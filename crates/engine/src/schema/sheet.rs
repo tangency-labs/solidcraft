@@ -51,6 +51,83 @@ impl JsonSchema for SheetPoints {
     }
 }
 
+/// A foldable print's filament joints, `print_filament` of a conversion (read by
+/// `sheet::filament_params`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FilamentJoints(pub Vec<solidcraft_doc::sheet::PrintFilament>);
+
+impl<'de> Deserialize<'de> for FilamentJoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::filament_params(&Value::deserialize(d)?).map(FilamentJoints).map_err(D::Error::custom)
+    }
+}
+
+impl JsonSchema for FilamentJoints {
+    fn schema_name() -> Cow<'static, str> {
+        "FilamentJoints".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "Filament joints on open edges of a foldable print, at most 1000.",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "at": point,
+                    "segments": {"type": "integer", "minimum": 2, "maximum": 200, "description": "Fingers along the edge, the two faces' by turns (default 5)."},
+                    "diameter": {"type": "number", "description": "The filament's diameter in mm (default 1.75)."},
+                    "tolerance": {"type": "number", "description": "How much wider (negative: narrower) the square channel is than the filament, in mm (default 0.1)."},
+                    "flip": {"type": "boolean", "description": "The other face has the first finger."},
+                    "wall": {"type": "number", "description": "On a bend: the wall round the channel or nub inside its fingers, which stand out of the walls inside the fold as far as that needs, in mm (default 0.8)."}
+                },
+                "required": ["at"],
+                "additionalProperties": false
+            },
+            "maxItems": 1000
+        })
+    }
+}
+
+/// A foldable print's press-fit joints, `print_press` of a conversion (read by
+/// `crate::cmd::press_params`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PressJoints(pub Vec<solidcraft_doc::sheet::PrintFilament>);
+
+impl<'de> Deserialize<'de> for PressJoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::press_params(&Value::deserialize(d)?).map(PressJoints).map_err(D::Error::custom)
+    }
+}
+
+impl JsonSchema for PressJoints {
+    fn schema_name() -> Cow<'static, str> {
+        "PressJoints".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "Press-fit joints on open edges or bends of a foldable print, at most 1000.",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "at": point,
+                    "segments": {"type": "integer", "minimum": 2, "maximum": 200, "description": "Fingers along the edge, the two faces' by turns (default 5)."},
+                    "radius": {"type": "number", "description": "The nub's radius on a finger's end face, in mm (default 0.8)."},
+                    "height": {"type": "number", "description": "How far the nub sticks out of the end face, in mm (default 0.3)."},
+                    "tolerance": {"type": "number", "description": "How much larger (negative: smaller) the dimple's ball is than the nub's, in mm (default 0)."},
+                    "flip": {"type": "boolean", "description": "The other face has the first finger and the nubs."},
+                    "wall": {"type": "number", "description": "On a bend: the wall round the channel or nub inside its fingers, which stand out of the walls inside the fold as far as that needs, in mm (default 0.8)."}
+                },
+                "required": ["at"],
+                "additionalProperties": false
+            },
+            "maxItems": 1000
+        })
+    }
+}
+
 /// The `edges` of an edge flange: 1 to 1000 points on sheet edges, each `[x, y, z]` (or
 /// `{x, y, z}`) or `{point, angle?, height?}` for an edge with its own angle and height (read by
 /// `sheet::flange_edge`). Whether the expressions suit the design is checked by the handler.
@@ -554,6 +631,44 @@ pub struct ConvertParams {
     /// The sheet metal rule, by name. Default: the active rule. A plate keeps its own thickness.
     #[serde(default)]
     pub rule: Option<String>,
+    /// Make a foldable 3D print instead of sheet metal: the flat pattern as one body, with a
+    /// V-groove at each bend that leaves a thin film to fold on. Needs `bends`; takes no `rule`.
+    /// Default: false.
+    #[serde(default)]
+    pub print_fold: bool,
+    /// Foldable print: the wall thickness. Required for a solid body; a shelled body's own walls
+    /// are used when it is left out.
+    #[serde(default)]
+    pub print_wall: Option<LengthExpr>,
+    /// Foldable print: how far the two faces of a V-groove stay apart once folded, and the fingers
+    /// of a joint from each other. Default: 0.15 mm (0.1 mm let PLA fingers fuse a little).
+    #[serde(default)]
+    pub print_clearance: Option<LengthExpr>,
+    /// Foldable print: the film under each V-groove that holds the panels together, less than
+    /// the wall thickness. Default: 0.4 mm.
+    #[serde(default)]
+    pub print_film: Option<LengthExpr>,
+    /// Foldable print: how two panels meet along an edge that is no bend, on the outside of the
+    /// body: "butt" (the panel nearer the fixed face runs on to the corner, the other ends on its
+    /// inside) or "mitre" (both cut on the plane halfway between them). Default: "butt".
+    #[serde(default)]
+    pub print_joint: Option<String>,
+    /// Foldable print: points on edges where the print is split into separate parts, so that
+    /// faces that would unfold onto each other print apart. The faces past a split edge (reached
+    /// across it like across a bend) are a part of their own, laid beside the first; the edge is
+    /// cut open on both as `print_joint` says.
+    #[serde(default)]
+    pub print_splits: Option<SheetPoints>,
+    /// Foldable print: joints on open edges (no bends) that a filament holds: the edge split
+    /// into fingers of its two faces by turns, a square channel through them, `diameter` +
+    /// `tolerance` wide, at half the wall's thickness behind both faces.
+    #[serde(default)]
+    pub print_filament: Option<FilamentJoints>,
+    /// Foldable print: joints on open edges or bends that snap together: the same fingers as a
+    /// filament joint, a nub on each end face of the starting face's fingers and a dimple for it
+    /// in the next finger.
+    #[serde(default)]
+    pub print_press: Option<PressJoints>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

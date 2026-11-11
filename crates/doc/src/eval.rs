@@ -8292,9 +8292,13 @@ fn eval_feature(
                 let b = crate::lineage::linked_tool(b.body.clone().with_import_certificate(&digest, f.id)?, f.id, carried);
                 st.bodies.push(ModelBody::traced_new(name, b, f.id));
             }
-            if !imp.warnings.is_empty() {
-                let n = imp.warnings.len();
-                let shown: Vec<&str> = imp.warnings.iter().take(3).map(String::as_str).collect();
+            // The surface model of an unfolded print is open sheets on purpose: that they are
+            // open is no warning there.
+            let sheets = doc.print_unfold.as_ref().is_some_and(|u| u.surface == Some(f.id));
+            let warnings: Vec<&String> = imp.warnings.iter().filter(|w| !(sheets && w.contains("imported as an open body"))).collect();
+            if !warnings.is_empty() {
+                let n = warnings.len();
+                let shown: Vec<&str> = warnings.iter().take(3).map(|w| w.as_str()).collect();
                 let more = if n > 3 { format!(" (+{} more)", n - 3) } else { String::new() };
                 *warning = Some(format!("{}{more}", shown.join("; ")));
                 *import_report = Some(Arc::new(imp.report.clone()));

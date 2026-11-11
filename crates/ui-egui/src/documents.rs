@@ -164,7 +164,7 @@ impl DocSlot {
 /// The open designs: one slot per tab; the active tab's slot is empty (its design is in the app).
 #[derive(Default)]
 pub struct Documents {
-    slots: Vec<Option<DocSlot>>,
+    pub(crate) slots: Vec<Option<DocSlot>>,
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
     pub closing: Option<usize>,

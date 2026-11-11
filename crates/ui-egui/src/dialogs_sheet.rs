@@ -24,6 +24,14 @@ const PERFORATION_PATTERNS: [&str; 2] = ["staggered", "square"];
 const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_square"];
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
+/// A foldable print's joints where two panels meet on an edge that is no bend: the command's names and the
+/// labels shown for them.
+const PRINT_JOINTS: [&str; 2] = ["butt", "mitre"];
+const PRINT_JOINT_LABELS: [&str; 2] = ["ui.print_joint_butt", "ui.print_joint_mitre"];
+/// The filament diameters offered for a foldable print's filament joints (mm), then "new …" for
+/// one of the user's own.
+const FILAMENTS: [f64; 2] = [1.75, 2.85];
+const FILAMENT_LABELS: [&str; 3] = ["ui.filament_175", "ui.filament_285", "ui.filament_custom"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
 /// The flange types' messages, by the type's index (Base, Edge, Contour).
 const FLANGE_TYPES: [&str; 3] = ["sheet.flange_type_base", "sheet.flange_type_edge", "sheet.flange_type_contour"];
@@ -113,6 +121,16 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             Convert {
                 rule: usize,
+                /// A foldable 3D print instead of sheet metal, with its wall thickness, clearance
+                /// and film (the rule box is off while it is on).
+                print: bool,
+                wall: String,
+                clearance: String,
+                film: String,
+                /// How panels meet on an edge that is no bend: 0 butt, 1 mitre.
+                joint: usize,
+                /// The filament joints' values, for every edge picked as one.
+                filament: Filament,
             },
             /// The rule manager: the rule shown (index into the rules, or past the end for a new one).
             Rules {
@@ -136,7 +154,64 @@ crate::dialog_descriptor::dialog_descriptors! {
     }
 }
 
+/// A foldable print's filament joints as the dialog edits them: the fingers along each edge, the
+/// filament (an index into `FILAMENT_LABELS`, the last one `custom`) and the channel's tolerance.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Filament {
+    pub segments: String,
+    pub diameter: usize,
+    pub custom: String,
+    pub tolerance: String,
+    /// The bend edges are joined too, not only by their film: with filament (`fold_kind` 0) or
+    /// a press fit (1).
+    pub fold_edges: bool,
+    pub fold_kind: usize,
+    /// The press fit's nub (radius on the finger's end, height) and the dimple's tolerance.
+    pub press_radius: String,
+    pub press_height: String,
+    pub press_tolerance: String,
+    /// The wall round a bend joint's channel or nub inside its fingers.
+    pub wall: String,
+    /// The user was told that no clearance lets fingers fuse (once each time it is set to 0).
+    pub gap_warned: bool,
+}
+
+/// How bend edges are joined when Join Fold Edges is on: filament, then press fit.
+const FOLD_KIND_LABELS: [&str; 2] = ["ui.fold_kind_filament", "ui.fold_kind_press"];
+
+impl Default for Filament {
+    fn default() -> Filament {
+        Filament {
+            segments: "5".into(),
+            diameter: 0,
+            custom: "1.75 mm".into(),
+            tolerance: "0.1 mm".into(),
+            fold_edges: false,
+            fold_kind: 0,
+            press_radius: "0.8 mm".into(),
+            press_height: "0.3 mm".into(),
+            press_tolerance: "0 mm".into(),
+            wall: "0.8 mm".into(),
+            gap_warned: false,
+        }
+    }
+}
+
 impl Sm {
+    /// Convert to Sheet Metal under rule box entry `rule`, with the foldable print off and its
+    /// values at their defaults (the wall left to a shelled body's own).
+    fn convert(rule: usize) -> Sm {
+        Sm::Convert {
+            rule,
+            print: false,
+            wall: String::new(),
+            clearance: "0.15 mm".into(),
+            film: "0.4 mm".into(),
+            joint: 0,
+            filament: Filament::default(),
+        }
+    }
+
     pub fn title(&self) -> &'static str {
         match self {
             Sm::Flange { .. } => "FLANGE",
@@ -193,9 +268,17 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sheet.flange" => (new_flange(app, 0), vec![SelInput::new("Profile / Edges", PROFILES | EDGES | CURVES, true)]),
         "sheet.unfold" => (Sm::Unfold { refold: false }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "sheet.refold" => (Sm::Unfold { refold: true }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
-        "sheet.convert" => {
-            (Sm::Convert { rule: 0 }, vec![SelInput::new("Fixed Face", PLANAR_FACES, false), SelInput::new("Bend Edges", EDGES, true)])
-        }
+        "sheet.convert" => (
+            Sm::convert(0),
+            vec![
+                SelInput::new("Fixed Face", PLANAR_FACES, false),
+                SelInput::new("Bend Edges", EDGES, true),
+                SelInput::new("Split Edges", EDGES, true).tip("ui.print_splits_tip"),
+                SelInput::new("Filament Edges", EDGES, true).tip("ui.print_filament_tip"),
+                SelInput::new("Swap Start Face", EDGES, true).tip("ui.print_swap_tip"),
+                SelInput::new("Press-Fit Edges", EDGES, true).tip("ui.print_press_tip"),
+            ],
+        ),
         "sheet.manage_rules" => {
             let active = app.session.doc.sheet.active.clone();
             let rules = rule_list(app);
@@ -375,7 +458,49 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
         }
         Sm::Unfold { .. } => {}
-        Sm::Convert { rule } => rule_combo(app, ui, "sm_conv_rule", rule),
+        Sm::Convert { rule, print, wall, clearance, film, joint, filament } => {
+            ui.add_enabled_ui(!*print, |ui| rule_combo(app, ui, "sm_conv_rule", rule));
+            crate::ui_kit::options(ui, "sm_conv_print", &mut [("ui.print_fold", print)]);
+            if *print {
+                enter |= hint_row(ui, "ui.print_wall", wall, crate::i18n::tr_label("ui.print_wall_from_shell"));
+                enter |= expr_row(ui, "ui.print_clearance", clearance);
+                enter |= expr_row(ui, "ui.print_film", film);
+                choice_row(ui, "ui.print_joint", "sm_conv_joint", joint, &PRINT_JOINT_LABELS);
+                // The filament joints' values, for the edges picked under Filament Edges.
+                let doc = &app.session.doc;
+                let eval = |text: &str| doc.eval(text.trim(), ValueKind::Unitless).ok();
+                enter |= crate::ui_kit::count_row(
+                    ui,
+                    "ui.filament_segments",
+                    &mut filament.segments,
+                    &crate::ui_kit::Count { min: 2, max: 200, eval: &eval },
+                );
+                choice_row(ui, "ui.filament_diameter", "sm_conv_filament", &mut filament.diameter, &FILAMENT_LABELS);
+                if filament.diameter >= FILAMENTS.len() {
+                    enter |= expr_row(ui, "ui.filament_custom_diameter", &mut filament.custom);
+                }
+                enter |= expr_row(ui, "ui.filament_tolerance", &mut filament.tolerance);
+                // The press fits' values, for the edges picked under Press-Fit Edges.
+                enter |= expr_row(ui, "ui.press_radius", &mut filament.press_radius);
+                enter |= expr_row(ui, "ui.press_height", &mut filament.press_height);
+                enter |= expr_row(ui, "ui.press_tolerance", &mut filament.press_tolerance);
+                crate::ui_kit::options(ui, "sm_conv_fold_join", &mut [("ui.print_fold_join", &mut filament.fold_edges)]);
+                if filament.fold_edges {
+                    choice_row(ui, "ui.print_fold_kind", "sm_conv_fold_kind", &mut filament.fold_kind, &FOLD_KIND_LABELS);
+                    enter |= expr_row(ui, "ui.joint_wall", &mut filament.wall);
+                }
+                // Fingers printed side by side with no clearance can fuse: say so once each time
+                // the clearance is set to 0 while there are joints.
+                let joined = filament.fold_edges || !items(inputs, 3).is_empty() || !items(inputs, 5).is_empty();
+                let zero = app.session.doc.eval(clearance.trim(), ValueKind::Length).is_ok_and(|c| c.abs() < 1e-9);
+                if zero && joined && !filament.gap_warned {
+                    filament.gap_warned = true;
+                    app.set_status(crate::i18n::tr_label("ui.print_zero_clearance"), false);
+                } else if !zero {
+                    filament.gap_warned = false;
+                }
+            }
+        }
         Sm::Rules { pick, name, values, relief, angles, active, loaded } => {
             let rules = rule_list(app);
             crate::rule_editor::rule_editor! {
@@ -755,7 +880,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             (if *refold { "sheet.refold" } else { "sheet.unfold" }, p)
         }
-        Sm::Convert { rule } => {
+        Sm::Convert { rule, print, wall, clearance, film, joint, filament } => {
             let Some(Sel::Face { body, point, .. }) = items(inputs, 0).first() else {
                 return Err("select the fixed face first (a plate's large face)".into());
             };
@@ -765,7 +890,77 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             if !bends.is_empty() {
                 p["bends"] = json!(bends);
             }
-            if let Some(r) = rule_value(app, *rule) {
+            if *print {
+                // A foldable print takes its own values instead of a rule.
+                p["print_fold"] = json!(true);
+                p["print_joint"] = json!(PRINT_JOINTS.get(*joint).copied().unwrap_or("butt"));
+                for (k, v) in [("print_wall", wall), ("print_clearance", clearance), ("print_film", film)] {
+                    if !v.trim().is_empty() {
+                        p[k] = json!(v.trim());
+                    }
+                }
+                // Where the print splits into parts printed side by side.
+                let splits: Vec<Value> = items(inputs, 2).edge_points().into_iter().map(pt).collect();
+                if !splits.is_empty() {
+                    p["print_splits"] = json!(splits);
+                }
+                // The filament and press-fit joints: every edge picked as one takes the same values,
+                // and starts with the other face's finger where it is picked under Swap Start Face
+                // too. With Join Fold Edges, every bend edge is one of the kind chosen there.
+                let same = |a: &Sel, b: &Sel| matches!((a, b), (Sel::Edge { body: x, index: i, .. }, Sel::Edge { body: y, index: j, .. }) if x == y && i == j);
+                let mut filament_edges: Vec<Sel> = items(inputs, 3).to_vec();
+                let mut press_edges: Vec<Sel> = items(inputs, 5).to_vec();
+                if filament.fold_edges {
+                    let to = if filament.fold_kind == 1 { &mut press_edges } else { &mut filament_edges };
+                    for b in items(inputs, 1) {
+                        if !to.iter().any(|e| same(e, b)) {
+                            to.push(b.clone());
+                        }
+                    }
+                }
+                let doc = &app.session.doc;
+                let length = |what: &str, text: &str| doc.eval(text.trim(), ValueKind::Length).map_err(|e| format!("{what}: {e}"));
+                let swapped = items(inputs, 4);
+                let wall = length("joint wall", &filament.wall)?;
+                let joints = |edges: &[Sel], values: Value| -> Vec<Value> {
+                    edges
+                        .iter()
+                        .filter_map(|s| match s {
+                            Sel::Edge { body, index, point } => {
+                                let flip = swapped.iter().any(|w| matches!(w, Sel::Edge { body: b, index: i, .. } if b == body && i == index));
+                                let mut j = json!({"at": pt(*point), "flip": flip});
+                                if let (Some(o), Some(v)) = (j.as_object_mut(), values.as_object()) {
+                                    o.extend(v.clone());
+                                }
+                                Some(j)
+                            }
+                            _ => None,
+                        })
+                        .collect()
+                };
+                if !filament_edges.is_empty() || !press_edges.is_empty() {
+                    let segments = doc.eval(filament.segments.trim(), ValueKind::Unitless).map_err(|e| format!("fingers: {e}"))?;
+                    let segments = segments.round().clamp(2.0, 200.0) as u64;
+                    if !filament_edges.is_empty() {
+                        let diameter = match FILAMENTS.get(filament.diameter) {
+                            Some(d) => *d,
+                            None => length("filament diameter", &filament.custom)?,
+                        };
+                        let tolerance = length("tolerance", &filament.tolerance)?;
+                        p["print_filament"] =
+                            json!(joints(&filament_edges, json!({"segments": segments, "diameter": diameter, "tolerance": tolerance, "wall": wall})));
+                    }
+                    if !press_edges.is_empty() {
+                        let radius = length("nub radius", &filament.press_radius)?;
+                        let height = length("nub height", &filament.press_height)?;
+                        let tolerance = length("dimple tolerance", &filament.press_tolerance)?;
+                        p["print_press"] = json!(joints(
+                            &press_edges,
+                            json!({"segments": segments, "radius": radius, "height": height, "tolerance": tolerance, "wall": wall})
+                        ));
+                    }
+                }
+            } else if let Some(r) = rule_value(app, *rule) {
                 p["rule"] = json!(r);
             }
             ("sheet.convert", p)
@@ -906,7 +1101,19 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         FeatureKind::SheetUnfold { body, refold } => {
             (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
         }
-        FeatureKind::SheetConvert { face, rule, bends, .. } => {
+        FeatureKind::SheetConvert {
+            face,
+            rule,
+            bends,
+            print_fold,
+            print_wall,
+            print_clearance,
+            print_film,
+            print_joint,
+            print_splits,
+            print_filament,
+            ..
+        } => {
             let (_, mut ins) = start(app, "sheet.convert")?;
             if let Some(i) = ins.first_mut() {
                 i.items = face_sel(s, face.0).into_iter().collect();
@@ -914,7 +1121,65 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             if let Some(i) = ins.get_mut(1) {
                 i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
             }
-            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule) }), ins, extra));
+            if let Some(i) = ins.get_mut(2) {
+                i.items = print_splits.iter().filter_map(|p| edge_sel(s, p.0)).collect();
+            }
+            // A filament joint on a bend edge comes from Join Fold Edges; the others are picked.
+            let bend_sels: Vec<Sel> = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
+            let on_bend = |f: &solidcraft_engine::doc::sheet::PrintFilament| {
+                edge_sel(s, f.at).is_some_and(|e| {
+                    bend_sels
+                        .iter()
+                        .any(|b| matches!((b, &e), (Sel::Edge { body: x, index: i, .. }, Sel::Edge { body: y, index: j, .. }) if x == y && i == j))
+                })
+            };
+            let fold_edges = print_filament.iter().find(|f| on_bend(f));
+            if let Some(i) = ins.get_mut(3) {
+                i.items = print_filament.iter().filter(|f| f.press.is_none() && !on_bend(f)).filter_map(|f| edge_sel(s, f.at)).collect();
+            }
+            if let Some(i) = ins.get_mut(5) {
+                i.items = print_filament.iter().filter(|f| f.press.is_some() && !on_bend(f)).filter_map(|f| edge_sel(s, f.at)).collect();
+            }
+            if let Some(i) = ins.get_mut(4) {
+                i.items = print_filament.iter().filter(|f| f.flip).filter_map(|f| edge_sel(s, f.at)).collect();
+            }
+            let mut k = Sm::convert(rule_index(rule));
+            if let Sm::Convert { print, wall, clearance, film, joint, filament, .. } = &mut k {
+                if let Some(fit) = print_filament.iter().find_map(|f| f.press) {
+                    filament.press_radius = format!("{} mm", fit.radius);
+                    filament.press_height = format!("{} mm", fit.height);
+                    filament.press_tolerance = format!("{} mm", fit.tolerance);
+                }
+                if let Some(f) = print_filament.iter().find(|f| f.press.is_none()) {
+                    match FILAMENTS.iter().position(|d| (d - f.diameter).abs() < 1e-9) {
+                        Some(i) => filament.diameter = i,
+                        None => {
+                            filament.diameter = FILAMENTS.len();
+                            filament.custom = format!("{} mm", f.diameter);
+                        }
+                    }
+                    filament.tolerance = format!("{} mm", f.tolerance);
+                }
+                if let Some(f) = print_filament.first() {
+                    filament.segments = f.segments.to_string();
+                }
+                filament.fold_edges = fold_edges.is_some();
+                if let Some(f) = fold_edges {
+                    filament.wall = format!("{} mm", f.wall);
+                }
+                filament.fold_kind = usize::from(fold_edges.is_some_and(|f| f.press.is_some()));
+                *joint = print_joint.map_or(0, |j| PRINT_JOINTS.iter().position(|n| *n == j.name()).unwrap_or(0));
+                *print = *print_fold;
+                let text = |e: &Option<solidcraft_engine::doc::Expr>| e.as_ref().map(|e| crate::length_input::stored(&s.doc, e));
+                *wall = text(print_wall).unwrap_or_default();
+                if let Some(c) = text(print_clearance) {
+                    *clearance = c;
+                }
+                if let Some(f) = text(print_film) {
+                    *film = f;
+                }
+            }
+            return Some((Kind::Sheet(k), ins, extra));
         }
         _ => return None,
     };

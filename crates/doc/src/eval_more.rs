@@ -491,19 +491,30 @@ fn rebuild_sheet(st: &mut ModelState, idx: usize) -> Result<()> {
     Ok(())
 }
 
-/// The sheet a feature works on: by body name, else the one with an edge nearest the pick.
+/// The sheet a feature works on: by body name, else the one with an edge nearest the pick. A
+/// foldable print is none: only unfolding and refolding work on it (`sheet_or_print_for`).
 fn sheet_for(st: &ModelState, body: &Option<crate::BodyName>, pick: Option<Vec3>) -> Result<usize> {
     if let Some(n) = body {
-        return st.sheets.iter().position(|s| &s.body == n).ok_or_else(|| DocError::Invalid(format!("`{n}` is not a sheet metal body")));
+        let i = sheet_or_print_for(st, n)?;
+        if st.sheets.get(i).is_some_and(|s| s.print.is_some()) {
+            return Err(DocError::Invalid(format!("`{n}` is a foldable print: only Unfold and Refold work on it")));
+        }
+        return Ok(i);
     }
     let p = pick.ok_or_else(|| DocError::Invalid("no sheet metal body".into()))?;
     st.sheets
         .iter()
         .enumerate()
+        .filter(|(_, s)| s.print.is_none())
         .filter_map(|(i, s)| s.edge_at(p).map(|e| (i, e.4)))
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(i, _)| i)
         .ok_or_else(|| DocError::Invalid("there is no sheet metal body".into()))
+}
+
+/// The sheet or foldable print of body `n`.
+fn sheet_or_print_for(st: &ModelState, n: &crate::BodyName) -> Result<usize> {
+    st.sheets.iter().position(|s| &s.body == n).ok_or_else(|| DocError::Invalid(format!("`{n}` is not a sheet metal body")))
 }
 
 /// Whether a point touches sheet `i`'s material: inside it, on one of its faces, or within its
@@ -712,7 +723,7 @@ pub(super) fn sheet_eval(
             // Without a body name the field goes on the newest sheet, as the command's own body lookup does.
             let i = match body {
                 Some(_) => sheet_for(st, body, None)?,
-                None => st.sheets.len().checked_sub(1).ok_or_else(|| DocError::Invalid("there is no sheet metal body".into()))?,
+                None => st.sheets.iter().rposition(|s| s.print.is_none()).ok_or_else(|| DocError::Invalid("there is no sheet metal body".into()))?,
             };
             let d = val(vals, diameter, Kind::Length)?;
             let pitch = val(vals, pitch, Kind::Length)?;
@@ -803,7 +814,7 @@ pub(super) fn sheet_eval(
         }
         FeatureKind::SheetUnfold { body, refold } => {
             let i = match body {
-                Some(_) => sheet_for(st, body, None)?,
+                Some(n) => sheet_or_print_for(st, n)?,
                 None => st.sheets.iter().rposition(|s| s.flat == *refold).ok_or_else(|| {
                     DocError::Invalid(if *refold { "no unfolded sheet to refold".into() } else { "no sheet metal body to unfold".into() })
                 })?,
@@ -814,10 +825,53 @@ pub(super) fn sheet_eval(
             rebuild_sheet(st, i)
         }
         // With bend edges: a solid or shelled body whose faces become the sheet.
-        FeatureKind::SheetConvert { body, face, rule, bends } if !bends.is_empty() => {
+        FeatureKind::SheetConvert {
+            body,
+            face,
+            rule,
+            bends,
+            print_fold,
+            print_wall,
+            print_clearance,
+            print_film,
+            print_joint,
+            print_splits,
+            print_filament,
+        } if !bends.is_empty() => {
             let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let r = doc.sheet_rule(rule.as_deref());
-            let values = |t: Option<f64>| doc.rule_values_at(vals, &r, t);
+            let len = |e: &Option<crate::Expr>| e.as_ref().map(|e| val(vals, e, Kind::Length)).transpose();
+            let wall = len(print_wall)?;
+            let print = sheet::PrintFold {
+                film: len(print_film)?.unwrap_or(sheet::DEFAULT_FILM),
+                clearance: len(print_clearance)?.unwrap_or(sheet::DEFAULT_PRINT_CLEARANCE),
+            };
+            if *print_fold && !(print.clearance.is_finite() && print.clearance >= 0.0) {
+                return Err(DocError::Invalid("the clearance must not be negative".into()));
+            }
+            // A foldable print takes none of the rule's values: its bends fold on a film, and its
+            // thickness is the wall's (a shelled body's own walls win).
+            let values = |t: Option<f64>| -> Result<sheet::RuleValues> {
+                if !*print_fold {
+                    return doc.rule_values_at(vals, &r, t);
+                }
+                let thickness = t.or(wall).ok_or_else(|| DocError::Invalid("a foldable print of a solid body needs a wall thickness".into()))?;
+                if !(thickness.is_finite() && thickness > 0.0 && thickness < 1e4) {
+                    return Err(DocError::Invalid("the wall thickness must be more than 0 and less than 10000 mm".into()));
+                }
+                Ok(sheet::RuleValues {
+                    thickness,
+                    k_factor: 0.5,
+                    bend_radius: 0.0,
+                    relief_width: 0.0,
+                    relief_depth: 0.0,
+                    corner_relief: 0.0,
+                    corner_relief_shape: sheet::ReliefShape::Notch,
+                    hem_gap: 0.0,
+                    gap: print.clearance,
+                    angle_display: sheet::AngleDisplay::Bend,
+                })
+            };
             // The bend edges by name where they have one: a name that no longer finds its edge
             // fails the conversion, asking for the edge to be picked again.
             let mut picks = Vec::with_capacity(bends.len());
@@ -836,12 +890,34 @@ pub(super) fn sheet_eval(
             }
             let placement = doc.component_transform(doc.model_body_component(&mb));
             let body_to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
-            let (mut sh, notes) = sheet::convert_body(&mb, &r.name, &values, face.0, &picks, &body_to_world)?;
-            for note in notes {
-                append_warning(warning, note);
+            let splits: Vec<_> = print_splits.iter().map(|p| p.0).collect();
+            let joint = print_fold.then(|| print_joint.unwrap_or_default());
+            let (mut parts, notes) =
+                sheet::convert_body(&mb, &r.name, &values, face.0, &picks, &body_to_world, joint, print.film, &splits, print_filament)?;
+            // The notes say where a corner or a bend's end is not finished as a rule says; a
+            // foldable print has no rule, and leaves its corners cut open on purpose.
+            if !*print_fold {
+                for note in notes {
+                    append_warning(warning, note);
+                }
             }
+            if !*print_fold {
+                let Some(mut sh) = parts.pop() else { return Err(DocError::Invalid("the sheet has no panels".into())) };
+                tag_flanges(&mut sh, 0, f.id);
+                return put_sheet(st, sh);
+            }
+            // The flat print takes the body's place. It refolds and unfolds like sheet metal, its
+            // bend lines on the flat; no other sheet metal feature works on it.
+            let mut parts = parts.into_iter();
+            let Some(mut sh) = parts.next() else { return Err(DocError::Invalid("the print has no parts".into())) };
+            sh.print_parts = parts.collect();
+            sh.print = Some(print);
+            sh.flat = true;
             tag_flanges(&mut sh, 0, f.id);
             put_sheet(st, sh)
+        }
+        FeatureKind::SheetConvert { print_fold: true, .. } => {
+            Err(DocError::Invalid("a foldable print needs the bend edges it folds on (`bends`)".into()))
         }
         FeatureKind::SheetConvert { body, face, rule, .. } => {
             let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;

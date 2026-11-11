@@ -158,7 +158,7 @@ fn turn_down(n: Vec3) -> [Vec3; 3] {
 }
 
 /// The column-major transform that lays `face` on the bed with `centre` above the origin.
-fn bed_matrix(face: PrintFace, centre: Vec3) -> [[f64; 4]; 4] {
+pub(super) fn bed_matrix(face: PrintFace, centre: Vec3) -> [[f64; 4]; 4] {
     let r = turn_down(face.normal);
     let apply = |p: Vec3| Vec3::new(r[0].dot(p), r[1].dot(p), r[2].dot(p));
     let c = apply(centre);

@@ -395,6 +395,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Surface tools and Split Face (`dialogs_surface`).
             Surface(crate::dialogs_surface::Surf),
             SaveMesh(crate::dialogs_save_mesh::SaveMesh),
+            /// Unfold for Printing, one step at a time (`dialogs_print_unfold`).
+            PrintUnfold(crate::dialogs_print_unfold::Pu),
             /// The Custom View Navigator panel (`view_gizmo`): the app's navigator, not the design.
             ViewNavigator(crate::view_gizmo::Form),
             ViewDxf {
@@ -1120,6 +1122,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_sheet::start(app, id))
                     .or_else(|| crate::dialogs_surface::start(app, id))
                     .or_else(|| crate::dialogs_save_mesh::start(app, id))
+                    .or_else(|| crate::dialogs_print_unfold::start(app, id))
                     .or_else(|| crate::dialogs_view_dxf::start(app, id))
                     .or_else(|| crate::view_gizmo::start(app, id))
                     .or_else(|| crate::dialogs_plastic::start(app, id))
@@ -2615,6 +2618,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Sheet(k) => k.title(),
         Kind::Surface(k) => k.title(),
         Kind::SaveMesh(_) => "SAVE AS MESH",
+        Kind::PrintUnfold(k) => k.title(),
         Kind::ViewDxf { .. } => "Export Current View as DXF",
         Kind::ViewNavigator(_) => "CUSTOM VIEW NAVIGATOR",
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
@@ -3742,6 +3746,7 @@ pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
         Kind::Measure { .. } => ("", "Close"),
         Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
         Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
+        Kind::PrintUnfold(k) => crate::dialogs_print_unfold::action_labels(k),
         Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
         _ => ("OK", "Cancel"),
     }
@@ -3858,6 +3863,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::ChatContext => true,
         Kind::Material { editor, .. } => !editor.editing() && apply_commands(app, &d).is_ok(),
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
+        Kind::PrintUnfold(k) => crate::dialogs_print_unfold::ready(app, k, &d.inputs),
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }) => {
             // Corner dialogs: preview errors are visual only; validation errors from
             // `apply_commands` go to `d.error`. OK stays enabled when the preview fails.
@@ -4106,6 +4112,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let run = match &mut d.kind {
             Kind::Text(k) => Some(crate::sketch_text::apply(app, k)),
             Kind::ChatContext => Some(crate::agent_chat::pick_done(app, &d)),
+            // Each step runs its own command; the tool box then opens at the step that follows.
+            Kind::PrintUnfold(k) => {
+                let k = k.clone();
+                Some(crate::dialogs_print_unfold::run(app, &k, &d.inputs))
+            }
             _ => match begin_applying(app, &d) {
                 // Computing: the dialog stays, saying so, until it is in.
                 Some(job) => {
@@ -4120,6 +4131,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 applied = true;
                 cancel = !apply_again;
                 adopted = d.previews();
+                if matches!(d.kind, Kind::PrintUnfold(_)) {
+                    then_start = Some(crate::dialogs_print_unfold::COMMAND);
+                }
             }
             Some(Err(e)) => d.refuse(app, e),
             None => {}
@@ -6024,6 +6038,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),
         Kind::SketchModify(k) => return crate::sketch_modify_ui::commands(app, k, &d.inputs, &d.extra),
         Kind::SaveMesh(k) => return crate::dialogs_save_mesh::commands(k, &d.inputs),
+        Kind::PrintUnfold(_) => return Ok(Vec::new()),
         Kind::ViewDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),

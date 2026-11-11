@@ -47,6 +47,7 @@ pub mod dialogs_move;
 pub mod dialogs_part_size;
 pub mod dialogs_parts;
 pub mod dialogs_plastic;
+pub mod dialogs_print_unfold;
 pub mod dialogs_save_mesh;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
@@ -1306,6 +1307,10 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
+        // The design that unfolds a body opens in a tab of its own.
+        if id == dialogs_print_unfold::COMMAND {
+            return dialogs_print_unfold::start_in_tab(self, &params);
+        }
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
             let action = serde_json::from_value(reply["action"].clone()).map_err(|e| e.to_string())?;
@@ -1324,7 +1329,11 @@ impl SolveApp {
             Ok(reply)
         });
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
-        self.after_command(id, &params, revision, selected_before, r)
+        let out = self.after_command(id, &params, revision, selected_before, r);
+        if out.is_ok() && self.session.revision != revision {
+            dialogs_print_unfold::source_changed(self);
+        }
+        out
     }
 
     /// Commit already prepared rendering through the same window post-hooks,
@@ -3489,6 +3498,7 @@ impl SolveApp {
         file_load::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
+        dialogs_print_unfold::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         update::show(self, ui.ctx());

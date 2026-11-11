@@ -1,0 +1,247 @@
+use serde_json::{Value, json};
+
+use crate::Session;
+
+fn run(s: &mut Session, id: &str, p: Value) -> Value {
+    match s.execute(id, &p) {
+        Ok(v) => v,
+        Err(e) => panic!("{id} {p}: {e}"),
+    }
+}
+
+fn refused(s: &mut Session, id: &str, p: Value) -> String {
+    match s.execute(id, &p) {
+        Ok(v) => panic!("{id} {p} was not refused: {v}"),
+        Err(e) => e.to_string(),
+    }
+}
+
+/// A block 100 x 60 x 30 from the origin, started unfolding on its bottom face: there it lies
+/// with its centre over the origin, so its bottom edges' middles are (0, ∓30, 0) and (±50, 0, 0).
+fn block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "print.unfold.start", json!({"body": "Block", "face": [50, 30, 0]}));
+    s
+}
+
+fn counts(v: &Value) -> (u64, usize, usize, usize) {
+    let n = |k: &str| v[k].as_array().map_or(0, Vec::len);
+    (v["attached"].as_u64().unwrap_or(0), n("bends"), n("cuts"), n("open"))
+}
+
+fn bbox(s: &mut Session, body: &str) -> ([f64; 3], [f64; 3]) {
+    let m = run(s, "inspect.measure", json!({"bodies": [body]}));
+    let read = |k: &str| -> [f64; 3] {
+        let a = &m["bodies"][0]["bbox"][k];
+        [a[0].as_f64().unwrap_or(f64::NAN), a[1].as_f64().unwrap_or(f64::NAN), a[2].as_f64().unwrap_or(f64::NAN)]
+    };
+    (read("min"), read("max"))
+}
+
+#[test]
+fn start_copies_the_body_into_a_design_of_its_own_lying_on_its_base_face() {
+    let mut s = block();
+    // The new design holds the body alone, on Z = 0, its centre of mass over the origin.
+    let (lo, hi) = bbox(&mut s, "Block");
+    let want = ([-50.0, -30.0, 0.0], [50.0, 30.0, 30.0]);
+    assert!((0..3).all(|i| (lo[i] - want.0[i]).abs() < 1e-6 && (hi[i] - want.1[i]).abs() < 1e-6), "{lo:?} {hi:?}");
+    assert_eq!(s.doc.features.len(), 1);
+    // It remembers where the body came from, and what it measured there: 100 x 60 x 30.
+    let unfold = s.doc.print_unfold.clone().unwrap_or_else(|| panic!("no unfolded print"));
+    let source = unfold.source.unwrap_or_else(|| panic!("no source"));
+    assert_eq!((source.body.as_str(), source.stamp.faces), ("Block", 6));
+    assert!((source.stamp.volume - 180_000.0).abs() < 1e-3 && (source.stamp.area - 21_600.0).abs() < 1e-3, "{:?}", source.stamp);
+    // Only the base face is on the pattern: its four edges are cuts, the other eight open.
+    let v = run(&mut s, "print.unfold.state", json!({}));
+    assert_eq!((v["step"].as_str(), v["faces"].as_u64(), v["complete"].as_bool()), (Some("edges"), Some(6), Some(false)), "{v}");
+    assert_eq!(counts(&v), (1, 0, 4, 8), "{v}");
+    // The five faces not on it are listed by their outlines, four corners each.
+    let missing = v["missing"].as_array().cloned().unwrap_or_default();
+    assert!(missing.len() == 5 && missing.iter().all(|lp| lp.as_array().map(Vec::len) == Some(4)), "{v}");
+    // Every edge of a block folds by a quarter turn.
+    assert!(
+        v["cuts"].as_array().into_iter().flatten().all(|e| e["foldable"] == true && (e["angle"].as_f64().unwrap_or(0.0) - 90.0).abs() < 1e-9),
+        "{v}"
+    );
+
+    // On a side face (100 long, at x = 100) it stands 100 high on a 60 x 30 footprint.
+    let mut side = Session::default();
+    run(&mut side, "solid.box", json!({"length": 100, "width": 60, "height": 30, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut side, "print.unfold.start", json!({"body": "Block", "face": [100, 30, 15]}));
+    let (lo, hi) = bbox(&mut side, "Block");
+    let mut foot = [hi[0] - lo[0], hi[1] - lo[1]];
+    foot.sort_by(f64::total_cmp);
+    assert!(lo[2].abs() < 1e-6 && (hi[2] - 100.0).abs() < 1e-6 && (foot[0] - 30.0).abs() < 1e-6 && (foot[1] - 60.0).abs() < 1e-6, "{lo:?} {hi:?}");
+}
+
+#[test]
+fn a_bend_hangs_the_face_across_it_on_the_pattern_and_cuts_that_faces_other_edges() {
+    let mut s = block();
+    // The front wall hangs on the base face: its top and its two upright edges are cuts now,
+    // next to the base face's other three. The five edges of the faces not reached stay open.
+    let v = run(&mut s, "print.unfold.bend", json!({"edge": [0, -30, 0]}));
+    assert_eq!((v["changed"].as_str(), counts(&v)), (Some("added"), (2, 1, 6, 5)), "{v}");
+    // An edge between two faces not on the pattern can't be a bend yet.
+    let e = refused(&mut s, "print.unfold.bend", json!({"edge": [0, 30, 30]}));
+    assert!(e.contains("neither face"), "{e}");
+    // The other three walls: every edge is a bend or a cut, but the top face hangs nowhere.
+    for edge in [[50, 0, 0], [0, 30, 0], [-50, 0, 0]] {
+        run(&mut s, "print.unfold.bend", json!({"edge": edge}));
+    }
+    let v = run(&mut s, "print.unfold.state", json!({}));
+    assert_eq!((counts(&v), v["complete"].as_bool()), ((5, 4, 8, 0), Some(false)), "{v}");
+    let e = refused(&mut s, "print.unfold.surface", json!({}));
+    assert!(e.contains("1 of the body's 6 faces"), "{e}");
+    // The top face on the front wall: the pattern is complete, five bends and seven cuts.
+    let v = run(&mut s, "print.unfold.bend", json!({"edge": [0, -30, 30]}));
+    assert_eq!((counts(&v), v["complete"].as_bool()), ((6, 5, 7, 0), Some(true)), "{v}");
+    // A cut between two faces of the pattern moves the face farther from the base face: the
+    // top face hangs on the back wall now, and its edge to the front wall is a cut again.
+    let v = run(&mut s, "print.unfold.bend", json!({"edge": [0, 30, 30]}));
+    assert_eq!((v["changed"].as_str(), counts(&v)), (Some("moved"), (6, 5, 7, 0)), "{v}");
+    let is_bend = |v: &Value, y: f64| {
+        v["bends"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|e| (e["start"][1].as_f64().unwrap_or(0.0) - y).abs() < 1e-6 && e["start"][2] == 30.0 && e["end"][2] == 30.0)
+    };
+    assert!(is_bend(&v, 30.0) && !is_bend(&v, -30.0), "{v}");
+    // A bend clicked again is a cut again, and what hung by it is off the pattern: the back
+    // wall and the top face on it. The edge between those two is open again.
+    let v = run(&mut s, "print.unfold.bend", json!({"edge": [0, 30, 0]}));
+    assert_eq!((v["changed"].as_str(), counts(&v)), (Some("removed"), (4, 3, 8, 1)), "{v}");
+    // Each click is one step to undo.
+    run(&mut s, "edit.undo", json!({}));
+    let v = run(&mut s, "print.unfold.state", json!({}));
+    assert_eq!(counts(&v), (6, 5, 7, 0), "{v}");
+}
+
+#[test]
+fn the_surface_model_is_every_face_as_a_sheet_of_its_own_with_the_solid_hidden() {
+    let mut s = block();
+    for edge in [[0, -30, 0], [50, 0, 0], [0, 30, 0], [-50, 0, 0], [0, -30, 30]] {
+        run(&mut s, "print.unfold.bend", json!({"edge": edge}));
+    }
+    let v = run(&mut s, "print.unfold.surface", json!({}));
+    assert_eq!(v["step"], "surface", "{v}");
+    // Six sheets next to the solid, together the block's skin: 2·(100·60 + 100·30 + 60·30).
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).filter(|n| n != "Block").collect();
+    assert_eq!(names.len(), 6, "{names:?}");
+    let m = run(&mut s, "inspect.measure", json!({"bodies": names}));
+    let area: f64 = m["bodies"].as_array().into_iter().flatten().map(|b| b["area_mm2"].as_f64().unwrap_or(f64::NAN)).sum();
+    assert!((area - 21_600.0).abs() < 1e-3, "{area}");
+    assert!(m["bodies"].as_array().into_iter().flatten().all(|b| b["closed"] == false), "{m}");
+    assert!(s.visibility.hidden_bodies.contains(&"Block".to_string()));
+    // The bends can't change under it.
+    let e = refused(&mut s, "print.unfold.bend", json!({"edge": [0, 30, 30]}));
+    assert!(e.contains("print.unfold.edit"), "{e}");
+    // Back to the edges: the sheets are gone, the solid shows, the bends are as they were.
+    let v = run(&mut s, "print.unfold.edit", json!({}));
+    assert_eq!((v["step"].as_str(), counts(&v)), (Some("edges"), (6, 5, 7, 0)), "{v}");
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!(s.visibility.hidden_bodies.is_empty());
+}
+
+#[test]
+fn what_cant_unfold_is_refused_and_says_why() {
+    // A body with a curved face.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Rod"}));
+    let undo = s.undo.len();
+    let e = refused(&mut s, "print.unfold.start", json!({"body": "Rod", "face": [0, 0, 0]}));
+    assert!(e.contains("curved faces"), "{e}");
+    assert!(s.doc.print_unfold.is_none() && s.undo.len() == undo && s.model.state().body("Rod").is_some());
+    // No body of that name, no face there, and a design that unfolds nothing.
+    let e = refused(&mut s, "print.unfold.start", json!({"body": "Block", "face": [0, 0, 0]}));
+    assert!(e.contains("Block"), "{e}");
+    let e = refused(&mut s, "print.unfold.bend", json!({"edge": [0, 0, 0]}));
+    assert!(e.contains("print.unfold.start"), "{e}");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30, "corner": [0, 0, 0], "body_name": "Block"}));
+    let e = refused(&mut s, "print.unfold.start", json!({"body": "Block", "face": [50, 30, 15]}));
+    assert!(e.contains("no face"), "{e}");
+    let mut s = block();
+    let e = refused(&mut s, "print.unfold.bend", json!({"edge": [0, 0, 15]}));
+    assert!(e.contains("no edge"), "{e}");
+
+    // An L-shaped bar: the edge in its inside corner can't fold, wherever the pattern has got to.
+    let mut l = Session::default();
+    run(&mut l, "sketch.create", json!({"plane": "XY", "name": "L"}));
+    run(&mut l, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 10], [10, 10], [10, 30], [0, 30]], "closed": true}));
+    run(&mut l, "sketch.finish", json!({}));
+    run(&mut l, "solid.extrude", json!({"sketch": "L", "distance": 20, "body_name": "Bar"}));
+    run(&mut l, "print.unfold.start", json!({"body": "Bar", "face": [5, 5, 0]}));
+    let v = run(&mut l, "print.unfold.state", json!({}));
+    // Eight faces and eighteen edges, one of them in the inside corner.
+    assert_eq!(v["faces"], 8, "{v}");
+    let all = || ["bends", "cuts", "open"].into_iter().flat_map(|k| v[k].as_array().into_iter().flatten());
+    assert_eq!((all().count(), all().filter(|e| e["foldable"] == false).count()), (18, 1), "{v}");
+    let inside = all().find(|e| e["foldable"] == false).cloned().unwrap_or_default();
+    let mid: Vec<f64> = (0..3).map(|i| (inside["start"][i].as_f64().unwrap_or(0.0) + inside["end"][i].as_f64().unwrap_or(0.0)) / 2.0).collect();
+    let e = refused(&mut l, "print.unfold.bend", json!({"edge": mid}));
+    assert!(e.contains("inside corner"), "{e}");
+}
+
+fn mid(e: &Value) -> Vec<f64> {
+    (0..3).map(|i| (e["start"][i].as_f64().unwrap_or(0.0) + e["end"][i].as_f64().unwrap_or(0.0)) / 2.0).collect()
+}
+
+/// An L-shaped bar (one inside corner), unfolded from its bottom with every face on the pattern
+/// and laid flat.
+fn l_bar_flat() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "L"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 10], [10, 10], [10, 30], [0, 30]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "L", "distance": 20, "body_name": "Bar"}));
+    run(&mut s, "print.unfold.start", json!({"body": "Bar", "face": [5, 5, 0]}));
+    let v = run(&mut s, "print.unfold.state", json!({}));
+    for e in v["cuts"].as_array().cloned().unwrap_or_default() {
+        run(&mut s, "print.unfold.bend", json!({"edge": mid(&e)}));
+    }
+    // The top face hangs on a wall by one of that wall's top edges.
+    let v = run(&mut s, "print.unfold.state", json!({}));
+    let top = v["cuts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|e| e["foldable"] == true && e["start"][2] == e["end"][2] && e["start"][2].as_f64().unwrap_or(0.0) > 10.0)
+        .cloned();
+    run(&mut s, "print.unfold.bend", json!({"edge": mid(&top.unwrap_or_else(|| panic!("no top edge")))}));
+    let v = run(&mut s, "print.unfold.flatten", json!({}));
+    assert_eq!((v["step"].as_str(), v["complete"].as_bool()), (Some("flat"), Some(true)), "{v}");
+    s
+}
+
+#[test]
+fn where_a_rigid_joint_cant_be_made_an_edge_gets_a_mitre_by_itself() {
+    let mut s = l_bar_flat();
+    // Film and butt only: no wall is needed beyond the film.
+    let v = run(&mut s, "print.unfold.state", json!({}));
+    assert_eq!(v["min_wall"].as_f64(), Some(0.0), "{v}");
+    // Filament at every cut: the one inside corner gets a mitre, every other cut a filament joint.
+    let v = run(&mut s, "print.unfold.joints", json!({"cuts": "filament"}));
+    let joints: Vec<(String, bool)> =
+        v["flat_cuts"].as_array().into_iter().flatten().map(|e| (e["joint"].as_str().unwrap_or("").to_string(), e["own"] == true)).collect();
+    let (mitres, filaments) = (joints.iter().filter(|j| j.0 == "mitre").count(), joints.iter().filter(|j| j.0 == "filament").count());
+    // The inside corner is one edge, listed once for each of its two faces.
+    assert_eq!((mitres, filaments, joints.len()), (2, joints.len() - 2, joints.len()), "{v}");
+    assert!(joints.iter().all(|j| !j.1), "nothing was set by hand: {joints:?}");
+    // The least wall: the channel (1.75 + 0.1) and the film either side (0.4 each), up to 0.1.
+    assert_eq!(v["min_wall"].as_f64(), Some(2.7), "{v}");
+    let v = run(&mut s, "print.unfold.joints", json!({"cuts": "press"}));
+    assert_eq!(v["min_wall"].as_f64(), Some(2.4), "{v}");
+    // A joint of its own on that edge is refused, and says why; on another edge it is taken.
+    let inside = v["flat_cuts"].as_array().into_iter().flatten().find(|e| e["joint"] == "mitre").cloned().unwrap_or_default();
+    let e = refused(&mut s, "print.unfold.joint", json!({"edge": mid(&inside), "kind": "press"}));
+    assert!(e.contains("inside corner"), "{e}");
+    let other = v["flat_cuts"].as_array().into_iter().flatten().find(|e| e["joint"] == "press").cloned().unwrap_or_default();
+    let v = run(&mut s, "print.unfold.joint", json!({"edge": mid(&other), "kind": "filament"}));
+    assert_eq!(v["min_wall"].as_f64(), Some(2.7), "{v}");
+    assert!(v["flat_cuts"].as_array().into_iter().flatten().any(|e| e["own"] == true && e["joint"] == "filament"), "{v}");
+    // Bends that turn on the film alone have no wall to ask for.
+    let v = run(&mut s, "print.unfold.joints", json!({"cuts": "butt", "bends": "film"}));
+    assert_eq!(v["min_wall"].as_f64(), Some(2.7), "the edge of its own still needs its channel: {v}");
+}

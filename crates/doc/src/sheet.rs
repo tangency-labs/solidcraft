@@ -22,9 +22,16 @@ use crate::{DocError, Document, IDENTITY, Mat, Result, apply_point, apply_vector
 mod convert;
 #[path = "sheet_face_names.rs"]
 mod face_names;
+#[path = "sheet_print_fold.rs"]
+mod print_fold;
 pub use convert::{bend_edge_names, convert_body};
 pub(crate) use convert::{outline_loop, round_wall};
 pub use face_names::body_sheet_face_names;
+pub use print_fold::{
+    Bevel, DEFAULT_CHANNEL_TOLERANCE, DEFAULT_FILAMENT, DEFAULT_FILM, DEFAULT_JOINT_WALL, DEFAULT_NUB_HEIGHT, DEFAULT_NUB_RADIUS,
+    DEFAULT_PRINT_CLEARANCE, DEFAULT_SEGMENTS, FOLD_JOINT_ANGLES, FilamentCut, FoldCore, FoldEnd, FoldFilament, MIN_FINGER_WIDTH, PART_GAP, PressFit,
+    PrintFilament, PrintFold, PrintJoint, check_print_fold, finger_count, fold_core, print_fold_parts, print_folded_parts,
+};
 
 // Bound the aggregate geometry, including sampled curves and intermediate clipping pieces.
 // These are work limits, never geometry truncation: a larger input returns a useful error.
@@ -891,6 +898,38 @@ pub struct SheetBody {
     pub labels: Vec<Region2>,
     /// Unfolded.
     pub flat: bool,
+    /// Bends that fold on a film at the outer skin (a foldable 3D print) rather than round a
+    /// radius: the panels' outer faces meet at each bend's virtual sharp, so the flat keeps the
+    /// outer lengths (see [`SheetBody::allowance`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hinged: bool,
+    /// A hinged sheet's mitred panel ends, cut once it is flat (`sheet_print_fold.rs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bevels: Vec<Bevel>,
+    /// A hinged sheet's filament joints: fingers and a channel at open edges, cut once it is
+    /// flat (`sheet_print_fold.rs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filament: Vec<FilamentCut>,
+    /// A foldable print's values: this sheet is a print, its body the flat print while `flat`
+    /// and the print folded back up otherwise; no sheet metal feature works on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub print: Option<PrintFold>,
+    /// A hinged sheet's filament joints on bends: fingers that share the folded corner out and a
+    /// channel through it, the film left whole (`sheet_print_fold.rs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fold_filament: Vec<FoldFilament>,
+    /// Where a hinged sheet's filament channels run out through a face folded over their ends:
+    /// outlines in the flat, cut through the sheet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub channel_holes: Vec<Vec<Vec2>>,
+    /// Holes of flange panels that walls fold into (a hole with a bend on its edge is part of
+    /// its panel, not a cut-out of the sheet): the flange and the hole, clockwise. The base keeps
+    /// such holes in its own region.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panel_holes: Vec<(usize, Loop2)>,
+    /// A foldable print's other parts (the faces past its split edges), printed beside this one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub print_parts: Vec<SheetBody>,
     /// Gap between flanges that meet at a corner.
     pub gap: f64,
     /// The relief cut where two bends meet at a corner of the base, and how far across it is
@@ -1557,9 +1596,10 @@ impl SheetBody {
         }
     }
 
-    /// Bend allowance of a flange.
+    /// Bend allowance of a flange. A hinged sheet's is the two set-backs of its outer skin from
+    /// the virtual sharp, 2·(R + T)·tan(θ/2): the outer faces run on to the sharp in the flat.
     pub fn allowance(&self, f: &SheetFlange) -> f64 {
-        f.angle.abs() * (f.radius + self.k * self.t)
+        if self.hinged { 2.0 * (f.radius + self.t) * (f.angle.abs() / 2.0).tan() } else { f.angle.abs() * (f.radius + self.k * self.t) }
     }
 
     /// Fold transform of flange `i`'s panel (flat 3D coordinates → folded, in the flat frame).
@@ -2167,6 +2207,10 @@ impl SheetBody {
 
     /// The folded (or, when unfolded, flat) solid, sewn from its faces.
     pub fn solid(&self) -> Result<Body> {
+        if let Some(pf) = self.print {
+            let parts: Vec<SheetBody> = std::iter::once(self.clone()).chain(self.print_parts.iter().cloned()).collect();
+            return if self.flat { print_fold_parts(&parts, pf) } else { print_folded_parts(&parts, pf) };
+        }
         if self.flat {
             return self.flat_solid();
         }
@@ -3045,10 +3089,17 @@ impl SheetBody {
         let mut v = vec![(None, self.base.clone())];
         for (i, f) in self.flanges.iter().enumerate() {
             if f.leg > 1e-9 {
-                v.push((Some(i), self.panel(f)));
+                v.push((Some(i), self.panel_with_holes(i, f)));
             }
         }
         v
+    }
+
+    /// A flange's panel with the holes its walls fold into ([`Self::panel_holes`]).
+    pub(crate) fn panel_with_holes(&self, i: usize, f: &SheetFlange) -> Region2 {
+        let mut r = self.panel(f);
+        r.holes.extend(self.panel_holes.iter().filter(|(j, _)| *j == i).map(|(_, h)| h.clone()));
+        r
     }
 
     /// Where a world point of this sheet lay in `before`, the same sheet before a feature
@@ -5952,6 +6003,14 @@ pub fn base_flange(body: &str, rule: &str, rv: &RuleValues, plane: Plane, region
         perforations: Vec::new(),
         labels: Vec::new(),
         flat: false,
+        hinged: false,
+        bevels: Vec::new(),
+        filament: Vec::new(),
+        print: None,
+        print_parts: Vec::new(),
+        fold_filament: Vec::new(),
+        channel_holes: Vec::new(),
+        panel_holes: Vec::new(),
         gap: rv.gap,
         relief: rv.corner_relief_shape,
         relief_size: rv.corner_relief,
@@ -6012,6 +6071,14 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
         perforations: Vec::new(),
         labels: Vec::new(),
         flat: false,
+        hinged: false,
+        bevels: Vec::new(),
+        filament: Vec::new(),
+        print: None,
+        print_parts: Vec::new(),
+        fold_filament: Vec::new(),
+        channel_holes: Vec::new(),
+        panel_holes: Vec::new(),
         gap: rv.gap,
         relief: rv.corner_relief_shape,
         relief_size: rv.corner_relief,

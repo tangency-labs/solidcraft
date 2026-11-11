@@ -1465,6 +1465,34 @@ pub enum FeatureKind {
         /// Points on the sharp edges that become bends.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         bends: Vec<Position>,
+        /// Foldable 3D print: instead of a sheet metal body, the flat pattern as one printable
+        /// body, folded after printing. A V-groove at each bend leaves a thin film that hinges it;
+        /// the rule is not used.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        print_fold: bool,
+        /// The printed wall's thickness (default: a shelled body's own walls).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Wall thickness")]
+        print_wall: Option<Expr>,
+        /// How far the two faces of a V-groove stay apart once folded (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Clearance")]
+        print_clearance: Option<Expr>,
+        /// The film under each V-groove that holds the panels together (default 0.4 mm).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Film thickness")]
+        print_film: Option<Expr>,
+        /// How two panels meet along an edge that is no bend (default: butt).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        print_joint: Option<crate::sheet::PrintJoint>,
+        /// Points on the edges where a foldable print is split into separate parts: the faces past
+        /// one print as a part of their own, the edge cut open on both.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        print_splits: Vec<Position>,
+        /// Filament joints on open edges of a foldable print: fingers of the two faces by turns,
+        /// with a channel through them for a filament that holds the folded print together.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        print_filament: Vec<crate::sheet::PrintFilament>,
     },
     /// Plastic boss: a round post on a face (draft, root fillet, hole, ribs).
     Boss {
@@ -3231,6 +3259,10 @@ pub struct Document {
     /// The flat face per body (by body name) that a slicer export lays on the print bed.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub print_faces: std::collections::BTreeMap<String, crate::config::ConfigFaceTarget>,
+    /// The body this design unfolds for printing, with its base face and bends (Unfold for
+    /// Printing); none in any other design.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub print_unfold: Option<crate::print_unfold::PrintUnfold>,
     /// Physical materials defined in this design (`material.create`), next to the built-in ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_materials: Vec<UserMaterial>,
@@ -3542,6 +3574,7 @@ impl Document {
             body_offsets: Default::default(),
             materials: Default::default(),
             print_faces: Default::default(),
+            print_unfold: None,
             user_materials: Vec::new(),
             appearances: Default::default(),
             favorites: Default::default(),
@@ -3576,6 +3609,9 @@ impl Document {
         if let Some(mut face) = self.print_faces.remove(old) {
             face.body = new.to_string();
             self.print_faces.insert(new.to_string(), face);
+        }
+        if let Some(unfold) = self.print_unfold.as_mut().filter(|u| u.body == old) {
+            unfold.body = new.to_string();
         }
         if let Some(rule) = self.plastic.assigned.remove(old) {
             self.plastic.assigned.insert(new.to_string(), rule);

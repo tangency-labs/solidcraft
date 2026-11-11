@@ -869,7 +869,10 @@ fn convert_takes_the_fixed_face_and_the_bend_edges() {
     let mut app = SolveApp::new(s, Services::default());
     app.start("sheet.convert");
     let mut d = app.dialog.clone().unwrap();
-    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Fixed Face", "Bend Edges"]);
+    assert_eq!(
+        d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(),
+        ["Fixed Face", "Bend Edges", "Split Edges", "Filament Edges", "Swap Start Face", "Press-Fit Edges"]
+    );
     assert!(apply_commands(&app, &d).is_err(), "nothing to convert without a face");
     // The face alone is the plate conversion: no `bends`.
     d.inputs[0].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 0.0)).into_iter().collect();
@@ -879,7 +882,58 @@ fn convert_takes_the_fixed_face_and_the_bend_edges() {
         .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
         .collect();
     d.inputs[1].items = edges;
+    // Split edges are sent for a foldable print only, with its values instead of a rule.
+    d.inputs[2].items = edge_sel(&app.session, Vec3::new(100.0, 60.0, 15.0)).into_iter().collect();
+    let mut print = d.clone();
+    if let Kind::Sheet(Sm::Convert { print, .. }) = &mut print.kind {
+        *print = true;
+    }
+    let p = &apply_commands(&app, &print).unwrap()[0].1;
+    assert_eq!((p["print_fold"].clone(), p["print_splits"].clone()), (json!(true), json!([[100.0, 60.0, 15.0]])), "{p}");
+    assert!(p.get("rule").is_none(), "{p}");
+    // Filament edges take the dialog's values; one picked under Swap Start Face too is flipped.
+    let corner = edge_sel(&app.session, Vec3::new(0.0, 0.0, 15.0)).expect("an upright corner");
+    let other = edge_sel(&app.session, Vec3::new(100.0, 0.0, 15.0)).expect("another one");
+    print.inputs[3].items = vec![corner.clone(), other];
+    print.inputs[4].items = vec![corner];
+    if let Kind::Sheet(Sm::Convert { filament, .. }) = &mut print.kind {
+        filament.segments = "7".into();
+        filament.diameter = 1;
+        filament.tolerance = "0.1 mm".into();
+    }
+    let p = &apply_commands(&app, &print).unwrap()[0].1;
+    let want = json!([
+        {"at": [0.0, 0.0, 15.0], "segments": 7, "diameter": 2.85, "tolerance": 0.1, "flip": true, "wall": 0.8},
+        {"at": [100.0, 0.0, 15.0], "segments": 7, "diameter": 2.85, "tolerance": 0.1, "flip": false, "wall": 0.8}
+    ]);
+    assert_eq!(p["print_filament"], want, "{p}");
+    // Join Fold Edges adds every bend edge, with the same values, after the picked ones.
+    if let Kind::Sheet(Sm::Convert { filament, .. }) = &mut print.kind {
+        filament.fold_edges = true;
+    }
+    let p = &apply_commands(&app, &print).unwrap()[0].1;
+    let joints = p["print_filament"].as_array().cloned().unwrap_or_default();
+    assert_eq!(joints.len(), 2 + print.inputs[1].items.len(), "{p}");
+    assert!(joints.iter().skip(2).all(|j| j["segments"] == json!(7) && j["flip"] == json!(false)), "{p}");
+    // Press-Fit Edges take the nub's values; with the press fit chosen for fold edges, the bend
+    // edges are press fits too, not filament joints.
+    let third = edge_sel(&app.session, Vec3::new(0.0, 60.0, 15.0)).expect("a third corner");
+    print.inputs[5].items = vec![third];
+    if let Kind::Sheet(Sm::Convert { filament, .. }) = &mut print.kind {
+        filament.fold_kind = 1;
+        filament.press_radius = "0.7 mm".into();
+    }
+    let p = &apply_commands(&app, &print).unwrap()[0].1;
+    assert_eq!(p["print_filament"].as_array().map(Vec::len), Some(2), "{p}");
+    let press = p["print_press"].as_array().cloned().unwrap_or_default();
+    assert_eq!(press.len(), 1 + print.inputs[1].items.len(), "{p}");
+    assert_eq!(
+        press[0],
+        json!({"at": [0.0, 60.0, 15.0], "flip": false, "segments": 7, "radius": 0.7, "height": 0.3, "tolerance": 0.0, "wall": 0.8}),
+        "{p}"
+    );
     let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("print_splits").is_none(), "{:?}", c[0].1);
     assert_eq!(c[0].0, "sheet.convert");
     assert_eq!(c[0].1["bends"], json!([[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]));
     run_all(&mut app, c);

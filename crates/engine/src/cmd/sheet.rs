@@ -118,7 +118,17 @@ pub static COMMANDS: &[CommandSpec] = &[
              edges between two of those faces that are no bends are cut open with the rule's gap; \
              a point in the middle of a chamfer between two faces, or on a bend modelled with its radius (a cylinder between \
              two flat faces tangent to it, either skin), makes it one bend of the rule's radius at their virtual sharp; \
-             the faces' holes become cut-outs and their engravings, up to half the thickness deep, pockets)",
+             the faces' holes become cut-outs and their engravings, up to half the thickness deep, pockets); \
+             print_fold?: true makes a foldable 3D print instead (needs bends, takes no rule): the flat pattern as one body, \
+             outer faces on the print bed, with a V-groove at each bend that leaves a film to fold on; \
+             print_wall? (required for a solid body), print_clearance? (default 0.15), print_film? (default 0.4), \
+             print_joint?: \"butt\" (default: the panel nearer the fixed face runs on to the corner) or \"mitre\" where two panels meet on an edge that is no bend; \
+             print_splits?: [[x,y,z], ...] edges where the print splits into parts printed side by side (a print whose faces unfold onto each other is refused, naming them); \
+             print_filament?: [{at: [x,y,z] on an open edge or a bend, segments? (default 5), diameter? (mm, default 1.75), tolerance? (mm, default 0.1), flip?, wall? (mm, default 0.8)}] \
+             joins the edge with fingers of both faces by turns and a square channel (diameter + tolerance) through them for a filament; \
+             print_press?: [{at: [x,y,z] on an open edge or a bend, segments? (default 5), radius? (nub on the finger ends, mm, default 0.8), height? (mm, default 0.3), tolerance? (dimple, mm, default 0), flip?, wall? (mm, default 0.8)}] \
+             joins the edge with the same fingers and a nub on the starting face's fingers that snaps into a dimple in the next; \
+             on a bend the fingers are sectors round its sharp, the channel or nub on the bisector of the fold with `wall` round it, standing out of the walls inside the fold as far as that needs",
         ),
     CommandSpec::new("sheet.manage_rules", "Sheet Metal Rules", crate::checked!("sheet.manage_rules", rules))
         .contract(&MANAGE_RULES_CONTRACT).output(output_schema_for::<ManageRulesResult>).at("SHEET METAL", "MODIFY").icon("sheet_rules").params(
@@ -624,7 +634,7 @@ fn refold(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: true })
 }
 
-fn convert(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.convert";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
     if s.model.state().body(&body).is_none() {
@@ -642,11 +652,136 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("`{key}` is not a sheet.convert parameter: the sheet metal rule sets it. Pass a rule's name as `rule`")));
     }
     let rule = rule_param(s, p, cmd)?;
+    // A foldable print: the flat pattern to print and fold, with its own values instead of a rule.
+    let print_fold = bool_(p, "print_fold").unwrap_or(false);
+    let print = |k: &str| -> Result<Option<solidcraft_doc::Expr>> {
+        match expr(p, k) {
+            Some(e) => {
+                check_expr(s, &e, Kind::Length, cmd, k)?;
+                Ok(Some(e))
+            }
+            None => Ok(None),
+        }
+    };
+    let (print_wall, print_clearance, print_film) = (print("print_wall")?, print("print_clearance")?, print("print_film")?);
+    let print_splits = match p.get("print_splits") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => points(p, "print_splits", cmd)?,
+    };
+    let mut print_filament = match p.get("print_filament") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(v) => filament_params(v).map_err(|why| bad(cmd, why))?,
+    };
+    // Press fits join their edges with the same fingers; they are kept in the same list.
+    if let Some(v) = p.get("print_press").filter(|v| !v.is_null()) {
+        print_filament.extend(press_params(v).map_err(|why| bad(cmd, why))?);
+    }
+    let print_joint = match p.get("print_joint") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_str().and_then(sheet::PrintJoint::parse).ok_or_else(|| bad(cmd, "`print_joint` must be \"butt\" or \"mitre\""))?),
+    };
+    if print_fold {
+        if bends.is_empty() {
+            return Err(bad(cmd, "a foldable print (`print_fold`) needs the bend edges it folds on (`bends`)"));
+        }
+        if rule.is_some() {
+            return Err(bad(cmd, "a foldable print (`print_fold`) takes no `rule`: `print_wall`, `print_clearance` and `print_film` set it"));
+        }
+    } else if let Some(k) = ["print_wall", "print_clearance", "print_film", "print_joint", "print_splits", "print_filament", "print_press"]
+        .into_iter()
+        .find(|k| p.get(*k).is_some())
+    {
+        return Err(bad(cmd, format!("`{k}` is only for a foldable print: set `print_fold` to true")));
+    }
     add_feature(
         s,
         p,
-        FeatureKind::SheetConvert { body: BodyName(body), face: FacePick(face), rule, bends: bends.into_iter().map(Position).collect() },
+        FeatureKind::SheetConvert {
+            body: BodyName(body),
+            face: FacePick(face),
+            rule,
+            bends: bends.into_iter().map(Position).collect(),
+            print_fold,
+            print_wall,
+            print_clearance,
+            print_film,
+            print_joint,
+            print_splits: print_splits.into_iter().map(Position).collect(),
+            print_filament,
+        },
     )
+}
+
+/// A foldable print's filament joints: a list of `{at: [x, y, z], segments?, diameter?,
+/// tolerance?, flip?}` (also read by the contract's `FilamentParams`).
+pub(crate) fn filament_params(v: &Value) -> std::result::Result<Vec<sheet::PrintFilament>, String> {
+    joint_params(v, false)
+}
+
+/// A foldable print's press-fit joints: a list of `{at: [x, y, z], segments?, radius?, height?,
+/// tolerance?, flip?}` (also read by the contract's `PressJoints`).
+pub(crate) fn press_params(v: &Value) -> std::result::Result<Vec<sheet::PrintFilament>, String> {
+    joint_params(v, true)
+}
+
+/// Filament joints, or with `press` press-fit joints: the fingers are the same, the rest differs.
+fn joint_params(v: &Value, press: bool) -> std::result::Result<Vec<sheet::PrintFilament>, String> {
+    let (key, keys, what) = if press {
+        (
+            "print_press",
+            &["at", "segments", "radius", "height", "tolerance", "flip", "wall"][..],
+            "`print_press` must be a list of {at: [x, y, z], segments?, radius?, height?, tolerance?, flip?, wall?}",
+        )
+    } else {
+        (
+            "print_filament",
+            &["at", "segments", "diameter", "tolerance", "flip", "wall"][..],
+            "`print_filament` must be a list of {at: [x, y, z], segments?, diameter?, tolerance?, flip?, wall?}",
+        )
+    };
+    let list = v.as_array().filter(|a| a.len() <= 1000).ok_or(what)?;
+    let mut out = Vec::with_capacity(list.len());
+    for item in list {
+        let o = item.as_object().ok_or(what)?;
+        if let Some(k) = o.keys().find(|k| !keys.contains(&k.as_str())) {
+            return Err(format!("`{key}` takes no `{k}`; {what}"));
+        }
+        let at = super::sheet_points(Some(&json!([o.get("at").cloned().unwrap_or(Value::Null)])))
+            .ok()
+            .and_then(|p| p.first().copied())
+            .ok_or(format!("each of `{key}` needs `at`: a point [x, y, z] on its edge"))?;
+        let num = |k: &str, default: f64| -> std::result::Result<f64, String> {
+            match o.get(k) {
+                None | Some(Value::Null) => Ok(default),
+                Some(v) => v.as_f64().filter(|x| x.is_finite()).ok_or(format!("`{k}` of `{key}` must be a number (mm)")),
+            }
+        };
+        let segments = match o.get("segments") {
+            None | Some(Value::Null) => sheet::DEFAULT_SEGMENTS,
+            Some(v) => v
+                .as_u64()
+                .filter(|n| (2..=200).contains(n))
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or(format!("`segments` of `{key}` must be a whole number 2…200"))?,
+        };
+        let flip = match o.get("flip") {
+            None | Some(Value::Null) => false,
+            Some(v) => v.as_bool().ok_or(format!("`flip` of `{key}` must be true or false"))?,
+        };
+        let (diameter, tolerance, fit) = if press {
+            let fit = sheet::PressFit {
+                radius: num("radius", sheet::DEFAULT_NUB_RADIUS)?,
+                height: num("height", sheet::DEFAULT_NUB_HEIGHT)?,
+                tolerance: num("tolerance", 0.0)?,
+            };
+            (sheet::DEFAULT_FILAMENT, sheet::DEFAULT_CHANNEL_TOLERANCE, Some(fit))
+        } else {
+            (num("diameter", sheet::DEFAULT_FILAMENT)?, num("tolerance", sheet::DEFAULT_CHANNEL_TOLERANCE)?, None)
+        };
+        let wall = num("wall", sheet::DEFAULT_JOINT_WALL)?;
+        out.push(sheet::PrintFilament { at, segments, diameter, tolerance, flip, press: fit, wall });
+    }
+    Ok(out)
 }
 
 pub(crate) fn sheet_rule_name(v: &Value) -> std::result::Result<&str, &'static str> {

@@ -2493,6 +2493,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         param_comments,
         materials,
         print_faces,
+        print_unfold,
         user_materials,
         appearances,
         body_components,
@@ -2529,6 +2530,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *param_comments == b.param_comments
         && *materials == b.materials
         && *print_faces == b.print_faces
+        && *print_unfold == b.print_unfold
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components

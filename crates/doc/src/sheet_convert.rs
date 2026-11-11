@@ -55,8 +55,11 @@ use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::{Mesh, Ring, UnitVec3};
 use solidcraft_kernel::{Body, FaceSurface, face_surface};
 
-use super::{FlatWork, ReliefOverride, RuleValues, SheetBody, SheetFlange, base_flange, polys_cross, signed_area, snap};
-use crate::{DocError, ModelBody, Result, apply_point, mat_inverse};
+use super::{
+    Bevel, FilamentCut, FlatWork, FoldEnd, FoldFilament, PrintFilament, PrintFold, PrintJoint, ReliefOverride, RuleValues, SheetBody, SheetFlange,
+    base_flange, polys_cross, signed_area, snap,
+};
+use crate::{DocError, ModelBody, Result, apply_point, apply_vector, mat_inverse};
 
 const MAX_BENDS: usize = 1000;
 
@@ -72,6 +75,7 @@ fn at(p: Vec3) -> String {
 /// normal. Edge `i` runs from corner `i` to the next one, along face `across[i]`: straight, or an
 /// arc where that face is a round wall (`round[i]`: the circle's centre and the arc's middle).
 /// `holes`: its inner loops, in `plane`, each with the faces of its walls.
+#[derive(Clone)]
 struct Face {
     n: UnitVec3,
     pts: Vec<Vec3>,
@@ -83,11 +87,15 @@ struct Face {
 
 /// A face of the sheet: the panel it hangs off (none for the fixed face), and the bend between
 /// the two: its angle (positive toward the material, as a flange's) and its setback on this skin.
+/// `root`: the face its part of a foldable print is laid out from (the fixed face, or the face
+/// across a split edge, which starts a part of its own).
+#[derive(Clone)]
 struct Panel {
     face: Face,
     parent: Option<usize>,
     angle: f64,
     setback: f64,
+    root: usize,
 }
 
 /// Area of a loop in space, positive when it runs counter-clockwise about `n`.
@@ -362,6 +370,12 @@ fn chamfer_at(mb: &ModelBody, mesh: &Mesh, p: Vec3, tol: f64, near: f64) -> Opti
     if d > tol {
         return None;
     }
+    // A point on one of the body's edges picks that edge, not the middle of a strip beside it:
+    // every side face of a prism lies between two faces whose planes meet, and the middle of its
+    // end edge is the middle of that face too.
+    if b.nearest_edge(p, tol).ok().flatten().is_some_and(|(_, at)| at <= tol * 10.0) {
+        return None;
+    }
     let strip = outline(b, mesh, f, tol).ok()?;
     let plane = |g: usize| match face_surface(b, g) {
         Some(FaceSurface::Plane { normal, .. }) => Some(normal),
@@ -531,6 +545,143 @@ fn rip_cut(x: &Face, y: &Face, e: Vec3, t: f64, gap: f64) -> Result<f64> {
     // The sheet's other face lies `t` behind the panel: nearer that plane, or further from it.
     let lean = -x.n.dot(mid) * t;
     Ok((gap / 2.0 - lean.min(0.0)) / wx.dot(mid))
+}
+
+/// A foldable print's end of panel `x` along the edge `e` (its direction round `x`) to panel `y`
+/// that is no bend: how far in from the edge the panel ends square at its outer skin, and, for a
+/// mitre, how much further in it ends at its inner skin. Where `y` turns behind `x` (a corner on
+/// the outside of the body):
+/// - butt: the panel reached first from the fixed face (`x_first`) runs on to the corner, the
+///   other ends square on its inner face, `clearance` short of it;
+/// - mitre: both end on the plane halfway between them, half the clearance short of it.
+///
+/// Elsewhere (an inside corner) the panel is cut as sheet metal's are ([`rip_cut`]).
+fn print_cut(x: &Face, y: &Face, e: Vec3, t: f64, clearance: f64, joint: PrintJoint, x_first: bool) -> Result<(f64, Option<f64>)> {
+    let (wx, wy) = (x.n.cross(e), e.cross(y.n));
+    if wy.dot(x.n) >= -1e-9 {
+        return Ok((rip_cut(x, y, e, t, clearance)?, None));
+    }
+    match joint {
+        PrintJoint::Butt if x_first => Ok((0.0, None)),
+        PrintJoint::Butt => {
+            // Both of this end's corners (outer and inner skin) a wall and the clearance into `y`.
+            let into = -y.n.dot(wx);
+            if into <= 1e-9 {
+                return err("two faces of the sheet lie on each other along the edge between them");
+            }
+            Ok(((t + clearance - (t * x.n.dot(y.n)).min(0.0)) / into, None))
+        }
+        PrintJoint::Mitre => {
+            // Half the angle inside the corner between the two outer faces.
+            let half = (std::f64::consts::PI - x.n.dot(y.n).clamp(-1.0, 1.0).acos()) / 2.0;
+            if !(half > 1e-6 && half < FRAC_PI_2 - 1e-6) {
+                return err("two faces of the sheet lie on each other along the edge between them");
+            }
+            Ok((clearance / 2.0 / half.sin(), Some(t / half.tan())))
+        }
+    }
+}
+
+/// A filament joint's corner, seen from panel `x` on its edge `e` with `y`, the two meeting on
+/// the outside of the body: how far in from the edge `x` ends where a finger of `y` runs on to
+/// the corner (as a butt joint's second panel, `clearance` short of it), and how far in from the
+/// edge the channel's middle lies: at half the wall's thickness behind both faces.
+fn filament_cut(x: &Face, y: &Face, e: Vec3, t: f64, clearance: f64) -> std::result::Result<(f64, f64), String> {
+    let (wx, wy) = (x.n.cross(e), e.cross(y.n));
+    if wy.dot(x.n) >= -1e-9 {
+        return Err("a filament joint needs faces that meet on the outside of the body, not in an inside corner".into());
+    }
+    let into = -y.n.dot(wx);
+    let cos = x.n.dot(y.n);
+    if !(into > 1e-9 && cos > -1.0 + 1e-9) {
+        return Err("its two faces lie on each other".into());
+    }
+    let depth = (t + clearance - (t * cos).min(0.0)) / into;
+    Ok((depth, t / (2.0 * (1.0 + cos)) * into))
+}
+
+/// A filament channel's end at a corner of its edge: the channel's centre line through `centre`
+/// along `along`, its square cross-section `side` wide along `u` and `v`, between `faces`.
+struct ChannelEnd {
+    at: Vec3,
+    centre: Vec3,
+    u: Vec3,
+    v: Vec3,
+    along: Vec3,
+    side: f64,
+    faces: (usize, usize),
+}
+
+/// The convex hull of a few points, counter-clockwise (Andrew's monotone chain).
+fn convex_hull(mut pts: Vec<Vec2>) -> Vec<Vec2> {
+    pts.retain(|p| p.x.is_finite() && p.y.is_finite());
+    pts.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+    pts.dedup_by(|a, b| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9);
+    if pts.len() < 3 {
+        return pts;
+    }
+    let cross = |o: Vec2, a: Vec2, b: Vec2| (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    let mut hull: Vec<Vec2> = Vec::with_capacity(pts.len() * 2);
+    for pass in 0..2 {
+        let start = hull.len();
+        let iter: Box<dyn Iterator<Item = &Vec2>> = if pass == 0 { Box::new(pts.iter()) } else { Box::new(pts.iter().rev()) };
+        for p in iter {
+            while hull.len() >= start + 2 {
+                let (Some(&a), Some(&b)) = (hull.get(hull.len() - 2), hull.last()) else { break };
+                if cross(a, b, *p) > 1e-12 {
+                    break;
+                }
+                hull.pop();
+            }
+            hull.push(*p);
+        }
+        hull.pop();
+    }
+    hull
+}
+
+/// Where along a filament edge (from its first point `ends.0`, mm) the fingers of the panel
+/// across it are, notched out of this panel: the edge split evenly from the end that sorts first,
+/// the first finger the starting panel's (the one nearer the fixed face, `nearer`, unless
+/// flipped), each notch `clearance` / 2 wider each side so the fingers stay that far apart.
+fn finger_notches(fl: &PrintFilament, ends: (Vec3, Vec3), nearer: bool, clearance: f64, tol: f64) -> std::result::Result<Vec<(f64, f64)>, String> {
+    const MIN_FINGER: f64 = 1.0;
+    let (p, q) = ends;
+    let len = p.dist(q);
+    if !(2..=200).contains(&fl.segments) {
+        return Err("a filament joint needs 2…200 fingers".into());
+    }
+    // A short edge gets fewer fingers, none narrower than MIN_FINGER_WIDTH (both panels count
+    // the same, from the same edge).
+    let n = super::finger_count(fl.segments, len);
+    if fl.press.is_none() && !(fl.diameter.is_finite() && fl.diameter > 0.0 && fl.diameter <= 20.0) {
+        return Err("the filament diameter must be more than 0 and at most 20 mm".into());
+    }
+    if fl.press.is_none() && !(fl.tolerance.is_finite() && fl.side() >= 0.1) {
+        return Err("the tolerance closes the channel; it must leave it at least 0.1 mm wide".into());
+    }
+    let each = len / f64::from(n);
+    if !(each - clearance >= MIN_FINGER) {
+        return Err(format!("{n} fingers on {len:.2} mm leave each {:.2} mm, less than {MIN_FINGER} mm; take fewer", each - clearance));
+    }
+    // The end the edge is split from: the one that sorts first, the same seen from either panel.
+    let d = q - p;
+    let first_is_p = [d.x, d.y, d.z].into_iter().find(|c| c.abs() > tol).is_none_or(|c| c > 0.0);
+    let mine = nearer != fl.flip;
+    let over = tol * 10.0 + clearance;
+    let mut notches = Vec::new();
+    for k in 0..n {
+        // Even fingers are the starting panel's.
+        if (k % 2 == 0) == mine {
+            continue;
+        }
+        let (s, e) = (f64::from(k) * each, f64::from(k + 1) * each);
+        let (s, e) = if first_is_p { (s, e) } else { (len - e, len - s) };
+        let lo = if s <= tol { -over } else { s - clearance / 2.0 };
+        let hi = if e >= len - tol { len + over } else { e + clearance / 2.0 };
+        notches.push((lo, hi));
+    }
+    Ok(notches)
 }
 
 /// A counter-clockwise outline with each edge moved in by its own amount. Moved edges meet
@@ -821,7 +972,12 @@ pub fn bend_edge_names(st: &crate::ModelState, body: &str, pts: &[Vec3]) -> Vec<
 /// points on the sharp edges that become bends, in the middle of chamfers or on bend cylinders
 /// that do (the body's coordinates, mm). See the module docs. `body_to_world` places diagnostic
 /// points in world coordinates. Geometry and picks stay local. Returns the sheet and a note for
-/// every corner or end of a bend not finished as the rule says.
+/// every corner or end of a bend not finished as the rule says. With `print`, the sheet is a
+/// foldable 3D print, hinged ([`SheetBody::hinged`]): each bend folds on a film at its outer
+/// skin, so every bend must turn toward the material, as the faces of a solid do round its
+/// outside, and two panels that meet on the outside of the body along an edge that is no bend
+/// meet as `print` says ([`print_cut`]), on a film `film` thick.
+#[allow(clippy::too_many_arguments)]
 pub fn convert_body(
     mb: &ModelBody,
     rule: &str,
@@ -829,11 +985,24 @@ pub fn convert_body(
     face: Vec3,
     bends: &[Vec3],
     body_to_world: &crate::Mat,
-) -> Result<(SheetBody, Vec<String>)> {
+    print: Option<PrintJoint>,
+    film: f64,
+    splits: &[Vec3],
+    filament: &[PrintFilament],
+) -> Result<(Vec<SheetBody>, Vec<String>)> {
+    let hinged = print.is_some();
     let at = |p| at(apply_point(body_to_world, p));
-    if bends.is_empty() || bends.len() > MAX_BENDS {
+    if bends.is_empty() || bends.len() + splits.len() > MAX_BENDS {
         return err(format!("pick 1…{MAX_BENDS} bend edges"));
     }
+    if !hinged && !(splits.is_empty() && filament.is_empty()) {
+        return err("only a foldable print is split into parts or joined with filament");
+    }
+    if filament.len() > MAX_BENDS {
+        return err(format!("pick at most {MAX_BENDS} filament edges"));
+    }
+    // Which filament joints were found on an open edge of the print (each is on two panels).
+    let mut filament_used = vec![false; filament.len()];
     let rv = values(None)?;
     let (b, mesh) = (&mb.body, mb.mesh());
     let size = b.size();
@@ -847,9 +1016,16 @@ pub fn convert_body(
     };
     // The two faces along each bend edge, or on either side of each chamfer or bend cylinder
     // (with a bend cylinder its other skin's too).
-    let mut picks = Vec::with_capacity(bends.len());
+    // A split edge of a foldable print is taken as a bend is, to reach the faces past it; they
+    // are laid out as a part of their own, the edge cut open on both.
+    let mut picks = Vec::with_capacity(bends.len() + splits.len());
+    let mut split_at = Vec::with_capacity(bends.len() + splits.len());
     let mut chamfers: Vec<Chamfer> = Vec::new();
-    for p in bends {
+    for (p, split) in bends.iter().map(|p| (p, false)).chain(splits.iter().map(|p| (p, true))) {
+        split_at.push(split);
+        if split && chamfer_at(mb, &mesh, *p, tol, near).is_some() {
+            return err(format!("the split edge at {} is on a chamfer or a bend cylinder; split at a sharp edge", at(*p)));
+        }
         if let Some(c) = chamfer_at(mb, &mesh, *p, tol, near) {
             picks.push((*p, (c.a, c.b)));
             // Every piece of the bend, on either skin: cut-outs across it split its cylinder.
@@ -899,22 +1075,22 @@ pub fn convert_body(
         mesh.edge_faces.iter().any(|faces| faces.contains(&(x as u32)) && faces.contains(&(y as u32)))
             || chamfers.iter().any(|c| (c.a, c.b) == (x, y) || (c.a, c.b) == (y, x))
     };
-    let mut todo: Vec<(Vec3, Vec<(usize, usize)>)> = Vec::with_capacity(picks.len());
-    for (&(p, pair), back) in picks.iter().zip(&backs) {
+    let mut todo: Vec<(Vec3, Vec<(usize, usize)>, bool)> = Vec::with_capacity(picks.len());
+    for ((&(p, pair), back), split) in picks.iter().zip(&backs).zip(&split_at) {
         let other = back.filter(|(x, y)| shell.is_some() && joined(*x, *y));
-        todo.push((p, std::iter::once(pair).chain(other).collect()));
+        todo.push((p, std::iter::once(pair).chain(other).collect(), *split));
     }
     // The panels: the faces reached from the fixed face across the bends, each hanging off the
     // face it was reached from.
-    let mut panels = BTreeMap::from([(f0, Panel { face: fixed, parent: None, angle: 0.0, setback: 0.0 })]);
+    let mut panels = BTreeMap::from([(f0, Panel { face: fixed, parent: None, angle: 0.0, setback: 0.0, root: f0 })]);
     let mut order = vec![f0];
     loop {
         let waiting = todo.len();
         let mut rest = Vec::new();
-        for (p, pairs) in todo {
+        for (p, pairs, split) in todo {
             let reached = pairs.iter().find(|(x, y)| panels.contains_key(x) || panels.contains_key(y));
             let Some(&(x, y)) = reached else {
-                rest.push((p, pairs));
+                rest.push((p, pairs, split));
                 continue;
             };
             let (from, to) = if panels.contains_key(&x) { (x, y) } else { (y, x) };
@@ -929,6 +1105,13 @@ pub fn convert_body(
             let child =
                 face_of(to).map_err(|e| DocError::Invalid(format!("the face across the bend at {} can't be a face of the sheet: {e}", at(p))))?;
             let Some(parent) = panels.get(&from) else { continue };
+            if split {
+                // Not folded: the face starts a part of its own, laid out from it.
+                panels.insert(to, Panel { face: child, parent: Some(from), angle: 0.0, setback: 0.0, root: to });
+                order.push(to);
+                continue;
+            }
+            let root = parent.root;
             let theta = parent.face.n.dot(child.n).clamp(-1.0, 1.0).acos();
             if !(theta > 1e-6 && theta < std::f64::consts::PI - 1e-6) {
                 return err(format!("the faces at the bend at {} must meet at an angle between 0 and 180°", at(p)));
@@ -936,8 +1119,14 @@ pub fn convert_body(
             // Up: the child rises on the material side of its parent, which is behind its face.
             let o = parent.face.pts.first().copied().unwrap_or_default();
             let lift = child.pts.iter().map(|q| (*q - o).dot(parent.face.n)).fold(0.0, |m: f64, h| if h.abs() > m.abs() { h } else { m });
+            if hinged && lift >= 0.0 {
+                return err(format!(
+                    "not supported yet: a foldable print whose bend at {} turns away from the material; pick the fixed face on the outside of the body",
+                    at(p)
+                ));
+            }
             let (angle, sharp) = if lift < 0.0 { (theta, r + t) } else { (-theta, r) };
-            panels.insert(to, Panel { face: child, parent: Some(from), angle, setback: sharp * (theta / 2.0).tan() });
+            panels.insert(to, Panel { face: child, parent: Some(from), angle, setback: sharp * (theta / 2.0).tan(), root });
             order.push(to);
         }
         todo = rest;
@@ -945,235 +1134,579 @@ pub fn convert_body(
             break;
         }
     }
-    if let Some((p, _)) = todo.first() {
+    if let Some((p, ..)) = todo.first() {
         return err(format!("the bend at {} does not connect to the fixed face through the other bends", at(*p)));
     }
-    // The flat frame: on the fixed face, x along its longest edge, z into the material.
-    let Some(base) = panels.get(&f0) else { return err("fixed face") };
-    let base_ring = Ring::from(base.face.pts.clone());
-    let corners = base_ring.edges();
-    let straight = corners.zip(&base.face.round).filter(|(_, r)| r.is_none()).map(|(c, _)| c);
-    let longest = straight.max_by(|x, y| x.0.dist(*x.1).total_cmp(&y.0.dist(*y.1)));
-    let frame = longest
-        .and_then(|(a, b)| Some((*a, (*b - *a).normalized()?)))
-        .and_then(|(a, x)| Plane::new(a, x, x.cross(base.face.n)))
-        .ok_or_else(|| DocError::Invalid("the fixed face has no plane".into()))?;
-    // A wall on part of an edge of the fixed face bends only where it stands (a bend picked as a
-    // chamfer or a cylinder is taken as it is).
-    let walls: Vec<(usize, f64)> = panels.iter().filter(|(_, p)| p.parent == Some(f0)).map(|(g, p)| (*g, p.setback)).collect();
-    for (g, by) in walls {
-        if chamfers.iter().any(|c| (c.a, c.b) == (f0, g) || (c.a, c.b) == (g, f0)) {
-            continue;
+    // Each part laid out on its own, from its root: the fixed face's first, then the parts past
+    // split edges in the order they were reached. A part's root hangs off nothing in it.
+    let all = panels;
+    let mut sheets = Vec::new();
+    for root in order.iter().copied().filter(|f| all.get(f).is_some_and(|p| p.root == *f)) {
+        let f0 = root;
+        let mut panels: BTreeMap<usize, Panel> = all.iter().filter(|(_, p)| p.root == root).map(|(g, p)| (*g, p.clone())).collect();
+        if let Some(p) = panels.get_mut(&root) {
+            p.parent = None;
         }
-        let kids: Vec<usize> = panels.iter().filter(|(_, p)| p.parent == Some(g)).map(|(h, _)| *h).collect();
-        let Some(mut wall) = panels.remove(&g) else { continue };
-        if let Some(base) = panels.get_mut(&f0) {
-            end_at_wall(&mut base.face, &mut wall.face, (f0, g), by, &|h| h == f0 || kids.contains(&h), tol);
-        }
-        panels.insert(g, wall);
-    }
-    let mut sh = base_flange(&mb.name, rule, &RuleValues { thickness: t, ..rv }, frame, Region2::default());
-    // How far behind a face of the sheet the body's face `g` starts and ends: a hole's wall
-    // reaches through the sheet, a pocket's ends on its floor, an island's starts at the face.
-    let mut points: BTreeMap<usize, Vec<Vec3>> = BTreeMap::new();
-    for (tri, g) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        points.entry(*g as usize).or_default().extend(tri.iter().filter_map(|k| mesh.positions.get(*k as usize)));
-    }
-    let span = |g: usize, face: &Face| {
-        let o = face.pts.first().copied().unwrap_or_default();
-        let ds = points.get(&g).into_iter().flatten().map(|p| (o - *p).dot(face.n));
-        ds.fold((f64::INFINITY, 0.0), |(lo, hi): (f64, f64), d| (lo.min(d.max(0.0)), hi.max(d)))
-    };
-    // The span of a loop's walls: the least any starts at, and the least and most any ends at.
-    let walls_span = |walls: &[usize], face: &Face| {
-        walls
-            .iter()
-            .map(|g| span(*g, face))
-            .fold((f64::INFINITY, f64::INFINITY, 0.0), |(s, lo, hi): (f64, f64, f64), (a, b)| (s.min(a), lo.min(b), hi.max(b)))
-    };
-    let mut work = FlatWork::new();
-    // Lay the panels out, parents first: each is its face, seen through the inverse of its
-    // fold, with its edges moved in by a bend's setback or a rip's cut.
-    let mut queue: Vec<(usize, Option<usize>)> = vec![(f0, None)];
-    let mut next = 0;
-    while let Some(&(pf, fl)) = queue.get(next) {
-        next += 1;
-        let Some(panel) = panels.get(&pf) else { continue };
-        let inv = mat_inverse(&sh.world(fl)).ok_or_else(|| DocError::Invalid("sheet panel frame".into()))?;
-        let n = panel.face.pts.len();
-        let (mut pts, mut by) = (Vec::with_capacity(n), Vec::with_capacity(n));
-        for (i, p) in panel.face.pts.iter().enumerate() {
-            let q = apply_point(&inv, *p);
-            if !(q.z.abs() <= tol) {
-                return err(format!("the face at {} does not lie where its bend puts it ({:.6} mm off)", at(*p), q.z));
+        // Which face each flange of the part is (for saying where its pieces overlap).
+        let mut flange_face: Vec<usize> = Vec::new();
+        // The flat frame: on the fixed face, x along its longest edge, z into the material.
+        let Some(base) = panels.get(&f0) else { return err("fixed face") };
+        let base_ring = Ring::from(base.face.pts.clone());
+        let corners = base_ring.edges();
+        let straight = corners.zip(&base.face.round).filter(|(_, r)| r.is_none()).map(|(c, _)| c);
+        let longest = straight.max_by(|x, y| x.0.dist(*x.1).total_cmp(&y.0.dist(*y.1)));
+        let frame = longest
+            .and_then(|(a, b)| Some((*a, (*b - *a).normalized()?)))
+            .and_then(|(a, x)| Plane::new(a, x, x.cross(base.face.n)))
+            .ok_or_else(|| DocError::Invalid("the fixed face has no plane".into()))?;
+        // A wall on part of an edge of the fixed face bends only where it stands (a bend picked as a
+        // chamfer or a cylinder is taken as it is).
+        let walls: Vec<(usize, f64)> = panels.iter().filter(|(_, p)| p.parent == Some(f0)).map(|(g, p)| (*g, p.setback)).collect();
+        for (g, by) in walls {
+            if chamfers.iter().any(|c| (c.a, c.b) == (f0, g) || (c.a, c.b) == (g, f0)) {
+                continue;
             }
-            pts.push(Vec2::new(q.x, q.y));
-            let e = panel.face.pts.get((i + 1) % n).and_then(|b| (*b - *p).normalized()).unwrap_or(Vec3::X);
-            by.push(match panel.face.across.get(i).copied().flatten().and_then(|g| Some((g, panels.get(&g)?))) {
-                Some((g, _)) if panel.parent == Some(g) => panel.setback,
-                Some((_, other)) if other.parent == Some(pf) => other.setback,
-                Some((_, other)) => rip_cut(&panel.face, &other.face, e, t, rv.gap)?,
-                None => 0.0,
-            });
+            let kids: Vec<usize> = panels.iter().filter(|(_, p)| p.parent == Some(g)).map(|(h, _)| *h).collect();
+            let Some(mut wall) = panels.remove(&g) else { continue };
+            if let Some(base) = panels.get_mut(&f0) {
+                end_at_wall(&mut base.face, &mut wall.face, (f0, g), by, &|h| h == f0 || kids.contains(&h), tol);
+            }
+            panels.insert(g, wall);
         }
-        let mut across = panel.face.across.clone();
-        let flat = |p: Vec3| {
-            let q = apply_point(&inv, p);
-            Vec2::new(q.x, q.y)
+        let mut sh = base_flange(&mb.name, rule, &RuleValues { thickness: t, ..rv }, frame, Region2::default());
+        sh.hinged = hinged;
+        // How far behind a face of the sheet the body's face `g` starts and ends: a hole's wall
+        // reaches through the sheet, a pocket's ends on its floor, an island's starts at the face.
+        let mut points: BTreeMap<usize, Vec<Vec3>> = BTreeMap::new();
+        for (tri, g) in mesh.triangles.iter().zip(&mesh.tri_face) {
+            points.entry(*g as usize).or_default().extend(tri.iter().filter_map(|k| mesh.positions.get(*k as usize)));
+        }
+        let span = |g: usize, face: &Face| {
+            let o = face.pts.first().copied().unwrap_or_default();
+            let ds = points.get(&g).into_iter().flatten().map(|p| (o - *p).dot(face.n));
+            ds.fold((f64::INFINITY, 0.0), |(lo, hi): (f64, f64), d| (lo.min(d.max(0.0)), hi.max(d)))
         };
-        let mut round: Vec<Option<(Vec2, Vec2)>> = panel.face.round.iter().map(|r| r.map(|(c, m)| (flat(c), flat(m)))).collect();
-        if signed_area(&pts) < 0.0 {
-            pts.reverse();
-            turn(&mut by);
-            turn(&mut across);
-            turn(&mut round);
-        }
-        let first = panel.face.pts.first().copied().unwrap_or_default();
-        let face_at = |e: DocError| DocError::Invalid(format!("{e} (the face at {})", at(first)));
-        let (mut trimmed, mut from) = inset(&pts, &by, tol).map_err(face_at)?;
-        // Where cut-outs across a bend notch the panel, its edges along the bend are one bend
-        // edge and the notches holes of the sheet, as is the bend zone between them (below).
-        let mut gaps: BTreeMap<usize, Vec<(Vec2, Vec2)>> = BTreeMap::new();
-        let mut bent: Vec<usize> =
-            across.iter().flatten().copied().filter(|g| panel.parent == Some(*g) || panels.get(g).is_some_and(|c| c.parent == Some(pf))).collect();
-        bent.sort_unstable();
-        bent.dedup();
-        for g in bent {
-            for (hole, e, s) in join_runs(&mut trimmed, &mut from, &across, &pts, &round, g, tol).map_err(face_at)? {
-                sh.holes.push(hole);
-                gaps.entry(g).or_default().push((e, s));
-            }
-        }
-        let exact = drawn(&trimmed, &from, &pts, &round).map_err(face_at)?;
-        match fl {
-            None => sh.base.outer = exact.unwrap_or_else(|| Loop2::polygon(&trimmed.iter().map(|q| snap(*q)).collect::<Vec<_>>())),
-            Some(i) => {
-                set_panel(&mut sh, i, &trimmed);
-                if let (Some(lp), Some(f)) = (exact, sh.flanges.get_mut(i)) {
-                    f.shape = Some(trimmed.clone());
-                    f.exact = Some(lp);
-                }
-            }
-        }
-        // The face's holes: cut-outs of the sheet where they lie, inside its panel. A hole's walls
-        // reach through the sheet; a pocket's (an engraved label) end inside it, on floors facing
-        // out as the face does: a pocket of the sheet from that skin, round its islands. On a
-        // shell the face behind, the other skin, is read for its pockets too.
-        let region = match fl {
-            None => sh.base.clone(),
-            Some(i) => sh.flanges.get(i).map(|f| sh.panel(f)).unwrap_or_default(),
+        // The span of a loop's walls: the least any starts at, and the least and most any ends at.
+        let walls_span = |walls: &[usize], face: &Face| {
+            walls
+                .iter()
+                .map(|g| span(*g, face))
+                .fold((f64::INFINITY, f64::INFINITY, 0.0), |(s, lo, hi): (f64, f64, f64), (a, b)| (s.min(a), lo.min(b), hi.max(b)))
         };
-        let back = skin_behind.get(&pf).and_then(|g| outline(b, &mesh, *g, tol).ok());
-        let skins: Vec<(&Face, bool)> = std::iter::once((&panel.face, true)).chain(back.as_ref().map(|f| (f, false))).collect();
-        let bound = if skins.iter().all(|(f, _)| f.holes.is_empty()) { Ring::default() } else { region.outer.ccw().polyline(1e-3) };
-        for (face, front) in skins {
-            for (h, walls) in &face.holes {
-                let p = face.plane.to_world(h.centroid());
-                let (_, reach, deepest) = walls_span(walls, face);
-                let through = reach >= t - tol;
-                if through && !front {
-                    continue;
+        let mut work = FlatWork::new();
+        // Lay the panels out, parents first: each is its face, seen through the inverse of its
+        // fold, with its edges moved in by a bend's setback or a rip's cut.
+        let mut bevels: Vec<Bevel> = Vec::new();
+        let mut fil_cuts: Vec<FilamentCut> = Vec::new();
+        // Each filament channel's ends, where a third face of the part may close it off.
+        let mut channel_ends: Vec<ChannelEnd> = Vec::new();
+        // Each joint on a bend: its index, the edge's ends and its two faces.
+        let mut fold_joints: Vec<(usize, Vec3, Vec3, usize, usize)> = Vec::new();
+        let mut queue: Vec<(usize, Option<usize>)> = vec![(f0, None)];
+        let mut next = 0;
+        while let Some(&(pf, fl)) = queue.get(next) {
+            next += 1;
+            let owner = fl;
+            let Some(panel) = panels.get(&pf) else { continue };
+            let inv = mat_inverse(&sh.world(fl)).ok_or_else(|| DocError::Invalid("sheet panel frame".into()))?;
+            let n = panel.face.pts.len();
+            let (mut pts, mut by) = (Vec::with_capacity(n), Vec::with_capacity(n));
+            for (i, p) in panel.face.pts.iter().enumerate() {
+                let q = apply_point(&inv, *p);
+                if !(q.z.abs() <= tol) {
+                    return err(format!("the face at {} does not lie where its bend puts it ({:.6} mm off)", at(*p), q.z));
                 }
-                let cut = sh.region_to_flat(fl, &face.plane, &Region2 { outer: h.clone(), holes: Vec::new() })?;
-                let ring = cut.outer.polyline(1e-3);
-                if !ring.iter().all(|q| bound.contains(*q)) || polys_cross(&bound, &ring) {
-                    let kind = if through { "hole" } else { "pocket" };
-                    return err(format!("not supported yet: the {kind} at {} reaches into a bend (cut it after converting)", at(p)));
-                }
-                if through {
-                    sh.holes.push(cut);
-                    continue;
-                }
-                let pocket =
-                    |why: &str| err(format!("not supported yet: the pocket at {} in a face of the sheet {why} (cut it after converting)", at(p)));
-                let eps = t * 1e-3;
-                if reach > t / 2.0 + eps {
-                    return pocket(&format!("ends {reach:.3} deep, more than half the sheet's {t:.3}"));
-                }
-                if deepest - reach > eps {
-                    return pocket("has walls of more than one depth");
-                }
-                // Its floors: the faces at its depth beside its walls, facing out as the face does.
-                let mut floors: Vec<usize> = mesh
-                    .edge_faces
-                    .iter()
-                    .filter(|fs| fs.iter().any(|g| walls.contains(&(*g as usize))))
-                    .flatten()
-                    .map(|g| *g as usize)
-                    .filter(|g| {
-                        !walls.contains(g)
-                            && matches!(face_surface(b, *g), Some(FaceSurface::Plane { normal, .. }) if normal.dot(face.n) > 1.0 - 1e-9)
-                    })
-                    .filter(|g| {
-                        let (lo, hi) = span(*g, face);
-                        (lo - reach).abs() <= eps && (hi - reach).abs() <= eps
-                    })
-                    .collect();
-                floors.sort_unstable();
-                floors.dedup();
-                if floors.is_empty() {
-                    return pocket("has no flat floor");
-                }
-                // The islands left standing in it (a letter's counter): walls from a floor up to the face.
-                let mut islands = Vec::new();
-                for g in floors {
-                    let floor = outline(b, &mesh, g, tol)?;
-                    for (k, kw) in &floor.holes {
-                        let (start, lo, hi) = walls_span(kw, face);
-                        if start > eps || (lo - reach).abs() > eps || (hi - reach).abs() > eps {
-                            return pocket("has a hole or a step in its floor");
+                pts.push(Vec2::new(q.x, q.y));
+                let e = panel.face.pts.get((i + 1) % n).and_then(|b| (*b - *p).normalized()).unwrap_or(Vec3::X);
+                // A face of another part (across a split edge) meets this one on an open edge.
+                by.push(match panel.face.across.get(i).copied().flatten().and_then(|g| Some((g, all.get(&g)?))) {
+                    Some((g, _)) if panel.parent == Some(g) => panel.setback,
+                    Some((g, other)) if other.parent == Some(pf) && panels.contains_key(&g) => other.setback,
+                    Some((g, other)) => match print {
+                        None => rip_cut(&panel.face, &other.face, e, t, rv.gap)?,
+                        Some(joint) => {
+                            // The panel reached first from the fixed face runs on at a butt joint.
+                            let rank = |h: usize| order.iter().position(|&o| o == h).unwrap_or(usize::MAX);
+                            let next = panel.face.pts.get((i + 1) % n).copied().unwrap_or(*p);
+                            let picked = filament.iter().position(|fl| fl.at.dist_to_segment(*p, next) <= near);
+                            if let Some((k, fl)) = picked.and_then(|k| Some((k, filament.get(k)?))) {
+                                if let Some(u) = filament_used.get_mut(k) {
+                                    *u = true;
+                                }
+                                let (depth, offset) = filament_cut(&panel.face, &other.face, e, t, rv.gap)
+                                    .map_err(|why| DocError::Invalid(format!("the filament edge at {}: {why}", at(fl.at))))?;
+                                let notches = finger_notches(fl, (*p, next), rank(pf) < rank(g), rv.gap, tol)
+                                    .map_err(|why| DocError::Invalid(format!("the filament edge at {}: {why}", at(fl.at))))?;
+                                // Seen from one of the two panels (both cut the same channel).
+                                if fl.press.is_none() && (pf < g || !panels.contains_key(&g)) {
+                                    let inward = panel.face.n.cross(e);
+                                    for end in [*p, next] {
+                                        channel_ends.push(ChannelEnd {
+                                            at: end,
+                                            centre: end + inward * offset - panel.face.n * (t / 2.0),
+                                            u: inward,
+                                            v: *panel.face.n,
+                                            along: e,
+                                            side: fl.side(),
+                                            faces: (pf, g),
+                                        });
+                                    }
+                                }
+                                let (b, inward) = (apply_point(&inv, next), apply_vector(&inv, panel.face.n.cross(e)));
+                                fil_cuts.push(FilamentCut {
+                                    a: Vec2::new(q.x, q.y),
+                                    b: Vec2::new(b.x, b.y),
+                                    n: Vec2::new(inward.x, inward.y),
+                                    notches,
+                                    depth,
+                                    offset,
+                                    side: if fl.press.is_some() { 0.0 } else { fl.side() },
+                                    press: fl.press,
+                                    // The starting panel's fingers carry the nubs.
+                                    nubs: (rank(pf) < rank(g)) != fl.flip,
+                                    angle: panel.face.n.dot(*other.face.n).clamp(-1.0, 1.0).acos(),
+                                    panel: owner,
+                                });
+                                // Both panels run on to the corner; the fingers share it out.
+                                0.0
+                            } else {
+                                let (cut, extra) = print_cut(&panel.face, &other.face, e, t, rv.gap, joint, rank(pf) < rank(g))?;
+                                if let Some(extra) = extra {
+                                    let next = panel.face.pts.get((i + 1) % n).copied().unwrap_or(*p);
+                                    let (b, inward) = (apply_point(&inv, next), apply_vector(&inv, panel.face.n.cross(e)));
+                                    bevels.push(Bevel {
+                                        a: Vec2::new(q.x, q.y),
+                                        b: Vec2::new(b.x, b.y),
+                                        n: Vec2::new(inward.x, inward.y),
+                                        at: cut,
+                                        extra,
+                                    });
+                                }
+                                cut
+                            }
                         }
-                        islands.push(sh.region_to_flat(fl, &floor.plane, &Region2 { outer: k.clone(), holes: Vec::new() })?.outer.reversed());
+                    },
+                    None => 0.0,
+                });
+            }
+            let mut across = panel.face.across.clone();
+            let flat = |p: Vec3| {
+                let q = apply_point(&inv, p);
+                Vec2::new(q.x, q.y)
+            };
+            let mut round: Vec<Option<(Vec2, Vec2)>> = panel.face.round.iter().map(|r| r.map(|(c, m)| (flat(c), flat(m)))).collect();
+            if signed_area(&pts) < 0.0 {
+                pts.reverse();
+                turn(&mut by);
+                turn(&mut across);
+                turn(&mut round);
+            }
+            let first = panel.face.pts.first().copied().unwrap_or_default();
+            let face_at = |e: DocError| DocError::Invalid(format!("{e} (the face at {})", at(first)));
+            let (mut trimmed, mut from) = inset(&pts, &by, tol).map_err(face_at)?;
+            // Where cut-outs across a bend notch the panel, its edges along the bend are one bend
+            // edge and the notches holes of the sheet, as is the bend zone between them (below).
+            let mut gaps: BTreeMap<usize, Vec<(Vec2, Vec2)>> = BTreeMap::new();
+            let mut bent: Vec<usize> = across
+                .iter()
+                .flatten()
+                .copied()
+                .filter(|g| panel.parent == Some(*g) || panels.get(g).is_some_and(|c| c.parent == Some(pf)))
+                .collect();
+            bent.sort_unstable();
+            bent.dedup();
+            for g in bent {
+                for (hole, e, s) in join_runs(&mut trimmed, &mut from, &across, &pts, &round, g, tol).map_err(face_at)? {
+                    sh.holes.push(hole);
+                    gaps.entry(g).or_default().push((e, s));
+                }
+            }
+            let exact = drawn(&trimmed, &from, &pts, &round).map_err(face_at)?;
+            match fl {
+                None => sh.base.outer = exact.unwrap_or_else(|| Loop2::polygon(&trimmed.iter().map(|q| snap(*q)).collect::<Vec<_>>())),
+                Some(i) => {
+                    set_panel(&mut sh, i, &trimmed);
+                    if let (Some(lp), Some(f)) = (exact, sh.flanges.get_mut(i)) {
+                        f.shape = Some(trimmed.clone());
+                        f.exact = Some(lp);
                     }
                 }
-                let (z0, z1) = if front { (0.0, reach) } else { (t - reach, t) };
-                sh.record_pocket(Region2 { outer: cut.outer, holes: islands }, z0, z1, &mut work)?;
             }
-        }
-        // Its children: flanges on the trimmed edges they bend at.
-        let m = trimmed.len();
-        for &g in &order {
-            let Some(child) = panels.get(&g).filter(|c| c.parent == Some(pf)) else { continue };
-            let runs: Vec<usize> =
-                (0..m).filter(|j| from.get(*j).copied().flatten().and_then(|i| across.get(i).copied().flatten()) == Some(g)).collect();
-            let (a, b) = match runs.as_slice() {
-                &[j] => (trimmed.get(j).copied().map(snap), trimmed.get((j + 1) % m).copied().map(snap)),
-                _ => return err("not supported yet: two faces of the sheet that meet along more than one edge"),
+            // The face's holes: cut-outs of the sheet where they lie, inside its panel. A hole's walls
+            // reach through the sheet; a pocket's (an engraved label) end inside it, on floors facing
+            // out as the face does: a pocket of the sheet from that skin, round its islands. On a
+            // shell the face behind, the other skin, is read for its pockets too.
+            let region = match fl {
+                None => sh.base.clone(),
+                Some(i) => sh.flanges.get(i).map(|f| sh.panel(f)).unwrap_or_default(),
             };
-            let (Some(a), Some(b)) = (a, b) else { continue };
-            let Some(d) = (b - a).normalized() else { return err("a bend edge has no length") };
-            sh.flanges.push(SheetFlange {
-                parent: fl,
-                p: a,
-                d,
-                len: a.dist(b),
-                n: Vec2::new(d.y, -d.x),
-                angle: child.angle,
-                radius: r,
-                leg: 0.0,
-                ext: (0.0, 0.0),
-                slope: (0.0, 0.0),
-                shape: None,
-                exact: None,
-                zone_shape: None,
-                tag: String::new(),
-                tear: (false, false),
-                tear_curved: (false, false),
-                tear_ease: (0.0, 0.0),
-            });
-            let i = sh.flanges.len() - 1;
-            let (ba, n) = sh.flanges.get(i).map_or((0.0, Vec2::new(d.y, -d.x)), |f| (sh.allowance(f), f.n));
-            for (e, s) in gaps.get(&g).into_iter().flatten() {
-                let zone = Loop2::polygon(&[snap(*e), snap(*s), snap(*s + n * ba), snap(*e + n * ba)]);
-                sh.holes.push(Region2 { outer: zone.ccw(), holes: Vec::new() });
+            let back = skin_behind.get(&pf).and_then(|g| outline(b, &mesh, *g, tol).ok());
+            let skins: Vec<(&Face, bool)> = std::iter::once((&panel.face, true)).chain(back.as_ref().map(|f| (f, false))).collect();
+            let bound = if skins.iter().all(|(f, _)| f.holes.is_empty()) { Ring::default() } else { region.outer.ccw().polyline(1e-3) };
+            for (face, front) in skins {
+                for (h, walls) in &face.holes {
+                    // A hole with a bend on an edge: its walls fold into it (below); no cut-out.
+                    if front && walls.iter().any(|g| panels.get(g).is_some_and(|c| c.parent == Some(pf))) {
+                        continue;
+                    }
+                    let p = face.plane.to_world(h.centroid());
+                    let (_, reach, deepest) = walls_span(walls, face);
+                    let through = reach >= t - tol;
+                    if through && !front {
+                        continue;
+                    }
+                    let cut = sh.region_to_flat(fl, &face.plane, &Region2 { outer: h.clone(), holes: Vec::new() })?;
+                    let ring = cut.outer.polyline(1e-3);
+                    if !ring.iter().all(|q| bound.contains(*q)) || polys_cross(&bound, &ring) {
+                        let kind = if through { "hole" } else { "pocket" };
+                        return err(format!("not supported yet: the {kind} at {} reaches into a bend (cut it after converting)", at(p)));
+                    }
+                    if through {
+                        sh.holes.push(cut);
+                        continue;
+                    }
+                    let pocket =
+                        |why: &str| err(format!("not supported yet: the pocket at {} in a face of the sheet {why} (cut it after converting)", at(p)));
+                    let eps = t * 1e-3;
+                    if reach > t / 2.0 + eps {
+                        return pocket(&format!("ends {reach:.3} deep, more than half the sheet's {t:.3}"));
+                    }
+                    if deepest - reach > eps {
+                        return pocket("has walls of more than one depth");
+                    }
+                    // Its floors: the faces at its depth beside its walls, facing out as the face does.
+                    let mut floors: Vec<usize> = mesh
+                        .edge_faces
+                        .iter()
+                        .filter(|fs| fs.iter().any(|g| walls.contains(&(*g as usize))))
+                        .flatten()
+                        .map(|g| *g as usize)
+                        .filter(|g| {
+                            !walls.contains(g)
+                                && matches!(face_surface(b, *g), Some(FaceSurface::Plane { normal, .. }) if normal.dot(face.n) > 1.0 - 1e-9)
+                        })
+                        .filter(|g| {
+                            let (lo, hi) = span(*g, face);
+                            (lo - reach).abs() <= eps && (hi - reach).abs() <= eps
+                        })
+                        .collect();
+                    floors.sort_unstable();
+                    floors.dedup();
+                    if floors.is_empty() {
+                        return pocket("has no flat floor");
+                    }
+                    // The islands left standing in it (a letter's counter): walls from a floor up to the face.
+                    let mut islands = Vec::new();
+                    for g in floors {
+                        let floor = outline(b, &mesh, g, tol)?;
+                        for (k, kw) in &floor.holes {
+                            let (start, lo, hi) = walls_span(kw, face);
+                            if start > eps || (lo - reach).abs() > eps || (hi - reach).abs() > eps {
+                                return pocket("has a hole or a step in its floor");
+                            }
+                            islands.push(sh.region_to_flat(fl, &floor.plane, &Region2 { outer: k.clone(), holes: Vec::new() })?.outer.reversed());
+                        }
+                    }
+                    let (z0, z1) = if front { (0.0, reach) } else { (t - reach, t) };
+                    sh.record_pocket(Region2 { outer: cut.outer, holes: islands }, z0, z1, &mut work)?;
+                }
             }
-            queue.push((g, Some(i)));
+            // The children that bend at an edge of one of its holes (laid out below).
+            let in_holes: Vec<usize> = panel
+                .face
+                .holes
+                .iter()
+                .flat_map(|(_, walls)| walls.iter().copied())
+                .filter(|g| panels.get(g).is_some_and(|c| c.parent == Some(pf)))
+                .collect();
+            // Its children: flanges on the trimmed edges they bend at.
+            let m = trimmed.len();
+            for &g in &order {
+                let Some(child) = panels.get(&g).filter(|c| c.parent == Some(pf)) else { continue };
+                let runs: Vec<usize> =
+                    (0..m).filter(|j| from.get(*j).copied().flatten().and_then(|i| across.get(i).copied().flatten()) == Some(g)).collect();
+                let (a, b) = match runs.as_slice() {
+                    &[j] => (trimmed.get(j).copied().map(snap), trimmed.get((j + 1) % m).copied().map(snap)),
+                    [] if in_holes.contains(&g) => continue,
+                    _ => return err("not supported yet: two faces of the sheet that meet along more than one edge"),
+                };
+                let (Some(a), Some(b)) = (a, b) else { continue };
+                let Some(d) = (b - a).normalized() else { return err("a bend edge has no length") };
+                sh.flanges.push(SheetFlange {
+                    parent: fl,
+                    p: a,
+                    d,
+                    len: a.dist(b),
+                    n: Vec2::new(d.y, -d.x),
+                    angle: child.angle,
+                    radius: r,
+                    leg: 0.0,
+                    ext: (0.0, 0.0),
+                    slope: (0.0, 0.0),
+                    shape: None,
+                    exact: None,
+                    zone_shape: None,
+                    tag: String::new(),
+                    tear: (false, false),
+                    tear_curved: (false, false),
+                    tear_ease: (0.0, 0.0),
+                });
+                let i = sh.flanges.len() - 1;
+                let (ba, n) = sh.flanges.get(i).map_or((0.0, Vec2::new(d.y, -d.x)), |f| (sh.allowance(f), f.n));
+                for (e, s) in gaps.get(&g).into_iter().flatten() {
+                    let zone = Loop2::polygon(&[snap(*e), snap(*s), snap(*s + n * ba), snap(*e + n * ba)]);
+                    sh.holes.push(Region2 { outer: zone.ccw(), holes: Vec::new() });
+                }
+                // A filament joint on the bend: its fingers and channel are cut once the print is flat.
+                if hinged {
+                    let k = panel.face.pts.len();
+                    for (j, p) in panel.face.pts.iter().enumerate() {
+                        if panel.face.across.get(j).copied().flatten() != Some(g) {
+                            continue;
+                        }
+                        let q = panel.face.pts.get((j + 1) % k).copied().unwrap_or(*p);
+                        let Some((used, fl)) =
+                            filament.iter().position(|fl| fl.at.dist_to_segment(*p, q) <= near).and_then(|u| Some((u, filament.get(u)?)))
+                        else {
+                            continue;
+                        };
+                        finger_notches(fl, (*p, q), true, rv.gap, tol)
+                            .map_err(|why| DocError::Invalid(format!("the filament edge at {}: {why}", at(fl.at))))?;
+                        if let Some(u) = filament_used.get_mut(used) {
+                            *u = true;
+                        }
+                        let ff = FoldFilament {
+                            flange: i,
+                            segments: fl.segments,
+                            flip: fl.flip,
+                            side: fl.side(),
+                            press: fl.press,
+                            wall: fl.wall,
+                            ends: Vec::new(),
+                        };
+                        let core = ff
+                            .core(t, child.angle, PrintFold { film, clearance: rv.gap })
+                            .map_err(|why| DocError::Invalid(format!("the joint on the bend at {}: {why}", at(fl.at))))?;
+                        fold_joints.push((sh.fold_filament.len(), *p, q, pf, g));
+                        sh.fold_filament.push(ff);
+                        if fl.press.is_some() {
+                            continue;
+                        }
+                        // The channel's ends, where a third face may close it off: on the core,
+                        // inside the fold on its bisector, square to the parent's wall.
+                        let e = (q - *p).normalized().unwrap_or(Vec3::X);
+                        let inward = panel.face.n.cross(e);
+                        let half = child.angle.abs() / 2.0;
+                        for end in [*p, q] {
+                            channel_ends.push(ChannelEnd {
+                                at: end,
+                                centre: end + inward * (core.d * half.sin()) - panel.face.n * (core.d * half.cos()),
+                                u: inward,
+                                v: *panel.face.n,
+                                along: e,
+                                side: fl.side(),
+                                faces: (pf, g),
+                            });
+                        }
+                    }
+                }
+                flange_face.push(g);
+                queue.push((g, Some(i)));
+            }
+            // A hole with a bend on an edge stays a hole of the panel: its edges at bends set back
+            // as an outline's are, its others cut as open edges, and the walls at its bends fold
+            // into it.
+            for (h, walls) in &panel.face.holes {
+                if !walls.iter().any(|g| in_holes.contains(g)) {
+                    continue;
+                }
+                let mut corners: Vec<Vec3> = Vec::with_capacity(h.segs.len());
+                for seg in &h.segs {
+                    match seg {
+                        Seg2::Line { a, .. } => corners.push(panel.face.plane.to_world(*a)),
+                        _ => return err(format!("not supported yet: a curved hole with a bend on its edge (the face at {})", at(first))),
+                    }
+                }
+                let mut flat: Vec<Vec2> = corners
+                    .iter()
+                    .map(|p| {
+                        let q = apply_point(&inv, *p);
+                        Vec2::new(q.x, q.y)
+                    })
+                    .collect();
+                // Counter-clockwise in the flat: the hole on the left of each edge, the panel on its right.
+                if signed_area(&flat) < 0.0 {
+                    flat.reverse();
+                    corners.reverse();
+                }
+                let k = corners.len();
+                // Each edge's wall: the face whose plane holds both its ends.
+                let wall_of = |a: Vec3, b: Vec3| {
+                    walls.iter().copied().find(|g| {
+                        all.get(g).is_some_and(|w| {
+                            let o = w.face.pts.first().copied().unwrap_or_default();
+                            (a - o).dot(*w.face.n).abs() <= near && (b - o).dot(*w.face.n).abs() <= near
+                        })
+                    })
+                };
+                let tags: Vec<Option<usize>> = (0..k).map(|j| wall_of(corners[j % k], corners[(j + 1) % k])).collect();
+                // Round the panel (its material on the left, about its normal) each edge runs the
+                // other way when the hole runs counter-clockwise about the normal.
+                let reversed = area_about(&corners, panel.face.n) > 0.0;
+                let rank = |h: usize| order.iter().position(|&o| o == h).unwrap_or(usize::MAX);
+                let mut by = Vec::with_capacity(k);
+                for j in 0..k {
+                    let (a3, b3) = (corners[j % k], corners[(j + 1) % k]);
+                    let e = (if reversed { a3 - b3 } else { b3 - a3 }).normalized().unwrap_or(Vec3::X);
+                    by.push(match tags.get(j).copied().flatten().and_then(|g| Some((g, all.get(&g)?))) {
+                        Some((g, _)) if panel.parent == Some(g) => panel.setback,
+                        Some((g, other)) if other.parent == Some(pf) && panels.contains_key(&g) => other.setback,
+                        Some((g, other)) => match print {
+                            None => rip_cut(&panel.face, &other.face, e, t, rv.gap)?,
+                            Some(joint) => print_cut(&panel.face, &other.face, e, t, rv.gap, joint, rank(pf) < rank(g))?.0,
+                        },
+                        None => 0.0,
+                    });
+                }
+                // Moved into the panel (to the right): the hole grows.
+                let grow: Vec<f64> = by.iter().map(|b| -b).collect();
+                let (out, from) = inset(&flat, &grow, tol).map_err(face_at)?;
+                let hole = Loop2::polygon(&out.iter().rev().map(|q| snap(*q)).collect::<Vec<_>>());
+                match fl {
+                    None => sh.base.holes.push(hole),
+                    Some(i) => sh.panel_holes.push((i, hole)),
+                }
+                let m = out.len();
+                for &g in &order {
+                    let Some(child) = panels.get(&g).filter(|c| c.parent == Some(pf) && in_holes.contains(&g)) else { continue };
+                    let runs: Vec<usize> =
+                        (0..m).filter(|j| from.get(*j).copied().flatten().and_then(|i| tags.get(i).copied().flatten()) == Some(g)).collect();
+                    let j = match runs.as_slice() {
+                        &[j] => j,
+                        [] => continue,
+                        _ => return err("not supported yet: two faces of the sheet that meet along more than one edge"),
+                    };
+                    // Walked with the hole on the right, the flange's side.
+                    let (Some(a), Some(b)) = (out.get((j + 1) % m).copied().map(snap), out.get(j).copied().map(snap)) else { continue };
+                    let Some(d) = (b - a).normalized() else { return err("a bend edge has no length") };
+                    sh.flanges.push(SheetFlange {
+                        parent: fl,
+                        p: a,
+                        d,
+                        len: a.dist(b),
+                        n: Vec2::new(d.y, -d.x),
+                        angle: child.angle,
+                        radius: r,
+                        leg: 0.0,
+                        ext: (0.0, 0.0),
+                        slope: (0.0, 0.0),
+                        shape: None,
+                        exact: None,
+                        zone_shape: None,
+                        tag: String::new(),
+                        tear: (false, false),
+                        tear_curved: (false, false),
+                        tear_ease: (0.0, 0.0),
+                    });
+                    flange_face.push(g);
+                    queue.push((g, Some(sh.flanges.len() - 1)));
+                }
+            }
         }
+        // Where another face of the part meets an end of a joined bend, the fingers stop short of
+        // it (and of the fingers of a bend joined there too).
+        for (k, p, q, pf, g) in &fold_joints {
+            let Some(f) = sh.fold_filament.get(*k).and_then(|ff| sh.flanges.get(ff.flange)) else { continue };
+            let Some(inv) = mat_inverse(&sh.world(f.parent)) else { continue };
+            let e = (*q - *p).normalized().unwrap_or(Vec3::X);
+            let mut ends = Vec::new();
+            for end in [*p, *q] {
+                let mut sin: Option<f64> = None;
+                for (h, cap) in &panels {
+                    if h == pf || h == g || !cap.face.pts.iter().any(|x| x.dist(end) <= tol) || (*h != f0 && !flange_face.contains(h)) {
+                        continue;
+                    }
+                    let s = e.dot(*cap.face.n).abs();
+                    sin = Some(sin.map_or(s, |x: f64| x.min(s)));
+                }
+                let Some(sin) = sin else { continue };
+                let joined = fold_joints
+                    .iter()
+                    .filter(|(j, ..)| j != k)
+                    .find(|(_, a, b, ..)| a.dist(end) <= tol || b.dist(end) <= tol)
+                    .and_then(|(j, ..)| sh.fold_filament.get(*j))
+                    .map(|x| x.flange);
+                let fp = apply_point(&inv, end);
+                ends.push(FoldEnd { u: (Vec2::new(fp.x, fp.y) - f.p).dot(f.d), sin, joined });
+            }
+            if let Some(ff) = sh.fold_filament.get_mut(*k) {
+                ff.ends = ends;
+            }
+        }
+        // A face of the part that meets a channel's end (the base under a box's corner, folded
+        // over it) gets the channel through it too, so the filament goes all the way through.
+        for end in &channel_ends {
+            for (h, cap) in &panels {
+                if *h == end.faces.0 || *h == end.faces.1 || !cap.face.pts.iter().any(|q| q.dist(end.at) <= tol) {
+                    continue;
+                }
+                let idx = if *h == f0 { None } else { flange_face.iter().position(|x| x == h) };
+                if *h != f0 && idx.is_none() {
+                    continue;
+                }
+                let Some(inv) = mat_inverse(&sh.world(idx)) else { continue };
+                let along = apply_vector(&inv, end.along);
+                let inner = apply_point(&inv, end.at - cap.face.n * t).z;
+                if along.z.abs() <= 1e-6 {
+                    continue;
+                }
+                let mut ring = Vec::with_capacity(8);
+                for (a, b) in [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)] {
+                    let q = apply_point(&inv, end.centre + end.u * (a * end.side) + end.v * (b * end.side));
+                    for z in [0.0, inner] {
+                        let k = (z - q.z) / along.z;
+                        ring.push(Vec2::new(q.x + along.x * k, q.y + along.y * k));
+                    }
+                }
+                let hull = convex_hull(ring);
+                // Only where that face's piece of the flat is (not a face a wall runs on past).
+                let mid = apply_point(&inv, end.centre);
+                let mid = Vec2::new(mid.x, mid.y);
+                let inside = sh.piece_regions(idx).iter().any(|r| r.outer.ccw().polyline(1e-3).contains(mid));
+                if hull.len() >= 3 && inside {
+                    sh.channel_holes.push(hull);
+                }
+            }
+        }
+        sh.bevels = bevels;
+        sh.filament = fil_cuts;
+        if hinged && let Some((x, y)) = sh.print_overlap() {
+            let face_at = |o: Option<usize>| {
+                let g = o.and_then(|i| flange_face.get(i).copied()).unwrap_or(f0);
+                let pts = all.get(&g).map(|p| p.face.pts.as_slice()).unwrap_or_default();
+                at(pts.iter().fold(Vec3::ZERO, |s, q| s + *q) * (1.0 / pts.len().max(1) as f64))
+            };
+            return err(format!(
+                "the flat print overlaps itself where the faces at {} and {} unfold onto each other; split the body at an edge between them (Split Edges) so they print as separate parts",
+                face_at(x),
+                face_at(y)
+            ));
+        }
+        sheets.push(sh);
     }
     // The bends on the fixed face finished as an edge flange feature finishes its own
     // (`SheetBody::add_flanges_each`): the rule's bend relief where one ends beside more of the
     // fixed face; where two meet at a corner of it, their walls closed with the rule's gap (which
     // the cuts above already are) and the rule's corner relief.
+    // A foldable print has no rule to finish them by: its walls already meet as `print` says.
+    if let Some(k) = filament_used.iter().position(|u| !u) {
+        let p = filament.get(k).map(|f| f.at).unwrap_or_default();
+        return err(format!("the filament edge at {} is no edge where two faces of the print meet", at(p)));
+    }
+    if hinged {
+        return Ok((sheets, Vec::new()));
+    }
+    let Some(mut sh) = sheets.pop() else { return err("the sheet has no panels") };
     let made: Vec<usize> = (0..sh.flanges.len()).collect();
     let mut notes = Vec::new();
     for &i in &made {
@@ -1188,7 +1721,7 @@ pub fn convert_body(
         }
     }
     notes.extend(sh.relieve_corners(&corners, &closed, ReliefOverride::default()));
-    Ok((sh, notes))
+    Ok((vec![sh], notes))
 }
 
 #[cfg(test)]
