@@ -66,6 +66,7 @@ use crate::curve::curve::p2::evaluate_geometric as curve_evaluate_geometric;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{ignored, ignored_or_pass_on, passed_on, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
@@ -450,10 +451,13 @@ impl Surface {
         }
 
         // SER(sNormSum.Unitize()): a zero sum is the SM_ERR_INVALID_INPUT status
-        norm_sum.unitize().map_err(|_| SolidError::Upstream {
-            operation: "surface::surface::p5::evaluate_normal_at_singularity",
-            code: crate::error::SM_ERR_INVALID_INPUT,
-            entity: None,
+        norm_sum.unitize().map_err(|_| {
+            SolidError::surface(
+                "surface::surface::p5::evaluate_normal_at_singularity",
+                SurfaceFailure::InvalidValue(
+                    "the sum of the normals around the singularity is zero",
+                ),
+            )
         })
     }
 }
@@ -2396,7 +2400,7 @@ fn surface_identical_solutions<O: SolutionObject>(
             || (sol1.solution_type == SolutionType::SingleValue
                 && sol2.solution_type == SolutionType::SingleValue))
     {
-        let surf = surface.ok_or(SolidError::null_pointer(OP_SING))?;
+        let surf = surface.ok_or_else(|| SolidError::surface_missing(OP_SING, "the surface"))?;
 
         // At a singularity, the same 3d point can have different uv values.
         let uv1 = Point2::new(sol1.start.param(uv_at)?, sol1.start.param(uv_at + 1)?);
@@ -2825,5 +2829,42 @@ mod tests {
             .unwrap();
         assert_eq!(r.covering_is_other, Some(false));
         assert!(r.max_dist <= 1e-6);
+    }
+
+    /// The singularity routines' failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+            (
+                OP_SING,
+                SurfaceFailure::Missing("the surface"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                "surface::surface::p5::evaluate_normal_at_singularity",
+                SurfaceFailure::InvalidValue(
+                    "the sum of the normals around the singularity is zero",
+                ),
+                crate::error::SM_ERR_INVALID_INPUT,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }
