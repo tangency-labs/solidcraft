@@ -247,11 +247,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     .wide()
     .body_rows(16.0)
     .reset_scroll(d.reset_scroll);
+    // A width or body height the user dragged the card to replaces that default; each axis stays
+    // automatic until the user drags it (review of #13422).
+    let chosen_width: Option<f32> = ctx.data_mut(|m| m.get_persisted(width_id())).filter(|w: &f32| w.is_finite());
+    let chosen_height: Option<f32> = ctx.data_mut(|m| m.get_persisted(height_id())).filter(|h: &f32| h.is_finite());
+    let width = chosen_width.map_or(solidcraft_theme::Tokens::get().form_card_width * 3.0, |w| w.max(crate::frame::DIALOG_MIN_W));
+    let panel = panel.body_height(chosen_height);
     let panel = if side == crate::frame::Side::Left {
         let available = crate::sketch_palette::room_left_of(app, ctx, viewport);
-        panel.width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min(available))
+        panel.width(width.min(available))
     } else {
-        panel
+        panel.width(width)
     };
     let all = if let Some((_, rows)) = d.listed.as_ref().filter(|(rev, _)| *rev == app.session.revision) {
         rows.clone()
@@ -264,7 +270,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut outcome = (false, ui_kit::Action::None);
     let live = app.preferences.parameters_apply_live;
     let held_status = if live { None } else { held_status(held(&d, &all).len()) };
-    panel.window(ctx).show(ctx, |ui| {
+    let mut resize = Resize::None;
+    let shown = panel.window(ctx).show(ctx, |ui| {
         outcome = panel.feature(
             ui,
             ui_kit::FeatureOptions {
@@ -349,8 +356,39 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::ComputeStatus { text: held_status, busy: false, applying: false }
             },
         );
+        resize = resize_edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
         d.reset_scroll = false;
     });
+    match resize {
+        Resize::None => {}
+        Resize::Reset(axes) => ctx.data_mut(|m| {
+            if axes.width {
+                m.remove::<f32>(width_id());
+            }
+            if axes.height {
+                m.remove::<f32>(height_id());
+            }
+        }),
+        Resize::By(axes, delta) => {
+            let t = solidcraft_theme::Tokens::get();
+            if axes.width
+                && let Some(card) = shown.as_ref().map(|r| r.response.rect)
+            {
+                let w = (card.width() + delta.x).clamp(crate::frame::DIALOG_MIN_W, viewport.width().max(crate::frame::DIALOG_MIN_W));
+                if w.is_finite() {
+                    ctx.data_mut(|m| m.insert_persisted(width_id(), w));
+                }
+            }
+            if axes.height
+                && let Some(body) = panel.last_body_height(ctx)
+            {
+                let h = (body + delta.y).clamp(t.control_height * 2.0, viewport.height().max(t.control_height * 2.0));
+                if h.is_finite() {
+                    ctx.data_mut(|m| m.insert_persisted(height_id(), h));
+                }
+            }
+        }
+    }
     // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
     let (closed, action) = outcome;
     let applied = live || !matches!(action, ui_kit::Action::Ok | ui_kit::Action::Apply) || apply_held(app, &mut d, &all);
@@ -376,6 +414,99 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 /// Where the chosen order is kept: egui's persisted memory, like a section's open state.
 fn sort_id() -> egui::Id {
     egui::Id::unique("sc_params_sort")
+}
+
+/// Where the outer width the user dragged the card to is kept; absent while the width is automatic.
+fn width_id() -> egui::Id {
+    egui::Id::unique("sc_params_width")
+}
+
+/// Where the body height the user dragged the card to is kept; absent while the height is automatic.
+fn height_id() -> egui::Id {
+    egui::Id::unique("sc_params_height")
+}
+
+/// Where the column widths the user dragged are kept, shared by every section's table.
+fn columns_id() -> egui::Id {
+    egui::Id::unique("sc_params_columns")
+}
+
+/// Which of the card's two sizes a resize edge changes: the side edge its width, the bottom edge
+/// its body height, the corner both. The other axis keeps its automatic size.
+#[derive(Clone, Copy)]
+struct Axes {
+    width: bool,
+    height: bool,
+}
+
+/// What the card's resize edges asked for this frame.
+enum Resize {
+    None,
+    /// Grow the card by this much on these axes: x widens it, y lengthens its body.
+    By(Axes, egui::Vec2),
+    /// A double-click on an edge returns these axes to their automatic size.
+    Reset(Axes),
+}
+
+/// Drag areas on the card's free side edge (the one away from its dock side), its bottom edge
+/// and the corner between them. The header stays the title drag area. When the free edge is the
+/// right one and the body scrolls, `scrollbar` is the body viewport whose right edge carries the
+/// scrollbar: the side grip skips that span so scrollbar drags still scroll (#13422 review).
+fn resize_edges(ui: &mut egui::Ui, side: crate::frame::Side, scrollbar: Option<egui::Rect>) -> Resize {
+    let t = solidcraft_theme::Tokens::get();
+    let card = ui.min_rect();
+    let grip = t.space_6;
+    if !card.is_finite() || card.width() < grip * 4.0 || card.height() < t.form_header_height + grip * 2.0 {
+        return Resize::None;
+    }
+    // A card docked right is held by its right edge, so it grows from its left edge.
+    let free_left = side == crate::frame::Side::Right;
+    let x_edge = if free_left { card.left()..=card.left() + grip } else { card.right() - grip..=card.right() };
+    let corner_x = if free_left { card.left()..=card.left() + grip * 2.0 } else { card.right() - grip * 2.0..=card.right() };
+    // The scrollbar sits on the body's right edge, so only a right-hand grip can cover it.
+    let side_top = match scrollbar {
+        Some(body) if !free_left && body.is_finite() => body.bottom().max(card.top() + t.form_header_height),
+        _ => card.top() + t.form_header_height,
+    };
+    let mut edges = vec![(
+        "bottom",
+        egui::Rect::from_x_y_ranges(card.left() + grip * 2.0..=card.right() - grip * 2.0, card.bottom() - grip..=card.bottom()),
+        egui::CursorIcon::ResizeVertical,
+        Axes { width: false, height: true },
+    )];
+    if side_top < card.bottom() - grip * 2.0 {
+        edges.push((
+            "side",
+            egui::Rect::from_x_y_ranges(x_edge, side_top..=card.bottom() - grip * 2.0),
+            egui::CursorIcon::ResizeHorizontal,
+            Axes { width: true, height: false },
+        ));
+    }
+    edges.push((
+        "corner",
+        egui::Rect::from_x_y_ranges(corner_x, card.bottom() - grip * 2.0..=card.bottom()),
+        if free_left { egui::CursorIcon::ResizeNeSw } else { egui::CursorIcon::ResizeNwSe },
+        Axes { width: true, height: true },
+    ));
+    let mut out = Resize::None;
+    for (name, rect, cursor, axes) in edges {
+        let response = ui.interact(rect, ui.make_persistent_id(("params_resize", name)), egui::Sense::click_and_drag()).on_hover_cursor(cursor);
+        crate::scenario::publish_target(&format!("params:resize:{name}"), rect);
+        if response.dragged() {
+            ui.ctx().set_cursor_icon(cursor);
+        }
+        if response.double_clicked() {
+            out = Resize::Reset(axes);
+        } else if response.dragged() {
+            let delta = response.drag_delta();
+            let delta =
+                egui::vec2(if axes.width { if free_left { -delta.x } else { delta.x } } else { 0.0 }, if axes.height { delta.y } else { 0.0 });
+            if delta.is_finite() && delta != egui::Vec2::ZERO {
+                out = Resize::By(axes, delta);
+            }
+        }
+    }
+    out
 }
 
 /// The dialog's sections, each in the chosen order.
@@ -469,10 +600,14 @@ fn new_check(app: &mut SolveApp, d: &mut ParamsDialog, unit: &str) -> Result<Str
     r
 }
 
+/// One section's table of parameter rows with its sortable, resizable headings and add row.
+/// `salt` keeps each section's widgets apart; `name_floor` is the shared Name column minimum.
 fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str, name_floor: f32) {
     let units: Vec<_> = UNITS.iter().map(|unit| unit_label(unit)).collect();
     // Name keeps a larger share and a shared content floor so long identifiers stay readable
     // and every section's columns line up (#8533, #8551 review). Full window/column resize is #5097.
+    // Widths the user dragged a header divider to (#5097); the rest keep their automatic widths.
+    let manual: Vec<Option<f32>> = ui.ctx().data_mut(|m| m.get_persisted(columns_id())).unwrap_or_default();
     let columns = [
         Column::new("", 0.0).min_content_width(solidcraft_theme::Tokens::get().space_24 * 3.0),
         Column::new("Name", 2.0).flex().min_content_width(name_floor),
@@ -484,11 +619,12 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
         Column::new("Comment", 1.0).flex(),
         Column::new("Actions", 0.0).icon_only().min_content_width(ui_kit::table_row_height()),
     ];
+    let columns: Vec<_> = columns.into_iter().enumerate().map(|(i, c)| c.manual_width(manual.get(i).copied().flatten())).collect();
     // An expression being edited may open over the cells to its right, up to the table's edge.
     let right = ui.max_rect().right().min(ui.clip_rect().right());
     ui_kit::table_custom(ui, salt, &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
         // The Name heading sorts every section at once, each inside itself (#8563).
-        table.headers(ui, |ui, index| {
+        table.headers_resizable(ui, columns_id(), |ui, index| {
             if index != 1 {
                 return false;
             }

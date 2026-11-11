@@ -1,4 +1,5 @@
-//! ISO 10303-21 writer for the neutral [`step_import::Model`].
+//! ISO 10303-21 writer for the neutral [`solidcore_record::step::Model`], and the mapper ([`map`])
+//! that reads a Part 21 exchange ([`solidcore_record::step::p21`]) into it.
 //!
 //! The writer emits one `MANIFOLD_SOLID_BREP` per manifold body (one closed shell,
 //! planar faces, line edges) and one `FACETED_BREP` per faceted body, together with a
@@ -36,10 +37,24 @@
 //! [`write_with_metadata`] (or [`write_faceted_with_metadata`]), which emits those
 //! entities directly; no post-write text rewriting is required.
 
+/// A kernel body as the neutral model this writer writes (moved from step-brep).
+pub mod brep_to_model;
+pub mod geom;
+pub mod map;
+pub mod validate;
+
+pub use map::{import, Limits};
+
+#[cfg(test)]
+mod import_tests;
+pub use brep_to_model::{brep_to_model, ExportModelError};
+
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 
-use step_import::model::{Body, BodyKind, Bound, Curve, Frame, Model, PcurveKey, Surface};
+use solidcore_record::step::model::{
+    Body, BodyKind, Bound, Curve, Frame, Model, PcurveKey, Surface,
+};
 
 /// Default distance, in millimetres, within which faceted vertices are welded.
 pub const WELD_TOLERANCE_MM: f64 = 1e-6;
@@ -442,7 +457,7 @@ fn write_surface(
 fn write_bspline_surface(
     entities: &mut Entities,
     points: &mut PointIds,
-    surface: &step_import::model::BSplineSurface,
+    surface: &solidcore_record::step::model::BSplineSurface,
 ) -> Result<u64, ExportError> {
     let mut ids = Vec::with_capacity(surface.points.len());
     for row in &surface.points {
@@ -559,7 +574,7 @@ fn write_curve(
 fn write_bspline_curve(
     entities: &mut Entities,
     points: &mut PointIds,
-    curve: &step_import::model::BSplineCurve,
+    curve: &solidcore_record::step::model::BSplineCurve,
 ) -> Result<u64, ExportError> {
     let ids = curve
         .points
@@ -1390,8 +1405,8 @@ fn refs(ids: &[u64]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use step_import::model::{Edge, Face, Loop, OrientedEdge, Shell, Vertex};
-    use step_import::part21::Header;
+    use solidcore_record::step::model::{Edge, Face, Loop, OrientedEdge, Shell, Vertex};
+    use solidcore_record::step::p21::Header;
 
     fn line(origin: [f64; 3], dir: [f64; 3], magnitude: f64) -> Curve {
         Curve::Line {
@@ -1516,7 +1531,7 @@ mod tests {
             diagnostics: Vec::new(),
             assembly_instances: 0,
             pcurves: BTreeMap::new(),
-            file_pcurves: step_import::model::FilePcurves::default(),
+            file_pcurves: solidcore_record::step::model::FilePcurves::default(),
         }
     }
 
@@ -1646,7 +1661,7 @@ mod tests {
             diagnostics: Vec::new(),
             assembly_instances: 0,
             pcurves: BTreeMap::new(),
-            file_pcurves: step_import::model::FilePcurves::default(),
+            file_pcurves: solidcore_record::step::model::FilePcurves::default(),
         }
     }
 
@@ -1684,8 +1699,7 @@ mod tests {
     }
 
     fn reimport(text: &str) -> Model {
-        let model = step_import::import(text.as_bytes(), &step_import::Limits::default())
-            .expect("re-import written STEP");
+        let model = import(text.as_bytes(), &Limits::default()).expect("re-import written STEP");
         assert!(model.skipped.is_empty(), "{:?}", model.skipped);
         model
     }
@@ -2037,7 +2051,7 @@ mod tests {
                 magnitude: 3.0,
             },
         ];
-        let bspline = step_import::model::BSplineSurface {
+        let bspline = solidcore_record::step::model::BSplineSurface {
             u_degree: 1,
             v_degree: 1,
             points: vec![
@@ -2067,7 +2081,7 @@ mod tests {
                 semi1: 2.0,
                 semi2: 1.0,
             },
-            Curve::BSpline(step_import::model::BSplineCurve {
+            Curve::BSpline(solidcore_record::step::model::BSplineCurve {
                 degree: 1,
                 points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
                 weights: None,

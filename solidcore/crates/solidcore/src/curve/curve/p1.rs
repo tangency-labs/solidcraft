@@ -156,8 +156,10 @@ fn first_n<const N: usize>(v: &[Vec3]) -> [Vec3; N] {
 /// The `SmStatus` value of an error a `double` function returns as its value
 /// (`sm_GetProjDist`'s `SER`).
 fn status_value(e: &SolidError) -> f64 {
+    if let Some(code) = e.upstream_status() {
+        return f64::from(code);
+    }
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         _ => 1001.0,
     }
@@ -201,11 +203,18 @@ where
         }
 
         if sol.num_variables != 2 {
-            return Err(SolidError::sm_err(OP_REFINE));
+            return Err(SolidError::curve_failed(
+                OP_REFINE,
+                "a range solution does not have two variables",
+            ));
         }
 
-        let crv1 = curve_of(sol.objects[0]).ok_or(SolidError::null_pointer(OP_REFINE))?;
-        let crv2 = curve_of(sol.objects[1]).ok_or(SolidError::null_pointer(OP_REFINE))?;
+        let crv1 = curve_of(sol.objects[0]).ok_or_else(|| {
+            SolidError::curve_missing(OP_REFINE, "a range solution's first curve")
+        })?;
+        let crv2 = curve_of(sol.objects[1]).ok_or_else(|| {
+            SolidError::curve_missing(OP_REFINE, "a range solution's second curve")
+        })?;
 
         let natural_dom1 = crv1.natural_interval();
         let natural_dom2 = crv2.natural_interval();
@@ -528,10 +537,16 @@ impl Curve {
 
         // need 2 breakpoints to define the curve interval
         let (Some(&first), Some(&last)) = (breaks.first(), breaks.last()) else {
-            return Err(SolidError::sm_err(OP_APPROX));
+            return Err(SolidError::curve_failed(
+                OP_APPROX,
+                "there are fewer than two breakpoints",
+            ));
         };
         if breaks.len() < 2 {
-            return Err(SolidError::sm_err(OP_APPROX));
+            return Err(SolidError::curve_failed(
+                OP_APPROX,
+                "there are fewer than two breakpoints",
+            ));
         }
 
         // low work - degenerate curves
@@ -641,14 +656,20 @@ impl Curve {
                     pop_stack(&mut stack)?;
                 } else {
                     if subdivisions >= MAX_APPROXIMATION_SUBDIVISIONS {
-                        return Err(SolidError::sm_err(OP_APPROX));
+                        return Err(SolidError::curve_failed(
+                            OP_APPROX,
+                            "the approximation passed its most subdivisions",
+                        ));
                     }
                     subdivisions += 1;
 
                     // get param mid point and associated curve pos and tan
                     let mid_t = (last_t + curr_t) / 2.0;
                     if !mid_t.is_finite() || mid_t == last_t || mid_t == curr_t {
-                        return Err(SolidError::sm_err(OP_APPROX));
+                        return Err(SolidError::curve_failed(
+                            OP_APPROX,
+                            "the midpoint parameter no longer splits the step",
+                        ));
                     }
                     let mid_pv: [Vec3; 2] = eval_n(k, self, mid_t, 1, true, true)?; // NonZeroTangent values
                     curr_t = mid_t;
@@ -1009,7 +1030,10 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
         let point_node = self.base.branch_node(branch, 0)?;
         let curve_node = self.base.branch_node(branch, 1)?;
         if matches!(curve_node.data, NodeData::None) {
-            return Err(SolidError::null_pointer(OP_LOCAL));
+            return Err(SolidError::curve_missing(
+                OP_LOCAL,
+                "the branch's curve node data",
+            ));
         }
         let curve_tree = self.base.tree(1)?;
         let bez_span = *curve_tree.curve_span(curve_node)?;
@@ -1643,7 +1667,10 @@ fn drop_point_fast<O: Copy>(
             requested,
             handle,
         ),
-        _ => Err(SolidError::sm_err("curve::curve::p1::drop_point_fast")),
+        _ => Err(SolidError::curve_failed(
+            "curve::curve::p1::drop_point_fast",
+            "the curve kind has no fast point drop",
+        )),
     }
 }
 
@@ -1779,10 +1806,12 @@ impl Curve {
             *cache = Some(match make_curve_cache::<O>(k, self, opts.handle) {
                 Ok(c) => c,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Err(SolidError::null_pointer(OP_GLOBAL)),
+                Err(_) => return Err(SolidError::curve_missing(OP_GLOBAL, "the curve's cache")),
             });
         }
-        let cache = cache.as_mut().ok_or(SolidError::null_pointer(OP_GLOBAL))?;
+        let cache = cache
+            .as_mut()
+            .ok_or_else(|| SolidError::curve_missing(OP_GLOBAL, "the curve's cache"))?;
 
         // Analytical Curve Optimization
         if op == SolverOperation::Minimize || op == SolverOperation::Intersect {
@@ -1842,7 +1871,9 @@ impl Curve {
         // Execute a Point/CurveLeafNode solution for every LeafNode in the target
         // curve's cache.
         let point_tree: Tree<O> = Tree::from_point(test_point, 0.0, false);
-        let curve_tree = cache.tree().ok_or(SolidError::null_pointer(OP_GLOBAL))?;
+        let curve_tree = cache
+            .tree()
+            .ok_or_else(|| SolidError::curve_missing(OP_GLOBAL, "the curve cache's tree"))?;
 
         // Construct and init global solver
         let mut gs = CpGlobalSolver::new(k, &point_tree, curve_tree, *interval).with_curve(self);
@@ -1851,7 +1882,8 @@ impl Curve {
 
         // set atDistance value - when appropriate
         if op == SolverOperation::AtDistance {
-            let d = target.ok_or(SolidError::null_pointer(OP_GLOBAL))?;
+            let d = target
+                .ok_or_else(|| SolidError::curve_missing(OP_GLOBAL, "the target distance"))?;
             gs.base.set_at_distance(d);
         }
 
@@ -2361,7 +2393,7 @@ mod tests {
         // trillions of spans, despite this curve having only two control points.
         assert!(matches!(
             c.approximate_curve_base(&k, &[0.0, 1e100], -1e300, &opts),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if crate::error::upstream_status(&e) == Some(1001)
         ));
     }
 
@@ -2375,7 +2407,7 @@ mod tests {
         };
         assert!(matches!(
             c.approximate_curve_base(&Kernel::default(), &[f64::MAX * 0.75, f64::MAX], 0.0, &opts,),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if crate::error::upstream_status(&e) == Some(1001)
         ));
     }
 

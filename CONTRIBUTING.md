@@ -25,10 +25,9 @@ solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.m
 `skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
 `crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
 
-A kernel pull request targets `main` like any other, with a code owner (jyviko or me) approving the
-`solidcore/` part; a change that touches the kernel and the app is one pull request. The `kernel` branch
-is only for multi-step kernel work that isn't safe on `main` until every step has landed: send those
-steps to `kernel`, and it merges into `main` when the work is done.
+A kernel pull request targets `main` like any other; a change that touches the kernel and the app is one
+pull request. A big feature in several steps goes as stacked pull requests into `main`, each one landing in order
+on top of the one before.
 Crashes and data loss are still taken first.
 
 ### Updating a PR that was moved from solidcore
@@ -39,13 +38,16 @@ contributors without write access can't push to them. To update one:
 1. `git fetch https://github.com/tangency-labs/solidcraft moved/solidcore-N:moved/solidcore-N`, then
    `git switch moved/solidcore-N`.
 2. Commit your changes on it and push it to your fork: `git push <your-fork> moved/solidcore-N`.
-3. Open a PR against `kernel` that says "Replaces #M" (M is the moved PR's number). The moved one
+3. Open a PR against `main` that says "Replaces #M" (M is the moved PR's number). The moved one
    gets closed.
 
 ## Get it running (about 10 minutes on a fast machine)
 
-You need stable Rust 1.95 or newer (required by egui/eframe 0.36). For the web
-build you also need `rustup target add wasm32-unknown-unknown` and [`trunk`](https://github.com/trunk-rs/trunk)
+You need [rustup](https://rustup.rs/). The repository pins Rust 1.98.0 in
+`rust-toolchain.toml`, the version CI builds with, and rustup installs it with rustfmt, clippy and
+the `wasm32-unknown-unknown` target the first time you run `cargo` here. The code itself builds on
+Rust 1.95 or newer (`rust-version` in Cargo.toml, required by egui/eframe 0.36). For the web build
+you also need [`trunk`](https://github.com/trunk-rs/trunk)
 ([documentation](https://trunk-rs.github.io/trunk/)).
 
 ```sh
@@ -322,7 +324,7 @@ and a fresh CI run:
 - **Growing Rust lists**: use slices (`const ITEMS: &[Item] = &[...];`) without a written
   length. `cargo xtask lists` rejects non-test const/static arrays with more than ten lines
   of entries, except fixed standard or algorithm tables listed with reasons in `xtask/src/lists.rs`.
-  Built-in themes need only a JSON file in `assets/styles/ui/themes/`, with a unique nonnegative
+  Built-in themes need only a JSON file in `crates/look/themes/`, with a unique nonnegative
   integer `order` (the picker order) and its own `provenance` line; keep existing order values.
 - **Message catalogs** (`assets/locales/*.json`): one message per line, sorted by id. Add your
   message anywhere and run `cargo xtask lists --fix`; `cargo xtask lists` (in `cargo xtask ci`
@@ -510,11 +512,15 @@ The user guide's screenshots and short clips (`docs/book/src/media/`) are captur
 app by `examples/demo/doc_shots.py`, one function per figure. Each run starts a fresh app with its
 own settings, so your preferences never show. When a change makes a figure out of date, run
 `python3 examples/demo/doc_shots.py <page or shot>` (it needs Xvfb, ffmpeg, Pillow and a release
-build) and commit the new file. A new figure is a new function there, an ATTRIBUTION row in
-`attribution/pending/`, and a `<video>` (clips) or image link on the page. Keep a still under
+build) and commit the new file. Stills come in both themes: `--light` makes `<name>.light.png`,
+and the page shows the one that matches the book's theme (an `<img class="dark-ui">` and an
+`<img class="light-ui">`). A new figure is a new function there, an ATTRIBUTION row in
+`attribution/pending/`, and a `<video>` (clips) or the image pair on the page. Keep a still under
 about 250 KB and a clip under about 1 MB.
 
 ## Licence
 
 By contributing you agree that your contribution is licensed as MIT OR Apache-2.0, like the rest
-of SolidCraft. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).
+of SolidCraft. A contribution to the brand and interface (`crates/ui-kit`, `crates/look`,
+`crates/theme`, `assets/branding`, `assets/icons/app`) is licensed under
+[LICENSE-BRAND](LICENSE-BRAND), which lets the maintainers also license it as MIT OR Apache-2.0. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).

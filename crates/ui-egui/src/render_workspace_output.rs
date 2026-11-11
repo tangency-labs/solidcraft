@@ -231,7 +231,7 @@ fn browse_button(app: &mut SolveApp, ui: &mut egui::Ui, kind: &str, key: &str) {
 fn all_shots_button(app: &mut SolveApp, ui: &mut egui::Ui, label: &str, target: &str) -> Option<String> {
     let ready = super::ribbon::action_ready(app, "render.batch");
     let button = ui_kit::button(ui, label, ui_kit::Button::Enabled(ready.is_ok()));
-    let button = if let Err(reason) = &ready { button.on_disabled_hover_text(reason) } else { button };
+    let button = if let Err(reason) = &ready { button.backing_on_disabled_hover_text(reason) } else { button };
     crate::scenario::publish_target(target, button.rect);
     if button.clicked()
         && let Err(error) = super::ribbon::perform_job(app, "render.batch")
@@ -352,7 +352,7 @@ fn scene_stage(app: &mut SolveApp, stage: super::Stage) {
     };
     let _ = app.run("view.render_select", params);
 }
-pub(super) fn apply_camera_draft(app: &mut SolveApp, camera: solidcraft_engine::render::Camera) -> Result<(), String> {
+pub(super) fn apply_camera_draft(app: &mut SolveApp, camera: solidcraft_viewport::Camera) -> Result<(), String> {
     app.run("render.camera.set", json!({"camera":camera}))?;
     app.follow_view_request(false);
     app.render_workspace.view.dirty = true;
@@ -1110,7 +1110,7 @@ pub(super) fn quality_choices(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     let help = quality_hover(app);
     if !help.is_empty() {
-        choice.response.on_hover_text(help);
+        choice.response.backing_on_hover_text(help);
     }
     if choice.inner
         && let Err(error) = choose_quality(app, quality)
@@ -1617,6 +1617,7 @@ fn gpu_status(app: &mut SolveApp, ui: &mut egui::Ui) {
         super::PathHost::Failed(error) => {
             ui_kit::text(ui, &format!("{}: {error}", app.tr("render.gpu_path_failed")), ui_kit::Text::Error("render.gpu_path_failed"));
             super::retry_crashed_setup(app, ui);
+            super::backend_recovery(app, ui);
         }
         super::PathHost::NotStarted if app.render_workspace.view.method == ImageMethod::GpuRaytrace => {
             ui_kit::text(ui, app.tr("render.gpu_path_not_started"), ui_kit::Text::Note("render.gpu_path_not_started"));

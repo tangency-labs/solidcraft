@@ -1,0 +1,14 @@
+{
+  "en": { "ui.properties.copy_value": "Click to copy", "ui.properties.value_copied": "Value copied" },
+  "ar": { "ui.properties.copy_value": "انقر للنسخ", "ui.properties.value_copied": "تم نسخ القيمة" },
+  "de": { "ui.properties.copy_value": "Klicken, um den Wert zu kopieren", "ui.properties.value_copied": "Wert kopiert" },
+  "es": { "ui.properties.copy_value": "Haz clic para copiar", "ui.properties.value_copied": "Valor copiado" },
+  "fr": { "ui.properties.copy_value": "Cliquer pour copier", "ui.properties.value_copied": "Valeur copiée" },
+  "he": { "ui.properties.copy_value": "לחיצה מעתיקה את הערך", "ui.properties.value_copied": "הערך הועתק" },
+  "it": { "ui.properties.copy_value": "Fai clic per copiare", "ui.properties.value_copied": "Valore copiato" },
+  "ja": { "ui.properties.copy_value": "クリックでコピー", "ui.properties.value_copied": "値をコピーしました" },
+  "ko": { "ui.properties.copy_value": "클릭하여 복사", "ui.properties.value_copied": "값을 복사했습니다" },
+  "vi": { "ui.properties.copy_value": "Nhấp để sao chép", "ui.properties.value_copied": "Đã sao chép giá trị" },
+  "zh": { "ui.properties.copy_value": "点击复制", "ui.properties.value_copied": "已复制数值" },
+  "zh-TW": { "ui.properties.copy_value": "按一下以複製", "ui.properties.value_copied": "已複製數值" }
+}

@@ -250,8 +250,8 @@ impl FilletSession<'_> {
     /// wedge of its edges between planes, else at the narrowest of its wedges at which no
     /// station folds ([`unfolded_wedge`]), so their rails meet where they run on into each
     /// other. Then prepared as [`Self::prepare_per_edge_two_offsets`] with the linear
-    /// section, and the solver keeps the sizes: with `fixes.fillet_gn_section_generator` and
-    /// `fixes.fillet_round_as_definition` the chamfer's surface is its definition, the
+    /// section, and the solver keeps the sizes: with `fixes.fillet_round_as_definition` the
+    /// chamfer's surface is its definition, the
     /// chord of order 0, and keeps them too. A distance is along the edge's blend edge
     /// use's face (support 1) or its radial mate's (support 2); an angle is to support 1.
     /// Between planes the sizes hold all along the edge; on a curved face, where the wedge
