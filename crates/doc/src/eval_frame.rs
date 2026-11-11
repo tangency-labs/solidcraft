@@ -137,6 +137,15 @@ pub(crate) fn member_section(
     Ok((plane, a.dist(*b), region))
 }
 
+/// The point member `line` of `f` turns about, halfway along it: the centre of the profile's
+/// bounding box, which a Rotate step's turn leaves where it is ([`member_plane`]).
+pub(crate) fn member_pivot(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState, line: &str) -> Result<Vec3> {
+    let Layout { segments, at, turn, centre, .. } = layout(doc, vals, f, st)?;
+    let (_, a, b) = segments.iter().find(|(id, _, _)| id == line).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
+    let plane = member_plane(*a, *b, turn, at, centre, None).ok_or_else(|| DocError::Invalid(format!("line `{line}`: no plane square to it")))?;
+    Ok(plane.origin + plane.x * centre.x + plane.y * centre.y + (*b - *a) * 0.5)
+}
+
 /// The body name of the member on each of `lines`: its own name from `pinned` (by line id) when no
 /// other body has it, else the first free one of `base`, `base (2)`, `base (3)`… that no line has
 /// pinned. A member therefore keeps its name when other lines are added, deleted or reordered.
