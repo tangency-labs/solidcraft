@@ -115,7 +115,7 @@ pub struct ExportParams {
     /// The file to write.
     #[serde(default)]
     pub path: Option<String>,
-    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, urdf or json, or a file name whose
+    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, urdf or json, or a file name whose
     /// extension names it. Default: from the path's extension.
     #[serde(default)]
     pub format: Option<String>,
@@ -123,7 +123,7 @@ pub struct ExportParams {
     /// complete design, so they refuse a list.
     #[serde(default)]
     pub bodies: Option<StringList>,
-    /// How closely the mesh follows curved faces (STL, OBJ and 3MF). Default: standard. Not read
+    /// How closely the mesh follows curved faces (STL, OBJ, 3MF and GLB). Default: standard. Not read
     /// for URDF.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
@@ -242,7 +242,7 @@ pub struct ExportResult {
     /// Its size in bytes.
     pub bytes: usize,
     /// The format written: Step, StlBinary, ThreeMf or Obj (and for `file.export` and
-    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design).
+    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design and Glb).
     pub format: String,
     /// OBJ only: every file written, the material library first and the mesh file last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -730,7 +730,7 @@ pub struct RecoveryDiscardResult {
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum FileExportResult {
-    /// STL, OBJ, STEP, 3MF or design JSON.
+    /// STL, OBJ, STEP, 3MF, GLB or design JSON.
     File(ExportResult),
     /// URDF.
     Urdf(UrdfExportResult),

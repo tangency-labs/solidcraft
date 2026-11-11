@@ -1672,7 +1672,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
             let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
-            app.pick_save_command(&format!("{name}.step"), &["step", "stp", "igs", "stl", "3mf", "obj"], "file.export", json!({"bodies": bodies}));
+            app.pick_save_command(
+                &format!("{name}.step"),
+                &["step", "stp", "igs", "stl", "3mf", "obj", "glb"],
+                "file.export",
+                json!({"bodies": bodies}),
+            );
         }
         "ui.findBrowser" => {
             if let Some(b) = p.get("body").and_then(Value::as_str) {
