@@ -325,6 +325,37 @@ fn browser_card_shrinks_and_scrolls_without_covering_history() {
     assert!(rect_of("browser:card").unwrap().height() < short.height());
 }
 
+/// In the compact layout, a Browser holding the History fills the window's height; other layouts and a
+/// folded Browser still hug their rows (#14566).
+#[test]
+fn compact_browser_holding_the_history_fills_the_window_height() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+    h.settle();
+    assert!(h.app.preferences.history_in_browser);
+    let floating = rect_of("browser:card").unwrap();
+    let viewport = h.app.viewport.rect.unwrap();
+    assert!(floating.bottom() < viewport.bottom() - 100.0, "the floating card still hugs its rows: {floating:?} in {viewport:?}");
+
+    h.call("ui.set", json!({"layout":"docked"}));
+    h.settle();
+    let compact = rect_of("browser:card").unwrap();
+    assert!(compact.height() > floating.height() + 100.0, "{compact:?} {floating:?}");
+    let foot = viewport.bottom() - compact.bottom();
+    assert!((-0.5..=SHELL_GAP + 0.5).contains(&foot), "{compact:?} reaches the window's foot {viewport:?}");
+
+    let at = handle_at("browser:header").unwrap();
+    h.call("ui.click", json!({"x":at.x,"y":at.y}));
+    h.settle();
+    assert!(h.app.preferences.browser_collapsed);
+    assert!(rect_of("browser:card").unwrap().height() < 60.0, "a folded Browser keeps only its header");
+    h.call("ui.click", json!({"x":at.x,"y":at.y}));
+    h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
+    h.settle();
+    assert!(rect_of("browser:card").unwrap().height() < compact.height() - 100.0, "History at the bottom: the Browser hugs its rows again");
+}
+
 #[test]
 fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
     let previous = solidcraft_theme::is_dark();
