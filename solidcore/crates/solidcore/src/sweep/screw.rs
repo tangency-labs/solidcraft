@@ -583,7 +583,10 @@ pub(crate) fn screw_net(
     let mut pieces = Vec::new();
     for pair in stations.windows(2) {
         let [from, to] = *pair else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "a screw net's station pair is incomplete",
+            ));
         };
         let half = 0.5 * (to - from);
         if !(half > 0.0 && half <= crate::surface::procedural_sweep::MAX_HALF_ANGLE) {
@@ -604,7 +607,7 @@ pub(crate) fn screw_net(
         total: stations
             .last()
             .copied()
-            .ok_or_else(|| SolidError::sm_err(OP))?,
+            .ok_or_else(|| SolidError::sweep_missing(OP, "a screw net's last station"))?,
         e: law.map_or(Vec3::ZERO, RadialLaw::direction),
         angles: law.map_or_else(Vec::new, |l| l.angles().to_vec()),
         offsets: law.map_or_else(Vec::new, |l| l.offsets().to_vec()),
@@ -922,11 +925,9 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
             if r > 0.0 && m.offset(t0) == m.offset(t1) {
                 let ends = curve.ends(k)?;
                 for piece in group {
-                    let a = piece
-                        .t
-                        .first()
-                        .copied()
-                        .ok_or_else(|| SolidError::sm_err(OP))?;
+                    let a = piece.t.first().copied().ok_or_else(|| {
+                        SolidError::sweep_missing(OP, "a cylinder piece's first station")
+                    })?;
                     cylinder_piece(
                         k,
                         &mut brep,
