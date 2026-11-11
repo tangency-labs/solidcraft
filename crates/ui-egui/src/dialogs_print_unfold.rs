@@ -16,8 +16,8 @@ use solidcraft_engine::schema::print_unfold::PrintUnfoldState;
 use crate::SolveApp;
 use crate::dialogs::Kind;
 use crate::selection::{EDGES, PLANAR_FACES, SelInput};
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 /// The command the tool box belongs to.
 pub const COMMAND: &str = "print.unfold.start";
@@ -190,34 +190,36 @@ fn count_row(ui: &mut egui::Ui, label: &str, value: String) {
 }
 
 fn step_note(ui: &mut egui::Ui, step: &str) {
-    note(ui, &crate::i18n::format("ui.print_unfold_step", &[("step", step), ("of", STEPS)]));
+    note(ui, &solidcraft_ui_text::format("ui.print_unfold_step", &[("step", step), ("of", STEPS)]));
 }
 
 /// The parts of the flat pattern, each with the rectangle round it and whether it fits the bed.
 fn part_rows(app: &SolveApp, ui: &mut egui::Ui) {
     let Some(s) = state(app) else { return };
     for (i, part) in s.parts.iter().enumerate() {
-        let size =
-            crate::i18n::format("ui.print_unfold_part_size", &[("long", &format!("{:.1}", part.long)), ("short", &format!("{:.1}", part.short))]);
+        let size = solidcraft_ui_text::format(
+            "ui.print_unfold_part_size",
+            &[("long", &format!("{:.1}", part.long)), ("short", &format!("{:.1}", part.short))],
+        );
         let fits = match part.fits {
-            Some(true) => crate::i18n::tr("ui.print_unfold_fits"),
-            Some(false) => crate::i18n::tr("ui.print_unfold_fits_not"),
+            Some(true) => solidcraft_ui_text::tr("ui.print_unfold_fits"),
+            Some(false) => solidcraft_ui_text::tr("ui.print_unfold_fits_not"),
             None => "",
         };
-        count_row(ui, &crate::i18n::format("ui.print_unfold_part", &[("n", &(i + 1).to_string())]), format!("{size}  {fits}"));
+        count_row(ui, &solidcraft_ui_text::format("ui.print_unfold_part", &[("n", &(i + 1).to_string())]), format!("{size}  {fits}"));
     }
     if s.parts.iter().any(|p| p.fits == Some(false)) {
-        warn(ui, crate::i18n::tr("ui.print_unfold_no_fit"));
+        warn(ui, solidcraft_ui_text::tr("ui.print_unfold_no_fit"));
     }
     if s.parts.iter().any(|p| p.overlaps > 0) {
-        warn(ui, crate::i18n::tr("ui.print_unfold_overlap"));
+        warn(ui, solidcraft_ui_text::tr("ui.print_unfold_overlap"));
     }
 }
 
 /// A button back to the bends and cuts, which the flat pattern is made from.
 fn edit_edges_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::dialogs::form_row(ui, "", |ui| {
-        if crate::ui_kit::button(ui, crate::i18n::tr("cmd.print_unfold_edit"), crate::ui_kit::Button::Small).clicked() {
+        if crate::ui_kit::button(ui, solidcraft_ui_text::tr("cmd.print_unfold_edit"), crate::ui_kit::Button::Small).clicked() {
             match app.run("print.unfold.edit", json!({})) {
                 Ok(_) => {
                     SPLITTING.with(|c| c.set(None));
@@ -237,7 +239,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
     match k {
         Pu::Base => {
             step_note(ui, "1");
-            note(ui, crate::i18n::tr("ui.print_unfold_base_note"));
+            note(ui, solidcraft_ui_text::tr("ui.print_unfold_base_note"));
         }
         Pu::Edges => {
             let picked: Vec<Sel> = inputs.first_mut().map(|i| std::mem::take(&mut i.items)).unwrap_or_default();
@@ -250,41 +252,41 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
                             Some("removed") => "ui.print_unfold_removed",
                             _ => "ui.print_unfold_added",
                         };
-                        app.set_status(crate::i18n::tr(id), false);
+                        app.set_status(solidcraft_ui_text::tr(id), false);
                     }
                     Err(e) => app.set_status(e, true),
                 }
             }
             step_note(ui, "2");
-            note(ui, crate::i18n::tr("ui.print_unfold_edges_note"));
+            note(ui, solidcraft_ui_text::tr("ui.print_unfold_edges_note"));
             if let Some(s) = state(app) {
-                let on = crate::i18n::format("ui.print_unfold_faces_on", &[("on", &s.attached.to_string()), ("all", &s.faces.to_string())]);
-                count_row(ui, crate::i18n::tr("ui.print_unfold_faces"), on);
-                count_row(ui, crate::i18n::tr("ui.print_unfold_bends"), s.bends.len().to_string());
-                count_row(ui, crate::i18n::tr("ui.print_unfold_cuts"), s.cuts.len().to_string());
+                let on = solidcraft_ui_text::format("ui.print_unfold_faces_on", &[("on", &s.attached.to_string()), ("all", &s.faces.to_string())]);
+                count_row(ui, solidcraft_ui_text::tr("ui.print_unfold_faces"), on);
+                count_row(ui, solidcraft_ui_text::tr("ui.print_unfold_bends"), s.bends.len().to_string());
+                count_row(ui, solidcraft_ui_text::tr("ui.print_unfold_cuts"), s.cuts.len().to_string());
                 if !s.complete {
-                    note(ui, crate::i18n::tr("ui.print_unfold_missing_note"));
-                    note(ui, crate::i18n::tr("ui.print_unfold_incomplete"));
+                    note(ui, solidcraft_ui_text::tr("ui.print_unfold_missing_note"));
+                    note(ui, solidcraft_ui_text::tr("ui.print_unfold_incomplete"));
                 }
             }
         }
         Pu::Surface => {
-            note(ui, crate::i18n::tr("ui.print_unfold_surface_note"));
+            note(ui, solidcraft_ui_text::tr("ui.print_unfold_surface_note"));
             edit_edges_row(app, ui);
         }
         Pu::Flat { printer, width, depth } => {
             step_note(ui, "3");
-            note(ui, crate::i18n::tr("ui.print_unfold_flat_note"));
+            note(ui, solidcraft_ui_text::tr("ui.print_unfold_flat_note"));
             let printers = solidcraft_engine::cmd::print_unfold::PRINTERS;
-            let custom = crate::i18n::tr("ui.print_unfold_custom_bed").to_string();
+            let custom = solidcraft_ui_text::tr("ui.print_unfold_custom_bed").to_string();
             let mut names: Vec<&str> = printers.iter().map(|p| p.0).collect();
             names.push(&custom);
-            crate::ui_kit::choice_row(ui, crate::i18n::tr("ui.print_unfold_printer"), "pu_printer", printer, &names);
+            crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_printer"), "pu_printer", printer, &names);
             let chosen = match printers.get(*printer) {
                 Some((name, w, d)) => Some((name.to_string(), *w, *d)),
                 None => {
-                    enter |= crate::ui_kit::expr_row(ui, crate::i18n::tr("ui.print_unfold_bed_width"), width);
-                    enter |= crate::ui_kit::expr_row(ui, crate::i18n::tr("ui.print_unfold_bed_depth"), depth);
+                    enter |= crate::ui_kit::expr_row(ui, solidcraft_ui_text::tr("ui.print_unfold_bed_width"), width);
+                    enter |= crate::ui_kit::expr_row(ui, solidcraft_ui_text::tr("ui.print_unfold_bed_depth"), depth);
                     bed_mm(width).zip(bed_mm(depth)).map(|(w, d)| (String::new(), w, d))
                 }
             };
@@ -297,8 +299,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
                 }
                 count_row(
                     ui,
-                    crate::i18n::tr("ui.print_unfold_bed"),
-                    crate::i18n::format("ui.print_unfold_part_size", &[("long", &format!("{w:.0}")), ("short", &format!("{d:.0}"))]),
+                    solidcraft_ui_text::tr("ui.print_unfold_bed"),
+                    solidcraft_ui_text::format("ui.print_unfold_part_size", &[("long", &format!("{w:.0}")), ("short", &format!("{d:.0}"))]),
                 );
             }
             part_rows(app, ui);
@@ -311,16 +313,16 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
                 match app.run("print.unfold.split", json!({"edge": [point.x, point.y, point.z]})) {
                     Ok(reply) => {
                         let id = if reply["changed"] == "joined" { "ui.print_unfold_joined" } else { "ui.print_unfold_split_done" };
-                        app.set_status(crate::i18n::tr(id), false);
+                        app.set_status(solidcraft_ui_text::tr(id), false);
                     }
                     Err(e) => app.set_status(e, true),
                 }
             }
             step_note(ui, "4");
-            note(ui, crate::i18n::tr("ui.print_unfold_split_note"));
+            note(ui, solidcraft_ui_text::tr("ui.print_unfold_split_note"));
             part_rows(app, ui);
             crate::dialogs::form_row(ui, "", |ui| {
-                if crate::ui_kit::button(ui, crate::i18n::tr("ui.print_unfold_to_bed"), crate::ui_kit::Button::Small).clicked() {
+                if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.print_unfold_to_bed"), crate::ui_kit::Button::Small).clicked() {
                     SPLITTING.with(|c| c.set(None));
                     REOPEN.with(|c| c.set(true));
                 }
@@ -337,24 +339,24 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
                 }
             }
             step_note(ui, "5");
-            note(ui, crate::i18n::tr("ui.print_unfold_joints_note"));
-            note(ui, crate::i18n::tr("ui.print_unfold_rigid_note"));
+            note(ui, solidcraft_ui_text::tr("ui.print_unfold_joints_note"));
+            note(ui, solidcraft_ui_text::tr("ui.print_unfold_rigid_note"));
             if let Some(s) = state(app)
                 && s.min_wall > 0.0
             {
-                let text = crate::i18n::format("ui.print_unfold_min_wall", &[("wall", &format!("{:.1}", s.min_wall))]);
+                let text = solidcraft_ui_text::format("ui.print_unfold_min_wall", &[("wall", &format!("{:.1}", s.min_wall))]);
                 if bed_mm_any(wall).is_some_and(|w| w + 1e-9 < s.min_wall) {
                     warn(ui, &text);
                 } else {
                     note(ui, &text);
                 }
             }
-            enter |= crate::ui_kit::expr_row(ui, crate::i18n::tr("ui.print_wall"), wall);
-            let names = |kinds: &[(&str, &str)]| -> Vec<String> { kinds.iter().map(|k| crate::i18n::tr(k.1).to_string()).collect() };
+            enter |= crate::ui_kit::expr_row(ui, solidcraft_ui_text::tr("ui.print_wall"), wall);
+            let names = |kinds: &[(&str, &str)]| -> Vec<String> { kinds.iter().map(|k| solidcraft_ui_text::tr(k.1).to_string()).collect() };
             let (bend_names, cut_names, own_names) = (names(&BEND_KINDS), names(&CUT_KINDS), names(&OWN_KINDS));
-            crate::ui_kit::choice_row(ui, crate::i18n::tr("ui.print_unfold_bends"), "pu_bend_kind", bends, &refs(&bend_names));
-            crate::ui_kit::choice_row(ui, crate::i18n::tr("ui.print_unfold_cuts"), "pu_cut_kind", cuts, &refs(&cut_names));
-            crate::ui_kit::choice_row(ui, crate::i18n::tr("ui.print_unfold_own_kind"), "pu_own_kind", assign, &refs(&own_names));
+            crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_bends"), "pu_bend_kind", bends, &refs(&bend_names));
+            crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_cuts"), "pu_cut_kind", cuts, &refs(&cut_names));
+            crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_own_kind"), "pu_own_kind", assign, &refs(&own_names));
             // What the rows say goes to the design at once.
             if let Some(s) = state(app) {
                 let (b, c) = (BEND_KINDS.get(*bends).map_or("film", |k| k.0), CUT_KINDS.get(*cuts).map_or("butt", |k| k.0));
@@ -366,10 +368,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
                     app.set_status(e, true);
                 }
                 let own: std::collections::BTreeSet<usize> = s.flat_bends.iter().chain(&s.flat_cuts).filter(|e| e.own).map(|e| e.edge).collect();
-                count_row(ui, crate::i18n::tr("ui.print_unfold_own_count"), own.len().to_string());
+                count_row(ui, solidcraft_ui_text::tr("ui.print_unfold_own_count"), own.len().to_string());
             }
             crate::dialogs::form_row(ui, "", |ui| {
-                if crate::ui_kit::button(ui, crate::i18n::tr("ui.print_unfold_to_split"), crate::ui_kit::Button::Small).clicked() {
+                if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.print_unfold_to_split"), crate::ui_kit::Button::Small).clicked() {
                     JOINING.with(|c| c.set(None));
                     SPLITTING.with(|c| c.set(Some(app.session.uid)));
                     REOPEN.with(|c| c.set(true));
@@ -378,7 +380,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
         }
         Pu::Done => {
             step_note(ui, "6");
-            note(ui, crate::i18n::tr("ui.print_unfold_done_note"));
+            note(ui, solidcraft_ui_text::tr("ui.print_unfold_done_note"));
         }
     }
     enter
@@ -389,7 +391,7 @@ pub fn run(app: &mut SolveApp, k: &Pu, inputs: &[SelInput]) -> Result<(), String
     match k {
         Pu::Base => {
             let Some(Sel::Face { body, point, .. }) = inputs.first().and_then(|i| i.items.first()) else {
-                return Err(crate::i18n::tr("ui.print_unfold_base_tip").to_string());
+                return Err(solidcraft_ui_text::tr("ui.print_unfold_base_tip").to_string());
             };
             app.run(COMMAND, json!({"body": body, "face": [point.x, point.y, point.z]})).map(|_| ())
         }
@@ -463,7 +465,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             for i in 0..4 {
                 let (a, b) = (part.corners[i], part.corners[(i + 1) % 4]);
                 if let (Some(a), Some(b)) = (point(&[a[0], a[1], 0.0]), point(&[b[0], b[1], 0.0])) {
-                    painter.extend(crate::viewport::dashed_line(&[a, b], clip, Stroke::new(1.5, colour), 4.0, 4.0));
+                    painter.extend(crate::ui_kit::dashed_line(&[a, b], clip, Stroke::new(1.5, colour), 4.0, 4.0));
                 }
             }
         }
@@ -490,7 +492,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         for edge in &state.flat_bends {
             if let (Some(a), Some(b)) = (point(&edge.start), point(&edge.end)) {
                 let (colour, width) = joint(&edge.joint, t.accent);
-                painter.extend(crate::viewport::dashed_line(&[a, b], clip, Stroke::new(width.max(3.0), colour), 9.0, 6.0));
+                painter.extend(crate::ui_kit::dashed_line(&[a, b], clip, Stroke::new(width.max(3.0), colour), 9.0, 6.0));
             }
         }
         return;
@@ -511,7 +513,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
     for edge in &state.bends {
         if let (Some(a), Some(b)) = (point(&edge.start), point(&edge.end)) {
-            painter.extend(crate::viewport::dashed_line(&[a, b], clip, Stroke::new(3.0, t.accent), 9.0, 6.0));
+            painter.extend(crate::ui_kit::dashed_line(&[a, b], clip, Stroke::new(3.0, t.accent), 9.0, 6.0));
         }
     }
 }
@@ -588,7 +590,7 @@ pub fn answer_changed(app: &mut SolveApp, answer: Changed) {
                     if let Some(Some(slot)) = app.docs.slots.get_mut(i) {
                         slot.session.replace_design(fresh);
                     }
-                    app.set_status(crate::i18n::tr("ui.print_unfold_restarted"), false);
+                    app.set_status(solidcraft_ui_text::tr("ui.print_unfold_restarted"), false);
                 }
                 // Its base face is gone: the tab keeps the old copy, which no longer follows.
                 Err(e) => {
@@ -598,7 +600,7 @@ pub fn answer_changed(app: &mut SolveApp, answer: Changed) {
                         source.session = 0;
                         source.path = None;
                     }
-                    app.set_status(crate::i18n::format("ui.print_unfold_restart_failed", &[("why", &e.to_string())]), true);
+                    app.set_status(solidcraft_ui_text::format("ui.print_unfold_restart_failed", &[("why", &e.to_string())]), true);
                 }
             }
         }
@@ -615,13 +617,16 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
         CHANGED.with(|c| c.set(None));
         return;
     }
-    let (closed, action) =
-        crate::ui_kit::Confirm::new(egui::Id::unique("sc_print_unfold_changed"), "status_warning", crate::i18n::tr("ui.print_unfold_changed_title"))
-            .tone(crate::ui_kit::Tone::Warning)
-            .actions(crate::i18n::tr("ui.print_unfold_discard"), crate::i18n::tr("ui.print_unfold_undo_change"), None)
-            .show(ctx, true, |ui| {
-                crate::ui_kit::text(ui, crate::i18n::tr("ui.print_unfold_changed"), crate::ui_kit::Text::Report("print_unfold_changed", false));
-            });
+    let (closed, action) = crate::ui_kit::Confirm::new(
+        egui::Id::unique("sc_print_unfold_changed"),
+        "status_warning",
+        solidcraft_ui_text::tr("ui.print_unfold_changed_title"),
+    )
+    .tone(crate::ui_kit::Tone::Warning)
+    .actions(solidcraft_ui_text::tr("ui.print_unfold_discard"), solidcraft_ui_text::tr("ui.print_unfold_undo_change"), None)
+    .show(ctx, true, |ui| {
+        crate::ui_kit::text(ui, solidcraft_ui_text::tr("ui.print_unfold_changed"), crate::ui_kit::Text::Report("print_unfold_changed", false));
+    });
     match action {
         crate::ui_kit::Action::Ok => answer_changed(app, Changed::Discard),
         crate::ui_kit::Action::Cancel => answer_changed(app, Changed::Undo),

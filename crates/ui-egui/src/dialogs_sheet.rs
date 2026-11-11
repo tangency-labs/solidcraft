@@ -462,7 +462,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             ui.add_enabled_ui(!*print, |ui| rule_combo(app, ui, "sm_conv_rule", rule));
             crate::ui_kit::options(ui, "sm_conv_print", &mut [("ui.print_fold", print)]);
             if *print {
-                enter |= hint_row(ui, "ui.print_wall", wall, crate::i18n::tr_label("ui.print_wall_from_shell"));
+                enter |= hint_row(ui, "ui.print_wall", wall, solidcraft_ui_text::tr_label("ui.print_wall_from_shell"));
                 enter |= expr_row(ui, "ui.print_clearance", clearance);
                 enter |= expr_row(ui, "ui.print_film", film);
                 choice_row(ui, "ui.print_joint", "sm_conv_joint", joint, &PRINT_JOINT_LABELS);
@@ -495,7 +495,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 let zero = app.session.doc.eval(clearance.trim(), ValueKind::Length).is_ok_and(|c| c.abs() < 1e-9);
                 if zero && joined && !filament.gap_warned {
                     filament.gap_warned = true;
-                    app.set_status(crate::i18n::tr_label("ui.print_zero_clearance"), false);
+                    app.set_status(solidcraft_ui_text::tr_label("ui.print_zero_clearance"), false);
                 } else if !zero {
                     filament.gap_warned = false;
                 }
