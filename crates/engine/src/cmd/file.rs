@@ -28,6 +28,7 @@ use crate::schema::file::{
     RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams, RecoveryListResult,
 };
 use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
+use crate::schema::insert_step::{InsertStepParams, StepInserted};
 use crate::schema::new_design::{NewDesignParams, NewDesignResult};
 use crate::schema::save::{SaveAsParams, SaveParams, SaveResult};
 #[cfg(not(target_arch = "wasm32"))]
@@ -37,6 +38,7 @@ use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const INSERT_MESH_CONTRACT: TypedContract<InsertMeshParams> = TypedContract::new();
+const INSERT_STEP_CONTRACT: TypedContract<InsertStepParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.new", "New Design", crate::checked!("file.new", new_doc))
@@ -53,9 +55,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
         .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
-    CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
+    CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
+        .contract(&INSERT_STEP_CONTRACT)
+        .output(output_schema_for::<StepInserted>)
         .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
@@ -287,23 +291,29 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     let created = created_bodies(s, id);
     let folder = if options.folder { import_folder(s, id, &placed)? } else { None };
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
-    let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": created, "created_bodies": created, "warnings": sf.warnings, "system": sf.import.system});
-    if let Some((up, exporter)) = exporter_up(&sf.import) {
-        out["exporter"] = json!(exporter);
-        out["exporter_up"] = json!(up);
-    }
-    placed.report(&mut out);
-    if let Some(turned) = turned {
-        out["stand_up"] = json!(turned);
-    }
-    if let Some(folder) = folder {
-        out["group"] = json!(folder);
-    }
-    if let Some(mark) = profiled {
-        let report = crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20);
-        out["profile"] = serde_json::to_value(report).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    }
-    Ok(out)
+    let known = exporter_up(&sf.import);
+    let reply = StepInserted {
+        path: path.to_string(),
+        feature: id,
+        name: fname,
+        bodies: created.clone(),
+        created_bodies: created,
+        warnings: sf.warnings,
+        system: sf.import.system.clone(),
+        exporter: known.map(|(_, exporter)| exporter.to_string()),
+        exporter_up: known.map(|(up, _)| up.to_string()),
+        component: placed.component,
+        component_name: placed.name.clone(),
+        occurrence: placed.occurrence,
+        subcomponents: (placed.components > 0).then_some(placed.components),
+        rigid_joints: (placed.components > 0).then_some(placed.joints.len()),
+        stand_up: turned,
+        group: folder,
+        transform: None,
+        profile: profiled.map(|mark| crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20)),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }
 
 /// An import that brings more than one item into the history (its Import feature and the rigid
