@@ -1098,14 +1098,15 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
     let end_use = f.fb.brep().edge(rail).unwrap().edgeuses[1];
     let count = f.fb.geoms().len();
     let err = Missing.topology_split(&mut f.context(), id).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            SolidError::Upstream {
-                operation: "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            }
+    // a typed blend failure that keeps the bare `Upstream`'s status (#13790)
+    assert_eq!(
+        (err.operation(), err.blend_failure(), err.upstream_status()),
+        (
+            "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the other base edge use"
+            )),
+            Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
     );
