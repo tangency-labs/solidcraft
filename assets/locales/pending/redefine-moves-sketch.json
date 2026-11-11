@@ -1,0 +1,26 @@
+{
+  "en": {
+    "sketch_panel.redefine_moves_sketch": "{plane} comes after {sketch} in the timeline. If {plane} is built from features made after {sketch}, OK moves {sketch} to just after {plane}."
+  },
+  "de": {
+    "sketch_panel.redefine_moves_sketch": "{plane} kommt in der Zeitleiste nach {sketch}. Ist {plane} aus Merkmalen aufgebaut, die nach {sketch} kommen, verschiebt OK {sketch} direkt hinter {plane}."
+  },
+  "ja": {
+    "sketch_panel.redefine_moves_sketch": "タイムラインで {plane} は {sketch} より後にあります。{plane} が {sketch} より後のフィーチャーから作られている場合、OK で {sketch} を {plane} の直後に移動します。"
+  },
+  "ko": {
+    "sketch_panel.redefine_moves_sketch": "타임라인에서 {plane}은(는) {sketch}보다 뒤에 있습니다. {plane}이(가) {sketch} 이후에 만든 피처로 만들어졌다면 확인을 누르면 {sketch}이(가) {plane} 바로 뒤로 이동합니다."
+  },
+  "zh": {
+    "sketch_panel.redefine_moves_sketch": "在时间线中 {plane} 位于 {sketch} 之后。如果 {plane} 由 {sketch} 之后创建的特征构建，确定会将 {sketch} 移到 {plane} 之后。"
+  },
+  "ar": {
+    "sketch_panel.redefine_moves_sketch": "يأتي {plane} بعد {sketch} في المخطط الزمني. إذا كان {plane} مبنيًا من ميزات أُنشئت بعد {sketch}، فإن «موافق» ينقل {sketch} إلى ما بعد {plane} مباشرةً."
+  },
+  "he": {
+    "sketch_panel.redefine_moves_sketch": "{plane} מופיע אחרי {sketch} בציר הזמן. אם {plane} בנוי מתכונות שנוצרו אחרי {sketch}, אישור יעביר את {sketch} מיד אחרי {plane}."
+  },
+  "vi": {
+    "sketch_panel.redefine_moves_sketch": "{plane} nằm sau {sketch} trong dòng thời gian. Nếu {plane} được dựng từ các tính năng tạo sau {sketch}, OK sẽ chuyển {sketch} đến ngay sau {plane}."
+  }
+}
