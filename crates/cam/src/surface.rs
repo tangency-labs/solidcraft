@@ -167,7 +167,7 @@ pub fn barycentric(t: &[Vec3; 3], p: Vec3) -> Option<[f64; 3]> {
 }
 
 /// Where the ray `o + t·d` (t ≥ 0) meets the triangle (Möller–Trumbore), either side. A ray in
-/// the triangle's plane, to rounding ([`PARALLEL_SINE`]), meets it nowhere: such a ray runs
+/// the triangle's plane, to rounding (`PARALLEL_SINE`), meets it nowhere: such a ray runs
 /// into the triangles beyond the edges it crosses, which say where.
 pub fn ray_triangle(o: Vec3, d: Vec3, t: &[Vec3; 3]) -> Option<f64> {
     let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
