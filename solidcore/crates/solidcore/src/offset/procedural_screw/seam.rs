@@ -29,6 +29,8 @@ fn dot(a: [Ivl; 3], b: [Ivl; 3]) -> Ivl {
         .fold(Ivl::from(0.0), |sum, (x, y)| sum + x * y)
 }
 use super::same_motion;
+use crate::geom::extent1d::Extent1d;
+use crate::nurbs::math::NOW;
 fn controls(curve: &Curve) -> Result<Vec<[Ivl; 3]>> {
     let spline = curve
         .b_spline_base()
@@ -54,6 +56,86 @@ fn controls(curve: &Curve) -> Result<Vec<[Ivl; 3]>> {
             }))
         })
         .collect()
+}
+
+/// Enclosures of the vertices of `curve`'s polygon over `interval`, when the curve
+/// has degree one (a line, a polyline): its points at the interval's ends and at the
+/// knots inside, each its homogeneous controls interpolated in interval arithmetic and
+/// divided by the interpolated weight. Each span of such a curve is the segment between
+/// its ends (a rational one too: a projective map of a segment, under positive weights),
+/// so the polygon is the curve over the interval. `None` for any other degree.
+fn polygon_over(curve: &Curve, interval: Extent1d) -> Result<Option<Vec<[Ivl; 3]>>> {
+    let spline = curve
+        .b_spline_base()
+        .ok_or_else(|| bad("seam needs a bounded spline"))?;
+    if spline.degree()? != 1 {
+        return Ok(None);
+    }
+    let knots = spline.knot_values()?;
+    // stored homogeneous: a rational point weighted, a non-rational one Euclidean of weight 1
+    let homogeneous: Vec<[Ivl; 4]> = spline
+        .control_points()?
+        .iter()
+        .map(|p| {
+            let weight = if p.w == NOW { 1.0 } else { p.w };
+            if !weight.is_finite()
+                || weight <= 0.0
+                || ![p.x, p.y, p.z].iter().all(|v| v.is_finite())
+            {
+                return Err(bad("seam controls need finite positive weights"));
+            }
+            Ok([p.x, p.y, p.z, weight].map(Ivl::from))
+        })
+        .collect::<Result<_>>()?;
+    // degree one: control j sits at knot j + 1, its Greville abscissa
+    let stations: Vec<f64> = (0..homogeneous.len())
+        .map(|j| {
+            knots
+                .get(j + 1)
+                .copied()
+                .ok_or_else(|| bad("seam curve has too few knots"))
+        })
+        .collect::<Result<_>>()?;
+    let (lo, hi) = (interval.min(), interval.max());
+    let (Some(&first), Some(&last)) = (stations.first(), stations.last()) else {
+        return Err(bad("empty seam support"));
+    };
+    if !(lo.is_finite() && hi.is_finite() && first <= lo && lo <= hi && hi <= last) {
+        return Err(bad("seam interval lies outside its curve"));
+    }
+    let euclid = |h: [Ivl; 4]| -> Result<[Ivl; 3]> {
+        let [x, y, z, w] = h;
+        if w.lo <= 0.0 {
+            return Err(bad("seam controls need finite positive weights"));
+        }
+        Ok([x / w, y / w, z / w])
+    };
+    let at = |t: f64| -> Result<[Ivl; 3]> {
+        for (j, pair) in stations.windows(2).enumerate() {
+            let &[a, b] = pair else { continue };
+            if !(a < b && a <= t && t <= b) {
+                continue;
+            }
+            let (Some(&p), Some(&q)) = (homogeneous.get(j), homogeneous.get(j + 1)) else {
+                break;
+            };
+            let s = (Ivl::from(t) - Ivl::from(a)) / (Ivl::from(b) - Ivl::from(a));
+            let r = Ivl::from(1.0) - s;
+            return euclid(std::array::from_fn(|i| {
+                p.get(i).copied().unwrap_or(Ivl::whole()) * r
+                    + q.get(i).copied().unwrap_or(Ivl::whole()) * s
+            }));
+        }
+        Err(bad("seam interval lies outside its curve"))
+    };
+    let mut points = vec![at(lo)?];
+    for (&g, &h) in stations.iter().zip(&homogeneous) {
+        if lo < g && g < hi {
+            points.push(euclid(h)?);
+        }
+    }
+    points.push(at(hi)?);
+    Ok(Some(points))
 }
 
 /// An authored station and physical half-plane, including a rigorous enclosure
@@ -167,13 +249,21 @@ impl Separator {
         Ok(dot(self.normal, relative).mag())
     }
 
-    /// Positive rational weights make every point a convex combination of the
-    /// Euclidean controls. Thus these inequalities cover the entire curve.
-    pub fn certify_curve(&self, curve: &Curve, tolerance: f64) -> Result<()> {
+    /// The part of `curve` an edge uses, over `interval`, lies in the half-plane
+    /// within `tolerance`. A curve of degree one is its polygon over the interval
+    /// ([`polygon_over`]): a line keeps no more than its edge's segment, however
+    /// far its stored support runs (a record's line is unbounded, and the kernel's
+    /// runs on across the axis). Any other curve is held by all its controls:
+    /// positive rational weights make every point a convex combination of the
+    /// Euclidean controls, so these inequalities cover the entire curve.
+    pub fn certify_curve(&self, curve: &Curve, interval: Extent1d, tolerance: f64) -> Result<()> {
         if !tolerance.is_finite() || tolerance <= 0.0 {
             return Err(bad("invalid seam tolerance"));
         }
-        let points = controls(curve)?;
+        let points = match polygon_over(curve, interval)? {
+            Some(points) => points,
+            None => controls(curve)?,
+        };
         if points.len() < 2 {
             return Err(bad("empty seam support"));
         }

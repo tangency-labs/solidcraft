@@ -3998,7 +3998,7 @@ impl OffsetGeometryCreation {
         let curve = brep
             .edge_curve(edge)?
             .ok_or(dangling("seam without curve"))?;
-        separator.certify_curve(curve_of(brep, curve)?, tolerance)?;
+        separator.certify_curve(curve_of(brep, curve)?, brep.edge_interval(edge)?, tolerance)?;
         for (eu, surf) in [(edgeuse, old_a), (other, old_b)] {
             let uv = brep
                 .edgeuse_uv_trim_curve(eu)?
@@ -4042,7 +4042,11 @@ impl OffsetGeometryCreation {
                 let curve = brep
                     .edge_curve(parent)?
                     .ok_or(dangling("parent seam without curve"))?;
-                separator.certify_curve(curve_of(brep, curve)?, parent_tol)?;
+                separator.certify_curve(
+                    curve_of(brep, curve)?,
+                    brep.edge_interval(parent)?,
+                    parent_tol,
+                )?;
                 let parent_uses = brep.edge_edgeuses(parent)?;
                 for face in faces {
                     // Face construction relates only its participating use. The
