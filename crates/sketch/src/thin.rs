@@ -12,9 +12,10 @@
 //! merged into regions. Walls that cross or meet (a honeycomb, a ring and a cross) come out as
 //! one region where they touch.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
 use crate::model::{CurveKind, Result, Sketch, SketchError};
 use crate::profiles::{find_profiles, merge_regions};

@@ -3,7 +3,8 @@
 //! They are reference geometry: drawn and usable as paths, not part of profiles or the solver.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::link::{Link, LinkGeom, LinkKind, LinkSource};
 use crate::model::{Result, Sketch, SketchError, in_range3, radius_in_range};
@@ -73,7 +74,7 @@ pub struct Wire {
 /// One exact piece of a 3D sketch curve ([`Wire::exact`]): a record curve on its interval.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WireCurve {
-    pub curve: solidcraft_geom::brep::Curve,
+    pub curve: solidcore_record::brep::Curve,
     pub interval: [f64; 2],
 }
 
@@ -81,7 +82,7 @@ impl WireCurve {
     /// The piece carried by the rigid motion `point` of points and `vector` of directions (a
     /// placement). `None` for an intersection curve, whose surfaces are not carried here.
     pub fn mapped(&self, point: &impl Fn(Vec3) -> Vec3, vector: &impl Fn(Vec3) -> Vec3) -> Option<WireCurve> {
-        use solidcraft_geom::brep::{Curve, Frame};
+        use solidcore_record::brep::{Curve, Frame};
         let a = |q: [f64; 3]| Vec3::new(q[0], q[1], q[2]);
         let b = |v: Vec3| [v.x, v.y, v.z];
         let p = |q: [f64; 3]| b(point(a(q)));

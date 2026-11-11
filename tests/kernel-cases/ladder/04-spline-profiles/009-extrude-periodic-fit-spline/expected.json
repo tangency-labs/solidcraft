@@ -2,7 +2,7 @@
  "sources": [],
  "what": "a closed periodic fit-point spline through 6 points, extruded 10",
  "source": "analytic",
- "method": "a periodic fit spline is the cyclic C2 cubic through its points with chord-length knots (crates/sketch/src/periodic.rs); A = 1/2 loop int (x y' - y x') over its six spans (Gauss, exact on the polynomials) = 1228.101202178, its length L by Gauss = 124.240003044; V = 10 A, area 2 A + 10 L. Faces: one side face per span + the caps; edges 6 + 6 + 6 vertical; vertices 12. The points are symmetric about both axes, so the curve is: x reaches 20 at (+-20, 0) (vertical tangent there), y reaches 19.600203460 between (10, 17) and (-10, 17); centre of mass (0, 0, 5)",
+ "method": "a periodic fit spline is the cyclic C2 cubic through its points with chord-length knots (crates/sketch/src/periodic.rs); A = 1/2 loop int (x y' - y x') over its six spans (Gauss, exact on the polynomials) = 1228.101202178, its length L by Gauss = 124.240003044; V = 10 A, area 2 A + 10 L. Faces: one side face over the whole periodic curve + the two caps; edges: top loop, bottom loop, one seam; vertices: the seam's two ends. The points are symmetric about both axes, so the curve is: x reaches 20 at (+-20, 0) (vertical tangent there), y reaches 19.600203460 between (10, 17) and (-10, 17); centre of mass (0, 0, 5)",
  "body_count": 1,
  "tolerance": {
   "rel": 1e-05
@@ -14,9 +14,9 @@
   0,
   5
  ],
- "faces": 8,
- "edges": 18,
- "vertices": 12,
+ "faces": 3,
+ "edges": 3,
+ "vertices": 2,
  "bbox": {
   "min": [
    -20,

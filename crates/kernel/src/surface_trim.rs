@@ -3,8 +3,9 @@
 //! Trim: two surfaces cut by each other, each keeping its picked side, extended to meet first
 //! when one stops short of the other.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::splitface::{SplitTool, ToolSide};
@@ -211,7 +212,7 @@ mod tests {
     use super::*;
     use crate::history::{Change, FaceOrigin};
     use crate::{extrude_sheet, measure, patch_region, stitch};
-    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
     use std::f64::consts::PI;
 
     fn rel(a: f64, b: f64) -> f64 {

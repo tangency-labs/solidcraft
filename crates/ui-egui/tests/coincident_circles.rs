@@ -1,4 +1,5 @@
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::scenario::Harness;
 
 /// The Coincident tool takes two circles clicked by their edges and lays the second on the first.

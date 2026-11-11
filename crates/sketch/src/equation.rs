@@ -5,7 +5,7 @@
 //! still share its end points.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use crate::model::{CurveKind, Result, Sketch, SketchError};
 
@@ -142,7 +142,7 @@ impl Sketch {
         if at.len() < wanted || at.len() > crate::curves::MAX_SPLINE_POINTS {
             return Err(SketchError::Invalid(format!("an equation curve needs {wanted} to {} points", crate::curves::MAX_SPLINE_POINTS)));
         }
-        if self.points.len().saturating_add(at.len()) > crate::model::MAX_POINTS {
+        if self.points.len().saturating_add(at.len()) > crate::limits::max_points() {
             return Err(SketchError::TooLarge);
         }
         let place = |sk: &mut Sketch, existing: Option<usize>, p: Vec2| -> Result<usize> {

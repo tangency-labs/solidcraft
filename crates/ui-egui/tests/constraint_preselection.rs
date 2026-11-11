@@ -3,6 +3,7 @@
 mod support;
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, sketch::ConstraintKind};
 use solidcraft_ui_egui::scenario::Harness;
 
@@ -159,6 +160,48 @@ fn ambiguous_selection_preserves_tool_first_workflow() {
     }
 }
 
+/// #12092: a tool that constrains two curves takes the line when the click lands on its end
+/// point. It used to pass the point on, and the command refused it ("unknown sketch curve
+/// `l1.end`"). Tangent keeps the end: the line's end then moves onto the circle, tangent there.
+#[test]
+fn a_click_on_a_line_end_picks_the_line_for_two_curve_constraints() {
+    for command in ["parallel", "perpendicular", "equal", "collinear"] {
+        let mut h = lines();
+        let undo = h.app.session.undo.len();
+        h.run(&json!([{"start":format!("sketch.constraint.{command}")}, {"click":{"sketch":[40,10]}}, {"click":{"sketch":[40,35]}}])).unwrap();
+        assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{command}: {:?}", h.app.status);
+        assert_eq!(h.app.session.undo.len(), undo + 1, "{command}");
+        assert_line_geometry(&h, command);
+    }
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}},
+        {"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[0,20],[30,20]],"infer":false}}},
+        {"call":"engine.execute","params":{"command":"sketch.circle.center","params":{"center":[50,0],"radius":10}}},
+        {"call":"ui.view","params":{"view":"top"}},
+        {"start":"sketch.constraint.tangent"},
+        {"click":{"sketch":[30,20]}},
+        {"click":{"sketch":[60,0]}}
+    ]))
+    .unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "tangent: {:?}", h.app.status);
+    let sk = &h.app.session.model.state().sketches[0].sketch;
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Tangent { .. })), "tangent");
+    // The line now touches the circle: its distance from the centre is the radius.
+    let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+    let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+    let circle = sk.curves.iter().position(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Circle { .. })).unwrap();
+    let centre = sk.point(sk.resolve_point(&format!("{}.center", sk.curves[circle].id)).unwrap()).unwrap();
+    let radius = sk.radius(circle).unwrap();
+    let distance = (b - a).normalized().unwrap().cross(centre - a).abs();
+    assert!((distance - radius).abs() < 1e-6, "line {a:?}..{b:?} is {distance} from the centre, radius {radius}");
+    // The clicked end lies on the circle, where the line touches it.
+    assert!((b.dist(centre) - radius).abs() < 1e-6, "the line's end {b:?} is {} from the centre, radius {radius}", b.dist(centre));
+    // Only that end moved: the line turned about its other end, and the circle stayed.
+    assert!(a.x.abs() < 1e-9 && (a.y - 20.0).abs() < 1e-9, "the line's other end moved to {a:?}");
+    assert!((centre.x - 50.0).abs() < 1e-9 && centre.y.abs() < 1e-9 && (radius - 10.0).abs() < 1e-9, "the circle moved: {centre:?}, radius {radius}");
+}
+
 #[test]
 fn rejected_preselection_preserves_document_and_error() {
     let mut h = lines();
@@ -202,7 +245,7 @@ fn curvature_polygon_and_fix_consume_clicked_operands_atomically() {
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(30.0, 15.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(30.0, 15.0, 0.0);
         h.settle();
         for (i, p) in picks.iter().enumerate() {
             h.step(&json!({"click":{"sketch":p},"shift":i>0})).unwrap();

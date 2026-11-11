@@ -1,6 +1,8 @@
 use serde::Serialize;
-use solidcraft_geom::brep::{self, Brep, Curve, Loop, Shell, Surface};
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcore_record::brep::{self, Brep, Curve, Loop, Shell, Surface};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Aabb3, Mesh};
 
 use crate::history::BodyHistory;
 use crate::{KernelError, Result, guard};
@@ -25,12 +27,19 @@ pub struct Body {
     /// The body in SMLib, built from `record` on first use (or kept from the operation that
     /// made it), shared by clones because they share the record.
     pub(crate) smlib: std::sync::Arc<std::sync::OnceLock<std::result::Result<solidcraft_smlib::Brep, Refusal>>>,
+    /// The record as solidcore-ops' body, for the kernel's answers about its faces
+    /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is. None
+    /// when the record was refused, kept like `smlib`'s refusal so it is not tried again.
+    pub(crate) ops: std::sync::Arc<std::sync::OnceLock<Option<(solidcore_ops::Body, solidcore_ops::Order)>>>,
     /// Bounding-box diagonal of the vertices, measured when the body was made; 0 means "not
     /// measured, walk the geometry". Every kernel tolerance is a fraction of it.
     pub(crate) size: f64,
     /// The last volume measured for this record and the tolerance it was measured at, shared by
     /// clones because they share the record.
     pub(crate) volume: Option<std::sync::Arc<std::sync::Mutex<Option<(u64, f64)>>>>,
+    /// The exact box ([`Body::exact_bounds`]), measured on first use and shared by clones
+    /// because they share the record.
+    pub(crate) bounds: std::sync::Arc<std::sync::Mutex<Option<Aabb3>>>,
     /// Set for mesh bodies (`record` is then empty).
     pub(crate) mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>,
     /// Display colour (linear RGB 0..1) from an imported file; operations drop it.
@@ -147,7 +156,7 @@ fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
             t[0][2] * v.x + t[1][2] * v.y + t[2][2] * v.z + w * t[3][2],
         )
     };
-    brep::placement::Rigid::of_matrix(t)?;
+    solidcraft_geom::brep::placement::Rigid::of_matrix(t)?;
     Some(Mesh {
         positions: m.positions.iter().map(|p| r(*p, 1.0)).collect(),
         normals: m.normals.iter().map(|n| r(*n, 0.0)).collect(),
@@ -159,20 +168,20 @@ fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum FaceSource {
     ExtrudeSide {
-        segment: solidcraft_geom::Seg2,
-        plane: Option<solidcraft_geom::Plane>,
+        segment: solidcore_record::Seg2,
+        plane: Option<solidcore_record::Plane>,
         coalesced: bool,
     },
     CertifiedExtrudeSide {
         producer: u64,
         sketch: u64,
         curve: String,
-        plane: Option<solidcraft_geom::Plane>,
+        plane: Option<solidcore_record::Plane>,
     },
     ExtrudeCap {
         high: bool,
-        region: solidcraft_geom::Region2,
-        plane: solidcraft_geom::Plane,
+        region: solidcore_record::Region2,
+        plane: solidcore_record::Plane,
     },
     CertifiedExtrudeCap {
         producer: u64,
@@ -180,25 +189,25 @@ pub enum FaceSource {
         high: bool,
         outer: Vec<String>,
         holes: Vec<Vec<String>>,
-        plane: solidcraft_geom::Plane,
+        plane: solidcore_record::Plane,
     },
     Box {
         producer: Option<u64>,
         axis: u8,
         high: bool,
-        plane: solidcraft_geom::Plane,
+        plane: solidcore_record::Plane,
     },
     /// A cylinder primitive's cap: `high` at the far end (its `top`), else at the base.
     CylinderCap {
         producer: u64,
         high: bool,
-        plane: solidcraft_geom::Plane,
+        plane: solidcore_record::Plane,
     },
     ShellPlanar {
         producer: Option<u64>,
         source: Box<FaceSource>,
         inner: bool,
-        plane: solidcraft_geom::Plane,
+        plane: solidcore_record::Plane,
     },
     Imported {
         item: u64,
@@ -212,7 +221,7 @@ pub type CapSignature = (Vec<String>, Vec<Vec<String>>);
 type FaceSources = std::sync::Arc<Vec<Option<FaceSource>>>;
 
 impl FaceSource {
-    fn plane_mut(&mut self) -> Option<&mut solidcraft_geom::Plane> {
+    fn plane_mut(&mut self) -> Option<&mut solidcore_record::Plane> {
         match self {
             Self::ExtrudeSide { plane, .. } | Self::CertifiedExtrudeSide { plane, .. } => plane.as_mut(),
             Self::ExtrudeCap { plane, .. }
@@ -262,71 +271,9 @@ pub struct FaceInfo {
     pub plane_normal: Option<Vec3>,
 }
 
-/// The most one facet of the display mesh turns (radians): a curved face or edge is divided
-/// until no facet spans more of it than this, however small its radius is beside the body.
-/// 20 degrees: a quarter turn is drawn with at least five facets, a full circle with at least 18.
-pub const DISPLAY_ANGLE: f64 = std::f64::consts::PI / 9.0;
-
-/// The sag, as a fraction of the chord tolerance, below which the angle no longer divides a
-/// facet: at [`DISPLAY_ANGLE`] and the application's tolerance of 1/1000 of the body, a radius
-/// under about 1/15000 of the body gets fewer facets than the angle asks for, and one under
-/// a millionth of it only those of the chord tolerance.
-const DISPLAY_ANGLE_FLOOR: f64 = 1e-3;
-
-/// The finest angle a display mesh is divided by (one degree).
-const MIN_DISPLAY_ANGLE: f64 = std::f64::consts::PI / 180.0;
-
-/// How closely [`Body::mesh`] follows the exact surfaces.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MeshTolerance {
-    /// The farthest a facet or an edge segment may stand off the surface or curve it stands for
-    /// (mm). Not finite or not positive: 0.05 mm. Never finer than a millionth of the body.
-    pub chord: f64,
-    /// The most a facet may turn (radians, at least one degree) where its sag is above a
-    /// thousandth of `chord`; `None`: `chord` alone.
-    pub angle: Option<f64>,
-}
-
-impl MeshTolerance {
-    /// `chord` alone.
-    pub const fn chord(chord: f64) -> Self {
-        MeshTolerance { chord, angle: None }
-    }
-
-    /// What the viewport draws: `chord`, and no facet turning more than [`DISPLAY_ANGLE`], so
-    /// small radii on a large body look round too.
-    pub const fn display(chord: f64) -> Self {
-        MeshTolerance { chord, angle: Some(DISPLAY_ANGLE) }
-    }
-
-    /// The application's display mesh of a body of size `size` (its box diagonal): 1/1000 of
-    /// it, at least 1 µm, at [`DISPLAY_ANGLE`].
-    pub fn display_of(size: f64) -> Self {
-        MeshTolerance::display((size * 1e-3).max(1e-3))
-    }
-
-    /// For export to a mesh format (STL, 3MF, OBJ) of a body of size `size`: 1/5000 of it, at
-    /// least 1 µm, the chord alone.
-    pub fn export_of(size: f64) -> Self {
-        MeshTolerance::chord((size * 2e-4).max(1e-3))
-    }
-
-    /// The planner's chord tolerance and facet angle for a body of size `size`.
-    pub(crate) fn rules(&self, size: f64) -> (f64, Option<crate::tess::size::Turn>) {
-        let tol = if self.chord.is_finite() && self.chord > 0.0 { self.chord } else { 0.05 };
-        let tol = tol.max(size * 1e-6);
-        let turn = self
-            .angle
-            .filter(|a| a.is_finite() && *a > 0.0)
-            .map(|a| crate::tess::size::Turn { angle: a.max(MIN_DISPLAY_ANGLE), floor: tol * DISPLAY_ANGLE_FLOOR });
-        (tol, turn)
-    }
-
-    /// The key a kept mesh is found by.
-    fn key(&self) -> (u64, u64) {
-        (self.chord.to_bits(), self.angle.map_or(u64::MAX, f64::to_bits))
-    }
-}
+/// How closely [`Body::mesh`] follows the exact surfaces, and the facet angle a viewport draws
+/// at: the mesher's own (solidcore-tess).
+pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
@@ -361,7 +308,7 @@ fn coarse_tolerance(span: f64) -> f64 {
 fn span_of(record: &Brep) -> f64 {
     let mut bounds: Aabb3 = record.vertices.iter().map(|v| v3(v.point)).collect();
     for e in &record.edges {
-        if let Ok(c) = brep::eval::CurveEval::new(e.parameters()) {
+        if let Ok(c) = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()) {
             let [t0, t1] = e.interval;
             for i in 1..4 {
                 if let Some(p) = c.point(t0 + (t1 - t0) * f64::from(i) / 4.0)
@@ -389,7 +336,7 @@ fn same_shared<T: PartialEq>(a: &Option<std::sync::Arc<T>>, b: &Option<std::sync
 /// canonical order) and at least one face. A solid's faces bound material; a surface body's lie
 /// in open shells.
 fn solid_record(record: Brep) -> Result<Brep> {
-    record.validate_built().map_err(|e| KernelError::Invalid(e.to_string()))?;
+    solidcore_ops::record_check::validate_built(&record).map_err(|e| KernelError::Invalid(e.to_string()))?;
     if record.faces.is_empty() {
         return Err(KernelError::Failed("empty result".into()));
     }
@@ -452,23 +399,26 @@ const MAX_REFUSAL_PROBES: usize = 20_000;
 
 impl Refusal {
     /// The refusal of `record` for `error`, with the face SMLib refuses on its own.
-    fn of(record: &Brep, error: &solidcraft_smlib::Error) -> Refusal {
+    pub(crate) fn of(record: &Brep, error: &solidcraft_smlib::Error) -> Refusal {
         if let solidcraft_smlib::Error::Internal(why) = error {
             return Refusal { face: None, surface: None, why: why.clone(), internal: true };
         }
         let _span = solidcraft_profile::span("kernel", "smlib_refusal_face");
-        let alone = |f: usize| crate::surfaces::Parts::of(record, &[(f, false)]).and_then(|p| p.canonical()).map(|c| c.brep);
-        let face = (record.faces.len() <= MAX_REFUSAL_PROBES)
-            .then(|| (0..record.faces.len()).find(|&f| alone(f).is_ok_and(|r| solidcraft_smlib::Brep::from_record(&r, true).is_err())))
-            .flatten();
+        // It is kept with the body for every later reader: a stopped job's probes must not decide it.
+        let face = solidcraft_smlib::stop::unstoppable(|| {
+            let alone = |f: usize| crate::surfaces::Parts::of(record, &[(f, false)]).and_then(|p| p.canonical()).map(|c| c.brep);
+            (record.faces.len() <= MAX_REFUSAL_PROBES)
+                .then(|| (0..record.faces.len()).find(|&f| alone(f).is_ok_and(|r| solidcraft_smlib::Brep::from_record(&r, true).is_err())))
+                .flatten()
+        });
         let surface = face.and_then(|f| record.faces.get(f)).map(|f| SurfaceKind::of(&f.surface));
         Refusal { face, surface, why: error.to_string(), internal: false }
     }
 }
 
 impl SurfaceKind {
-    pub(crate) fn of(surface: &solidcraft_geom::brep::Surface) -> SurfaceKind {
-        use solidcraft_geom::brep::Surface as S;
+    pub(crate) fn of(surface: &solidcore_record::brep::Surface) -> SurfaceKind {
+        use solidcore_record::brep::Surface as S;
         match surface {
             S::Plane { .. } | S::PlaneThrough { .. } => SurfaceKind::Plane,
             S::Cylinder { .. } => SurfaceKind::Cylinder,
@@ -487,8 +437,10 @@ impl Body {
         Body {
             record: std::sync::Arc::new(record),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
+            ops: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
             mesh,
             color: None,
             paint: None,
@@ -543,7 +495,10 @@ impl Body {
     pub fn smlib(&self) -> Result<&solidcraft_smlib::Brep> {
         self.require_brep("an SMLib operation")?;
         self.smlib
-            .get_or_init(|| solidcraft_smlib::Brep::from_record(&self.record, true).map_err(|e| Refusal::of(&self.record, &e)))
+            .get_or_init(|| {
+                solidcraft_smlib::stop::unstoppable(|| solidcraft_smlib::Brep::from_record(&self.record, true))
+                    .map_err(|e| Refusal::of(&self.record, &e))
+            })
             .as_ref()
             .map_err(
                 |r| if r.internal { KernelError::Internal(format!("SMLib: {}", r.why)) } else { KernelError::Failed(format!("SMLib: {}", r.why)) },
@@ -714,7 +669,7 @@ impl Body {
     }
 
     /// An exact construction/import plane; never inferred from tessellation.
-    pub fn face_plane(&self, index: usize) -> Option<solidcraft_geom::Plane> {
+    pub fn face_plane(&self, index: usize) -> Option<solidcore_record::Plane> {
         if index >= 50_000 {
             return None;
         }
@@ -731,8 +686,9 @@ impl Body {
     }
 
     /// Exact current planar surface for an explicitly fixed snapshot, without source lineage: the
-    /// face's plane as the face faces (out of the material in a closed shell).
-    pub fn planar_face(&self, index: usize) -> Option<solidcraft_geom::Plane> {
+    /// face's plane as the face faces (out of the material in a closed shell). A plane surface,
+    /// or a B-spline face the kernel finds flat ([`Body::flat_spline_face`], #14346).
+    pub fn planar_face(&self, index: usize) -> Option<solidcore_record::Plane> {
         let face = self.record.faces.get(index)?;
         let (o, u, v) = match &face.surface {
             Surface::Plane { origin, u_axis, v_axis } => (v3(*origin), v3(*u_axis), v3(*v_axis)),
@@ -740,10 +696,48 @@ impl Body {
                 let o = v3(*origin);
                 (o, v3(*u_point) - o, v3(*v_point) - o)
             }
+            Surface::Spline { .. } | Surface::RationalSpline { .. } => return self.flat_spline_face(index),
             _ => return None,
         };
         let v = if self.face_forward(index) { v } else { -v };
-        solidcraft_geom::Plane::new(o, u, v)
+        solidcore_record::Plane::new(o, u, v)
+    }
+
+    /// The plane of B-spline face `index` when the kernel finds it flat: SMLib's `IsPlanar` at
+    /// the face's own tolerance, with the normal facing out of the material as the face is used
+    /// ([`solidcore_ops::Body::face_plane_normal`]), through the face's first vertex. A loft's
+    /// side through three or more sections is skinned as a B-spline patch even when it is flat,
+    /// as a face of an imported design can be (#14346).
+    fn flat_spline_face(&self, index: usize) -> Option<solidcore_record::Plane> {
+        let face = self.record.faces.get(index)?;
+        let vertex = face.loops.iter().find_map(|l| match l {
+            Loop::Edges { edges } => edges.first().and_then(|u| self.record.edges.get(u.edge as usize)).and_then(|e| e.vertices.first().copied()),
+            Loop::Vertex { vertex } => Some(*vertex),
+        })?;
+        let point = v3(self.record.vertices.get(vertex as usize)?.point);
+        let (body, order) = self.ops_body()?;
+        let normal = body.face_plane_normal(order, index).ok()??;
+        solidcore_record::Plane::from_normal(point, v3(normal.value))
+    }
+
+    /// The record as solidcore-ops' body and the order of its entities, made on first use and
+    /// kept for every later face. A refusal of the record is kept too, as `smlib`'s is: the same
+    /// record is refused the same way again. A refusal of the moment is not kept, so a later
+    /// query tries again: a call from inside a kernel call or from solidcore-ops' failure
+    /// callback ([`solidcore_ops::Error::Reentered`]), or a cancelled one. None for a mesh body.
+    pub(crate) fn ops_body(&self) -> Option<&(solidcore_ops::Body, solidcore_ops::Order)> {
+        if self.is_mesh() {
+            return None;
+        }
+        if let Some(kept) = self.ops.get() {
+            return kept.as_ref();
+        }
+        // Converted outside the cell: a failure callback that asked about this body again
+        // would otherwise reenter the cell while it is being filled.
+        match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
+            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled) => None,
+            made => self.ops.get_or_init(|| made.ok()).as_ref(),
+        }
     }
 
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
@@ -853,7 +847,7 @@ impl Body {
         let mut sources = sources.as_ref().clone();
         for source in sources.iter_mut().flatten() {
             if let Some(plane) = source.plane_mut() {
-                *plane = solidcraft_geom::Plane::new(
+                *plane = solidcore_record::Plane::new(
                     vector(plane.origin) + translation,
                     vector(plane.x),
                     vector(plane.y) * if reflected { -1. } else { 1. },
@@ -1049,13 +1043,21 @@ impl Body {
     }
 
     /// The exact box of the body's faces, edges and vertices (SMLib's tight box); a mesh body's
-    /// is its triangles'.
+    /// is its triangles'. Measured once per record: a boolean asks for the box of every body it
+    /// meets, and the same bodies come back feature after feature. A failure is not kept.
     pub fn exact_bounds(&self) -> Result<Aabb3> {
         if self.is_mesh() {
             return Ok(self.outline_bounds());
         }
+        // Held while measuring, so callers on other threads wait for this measurement.
+        let mut slot = self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(b) = *slot {
+            return Ok(b);
+        }
         let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
-        Ok(Aabb3 { min: v3(lo), max: v3(hi) })
+        let b = Aabb3 { min: v3(lo), max: v3(hi) };
+        *slot = Some(b);
+        Ok(b)
     }
 
     /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
@@ -1088,7 +1090,12 @@ impl Body {
     /// makes a kept timeline snapshot expensive, so it dominates the estimate.
     pub fn retained_bytes(&self) -> usize {
         if let Some(m) = &self.mesh {
-            return m.positions.len() * 24 + m.triangles.len() * 12;
+            return m
+                .positions
+                .len()
+                .saturating_mul(24)
+                .saturating_add(m.triangles.len().saturating_mul(12))
+                .saturating_add(m.corner_normals.len().saturating_mul(72));
         }
         let uses: usize = self.record.faces.iter().flat_map(|f| &f.loops).map(|l| if let Loop::Edges { edges } = l { edges.len() } else { 1 }).sum();
         self.record.faces.len() * 2048 + uses * (512 + 96)
@@ -1139,12 +1146,12 @@ impl Body {
         // A placed copy is planned as its original, moved (as `Body::mesh` shows the original's
         // mesh): the part is planned once for every copy.
         if let Some((shared, m)) = self.display_of.as_deref()
-            && brep::placement::Rigid::of_matrix(m).is_some()
+            && solidcraft_geom::brep::placement::Rigid::of_matrix(m).is_some()
         {
             return Ok(remembered(&shared.plans, t, || shared.original.mesh_plan_untimed(t))?.transformed(m));
         }
-        let (tol, turn) = t.rules(self.size());
-        let (plan, stats) = guard("mesh", || crate::tess::plan(&self.record, tol, turn))?;
+        let size = self.size();
+        let (plan, stats) = guard("mesh", || solidcore_tess::plan(&self.record, t, size).map_err(KernelError::from))?;
         // A face filled leniently has no hole on screen, but its pcurves or seams are still wrong:
         // it is reported, never silent.
         for f in &stats.lenient {
@@ -1160,7 +1167,7 @@ impl Body {
     /// The mesh of `plan`, a plan [`Body::mesh_plan`] made of this body: what [`Body::mesh`]
     /// gives at the plan's tolerance.
     pub fn mesh_of(&self, plan: &solidcraft_geom::tess::TessPlan) -> Result<Mesh> {
-        self.flagged(plan.evaluate())
+        self.flagged(solidcraft_geom::tess::EvaluateMesh::evaluate_mesh(plan))
     }
 
     /// A copy of this body that keeps the meshes made of it for reuse, for as long as the copy
@@ -1298,7 +1305,7 @@ impl Body {
     /// B-spline it is, for a sketch to project them. `None` for an edge that doesn't lie in a
     /// plane parallel to `plane`, isn't read exactly or isn't there, and for every edge of a mesh
     /// body.
-    pub fn planar_edges(&self, plane: &solidcraft_geom::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
+    pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
@@ -1531,7 +1538,7 @@ impl Body {
 /// rest at the evaluator's points (capped).
 fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
     const MAX_POINTS: usize = 4096;
-    let curve = brep::eval::CurveEval::new(e.parameters()).map_err(|err| KernelError::Invalid(err.to_string()))?;
+    let curve = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).map_err(|err| KernelError::Invalid(err.to_string()))?;
     let [t0, t1] = e.interval;
     let at = |t: f64| curve.point(t).ok_or_else(|| KernelError::Invalid(format!("edge curve has no point at {t}")));
     if let Curve::Line { .. } = e.curve {
@@ -1559,7 +1566,7 @@ fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
 fn curve_hull(c: &Curve, interval: [f64; 2], b: &mut Aabb3) {
     match c {
         Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } => {
-            if let Ok(e) = brep::eval::CurveEval::new(c) {
+            if let Ok(e) = solidcraft_geom::brep::eval::CurveEval::new(c) {
                 let [t0, t1] = interval;
                 for i in 0..=16 {
                     if let Some(p) = e.point(t0 + (t1 - t0) * f64::from(i) / 16.0) {

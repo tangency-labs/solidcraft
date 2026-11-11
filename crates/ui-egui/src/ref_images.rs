@@ -1,13 +1,14 @@
 //! Canvases and decals: the design's reference images. With the GPU viewport they are textured
 //! quads in the 3D pass (the model hides them); the CPU viewport draws them over its image.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use egui::{Color32, Mesh, Shape, TextureHandle, TextureId, pos2};
+use solidcore_record::Vec2;
 use solidcraft_engine::doc::canvas::Canvas;
-use solidcraft_engine::geom::Vec2;
 
 use crate::SolveApp;
 use crate::gpu::GpuImage;

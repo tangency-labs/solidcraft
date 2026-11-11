@@ -89,6 +89,28 @@ fn a_hidden_joint_still_drives_and_shows_while_picked() {
 }
 
 #[test]
+fn hovering_a_joint_row_lights_its_glyph_until_the_pointer_leaves() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let row = crate::scenario::handle_at("row:Hinge").unwrap();
+    h.step(&json!({"move": [row.x, row.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, Some(hinge));
+    assert!(h.app.tree.picked_joints.is_empty(), "hovering doesn't pick");
+    // Lit as a hovered body's edges are: the dark core over the light halo.
+    let t = solidcraft_theme::Tokens::get();
+    let strokes = |h: &Harness, picked| crate::dialogs_assembly::glyph_strokes(&h.app, hinge, picked, false);
+    let (core, rim) = strokes(&h, false);
+    assert_eq!((core.color, rim.map(|r| r.color)), (t.hover_edge, Some(t.hover_edge_halo)));
+    assert!(rim.unwrap().width > core.width);
+    // Picked, it takes the selection's core and rim, hovered or not.
+    let (core, rim) = strokes(&h, true);
+    assert_eq!((core.color, rim.map(|r| r.color)), (t.sel_edge, Some(t.sel_edge_rim)));
+    h.step(&json!({"move": [5, 5]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, None);
+    assert_eq!(strokes(&h, false), (egui::Stroke::new(1.5, t.accent), None), "an unlit glyph has no rim");
+}
+
+#[test]
 fn the_menu_and_the_v_key_hide_and_show_picked_joints() {
     let mut h = harness();
     let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
@@ -141,6 +163,11 @@ fn each_placement_lists_the_joints_that_attach_it() {
     assert_eq!(rows("Glue").len(), 1, "Glue doesn't attach B");
     let at = crate::scenario::handle_at("row:Hinge").unwrap();
     assert_eq!(at.y, hinges[1], "the row clicked below is B's");
+    // Hovering B's row lights the glyph as the root's row does.
+    h.step(&json!({"move": [at.x, at.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, Some(hinge));
+    h.step(&json!({"move": [5, 5]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, None);
 
     h.step(&json!({"click": {"handle": "row:Hinge"}, "double": true})).unwrap();
     h.frames(3);
@@ -401,5 +428,27 @@ mod delete {
         assert_eq!(features(&h), before);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
+    }
+}
+
+/// Edit Joint Limits has its own id, so `ui.menuPick` tells it from Edit Joint, and it opens the
+/// joint's dialog on its Limits (#10745).
+#[test]
+fn edit_joint_limits_opens_the_limits_and_has_its_own_id() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let items = context_menu::items(&h.app, &Target::Joint { id: hinge });
+    let ids = |label: &str| items.iter().filter(|i| i.label == label).map(|i| i.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids("Edit Joint"), ["ui.editJoint"]);
+    assert_eq!(ids("Edit Joint Limits"), ["ui.editJointLimits"]);
+
+    for (item, limits) in [("ui.editJoint", false), ("ui.editJointLimits", true)] {
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(2);
+        h.call("ui.menu", json!({"x": 150, "y": 400, "target": {"type": "joint", "id": hinge}}));
+        assert_eq!(h.call("ui.menuPick", json!({"item": item}))["ok"], true, "{item}");
+        h.frames(3);
+        assert!(h.app.dialog.is_some(), "{item} opens the joint's dialog");
+        assert_eq!(h.widget("Angle limits").is_some(), limits, "{item}: the Limits section open");
     }
 }

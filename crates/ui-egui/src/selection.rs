@@ -3,8 +3,9 @@
 //! selection. The pure parts are unit tested; the viewport uses them.
 
 use egui::{Pos2, Rect};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::viewport::Hit;
 
@@ -23,6 +24,7 @@ pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 
     let point = |s: &Sel| match s {
         Sel::SketchPoint { id } => Some(serde_json::json!(id)),
         Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        // Horizontal/Vertical takes no origin axis yet: a selection with one isn't consumed.
         _ => None,
     };
     let (a, b) = (point(a)?, point(b)?);
@@ -36,6 +38,8 @@ pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value
     let operand = |s: &Sel| match s {
         Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
         Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        // An origin axis, either operand: the command projects it into the sketch.
+        Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Some(serde_json::json!({"axis": name})),
         _ => None,
     };
     let (a, b) = (operand(a)?, operand(b)?);
@@ -43,7 +47,7 @@ pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value
 }
 
 /// The current middle of a finite straight sketch edge.
-pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize) -> Option<solidcraft_engine::geom::Vec2> {
+pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize) -> Option<solidcore_record::Vec2> {
     let curve = sk.curves.get(line)?;
     if curve.infinite {
         return None;
@@ -98,18 +102,36 @@ pub struct SelInput {
     /// Face picks are places on the face, not the face: several on one face add up (a click on
     /// the very spot of one takes it out). For points that pick pieces a face is cut into.
     pub places: bool,
+    /// What the input is for, as a message id: its tooltip, and the note a click that picks
+    /// nothing leaves under the form (#10428). Without one the tooltip names what it takes.
+    pub tip: Option<&'static str>,
     pub items: Vec<Sel>,
 }
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, places: false, items: Vec::new() }
+        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new() }
     }
 
     /// This input with face picks as places (see [`SelInput::places`]).
     pub fn places(mut self) -> SelInput {
         self.places = true;
         self
+    }
+
+    /// This input with a tooltip saying what it is for (see [`SelInput::tip`]).
+    pub fn tip(mut self, id: &'static str) -> SelInput {
+        self.tip = Some(id);
+        self
+    }
+
+    /// Joint-origin inputs (`SNAPS`) have no snap for a sketch curve: `fits`/`accepts` let
+    /// `Sel::SketchCurve` through via its `AXES` bit, but `snap_of` can't resolve it. Reject it
+    /// here so every path into a `SNAPS` input shares one definition. Only an input that takes
+    /// exactly the joint-origin kinds: one that takes more besides them (Measure's items take
+    /// sketch curves too) handles them itself.
+    pub fn rejects(&self, sel: &Sel) -> bool {
+        self.accept == crate::dialogs_assembly::SNAPS && matches!(sel, Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. })
     }
 
     /// The selection a hit stands for, if this input accepts it. A curve of another sketch than
@@ -126,6 +148,7 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
+            Hit::SketchPoint3d { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
             // A straight sketch line stands for an axis only in an input that takes axes for
             // what they are: an input that takes curves too (Measure) takes the line as its curve.
             Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 && a & CURVES == 0 => Some(curve_pick(id, *sketch, active)),
@@ -370,7 +393,7 @@ fn segments_cross(p: Pos2, q: Pos2, r: Pos2, s: Pos2) -> bool {
 mod tests {
     use super::*;
     use egui::pos2;
-    use solidcraft_engine::render::{Camera, StandardView};
+    use solidcraft_viewport::{Camera, StandardView};
 
     #[test]
     fn origin_widget_keeps_its_screen_size() {

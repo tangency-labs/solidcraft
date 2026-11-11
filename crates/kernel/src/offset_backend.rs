@@ -12,9 +12,10 @@
 //! ([`FaceOrigin::Offset`]), and its edges as where its faces meet. A face SMLib makes new along
 //! a sheet's open edge (a thickened sheet's wall) is recorded as made in place of that edge.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_smlib::{Brep, CheckLevel, Error as SmError};
 
 use crate::body::Body;
@@ -145,7 +146,7 @@ pub(crate) fn thicken(b: &Body, thickness: f64, symmetric: bool) -> Result<Body>
 /// tilted by `angle` about their lines on `neutral`, leaning in going along `pull`; the faces
 /// around them extended or trimmed to meet them. A tilted face is the face itself (Modified).
 /// A face SMLib can't draft (not flat, or not parallel to the pull) is "not supported yet".
-pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcraft_geom::Plane, pull: Vec3, angle: f64) -> Result<Body> {
+pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcore_record::Plane, pull: Vec3, angle: f64) -> Result<Body> {
     if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 - 1e-3 {
         return Err(KernelError::Invalid("draft angle must be between −90° and 90°".into()));
     }

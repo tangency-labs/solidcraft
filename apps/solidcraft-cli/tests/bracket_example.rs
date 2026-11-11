@@ -1,10 +1,11 @@
 //! The bracket example must cut two through holes, rather than successfully cutting empty
 //! space beside the body. Check the shipped script and rebuild its saved design from scratch.
 
+use solidcraft_engine::geom::MeshGeom;
 use std::f64::consts::PI;
 
 use serde_json::Value;
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_engine::{Session, io, kernel};
 
 fn assert_two_through_holes(session: &Session, stage: &str) {

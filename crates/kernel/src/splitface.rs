@@ -17,12 +17,14 @@
 //! point. Every patch's normal points to the tool's positive side: a plane's normal, a face's
 //! outward side, the left of a sketch curve (inside a closed one, counter-clockwise).
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
+use solidcore_record::brep::{self, Frame, Surface};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::Aabb3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::brep::{self, Frame, Surface};
 use solidcraft_geom::tess::uv::Starts;
-use solidcraft_geom::{Aabb3, Plane, Seg2, Vec2, Vec3};
 
 use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceOrigin, History};

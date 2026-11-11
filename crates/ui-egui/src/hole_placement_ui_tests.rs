@@ -6,9 +6,11 @@
 //! looks the face up once for every point near the cursor.
 
 use serde_json::{Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::FeatureKind;
-use solidcraft_engine::geom::{Aabb3, Vec2, Vec3};
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::{CurveKind, LinkKind, SPoint};
 
 use crate::dialogs::Kind;
@@ -783,7 +785,8 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
         gap.x.max(gap.y).max(gap.z) <= 1e-3
     };
     let (body_tris, face_tris, near_tris) = (m.triangles.len(), face.len(), face.iter().filter(|t| near_points(t)).count());
-    assert!(body_tris >= 2 * face_tris, "the body has other faces: {body_tris} and {face_tris} triangles");
+    // Other faces exist (the flat caps are two triangles each now, so the curved side can be most of the body).
+    assert!(body_tris > face_tris, "the body has other faces: {body_tris} and {face_tris} triangles");
     Cluster { h, many, click, body_tris, face_tris, near_tris }
 }
 

@@ -20,12 +20,16 @@ pub mod easyprint;
 pub mod frames;
 pub mod fuzz;
 pub mod licences;
+mod mesh_lines;
 pub mod occurrences;
+pub mod origins;
+pub mod panels;
 pub mod params;
 pub mod product_scene;
 pub mod recovery;
 pub mod render_jobs;
 pub mod render_lights;
+pub mod render_preparation;
 pub mod sample;
 pub mod schema;
 #[cfg(not(target_arch = "wasm32"))]
@@ -38,21 +42,23 @@ pub mod status_items;
 pub mod timing;
 pub mod view;
 
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Model, ModelState};
-use solidcraft_geom::Vec3;
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command,
-    resolve_design_links, shown_scope, standard_view,
+    Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach,
+    find_command, resolve_design_links, shown_scope, standard_view,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
+pub use solidcraft_geom::note;
 pub use solidcraft_io as io;
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_profile as profile;
@@ -65,6 +71,8 @@ pub const MAX_LINE: usize = 16 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
+    #[error("{text}", text = panels::commands::error_text(.0.clone()))]
+    Panel(#[from] panels::PanelError),
     #[error("unknown command `{0}`{hint}", hint = cmd::did_you_mean(.0))]
     UnknownCommand(String),
     #[error("`{0}` is not available right now: {1}")]
@@ -80,6 +88,10 @@ pub enum EngineError {
     /// A command panicked; the document was kept as it was (a bug: please report it).
     #[error("internal error in `{0}` (the design was kept as it was): {1}")]
     Internal(String, String),
+    /// The work running the command was cancelled ([`solidcraft_doc::progress::Progress::cancel`])
+    /// while it ran: nothing was applied, whatever was computed before the cancel came in.
+    #[error("`{0}` was cancelled; nothing was applied")]
+    Cancelled(String),
 }
 
 impl From<solidcraft_doc::DocError> for EngineError {
@@ -345,16 +357,23 @@ impl Ahead {
     /// [`Ahead::evaluate`], setting `step` to the number of the command running (from 1), so a
     /// front end can say how far a batch has got.
     pub fn evaluate_counting(self, commands: &[(String, Value)], step: &std::sync::atomic::AtomicUsize) -> Result<Evaluated> {
-        let (after, _) = self.0.preview_in_place(commands, Some(step))?;
-        after.world_state()?.warm_display();
-        Ok(Evaluated(after.model))
+        let stop = self.0.stop.clone();
+        stop.within(|| {
+            let (after, _) = self.0.preview_in_place(commands, Some(step))?;
+            // Stopped by its watcher: nothing it ends with will be shown.
+            if !solidcraft_doc::progress::cancelled() {
+                after.world_state()?.warm_display();
+            }
+            Ok(Evaluated(after.model))
+        })
     }
 
     /// Run `commands` one after another, each reply or error in turn (what they evaluate stays
     /// in the shared evaluation cache): the checks a front end makes before a command, such as
     /// what a delete takes with it (#2678), computed off its window thread.
     pub fn replies(mut self, commands: &[(String, Value)]) -> Vec<Result<Value>> {
-        commands.iter().map(|(id, params)| self.0.execute(id, params)).collect()
+        let stop = self.0.stop.clone();
+        stop.within(|| commands.iter().map(|(id, params)| self.0.execute(id, params)).collect())
     }
 }
 
@@ -509,6 +528,10 @@ pub struct Session {
     pub(crate) followed: Option<cmd::inspect::Followed>,
     /// Project a face's edges into a sketch created on it (the default; `sketch.auto_project`).
     pub auto_project: bool,
+    /// Project, Intersect, Include 3D Geometry and the face edges projected into a new sketch
+    /// make construction geometry rather than normal geometry (off by default; #13142). A
+    /// preference, kept like `auto_project` when another design is opened or started.
+    pub project_construction: bool,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -530,6 +553,10 @@ pub struct Session {
     /// not a move of the design's, so the placements the design reports and Capture Position
     /// keeps leave it out ([`Session::uncaptured_moves`]).
     pub exploded: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// Stops the work computing off the window thread for this design, shared with its copies.
+    stop: solidcraft_kernel::Stop,
+    /// A copy of a design ([`Session::scratch`]), sharing its token.
+    is_copy: bool,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
     /// The design the joints were last solved for, as the solve left it, and the model it read
     /// (see [`Session::solve_joints`]).
@@ -600,7 +627,7 @@ pub struct Session {
     /// The camera `view.apply` asked the view to use (view state, not saved). The desktop app
     /// moves its viewport there and takes it; headless renders keep using it until a standard
     /// view is chosen.
-    pub camera: Option<render::Camera>,
+    pub camera: Option<solidcraft_viewport::Camera>,
     /// Host-owned viewport metadata, never saved or included in history.
     render_viewport: Option<Arc<render::ExecutorDescriptor>>,
     render_jobs: render_jobs::Jobs,
@@ -620,8 +647,7 @@ pub struct Session {
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
-    /// Full model evaluations (`refresh`), for tests.
-    #[cfg(test)]
+    /// Live-model evaluations after this session's initialization; never serialized.
     pub(crate) evaluations: usize,
     /// Resolved associative trace inputs, independent of the document revision and view state.
     pub(crate) motion_traces: cmd::motion::associative::Cache,
@@ -725,8 +751,8 @@ pub enum CombPick {
 
 impl SurfaceAnalysis {
     /// How a picture shades the faces for this analysis.
-    pub fn mode(self) -> render::AnalysisMode {
-        use render::AnalysisMode as M;
+    pub fn mode(self) -> solidcraft_viewport::AnalysisMode {
+        use solidcraft_viewport::AnalysisMode as M;
         match self {
             SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes },
             SurfaceAnalysis::Draft { pull, angle } => M::Draft { pull, angle },
@@ -790,6 +816,8 @@ impl Session {
     /// A session on `doc` evaluated as `model`, with what it hides.
     pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
         Session {
+            stop: Default::default(),
+            is_copy: false,
             saved: doc.clone(),
             doc,
             model,
@@ -812,6 +840,7 @@ impl Session {
             document_id: cmd::inspect::new_document_id(),
             followed: None,
             auto_project: true,
+            project_construction: false,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             live_links: None,
@@ -855,7 +884,6 @@ impl Session {
             camera: None,
             render_viewport: None,
             render_jobs: Default::default(),
-            #[cfg(test)]
             evaluations: 0,
             motion_traces: Default::default(),
             command_check: None,
@@ -870,7 +898,13 @@ impl Session {
     /// design before the batch, which is what the batch promised (#3242). The design is what a
     /// checkpoint keeps, not the replaced session's file path (docs/mcp.md).
     pub fn replace_design(&mut self, fresh: Session) {
+        // Nothing still computing for the design that leaves has anywhere to go. A copy leaves
+        // the design it came from going, and its token with it.
+        if !self.is_copy {
+            self.stop_computing();
+        }
         let auto_project = self.auto_project;
+        let project_construction = self.project_construction;
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
@@ -888,6 +922,7 @@ impl Session {
         self.crash_journal = crash_journal;
         self.command_check = command_check;
         self.auto_project = auto_project;
+        self.project_construction = project_construction;
         // The user's, like `auto_project`: the commands that open a design evaluate it under it
         // already (`Session::opened_validating`).
         self.set_validation(validation);
@@ -899,6 +934,19 @@ impl Session {
         self.checkpoints = checkpoints;
         self.next_checkpoint = next_checkpoint;
         self.replacements = replacements;
+    }
+
+    /// The token over the work running off the window thread for this design, on any of its
+    /// copies: a job started from a copy runs [`solidcraft_kernel::Stop::within`] it.
+    pub fn stop_token(&self) -> solidcraft_kernel::Stop {
+        self.stop.clone()
+    }
+
+    /// This design is going away: the work still computing for it stops at the kernel's next
+    /// check, and its results go nowhere (they are only ever for this design's evaluation cache).
+    /// A kernel call that doesn't check runs to its end, on a kernel of its own, holding up nothing.
+    pub fn stop_computing(&self) {
+        self.stop.stop();
     }
 
     /// Install (or with `None` remove) the check [`Session::execute`] runs before every command,
@@ -927,9 +975,16 @@ impl Session {
         }
     }
 
-    /// The design has changes not in its file: in the document, or in what is hidden.
+    /// The design has changes not in its file: in the document, in what is hidden, or a
+    /// component moved and not captured yet (#9736).
     pub fn is_dirty(&self) -> bool {
-        self.document_differs() || self.visibility != self.saved_visibility
+        self.document_differs() || self.visibility != self.saved_visibility || self.moved_uncaptured()
+    }
+
+    /// A component was moved and its position not captured yet (#9736). The placements of an
+    /// exploded view shown are not such a move: they last only while it is shown.
+    pub fn moved_uncaptured(&self) -> bool {
+        !self.pending_moves.is_empty() && !cmd::motion::shows_exploded_view(self)
     }
 
     /// The document is not the one its file holds: compared once per pair of documents and
@@ -1101,8 +1156,9 @@ impl Session {
         self.model.forget_fingerprints();
     }
 
-    /// Prepared placements only: optional save caches must not compute a cold world.
-    pub(crate) fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
+    /// Prepared placements only: optional save caches must not compute a cold world. `None`
+    /// when the design has components and nothing has placed them since it last changed.
+    pub fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
         let state = self.model.state();
         if self.doc.occurrences.is_empty() {
             return Some(state);
@@ -1174,7 +1230,7 @@ impl Session {
                 for sketch in w.sketches.iter_mut().filter(|sk| self.doc.feature(sk.feature).is_some_and(|f| f.component == self.active_component)) {
                     let sketch = Arc::make_mut(sketch);
                     let plane = sketch.plane;
-                    sketch.plane = solidcraft_geom::Plane::new(
+                    sketch.plane = solidcore_record::Plane::new(
                         solidcraft_doc::apply_point(&delta, plane.origin),
                         solidcraft_doc::apply_vector(&delta, plane.x),
                         solidcraft_doc::apply_vector(&delta, plane.y),
@@ -1231,16 +1287,25 @@ impl Session {
 
     /// A component by its id or name, or by the name of one of its placements (`K:2`); never the
     /// root.
-    pub(crate) fn component_or_placement(&self, key: &str) -> Option<u64> {
-        self.doc.find_component(key).or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component)).filter(|id| *id != 0)
+    pub(crate) fn component_or_placement(&self, key: &str) -> solidcraft_doc::Result<Option<u64>> {
+        Ok(self
+            .doc
+            .resolve_component(key)?
+            .or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component))
+            .filter(|id| *id != 0))
+    }
+
+    /// Number of live-model evaluations after this session's initialization.
+    /// Construction, other sessions and trial evaluations of cloned models are
+    /// excluded. This is not a count of all geometry work. Reading the counter
+    /// never evaluates geometry or warms display meshes.
+    pub fn evaluation_count(&self) -> usize {
+        self.evaluations
     }
 
     pub fn refresh(&mut self) {
         if self.model.evaluate_shared(&self.doc) {
-            #[cfg(test)]
-            {
-                self.evaluations += 1;
-            }
+            self.evaluations = self.evaluations.saturating_add(1);
         }
         self.revision += 1;
         self.prune_occurrence_state();
@@ -1265,10 +1330,7 @@ impl Session {
                     break;
                 }
                 self.model.evaluate(&self.doc);
-                #[cfg(test)]
-                {
-                    self.evaluations += 1;
-                }
+                self.evaluations = self.evaluations.saturating_add(1);
             }
         }
         cmd::motion::associative::refresh(self);
@@ -1609,6 +1671,12 @@ impl Session {
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        if panels::commands::is_command(spec.id) {
+            // Layout is application state. Even a missing capability must not
+            // clear live links, map picks, snapshot, evaluate or refresh a design.
+            panels::commands::parse_command(spec.id, params)?;
+            return Err(EngineError::Panel(panels::error(panels::Rule::Capability, "application layout backend was not injected")));
+        }
         // The command, the evaluation it causes and the refresh after it: one profiler span.
         let _span = solidcraft_profile::span("command", spec.id);
         let host_viewport = self.render_viewport.clone();
@@ -1640,6 +1708,9 @@ impl Session {
         // Picks in the world go into their component's frame (once: commands run by commands
         // already have them there).
         let (_nested, outermost) = frames::Nested::enter(spec.id);
+        if outermost {
+            frames::reset_inner_undoable();
+        }
         let mapped = if outermost {
             frames::forget_picks();
             frames::to_local(self, spec.id, params)?
@@ -1663,9 +1734,21 @@ impl Session {
                 Err(EngineError::Internal(spec.id.to_string(), msg))
             }
         };
+        // Cancelled while it ran: no result, even one finished before the cancel came in, and
+        // the design goes back as it was (solidcore#3247). Opening, starting or recovering a
+        // design (which replaces the session) keeps its own Cancel: the features not yet built
+        // are skipped and what is built so far is shown (#10577).
+        let r = if solidcraft_doc::progress::cancelled() && self.replacements == replacements {
+            Err(EngineError::Cancelled(spec.id.to_string()))
+        } else {
+            r
+        };
         // The kernel's internal errors come up without the command's id.
         let r = r.map_err(|e| match e {
-            EngineError::Internal(id, msg) if id.is_empty() => EngineError::Internal(spec.id.to_string(), msg),
+            EngineError::Internal(id, msg) if id.is_empty() => {
+                crash::kernel_caught();
+                EngineError::Internal(spec.id.to_string(), msg)
+            }
             e => e,
         });
         // A value typed as `name = expression` defines the user parameter `name` (#4071), in the
@@ -1717,7 +1800,18 @@ impl Session {
                     let render_only = self.replacements == replacements && self.render_only_change(&before);
                     let display_only = !changed && hidden;
                     let previous_doc = before.doc.clone();
-                    if spec.undoable {
+                    // One undo step per command: the outermost one saves it, for itself or for an
+                    // undoable command it ran (#12393), unless it replaced the session (opening a design starts
+                    // a fresh history). A command run inside another saves none.
+                    let saves = if outermost {
+                        spec.undoable || (frames::inner_undoable() && self.replacements == replacements)
+                    } else {
+                        if spec.undoable {
+                            frames::note_inner_undoable();
+                        }
+                        false
+                    };
+                    if saves {
                         self.undo.push(before);
                         if self.undo.len() > MAX_UNDO {
                             self.undo.remove(0);
@@ -1752,6 +1846,11 @@ impl Session {
                 Err(e)
             }
         };
+        // A sketch open for editing that failed (a projected edge lost by name) is still shown, its
+        // lost link marked, so it can be repaired from inside it (#12085).
+        if outermost {
+            self.model.hold_failed_sketch(&self.doc, self.active_sketch);
+        }
         if let Some((before, changed, failed)) = crash_outcome {
             // Refresh and body-name pinning can copy the shared document. Remember the final
             // document, so the next command does not mistake that work for an outside edit
@@ -1766,7 +1865,14 @@ impl Session {
     fn define_inline(&mut self, id: &str, mut v: Value) -> Result<Value> {
         let mut doc = (*self.doc).clone();
         let defined = doc.define_inline().map_err(|e| EngineError::BadParams { cmd: id.to_string(), msg: e.to_string() })?;
-        let Some(first) = defined.first() else { return Ok(v) };
+        let Some(first) = defined.first() else {
+            // Only definitions of parameters that already exist, typed again as they were made:
+            // nothing new to report, but the text now names the parameter.
+            if doc != *self.doc {
+                self.doc = Arc::new(doc);
+            }
+            return Ok(v);
+        };
         if let Some(out) = v.as_object_mut() {
             out.insert("defined".into(), serde_json::json!(first.name));
             out.insert("definitions".into(), serde_json::json!(defined));
@@ -1861,6 +1967,8 @@ impl Session {
     /// commands on without touching this one.
     pub fn scratch(&self) -> Session {
         Session {
+            stop: self.stop.clone(),
+            is_copy: true,
             doc: self.doc.clone(),
             model: self.model.clone(),
             undo: Vec::new(),
@@ -1883,6 +1991,7 @@ impl Session {
             document_id: self.document_id.clone(),
             followed: None,
             auto_project: self.auto_project,
+            project_construction: self.project_construction,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             live_links: None,
@@ -1928,7 +2037,6 @@ impl Session {
             render_viewport: self.render_viewport.clone(),
             render_jobs: self.render_jobs.scratch(),
             saved_visibility: self.saved_visibility.clone(),
-            #[cfg(test)]
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
@@ -1951,6 +2059,23 @@ impl Session {
         }
         let mut expected = (*original.doc).clone();
         expected.marker = source.doc.marker;
+        // Rolling the marker solves the joints again and stores where that puts each occurrence.
+        if expected.occurrences.len() == source.doc.occurrences.len() {
+            for (e, s) in expected.occurrences.iter_mut().zip(&source.doc.occurrences) {
+                if e.id == s.id {
+                    e.transform = s.transform;
+                }
+            }
+        }
+        // ...and works out each coupled joint's ratio and lift from the faces at that marker.
+        if expected.assembly.links.len() == source.doc.assembly.links.len() {
+            for (e, s) in expected.assembly.links.iter_mut().zip(&source.doc.assembly.links) {
+                if (e.a, e.ia, e.b, e.ib) == (s.a, s.ia, s.b, s.ib) {
+                    e.ratio = s.ratio;
+                    e.lift = s.lift.clone();
+                }
+            }
+        }
         if expected != *source.doc {
             return Err(EngineError::Other("the original editor model does not match its source design".into()));
         }
@@ -1958,6 +2083,16 @@ impl Session {
     }
 
     fn compute_commands_inner(
+        self,
+        commands: &[(String, Value)],
+        marker: Option<Option<usize>>,
+        original: Option<Session>,
+    ) -> Result<ComputedCommands> {
+        let stop = self.stop.clone();
+        stop.within(|| self.compute_commands_under(commands, marker, original))
+    }
+
+    fn compute_commands_under(
         self,
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
@@ -2233,16 +2368,7 @@ impl Session {
     }
 
     fn run_script_with(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Option<Value>)> {
-        let list = match script {
-            Value::Array(a) => a.clone(),
-            Value::Object(o) => {
-                o.get("commands").and_then(Value::as_array).cloned().ok_or_else(|| EngineError::Other("script: missing `commands` array".into()))?
-            }
-            _ => return Err(EngineError::Other("script must be a JSON array or {\"commands\": [...]}".into())),
-        };
-        if list.len() > 100_000 {
-            return Err(EngineError::Other("script too long".into()));
-        }
+        let list = script_steps(script)?;
         let mut out = Vec::new();
         let mut steps = Vec::new();
         let clock = timing::Clock::start();
@@ -2268,6 +2394,21 @@ impl Session {
         let timings = profile.map(|_| serde_json::json!({"timings": steps, "total_ms": timing::round_ms(clock.ms())}));
         Ok((out, timings))
     }
+}
+
+/// A script's steps: the JSON array itself, or the `commands` array of an object; at most 100 000.
+pub fn script_steps(script: &Value) -> Result<&Vec<Value>> {
+    let list = match script {
+        Value::Array(a) => a,
+        Value::Object(o) => {
+            o.get("commands").and_then(Value::as_array).ok_or_else(|| EngineError::Other("script: missing `commands` array".into()))?
+        }
+        _ => return Err(EngineError::Other("script must be a JSON array or {\"commands\": [...]}".into())),
+    };
+    if list.len() > 100_000 {
+        return Err(EngineError::Other("script too long".into()));
+    }
+    Ok(list)
 }
 
 #[cfg(test)]
@@ -2297,7 +2438,11 @@ mod hole_reference_tests;
 #[cfg(test)]
 mod large_assembly_tests;
 #[cfg(test)]
+mod loft_sheet_tests;
+#[cfg(test)]
 mod measure_centre_tests;
+#[cfg(test)]
+mod measure_surface_tests;
 #[cfg(test)]
 mod naming_history_tests;
 #[cfg(test)]
@@ -2362,6 +2507,7 @@ fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &ren
 /// to be decided on here.
 fn same_but_features(a: &Document, b: &Document) -> bool {
     let Document {
+        newer_file: _,
         render,
         format,
         format_pending,
@@ -2396,6 +2542,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        notes,
         visibility,
         next_component_color_index,
     } = a;
@@ -2432,6 +2579,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
         && *named_views == b.named_views
+        && *notes == b.notes
         && *visibility == b.visibility
         && *next_component_color_index == b.next_component_color_index
 }

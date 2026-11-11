@@ -6,6 +6,9 @@
 //! edge (face) nearest to it, which must lie within `tolerance` of it and be nearer than any other
 //! by more than the body's modelling tolerance ([`Error::NoMatch`], [`Error::Ambiguous`]).
 
+use serde_json::json;
+
+use crate::trace::{self, PickKind};
 use crate::{Brep, Error, Result, core};
 
 /// How [`Brep::boolean`] combines two bodies.
@@ -15,6 +18,17 @@ pub enum BooleanOp {
     /// The first body minus the second.
     Subtract,
     Intersect,
+}
+
+impl BooleanOp {
+    /// The operation's name in a trace ([`crate::trace`]).
+    pub fn word(self) -> &'static str {
+        match self {
+            BooleanOp::Union => "union",
+            BooleanOp::Subtract => "subtract",
+            BooleanOp::Intersect => "intersect",
+        }
+    }
 }
 
 /// What [`Brep::blend`] makes of each selected edge.
@@ -30,6 +44,42 @@ pub enum Blend {
     Chord,
     /// An equal-distance chamfer ([`Brep::chamfer`]): the size is the setback along each face.
     Chamfer,
+}
+
+impl Blend {
+    /// The section's name in a trace ([`crate::trace`]).
+    pub fn word(self) -> &'static str {
+        match self {
+            Blend::Round => "round",
+            Blend::Curvature => "curvature",
+            Blend::Chord => "chord",
+            Blend::Chamfer => "chamfer",
+        }
+    }
+}
+
+/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
+/// both on a plane (the rounds along a boss's base, at its upright edges): the turn of
+/// [`Brep::blend_dropping`]'s rounds ([`Blend::Round`] only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Turn {
+    /// The rounds run on to where they cross and meet in a mitre, the plane section of the two.
+    #[default]
+    Mitre,
+    /// The rounds end on their sections at the side edge, and the corner's face is that section
+    /// revolved about the side edge, an exact torus tangent to both rounds. A corner where this
+    /// is not built is [`Error::TurnRefused`].
+    Swept,
+}
+
+impl Turn {
+    /// The turn's name in a trace ([`crate::trace`]).
+    pub fn word(self) -> &'static str {
+        match self {
+            Turn::Mitre => "mitre",
+            Turn::Swept => "swept",
+        }
+    }
 }
 
 /// The second side of [`Brep::chamfer_sides`].
@@ -69,7 +119,9 @@ impl Brep {
     /// as one body, counted by [`Brep::solid_count`]. Tagged operands ([`Brep::tagged`]) give a
     /// result whose [`Brep::history`] says where each face and edge came from.
     pub fn boolean(&self, other: &Brep, op: BooleanOp) -> Result<Option<Brep>> {
-        core::boolean::boolean(self.core(), other.core(), op).map(|r| r.map(Brep::made_core))
+        let r = core::boolean::boolean(self.core(), other.core(), op).map(|r| r.map(Brep::made_core));
+        trace::maybe("boolean", &[self, other], &r, || json!({"op": op.word()}));
+        r
     }
 
     /// The union of `breps` in one call: they are unioned pairwise, level by level, so none takes
@@ -81,21 +133,27 @@ impl Brep {
             return Err(Error::Argument);
         }
         let bodies: Vec<&core::Body> = breps.iter().map(|b| b.core()).collect();
-        core::boolean::union_all(&bodies).map(Brep::made_core)
+        let r = core::boolean::union_all(&bodies).map(Brep::made_core);
+        trace::made("union_all", breps, &r, || json!({}));
+        r
     }
 
     /// `self` and `other`, sheets of planar faces on one plane ([`Brep::planar_faces`]), combined
     /// as regions of that plane by `op`: `None` when the result is empty. The result's edges are
     /// the inputs' own curves, split where they cross.
     pub fn boolean2d(&self, other: &Brep, op: BooleanOp) -> Result<Option<Brep>> {
-        core::boolean::boolean2d(self.core(), other.core(), op).map(|r| r.map(Brep::made_core))
+        let r = core::boolean::boolean2d(self.core(), other.core(), op).map(|r| r.map(Brep::made_core));
+        trace::maybe("boolean2d", &[self, other], &r, || json!({"op": op.word()}));
+        r
     }
 
     /// `self` with each face `tool` meets cut along the intersection, the pieces kept as faces of
     /// one body: `None` when the tool meets no face. Tagged operands give the pieces' history
     /// (each piece is a split of the face it was cut from).
     pub fn imprint(&self, tool: &Brep) -> Result<Option<Brep>> {
-        core::boolean::imprint(self.core(), tool.core()).map(|r| r.map(Brep::made_core))
+        let r = core::boolean::imprint(self.core(), tool.core()).map(|r| r.map(Brep::made_core));
+        trace::maybe("imprint", &[self, tool], &r, || json!({}));
+        r
     }
 
     /// The number of separate solid regions (voids not counted).
@@ -106,14 +164,18 @@ impl Brep {
     /// The edges nearest to `edges` (each within `tolerance`), exactly those, rounded
     /// at `radius`.
     pub fn fillet(&self, edges: &[[f64; 3]], tolerance: f64, radius: f64) -> Result<Brep> {
-        self.core_blend(Blend::Round, edges, &[radius], tolerance, &[], &[], core::blend::Corners::Filled)
+        let r = self.core_blend(Blend::Round, edges, &[radius], tolerance, &[], &[], core::blend::Corners::Filled);
+        trace::made("fillet", &[self], &r, || json!({"edges": trace::picks(self, PickKind::Edge, edges, tolerance), "radius": radius}));
+        r
     }
 
     /// The edges nearest to `edges` (each within `tolerance`), exactly those, cut by
     /// an equal-distance chamfer `distance` back along each face (measured at each edge's
     /// midpoint), with bevelled corners.
     pub fn chamfer(&self, edges: &[[f64; 3]], tolerance: f64, distance: f64) -> Result<Brep> {
-        self.core_blend(Blend::Chamfer, edges, &[distance], tolerance, &[], &[], core::blend::Corners::Filled)
+        let r = self.core_blend(Blend::Chamfer, edges, &[distance], tolerance, &[], &[], core::blend::Corners::Filled);
+        trace::made("chamfer", &[self], &r, || json!({"edges": trace::picks(self, PickKind::Edge, edges, tolerance), "distance": distance}));
+        r
     }
 
     /// The edges nearest to `edges` (each within `tolerance`), exactly those, blended
@@ -122,17 +184,33 @@ impl Brep {
         if edges.len() > MAX_POINTS || edges.is_empty() || sizes.len() != edges.len() {
             return Err(Error::Argument);
         }
-        self.core_blend(kind, edges, sizes, tolerance, &[], &[], core::blend::Corners::Filled)
+        let r = self.core_blend(kind, edges, sizes, tolerance, &[], &[], core::blend::Corners::Filled);
+        trace::made(
+            "blend",
+            &[self],
+            &r,
+            || json!({"kind": kind.word(), "edges": trace::picks(self, PickKind::Edge, edges, tolerance), "sizes": sizes}),
+        );
+        r
     }
 
     /// [`Brep::blend`], with whether each point picked an edge that a larger round, overflowing
     /// its faces, removed whole: that edge is gone and not rounded (SMLib rounds the edges whose
-    /// blends overflow first, then what is left of the others).
-    pub fn blend_dropping(&self, kind: Blend, edges: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<(Brep, Vec<bool>)> {
+    /// blends overflow first, then what is left of the others). Two rounds turn at a side edge as
+    /// `turn` says; [`Turn::Swept`] is for [`Blend::Round`] only ([`Error::Argument`] otherwise).
+    pub fn blend_dropping(&self, kind: Blend, turn: Turn, edges: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<(Brep, Vec<bool>)> {
         if edges.len() > MAX_POINTS || edges.is_empty() || sizes.len() != edges.len() {
             return Err(Error::Argument);
         }
-        core::blend::blend_dropping(self.core(), kind, edges, sizes, tolerance).map(|(b, d)| (Brep::made_core(b), d))
+        let r = core::blend::blend_dropping(self.core(), kind, turn, edges, sizes, tolerance).map(|(b, d)| (Brep::made_core(b), d));
+        trace::call(
+            "blend_dropping",
+            &[self],
+            &r,
+            |(b, _)| vec![b.id],
+            || json!({"kind": kind.word(), "turn": turn.word(), "edges": trace::picks(self, PickKind::Edge, edges, tolerance), "sizes": sizes}),
+        );
+        r
     }
 
     /// [`Brep::blend`] with corner setbacks: each of `corners` picks the vertex nearest it
@@ -158,7 +236,12 @@ impl Brep {
         {
             return Err(Error::Argument);
         }
-        self.core_blend(kind, edges, sizes, tolerance, corners, setbacks, core::blend::Corners::Filled)
+        let r = self.core_blend(kind, edges, sizes, tolerance, corners, setbacks, core::blend::Corners::Filled);
+        trace::made("blend_setback", &[self], &r, || {
+            json!({"kind": kind.word(), "edges": trace::picks(self, PickKind::Edge, edges, tolerance), "sizes": sizes,
+                "corners": trace::picks(self, PickKind::Vertex, corners, tolerance), "setbacks": setbacks})
+        });
+        r
     }
 
     /// [`Brep::blend_setback`] with each set-back corner left open: SMLib's patch between the
@@ -184,8 +267,19 @@ impl Brep {
         {
             return Err(Error::Argument);
         }
-        core::blend::blend_holes(self.core(), kind, edges, sizes, tolerance, corners, setbacks, core::blend::Corners::Open)
-            .map(|(b, holes)| (Brep::made_core(b), holes))
+        let r = core::blend::blend_holes(self.core(), kind, edges, sizes, tolerance, corners, setbacks, core::blend::Corners::Open)
+            .map(|(b, holes)| (Brep::made_core(b), holes));
+        trace::call(
+            "blend_setback_open",
+            &[self],
+            &r,
+            |(b, _)| vec![b.id],
+            || {
+                json!({"kind": kind.word(), "edges": trace::picks(self, PickKind::Edge, edges, tolerance), "sizes": sizes,
+                    "corners": trace::picks(self, PickKind::Vertex, corners, tolerance), "setbacks": setbacks})
+            },
+        );
+        r
     }
 
     /// The one edge nearest to `edge` (within `tolerance`) rounded with a radius
@@ -193,7 +287,14 @@ impl Brep {
     /// `radii` over the position along the edge, 0 at its end nearest `start` and 1 at the other
     /// (the edge curve's parameter scaled to 0..1).
     pub fn fillet_variable(&self, edge: [f64; 3], tolerance: f64, start: [f64; 3], degree: usize, knots: &[f64], radii: &[f64]) -> Result<Brep> {
-        core::blend::fillet_variable(self.core(), edge, tolerance, start, degree, knots, radii).map(Brep::made_core)
+        let r = core::blend::fillet_variable(self.core(), edge, tolerance, start, degree, knots, radii).map(Brep::made_core);
+        trace::made(
+            "fillet_variable",
+            &[self],
+            &r,
+            || json!({"edge": trace::picks(self, PickKind::Edge, &[edge], tolerance), "start": start, "degree": degree, "knots": knots, "radii": radii}),
+        );
+        r
     }
 
     /// The edges nearest to `edges` (each within `tolerance`), exactly those, cut by
@@ -204,7 +305,15 @@ impl Brep {
         if edges.is_empty() || edges.len() > MAX_POINTS {
             return Err(Error::Argument);
         }
-        core::blend::chamfer_sides(self.core(), edges, tolerance, distance, second, first).map(Brep::made_core)
+        let r = core::blend::chamfer_sides(self.core(), edges, tolerance, distance, second, first).map(Brep::made_core);
+        trace::made("chamfer_sides", &[self], &r, || {
+            let second = match second {
+                ChamferSecond::Distance(d) => json!({"distance": d}),
+                ChamferSecond::Angle(a) => json!({"angle": a}),
+            };
+            json!({"edges": trace::picks(self, PickKind::Edge, edges, tolerance), "distance": distance, "second": second, "first": first})
+        });
+        r
     }
 
     /// Hollowed to a wall of `thickness` (negative: inside the original surface, positive:
@@ -213,7 +322,14 @@ impl Brep {
     /// whose walls would just meet (a hole exactly twice the wall from a side) is
     /// [`Error::WallsTouch`].
     pub fn shell(&self, open_faces: &[[f64; 3]], tolerance: f64, thickness: f64) -> Result<Brep> {
-        core::offset::shell(self.core(), open_faces, tolerance, thickness).map(Brep::made_core)
+        let r = core::offset::shell(self.core(), open_faces, tolerance, thickness).map(Brep::made_core);
+        trace::made(
+            "shell",
+            &[self],
+            &r,
+            || json!({"open_faces": trace::picks(self, PickKind::Face, open_faces, tolerance), "thickness": thickness}),
+        );
+        r
     }
 
     /// The solid with the faces nearest to `faces` (each within `tolerance`) moved `distance`
@@ -221,14 +337,18 @@ impl Brep {
     /// faces around them extended or trimmed to meet them. Faces moved in past all of the body
     /// behind them are [`Error::NoRoom`].
     pub fn offset_faces(&self, faces: &[[f64; 3]], tolerance: f64, distance: f64) -> Result<Brep> {
-        core::offset::offset_faces(self.core(), faces, tolerance, distance).map(Brep::made_core)
+        let r = core::offset::offset_faces(self.core(), faces, tolerance, distance).map(Brep::made_core);
+        trace::made("offset_faces", &[self], &r, || json!({"faces": trace::picks(self, PickKind::Face, faces, tolerance), "distance": distance}));
+        r
     }
 
     /// A sheet thickened into a solid by `thickness` along its surfaces' normals (negative:
     /// against them), or by half each way when `symmetric`, with ruled walls along its open
     /// edges. A closed solid is [`Error::Argument`].
     pub fn thicken(&self, thickness: f64, symmetric: bool) -> Result<Brep> {
-        core::offset::thicken(self.core(), thickness, symmetric).map(Brep::made_core)
+        let r = core::offset::thicken(self.core(), thickness, symmetric).map(Brep::made_core);
+        trace::made("thicken", &[self], &r, || json!({"thickness": thickness, "symmetric": symmetric}));
+        r
     }
 
     /// This body with its topological edges and vertices removed (SMLib's
@@ -240,7 +360,9 @@ impl Brep {
         if keep.len() > MAX_POINTS {
             return Err(Error::Argument);
         }
-        core::merge::merge_faces(self.core(), keep, tolerance).map(Brep::made_core)
+        let r = core::merge::merge_faces(self.core(), keep, tolerance).map(Brep::made_core);
+        trace::made("merge_faces", &[self], &r, || json!({"keep": trace::picks(self, PickKind::Edge, keep, tolerance)}));
+        r
     }
 
     /// The flat faces nearest to `faces` (each within `tolerance`) tilted by `angle` radians
@@ -260,7 +382,12 @@ impl Brep {
         if faces.is_empty() || faces.len() > MAX_POINTS {
             return Err(Error::Argument);
         }
-        core::offset::draft(self.core(), faces, tolerance, neutral_origin, neutral_normal, pull, angle).map(Brep::made_core)
+        let r = core::offset::draft(self.core(), faces, tolerance, neutral_origin, neutral_normal, pull, angle).map(Brep::made_core);
+        trace::made("draft", &[self], &r, || {
+            json!({"faces": trace::picks(self, PickKind::Face, faces, tolerance), "neutral_origin": neutral_origin,
+                "neutral_normal": neutral_normal, "pull": pull, "angle": angle})
+        });
+        r
     }
 
     /// [`Brep::blend`] and its kin on solidcore (`core::blend::blend`).

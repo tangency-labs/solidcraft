@@ -48,8 +48,8 @@ fn periodic_step_seam_survives_identity_rotation_and_translation() {
     // A face whose loop uses an edge twice (the seam).
     let seamed = body.record().faces.iter().any(|f| {
         f.loops.iter().any(|l| match l {
-            solidcraft_geom::brep::Loop::Edges { edges } => edges.iter().any(|u| edges.iter().filter(|w| w.edge == u.edge).count() > 1),
-            solidcraft_geom::brep::Loop::Vertex { .. } => false,
+            solidcore_record::brep::Loop::Edges { edges } => edges.iter().any(|u| edges.iter().filter(|w| w.edge == u.edge).count() > 1),
+            solidcore_record::brep::Loop::Vertex { .. } => false,
         })
     });
     assert!(seamed);
@@ -94,4 +94,30 @@ fn mirrored_bodies_read_back_from_their_records_valid() {
         let (want, got) = (crate::measure(&body).unwrap().volume, crate::measure(&read_back).unwrap().volume);
         assert!((got - want).abs() < 1e-6 * want, "{what}: volume {got}, expected {want}");
     }
+}
+
+/// A scaling or shear of a box maps its record as a rigid motion does: its faces stay planes, on
+/// the same parameters, and the volume is the determinant's (#14422). A reflection, or a body
+/// with a cylinder, still goes through SMLib and keeps the right volume.
+#[test]
+fn a_box_scaled_or_sheared_keeps_its_planes() {
+    let planes = |b: &Body| b.record().faces.iter().all(|f| matches!(f.surface, solidcore_record::brep::Surface::Plane { .. }));
+    let volume = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
+    let source = crate::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap();
+    assert!(planes(&source));
+    for (matrix, want) in [
+        ([[2., 0., 0., 0.], [0., 3., 0., 0.], [0., 0., 0.5, 0.], [0., 0., 0., 1.]], 3000.),
+        ([[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1.0001, 0.], [5., 0., 0., 1.]], 1000.1),
+        ([[1., 0., 0., 0.], [0.5, 1., 0., 0.], [0., 0., 2., 0.], [0., 0., 0., 1.]], 2000.),
+    ] {
+        let scaled = transform_matrix(&source, matrix).unwrap();
+        assert_topology(&source, &scaled, matrix);
+        assert!(planes(&scaled));
+        assert!((volume(&scaled) - want).abs() < 1e-6, "{} vs {want}", volume(&scaled));
+        assert!(scaled.record().tolerance >= source.record().tolerance);
+    }
+    let mirrored = transform_matrix(&source, [[-2., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]]).unwrap();
+    assert!((volume(&mirrored) - 2000.).abs() < 1e-6);
+    let stretched = transform_matrix(&periodic_cylinder(), [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 2., 0.], [0., 0., 0., 1.]]).unwrap();
+    assert!((volume(&stretched) - 4000. * std::f64::consts::PI).abs() < 5., "{}", volume(&stretched));
 }

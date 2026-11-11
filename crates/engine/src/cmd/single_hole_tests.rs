@@ -1,10 +1,11 @@
 //! A Single hole at a sketch point follows the point when the sketch changes (#2110), drilled
 //! into the face it was placed on, and keeps doing so after the design is saved and reopened.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 

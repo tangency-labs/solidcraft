@@ -3,7 +3,8 @@
 //! meets the tangent junction of the bar's straight and round walls. The chamfer must trim
 //! against the round wall instead of extending that short seam outside the solid.
 
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_kernel::{Body, BoolOp, boolean, chamfer, cylinder, extrude, tangent_chain};
 use std::f64::consts::PI;
 

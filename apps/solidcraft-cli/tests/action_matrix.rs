@@ -21,6 +21,7 @@
 //! Each design runs in a child process (this test binary, [`action_matrix_worker`]) so an action
 //! that hangs or aborts is recorded as such and the rest of the design still runs.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -28,10 +29,10 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::kernel::{FaceSurface, face_surface};
 use solidcraft_engine::doc::{FaceAttachmentStatus, ModelBody, naming};
-use solidcraft_engine::geom::Vec3;
 
 /// One in this many actions runs on pull requests (by a stable hash of its key).
 const PR_SAMPLE: u64 = 40;
@@ -1307,7 +1308,7 @@ fn edge_round_actions_keep_the_picked_body() {
             let mut unscoped = p.clone();
             unscoped.as_object_mut().unwrap().remove("body");
             let err = s.scratch().execute(id, &unscoped).unwrap_err().to_string();
-            assert!(err.contains("edges meet"), "{err}");
+            assert!(err.contains("[10, 0, 20] lies on edges of 2 bodies, Plate and Block"), "{err}");
             perform(&mut s.scratch(), &a.act, &errors(&s)).unwrap();
             tried += 1;
         }
@@ -1656,7 +1657,7 @@ impl TipConstruction {
             other => panic!("expected an axis, got {other:?}"),
         }
     }
-    fn plane(&self) -> solidcraft_engine::geom::Plane {
+    fn plane(&self) -> solidcore_record::Plane {
         match &self.0 {
             solidcraft_engine::doc::construct::ConstructGeom::Plane(p) => *p,
             other => panic!("expected a plane, got {other:?}"),

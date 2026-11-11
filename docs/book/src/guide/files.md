@@ -1,5 +1,14 @@
 # Import and export
 
+Everything here starts from the **File** menu at the top left.
+
+<img class="dark-ui" src="../media/files/menu.png" alt="The File menu, numbered 1 to 5">
+<img class="light-ui" src="../media/files/menu.light.png" alt="The File menu, numbered 1 to 5">
+
+**1** Open a design (or a STEP, IGES or mesh file as a new one) · **2** Insert a file into the open
+design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSON ·
+**5** Design properties
+
 | Format | Read | Write |
 |---|---|---|
 | `.sc` (versioned container or JSON design; `.solidcraft` files from earlier releases still open) | yes | yes |
@@ -22,7 +31,7 @@ Every imported file (STEP, IGES, 3MF, STL, OBJ or glTF) comes in as a new compon
 file, so its bodies never mix with yours. A STEP assembly keeps its structure: its parts and
 sub-assemblies become nested components, and a part used several times is one component with an
 occurrence for each place. The imported assembly is rigid: moving its component moves everything,
-and its parts don't move on their own. Right-click the component and choose **Unlock Contents** to
+and its parts don't move on their own. Right-click the component and choose **Placement → Unlock Contents** to
 joint the parts one by one. Undo removes a whole import in one step.
 
 A glTF file (`.glb`, or `.gltf` with the `.bin` files it names in the same folder) comes in the
@@ -77,7 +86,7 @@ origin; the design itself does not move. The face is tinted and outlined in the 
 copy made with Move/Copy or Mirror keeps it. A print face that is gone or no longer flat is
 reported, and the body is sent as it lies. Curved faces and mesh bodies can't be print faces.
 Known limitation: after a shell of a body that is already shelled, no face of that body can be
-marked, as no sketch can be attached to one either; this needs kernel work, which is paused.
+marked, as no sketch can be attached to one either; this needs kernel work in solidcore.
 
 The list also has a plain **EasyPrint (Printables, in the browser)** row, and it is the one entry
 that works in the browser build too. EasyPrint is Printables' slicer, so choosing it uploads the
@@ -109,8 +118,9 @@ is started on its own first, SolidCraft waits up to ten seconds for it to be rea
 file. If the version can't be read, the command decides: the `slic3r-app-launcher` launcher is
 treated as PrusaSlicer 3, and any other entry is left as it is.
 
-Closed mechanical meshes with a constant cross-section can be rebuilt as solids with the
-`mesh.convert` command (command palette, scripts and the control channel).
+Closed meshes can be rebuilt as solids with the `mesh.convert` command (command palette,
+scripts and the control channel): a mesh with a constant cross-section as analytic planar and
+cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
 
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate
@@ -129,7 +139,7 @@ opened through a symbolic link (a synced folder linked into a project) is saved 
 link points to, so the link stays. Unsaved changes in every open tab are autosaved to separate
 entries in a recovery folder, and the next launch offers to recover each design. Saving or
 closing one tab removes only its recovery entry. Older design files are upgraded on open, and files
-from a newer version are refused with a message.
+from a newer version open with a warning.
 
 **Save** writes a container by default; files named `.json` keep JSON on subsequent saves.
 **Save As** offers a container or plain JSON on
@@ -159,9 +169,12 @@ The default `cache: false` omits the portable thumbnail too.
 The repository's `docs/design-container.md` describes limits and encoding details.
 
 Designs are saved in the newest format this version of SolidCraft knows (`"format": "solidcraft/N"`
-in the file). It opens designs of every older format and upgrades them as they open; a design
-from a newer version asks you to update instead of being guessed at. Development (nightly) builds
-save a format number no release reads yet.
+in the file). It opens designs of every older format and upgrades them as they open. A design
+from a newer version opens too, with a notice saying so: what this version can read is read, and
+a feature it can't read stays on the timeline with an error saying so, so you can see what is
+missing. Saving such a design keeps what this version can't read and the file's format number, so
+the newer version finds its work again. Development (nightly) builds save a format number no release
+reads yet.
 
 Sketch patterns retain their live direction-line references and placement settings when saved.
 Older patterns keep their fixed vector directions and original placement defaults.
@@ -182,7 +195,7 @@ up to **256 MB**. A larger file is refused before it is read, and the message sa
 the limit. In the desktop app you can raise both:
 
 - **Preferences › General › Largest file to open** sets each limit in MB, from its default up to
-  16 GB (16384 MB). It is kept between runs; Restore Defaults on the General page puts back 512 MB
+  16 GB (16384 MB). It is kept between runs; Restore page defaults on the General page puts back 512 MB
   and 256 MB.
 - **`--max-file-size SIZE`** at launch (`solidcraft --max-file-size 2GB big-assembly.step`) raises
   both limits for that run only, over the preference, without saving anything. SIZE is a number
@@ -206,10 +219,33 @@ Before you raise them:
 The control channel sets the same preference with `ui.prefs {"max_step_file_mb": 2048,
 "max_design_file_mb": 1024}`.
 
+## Export file names
+
+**Preferences → Design → Export file name** sets the name that **File → Export**, **Save As Mesh**
+and a body's right-click **Export…** offer in the save dialog. The setting is a template. Each
+placeholder in it is replaced:
+
+| Placeholder | Replaced with |
+|---|---|
+| `{design}` | The design's name |
+| `{body}` | The exported body's name. When an export holds several bodies, the first one |
+| `{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}` | That [design property](#design-properties) |
+
+The help icon next to the setting lists the same placeholders. A design property that is not set
+is left out. Other text in braces stays as typed.
+
+With `{part_number}_rev{revision}`, a design with part number RV-102 and revision C is offered as
+`RV-102_revC.step`. With `{design}-{body}`, the body Base of the design Bracket is offered as
+`Bracket-Base.stl`. Characters that file names cannot hold (`/ \ : * ? " < > |`) become `_`. A
+name that Windows keeps for a device, such as `CON` or `NUL`, gets a `_` in front. A long name is
+cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, File → Export
+offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
+channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
+
 ## Design properties
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the
-top component's right-click menu) records who made a design and what it is: project, part
+top component's right-click menu, under **Design**) records who made a design and what it is: project, part
 number, revision, author, organization, description and licence. **OK** applies the changes as
 one undo step. Scripts and agents use the same commands: `document.metadata` reads them,
 `document.metadata.set` (`key` and `value`, or `values: {key: value, …}`) and
@@ -305,3 +341,16 @@ browser can write to a folder it saves back to that file, otherwise it works on 
 in the browser. Use **Rename** beside a stored file to change its name. Autosave and recovery
 stay in the browser's private storage in every browser. Exports such as STEP and STL are
 downloaded.
+
+By default, closing or reloading the tab while a design has unsaved changes shows your browser's
+own "Leave site?" box. To keep your work instead, turn on **Preferences → General → Saving →
+Keep unsaved work in this browser**. SolidCraft then keeps a copy of each open design's unsaved
+changes in this browser's private storage, updated about a second after each change and again
+when the tab is hidden. Turning it on alone doesn't skip the box: it is skipped only when **Still
+ask when the tab closes** is also off and every kept copy is current. A change made in the last
+moment before closing can still bring the box up while its copy is written. On your next visit,
+SolidCraft asks **Restore unsaved design: <name>, changed <time>?** (one window lists them all when
+there are several). **Restore** opens the design with its changes, still unsaved, **Open saved
+version** opens its file as last saved, and **Discard** drops the copy. A copy older than the
+design's last save isn't offered. Closing a design inside SolidCraft (its tab's ×, **File → Close**
+or Ctrl+W) still asks **Save changes to <name>?**, and **Don't Save** drops its copy.

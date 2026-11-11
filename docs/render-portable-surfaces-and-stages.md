@@ -4,11 +4,11 @@ Integration-branch implementation, not a release acceptance claim. Source, type/
 
 ## Saved surfaces
 
-`RenderSetup.surfaces` stores at most 128 built-in surface bindings: a `SURF-nnn` ID, resource version, four encoded SHA-256 receipts, an exact definition/producing-feature/component/occurrence-path target, a definition-local planar frame in millimetres, and normal strength. The roles are base color, OpenGL normal, roughness and metallic. Height remains authoring-only. Existing body IOR is retained. Engineering material cards, mass, topology and the CAD timeline are unchanged.
+`RenderSetup.surfaces` stores at most 128 surface bindings. Built-in sources retain: a `SURF-nnn` ID, resource version, four encoded SHA-256 receipts, an exact definition/producing-feature/component/occurrence-path target, a definition-local planar frame in millimetres, and normal strength. The roles are base color, OpenGL normal, roughness and metallic. Height remains authoring-only. Existing body IOR is retained. Engineering material cards, mass, topology and the CAD timeline are unchanged.
 
-No captured body ordinal, GPU object or external path is saved. Every Check and Start resolves the semantic target, transforms its local frame into current world coordinates, then produces the ordinary bounded GPU texture request. Motion follows that transform; another instance does not inherit the assignment. Missing, hidden, ambiguous, renamed or replaced definitions/features refuse instead of selecting a similar body. An occurrence label may change while its ID path remains valid. Definition renaming and topology-producing feature changes currently require explicit rebinding.
+No captured body ordinal, GPU object or external path is saved. Every Check and Start resolves the semantic target, transforms its local frame into current world coordinates, then produces the ordinary bounded texture request for the selected executor. Motion follows that transform; another instance does not inherit the assignment. Missing, hidden, ambiguous, renamed or replaced definitions/features refuse instead of selecting a similar body. An occurrence label may change while its ID path remains valid. Definition renaming and topology-producing feature changes currently require explicit rebinding.
 
-Bindings are path-independent **for the pinned built-in pack**, not a general embedded external-texture format. Reopening preserves references, but execution refuses an unavailable resource or version/digest mismatch. A future installed pack must still supply those exact bytes; an old ID must never be silently reinterpreted.
+Built-in bindings are path-independent **for the pinned built-in pack**. Reopening preserves references, but execution refuses an unavailable resource or version/digest mismatch. A future installed pack must still supply those exact bytes; an old ID must never be silently reinterpreted.
 
 Send the following to `render.library.surface.bind` after inspecting `render.scene`:
 
@@ -18,7 +18,7 @@ Send the following to `render.library.surface.bind` after inspecting `render.sce
   "set": {"job": {"method": "gpu_path", "options": {"samples": 128}}},
   "surface": {
     "id": "SURF-001", "body_index": 0, "body_name": "Panel",
-    "plane": "xy", "scale": 1.0
+    "plane": "xy", "scale": 1.0, "rotation_rad": 0.7853981633974483
   },
   "replace": false
 }
@@ -26,9 +26,70 @@ Send the following to `render.library.surface.bind` after inspecting `render.sce
 
 The temporary ordinal/name pair is checked once, its semantic identity is captured, and the opaque target and planar precision bounds are validated before one atomic setup change/undo. `replace: true` explicitly replaces a prior binding; an identical application is a no-op. The full setup is returned.
 
-`render.library.surface.unbind` takes setup `name` and the exact saved `target`. It can remove an obsolete association without current geometry or a device. Switching a bound setup to CPU/raster without removing GPU-only maps refuses. Temporary optical overrides and unsaved external HDR capture cannot silently supersede saved maps; save the HDR first or explicitly remove the temporary inputs.
+`render.library.surface.unbind` takes setup `name` and the exact saved `target`. It can remove an obsolete association without current geometry or a device. Saved opaque maps work with native CPU raytracing and GPU path tracing. Switching to raster refuses instead of dropping the maps. Temporary optical overrides and unsaved external HDR capture cannot silently supersede saved maps; save the HDR first or explicitly remove the temporary inputs.
 
 The existing Render library adds Save maps to this setup and saved-binding inspection/removal. The older temporary-map action stays separate. No alternate UI shell, new artwork or runtime Python dependency is introduced.
+
+## Imported wood and other opaque surface images
+
+The Surfaces panel can import a local color image, choose its physical U/V repeat
+and grain angle, and save it with the selected shot. Import records the supplied
+author, source and license as inert declared provenance. It does not fetch a URL
+or approve licensing. The full frame is saved in definition-local millimetres;
+rotating or moving an occurrence carries its grain with it. Physical materials,
+mechanical axes, mass and geometry are unchanged.
+
+`render.surface.import` captures exact static 8-bit PNG/JPEG bytes and binds the
+image in one undo step. Example after inspecting `render.scene`:
+
+```json
+{
+  "name": "Wood",
+  "set": {"job": {"method": "gpu_path", "options": {"samples": 128}}},
+  "body_index": 0, "body_name": "Panel",
+  "frame": {"origin": [0,0,0], "u": [240,0,0], "v": [0,480,0]},
+  "maps": {"base_color_srgb": {"path": "/textures/original-wood.png"}},
+  "provenance": {"author": "Your name", "source": "Original photograph", "license": "Your declared terms"}
+}
+```
+
+Map inputs also accept `normal_opengl`, `roughness_linear` and `metallic_linear`.
+Each map takes `path` and optional `expected_sha256`; a changed selection refuses.
+The role is explicit: color normalizes from sRGB before filtering, while normals
+and scalar maps remain linear data. Portable base-color PNG declarations must
+agree with normalized sRGB. Static metadata and encoding checks apply to portable
+imports; older built-in and temporary GPU maps retain their prior decoder admission,
+explicit-role interpretation, single-level bilinear sampling and face-map precedence.
+Newly imported GPU resources opt into full mip chains and yield to explicit scalar
+face appearances. Native CPU maps use full mip chains. `normal_strength` defaults to one and
+`flip_v` defaults to false. `replace: true` is required for an existing binding.
+
+The design deduplicates bytes by SHA-256, independently of role. Importing an
+existing digest reuses its first recorded provenance; later imports do not replace
+that author, source or license metadata. The design stores at most
+32 unique images and 64 MiB total encoded storage; each image is at most 16 MiB
+and 1024×1024. Complete decode and metadata validation happen before publishing
+any resource. Native containers reuse verified `blobs/` entries; portable JSON
+uses bounded canonical base64. Save, delete the source file, and reopen offline:
+no filesystem path is retained or reopened. Failed import/open leaves the prior
+design intact. Older applications refuse the newer format instead of discarding
+its resources.
+
+`render.texture.list` reports digests, dimensions, declared provenance and setup
+users. `render.texture.remove` refuses referenced images and lists their users;
+explicitly unbind them first. Import, unbind, removal and their undo operations
+preserve the exact bytes. Completed render handles retain metadata rather than
+keeping an uncharged encoded-image cache alive.
+
+The native CPU consumer prepares rows and complete mip chains cooperatively,
+then maps the opaque closure used for direct lights and HDR illumination. It
+accepts only noninterlaced 8-bit PNG when importing into a CPU setup. Supported
+JPEG8 and interlaced PNG remain GPU inputs; explicitly normalize them before CPU use. It
+rejects incompatible selected reflections, glass, anisotropy and procedural
+surface overrides. Browser execution and unsupported source encodings refuse
+explicitly. Projection remains planar: use separately oriented bindings for
+separate boards. This is an opaque image-based wood preview, not a volumetric
+end-grain or measured wood-scattering model.
 
 ## Passive stages
 

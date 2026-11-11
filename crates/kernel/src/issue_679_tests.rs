@@ -2,7 +2,8 @@
 //! grid extruded up and down (#679), a pad half past the edge of the face it stands on (#674),
 //! several contact regions, contact beside a shared edge, and random rectangles.
 
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_geom::MeshGeom;
 
 use crate::*;
 

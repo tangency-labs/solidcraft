@@ -1,5 +1,6 @@
 //! One floating editor for the selected Render item.
 use super::{RenderSelection, environment, inspector, library, light, setups, shot, wear};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 use inspector::selection_appearance;
 use serde_json::json;
@@ -39,13 +40,24 @@ pub(crate) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             editor: appearance,
             enabled: true,
             header_actions: None,
+            move_command: "view.render_dock",
         },
         &mut side,
         &mut width,
         false,
         |ui, options| {
             if appearance {
-                action.set(ui_kit::inspector_header(ui, options.icon, options.title, &scope));
+                action.set(ui_kit::inspector_header(
+                    ui,
+                    options.icon,
+                    options.title,
+                    &scope,
+                    ui_kit::InspectorNames {
+                        close: "render:appearance:close",
+                        remove: "render:appearance:remove",
+                        remove_label: solidcraft_ui_text::tr("render.inspector_remove"),
+                    },
+                ));
             } else {
                 ui_kit::panel::header(ui, options.icon, options.title, || action.set(Some(ui_kit::InspectorAction::Close)));
             }
@@ -124,13 +136,13 @@ pub(super) fn output_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
             ("render.start", app.tr("cmd.render_start").to_owned(), "render:output:render"),
             (
                 "render.batch",
-                crate::i18n::format("render.batch_all_shots", &[("count", &app.session.doc.render.setups.len().to_string())]),
+                solidcraft_ui_text::format("render.batch_all_shots", &[("count", &app.session.doc.render.setups.len().to_string())]),
                 "render:output:all-shots",
             ),
         ] {
             let ready = super::ribbon::action_ready(app, id);
             let response = ui_kit::icon_label_action(ui, &label, Some("play"), ready.is_ok(), id == "render.start");
-            let response = if let Err(reason) = ready { response.on_disabled_hover_text(reason) } else { response };
+            let response = if let Err(reason) = ready { response.backing_on_disabled_hover_text(reason) } else { response };
             crate::scenario::publish_target(target, response.rect);
             if response.clicked() {
                 app.start(id);

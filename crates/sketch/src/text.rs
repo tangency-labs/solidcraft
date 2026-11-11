@@ -3,14 +3,16 @@
 //! OpenType (CFF) cubic Béziers are cubic control splines, both exact. A glyph's counters (the
 //! holes of A, B, 8…) are loops inside its outline; profile detection makes them holes.
 //!
-//! The default font is embedded (Liberation Sans, SIL OFL 1.1; see `assets/fonts/liberation-sans/OFL.txt` and
+//! The default font is embedded (Liberation Sans, SIL OFL 1.1; see `crates/sketch/assets/fonts/liberation-sans/OFL.txt` and
 //! ATTRIBUTION.md); [`crate::fonts`] finds others by file path or installed family name. [`TextMetrics`] measures
 //! text by the rule that draws it. A line with right-to-left characters (Arabic, Hebrew…) is ordered by the
 //! Unicode bidirectional algorithm and shaped with the font's own rules, so letters join and marks sit where the font
 //! puts them; every other line is set glyph by glyph, as it always was.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Ring, Vec2};
+use solidcore_record::Vec2;
+use solidcraft_geom::Ring;
+use solidcraft_geom::prelude::*;
 
 use crate::fonts::{FontData, font_data_styled};
 use crate::link::{LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};
@@ -103,6 +105,40 @@ impl TextAlign {
     }
 }
 
+/// Where a text's block of lines sits up and down against its anchor (`at`, or its path).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextVerticalAlign {
+    /// The first line's baseline runs through the anchor.
+    #[default]
+    Baseline,
+    /// The tops of the first line's capitals are at the anchor.
+    Top,
+    /// The block is centred on it: halfway between the first line's capital tops and the last
+    /// line's baseline.
+    Middle,
+    /// The bottom of the last line's descenders (the tails of g, p and y) is at the anchor.
+    Bottom,
+}
+
+impl TextVerticalAlign {
+    fn is_baseline(&self) -> bool {
+        *self == TextVerticalAlign::Baseline
+    }
+
+    /// How far up (mm) every baseline moves for a block of `lines` lines at capital height
+    /// `height`, `pitch` apart, whose descenders reach `descent` below a baseline.
+    fn shift(self, lines: usize, height: f64, pitch: f64, descent: f64) -> f64 {
+        let below = lines.saturating_sub(1) as f64 * pitch;
+        match self {
+            TextVerticalAlign::Baseline => 0.0,
+            TextVerticalAlign::Top => -height,
+            TextVerticalAlign::Middle => (below - height) / 2.0,
+            TextVerticalAlign::Bottom => below + descent,
+        }
+    }
+}
+
 /// How a text is set: the style of its font, where its lines sit, the space between its letters
 /// and lines, and the sketch curve its baseline follows (instead of the straight line from `at`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -113,6 +149,8 @@ pub struct TextStyle {
     pub italic: bool,
     #[serde(default, skip_serializing_if = "TextAlign::is_left")]
     pub align: TextAlign,
+    #[serde(default, skip_serializing_if = "TextVerticalAlign::is_baseline")]
+    pub vertical_align: TextVerticalAlign,
     /// Extra space between letters (mm; negative brings them closer).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub letter_spacing: f64,
@@ -130,7 +168,16 @@ pub struct TextStyle {
 
 impl Default for TextStyle {
     fn default() -> Self {
-        TextStyle { bold: false, italic: false, align: TextAlign::Left, letter_spacing: 0.0, line_spacing: 1.0, path: None, reverse: false }
+        TextStyle {
+            bold: false,
+            italic: false,
+            align: TextAlign::Left,
+            vertical_align: TextVerticalAlign::Baseline,
+            letter_spacing: 0.0,
+            line_spacing: 1.0,
+            path: None,
+            reverse: false,
+        }
     }
 }
 
@@ -245,6 +292,12 @@ impl<'a> TextMetrics<'a> {
         let k = self.scale(height)?;
         let own = if self.pitch > 0.0 { self.pitch * k } else { height * 1.5 };
         Ok(own * self.line_spacing)
+    }
+
+    /// How far (mm) the font's descenders reach below a baseline at a capital height of `height` mm (none when the
+    /// font gives no descender below it).
+    pub fn descent(&self, height: f64) -> Result<f64> {
+        Ok((-f64::from(self.face.descender())).max(0.0) * self.scale(height)?)
     }
 
     /// The width (mm) of one line at a capital height of `height` mm, as it is drawn: from its first glyph's origin to
@@ -378,9 +431,10 @@ pub fn text_geometry_styled(
     let along = path.map(|pts| Path::new(pts, style.reverse)).transpose()?;
     let anchor = along.as_ref().map(|p| p.anchor(style.align)).unwrap_or(0.0);
     let (sin, cos) = angle.sin_cos();
+    let lift = style.vertical_align.shift(text.split('\n').count(), height, pitch, metrics.descent(height)?);
     let mut out = Vec::new();
     for (row, line) in text.split('\n').enumerate() {
-        let base_y = -(row as f64) * pitch;
+        let base_y = lift - (row as f64) * pitch;
         let start = match style.align {
             TextAlign::Left => 0.0,
             TextAlign::Center => -metrics.line_width(line, height)? / 2.0,
@@ -588,7 +642,7 @@ mod tests {
 
     #[test]
     fn a_font_file_gives_the_same_outlines_and_unknown_fonts_are_errors() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/liberation-sans/LiberationSans-Regular.ttf");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/liberation-sans/LiberationSans-Regular.ttf");
         let by_file = text_geometry_in(Some(&path.to_string_lossy()), "A7_L", Vec2::ZERO, 8.0, 0.0).unwrap();
         assert_eq!(by_file, text_geometry("A7_L", Vec2::ZERO, 8.0, 0.0).unwrap());
         let e = text_geometry_in(Some("No Such Family 12345"), "A", Vec2::ZERO, 8.0, 0.0).unwrap_err().to_string();

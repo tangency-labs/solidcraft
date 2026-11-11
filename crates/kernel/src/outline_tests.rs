@@ -1,9 +1,10 @@
 //! A lip swept along the rim of a round body joins it, flush with its side or set in from it:
 //! the lip's foot lies on the body's top, and its sides are round where the rim is.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI};
 
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use crate::*;
 

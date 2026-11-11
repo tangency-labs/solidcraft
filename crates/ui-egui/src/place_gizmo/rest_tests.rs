@@ -2,9 +2,10 @@
 //! a sketch point as a click would; the grip turns a rectangular pad, also from Edit Feature.
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::FeatureKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 

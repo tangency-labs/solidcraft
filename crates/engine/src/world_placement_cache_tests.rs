@@ -1,6 +1,8 @@
 //! Placement-cache changes must retain physical picking, pending positions and named joints.
-use crate::{Session, geom::Vec3};
+use crate::Session;
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 fn run(session: &mut Session, command: &str, params: Value) -> Value {

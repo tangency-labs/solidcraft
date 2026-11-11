@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::model::{Result, SketchError};
 
-static DEFAULT_FONT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/liberation-sans/LiberationSans-Regular.ttf"));
+static DEFAULT_FONT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts/liberation-sans/LiberationSans-Regular.ttf"));
 
 /// Family name of the built-in font (also what an empty or absent font name means).
 pub const DEFAULT_FONT_FAMILY: &str = "Liberation Sans";

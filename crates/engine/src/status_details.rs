@@ -84,7 +84,7 @@ impl crate::Session {
     }
 
     /// Validate again at activation; a button's earlier descriptor is never authority.
-    pub fn continuity_target_points(&self, body: &str, edge: usize) -> Option<&[solidcraft_geom::Vec3]> {
+    pub fn continuity_target_points(&self, body: &str, edge: usize) -> Option<&[solidcore_record::Vec3]> {
         if !self.continuity_details().iter().any(|row| row.body == body && row.edge == edge && row.current) {
             return None;
         }

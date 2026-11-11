@@ -5,6 +5,7 @@ use crate::dialogs::Kind;
 use crate::scenario::{Harness, handle_at};
 use crate::sketch_modify_ui::Mod;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 fn spacings(h: &Harness) -> (String, String) {
     match h.app.dialog.as_ref().map(|d| &d.kind) {
@@ -104,8 +105,8 @@ fn a_pattern_of_features_puts_its_arrow_on_the_patterned_feature() {
     assert!(matches!(d.inputs.first().and_then(|i| i.items.first()), Some(solidcraft_engine::Sel::Feature { .. })), "{:?}", d.inputs);
     // The arrow starts at the middle of the boss and points along X, the pattern's direction.
     let (base, dir) = crate::canvas::anchor(&h.app, d).expect("the pattern has an anchor");
-    assert!(base.dist(solidcraft_engine::geom::Vec3::new(12.0, 10.0, 8.0)) < 1e-6, "{base:?}");
-    assert!(dir.is_some_and(|v| v.dist(solidcraft_engine::geom::Vec3::new(1.0, 0.0, 0.0)) < 1e-9), "{dir:?}");
+    assert!(base.dist(solidcore_record::Vec3::new(12.0, 10.0, 8.0)) < 1e-6, "{base:?}");
+    assert!(dir.is_some_and(|v| v.dist(solidcore_record::Vec3::new(1.0, 0.0, 0.0)) < 1e-9), "{dir:?}");
     let Some(tip) = handle_at("arrow") else { panic!("no arrow on a pattern of features") };
     let from = h.call("ui.worldToScreen", json!({"points": [[12, 10, 8], [32, 10, 8]]}))["result"].clone();
     let at = |i: usize| egui::pos2(from[i][0].as_f64().unwrap() as f32, from[i][1].as_f64().unwrap() as f32);

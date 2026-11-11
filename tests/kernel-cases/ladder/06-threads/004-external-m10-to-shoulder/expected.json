@@ -1,14 +1,14 @@
 {
  "sources": [],
- "what": "a modelled M10 thread on a d10 shaft running down to a d16 shoulder: it stops clear of it, the collar whole",
+ "what": "a modelled M10 thread on a d10 shaft running down to a d16 shoulder: it reaches the shoulder at every angle, the collar whole",
  "source": "analytic",
- "method": "the shaft's lower end is a shoulder (the d16 collar lies past it, in the groove's way), so the groove stops there with its widest part clear of it: its centre w = (P/4 + 2 (d/2 + 0.05P - r_root) tan30)/2 = 0.699551 mm above the shoulder (its half width at the tool's outer edge, 0.05 P past the crest), and the square stop inside material removes exactly as if the groove ended at its centre (see 003); the top end is free, the groove runs out into the air. V = pi 8^2 10 (the collar) + pi 5^2 w + 2 pi int_{10+w}^35 int r m(r) dr dz (m as in 001); the centre of mass from the three parts' moments (the threaded part's at its middle, the screw averaging every meridian alike; its stop moves it under 0.002 mm). Tolerance 0.05%: the groove is SMLib's exact screw sweep; a groove running a pitch into the collar (the old free-end overrun) removes 0.9% more",
+ "method": "the shaft's lower end is a shoulder (the d16 collar lies past it, in the groove's way), so the groove runs on past its plane and is trimmed there; the top end is free, the groove runs out into the air. Every slice of the shaft along the axis then loses the same, whatever its height: V = pi 8^2 10 (the collar) + pi 5^2 25 - (25/P) V_turn, V_turn = 2 pi int r m(r) dr one turn of the groove within the shaft (m as in 001); the centre of mass from the two parts' moments (the threaded part's at its middle, the screw averaging every meridian alike). Tolerance 0.05%: the groove is SMLib's exact screw sweep; a groove running a pitch into the collar (the old free-end overrun) removes 0.9% more, and one stopping clear of the shoulder leaves its last turn uncut, 0.26% more material",
  "body_count": 1,
- "volume_mm3": 3648.530350498,
+ "volume_mm3": 3639.157562673,
  "center_of_mass": [
   0,
   0,
-  12.824948457564597
+  12.831323
  ],
  "bbox": {
   "min": [

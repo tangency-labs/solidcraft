@@ -21,7 +21,7 @@ use solidcore::query::api_queries::edge_closest_point;
 use solidcore::topology::face::p4 as face4;
 use solidcore::topology::{Brep, EdgeId, VertexId, edge};
 use solidcore::{EntityRef, Point3, SolidError};
-use solidcraft_geom::brep::history::Change;
+use solidcore_record::brep::history::Change;
 
 use super::{Body, answer, with_body};
 use crate::history::{Raw, RawEdge, RawFace};

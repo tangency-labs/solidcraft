@@ -110,11 +110,12 @@
 //! The fill's boundary is exact, whatever its inside: a station's gap is nought by construction.
 //! Input is hostile: sizes are capped and every evaluation checked; nothing here panics.
 
-use crate::Vec3;
 use crate::bspline::{HPoint, MAX_SPLINE_DEGREE, NurbsSurface, SplineError, SplineResult, check_knots, invalid, segment};
 use crate::fill_general::Across;
 use crate::linkage::MAX_CONTINUITY;
+use crate::prelude::*;
 use crate::spline_space::{Cond, Interpolant, Space};
+use solidcore_record::Vec3;
 
 /// Most spans of the fill's space.
 pub const MAX_ISO_SPANS: usize = 64;

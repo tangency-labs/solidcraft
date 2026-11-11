@@ -3,6 +3,9 @@
 //! taken over its whole domain.
 
 use crate::ssi::Surface;
+use serde_json::json;
+
+use crate::trace;
 use crate::{Brep, Error, Result, core};
 
 impl Brep {
@@ -15,7 +18,15 @@ impl Brep {
             return Err(Error::Argument);
         }
         let specs: Vec<&crate::ssi::Spec> = tools.iter().map(|t| t.spec()).collect();
-        core::split::split_faces(self.core(), faces, &specs).map(|r| r.map(|(b, made)| (Brep::made_core(b), made)))
+        let r = core::split::split_faces(self.core(), faces, &specs).map(|r| r.map(|(b, made)| (Brep::made_core(b), made)));
+        trace::call(
+            "split_faces",
+            &[self],
+            &r,
+            |o| o.iter().map(|(b, _)| b.id).collect(),
+            || json!({"faces": faces, "tools": specs.iter().map(|s| trace::surface(s)).collect::<Vec<_>>()}),
+        );
+        r
     }
 
     /// The manifold solid `self` cut in two by `tool` (whose domain must reach past it): the
@@ -24,7 +35,15 @@ impl Brep {
     /// leaves both parts the whole body, with no face from the tool (tag `self` to tell); `None`
     /// when a side is left empty.
     pub fn split_body(&self, tool: &Surface) -> Result<Option<(Brep, Brep)>> {
-        core::split::split_body(self.core(), tool.spec()).map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))))
+        let r = core::split::split_body(self.core(), tool.spec()).map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))));
+        trace::call(
+            "split_body",
+            &[self],
+            &r,
+            |o| o.iter().flat_map(|(b, f)| [b.id, f.id]).collect(),
+            || json!({"tool": trace::surface(tool.spec())}),
+        );
+        r
     }
 
     /// The manifold solid `self` cut in two by the sheet `sheet` as it is (its faces joined edge
@@ -33,6 +52,8 @@ impl Brep {
     /// normal and the part in front. A `sheet` that is no sheet, or a `face` it does not have, is
     /// [`Error::Argument`].
     pub fn split_body_by_sheet(&self, sheet: &Brep, face: usize) -> Result<Option<(Brep, Brep)>> {
-        core::split::split_body_by_sheet(self.core(), sheet.core(), face).map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))))
+        let r = core::split::split_body_by_sheet(self.core(), sheet.core(), face).map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))));
+        trace::call("split_body_by_sheet", &[self, sheet], &r, |o| o.iter().flat_map(|(b, f)| [b.id, f.id]).collect(), || json!({"face": face}));
+        r
     }
 }

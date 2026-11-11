@@ -10,8 +10,9 @@
 //! B-spline curve, eq. 3.4: control values at the knot averages reproduce a linear function),
 //! A2.1 (span search).
 
-use crate::Vec3;
 use crate::bspline::{Dir, HPoint, NurbsSurface, Side, SplineError, SplineResult, find_span, invalid, local_basis_array};
+use crate::prelude::*;
+use solidcore_record::Vec3;
 
 /// Most loop points a fill takes.
 pub const MAX_LOOP_POINTS: usize = 8192;

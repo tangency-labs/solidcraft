@@ -13,6 +13,8 @@ workspace = true
 trust-unknown-source = []
 
 [dependencies]
+solidcore-record = { workspace = true }
+solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }

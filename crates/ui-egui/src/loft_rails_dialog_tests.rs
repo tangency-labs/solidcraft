@@ -1,6 +1,7 @@
 //! The Loft and Surface Loft dialogs' guide rails (#201): rails picked in the dialog reach the
 //! commands with their sketches and the fit, and editing the loft brings them back and keeps them.
-//! Their sections follow the picks, two of them from one sketch included (#8221).
+//! Their sections follow the picks, two of them from one sketch included (#8221), and profiles
+//! picked one after another in one sketch are one section (#11720).
 use crate::dialogs::Kind;
 use crate::dialogs_surface::Surf;
 use crate::scenario::Harness;
@@ -97,7 +98,7 @@ fn curves_that_share_an_id_are_picked_from_their_own_sketches() {
     h.app.run("sketch.arc.three_point", json!({"start": [-10, 0], "end": [-10, -40], "through": [-15, -20], "id": "out"})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     let left = h.app.session.doc.find_feature("L").unwrap().id;
-    let hit = |sketch: u64, id: &str| Hit::SketchCurve { sketch, id: id.into(), straight: false, point: solidcraft_engine::geom::Vec3::ZERO };
+    let hit = |sketch: u64, id: &str| Hit::SketchCurve { sketch, id: id.into(), straight: false, point: solidcore_record::Vec3::ZERO };
     h.step(&json!({"call":"ui.start","params":{"command":"solid.loft"}})).unwrap();
     h.frames(3);
     let d = h.app.dialog.as_mut().unwrap();
@@ -215,5 +216,132 @@ fn loft_profiles_from_one_sketch_stay_apart() {
     h.frames(8);
     let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands[0].1["params"]["sections"], expected);
+    ok(&mut h);
+}
+
+/// Both halves of a split outline, picked one after the other, are one section (#11720): a
+/// 40 mm square split at x = 0 lofted to a 30 mm one split the same way makes one body, and an
+/// edit keeps the two sections. With one half picked above, the two halves below stay one section.
+#[test]
+fn loft_profiles_picked_together_in_one_sketch_are_one_section() {
+    let mut h = Harness::new();
+    let split =
+        |r: i32| [("sketch.rectangle.two_point", json!({"p0": [-r, -r], "p1": [r, r]})), ("sketch.line", json!({"points": [[0, -r], [0, r]]}))];
+    let low = sketch_at(&mut h, "Low", 0, &split(20));
+    let high = sketch_at(&mut h, "High", 30, &split(15));
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.loft"}})).unwrap();
+    h.frames(3);
+    let pick = |sketch, index| Sel::Profile { sketch, index };
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![pick(low, 0), pick(low, 1), pick(high, 0)];
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["sections"], json!([{"sketch": low, "profiles": [0, 1]}, {"sketch": high, "profiles": [0]}]));
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items.push(pick(high, 1));
+    let expected = json!([{"sketch": low, "profiles": [0, 1]}, {"sketch": high, "profiles": [0, 1]}]);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["sections"], expected);
+    ok(&mut h);
+    let ws = h.app.session.world_state().unwrap();
+    assert_eq!(ws.bodies.len(), 1, "{:?}", h.app.session.log);
+    // Frustum of a 40 mm square to a 30 mm one, 30 mm tall: h/3 (A + B + sqrt(AB)) = 37000 mm³.
+    let volume = solidcraft_engine::doc::kernel::measure(&ws.bodies[0].body).unwrap().volume;
+    assert!((volume - 37000.0).abs() < 1.0, "{volume}");
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+    h.frames(8);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["params"]["sections"], expected);
+    ok(&mut h);
+}
+
+/// A section that is every profile of its sketch stays "all" through an unchanged edit, now that
+/// the edit's picks of it make one section again (#11720): "all" keeps a letter's counter a hole,
+/// which the profiles' indices would fill.
+#[test]
+fn an_unchanged_loft_edit_keeps_a_section_of_all_profiles() {
+    let mut h = Harness::new();
+    let split = [("sketch.rectangle.two_point", json!({"p0": [-20, -20], "p1": [20, 20]})), ("sketch.line", json!({"points": [[0, -20], [0, 20]]}))];
+    let low = sketch_at(&mut h, "Low", 0, &split);
+    let high = sketch_at(&mut h, "High", 30, &[("sketch.circle.center", json!({"center": [0, 0], "radius": 10}))]);
+    h.app.run("solid.loft", json!({"sections": [{"sketch": low, "profiles": "all"}, {"sketch": high, "profiles": [0]}]})).unwrap();
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    let sections = |h: &Harness| match &h.app.session.doc.find_feature(&name).unwrap().kind {
+        FeatureKind::Loft { sections, .. } => sections.iter().map(|s| s.profiles.clone()).collect::<Vec<_>>(),
+        k => panic!("{k:?}"),
+    };
+    let stored = sections(&h);
+    assert_eq!(stored[0], solidcraft_engine::doc::ProfileSel::All);
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+    h.frames(8);
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["params"]["sections"], json!([{"sketch": low, "profiles": "all"}, {"sketch": high, "profiles": [0]}]));
+    ok(&mut h);
+    assert_eq!(sections(&h), stored);
+}
+
+/// Surface Loft accepts body edge chains as sections (#11838): picking a body edge and a sketch
+/// curve produces valid sections parameters, and editing the feature round-trips correctly.
+#[test]
+fn surface_loft_with_body_edges_and_sketch_sections() {
+    let mut h = Harness::new();
+    // Create two surface bodies with edges to pick
+    h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "LowSketch"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch": "LowSketch", "distance": "10 mm", "body_name": "Low"})).unwrap();
+
+    h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "MidSketch"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[15, 15], [25, 25]], "ids": ["m"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let mid = h.app.session.doc.find_feature("MidSketch").unwrap().id;
+
+    h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, 60], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "HighSketch"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch": "HighSketch", "distance": "10 mm", "body_name": "High"})).unwrap();
+
+    // Pick edges from Low and High bodies, and a curve from Mid sketch
+    let st = h.app.session.world_state().unwrap();
+    let low_body = st.body("Low").unwrap();
+    let low_mesh = low_body.mesh();
+    let low_edge = low_mesh.edges.iter().find(|e| e.iter().any(|p| (p.z - 10.0).abs() < 1e-6)).unwrap();
+    let low_edge_idx = low_mesh.edges.iter().position(|e| std::ptr::eq(e, low_edge)).unwrap();
+    let low_edge_point = (low_edge[0] + low_edge[1]) * 0.5;
+
+    let high_body = st.body("High").unwrap();
+    let high_mesh = high_body.mesh();
+    let high_edge = high_mesh.edges.iter().find(|e| e.iter().any(|p| (p.z - 60.0).abs() < 1e-6)).unwrap();
+    let high_edge_idx = high_mesh.edges.iter().position(|e| std::ptr::eq(e, high_edge)).unwrap();
+    let high_edge_point = high_edge[high_edge.len() / 2];
+
+    h.step(&json!({"call":"ui.start","params":{"command":"surface.loft"}})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![
+        Sel::Edge { body: "Low".into(), index: low_edge_idx, point: low_edge_point },
+        Sel::SketchCurve { id: "m".into(), sketch: Some(mid) },
+        Sel::Edge { body: "High".into(), index: high_edge_idx, point: high_edge_point },
+    ];
+
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let sections = &commands[0].1["sections"];
+    assert_eq!(sections.as_array().unwrap().len(), 3, "should have 3 sections");
+    assert!(!sections[0]["body"].is_null(), "first section should be body edge");
+    assert!(!sections[1]["sketch"].is_null(), "second section should be sketch curve");
+    assert!(!sections[2]["body"].is_null(), "third section should be body edge");
+
+    ok(&mut h);
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+
+    // Edit and verify round-trip
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+    h.frames(8);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items.len(), 3, "should have 3 picks after edit");
+    assert!(d.inputs[0].items.iter().any(|x| matches!(x, Sel::Edge { body, .. } if body == "Low")), "should have Low edge");
+    assert!(d.inputs[0].items.iter().any(|x| matches!(x, Sel::SketchCurve { id, .. } if id == "m")), "should have mid curve");
+    assert!(d.inputs[0].items.iter().any(|x| matches!(x, Sel::Edge { body, .. } if body == "High")), "should have High edge");
+
     ok(&mut h);
 }

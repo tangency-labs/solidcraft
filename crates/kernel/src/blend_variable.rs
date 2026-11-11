@@ -5,8 +5,9 @@
 //! two planar faces the band a radius law takes from the faces is checked against the faces
 //! first, which also gives a [`taper`] its room along the edge.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::prelude::*;
 
 use crate::blend::{Faces, too_large, unsupported};
 use crate::body::Body;
@@ -504,8 +505,8 @@ mod tests {
                 f.loops
                     .iter()
                     .map(|l| match l {
-                        solidcraft_geom::brep::Loop::Edges { edges } => edges.len(),
-                        solidcraft_geom::brep::Loop::Vertex { .. } => 0,
+                        solidcore_record::brep::Loop::Edges { edges } => edges.len(),
+                        solidcore_record::brep::Loop::Vertex { .. } => 0,
                     })
                     .sum()
             })
@@ -651,7 +652,7 @@ mod tests {
 
     /// A prism of the polygon `pts` (in xy) from z = `z0` to `z1`.
     fn prism_between(pts: &[(f64, f64)], z0: f64, z1: f64) -> Body {
-        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
         let outer = Loop2::polygon(&pts.iter().map(|(x, y)| Vec2::new(*x, *y)).collect::<Vec<_>>());
         crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], z0, z1).unwrap().pop().unwrap()
     }

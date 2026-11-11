@@ -27,8 +27,9 @@ fn emission_fixture(reverse: bool) -> (ProductScene, ImageRequest, RaytraceOptio
     request.height = 1;
     request.camera.distance = 25.0;
     request.camera.fov = 0.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     let options = RaytraceOptions {
+        threads: 1,
         lights: Some(Vec::new()),
         emissions: Some(vec![job::SurfaceEmission {
             body_index: 0,
@@ -102,6 +103,108 @@ fn emission_survives_face_reflectance_override_without_changing_captured_geometr
     assert!(std::sync::Arc::ptr_eq(&original, &scene.meshes[0].mesh));
     assert_eq!(scene.meshes[0].faces[0].color, [0; 3]);
 }
+#[test]
+fn cpu_path_emissive_enclosure_keeps_authored_depth_without_roulette() {
+    use std::f64::consts::PI;
+    let samples = 32;
+    for seed in [0, 9, 97] {
+        for max_depth in [4, 5, 8] {
+            let mut body = dielectric::tests::box_body(20.0);
+            body.surface = Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 0.0, 1.0, 1.0).unwrap());
+            let options = RaytraceOptions {
+                threads: 1,
+                shadows: true,
+                denoise: false,
+                lights: Some(Vec::new()),
+                path: Some(job::CpuPathOptions { max_depth }),
+                progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: samples, seed }),
+                emissions: Some(vec![job::SurfaceEmission {
+                    body_index: 0,
+                    body: body.name.clone(),
+                    color: [1.0; 3],
+                    strength: 1.0,
+                    sides: job::EmissionSides::Both,
+                }]),
+                ..Default::default()
+            };
+            let mut request = dielectric::tests::request(options.clone());
+            // The actual perspective eye is inside the closed enclosure.
+            request.camera.target = Vec3::new(0.0, 0.0, 10.0);
+            request.camera.distance = 1.0;
+            request.camera.pitch = PI * 0.5;
+            request.camera.fov = 0.5;
+            let mut task = ImageTask::new(dielectric::tests::scene(body), request, CancelToken::default(), options).unwrap();
+            for _ in 0..10_000 {
+                if task.bvh.is_some() {
+                    break;
+                }
+                assert!(matches!(task.step_with_previews(1).unwrap(), ImagePoll::Pending(_)));
+            }
+            let mut expected = 0.0;
+            let mut fifth_events = 0;
+            {
+                let bvh = task.bvh.as_ref().expect("enclosure BVH must be ready before lighting");
+                let prepared = PreparedScene { bvh, primitives: &task.looks, source: &task.scene };
+                let mut work = WorkBudget::new(1_000_000).unwrap();
+                for ordinal in 0..samples {
+                    let [dx, dy] = progressive::variates(seed, 0, ordinal, 0);
+                    let mut ray = primary_ray(&task.request, dx, dy, task.clip).unwrap();
+                    let mut throughput = 1.0;
+                    for depth in 0..max_depth {
+                        let hit = bvh.closest_hit(&ray, &mut work, &task.cancel).unwrap().expect("accepted rays stay in the closed enclosure");
+                        let hit = prepared.resolve_hit(ray, hit).unwrap();
+                        expected += throughput;
+                        fifth_events += usize::from(depth == 4);
+                        if depth + 1 == max_depth {
+                            break;
+                        }
+                        let domain = 0x5041_5448_0000 + u64::from(depth) * 0x10000;
+                        let [component, x] = progressive::variates(seed, 0, ordinal, domain + 0x3000);
+                        let [y, _] = progressive::variates(seed, 0, ordinal, domain + 0x3001);
+                        let Some(proposal) = super::super::indirect::sample(
+                            hit.surface,
+                            hit.shading_normal,
+                            hit.oriented_geometric_normal(),
+                            -ray.direction(),
+                            [component, x, y],
+                        )
+                        .unwrap() else {
+                            break;
+                        };
+                        // Use the proposal only for direction and null mass. For
+                        // index-matched white Lambert, f=1/pi; roughness-one VNDF
+                        // reflection has density 1/(2*pi*(1+n.v)). Compute the
+                        // emission integral independently of transport weights.
+                        let cosine = hit.shading_normal.dot(proposal.direction);
+                        let view_cosine = hit.shading_normal.dot(-ray.direction());
+                        let pdf = 0.5 * cosine / PI + 0.5 / (2.0 * PI * (1.0 + view_cosine));
+                        throughput *= cosine / (PI * pdf);
+                        ray = hit.spawn(proposal.direction).unwrap();
+                    }
+                }
+            }
+            expected /= f64::from(samples);
+            if max_depth >= 5 {
+                assert!(fifth_events > 0, "the oracle must exercise continuations beyond the former roulette threshold");
+            }
+            for _ in 0..100_000 {
+                if task.progressive.as_ref().is_some_and(|p| p.film.samples() == samples) {
+                    break;
+                }
+                assert!(!matches!(task.step_with_previews(1).unwrap(), ImagePoll::Complete(_)));
+            }
+            let (mean, covered, count) = task.progressive.as_ref().unwrap().film.pixel(0).unwrap();
+            assert_eq!((covered, count), (samples, samples));
+            for actual in mean {
+                assert!(
+                    (actual - expected).abs() < 1e-11 * expected.max(1.0),
+                    "seed={seed}, depth={max_depth}: raw emission {actual}, independent finite-depth integral {expected}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn emission_scan_observes_cancel_and_exhausts_shared_work_without_png() {
     let (scene, mut request, options) = emission_fixture(false);
@@ -227,7 +330,7 @@ fn thin_shadow_occluder_survives_large_unrelated_translation() {
 #[test]
 fn primary_intervals_follow_camera_clip_planes_for_both_projections_and_up_axes() {
     for fov in [0.0, 0.7] {
-        for up in [crate::UpAxis::Z, crate::UpAxis::Y] {
+        for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
             let mut request = request();
             request.camera.fov = fov;
             request.camera.up = up;
@@ -293,8 +396,9 @@ fn actual_png_has_analytic_lit_and_cast_shadow_pixels() {
     request.width = 40;
     request.height = 40;
     request.camera.distance = 50.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     let options = RaytraceOptions {
+        threads: 1,
         lights: Some(vec![job::DirectionalLightOptions { direction: [-1.0, 0.0, 1.0], color: [1.0; 3], intensity: 1.0 }]),
         ..Default::default()
     };
@@ -347,8 +451,11 @@ fn triangle_task(cancel: CancelToken) -> ImageTask {
     };
     let mut request = request();
     request.camera.distance = 50.0;
-    request.camera.set_view(crate::StandardView::Top);
-    ImageTask::new(scene, request, cancel, Default::default()).unwrap()
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
+    // These fixtures inspect owner-local continuations between serial work quanta.
+    let options = RaytraceOptions { threads: 1, ..Default::default() };
+    request.raytrace = Some(options.clone());
+    ImageTask::new(scene, request, cancel, options).unwrap()
 }
 #[test]
 fn face_looks_cost_one_unit_per_triangle_and_the_first_entry_wins() {
@@ -390,7 +497,7 @@ fn face_looks_cost_one_unit_per_triangle_and_the_first_entry_wins() {
     };
     let mut request = request();
     request.camera.distance = 60.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     let mut task = ImageTask::new(scene, request, CancelToken::default(), Default::default()).unwrap();
     let before = task.work.used();
     for _ in 0..10_000 {
@@ -467,17 +574,17 @@ fn runtime_presets_reach_the_lighting_consumer() {
         (job::LightingPreset::WarmCool, StudioPreset::WarmCool),
         (job::LightingPreset::KeyRim, StudioPreset::KeyRim),
     ] {
-        let options = RaytraceOptions { preset: Some(runtime), ..Default::default() };
+        let options = RaytraceOptions { threads: 1, preset: Some(runtime), ..Default::default() };
         assert_eq!(lighting(&options).unwrap(), Lighting::preset(expected).unwrap());
     }
-    let conflict = RaytraceOptions { preset: Some(job::LightingPreset::Neutral), lights: Some(Vec::new()), ..Default::default() };
+    let conflict = RaytraceOptions { threads: 1, preset: Some(job::LightingPreset::Neutral), lights: Some(Vec::new()), ..Default::default() };
     assert_eq!(lighting(&conflict).err().unwrap().code, ErrorCode::InvalidRequest);
 }
 #[test]
 fn warm_cool_preset_changes_actual_triangle_png() {
     fn render(preset: job::LightingPreset) -> Vec<u8> {
         let initial = triangle_task(CancelToken::default());
-        let options = RaytraceOptions { preset: Some(preset), ..Default::default() };
+        let options = RaytraceOptions { threads: 1, preset: Some(preset), ..Default::default() };
         let mut request = initial.request.clone();
         request.raytrace = Some(options.clone());
         let mut task = ImageTask::new(initial.scene.clone(), request, CancelToken::default(), options).unwrap();
@@ -603,8 +710,9 @@ fn reflected_hit_adds_surface_emission_with_the_current_path_throughput() {
     request.height = 1;
     request.camera.distance = 50.0;
     request.camera.fov = 0.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     let options = RaytraceOptions {
+        threads: 1,
         lights: Some(Vec::new()),
         shadows: false,
         emissions: Some(vec![job::SurfaceEmission {
@@ -667,8 +775,8 @@ fn procedural_effects_change_completed_pngs_independently_and_zero_is_byte_ident
         request.width = 32;
         request.height = 32;
         request.camera.distance = 40.0;
-        request.camera.set_view(crate::StandardView::Top);
-        let options = RaytraceOptions { surface_effects: effect.map(|e| vec![e]), shadows: false, ..Default::default() };
+        request.camera.set_view(solidcraft_viewport::StandardView::Top);
+        let options = RaytraceOptions { threads: 1, surface_effects: effect.map(|e| vec![e]), shadows: false, ..Default::default() };
         request.raytrace = Some(options.clone());
         let mut task = ImageTask::new(scene.clone(), request, CancelToken::default(), options).unwrap();
         for _ in 0..100_000 {
@@ -702,7 +810,7 @@ fn surface_target_refusals_are_atomic_before_pixels_or_bvh_allocation() {
         SurfaceEffect { body: "missing".into(), frame: Default::default(), repeat_mm: [20.0; 3], roughness_amplitude: 0.2, bump_amplitude_mm: 0.0 };
     let scene = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
     for effects in [vec![effect.clone()], vec![effect.clone(), effect]] {
-        let options = RaytraceOptions { surface_effects: Some(effects), ..Default::default() };
+        let options = RaytraceOptions { threads: 1, surface_effects: Some(effects), ..Default::default() };
         let mut request = request();
         request.raytrace = Some(options.clone());
         assert_eq!(admit(&scene, &request, &options).unwrap_err().code, ErrorCode::InvalidRequest);
@@ -733,6 +841,7 @@ fn surface_consumer_fixture() -> (ProductScene, ImageRequest, RaytraceOptions) {
         }],
     };
     let options = RaytraceOptions {
+        threads: 1,
         surface_effects: Some(vec![SurfaceEffect {
             body: "Coupon".into(),
             frame: Default::default(),
@@ -748,7 +857,7 @@ fn surface_consumer_fixture() -> (ProductScene, ImageRequest, RaytraceOptions) {
     request.width = 1;
     request.height = 1;
     request.camera.distance = 40.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     request.raytrace = Some(options.clone());
     (scene, request, options)
 }
@@ -814,7 +923,9 @@ fn surface_effect_shared_hit_reaches_directional_point_area_and_hdr_consumers() 
             reference_options.surface_effects = None;
             let reference_request = ImageRequest { raytrace: Some(reference_options.clone()), ..request.clone() };
             request.raytrace = Some(options.clone());
-            let environment = || if mask & 8 != 0 { Some(surface_constant_environment()) } else { None };
+            let environment = || {
+                if mask & 8 != 0 { Some(surface_constant_environment()) } else { None }
+            };
             let expected = surface_consumer_png(
                 ImageTask::new_with_environment(reference_scene, reference_request, CancelToken::default(), reference_options, environment())
                     .unwrap(),
@@ -977,9 +1088,10 @@ fn reflected_surface_effect_uses_changed_shading_and_resets_before_emitting_seco
     request.height = 1;
     request.camera.distance = 50.0;
     request.camera.fov = 0.0;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     for mode in [job::ReflectionMode::Mirror, job::ReflectionMode::RoughSpecular] {
         let options = RaytraceOptions {
+            threads: 1,
             surface_effects: Some(vec![effect.clone()]),
             lights: Some(Vec::new()),
             shadows: false,
@@ -1010,7 +1122,11 @@ fn dielectric_triangle_task(cancel: CancelToken) -> ImageTask {
     let task = triangle_task(cancel.clone());
     let mut request = task.request;
     let options = RaytraceOptions {
+        threads: 1,
         dielectrics: vec![job::DielectricOptions {
+            model: None,
+            shadow_transmission: false,
+            subsurface: None,
             body_index: 0,
             body_name: "work fixture".into(),
             boundary: job::DielectricBoundary::ThinSheet,
@@ -1073,6 +1189,7 @@ fn dielectric_fixed_stack_and_path_caps_return_typed_failures() {
 #[test]
 fn dielectric_image_path_applies_radiance_eta_squared_at_each_interface() {
     let options = RaytraceOptions {
+        threads: 1,
         dielectrics: vec![dielectric::tests::input(job::DielectricBoundary::ClosedBox)],
         lights: Some(Vec::new()),
         shadows: false,
@@ -1125,6 +1242,9 @@ fn optical_sheet(name: &str, x: f64, z: f64) -> crate::ProductMesh {
 
 fn optical_input(body_index: usize, body_name: &str, ior: f64) -> job::DielectricOptions {
     job::DielectricOptions {
+        model: None,
+        shadow_transmission: false,
+        subsurface: None,
         body_index,
         body_name: body_name.into(),
         boundary: job::DielectricBoundary::ThinSheet,
@@ -1155,6 +1275,7 @@ fn dielectric_branches_sum_inside_each_spatial_and_reflection_attempt() {
     for spatial in [1, 4, 16] {
         for attempts in [1, 4, 16] {
             let options = RaytraceOptions {
+                threads: 1,
                 primary_samples: spatial,
                 dielectrics: vec![dielectric::tests::input(job::DielectricBoundary::ClosedBox)],
                 environment: Some(job::RaytraceEnvironmentOptions { color: [1.0; 3], intensity: 1.0 }),
@@ -1178,9 +1299,9 @@ fn dielectric_branches_sum_inside_each_spatial_and_reflection_attempt() {
                     let before = task.work.used();
                     let poll = task.step(quantum).unwrap();
                     assert!(task.work.used() - before <= 4);
-                    assert!(task.primary_coverage <= u16::from(spatial) * u16::from(attempts));
+                    assert!(task.primary_coverage <= u32::from(spatial) * u32::from(attempts));
                     if task.emit_spatial_pixel {
-                        assert_eq!(task.primary_coverage, u16::from(spatial) * u16::from(attempts), "branches are not coverage samples");
+                        assert_eq!(task.primary_coverage, u32::from(spatial) * u32::from(attempts), "branches are not coverage samples");
                         saw_complete_coverage = true;
                     }
                     if let Some(state) = task.optical.first().and_then(|o| o.pending.as_ref())
@@ -1253,7 +1374,9 @@ fn unit_ior_sheet_rejoins_surface_emission_and_every_existing_light_consumer() {
             sides: job::EmissionSides::Front,
         }]);
         request.raytrace = Some(options.clone());
-        let environment = || if mask & 8 != 0 { Some(surface_constant_environment()) } else { None };
+        let environment = || {
+            if mask & 8 != 0 { Some(surface_constant_environment()) } else { None }
+        };
         let expected = optical_png(
             ImageTask::new_with_environment(scene.clone(), request.clone(), CancelToken::default(), options.clone(), environment()).unwrap(),
             1,
@@ -1372,7 +1495,8 @@ fn optical_reuse_rejects_an_undrained_branch_and_a_selected_primary() {
 #[test]
 fn optical_admission_bills_capacity_and_refuses_ambiguous_effect_and_environment_contracts() {
     let scene = dielectric::tests::scene(dielectric::tests::box_body(2.0));
-    let mut options = RaytraceOptions { dielectrics: vec![dielectric::tests::input(job::DielectricBoundary::ClosedBox)], ..Default::default() };
+    let mut options =
+        RaytraceOptions { threads: 1, dielectrics: vec![dielectric::tests::input(job::DielectricBoundary::ClosedBox)], ..Default::default() };
     let name = scene.meshes[0].name.clone();
     let bytes = options.retained_bytes().unwrap();
     assert_eq!(
@@ -1382,12 +1506,16 @@ fn optical_admission_bills_capacity_and_refuses_ambiguous_effect_and_environment
     );
     let mut request = dielectric::tests::request(options.clone());
     let with_optics = admit(&scene, &request, &options).unwrap();
-    let plain = RaytraceOptions::default();
+    let plain = RaytraceOptions { threads: 1, ..Default::default() };
     let plain_request = ImageRequest { raytrace: Some(plain.clone()), ..request.clone() };
     let without_optics = admit(&scene, &plain_request, &plain).unwrap();
     assert_eq!(
         with_optics.estimated_total_bytes - without_optics.estimated_total_bytes,
-        bytes + request.raytrace.as_ref().unwrap().retained_dielectric_bytes().unwrap() + std::mem::size_of::<OpticalTask>() as u64
+        bytes
+            + request.raytrace.as_ref().unwrap().retained_dielectric_bytes().unwrap()
+            + std::mem::size_of::<OpticalTask>() as u64
+            + super::super::legacy_certificates::Task::required_bytes(&scene, &options).unwrap()
+            + std::mem::size_of::<super::CertifiedOptics>() as u64
     );
     options.surface_effects = Some(vec![crate::surface_patterns::SurfaceEffect {
         body: name,
@@ -1428,7 +1556,7 @@ fn optical_admission_bills_capacity_and_refuses_ambiguous_effect_and_environment
 #[test]
 fn captured_clear_coat_keeps_direct_shading_but_refuses_unmatched_cpu_transport() {
     let (mut scene, mut request, mut options) = emission_fixture(false);
-    let coat = crate::clear_coat::ClearCoat::new(0.8, 0.2, 1.5).unwrap();
+    let coat = solidcraft_viewport::clear_coat::ClearCoat::new(0.8, 0.2, 1.5).unwrap();
     let surface = OpaqueSurface::new(Vec3::new(0.4, 0.3, 0.2), 0.0, 0.4, 1.5).unwrap().with_clear_coat(coat);
     scene.meshes[0].surface = Some(surface);
     request.raytrace = Some(options.clone());
@@ -1483,4 +1611,1262 @@ fn cancelled_pending_pixel_allocation_is_refused_before_any_continuation() {
     let cancel = CancelToken::default();
     cancel.cancel();
     assert_eq!(PendingPixelSlot::new(&cancel).err().unwrap().code, ErrorCode::Cancelled);
+}
+
+fn progressive_optics_fixture(samples: u32, thin: bool, ior: f64, cancel: CancelToken) -> ImageTask {
+    let mut body = dielectric::tests::box_body(8.0);
+    let boundary = if thin {
+        std::sync::Arc::make_mut(&mut body.mesh).triangles = vec![[4, 5, 7], [4, 7, 6]];
+        job::DielectricBoundary::ThinSheet
+    } else {
+        job::DielectricBoundary::ClosedBox
+    };
+    let mut material = dielectric::tests::input(boundary);
+    material.ior = ior;
+    material.absorption_per_mm = [0.1, 0.2, 0.0];
+    material.thickness_mm = if thin { 8.0 } else { 0.0 };
+    let options = RaytraceOptions {
+        threads: 1,
+        progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: samples, seed: 83 }),
+        dielectrics: vec![material],
+        environment: Some(job::RaytraceEnvironmentOptions { color: [1.0; 3], intensity: 1.0 }),
+        lights: Some(Vec::new()),
+        shadows: false,
+        ..Default::default()
+    };
+    let mut request = dielectric::tests::request(options.clone());
+    // A small parallel camera keeps every independently jittered sample well inside
+    // the certified slab; this analytic fixture does not sample a boundary edge.
+    request.camera.distance = 10.0;
+    request.camera.fov = 0.0;
+    ImageTask::new(dielectric::tests::scene(body), request, cancel, options).unwrap()
+}
+
+fn progressive_optics_complete(mut task: ImageTask, quantum: usize) -> (Vec<(u32, Vec<u8>)>, Vec<u8>, u64) {
+    let mut previews = Vec::new();
+    let mut branches = 0;
+    for _ in 0..2_000_000 {
+        let used = task.work.used();
+        let transport = task.progress().phase == Phase::Running;
+        let poll = task.step_with_previews(quantum).unwrap();
+        if quantum == 1 && transport {
+            assert!(task.work.used() - used <= 4, "an optical continuation exceeded the shared work quantum");
+        }
+        assert!(task.primary_coverage <= 1, "Fresnel branches cannot become additional camera coverage samples");
+        if let Some(state) = task.optical.first().and_then(|o| o.pending.as_ref())
+            && state.path.boundaries > 0
+        {
+            branches += 1;
+            assert!(!task.pending.as_ref().unwrap().repeatable_primary);
+        }
+        match poll {
+            ImagePoll::Pending(_) => {}
+            ImagePoll::Preview { png, samples_per_pixel } => {
+                assert!(task.optical.first().is_some_and(|o| o.pending.is_none()), "a complete pass must drain every optical branch");
+                previews.push((samples_per_pixel, png));
+            }
+            ImagePoll::Complete(png) => {
+                assert!(branches > 0, "the actual image producer must consume optical interfaces");
+                assert!(task.optical.is_empty());
+                return (previews, png, task.work.used());
+            }
+        }
+    }
+    panic!("bounded progressive optical fixture did not finish");
+}
+
+#[test]
+fn progressive_certified_optics_keep_beer_lambert_energy_prefixes_and_shared_work() {
+    for thin in [false, true] {
+        for ior in [1.0, 1.5] {
+            let actual = progressive_optics_complete(progressive_optics_fixture(5, thin, ior, CancelToken::default()), 1);
+            assert_eq!(actual.0.iter().map(|p| p.0).collect::<Vec<_>>(), [1, 2, 3, 4]);
+            assert_eq!(actual, progressive_optics_complete(progressive_optics_fixture(5, thin, ior, CancelToken::default()), 16_384));
+            for (samples, png) in &actual.0 {
+                let prefix = progressive_optics_complete(progressive_optics_fixture(*samples, thin, ior, CancelToken::default()), 3);
+                assert_eq!(*png, prefix.1, "target sample count must not change an optical prefix");
+            }
+            if ior == 1.0 {
+                // Index-matched slab/sheet: no reflection, exactly eight millimetres
+                // of Beer attenuation in each independent camera sample.
+                let linear = Vec3::new((-0.8f64).exp(), (-1.6f64).exp(), 1.0);
+                let mapped = map_to_display(linear, 0.0).unwrap();
+                let expected = [encode8(mapped.x), encode8(mapped.y), encode8(mapped.z), 255];
+                assert_eq!(::image::load_from_memory(&actual.1).unwrap().to_rgba8().get_pixel(0, 0).0, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn progressive_certified_optical_branches_cancel_and_exhaust_before_any_late_pass() {
+    for exhausted in [false, true] {
+        let cancel = CancelToken::default();
+        let mut task = progressive_optics_fixture(5, false, 1.5, cancel.clone());
+        let mut stopped = false;
+        for _ in 0..200_000 {
+            assert!(matches!(task.step_with_previews(1).unwrap(), ImagePoll::Pending(_)));
+            if task.optical.first().and_then(|o| o.pending.as_ref()).is_some_and(|state| state.path.boundaries > 0) {
+                let used = task.work.used();
+                if exhausted {
+                    task.work.limit = used;
+                } else {
+                    cancel.cancel();
+                }
+                assert_eq!(task.step_with_previews(1).err().unwrap().code, if exhausted { ErrorCode::LimitExceeded } else { ErrorCode::Cancelled });
+                assert_eq!(task.work.used(), used);
+                assert!(!task.done);
+                stopped = true;
+                break;
+            }
+        }
+        assert!(stopped, "test must stop inside a real Fresnel branch");
+    }
+}
+
+type DenoiseOracleGuide = [[f64; 4]; 3];
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a.into_iter().zip(b).map(|(x, y)| x * y).sum()
+}
+fn diff(a: [f64; 4], b: [f64; 4]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+fn xyz(a: [f64; 4]) -> [f64; 3] {
+    [a[0], a[1], a[2]]
+}
+
+// Independent f64 gather oracle: all inputs are averaged linear values, so the
+// GPU's accumulated-sample scaling is absent from this numerical implementation.
+fn cpu_denoise_reference(width: usize, input: &[[f64; 4]], guides: &[DenoiseOracleGuide], step: usize, firefly_suppression: bool) -> Vec<[f64; 4]> {
+    let height = input.len() / width;
+    let kernel = [1.0, 4.0, 6.0, 4.0, 1.0];
+    let maximum = |v: [f64; 3]| v.into_iter().fold(0.0, f64::max);
+    input
+        .iter()
+        .enumerate()
+        .map(|(i, &center)| {
+            let [a, n, p] = guides[i];
+            if a[3] == 0.0 || center[3] < 0.999 {
+                return center;
+            }
+            let mut result = [0.0; 4];
+            let mut total = 0.0;
+            let center_peak = maximum(xyz(center));
+            let mut support = Vec::new();
+            for (ky, &wy) in kernel.iter().enumerate() {
+                for (kx, &wx) in kernel.iter().enumerate() {
+                    let x = (i % width) as isize + (kx as isize - 2) * step as isize;
+                    let y = (i / width) as isize + (ky as isize - 2) * step as isize;
+                    if x < 0 || y < 0 || x >= width as isize || y >= height as isize {
+                        continue;
+                    }
+                    let j = y as usize * width + x as usize;
+                    let [b, m, q] = guides[j];
+                    let value = input[j];
+                    if a[3] != b[3] || (value[3] - center[3]).abs() > 0.01 {
+                        continue;
+                    }
+                    let albedo = diff(a, b);
+                    let position = diff(q, p);
+                    let plane = dot(position, xyz(n)).abs() + dot(position, xyz(m)).abs();
+                    let scale = (0.05 * p[3].max(q[3]) * step as f64).max(1e-6);
+                    let depth = (n[3] - m[3]).abs() / (8.0 * p[3].max(q[3]) * step as f64).max(1e-6);
+                    let color = diff(center, value);
+                    let peak = maximum(xyz(value));
+                    let guide = (-dot(albedo, albedo) / 0.04 - plane / scale - depth).exp() * dot(xyz(n), xyz(m)).max(0.0).powi(32);
+                    if firefly_suppression
+                        && step == 1
+                        && i != j
+                        && (i % width).abs_diff(j % width) <= 1
+                        && (i / width).abs_diff(j / width) <= 1
+                        && guide >= 0.5
+                    {
+                        support.push(peak);
+                    }
+                    let brighter = center_peak.max(peak);
+                    let color_scale = 0.25 + 0.5 * brighter;
+                    let bound = 16.0 * (0.25 + center_peak.min(peak));
+                    let ratio = if firefly_suppression { bound / brighter.max(bound) } else { 1.0 };
+                    let weight = wx * wy * guide * ratio * ratio * (-maximum(color.map(f64::abs)) / color_scale).exp();
+                    for k in 0..3 {
+                        result[k] += value[k] * weight;
+                    }
+                    total += weight;
+                }
+            }
+            for v in result.iter_mut().take(3) {
+                *v /= total;
+            }
+            let support_peak = support.iter().copied().fold(0.0, f64::max);
+            if firefly_suppression && support.len() >= 5 && center_peak > 16.0 * (0.25 + support_peak) {
+                let cap = 2.0 * support_peak + 0.25;
+                let factor = cap / maximum(xyz(result)).max(cap);
+                for channel in result.iter_mut().take(3) {
+                    *channel *= factor;
+                }
+            }
+            result[3] = center[3];
+            result
+        })
+        .collect()
+}
+
+fn denoise_test_guide(x: usize, y: usize) -> job::denoise::Guide {
+    job::denoise::Guide {
+        albedo: [0.5; 3],
+        body: 1,
+        normal: [0.0, 0.0, 1.0],
+        depth: 4.0,
+        position: [x as f32, y as f32, 0.0],
+        footprint: 1.0,
+        reflected: Default::default(),
+    }
+}
+fn oracle_guides(guides: &[job::denoise::Guide]) -> Vec<DenoiseOracleGuide> {
+    guides
+        .iter()
+        .map(|g| {
+            [
+                [f64::from(g.albedo[0]), f64::from(g.albedo[1]), f64::from(g.albedo[2]), f64::from(g.body)],
+                [f64::from(g.normal[0]), f64::from(g.normal[1]), f64::from(g.normal[2]), f64::from(g.depth)],
+                [f64::from(g.position[0]), f64::from(g.position[1]), f64::from(g.position[2]), f64::from(g.footprint)],
+            ]
+        })
+        .collect()
+}
+fn complete_denoise(width: u32, pixels: Vec<[f32; 4]>, guides: &[job::denoise::Guide]) -> (Vec<[f32; 4]>, usize) {
+    let task = job::denoise::DenoiseTask::new(width, pixels.len() as u32 / width, pixels).unwrap();
+    complete_denoise_task(task, guides)
+}
+fn complete_denoise_with_settings(
+    width: u32,
+    pixels: Vec<[f32; 4]>,
+    guides: &[job::denoise::Guide],
+    settings: job::DenoiseSettings,
+) -> (Vec<[f32; 4]>, usize) {
+    let task = job::denoise::DenoiseTask::new_with_settings(width, pixels.len() as u32 / width, pixels, settings).unwrap();
+    complete_denoise_task(task, guides)
+}
+fn complete_denoise_task(mut task: job::denoise::DenoiseTask, guides: &[job::denoise::Guide]) -> (Vec<[f32; 4]>, usize) {
+    let mut visits = 0;
+    for _ in 0..1000 {
+        let count = task.next_pixels();
+        assert!(count <= job::denoise::MAX_STEP_PIXELS);
+        visits += count;
+        if task.step(guides, &CancelToken::default()).unwrap() {
+            return (task.finish().unwrap(), visits);
+        }
+    }
+    panic!("bounded filter did not finish")
+}
+#[test]
+fn cpu_atrous_matches_independent_f64_gather_preserves_hdr_coverage_and_edges() {
+    assert!(!job::DenoiseSettings::default().firefly_suppression);
+    let width = 17u32;
+    let count = (width * width) as usize;
+    let guides: Vec<_> = (0..count).map(|i| denoise_test_guide(i % 17, i / 17)).collect();
+    let pixels: Vec<_> = (0..count)
+        .map(|i| {
+            let hash = (i as u32).wrapping_mul(2654435761);
+            let value = 0.4 + 0.2 * (hash >> 8) as f32 / 16777216.0;
+            [value, value * 0.7, value * 1.3, 1.0]
+        })
+        .collect();
+    let original = pixels.clone();
+    let saved = guides.clone();
+    let (actual, visits) = complete_denoise(width, pixels, &guides);
+    let mut expected: Vec<_> = original.iter().map(|p| p.map(f64::from)).collect();
+    for step in [1, 2, 4] {
+        expected = cpu_denoise_reference(17, &expected, &oracle_guides(&guides), step, false);
+    }
+    assert_eq!(visits, 3 * count, "bounded pixel visits, not an invented scalar-FLOP budget");
+    for (a, b) in actual.iter().zip(expected) {
+        for c in 0..4 {
+            assert!((f64::from(a[c]) - b[c]).abs() < 2e-6)
+        }
+    }
+    let variance = |v: &[[f32; 4]]| {
+        let mean = v.iter().map(|p| f64::from(p[0])).sum::<f64>() / v.len() as f64;
+        v.iter().map(|p| (f64::from(p[0]) - mean).powi(2)).sum::<f64>() / v.len() as f64
+    };
+    assert!(variance(&actual) < variance(&original) / 4.0);
+    assert_eq!(guides.iter().map(|g| g.position).collect::<Vec<_>>(), saved.iter().map(|g| g.position).collect::<Vec<_>>());
+    for constant in [[0.75, 0.25, 0.5, 1.0], [1e30, 1e20, 1e10, 1.0], [0.7, 0.3, 0.1, 0.5]] {
+        assert_eq!(complete_denoise(width, vec![constant; count], &guides).0, vec![constant; count]);
+    }
+    for edge in 0..6 {
+        let mut g = guides.clone();
+        let mut p = vec![[0.0, 0.0, 0.0, 1.0]; count];
+        for (i, value) in p.iter_mut().enumerate() {
+            if i % 17 >= 8 {
+                *value = [1.0; 4];
+                match edge {
+                    0 => g[i].body = 2,
+                    1 => g[i].normal = [1.0, 0.0, 0.0],
+                    2 => g[i].position[2] = 10.0,
+                    3 => g[i].albedo = [1.0; 3],
+                    4 => g[i].depth = 1004.0,
+                    _ => g[i].body = 0,
+                }
+            } else if edge == 3 {
+                g[i].albedo = [0.0; 3]
+            }
+        }
+        let filtered = complete_denoise(width, p.clone(), &g).0;
+        assert!(filtered.iter().zip(p).all(|(a, b)| (a[0] - b[0]).abs() < 1e-12), "edge {edge}");
+    }
+    let bypass = vec![job::denoise::Guide::default(); count];
+    assert_eq!(complete_denoise(width, original.clone(), &bypass).0, original);
+}
+
+#[test]
+fn cpu_atrous_removes_an_isolated_hdr_spike_without_spreading_its_peak() {
+    let settings = job::DenoiseSettings { firefly_suppression: true, ..Default::default() };
+    let width = 9;
+    let count = width * width;
+    let center = count / 2;
+    let guides: Vec<_> = (0..count).map(|i| denoise_test_guide(i % width, i / width)).collect();
+    let mut pixels = vec![[0.5, 0.125, 0.0625, 1.0]; count];
+    pixels[center] = [4096.0, 1024.0, 512.0, 1.0];
+    let (actual, visits) = complete_denoise_with_settings(width as u32, pixels.clone(), &guides, settings);
+    assert_eq!(visits, 3 * count);
+    assert!(actual.iter().all(|p| p[0] <= 1.25));
+    assert!(actual.iter().all(|p| p[1] == 0.25 * p[0] && p[2] == 0.125 * p[0] && p[3] == 1.0));
+    let guides = oracle_guides(&guides);
+    let mut expected: Vec<_> = pixels.into_iter().map(|p| p.map(f64::from)).collect();
+    for step in [1, 2, 4] {
+        expected = cpu_denoise_reference(width, &expected, &guides, step, settings.firefly_suppression);
+    }
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert!(actual.iter().zip(expected).all(|(a, b)| (f64::from(*a) - b).abs() < 2e-6));
+    }
+}
+
+#[test]
+fn cpu_atrous_preserves_narrow_hdr_highlights_and_requires_compatible_spike_support() {
+    let settings = job::DenoiseSettings { firefly_suppression: true, ..Default::default() };
+    let width = 9;
+    let count = width * width;
+    let center = count / 2;
+    let dark = [0.5, 0.125, 0.0625, 1.0];
+    let bright = [4096.0, 1024.0, 512.0, 1.0];
+    let guides: Vec<_> = (0..count).map(|i| denoise_test_guide(i % width, i / width)).collect();
+    let stripe = (0..count).map(|i| if i % width == width / 2 { bright } else { dark }).collect();
+    let filtered = complete_denoise_with_settings(width as u32, stripe, &guides, settings).0;
+    assert!(filtered[center][0] > 0.99 * bright[0]);
+    assert!(filtered[center + 1][0] < 1.0);
+
+    let mut pixels = vec![dark; count];
+    pixels[center] = bright;
+    let mut surface_edge = guides.clone();
+    for (i, guide) in surface_edge.iter_mut().enumerate() {
+        if i != center {
+            guide.albedo = [0.75; 3];
+        }
+    }
+    // The same body crosses a guide discontinuity. The fifth compatible
+    // immediate neighbour determines whether the spike can be clamped.
+    for i in [center - width, center - 1, center + 1, center + width] {
+        surface_edge[i].albedo = guides[i].albedo;
+    }
+    let filtered = complete_denoise_with_settings(width as u32, pixels.clone(), &surface_edge, settings).0;
+    assert!(filtered[center][0] > 0.99 * bright[0]);
+    surface_edge[center + width + 1].albedo = guides[center + width + 1].albedo;
+    let filtered = complete_denoise_with_settings(width as u32, pixels, &surface_edge, settings).0;
+    assert!(filtered[center][0] <= 1.25);
+}
+
+fn denoised_plane(samples: u32, denoise: bool, output: Option<job::OutputOptions>) -> ImageTask {
+    let (scene, mut request, _) = emission_fixture(false);
+    request.width = 13;
+    request.height = 13;
+    let options = RaytraceOptions {
+        threads: 1,
+        denoise,
+        output: output.map(Box::new),
+        progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: samples, seed: 7 }),
+        lights: Some(Vec::new()),
+        area_lights: Some(vec![job::RectangleLightOptions {
+            center_mm: [0.0, 0.0, 10.0],
+            edge_u_mm: [14.0, 0.0, 0.0],
+            edge_v_mm: [0.0, -14.0, 0.0],
+            color: [1.0, 0.7, 0.3],
+            intensity: 10.0,
+        }]),
+        area_samples: Some(1),
+        seed: Some(31),
+        ..Default::default()
+    };
+    request.raytrace = Some(options.clone());
+    ImageTask::new(scene, request, CancelToken::default(), options).unwrap()
+}
+type DenoisedImageOutput = (Vec<(u32, Vec<u8>)>, Vec<u8>, Option<Vec<u8>>, u64);
+fn finish_denoise_image(mut task: ImageTask, units: usize) -> DenoisedImageOutput {
+    let mut previews = Vec::new();
+    for _ in 0..300000 {
+        match task.step_with_previews(units).unwrap() {
+            ImagePoll::Pending(_) => {}
+            ImagePoll::Preview { png, samples_per_pixel } => {
+                assert!(task.take_linear_exr().is_none());
+                previews.push((samples_per_pixel, png));
+            }
+            ImagePoll::Complete(png) => {
+                assert_eq!(task.denoise.capacity(), 0, "guides are work-owned, never retained with the final master");
+                return (previews, png, task.take_linear_exr(), task.work.used());
+            }
+        }
+    }
+    panic!("bounded denoised image did not finish")
+}
+#[test]
+fn cpu_denoising_filters_actual_complete_prefixes_without_changing_raw_film_or_exr() {
+    let output = job::OutputOptions { linear_exr: true, ..Default::default() };
+    let first = finish_denoise_image(denoised_plane(4, true, Some(output)), 1);
+    assert_eq!(first.0.iter().map(|p| p.0).collect::<Vec<_>>(), [1, 2, 3]);
+    assert_eq!(first, finish_denoise_image(denoised_plane(4, true, Some(output)), 16384));
+    for (samples, png) in &first.0 {
+        assert_eq!(png, &finish_denoise_image(denoised_plane(*samples, true, Some(output)), 3).1)
+    }
+    let raw = finish_denoise_image(denoised_plane(4, false, Some(output)), 1);
+    assert_eq!(first.2, raw.2, "EXR is encoded before filtering from identical absolute Monte Carlo samples");
+    assert_ne!(first.1, raw.1, "the actual CPU soft-light picture must pass through the filter");
+    let mut task = denoised_plane(2, true, None);
+    assert!(!task.options.denoise_settings.firefly_suppression);
+    for _ in 0..300000 {
+        if task.linear.len() == 169 && task.output.is_empty() {
+            break;
+        }
+        assert!(!matches!(task.step_with_previews(1).unwrap(), ImagePoll::Complete(_)));
+    }
+    assert_eq!(task.linear.len(), 169);
+    let guides = task.denoise.first().unwrap().pixels().unwrap().to_vec();
+    assert!(guides.iter().all(|g| g.body > 0));
+    assert!(guides.iter().all(|g| (g.normal[2] - 1.0).abs() < 1e-6));
+    let film: Vec<_> = (0..169).map(|i| task.progressive.as_ref().unwrap().film.pixel(i).unwrap()).collect();
+    let mut expected: Vec<_> = task.linear.iter().map(|p| p.map(f64::from)).collect();
+    for step in [1, 2, 4] {
+        expected = cpu_denoise_reference(13, &expected, &oracle_guides(&guides), step, task.options.denoise_settings.firefly_suppression)
+            .into_iter()
+            .map(|pixel| pixel.map(|value| f64::from(value as f32)))
+            .collect()
+    }
+    let linear: Vec<_> = expected.iter().map(|p| p.map(|v| v as f32)).collect();
+    let mut rgba = vec![0; 169 * 4];
+    job::presentation::Presentation { background: task.request.background, ..Default::default() }
+        .display(13, 13)
+        .unwrap()
+        .encode(&linear, &mut rgba, &CancelToken::default())
+        .unwrap();
+    let png = loop {
+        match task.step_with_previews(1).unwrap() {
+            ImagePoll::Preview { png, .. } => break png,
+            ImagePoll::Pending(_) => {}
+            ImagePoll::Complete(_) => panic!("first prefix was lost"),
+        }
+    };
+    assert_eq!(::image::load_from_memory(&png).unwrap().to_rgba8().as_raw(), &rgba);
+    assert_eq!((0..169).map(|i| task.progressive.as_ref().unwrap().film.pixel(i).unwrap()).collect::<Vec<_>>(), film);
+}
+#[test]
+fn cpu_denoising_admits_actual_guides_and_colour_scratch_only_when_enabled() {
+    let plain = denoised_plane(4, false, None);
+    let filtered = denoised_plane(4, true, None);
+    assert_eq!(plain.denoise.capacity(), 0);
+    assert_eq!(filtered.denoise.capacity(), 1);
+    let expected = 169 * 128 + std::mem::size_of::<super::super::denoise::Guides>() as u64 + std::mem::size_of::<job::output::OutputTask>() as u64;
+    assert_eq!(filtered.admission.estimated_total_bytes - plain.admission.estimated_total_bytes, expected);
+    let output = Some(job::OutputOptions { linear_exr: true, ..Default::default() });
+    let plain = denoised_plane(4, false, output);
+    let filtered = denoised_plane(4, true, output);
+    assert_eq!(
+        filtered.admission.estimated_total_bytes - plain.admission.estimated_total_bytes,
+        169 * 112 + std::mem::size_of::<super::super::denoise::Guides>() as u64
+    );
+    let mut request = plain.request.clone();
+    request.width = 8193;
+    request.height = 1;
+    let options = RaytraceOptions { threads: 1, denoise: true, budget: job::CpuBudget::Workstation, ..Default::default() };
+    request.raytrace = Some(options.clone());
+    assert!(admit(&plain.scene, &request, &options).unwrap_err().message.contains("linear EXR"));
+}
+#[test]
+fn cpu_denoising_guides_and_filter_keep_cancellation_and_cumulative_work() {
+    for guide_stage in [true, false] {
+        for cancel in [true, false] {
+            let mut task = denoised_plane(2, true, Some(job::OutputOptions { linear_exr: true, ..Default::default() }));
+            for _ in 0..300000 {
+                let reached = if guide_stage {
+                    task.bvh.is_some() && task.denoise.first().is_some_and(|g| !g.ready())
+                } else {
+                    task.output.first().is_some_and(|o| o.stage_name() == "denoise")
+                };
+                if reached {
+                    break;
+                }
+                assert!(!matches!(task.step_with_previews(1).unwrap(), ImagePoll::Complete(_)));
+            }
+            if guide_stage {
+                assert!(!task.denoise.first().unwrap().ready())
+            } else {
+                assert_eq!(task.output.first().unwrap().stage_name(), "denoise")
+            }
+            if cancel {
+                task.cancel.cancel()
+            } else {
+                task.work.limit = task.work.used()
+            }
+            assert_eq!(task.step_with_previews(1).err().unwrap().code, if cancel { ErrorCode::Cancelled } else { ErrorCode::LimitExceeded });
+            assert!(!task.done);
+            assert!(task.take_linear_exr().is_none());
+        }
+    }
+}
+
+fn actual_denoise_guides(mut task: ImageTask) -> Vec<job::denoise::Guide> {
+    for _ in 0..300000 {
+        if task.denoise.first().is_some_and(|guides| guides.ready()) {
+            assert_eq!(task.pixel, 0, "guide construction cannot consume a Monte Carlo sample");
+            assert_eq!(task.progressive.as_ref().unwrap().film.samples(), 0);
+            return task.denoise.first().unwrap().pixels().unwrap().to_vec();
+        }
+        assert!(!matches!(task.step_with_previews(1).unwrap(), ImagePoll::Complete(_)));
+    }
+    panic!("bounded production guides did not finish")
+}
+#[test]
+fn cpu_denoise_production_guides_use_exact_body_and_material_bypass_policy() {
+    for case in 0..7 {
+        let base = denoised_plane(2, true, None);
+        let mut source = base.scene.clone();
+        let mut options = base.options.clone();
+        match case {
+            0 | 1 => {
+                for body in &mut source.meshes {
+                    body.surface = Some(OpaqueSurface::new(Vec3::new(0.4, 0.6, 0.8), 1.0, if case == 0 { 0.2 } else { 0.3 }, 1.5).unwrap());
+                }
+            }
+            2 | 3 => {
+                for body in &mut source.meshes {
+                    body.surface =
+                        Some(OpaqueSurface::new(Vec3::new(0.4, 0.6, 0.8), 0.0, 0.5, 1.5).unwrap().with_clear_coat(
+                            solidcraft_viewport::clear_coat::ClearCoat::new(1.0, if case == 2 { 0.045 } else { 0.1 }, 1.5).unwrap(),
+                        ));
+                }
+            }
+            4 => {
+                options.dielectrics = source
+                    .meshes
+                    .iter()
+                    .enumerate()
+                    .map(|(body_index, body)| job::DielectricOptions {
+                        model: None,
+                        shadow_transmission: false,
+                        subsurface: None,
+                        body_index,
+                        body_name: body.name.clone(),
+                        boundary: job::DielectricBoundary::ThinSheet,
+                        ior: 1.5,
+                        absorption_per_mm: [0.0; 3],
+                        thickness_mm: 0.0,
+                    })
+                    .collect();
+            }
+            5 => {
+                options.reflections = Some(job::ReflectionOptions {
+                    samples: 1,
+                    bodies: source
+                        .meshes
+                        .iter()
+                        .map(|body| job::ReflectionBody { body: body.name.clone(), mode: job::ReflectionMode::Mirror })
+                        .collect(),
+                    ..Default::default()
+                })
+            }
+            _ => {
+                options.emissions = Some(
+                    source
+                        .meshes
+                        .iter()
+                        .enumerate()
+                        .map(|(body_index, body)| job::SurfaceEmission {
+                            body_index,
+                            body: body.name.clone(),
+                            color: [1.0; 3],
+                            strength: 1.0,
+                            sides: job::EmissionSides::Both,
+                        })
+                        .collect(),
+                )
+            }
+        }
+        let request = ImageRequest { raytrace: Some(options.clone()), ..base.request.clone() };
+        let guides = actual_denoise_guides(ImageTask::new(source, request, CancelToken::default(), options).unwrap());
+        let eligible = matches!(case, 1 | 3);
+        assert!(guides.iter().all(|g| (g.body != 0) == eligible), "case {case}");
+        if eligible {
+            assert!(guides.iter().all(|g| g.body == 1 || g.body == 2));
+            assert!(guides.iter().all(|g| g.albedo == [0.4, 0.6, 0.8]));
+        }
+    }
+}
+
+fn denoise_optical_plane(name: &str, z: f64, color: Vec3) -> crate::ProductMesh {
+    let mesh = solidcraft_geom::Mesh {
+        positions: vec![Vec3::new(-10.0, -10.0, z), Vec3::new(10.0, -10.0, z), Vec3::new(10.0, 10.0, z), Vec3::new(-10.0, 10.0, z)],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        ..Default::default()
+    };
+    crate::ProductMesh {
+        name: name.into(),
+        mesh: std::sync::Arc::new(mesh),
+        surface: Some(OpaqueSurface::new(color, 0.0, 0.5, 1.5).unwrap()),
+        color: [255; 3],
+        opacity: 1.0,
+        faces: Vec::new(),
+        transmission: None,
+    }
+}
+fn denoise_optical_fixture(boundary: Option<job::DielectricBoundary>, path: bool) -> (ProductScene, ImageRequest, RaytraceOptions) {
+    let mut request = request();
+    request.width = 1;
+    request.height = 1;
+    request.camera.target = Vec3::ZERO;
+    request.camera.distance = 3.0;
+    request.camera.fov = 0.5;
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
+    let mut options = RaytraceOptions {
+        threads: 1,
+        denoise: true,
+        shadows: true,
+        lights: Some(Vec::new()),
+        path: path.then_some(job::CpuPathOptions { max_depth: 3 }),
+        progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: 1, seed: 19 }),
+        ..Default::default()
+    };
+    let mut primary = if boundary.as_ref().is_some_and(|boundary| *boundary != job::DielectricBoundary::ThinSheet) {
+        dielectric::tests::box_body(1.0)
+    } else {
+        denoise_optical_plane("Optical primary", 0.0, Vec3::new(0.5, 0.5, 0.5))
+    };
+    if let Some(boundary) = boundary {
+        let mut material = dielectric::tests::input(boundary);
+        material.body_name = primary.name.clone();
+        material.absorption_per_mm = [0.0; 3];
+        options.dielectrics = vec![material];
+    } else if path {
+        primary.surface = Some(OpaqueSurface::new(Vec3::new(0.8, 0.7, 0.6), 1.0, 0.045, 1.5).unwrap());
+    } else {
+        options.reflections = Some(job::ReflectionOptions {
+            samples: 1,
+            bodies: vec![job::ReflectionBody { body: primary.name.clone(), mode: job::ReflectionMode::Mirror }],
+            ..Default::default()
+        });
+    }
+    let meshes = vec![
+        primary,
+        denoise_optical_plane("Reflected receiver", 4.0, Vec3::new(0.75, 0.5, 0.25)),
+        denoise_optical_plane("Transmitted receiver", -1.0, Vec3::new(0.25, 0.5, 0.75)),
+    ];
+    let bounds = meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+    (ProductScene { meshes, bounds }, request, options)
+}
+fn optical_denoise_guide(scene: ProductScene, mut request: ImageRequest, options: RaytraceOptions) -> job::denoise::Guide {
+    request.raytrace = Some(options.clone());
+    actual_denoise_guides(ImageTask::new(scene, request, CancelToken::default(), options).unwrap())[0]
+}
+
+#[test]
+fn cpu_denoise_optical_guides_follow_explicit_mirror_and_near_perfect_metal() {
+    for path in [false, true] {
+        let (scene, request, options) = denoise_optical_fixture(None, path);
+        let guide = optical_denoise_guide(scene, request.clone(), options);
+        assert_eq!(guide.body, 0xa000_0000 | (1 << 18) | (2 << 9));
+        assert_eq!(guide.albedo, [0.75, 0.5, 0.25]);
+        assert_eq!(guide.position[2], 1.0);
+        assert_eq!(guide.depth, -1.0);
+        assert!(guide.normal[2] < -0.999);
+        assert!(guide.footprint >= request.camera.half_height() as f32, "the reflected endpoint behind the eye keeps the primary footprint");
+    }
+}
+
+#[test]
+fn cpu_denoise_optical_guides_bypass_every_active_coat_on_metal() {
+    for roughness in [0.045, 0.1, 0.5] {
+        let (mut scene, request, options) = denoise_optical_fixture(None, true);
+        scene.meshes[0].surface = scene.meshes[0]
+            .surface
+            .map(|surface| surface.with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(0.8, roughness, 1.5).unwrap()));
+        assert_eq!(optical_denoise_guide(scene, request, options).body, 0);
+    }
+}
+
+#[test]
+fn cpu_denoise_optical_guides_follow_thin_and_closed_glass_and_bypass_missing_branches() {
+    use job::DielectricBoundary::{ClosedBox, ClosedMesh, ThinSheet};
+    for (boundary, path) in [(ThinSheet, false), (ThinSheet, true), (ClosedBox, false), (ClosedMesh, true)] {
+        let (scene, request, mut options) = denoise_optical_fixture(Some(boundary), path);
+        let guide = optical_denoise_guide(scene.clone(), request.clone(), options.clone());
+        assert_eq!(guide.body, 0xa000_0000 | (1 << 18) | (2 << 9) | 3, "both Fresnel branches must resolve");
+        assert_eq!(guide.reflected.albedo, [0.75, 0.5, 0.25]);
+        assert_eq!(guide.reflected.body, 2);
+        assert_eq!(guide.albedo, [0.25, 0.5, 0.75]);
+        assert_eq!(guide.position[2], -4.0);
+        assert_eq!(guide.depth, 4.0);
+        assert!(guide.normal[2] > 0.999);
+
+        let mut missing = scene.clone();
+        missing.meshes.remove(1);
+        missing.bounds = missing.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+        assert_eq!(optical_denoise_guide(missing, request.clone(), options.clone()).body, 0);
+        if let Some(path) = &mut options.path {
+            path.max_depth = if boundary == ThinSheet { 1 } else { 2 };
+            assert_eq!(optical_denoise_guide(scene.clone(), request.clone(), options.clone()).body, 0);
+            options.path.as_mut().unwrap().max_depth = 3;
+            options.dielectrics[0].model = Some(crate::glass_model::GlassModel { roughness: 0.2, ..Default::default() });
+            assert_eq!(optical_denoise_guide(scene.clone(), request.clone(), options.clone()).body, 0);
+            options.dielectrics[0].model = None;
+            options.area_lights = Some(vec![job::RectangleLightOptions {
+                center_mm: [0.0, 0.0, 3.5],
+                edge_u_mm: [8.0, 0.0, 0.0],
+                edge_v_mm: [0.0, -8.0, 0.0],
+                color: [1.0; 3],
+                intensity: 1.0,
+            }]);
+            assert_eq!(optical_denoise_guide(scene.clone(), request.clone(), options.clone()).body, 0);
+            options.area_lights = None;
+        }
+        options.dielectrics[0].ior = 1.0;
+        let guide = optical_denoise_guide(scene, request, options);
+        assert_eq!(guide.body, 0xa000_0000 | (1 << 18) | 3, "matched index has no reflection branch");
+    }
+}
+
+#[test]
+fn cpu_denoise_center_guides_are_translation_stable_and_independent_of_pupil_sampling() {
+    let base = denoised_plane(2, true, None);
+    let expected = actual_denoise_guides(denoised_plane(2, true, None));
+    let shift = Vec3::new(9e8, -8e8, 7e8);
+    let mut scene = base.scene.clone();
+    for body in &mut scene.meshes {
+        let mut mesh = (*body.mesh).clone();
+        for position in &mut mesh.positions {
+            *position += shift;
+        }
+        body.mesh = std::sync::Arc::new(mesh);
+    }
+    scene.bounds = scene.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+    let mut request = base.request.clone();
+    request.camera.target += shift;
+    let translated = actual_denoise_guides(ImageTask::new(scene, request, CancelToken::default(), base.options.clone()).unwrap());
+    for (a, b) in expected.iter().zip(translated) {
+        assert_eq!((a.body, a.albedo, a.normal), (b.body, b.albedo, b.normal));
+        for i in 0..3 {
+            assert!((a.position[i] - b.position[i]).abs() < 1e-4);
+        }
+        assert!((a.depth - b.depth).abs() < 1e-4);
+        assert_eq!(a.footprint, b.footprint);
+    }
+    let mut request = base.request.clone();
+    request.camera.fov = 0.8;
+    let no_lens = actual_denoise_guides(ImageTask::new(base.scene.clone(), request.clone(), CancelToken::default(), base.options.clone()).unwrap());
+    let mut options = base.options.clone();
+    options.lens = Some(job::ThinLens { aperture_radius_mm: 0.2, focus_distance_mm: 25.0 });
+    request.raytrace = Some(options.clone());
+    let lens = actual_denoise_guides(ImageTask::new(base.scene.clone(), request, CancelToken::default(), options).unwrap());
+    for (a, b) in no_lens.iter().zip(lens) {
+        assert_eq!((a.body, a.albedo, a.normal, a.position, a.depth, a.footprint), (b.body, b.albedo, b.normal, b.position, b.depth, b.footprint));
+    }
+}
+#[test]
+fn cpu_denoising_rejects_invalid_raw_radiance_and_never_masks_it_with_bypass() {
+    for body in [0, 1] {
+        let mut guide = denoise_test_guide(0, 0);
+        guide.body = body;
+        for pixel in [[f32::NAN, 0.0, 0.0, 1.0], [f32::INFINITY, 0.0, 0.0, 1.0], [-1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.1]] {
+            let mut task = job::denoise::DenoiseTask::new(1, 1, vec![pixel]).unwrap();
+            assert!(task.step(&[guide], &CancelToken::default()).is_err());
+        }
+    }
+    let cancel = CancelToken::default();
+    cancel.cancel();
+    let mut task = job::denoise::DenoiseTask::new(1, 1, vec![[1.0; 4]]).unwrap();
+    assert_eq!(task.step(&[denoise_test_guide(0, 0)], &cancel).unwrap_err().code, ErrorCode::Cancelled);
+}
+
+#[test]
+fn cpu_denoise_hit_and_miss_guide_continuations_charge_one_unit_before_each_store() {
+    for miss in [false, true] {
+        for exhaust_at_store in [false, true] {
+            let base = denoised_plane(2, true, None);
+            let source = if miss { ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY } } else { base.scene.clone() };
+            let mut task = ImageTask::new(source, base.request.clone(), CancelToken::default(), base.options.clone()).unwrap();
+            let mut guide_calls = 0;
+            let mut tested_store = false;
+            for _ in 0..300000 {
+                if task.bvh.is_some() && task.denoise.first().is_some_and(|guides| !guides.ready()) {
+                    let guide = task.denoise.first().unwrap();
+                    let stored = guide.completed_pixels();
+                    let at_store = guide.ready_to_store(&task.options);
+                    let before = task.work.used();
+                    if exhaust_at_store && at_store {
+                        task.work.limit = before;
+                        assert_eq!(task.step_with_previews(1).err().unwrap().code, ErrorCode::LimitExceeded);
+                        assert_eq!(task.work.used(), before);
+                        let guide = task.denoise.first().unwrap();
+                        assert_eq!(guide.completed_pixels(), stored);
+                        assert!(guide.ready_to_store(&task.options), "an exhausted debit cannot consume the pending guide");
+                        assert_eq!(task.progressive.as_ref().unwrap().film.samples(), 0);
+                        assert!(task.take_linear_exr().is_none());
+                        tested_store = true;
+                        break;
+                    }
+                    assert!(matches!(task.step_with_previews(1).unwrap(), ImagePoll::Pending(_)));
+                    assert_eq!(task.work.used() - before, 1, "one guide call; miss={miss}, store={at_store}");
+                    guide_calls += 1;
+                    if task.denoise.first().unwrap().ready() {
+                        break;
+                    }
+                } else {
+                    assert!(!matches!(task.step_with_previews(1).unwrap(), ImagePoll::Complete(_)));
+                }
+            }
+            assert!(guide_calls > 0);
+            if exhaust_at_store {
+                assert!(tested_store);
+            } else {
+                let guides = task.denoise.first().unwrap();
+                assert!(guides.ready());
+                assert_eq!(guides.completed_pixels(), 169);
+                assert!(guides.pixels().unwrap().iter().all(|guide| (guide.body == 0) == miss));
+                assert_eq!(task.progressive.as_ref().unwrap().film.samples(), 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn adaptive_certified_optics_drain_pilot_branches_and_keep_exact_independent_production_beer_energy() {
+    use crate::job::adaptive::AdaptiveSampling;
+    for thin in [false, true] {
+        for ior in [1.0, 1.5] {
+            let build = || {
+                let original = progressive_optics_fixture(16, thin, ior, CancelToken::default());
+                let options = RaytraceOptions {
+                    adaptive: Some(Box::new(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() })),
+                    ..original.options
+                };
+                let request = ImageRequest { raytrace: Some(options.clone()), ..original.request };
+                ImageTask::new(original.scene, request, CancelToken::default(), options).unwrap()
+            };
+            let actual = progressive_optics_complete(build(), 1);
+            assert_eq!(actual, progressive_optics_complete(build(), 16384));
+            assert_eq!(actual.0.iter().map(|p| p.0).collect::<Vec<_>>(), (1..32).collect::<Vec<_>>());
+            let production = progressive_optics_complete(progressive_optics_fixture(16, thin, ior, CancelToken::default()), 3);
+            assert_eq!(actual.1, production.1, "discarded pilots cannot alter the existing16-sample production optical estimator");
+            if ior == 1.0 {
+                let mapped = map_to_display(Vec3::new((-0.8_f64).exp(), (-1.6_f64).exp(), 1.0), 0.0).unwrap();
+                let expected = [encode8(mapped.x), encode8(mapped.y), encode8(mapped.z), 255];
+                for (_, png) in actual.0.iter().chain(std::iter::once(&(32, actual.1.clone()))) {
+                    assert_eq!(
+                        ::image::load_from_memory(png).unwrap().to_rgba8().get_pixel(0, 0).0,
+                        expected,
+                        "all pilot/production prefixes retain the independent8mm Beer oracle"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn prepaid_legacy_certificate_and_standalone_cursor_share_cumulative_work_and_exact_output() {
+    let scene = dielectric::tests::scene(dielectric::tests::box_body(2.0));
+    let options = RaytraceOptions {
+        threads: 1,
+        dielectrics: vec![dielectric::tests::input(job::DielectricBoundary::ClosedBox)],
+        lights: Some(Vec::new()),
+        environment: Some(job::RaytraceEnvironmentOptions { color: [1.0; 3], intensity: 1.0 }),
+        output: Some(Box::new(job::OutputOptions { linear_exr: true, ..Default::default() })),
+        ..Default::default()
+    };
+    let request = dielectric::tests::request(options.clone());
+    let cancel = CancelToken::default();
+    let proof = certify_for_request(&scene, &request, &options, &cancel).unwrap().unwrap();
+    let prepared_work = proof.work_used();
+    assert!(prepared_work > 12, "the complete tiled-boundary proof is real work");
+    let mut prepared = ImageTask::new_prepared(scene.clone(), request.clone(), cancel, options.clone(), None, Some(proof)).unwrap();
+    let mut standalone = ImageTask::new(scene, request, CancelToken::default(), options).unwrap();
+    assert!(prepared.optical[0].preparation.is_empty(), "the factory consumes the proof instead of certifying again");
+    assert!(!standalone.optical[0].preparation.is_empty());
+    assert_eq!(prepared.work.used(), prepared_work);
+    while !standalone.optical[0].preparation.is_empty() {
+        let before = standalone.work.used();
+        assert!(matches!(standalone.step(1).unwrap(), TaskPoll::Pending(_)));
+        assert_eq!(standalone.work.used() - before, 1);
+        assert!(standalone.triangles.is_empty() && standalone.pixels.is_empty(), "proof precedes geometry/pixels");
+    }
+    assert_eq!(standalone.work.used(), prepared.work.used(), "background proof/store credit transfers into the one cumulative budget");
+    let complete = |task: &mut ImageTask| {
+        for _ in 0..100_000 {
+            if let TaskPoll::Complete(png) = task.step(1).unwrap() {
+                return png;
+            }
+        }
+        panic!("tiny certified image did not complete");
+    };
+    let a = complete(&mut prepared);
+    let b = complete(&mut standalone);
+    assert_eq!(a, b);
+    let raw = prepared.take_linear_exr().expect("final raw EXR");
+    assert_eq!(Some(raw.as_slice()), standalone.take_linear_exr().as_deref(), "prepared proof does not alter raw master bytes");
+    assert_eq!(prepared.work.used(), standalone.work.used());
+    // Independent native uncompressed FLOAT EXR scanline: one1×1 chunk stores
+    // the four A/B/G/R channels, all exactly1 for this lossless white furnace.
+    assert_eq!(&raw[..8], &[0x76, 0x2f, 0x31, 0x01, 2, 0, 0, 0]);
+    let mut header = 8;
+    while raw[header] != 0 {
+        header += raw[header..].iter().position(|byte| *byte == 0).unwrap() + 1;
+        header += raw[header..].iter().position(|byte| *byte == 0).unwrap() + 1;
+        let count = u32::from_le_bytes(raw[header..header + 4].try_into().unwrap()) as usize;
+        header += 4 + count;
+    }
+    header += 1;
+    let chunk = u64::from_le_bytes(raw[header..header + 8].try_into().unwrap()) as usize;
+    assert_eq!(chunk, header + 8);
+    assert_eq!(i32::from_le_bytes(raw[chunk..chunk + 4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(raw[chunk + 4..chunk + 8].try_into().unwrap()), 16);
+    let channels: [f32; 4] = std::array::from_fn(|i| f32::from_le_bytes(raw[chunk + 8 + i * 4..chunk + 12 + i * 4].try_into().unwrap()));
+    assert_eq!(channels, [1.0; 4], "lossless raw radiance/coverage remains exactly1 before presentation");
+    // Default Reinhard maps linear1 to.5; standard sRGB encoding rounds to188.
+    assert_eq!(
+        ::image::load_from_memory(&a).unwrap().to_rgba8().get_pixel(0, 0).0,
+        [188, 188, 188, 255],
+        "white furnace follows the existing presentation contract"
+    );
+}
+
+#[test]
+fn standalone_legacy_preparation_cancellation_never_advances_or_allocates_pixels() {
+    let scene = dielectric::tests::scene(dielectric::tests::box_body(2.0));
+    let options =
+        RaytraceOptions { threads: 1, dielectrics: vec![dielectric::tests::input(job::DielectricBoundary::ClosedBox)], ..Default::default() };
+    let request = dielectric::tests::request(options.clone());
+    let cancel = CancelToken::default();
+    let mut task = ImageTask::new(scene, request, cancel.clone(), options).unwrap();
+    assert!(matches!(task.step(1).unwrap(), TaskPoll::Pending(_)));
+    let before = (task.work.used(), task.optical[0].preparation.len(), task.triangles.len(), task.pixels.len());
+    cancel.cancel();
+    assert_eq!(task.step(1).err().unwrap().code, ErrorCode::Cancelled);
+    assert_eq!((task.work.used(), task.optical[0].preparation.len(), task.triangles.len(), task.pixels.len()), before);
+}
+
+fn mapped_wood_fixture() -> (ProductScene, ImageRequest, RaytraceOptions) {
+    use crate::job::textures::{BaseColorMode, PlanarFrame, RuntimeTextures, TextureBinding, TextureMap};
+    use image::ImageEncoder;
+    use std::sync::Arc;
+    let mesh = solidcraft_geom::Mesh {
+        positions: vec![Vec3::new(-40., -40., 0.), Vec3::new(40., -40., 0.), Vec3::new(40., 40., 0.), Vec3::new(-40., 40., 0.)],
+        normals: vec![Vec3::Z; 4],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        tri_face: vec![0, 0],
+        ..Default::default()
+    };
+    let bounds = mesh.bounds();
+    let surface = OpaqueSurface::new(Vec3::new(1., 1., 1.), 0., 0.7, 1.).unwrap();
+    let scene = ProductScene {
+        bounds,
+        meshes: vec![crate::ProductMesh {
+            name: "Wood board".into(),
+            mesh: Arc::new(mesh),
+            color: [255; 3],
+            opacity: 1.,
+            surface: Some(surface),
+            transmission: None,
+            faces: vec![],
+        }],
+    };
+    // Original diagnostic grain: alternating opaque dark/light fibres with known mean.
+    let mut encoded = Vec::new();
+    let pixels: Vec<u8> = (0..64)
+        .flat_map(|i| {
+            let value = if i % 8 % 2 == 0 { 0 } else { 255 };
+            [value, value, value, 255]
+        })
+        .collect();
+    image::codecs::png::PngEncoder::new(&mut encoded).write_image(&pixels, 8, 8, image::ExtendedColorType::Rgba8).unwrap();
+    let textures = RuntimeTextures::new(vec![TextureBinding {
+        body_index: 0,
+        body_name: "Wood board".into(),
+        frame: PlanarFrame { origin: [0.; 3], u: [1., 0., 0.], v: [0., 1., 0.] },
+        normal_strength: 0.4,
+        base_color: Some(TextureMap::new(encoded, crate::texture_input::MapRole::BaseColor).unwrap()),
+        normal: None,
+        roughness: None,
+        metallic: None,
+        base_color_mode: BaseColorMode::Replace,
+        flip_v: false,
+    }])
+    .unwrap();
+    let mut request = request();
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
+    request.camera.distance = 1.25;
+    request.textures = Some(Arc::new(textures));
+    let options = RaytraceOptions {
+        threads: 1,
+        lights: Some(vec![job::DirectionalLightOptions { direction: [0., 0., 1.], color: [1.; 3], intensity: std::f64::consts::PI }]),
+        shadows: false,
+        ..Default::default()
+    };
+    request.raytrace = Some(options.clone());
+    (scene, request, options)
+}
+fn mapped_png(scene: ProductScene, request: ImageRequest, options: RaytraceOptions, quantum: usize) -> Vec<u8> {
+    let mut task = ImageTask::new(scene, request, CancelToken::default(), options).unwrap();
+    for _ in 0..300_000 {
+        let before = task.work.used();
+        let result = task.step(quantum).unwrap();
+        // Four bounded continuations; a PNG row keeps its legacy explicit row cost.
+        if let TaskPoll::Complete(png) = result {
+            return png;
+        }
+        assert!(task.work.used() >= before);
+    }
+    panic!("mapped image did not finish");
+}
+#[test]
+fn cpu_wood_keeps_close_fibres_and_minifies_distant_fibres_to_the_linear_mean() {
+    let (scene, mut request, options) = mapped_wood_fixture();
+    let mesh = scene.meshes[0].mesh.clone();
+    let close = mapped_png(scene.clone(), request.clone(), options.clone(), 1);
+    assert_eq!(close, mapped_png(scene.clone(), request.clone(), options.clone(), 7));
+    let image = image::load_from_memory(&close).unwrap().to_rgba8();
+    let values: Vec<_> = image.pixels().map(|p| p[0]).collect();
+    assert!(values.iter().max().unwrap() - values.iter().min().unwrap() > 150, "magnified fibres must remain distinct: {values:?}");
+    request.camera.distance = 25.;
+    let far = mapped_png(scene.clone(), request.clone(), options.clone(), 7);
+    let image = image::load_from_memory(&far).unwrap().to_rgba8();
+    // Linear mean reflectance is 0.5. Unit irradiance/pi yields 0.5 radiance,
+    // then the existing Reinhard presentation maps 0.5 to 1/3 before sRGB.
+    let expected = encode8(1. / 3.);
+    assert!(image.pixels().all(|p| p.0 == [expected, expected, expected, 255]), "distant grain must converge to linear-light mean");
+    assert!(std::sync::Arc::ptr_eq(&mesh, &scene.meshes[0].mesh));
+    assert_eq!(scene.meshes[0].surface.unwrap().dielectric_ior(), 1.);
+}
+#[test]
+fn cpu_wood_scalar_face_override_suppresses_inherited_body_maps() {
+    let (mut scene, mut request, options) = mapped_wood_fixture();
+    scene.meshes[0].faces.push(crate::FaceAppearance {
+        face: 0,
+        color: [64, 96, 128],
+        opacity: 1.,
+        surface: Some(OpaqueSurface::new(Vec3::new(0.2, 0.3, 0.4), 0., 0.7, 1.).unwrap()),
+        transmission: None,
+    });
+    let mapped = mapped_png(scene.clone(), request.clone(), options.clone(), 1);
+    request.textures = None;
+    assert_eq!(mapped, mapped_png(scene, request, options, 7));
+}
+#[test]
+fn cpu_wood_footprint_uses_unwrapped_physical_spacing_and_applies_supersampling_once() {
+    let (_, request, mut options) = mapped_wood_fixture();
+    let clip = request.camera.clip(100.);
+    let ray = primary_ray(&request, 0.5, 0.5, clip).unwrap();
+    let point = ray.origin() + ray.direction() * (-ray.origin().z / ray.direction().z);
+    let first = primary_footprint(&request, &options, None, 0, 0, clip, point, Vec3::Z).unwrap().unwrap();
+    assert!((first[0].len() - 0.125).abs() < 1e-12);
+    assert!((first[1].len() - 0.125).abs() < 1e-12);
+    for samples in [4, 16] {
+        options.primary_samples = samples;
+        let offset = primary_offset(samples, 0).unwrap();
+        let ray = primary_ray(&request, offset[0], offset[1], clip).unwrap();
+        let p = ray.origin() + ray.direction() * (-ray.origin().z / ray.direction().z);
+        let footprint = primary_footprint(&request, &options, None, 0, 0, clip, p, Vec3::Z).unwrap().unwrap();
+        for delta in footprint {
+            assert!((delta.len() - 0.125 / f64::from(samples).sqrt()).abs() < 1e-12);
+        }
+    }
+}
+#[test]
+fn thin_lens_map_footprint_holds_the_sampled_pupil_on_off_focus_planes() {
+    let (scene, mut request, mut options) = mapped_wood_fixture();
+    request.width = 64;
+    request.height = 32;
+    request.camera.distance = 10.0;
+    request.camera.fov = std::f64::consts::FRAC_PI_2;
+    options.progressive = Some(job::CpuProgressiveOptions { samples_per_pixel: 2, seed: 81 });
+    for focus_distance_mm in [5.0, 20.0] {
+        let lens = job::ThinLens { aperture_radius_mm: 0.8, focus_distance_mm };
+        options.lens = Some(lens);
+        request.raytrace = Some(options.clone());
+        let task = ImageTask::new(scene.clone(), request.clone(), CancelToken::default(), options.clone()).unwrap();
+        let progressive = task.progressive.as_ref().unwrap();
+        let (right, up, back) = request.camera.basis();
+        let plane = request.camera.target;
+        let depth = request.camera.distance;
+        // On a frontoparallel plane a fixed pupil translates every hit equally.
+        // One output-pixel differential is 2*depth*tan(fov/2)/height, regardless
+        // of focus distance or pupil position. This is an analytic scale oracle.
+        let expected = 2.0 * depth * (request.camera.fov * 0.5).tan() / f64::from(request.height);
+        for pixel in [0, 37, 1024, 2047] {
+            let [dx, dy] = progressive.variates(pixel, 0).unwrap();
+            let pupil = progressive.variates(pixel, 0x4c454e53).unwrap();
+            let x = (pixel % request.width as usize) as f64 + dx;
+            let y = (pixel / request.width as usize) as f64 + dy;
+            let hit = |ray: Ray| ray.origin() + ray.direction() * ((plane - ray.origin()).dot(back) / ray.direction().dot(back));
+            let point = hit(lens_primary_ray(&request, x, y, task.clip, lens, pupil).unwrap());
+            let pinhole = hit(primary_ray(&request, x, y, task.clip).unwrap());
+            assert!((point - pinhole).len() > 1e-6, "the fixture must expose off-focus pupil parallax");
+            let footprint = primary_footprint(&request, &options, Some(progressive), pixel, 0, task.clip, point, back).unwrap().unwrap();
+            assert!((footprint[0] - right * expected).len() < 1e-10, "horizontal footprint must hold the sampled pupil");
+            assert!((footprint[1] + up * expected).len() < 1e-10, "vertical footprint must hold the sampled pupil");
+            assert_eq!(progressive.variates(pixel, 0).unwrap(), [dx, dy]);
+            assert_eq!(progressive.variates(pixel, 0x4c454e53).unwrap(), pupil);
+            let mut zero = options.clone();
+            zero.lens = Some(job::ThinLens { aperture_radius_mm: 0.0, focus_distance_mm });
+            assert_eq!(
+                primary_footprint(&request, &zero, Some(progressive), pixel, 0, task.clip, pinhole, back).unwrap(),
+                camera_footprint(&request, x, y, 1.0, task.clip, pinhole, back).unwrap(),
+                "zero aperture keeps the existing pinhole footprint exactly"
+            );
+        }
+    }
+}
+
+#[test]
+fn cpu_wood_preparation_cancel_and_role_work_limit_never_publish_partial_pixels() {
+    let (scene, request, options) = mapped_wood_fixture();
+    let cancel = CancelToken::default();
+    let mut task = ImageTask::new(scene, request, cancel.clone(), options).unwrap();
+    let cache = task.maps.first().unwrap();
+    assert!(!cache.ready());
+    assert_eq!(cache.prepared_maps(), 0);
+    assert_eq!(cache.preparation_phase(), None);
+    for _ in 0..100_000 {
+        if task.maps.first().is_some_and(|cache| cache.hit_role() == Some(1)) {
+            break;
+        }
+        assert!(matches!(task.step(1).unwrap(), TaskPoll::Pending(_)));
+    }
+    assert_eq!(task.maps.first().unwrap().prepared_maps(), 1);
+    assert_eq!(task.maps.first().unwrap().hit_role(), Some(1));
+    assert!(task.pixels.is_empty());
+    task.work.limit = task.work.used();
+    assert_eq!(task.step(1).err().unwrap().code, ErrorCode::LimitExceeded);
+    assert_eq!(task.maps.first().unwrap().hit_role(), Some(1));
+    cancel.cancel();
+    assert_eq!(task.step(1).err().unwrap().code, ErrorCode::Cancelled);
+    assert!(!task.done);
+}
+
+#[test]
+fn diagnostic_admission_bills_internal_classes_final_mask_and_complete_codec_bound() {
+    let plain = denoised_plane(2, true, None);
+    let options = RaytraceOptions { denoise_diagnostics: true, ..plain.options.clone() };
+    let request = ImageRequest { raytrace: Some(options.clone()), ..plain.request.clone() };
+    let diagnostics = admit(&plain.scene, &request, &options).unwrap();
+    assert_eq!(
+        diagnostics.estimated_total_bytes - plain.admission.estimated_total_bytes,
+        169 + 169 * 4 + plain.admission.encoded_limit,
+        "one internal class byte, one final RGBA mask and one separately retained bounded PNG"
+    );
+    let options = RaytraceOptions { supersampling: 2, denoise_diagnostics: true, ..options };
+    let request = ImageRequest { raytrace: Some(options.clone()), ..request };
+    let high = admit(&plain.scene, &request, &options).unwrap();
+    assert!(high.estimated_total_bytes > diagnostics.estimated_total_bytes + 169 * 3 * 96);
+    assert_eq!(high.encoded_limit, diagnostics.encoded_limit, "supersampling never enlarges retained PNG dimensions");
+}
+
+#[test]
+fn cpu_supersample_resolve_and_mask_stages_cancel_or_exhaust_before_publication() {
+    for phase in ["diagnostics", "denoise_mask", "resolve"] {
+        for cancellation in [false, true] {
+            let cancel = CancelToken::default();
+            let mut task = job::output::OutputTask::new_with_quality(
+                2,
+                2,
+                65_568,
+                vec![[1.0; 4]; 16],
+                Vec::new(),
+                job::presentation::Presentation::default(),
+                false,
+                true,
+                false,
+                job::DenoiseSettings::default(),
+                2,
+                true,
+                1,
+                cancel.clone(),
+                &mut |_| Ok(()),
+            )
+            .unwrap();
+            let classes = [job::DenoiseGuideClass::Surface; 16];
+            for _ in 0..1000 {
+                if task.stage_name() == phase {
+                    break;
+                }
+                assert!(matches!(task.step_with_diagnostics(None, Some(&classes), None, &mut |_| Ok(())).unwrap(), TaskPoll::Pending(_)));
+            }
+            assert_eq!(task.stage_name(), phase);
+            if cancellation {
+                cancel.cancel();
+            }
+            let error = task
+                .step_with_diagnostics(None, Some(&classes), None, &mut |_| {
+                    Err(JobError::new(ErrorCode::LimitExceeded, "test shared work exhausted"))
+                })
+                .err()
+                .unwrap();
+            assert_eq!(error.code, if cancellation { ErrorCode::Cancelled } else { ErrorCode::LimitExceeded });
+            assert!(task.finish().is_err());
+        }
+    }
+}
+
+#[test]
+fn cpu_direct_owner_publication_checks_budget_and_cancel_before_mutating_film_or_continuation() {
+    for cancellation in [false, true] {
+        let original = denoised_plane(2, false, None);
+        let options = original.options;
+        let request = ImageRequest { width: 1, height: 1, raytrace: Some(options.clone()), ..original.request };
+        let mut task = ImageTask::new(original.scene, request, CancelToken::default(), options).unwrap();
+        for _ in 0..20_000 {
+            if task.primary_coverage == 1 && task.pending.is_some() {
+                break;
+            }
+            assert!(matches!(task.step_with_previews(1).unwrap(), ImagePoll::Pending(_)));
+        }
+        assert_eq!(task.primary_coverage, 1);
+        let pending = task.pending.as_ref().unwrap();
+        let before = (
+            task.pixel,
+            task.primary_coverage,
+            task.sample,
+            pending.ray.origin(),
+            pending.ray.direction(),
+            task.progressive.as_ref().unwrap().film.samples(),
+            task.work.used(),
+        );
+        if cancellation {
+            task.cancel.cancel();
+        } else {
+            task.work.limit = task.work.used();
+        }
+        let error = task.finish_sample(Vec3::ZERO).unwrap_err();
+        assert_eq!(error.code, if cancellation { ErrorCode::Cancelled } else { ErrorCode::LimitExceeded });
+        let pending = task.pending.as_ref().expect("failed publication retains its drained transport continuation");
+        assert_eq!(
+            (
+                task.pixel,
+                task.primary_coverage,
+                task.sample,
+                pending.ray.origin(),
+                pending.ray.direction(),
+                task.progressive.as_ref().unwrap().film.samples(),
+                task.work.used()
+            ),
+            before
+        );
+        assert!(!task.done && task.pixels.is_empty());
+        assert!(task.take_linear_exr().is_none());
+    }
 }

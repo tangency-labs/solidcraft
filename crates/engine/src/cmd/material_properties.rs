@@ -1,15 +1,24 @@
 //! Read-only validation of candidate engineering data; no assignment or simulation.
 use super::CommandSpec;
 use crate::params::bad;
+use crate::schema::material_properties::{CardModulus, CardValidated, DirectionalModulusParams, ValidateCardParams};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
-use serde_json::{Value, json};
+use serde_json::Value;
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("material.properties.validate", "Validate Physical Material Data", validate)
+const VALIDATE_CONTRACT: TypedContract<ValidateCardParams> = TypedContract::new();
+const DIRECTIONAL_CONTRACT: TypedContract<DirectionalModulusParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("material.properties.validate", "Validate Physical Material Data", crate::checked!("material.properties.validate", validate))
     .icon("material")
     .noundo()
     .doc_only()
+    .contract(&VALIDATE_CONTRACT)
+    .output(output_schema_for::<CardValidated>)
     .params("card: schema_version 1 engineering material card in SI units. Returns numerical consistency, derived isotropic moduli, missing conditions and sources needing review. Read-only; does not assign/save properties or provide an analysis solver. See docs/physical-material-cards.md"),
-    CommandSpec::new("material.properties.directional", "Directional Elastic Modulus", directional).icon("material").noundo().doc_only()
+    CommandSpec::new("material.properties.directional", "Directional Elastic Modulus", crate::checked!("material.properties.directional", directional)).icon("material").noundo().doc_only()
+        .contract(&DIRECTIONAL_CONTRACT)
+        .output(output_schema_for::<CardModulus>)
         .params("card: schema_version 1 engineering material card; direction: three finite nonzero-vector components in the card's material-local axes. Returns normalized direction, Young modulus in Pa and source/condition review. Read-only constitutive query; no structural solver, persistence or body-axis assignment. See docs/physical-material-cards.md")];
 
 fn directional(_: &mut Session, params: &Value) -> Result<Value> {
@@ -28,7 +37,7 @@ fn directional(_: &mut Session, params: &Value) -> Result<Value> {
     let direction = [component(0)?, component(1)?, component(2)?];
     let card = solidcraft_doc::physical_material::admit_card(value).map_err(|e| bad(cmd, e.to_string()))?;
     let response = card.directional_modulus(direction).map_err(|e| bad(cmd, e.to_string()))?;
-    serde_json::to_value(response).map_err(|e| bad(cmd, e.to_string()))
+    serde_json::to_value(CardModulus::from(response)).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn validate(_: &mut Session, params: &Value) -> Result<Value> {
@@ -38,13 +47,15 @@ fn validate(_: &mut Session, params: &Value) -> Result<Value> {
         .ok_or_else(|| bad("material.properties.validate", "expected {card: ...}"))?;
     let card = object.get("card").ok_or_else(|| bad("material.properties.validate", "missing card"))?;
     let result = solidcraft_doc::physical_material::validate_card(card).map_err(|e| bad("material.properties.validate", e.to_string()))?;
-    Ok(json!({"valid":true,"validation":result}))
+    let reply = CardValidated { valid: true, validation: result.into(), param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad("material.properties.validate", e.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::doc::Document;
+    use serde_json::json;
     use std::sync::Arc;
 
     fn card() -> Value {

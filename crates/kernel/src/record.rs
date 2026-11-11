@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use solidcraft_geom::brep::Brep;
+use solidcore_record::brep::Brep;
 
 use crate::body::Body;
 use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History, edge_faces};
@@ -39,7 +39,7 @@ pub(crate) fn generated(origins: Vec<FaceOrigin>) -> FaceProv {
     FaceProv { origins, change: Change::Generated }
 }
 
-pub(crate) use solidcraft_geom::brep::history::mark_shared_split;
+pub(crate) use solidcore_record::brep::history::mark_shared_split;
 
 /// The origins of a result edge that is (a piece of, or the moved) edges `edges` of operand
 /// `operand`.

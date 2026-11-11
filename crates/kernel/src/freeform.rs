@@ -5,8 +5,9 @@
 //! cubic and higher Béziers B-splines on their own control points; conics rational quadratic
 //! Béziers (exact ellipses, parabolas and hyperbolas).
 
-use solidcraft_geom::brep::{Curve, Curve2, Surface};
-use solidcraft_geom::{Plane, Seg2, Vec2, Vec3};
+use solidcore_record::brep::{Curve, Curve2, Surface};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::{KernelError, Result};
 
@@ -62,7 +63,7 @@ fn net(s: &Seg2) -> Result<(Vec<Vec2>, Vec<f64>, Vec<f64>)> {
         }
         Seg2::Bezier { n, ref p } => {
             let n = usize::from(n);
-            let pts = p.get(..=n).filter(|_| (1..=solidcraft_geom::MAX_BEZIER_DEGREE).contains(&n));
+            let pts = p.get(..=n).filter(|_| (1..=solidcore_record::MAX_BEZIER_DEGREE).contains(&n));
             let pts = pts.ok_or_else(|| KernelError::Invalid("Bézier degree".into()))?;
             (pts.to_vec(), vec![1.0; n + 1], bezier_knots(n))
         }

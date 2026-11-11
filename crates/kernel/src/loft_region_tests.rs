@@ -1,8 +1,9 @@
 //! Analytic regressions for lofted passages (#2435).
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use crate::{Body, loft_regions, measure, step_export, step_import};
 
@@ -90,7 +91,7 @@ fn loft_regions_bound_segments_after_matching() {
     // would exceed it in every section. Refuse before allocating the topology.
     let circle = |x, n| Loop2 {
         segs: (0..n)
-            .map(|i| solidcraft_geom::Seg2::Arc {
+            .map(|i| solidcore_record::Seg2::Arc {
                 center: Vec2::new(x, 0.0),
                 radius: 1.0,
                 start: i as f64 * std::f64::consts::TAU / n as f64,
@@ -117,5 +118,21 @@ fn loft_regions_refuse_ambiguous_hole_pairings_in_any_draw_order() {
                 assert!(err.contains("hole correspondence is ambiguous"), "{err}");
             }
         }
+    }
+}
+
+/// #13331: a loft between two parallel squares has planar sides, each joining two parallel
+/// lines: a tapered square duct (the reporter's hopper) and a square prism alike. The skin
+/// gave B-spline walls, which count as "other" and which Convert to Sheet Metal refuses.
+#[test]
+fn a_loft_between_parallel_squares_has_planar_sides() {
+    for top in [100.0, 55.0] {
+        let secs =
+            [(Plane::XY, Region2 { outer: square(55.0), holes: vec![] }), (Plane::XY.offset(120.0), Region2 { outer: square(top), holes: vec![] })];
+        let body = loft_regions(&secs).unwrap();
+        let (a, b) = (110.0f64 * 110.0, (2.0 * top) * (2.0 * top));
+        check(&body, 120.0 / 3.0 * (a + b + (a * b).sqrt()), 1e-6);
+        let types = measure(&body).unwrap().merged.face_types;
+        assert_eq!(types.get("plane"), Some(&6), "top {top}: {types:?}");
     }
 }

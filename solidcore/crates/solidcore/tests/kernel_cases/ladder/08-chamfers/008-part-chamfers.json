@@ -1,0 +1,222 @@
+{
+  "area": "ladder/08-chamfers",
+  "bodies": {
+    "b92": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b92"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b93"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b93"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b94"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b94"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b95"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b95"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b96"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  60.0,
+                  40.0,
+                  35.0
+                ],
+                [
+                  0.0,
+                  40.0,
+                  35.0
+                ]
+              ],
+              "index": 8
+            }
+          ],
+          "points": [
+            [
+              30.0,
+              40.0,
+              35.0
+            ]
+          ],
+          "tolerance": 4.00880488547035
+        },
+        "kind": "chamfer",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "008-part-chamfers",
+  "expected": {
+    "body_count": 1,
+    "faces": 26,
+    "method": "removed 0.5 * 2 pi (8 - 1/3) (Pappus) + 2 * 60",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 53006.936547015,
+    "what": "the running part: 1 mm on the boss top edge, 2 mm on the back wall's top back edge"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 12800.623144593372,
+      "body_count": 1,
+      "edges": 64,
+      "faces": 26,
+      "vertices": 42,
+      "volume_mm3": 53006.93654704299
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 64,
+      "faces": 26,
+      "vertices": 42
+    }
+  },
+  "records": "008-part-chamfers.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b96"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 12800.623144593372,
+      "body_count": 1,
+      "edges": 64,
+      "faces": 26,
+      "vertices": 42,
+      "volume_mm3": 53006.93654704299
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "the running part: 1 mm on the boss top edge, 2 mm on the back wall's top back edge",
+  "why_not": []
+}

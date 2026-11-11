@@ -1,10 +1,12 @@
 //! What the application draws of a large sheet with small bends and holes, and that what
 //! reads the same mesh (bounds, picks, inside tests) answers as before.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
 use solidcraft_kernel::{DISPLAY_ANGLE, FaceSurface, face_surface};
 
 use crate::Session;

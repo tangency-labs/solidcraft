@@ -312,7 +312,7 @@ pub(crate) fn trial(record: Trial) {
 mod tests {
     use super::*;
     use crate::{Analysis, ConstraintKind, Hold, Sketch, solve_with};
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
 
     fn distance(x: f64) -> Sketch {
         let mut sk = Sketch::new();
@@ -326,8 +326,14 @@ mod tests {
         for (x, stalled) in [(0.0, true), (0.0, false), (1e-5, false)] {
             let mut plain = distance(x);
             if stalled {
-                // Horizontal distances retain the magnitude residual and its zero slope.
-                plain.constraints[0].kind = ConstraintKind::DistanceX { p: 0, q: 1, value: 10.0 };
+                // A linear diameter of a point on its line: the magnitude residual
+                // `2 |d| - 10` has a zero slope there and no opening direction is given for
+                // it (unlike a distance, which opens along its points or the line's normal).
+                plain = Sketch::new();
+                let l = plain.add_line(Vec2::new(-5.0, 0.0), Vec2::new(5.0, 0.0), None, None, None).unwrap();
+                plain.curves[l].fixed = true;
+                let p = plain.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+                plain.add_constraint(ConstraintKind::LinearDiameter { p, l, value: 10.0 }, None).unwrap();
             }
             let mut measured = plain.clone();
             let run = |sk: &mut Sketch| solve_with(sk, &Hold::default(), None, Analysis::StatusOnly, None);

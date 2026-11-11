@@ -9,8 +9,9 @@
 //! curvature in the line's direction times the surface normal, `κₙ n` with
 //! `κₙ = n · S_tt / |S_t|²` (the second fundamental form over the first, in that direction).
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::iso::IsoLine;

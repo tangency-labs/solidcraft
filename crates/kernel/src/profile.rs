@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn a_faceted_boolean_is_boolean_time_and_a_reference_mesh_tessellation() {
         use crate::{BoolOp, box_solid, faceted_boolean};
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
         let tool = box_solid(Vec3::new(5.0, 5.0, 5.0), Vec3::new(15.0, 15.0, 15.0)).unwrap().mesh(&crate::MeshTolerance::chord(0.1)).unwrap();
         // The thread groove's route: the faceting it does first is the boolean's time too.
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn kernel_operations_are_profiler_spans_with_smlib_calls_inside() {
         use crate::{BoolOp, boolean, box_solid};
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         solidcraft_profile::set_enabled(true);
         let mark = solidcraft_profile::mark();
         let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
