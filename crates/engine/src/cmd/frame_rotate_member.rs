@@ -54,7 +54,7 @@ fn rotate_member_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "Activate the member's component"));
     }
     if super::sketch::face::anchor(&plane).is_some_and(|anchor| !anchor.path.is_empty()) {
-        return Err(bad(cmd, "Activate the member's component"));
+        return Err(bad(cmd, "not supported yet: rotating a member inside a component"));
     }
     let angle = match p.get("parallel_to").filter(|v| !v.is_null()) {
         Some(target) => parallel_angle(s, &plane, &member, target, cmd)?,

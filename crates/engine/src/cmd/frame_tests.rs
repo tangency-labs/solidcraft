@@ -1189,7 +1189,7 @@ fn rotate_member_refuses_a_member_in_another_occurrence() {
     let mut face = post_side(&s);
     face["path"] = json!([occurrence]);
     let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
-    assert!(e.contains("Activate the member's component"), "{e}");
+    assert!(e.contains("not supported yet: rotating a member inside a component"), "{e}");
 }
 
 /// A 40 × 40 square tube on the sloped line (0, 0, 0)–(300, 0, 300), its member body `Brace`,
