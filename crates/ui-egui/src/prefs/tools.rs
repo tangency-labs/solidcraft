@@ -55,6 +55,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let response = setting::extrude_view_return(app, ui);
                         crate::scenario::publish_target("prefs:extrude_view_return", response.rect);
                     });
+                    let response = setting::extrude_second_follows_first(app, ui);
+                    crate::scenario::publish_target("prefs:extrude_second_follows_first", response.rect);
                 });
                 // Found by the name of every feature that has the marker, as well as by the label.
                 let placed = PLACED_FEATURES.iter().map(|key| app.tr(key)).collect::<Vec<_>>().join(" ");
