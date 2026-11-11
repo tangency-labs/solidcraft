@@ -59,7 +59,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 
-use super::{invalid_input_status, OP};
+use super::{invalid_value, OP};
 
 /// The unset index of an [`IsoXSectSegment`] (upstream `9999`).
 pub const NO_INDEX: usize = 9999;
@@ -271,7 +271,7 @@ impl CurveLoops {
     /// `SM_ERR_INVALID_INPUT` for a loop index out of range.
     pub fn loop_start_index(&self, loop_index: usize) -> Result<usize> {
         if loop_index >= self.loop_counts.len() {
-            return Err(invalid_input_status());
+            return Err(invalid_value("the loop index is past the last loop"));
         }
         Ok(self
             .loop_counts
@@ -312,7 +312,10 @@ impl CurveLoops {
     pub fn loop_start_end(&self, k: &Kernel, curve_index: usize) -> Result<(usize, usize)> {
         match self.loop_start_end_raw(k, curve_index) {
             (true, s, e) => Ok((s, e)),
-            _ => Err(SolidError::sm_err(OP)),
+            _ => Err(SolidError::topology_failed(
+                OP,
+                "the curve index is past every loop",
+            )),
         }
     }
 
@@ -332,7 +335,10 @@ impl CurveLoops {
         param: f64,
     ) -> Result<usize> {
         let Some(idx) = self.curves.iter().position(|&c| c == key) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the curve is not in the loops",
+            ));
         };
         // status ignored upstream
         let (_, start, end) = self.loop_start_end_raw(k, idx);
@@ -362,7 +368,7 @@ impl CurveLoops {
         index2: usize,
     ) -> Result<(usize, usize)> {
         if self.loop_counts.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(OP, "there are no loops"));
         }
 
         let mut loop_number = 0usize;
@@ -380,7 +386,10 @@ impl CurveLoops {
         let end = next_loop_start.wrapping_sub(1);
 
         if index2 < start || index2 > end {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the two curves are not in the same loop",
+            ));
         }
 
         if count > 2 {
@@ -398,7 +407,10 @@ impl CurveLoops {
         } else if index1 == index2.wrapping_add(1) {
             Ok((index2, index1))
         } else {
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::topology_failed(
+                OP,
+                "the two curves are not adjacent in their loop",
+            ))
         }
     }
 
@@ -528,7 +540,9 @@ impl CurveLoops {
     /// for counts past `other`'s curves.
     pub fn append_loop(&mut self, other: &Self, other_loop: usize) -> Result<()> {
         if other_loop >= other.num_loops() {
-            return Err(invalid_input_status());
+            return Err(invalid_value(
+                "the loop index is past the other loops' last loop",
+            ));
         }
         let start = other.loop_start_index(other_loop)?;
         let count = get(&other.loop_counts, other_loop)?;
@@ -552,7 +566,7 @@ impl CurveLoops {
     /// [`SolidError::InvalidInput`] for orientations shorter than the curves.
     pub fn insert_into_loops(&mut self, new_curve: CurveKey, loop_curve: CurveKey) -> Result<()> {
         let Some(idx) = self.curves.iter().position(|&c| c == loop_curve) else {
-            return Err(invalid_input_status());
+            return Err(invalid_value("the loop curve is not in the loops"));
         };
         let o = get(&self.orients, idx)?;
         self.curves.insert(idx + 1, new_curve);
@@ -595,7 +609,10 @@ impl CurveLoops {
         // Find which loop the iso edge will go into.
         let min_idx = seg.min_index();
         if min_idx >= self.curves.len() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the segment's first curve index is past the curves",
+            ));
         }
 
         let mut loop_number = self.loop_counts.len();
@@ -608,14 +625,20 @@ impl CurveLoops {
             total = total.wrapping_add(c);
         }
         if loop_number >= self.loop_counts.len() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the segment's first curve is in no loop",
+            ));
         }
 
         // check state - highest index is in the same loop.
         let max_idx = seg.max_index();
         let this_count = get(&self.loop_counts, loop_number)?;
         if max_idx >= total.wrapping_add(this_count) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the segment's curves are not in one loop",
+            ));
         }
 
         // Copy any previous loops into the new loop structures.

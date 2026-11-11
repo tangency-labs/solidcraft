@@ -325,7 +325,7 @@ fn prepare_rust(k: &mut Kernel, i: &Inputs) -> Result<Result<(Brep, Resolved), O
 /// `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. }
             if *operation == "heal::stitch::p1" || *operation == "heal::stitch::p2" =>
         {

@@ -135,7 +135,7 @@ impl<'a> Environment<'a> {
     pub fn direct_sample_linear_srgb(
         &self,
         u: [f64; 2],
-        surface: crate::surface::OpaqueSurface,
+        surface: solidcraft_viewport::surface::OpaqueSurface,
         shading_normal: Vec3,
         geometric_normal: Vec3,
         view: Vec3,

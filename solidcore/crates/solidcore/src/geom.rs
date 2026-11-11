@@ -12,6 +12,7 @@ pub mod attribute;
 pub mod axis2_placement;
 pub mod certified;
 pub mod context;
+pub(crate) mod expansion;
 pub mod extent1d;
 pub mod extent2d;
 pub mod extent3d;

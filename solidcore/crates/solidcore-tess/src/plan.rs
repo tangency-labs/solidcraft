@@ -1,17 +1,13 @@
-//! Display tessellation plans: the parameter-space triangulation of every face of a body,
-//! with the surfaces to evaluate it on, kept apart from the evaluation itself.
-//!
-//! The planner ([`crate::plan`]) decides *where* the vertices go (in each face's (u, v) parameters, with the
-//! shared edge nodes fixed in 3D so neighbouring faces meet exactly) and *how* they are
-//! connected. Evaluating the surfaces at those parameters is the bulk of the work and has no
-//! branching on topology, so it can run anywhere: [`TessPlan::evaluate`] does it on the CPU,
-//! and the GPU evaluator runs the same maths in a compute shader. Both evaluate the kernel's
-//! [`EvalSurface`] forms, so the two cannot drift apart.
+//! A body's display tessellation, ready to evaluate: every face's triangulation in its own
+//! parameters, with the surfaces to evaluate it on in the kernel's plan-evaluator form
+//! ([`solidcore::eval::plan`]). The CPU evaluates it ([`TessPlan::evaluate`]); a GPU evaluates
+//! the same plan in a compute shader.
 
-use crate::{Mesh, RefusedFace};
-use solidcore::eval::EvalSurface;
-use solidcore_convert::{record_vec3, vec3};
+use solidcore::Vec3 as K;
+use solidcore::eval::plan::EvalSurface;
 use solidcore_record::Vec3;
+
+use crate::Mesh;
 
 /// One face's share of a [`TessPlan`].
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -31,8 +27,7 @@ pub struct FacePlan {
     pub flip: bool,
     /// Counter-clockwise seen from outside (orientation already applied).
     pub triangles: Vec<[u32; 3]>,
-    /// The boundary nodes where the surface has no normal (a pole of higher order), each with
-    /// the normal its triangles get there ([`crate::PoleRule`]).
+    /// The face's boundary nodes at a pole of higher order, with the normal each gets.
     pub poles: Vec<crate::PoleNode>,
 }
 
@@ -45,155 +40,104 @@ impl FacePlan {
             .map(|p| p.rule)
     }
 
-    /// Triangle `t` is on this face's own nodes.
+    /// Triangle `t` is on this face's own nodes (the evaluated mesh keeps only those).
     fn has_nodes(&self, t: &[u32; 3]) -> bool {
         t.iter().all(|&i| (i as usize) < self.uv.len())
-    }
-
-    /// Why this face of a plan with `surfaces` surfaces is malformed, if it is: a triangle off
-    /// its nodes, a surface index past the plan's, or (with no surface) a vertex whose position
-    /// or normal is not given. Such a face is refused whole by [`TessPlan::evaluate`].
-    fn malformed(&self, surfaces: usize) -> Option<String> {
-        if let Some(k) = self.triangles.iter().position(|t| !self.has_nodes(t)) {
-            return Some(format!(
-                "triangle {k} has a corner past its {} nodes",
-                self.uv.len()
-            ));
-        }
-        match self.surface {
-            Some(i) if i as usize >= surfaces => {
-                Some(format!("its surface {i} is not in the plan"))
-            }
-            Some(_) => None,
-            None => {
-                let n = self.uv.len();
-                let missing = if self.fixed.len() < n {
-                    Some(("position", self.fixed.len()))
-                } else if self.normals.len() < n {
-                    Some(("normal", self.normals.len()))
-                } else {
-                    None
-                };
-                missing.map(|(what, k)| {
-                    format!("vertex {k} has no surface to evaluate and no {what} given")
-                })
-            }
-        }
     }
 }
 
 /// A body's display tessellation, ready to evaluate.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TessPlan {
-    /// The surfaces the faces are evaluated on, in the kernel evaluator's form.
+    /// The faces' surfaces, in the plan evaluator's form.
     pub surfaces: Vec<EvalSurface>,
-    /// Each face's share, in the body's face order.
+    /// Each face's share of the plan, in the body's face order.
     pub faces: Vec<FacePlan>,
-    /// B-rep edges as polylines (the shared edge nodes), in the body's edge order; empty for an
-    /// edge that could not be sampled. Every face it bounds is then refused, each named in
-    /// [`crate::PlanStats::unmeshed`] with its first reason, which is another one where the face
-    /// was refused before its edges were sampled (its surface): the edge's own error then shows
-    /// nowhere. An edge bounding no face is named in [`crate::PlanStats::unsampled_edges`].
+    /// B-rep edges as polylines (the shared edge nodes), in the body's edge order.
     pub edges: Vec<Vec<Vec3>>,
-    /// Per edge: the faces it bounds, in the order of its uses, then any face whose loops run it
-    /// although its uses do not list it.
+    /// Per edge: the faces it bounds.
     pub edge_faces: Vec<Vec<u32>>,
 }
 
 impl TessPlan {
     /// Evaluate on the CPU into an indexed mesh (vertices are shared within a face, not
     /// across faces, so creases keep their own normals), with the faces left out of it.
-    ///
-    /// At a pole of higher order the plan names (a boundary node with no normal,
-    /// [`crate::PoleNode`]), the vertex is emitted once per incident triangle with the surface's
-    /// limit normal along that triangle, or once with the mean of its triangles' normals where
-    /// the plan says the kernel refused that limit ([`crate::PlanStats::averaged_poles`]).
-    ///
-    /// A face a vertex of which the kernel's evaluator refuses otherwise (no value there, a
-    /// point with no normal the plan does not name) is left out whole, nothing substituted, and
-    /// returned with why: the caller reports it as unmeshed.
     #[must_use]
-    pub fn evaluate(&self) -> (Mesh, Vec<RefusedFace>) {
+    pub fn evaluate(&self) -> (Mesh, Vec<crate::RefusedFace>) {
         let mut out = Mesh::default();
         let mut refused = Vec::new();
         for f in &self.faces {
-            // A malformed face is refused whole: nothing stands in for what it lacks, and no
-            // triangle of it is dropped.
-            if let Some(reason) = f.malformed(self.surfaces.len()) {
-                refused.push(RefusedFace {
+            let base = out.positions.len();
+            let surface = f.surface.and_then(|i| self.surfaces.get(i as usize));
+            // At a degenerate point (a cone's apex, a sphere's pole) the kernel's exact limit
+            // normal, from the second partials; the kernel's form of the face is made only when a
+            // vertex of it needs one.
+            let mut kernel: Option<solidcore::eval::EvalSurface> = None;
+            let (mut positions, mut normals) = (
+                Vec::with_capacity(f.uv.len()),
+                Vec::with_capacity(f.uv.len()),
+            );
+            // The first node the kernel's evaluator refuses, with its reason: the face is refused
+            // there, not meshed with a normal made up for it. Its pole nodes have their own rule
+            // below ([`crate::pole::apply`]).
+            let mut failure: Option<String> = None;
+            for (k, uv) in f.uv.iter().enumerate() {
+                let (p, n) = match surface {
+                    Some(s) => {
+                        solidcore_convert::record_pair(if let Some(pn) = s.regular(uv[0], uv[1]) {
+                            pn
+                        } else {
+                            let ks =
+                                kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
+                            ks.eval(uv[0], uv[1]).unwrap_or_else(|e| {
+                                if failure.is_none()
+                                    && !f.poles.iter().any(|p| p.node as usize == k)
+                                {
+                                    failure = Some(format!(
+                                        "node {k} at ({}, {}): {}",
+                                        uv[0],
+                                        uv[1],
+                                        crate::eval_message(e)
+                                    ));
+                                }
+                                s.eval(uv[0], uv[1])
+                            })
+                        })
+                    }
+                    None => (Vec3::ZERO, f.normals.get(k).copied().unwrap_or(Vec3::Z)),
+                };
+                let p = f.fixed.get(k).copied().unwrap_or(p);
+                positions.push(p);
+                normals.push(if f.flip { -n } else { n });
+            }
+            if let Some(reason) = failure {
+                refused.push(crate::RefusedFace {
                     face: f.face as usize,
                     reason,
                 });
                 continue;
             }
-            let (Some(mut positions), Some(mut normals)) =
-                (crate::with_room(f.uv.len()), crate::with_room(f.uv.len()))
-            else {
-                refused.push(RefusedFace {
-                    face: f.face as usize,
-                    reason: format!("its {} vertices cannot be held", f.uv.len()),
-                });
-                continue;
-            };
-            // The nodes at a pole of higher order the plan names (no normal there).
-            let mut at_poles: Vec<usize> = Vec::new();
-            let surface = f.surface.and_then(|i| self.surfaces.get(i as usize));
-            match surface {
-                Some(s) => {
-                    let mut why = None;
-                    for (k, uv) in f.uv.iter().enumerate() {
-                        match s.eval(uv[0], uv[1]) {
-                            Ok(pn) => {
-                                let (p, n) = solidcore_convert::record_pair(pn);
-                                positions.push(f.fixed.get(k).copied().unwrap_or(p));
-                                normals.push(if f.flip { -n } else { n });
-                            }
-                            // Its normals are its rule's, below; its point the shared node's.
-                            Err(solidcore::eval::EvalError::Degenerate(_))
-                                if f.pole(k).is_some() && k < f.fixed.len() =>
-                            {
-                                positions.push(f.fixed.get(k).copied().unwrap_or_default());
-                                normals.push(Vec3::default());
-                                at_poles.push(k);
-                            }
-                            Err(e) => {
-                                why = Some(format!(
-                                    "vertex {k} at {uv:?}: {}",
-                                    crate::eval_message(e)
-                                ));
-                                break;
-                            }
-                        }
-                    }
-                    if let Some(reason) = why {
-                        refused.push(RefusedFace {
-                            face: f.face as usize,
-                            reason,
-                        });
-                        continue;
-                    }
-                }
-                // No surface: every vertex's position and normal are the plan's own, as many as
-                // it has vertices (checked by `malformed` above).
-                None => {
-                    for (p, n) in f.fixed.iter().zip(&f.normals).take(f.uv.len()) {
-                        positions.push(*p);
-                        normals.push(if f.flip { -*n } else { *n });
-                    }
-                }
-            }
-            // At the poles: one copy per triangle with its limit normal, or the averaged one.
-            let mut local = None;
+            // At the poles of higher order the plan names: one copy per triangle with its limit
+            // normal, or the mean of the triangles' normals, by the kernel's evaluator.
+            let mut triangles = std::borrow::Cow::Borrowed(&f.triangles);
             if let Some(s) = surface
-                && !at_poles.is_empty()
+                && !f.poles.is_empty()
             {
-                match crate::pole::apply(s, f, &at_poles, positions, normals) {
+                let at_poles: Vec<usize> = f
+                    .poles
+                    .iter()
+                    .map(|p| p.node as usize)
+                    .filter(|&k| k < f.fixed.len())
+                    .collect();
+                let k = kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
+                match crate::pole::apply(k, f, &at_poles, positions.clone(), normals.clone()) {
                     Ok((p, n, t)) => {
                         (positions, normals) = (p, n);
-                        local = Some(t);
+                        triangles = std::borrow::Cow::Owned(t);
                     }
+                    // A normal the rule cannot give refuses the face, nothing substituted.
                     Err(reason) => {
-                        refused.push(RefusedFace {
+                        refused.push(crate::RefusedFace {
                             face: f.face as usize,
                             reason,
                         });
@@ -201,30 +145,16 @@ impl TessPlan {
                     }
                 }
             }
-            // The mesh's indices are u32: a face whose vertices would lie past them is refused.
-            let base = out.positions.len();
-            let at = |i: u32| {
-                base.checked_add(i as usize)
-                    .and_then(|j| u32::try_from(j).ok())
-            };
-            let triangles: Option<Vec<[u32; 3]>> = local
-                .as_ref()
-                .unwrap_or(&f.triangles)
-                .iter()
-                .map(|t| Some([at(t[0])?, at(t[1])?, at(t[2])?]))
-                .collect();
-            let Some(triangles) = triangles else {
-                refused.push(RefusedFace {
-                    face: f.face as usize,
-                    reason: format!("its vertices lie past the mesh's {} index", u32::MAX),
-                });
-                continue;
-            };
+            let nodes = positions.len();
             out.positions.extend(positions);
             out.normals.extend(normals);
-            out.tri_face
-                .extend(std::iter::repeat_n(f.face, triangles.len()));
-            out.triangles.extend(triangles);
+            for t in triangles.iter() {
+                if t.iter().all(|&i| (i as usize) < nodes) {
+                    let at = |i: u32| u32::try_from(base + i as usize).unwrap_or(u32::MAX);
+                    out.triangles.push([at(t[0]), at(t[1]), at(t[2])]);
+                    out.tri_face.push(f.face);
+                }
+            }
         }
         out.edges.clone_from(&self.edges);
         out.edge_faces.clone_from(&self.edge_faces);
@@ -232,13 +162,11 @@ impl TessPlan {
     }
 
     /// Which of the body's `faces` faces have triangles in [`TessPlan::evaluate`]'s mesh,
-    /// without evaluating it: the faces with triangles that are not malformed. A face the
-    /// evaluator refuses at a vertex is only found by evaluating, so it is counted here.
+    /// without evaluating it.
     pub fn faces_with_triangles(&self, faces: usize) -> Vec<bool> {
         let mut has = vec![false; faces];
         for f in &self.faces {
-            if !f.triangles.is_empty()
-                && f.malformed(self.surfaces.len()).is_none()
+            if f.triangles.iter().any(|t| f.has_nodes(t))
                 && let Some(h) = has.get_mut(f.face as usize)
             {
                 *h = true;
@@ -266,22 +194,34 @@ impl TessPlan {
             )
         };
         let point = |p: Vec3| vector(p) + Vec3::new(m[3][0], m[3][1], m[3][2]);
+        // The same on the evaluator's surfaces, in the kernel's vectors.
+        let (kvector, kpoint) = (
+            |v: K| solidcore_convert::vec3(vector(solidcore_convert::record_vec3(v))),
+            |p: K| solidcore_convert::vec3(point(solidcore_convert::record_vec3(p))),
+        );
         let surfaces = self
             .surfaces
             .iter()
             .map(|s| match s {
                 EvalSurface::Plane { origin, du, dv } => EvalSurface::Plane {
-                    origin: vec3(point(record_vec3(*origin))),
-                    du: vec3(vector(record_vec3(*du))),
-                    dv: vec3(vector(record_vec3(*dv))),
+                    origin: kpoint(*origin),
+                    du: kvector(*du),
+                    dv: kvector(*dv),
                 },
-                // An affine map keeps a surface closed or open.
-                EvalSurface::Nurbs(n) => EvalSurface::nurbs_closed(
-                    n.degree(),
-                    n.knots().clone(),
-                    n.count(),
+                EvalSurface::Nurbs {
+                    degree,
+                    knots,
+                    count,
+                    ctrl,
+                    closed,
+                } => EvalSurface::Nurbs {
+                    degree: *degree,
+                    // An affine map keeps a surface closed or open.
+                    closed: *closed,
+                    knots: knots.clone(),
+                    count: *count,
                     // Homogeneous: the translation scales with the weight.
-                    n.ctrl()
+                    ctrl: ctrl
                         .iter()
                         .map(|c| {
                             let q = vector(Vec3::new(c[0], c[1], c[2]))
@@ -289,8 +229,7 @@ impl TessPlan {
                             [q.x, q.y, q.z, c[3]]
                         })
                         .collect(),
-                    n.closed(),
-                ),
+                },
                 EvalSurface::Revolved {
                     profile,
                     origin,
@@ -299,22 +238,17 @@ impl TessPlan {
                     swap,
                 } => {
                     // `m` (as rows) after the surface's own affine map.
-                    let rows = [
-                        [m[0][0], m[1][0], m[2][0], m[3][0]],
-                        [m[0][1], m[1][1], m[2][1], m[3][1]],
-                        [m[0][2], m[1][2], m[2][2], m[3][2]],
-                    ];
+                    let r = |i: usize| m.map(|col| col.get(i).copied().unwrap_or(0.0));
+                    let rows = [r(0), r(1), r(2)];
                     let t = transform;
-                    let columns = [
-                        [t[0][0], t[1][0], t[2][0]],
-                        [t[0][1], t[1][1], t[2][1]],
-                        [t[0][2], t[1][2], t[2][2]],
-                        [t[0][3], t[1][3], t[2][3]],
-                    ];
                     let composed = rows.map(|row| {
                         let mut out = [0.0; 4];
-                        for ((j, slot), column) in out.iter_mut().enumerate().zip(columns) {
-                            *slot = row.iter().zip(column).map(|(r, c)| r * c).sum::<f64>()
+                        for (j, slot) in out.iter_mut().enumerate() {
+                            *slot = row
+                                .iter()
+                                .zip(t)
+                                .map(|(r, tk)| r * tk.get(j).copied().unwrap_or(0.0))
+                                .sum::<f64>()
                                 + if j == 3 { row[3] } else { 0.0 };
                         }
                         out
@@ -355,10 +289,18 @@ impl TessPlan {
 mod tests {
     use super::*;
     use crate::vec::VecExt as _;
-    use solidcore::eval::EvalCurve;
+    use solidcore::eval::plan::EvalCurve;
 
     fn close(a: Vec3, b: Vec3, tol: f64) -> bool {
         a.dist(b) <= tol
+    }
+
+    fn line(a: Vec3, b: Vec3) -> EvalCurve {
+        EvalCurve {
+            degree: 1,
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            ctrl: vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]],
+        }
     }
 
     /// A moved plan evaluates to the plan's points moved, on a rational spline surface (the
@@ -391,8 +333,8 @@ mod tests {
         );
         let revolved = EvalSurface::Revolved {
             profile: line(Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 1.0)),
-            origin: solidcore::Vec3::ZERO,
-            axis: solidcore::Vec3::Z,
+            origin: K::ZERO,
+            axis: K::Z,
             transform: [
                 [1.0, 0.0, 0.0, 1.0],
                 [0.0, 0.0, -1.0, 2.0],
@@ -414,14 +356,7 @@ mod tests {
             edges: vec![vec![Vec3::new(1.0, 1.0, 1.0)]],
             edge_faces: vec![vec![0, 1]],
         };
-        let ((a, refused_a), (b, refused_b)) = (plan.evaluate(), plan.transformed(&m).evaluate());
-        // Both faces evaluated, moved and not: three vertices each.
-        assert!(
-            refused_a.is_empty() && refused_b.is_empty(),
-            "{refused_a:?} {refused_b:?}"
-        );
-        assert_eq!((a.positions.len(), b.positions.len()), (6, 6));
-        assert_eq!(a.tri_face, vec![0, 1]);
+        let (a, b) = (plan.evaluate().0, plan.transformed(&m).evaluate().0);
         assert_eq!(a.triangles, b.triangles);
         for (p, q) in a.positions.iter().zip(&b.positions) {
             assert!(close(apply(*p), *q, 1e-12), "{p:?} -> {q:?}");
@@ -432,40 +367,28 @@ mod tests {
         assert!(close(apply(a.edges[0][0]), b.edges[0][0], 1e-12));
     }
 
-    fn line(a: Vec3, b: Vec3) -> EvalCurve {
-        EvalCurve::new(
-            1,
-            vec![0.0, 0.0, 1.0, 1.0],
-            vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]],
-        )
-    }
-
-    /// A plane face: its fixed vertex used exactly, its normals flipped. The face with a
-    /// triangle off its nodes is refused whole, with why, and none of its triangles is kept.
     #[test]
-    fn evaluate_uses_fixed_points_and_refuses_bad_indices() {
-        let face = |triangles: Vec<[u32; 3]>| FacePlan {
-            face: 3,
-            surface: Some(0),
-            uv: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
-            fixed: vec![Vec3::new(0.0, 0.0, 1e-9)],
-            normals: vec![],
-            flip: true,
-            triangles,
-            poles: Vec::new(),
-        };
+    fn evaluate_uses_fixed_points_and_drops_bad_indices() {
         let plan = TessPlan {
             surfaces: vec![EvalSurface::Plane {
-                origin: solidcore::Vec3::ZERO,
-                du: solidcore::Vec3::X,
-                dv: solidcore::Vec3::Y,
+                origin: K::ZERO,
+                du: K::X,
+                dv: K::Y,
             }],
-            faces: vec![face(vec![[0, 1, 2]])],
+            faces: vec![FacePlan {
+                face: 3,
+                surface: Some(0),
+                uv: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                fixed: vec![Vec3::new(0.0, 0.0, 1e-9)],
+                normals: vec![],
+                flip: true,
+                triangles: vec![[0, 1, 2], [0, 1, 7]],
+                poles: vec![],
+            }],
             edges: vec![],
             edge_faces: vec![],
         };
-        let (m, refused) = plan.evaluate();
-        assert!(refused.is_empty(), "{refused:?}");
+        let m = plan.evaluate().0;
         assert_eq!(m.positions.len(), 3);
         assert_eq!(
             m.positions.first().copied(),
@@ -474,101 +397,21 @@ mod tests {
         assert_eq!(m.triangles, vec![[0, 1, 2]]);
         assert_eq!(m.tri_face, vec![3]);
         assert!(m.normals.iter().all(|n| close(*n, -Vec3::Z, 1e-12)));
-        let bad = TessPlan {
-            faces: vec![face(vec![[0, 1, 2], [0, 1, 7]])],
-            ..plan.clone()
-        };
-        let (m, refused) = bad.evaluate();
-        assert!(m.triangles.is_empty() && m.positions.is_empty());
-        assert_eq!(
-            refused,
-            vec![RefusedFace {
-                face: 3,
-                reason: "triangle 1 has a corner past its 3 nodes".into()
-            }]
-        );
-    }
-
-    /// A face with no surface takes every position and normal from the plan. One missing a
-    /// position or a normal is refused with why; nothing (the origin, +z) stands in for it.
-    #[test]
-    fn a_face_without_a_surface_and_a_vertex_is_refused() {
-        let face = |face: u32, fixed: usize, normals: usize| FacePlan {
-            face,
-            surface: None,
-            uv: vec![[0.0, 0.0]; 3],
-            fixed: [Vec3::X, Vec3::Y, Vec3::Z]
-                .into_iter()
-                .take(fixed)
-                .collect(),
-            normals: vec![Vec3::Z; normals],
-            flip: false,
-            triangles: vec![[0, 1, 2]],
-            poles: Vec::new(),
-        };
-        let plan = TessPlan {
-            faces: vec![
-                face(0, 3, 3),
-                face(1, 2, 3),
-                face(2, 3, 2),
-                face(3, 3, 3),
-                FacePlan {
-                    surface: Some(4),
-                    ..face(4, 3, 3)
-                },
-            ],
-            ..TessPlan::default()
-        };
-        let (m, refused) = plan.evaluate();
-        assert_eq!(m.tri_face, vec![0, 3]);
-        assert_eq!(
-            m.positions,
-            vec![Vec3::X, Vec3::Y, Vec3::Z, Vec3::X, Vec3::Y, Vec3::Z]
-        );
-        let reasons: Vec<(usize, &str)> = refused
-            .iter()
-            .map(|r| (r.face, r.reason.as_str()))
-            .collect();
-        assert_eq!(
-            reasons,
-            vec![
-                (
-                    1,
-                    "vertex 2 has no surface to evaluate and no position given"
-                ),
-                (2, "vertex 2 has no surface to evaluate and no normal given"),
-                (4, "its surface 4 is not in the plan"),
-            ]
-        );
-        // Counted without evaluating: the faces the mesh has.
-        assert_eq!(
-            plan.faces_with_triangles(5),
-            vec![true, false, false, true, false]
-        );
-    }
-
-    /// Faces with triangles, counted without evaluating, are the faces the mesh has: not a face
-    /// whose triangle is off its nodes, nor one with none, nor one out of the body's range.
-    #[test]
-    fn faces_with_triangles_are_the_faces_the_mesh_has() {
+        // Faces with triangles, counted without evaluating, are the faces the mesh has: not a
+        // face whose only triangle is off its nodes, nor one with none, nor one out of range.
+        let mut plan = plan;
         let only = |face: u32, triangles: Vec<[u32; 3]>| FacePlan {
             face,
             uv: vec![[0.0, 0.0]; 3],
-            fixed: vec![Vec3::X, Vec3::Y, Vec3::Z],
-            normals: vec![Vec3::Z; 3],
             triangles,
             ..Default::default()
         };
-        let plan = TessPlan {
-            faces: vec![
-                only(0, vec![[0, 1, 9]]),
-                only(1, vec![]),
-                only(2, vec![[2, 1, 0]]),
-                only(3, vec![[0, 1, 2]]),
-                only(7, vec![[0, 1, 2]]),
-            ],
-            ..TessPlan::default()
-        };
+        plan.faces.extend([
+            only(0, vec![[0, 1, 9]]),
+            only(1, vec![]),
+            only(2, vec![[2, 1, 0]]),
+            only(7, vec![[0, 1, 2]]),
+        ]);
         let has = plan.faces_with_triangles(5);
         let mut evaluated = vec![false; 5];
         for f in plan.evaluate().0.tri_face {

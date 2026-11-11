@@ -83,13 +83,11 @@
 //!   `IsPointOnStartPoint` compares a squared distance with the squared tolerance (a
 //!   real distance of `this_approx_tol_3d`) instead of the tolerance itself; off by
 //!   default (pinned C++).
-//! - **Opt-in fix (WR-52).** With
-//!   [`UpstreamFixes::is_point_on_curve_propagates_eval_failure`](crate::kernel::UpstreamFixes::is_point_on_curve_propagates_eval_failure)
-//!   [`SurfaceIntersector::is_point_on_curve`] (`SmSurfaceIntersector.cpp:7376`,
+//! - **WR-52.** [`SurfaceIntersector::is_point_on_curve`] (`SmSurfaceIntersector.cpp:7376`,
 //!   `:7391`) and [`is_point_on_tsect_curve`] (`SmSurfaceIntersector.cpp:4195`)
 //!   propagate a failing `EvaluatePoint`, `DropPoint`, or Hermite `LocalPointSolve`
-//!   call as `Err(...)` instead of mapping non-`Unported` errors to `Ok(true)`; off
-//!   by default (pinned C++).
+//!   call as `Err(...)`; upstream maps those statuses to `TRUE` (`SER` inside an
+//!   `SmBoolean`).
 //! - **Surface calls.** `SmSurface::IsClosed`, `SmSurface::EvaluateNormal` and
 //!   `SmSurface::Evaluate1stDerivatives` go through `surface::surface::p7` (the
 //!   last co-ported there from unit `surface.surface_p1`).
@@ -694,18 +692,6 @@ fn or_keep<T>(r: Result<T>, fallback: T) -> Result<T> {
         Ok(v) => Ok(v),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(fallback),
-    }
-}
-
-/// `SER` inside a method returning `SmBoolean`: by default a failing status reads as
-/// `TRUE` ([`SolidError::Unported`] still propagates); with
-/// [`UpstreamFixes::is_point_on_curve_propagates_eval_failure`](crate::kernel::UpstreamFixes::is_point_on_curve_propagates_eval_failure)
-/// (`WR-52`), the error propagates directly.
-fn or_true(k: &Kernel, err: SolidError) -> Result<bool> {
-    if k.fixes.is_point_on_curve_propagates_eval_failure {
-        Err(err)
-    } else {
-        or_keep(Err(err), true)
     }
 }
 
@@ -1626,11 +1612,8 @@ impl<'s> SurfaceIntersector<'s> {
     /// `10 * this_approx_tol_3d`), or within ten times that when the surfaces do not
     /// diverge between the point and the curve point.
     ///
-    /// By default (pinned C++ parity), a failing `EvaluatePoint` (`:7376`) or
-    /// `DropPoint` (`:7391`) status is mapped to `Ok(true)` (`SER` inside `SmBoolean`,
-    /// `WR-52`; [`SolidError::Unported`] still propagates). With
-    /// [`UpstreamFixes::is_point_on_curve_propagates_eval_failure`](crate::kernel::UpstreamFixes::is_point_on_curve_propagates_eval_failure),
-    /// those failures propagate as `Err(...)`.
+    /// A failing `EvaluatePoint` (`:7376`) or `DropPoint` (`:7391`) status propagates
+    /// as `Err(...)` (`WR-52`); upstream maps it to `TRUE` (`SER` inside `SmBoolean`).
     pub fn is_point_on_curve(
         &self,
         k: &Kernel,
@@ -1665,10 +1648,7 @@ impl<'s> SurfaceIntersector<'s> {
             // if the curve is degenerate (can be treated as a single point)
             if curve.is_degenerate(k, EFF_ZERO, None)? {
                 let ivl = curve.natural_interval();
-                let crv_pnt = match curve.evaluate_point(k, ivl.min()) {
-                    Ok(p) => p,
-                    Err(e) => return or_true(k, e),
-                };
+                let crv_pnt = curve.evaluate_point(k, ivl.min())?;
                 if crv_pnt.distance(point) < self.this_approx_tol_3d * 4.0 {
                     return Ok(true);
                 }
@@ -1676,7 +1656,7 @@ impl<'s> SurfaceIntersector<'s> {
                 let ivl = curve.natural_interval();
 
                 // Find nearest point on curve to test point within 10*tolerance.
-                let drop = match curve.drop_point_in(
+                let drop = curve.drop_point_in(
                     k,
                     &ivl,
                     point,
@@ -1686,10 +1666,7 @@ impl<'s> SurfaceIntersector<'s> {
                     SolverOperation::Intersect,
                     caches,
                     jj,
-                ) {
-                    Ok(d) => d,
-                    Err(e) => return or_true(k, e),
-                };
+                )?;
                 let (success, crv_param, dist) = (drop.success, drop.parameter, drop.distance);
 
                 // If the point is within tolerance, it's on the curve.
@@ -2012,11 +1989,8 @@ pub fn compute_curve_type(
 /// a tangent pointing back along it, or onto its interior within half the chord's
 /// largest coordinate.
 ///
-/// By default (pinned C++ parity), a failing Hermite `LocalPointSolve` (`:4195`)
-/// status is mapped to `Ok(true)` (`SER` inside `SmBoolean`, `WR-52`;
-/// [`SolidError::Unported`] still propagates). With
-/// [`UpstreamFixes::is_point_on_curve_propagates_eval_failure`](crate::kernel::UpstreamFixes::is_point_on_curve_propagates_eval_failure),
-/// a failure propagates as `Err(...)`.
+/// A failing Hermite `LocalPointSolve` (`:4195`) status propagates as `Err(...)`
+/// (`WR-52`); upstream maps it to `TRUE` (`SER` inside `SmBoolean`).
 pub fn is_point_on_tsect_curve(
     k: &Kernel,
     point_to_test: &TsectPnt,
@@ -2112,17 +2086,14 @@ pub fn is_point_on_tsect_curve(
     // Find closest point on the Hermite Curve to the Point, from the midpoint.
     let guess = hermite_domain.evaluate(0.5);
     let herm_curve = Curve::from(herm_3d);
-    let (success, sol) = match herm_curve.local_point_solve::<()>(
+    let (success, sol) = herm_curve.local_point_solve::<()>(
         k,
         &hermite_domain,
         SolverOperation::Minimize,
         point_to_test.crv_pos(),
         &PointSolveOptions::default(),
         guess,
-    ) {
-        Ok(r) => r,
-        Err(e) => return or_true(k, e),
-    };
+    )?;
 
     // If the test point dropped to the interior of the Hermite curve,
     // then we've moved past it.  [B391]
@@ -2681,51 +2652,9 @@ mod tests {
         assert_eq!(curves.len(), 1);
     }
 
-    /// `WR-52`: `is_point_on_curve_propagates_eval_failure` defaults to `false`, is
-    /// registered in [`UpstreamFixes`](crate::kernel::UpstreamFixes), and gates the
-    /// `or_true` helper shared by `SmSurfaceIntersector::IsPointOnCurve` (`:7376`,
-    /// `:7391`) and `sm_IsPointOnCurve` (`:4195`) while always propagating
-    /// [`SolidError::Unported`].
-    #[test]
-    fn wr52_flag_lookup_and_default_off() {
-        use crate::error::SM_ERR;
-        use crate::kernel::UpstreamFixes;
-
-        let fixes = UpstreamFixes::default();
-        assert!(!fixes.is_point_on_curve_propagates_eval_failure);
-        assert!(UpstreamFixes::NAMES.contains(&"is_point_on_curve_propagates_eval_failure"));
-
-        let mut k = Kernel::default();
-        assert!(!k.fixes.is_point_on_curve_propagates_eval_failure);
-        *k.fixes
-            .flag_mut("is_point_on_curve_propagates_eval_failure")
-            .unwrap() = true;
-        assert!(k.fixes.is_point_on_curve_propagates_eval_failure);
-
-        let k_default = Kernel::default();
-        let eval_err = SolidError::sm_err("test::eval");
-        let null_err = SolidError::null_pointer("test::null");
-        let unported = SolidError::Unported {
-            upstream: "SmCurve::LocalPointSolve",
-            unit: "curve.curve_p3",
-        };
-
-        assert_eq!(or_true(&k_default, eval_err.clone()), Ok(true));
-        assert_eq!(or_true(&k_default, null_err.clone()), Ok(true));
-        assert_eq!(or_true(&k_default, unported.clone()), Err(unported.clone()));
-
-        let propagated_eval = or_true(&k, eval_err.clone()).unwrap_err();
-        assert_eq!(propagated_eval, eval_err);
-        assert_eq!(propagated_eval.sm_status(), Some(SM_ERR));
-        let propagated_null = or_true(&k, null_err.clone()).unwrap_err();
-        assert_eq!(propagated_null, null_err);
-        assert_eq!(propagated_null.sm_status(), Some(SM_ERR_NULL_POINTER));
-        assert_eq!(or_true(&k, unported.clone()), Err(unported));
-    }
-
     /// `WR-52` (`SmSurfaceIntersector.cpp:7376`): when `pCurve->IsDegenerate()` holds
     /// and `pCurve->EvaluatePoint` fails, pinned C++ returns the non-zero `SmStatus`
-    /// from `SmBoolean` as `TRUE` (`Ok(true)`); the opt-in flag propagates `Err`.
+    /// from `SmBoolean` as `TRUE` (`Ok(true)`); the port propagates `Err`.
     #[test]
     fn wr52_is_point_on_curve_degenerate_eval_failure() {
         use crate::curve::ellipse::Ellipse;
@@ -2736,38 +2665,21 @@ mod tests {
         let s1 = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let s2 = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
 
-        let k_default = Kernel::default();
-        let mut k_fix = Kernel::default();
-        k_fix.fixes.is_point_on_curve_propagates_eval_failure = true;
-        let si = SurfaceIntersector::new(&k_default, &s1, &dom, &s2, &dom, false).unwrap();
+        let k_fix = Kernel::default();
+        let si = SurfaceIntersector::new(&k_fix, &s1, &dom, &s2, &dom, false).unwrap();
 
         let far = Vec3::new(100.0, 100.0, 100.0);
 
         // 1. Degenerate `Ellipse` without NURB: `IsDegenerate` is `true` (zero radii),
         //    `EvaluatePoint` fails with `SM_ERR` (1001).
         let bad_ellipse = Curve::from(Ellipse::empty(3));
-        assert!(bad_ellipse
-            .is_degenerate(&k_default, EFF_ZERO, None)
-            .unwrap());
-        assert_eq!(
-            si.is_point_on_curve(&k_default, far, core::slice::from_ref(&bad_ellipse), None),
-            Ok(true)
-        );
+        assert!(bad_ellipse.is_degenerate(&k_fix, EFF_ZERO, None).unwrap());
         let err = si
             .is_point_on_curve(&k_fix, far, core::slice::from_ref(&bad_ellipse), None)
             .unwrap_err();
         assert_eq!(err.sm_status(), Some(SM_ERR), "{err:?}");
 
-        // Skipping index 0 bypasses the broken curve in both modes.
-        assert_eq!(
-            si.is_point_on_curve(
-                &k_default,
-                far,
-                core::slice::from_ref(&bad_ellipse),
-                Some(0)
-            ),
-            Ok(false)
-        );
+        // Skipping index 0 bypasses the broken curve.
         assert_eq!(
             si.is_point_on_curve(&k_fix, far, core::slice::from_ref(&bad_ellipse), Some(0)),
             Ok(false)
@@ -2776,13 +2688,7 @@ mod tests {
         // 2. Empty `OffsetCurve`: `IsDegenerate` is `true`, `EvaluatePoint` fails with
         //    `SM_ERR_NULL_POINTER` (1006).
         let bad_offset = Curve::from(OffsetCurve::empty());
-        assert!(bad_offset
-            .is_degenerate(&k_default, EFF_ZERO, None)
-            .unwrap());
-        assert_eq!(
-            si.is_point_on_curve(&k_default, far, core::slice::from_ref(&bad_offset), None),
-            Ok(true)
-        );
+        assert!(bad_offset.is_degenerate(&k_fix, EFF_ZERO, None).unwrap());
         let err = si
             .is_point_on_curve(&k_fix, far, core::slice::from_ref(&bad_offset), None)
             .unwrap_err();
@@ -2791,7 +2697,7 @@ mod tests {
 
     /// `WR-52` (`SmSurfaceIntersector.cpp:7391`): when `pCurve->IsDegenerate()` is
     /// `false` and `pCurve->DropPoint` fails, pinned C++ returns `TRUE` (`Ok(true)`);
-    /// the opt-in flag propagates `Err`.
+    /// the port propagates `Err`.
     #[test]
     fn wr52_is_point_on_curve_nondegenerate_drop_failure() {
         use crate::curve::ellipse::Ellipse;
@@ -2801,10 +2707,8 @@ mod tests {
         let s1 = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let s2 = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
 
-        let k_default = Kernel::default();
-        let mut k_fix = Kernel::default();
-        k_fix.fixes.is_point_on_curve_propagates_eval_failure = true;
-        let si = SurfaceIntersector::new(&k_default, &s1, &dom, &s2, &dom, false).unwrap();
+        let k_fix = Kernel::default();
+        let si = SurfaceIntersector::new(&k_fix, &s1, &dom, &s2, &dom, false).unwrap();
 
         // Non-degenerate `Ellipse` (`r = 1`, `[0, 90]` deg) without NURB or polar
         // conversion table: `IsDegenerate` is `false`, and `DropPoint` fails in global
@@ -2813,31 +2717,14 @@ mod tests {
         e.set_radius(1.0);
         e.set_step_interval(Extent1d::from_min_max(0.0, 90.0));
         let bad_nondegen = Curve::from(e);
-        assert!(!bad_nondegen
-            .is_degenerate(&k_default, EFF_ZERO, None)
-            .unwrap());
+        assert!(!bad_nondegen.is_degenerate(&k_fix, EFF_ZERO, None).unwrap());
 
         let far = Vec3::new(100.0, 100.0, 100.0);
-        assert_eq!(
-            si.is_point_on_curve(&k_default, far, core::slice::from_ref(&bad_nondegen), None),
-            Ok(true)
-        );
         let err = si
             .is_point_on_curve(&k_fix, far, core::slice::from_ref(&bad_nondegen), None)
             .unwrap_err();
         assert_eq!(err.sm_status(), Some(SM_ERR_NULL_POINTER), "{err:?}");
 
-        let mut caches = DropPointCaches::default();
-        assert_eq!(
-            si.is_point_on_curve_cached(
-                &k_default,
-                far,
-                core::slice::from_ref(&bad_nondegen),
-                None,
-                &mut caches,
-            ),
-            Ok(true)
-        );
         let mut caches_fix = DropPointCaches::default();
         let cached_err = si
             .is_point_on_curve_cached(
@@ -2854,7 +2741,7 @@ mod tests {
             "{cached_err:?}"
         );
 
-        // An earlier matching curve short-circuits to `Ok(true)` in both modes; a
+        // An earlier matching curve short-circuits to `Ok(true)`; a
         // non-matching curve advances to the broken curve and exposes the failure.
         let valid_line = Curve::from(
             Line::create_line_segment(3, Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), None)
@@ -2863,15 +2750,7 @@ mod tests {
         let curves = [valid_line, bad_nondegen];
         let on_line = Vec3::new(0.5, 0.0, 0.0);
         assert_eq!(
-            si.is_point_on_curve(&k_default, on_line, &curves, None),
-            Ok(true)
-        );
-        assert_eq!(
             si.is_point_on_curve(&k_fix, on_line, &curves, None),
-            Ok(true)
-        );
-        assert_eq!(
-            si.is_point_on_curve(&k_default, far, &curves, None),
             Ok(true)
         );
         let slice_err = si
@@ -2885,9 +2764,8 @@ mod tests {
     }
 
     /// `WR-52`: valid degenerate curves, valid non-degenerate curves, and traced
-    /// Hermite spans (`is_point_on_tsect_curve`, `SmSurfaceIntersector.cpp:4195`) agree
-    /// across default (`false`) and opt-in (`true`) modes for both on-curve and
-    /// off-curve points.
+    /// Hermite spans (`is_point_on_tsect_curve`, `SmSurfaceIntersector.cpp:4195`) give
+    /// the same answers as upstream for both on-curve and off-curve points.
     #[test]
     fn wr52_valid_curves_and_tsect_span_parity() {
         use crate::curve::line::Line;
@@ -2957,9 +2835,8 @@ mod tests {
             Vec2::new(5.0, 5.0),
         );
 
-        for propagate in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.is_point_on_curve_propagates_eval_failure = propagate;
+        {
+            let k = Kernel::default();
             let si = SurfaceIntersector::new(&k, &s1, &dom, &s2, &dom, false).unwrap();
 
             for degen in [&degen_bspline, &degen_hermite] {

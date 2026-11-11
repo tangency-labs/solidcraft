@@ -1,11 +1,14 @@
 //! SolidCraft's MCP server: its tools, instructions and resources over the shared server
 //! (`solidcraft-mcp-server`), with the agent's folders and the output options around each call.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, mpsc};
+
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs::{self, PathScope};
-use solidcraft_mcp_server::{Info, Tools};
+use solidcraft_mcp_server::{Contents, Incoming, Info, Tools, read_message, response};
 
-use crate::backend::Backend;
+use crate::backend::{Backend, Remote};
 use crate::options::Options;
 use crate::tools::{call_tool_with, tool_definitions_with};
 
@@ -62,6 +65,35 @@ fn design_files(name: &str, args: &Value) -> Vec<String> {
             .collect(),
         _ => step(name, args).into_iter().collect(),
     }
+}
+
+/// The id of a `tools/call` of `running` (no arguments), the one call answered apart from the
+/// call in progress (#14007); `None` for anything else, which waits its turn.
+fn running_call(line: &str) -> Option<Value> {
+    let msg: Value = serde_json::from_str(line.trim()).ok()?;
+    let id = msg.get("id").filter(|id| !id.is_null())?;
+    let params = msg.get("params")?;
+    let no_arguments = match params.get("arguments") {
+        None | Some(Value::Null) => true,
+        Some(Value::Object(a)) => a.is_empty(),
+        Some(_) => false,
+    };
+    (msg["method"] == "tools/call" && params["name"] == "running" && no_arguments).then(|| id.clone())
+}
+
+/// A fresh bridge to the app for a `running` call while another call is in progress, with the
+/// options tools run with; `None` when the backend is not bridged to an app.
+fn side_probe(side: &Mutex<Option<(Remote, Options)>>) -> Option<(Remote, Options)> {
+    let side = side.lock().ok()?;
+    let (template, options) = side.as_ref()?;
+    Some((template.side_channel()?, *options))
+}
+
+/// Write one reply line and flush it, whole, whichever thread sends it.
+fn write_line(output: &Mutex<impl std::io::Write>, reply: &str) -> std::io::Result<()> {
+    let mut out = output.lock().map_err(|_| std::io::Error::other("output lock poisoned"))?;
+    out.write_all(format!("{reply}\n").as_bytes())?;
+    out.flush()
 }
 
 /// SolidCraft's tools as the shared server serves them: the backend they run on, the files they
@@ -134,14 +166,15 @@ impl Tools for Agent {
         ]
     }
 
-    fn read_resource(&mut self, uri: &str) -> Option<Result<Value, String>> {
-        Some(match uri {
+    fn read_resource(&mut self, uri: &str) -> Option<Result<Contents, String>> {
+        let read = match uri {
             // The solvecraft:// URIs are what earlier releases listed (compatibility shim,
             // docs/compatibility.md); clients that saved them still read the resource.
             "solidcraft://design" | "solvecraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
             "solidcraft://commands" | "solvecraft://commands" => self.backend.call("engine.commands", json!({})),
             _ => return None,
-        })
+        };
+        Some(read.map(|v| Contents::json(&v)))
     }
 }
 
@@ -179,9 +212,73 @@ impl Server {
     pub fn is_initialized(&self) -> bool {
         self.inner.is_initialized()
     }
-    /// Serve newline-delimited JSON-RPC until `input` closes (see the shared server).
-    pub fn serve(&mut self, input: impl std::io::BufRead, output: impl std::io::Write) -> std::io::Result<()> {
-        self.inner.serve(input, output)
+    /// Serve newline-delimited JSON-RPC until `input` closes (see the shared server). Requests are
+    /// handled one at a time, in order, but `input` is read on a thread of its own, so a `running`
+    /// call that arrives while another call is still being handled (a long `batch`) is answered at
+    /// once on a connection of its own to the app, as its docs promise, instead of after that call
+    /// (#14007). Replies to those calls may then come before the reply to the call in progress;
+    /// each carries its request's id.
+    pub fn serve(&mut self, input: impl std::io::BufRead + Send, output: impl std::io::Write + Send) -> std::io::Result<()> {
+        let output = Mutex::new(output);
+        // Messages read and not yet answered by the main loop: counted when the reader queues one,
+        // not when the loop takes it, so a `running` read right behind a `batch` the loop has not
+        // picked up yet is not queued behind it. A `running` answered apart is never queued, so it
+        // never counts.
+        let in_flight = AtomicUsize::new(0);
+        // How to reach the app apart from the call in progress, and the options its tools run with:
+        // known before the first message, and refreshed as each one is taken (the backend may
+        // bridge to an app that started since).
+        let side: Mutex<Option<(Remote, Options)>> = Mutex::new(self.side());
+        let (tx, rx) = mpsc::channel::<Incoming>();
+        std::thread::scope(|scope| {
+            let (output, in_flight, side) = (&output, &in_flight, &side);
+            let reader = scope.spawn(move || -> std::io::Result<()> {
+                let mut input = input;
+                while let Some(incoming) = read_message(&mut input, solidcraft_engine::MAX_LINE)? {
+                    if let Incoming::Line(line) = &incoming
+                        && in_flight.load(Ordering::SeqCst) > 0
+                        && let Some(id) = running_call(line)
+                        && let Some((mut remote, options)) = side_probe(side)
+                    {
+                        scope.spawn(move || {
+                            let result = call_tool_with(&mut remote, "running", &json!({}), options);
+                            // The client may be gone; the main loop sees that on its own write.
+                            let _ = write_line(output, &response(id, result).to_string());
+                        });
+                        continue;
+                    }
+                    in_flight.fetch_add(1, Ordering::SeqCst);
+                    if tx.send(incoming).is_err() {
+                        break;
+                    }
+                }
+                Ok(())
+            });
+            let mut written = Ok(());
+            for incoming in rx {
+                if let Ok(mut s) = side.lock() {
+                    *s = self.side();
+                }
+                let reply = match incoming {
+                    Incoming::Line(line) => self.inner.handle_line(&line),
+                    Incoming::Refused(reply) => Some(reply),
+                };
+                let sent = reply.map_or(Ok(()), |reply| write_line(output, &reply));
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                if let Err(e) = sent {
+                    written = Err(e);
+                    break;
+                }
+            }
+            let read = reader.join().unwrap_or_else(|_| Err(std::io::Error::other("the stdin reader stopped")));
+            written.and(read)
+        })
+    }
+    /// A fresh bridge to the app for answering `running` apart from the call in progress, with
+    /// the options tools run with now; `None` when the backend is not bridged to an app.
+    fn side(&mut self) -> Option<(Remote, Options)> {
+        let options = self.inner.tools().listed;
+        self.inner.tools().backend.side_channel().map(|r| (r, options))
     }
     /// One line in, at most one line out (notifications get no reply).
     pub fn handle_line(&mut self, line: &str) -> Option<String> {

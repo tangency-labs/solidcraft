@@ -55,6 +55,8 @@ mod tests {
             Self { ctx, app, width, time: 0.0, maximized: false, full: false }
         }
 
+        /// One frame with `events`, the input going through `release_press_taken_by_os` first
+        /// as in the desktop app.
         fn frame(&mut self, events: Vec<Event>) -> egui::FullOutput {
             self.time += 0.05;
             let mut input = RawInput {
@@ -66,6 +68,8 @@ mod tests {
             if let Some(v) = input.viewports.get_mut(&ViewportId::ROOT) {
                 v.maximized = Some(self.maximized);
             }
+            // As the desktop app's raw-input hook does first.
+            crate::window_chrome::release_press_taken_by_os(&self.ctx, &mut input);
             let (app, full) = (&mut self.app, self.full);
             let mut out = self.ctx.run_ui(input, |ui| {
                 if full {
@@ -91,6 +95,16 @@ mod tests {
             events.into_iter().flat_map(|e| self.frame(e).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()).collect()
         }
 
+        /// A gesture whose release the OS keeps, as an X11 window manager does once a press
+        /// started a window move or resize: press, move along `path`, then one quiet frame.
+        fn gesture_os_keeps_release(&mut self, path: &[Pos2]) -> Vec<ViewportCommand> {
+            let press = Event::PointerButton { pos: path[0], button: PointerButton::Primary, pressed: true, modifiers: Default::default() };
+            let mut events = vec![vec![Event::PointerMoved(path[0])], vec![press]];
+            events.extend(path[1..].iter().map(|p| vec![Event::PointerMoved(*p)]));
+            events.push(vec![]);
+            events.into_iter().flat_map(|e| self.frame(e).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()).collect()
+        }
+
         fn click(&mut self, p: Pos2) -> Vec<ViewportCommand> {
             self.gesture(&[p])
         }
@@ -111,6 +125,21 @@ mod tests {
         let mut v = vec![];
         out.shapes.iter().for_each(|c| walk(&c.shape, &mut v));
         v
+    }
+
+    /// SolidCraft's name leaves Home where it has always been: 88 pt right of the name's start
+    /// (Home centred at 124 from the bar's content edge, the name starting at 36), the kit's least
+    /// place for Home.
+    #[test]
+    fn home_keeps_its_place_after_solidcrafts_name() {
+        let mut w = Win::new(1600.0);
+        w.app.home.open = false;
+        w.frame(vec![]);
+        let out = w.frame(vec![]);
+        let name = texts(&out).into_iter().find(|(text, _)| text == "SolidCraft").map(|(_, rect)| rect).expect("the name is drawn");
+        let home = crate::scenario::rect_of("titlebar:home").expect("Home is drawn");
+        assert_eq!(home.center().x - name.left(), 88.0);
+        assert!(name.right() < home.left());
     }
 
     #[test]
@@ -221,6 +250,38 @@ mod tests {
         let undo = crate::scenario::handle_at("appbar:undo").unwrap();
         let cmds = w.gesture(&[undo, undo + vec2(12.0, 4.0), undo + vec2(30.0, 8.0)]);
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "{cmds:?}");
+    }
+
+    /// On X11 the window manager keeps the release of the press that started a window move or
+    /// resize: every drag on the bar or the design's tab still moves the window and every edge
+    /// drag still resizes, not every other one (#13334).
+    #[test]
+    fn a_move_whose_release_the_os_keeps_does_not_swallow_the_next_drag() {
+        let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
+        let mut w = Win::new(1600.0);
+        w.frame(vec![]);
+        let empty = pos2(900.0, 17.0);
+        for round in 1..=3 {
+            let cmds = w.gesture_os_keeps_release(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+            assert_eq!(starts(&cmds), 1, "bar drag {round}: {cmds:?}");
+            w.time += 1.0;
+        }
+        let east = pos2(1598.0, 300.0);
+        for round in 1..=2 {
+            let cmds = w.gesture_os_keeps_release(&[east, east + vec2(6.0, 0.0)]);
+            assert_eq!(cmds, vec![ViewportCommand::BeginResize(ResizeDirection::East)], "resize {round}");
+        }
+        // The only design's tab is part of the title bar: a drag on it moves the window too.
+        let tab = crate::scenario::handle_at("tab:design:0").expect("the design's tab");
+        for round in 1..=2 {
+            let cmds = w.gesture_os_keeps_release(&[tab, tab + vec2(4.0, 12.0), tab + vec2(8.0, 30.0)]);
+            assert_eq!(starts(&cmds), 1, "tab drag {round}: {cmds:?}");
+            w.time += 1.0;
+        }
+        // A real release that does arrive later is ignored: no click, so no maximize.
+        let mut cmds = w.gesture(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+        cmds.extend(w.frame(vec![]).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default());
+        assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::Maximized(_))), "{cmds:?}");
     }
 
     #[test]

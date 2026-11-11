@@ -25,7 +25,8 @@
     clippy::indexing_slicing
 )] // test helpers
 use solidcore::blend::blend_corner::BlendCornerEvent;
-use solidcore::blend::blend_refusal::BlendRefusal;
+use solidcore::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy};
+use solidcore::blend::blend_setback::SpringCurve;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
@@ -169,6 +170,10 @@ struct Rounded {
     room: Vec<f64>,
     /// The refusal as data, where the session returned one ([`SolidError::BlendRefused`]).
     refusal: Option<BlendRefusal>,
+    /// The spring curves the corner checked against its faces' other edges.
+    springs: Vec<SpringCurve>,
+    /// The corner's tolerance (`approx_tol_3d`), `0.0` where the corner was not found.
+    tol: f64,
 }
 
 /// The vertex of `b` at `v`.
@@ -233,14 +238,19 @@ fn round_asked(
             }
         }
         let result = s.do_filleting(k, None);
-        let (mut setbacks, mut room) = (Vec::new(), Vec::new());
+        let (mut setbacks, mut room, mut springs) = (Vec::new(), Vec::new(), Vec::new());
+        let mut tol = 0.0;
         for c in s.fillet_corners().unwrap() {
             let fc = s.corner(c).unwrap();
+            if this == Some(c) {
+                tol = fc.approx_tol_3d;
+            }
             if let Some(sb) = fc.setback.as_ref() {
                 eprintln!("setbacks {:?}", sb.setbacks);
                 if this == Some(c) {
                     setbacks.clone_from(&sb.setbacks);
                     room.clone_from(&sb.room);
+                    springs.clone_from(&sb.springs);
                 }
             }
         }
@@ -257,6 +267,8 @@ fn round_asked(
             setbacks,
             room,
             refusal,
+            springs,
+            tol,
         }
     };
     if rounded.ok {
@@ -405,6 +417,93 @@ fn principal_curvatures(k: &Kernel, s: &Surface, uv: Point2, inside: Point3) -> 
         (-b - disc.sqrt()) / (2.0 * a),
         (-b + disc.sqrt()) / (2.0 * a),
     ))
+}
+
+/// The spring curves the corner checked (#2343 (d): their rails' directions in closed form,
+/// from the ball's centre and the faces' normal fields) are the fill's own spring edges: each
+/// half, at 21 even parameters, within 1e-11 of an edge of `b`, and its tangent at its rail
+/// end along that edge's to 1e-9 rad. A wrong factor in a face kind's normal turn, or the
+/// wrong side at a concave corner, moves both.
+fn springs_are_the_fills(k: &Kernel, b: &Brep, r: &Rounded, name: &str, n: usize) {
+    assert_eq!(r.springs.len(), n, "{name}: spring curves checked");
+    let curves: Vec<(Curve, Extent1d)> = get_edges(b)
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| {
+            let c = edge::curve(b, e).unwrap()?.clone();
+            Some((c, edge::interval(b, e).unwrap()))
+        })
+        .collect();
+    let at = |h: &[[f64; 4]], t: f64| {
+        let mut w = h.to_vec();
+        for kk in 0..w.len() - 1 {
+            for j in 0..w.len() - 1 - kk {
+                let (a, c) = (w[j], w[j + 1]);
+                w[j] = [
+                    a[0] + t * (c[0] - a[0]),
+                    a[1] + t * (c[1] - a[1]),
+                    a[2] + t * (c[2] - a[2]),
+                    a[3] + t * (c[3] - a[3]),
+                ];
+            }
+        }
+        Point3::new(w[0][0] / w[0][3], w[0][1] / w[0][3], w[0][2] / w[0][3])
+    };
+    let (mut worst, mut worst_turn) = (0.0f64, 0.0f64);
+    for spring in &r.springs {
+        for half in [&spring.from_p.curve, &spring.from_q.curve] {
+            // the fill's edge it lies on: the one nearest its middle (at its ends it meets
+            // the rails and end sections too)
+            let nearest = |x: Point3| {
+                let mut best: Option<(f64, &Curve, f64)> = None;
+                for (c, ivl) in &curves {
+                    let d = c
+                        .drop_point(k, ivl, x, None, BIG_DOUBLE, None, SolverOperation::Minimize)
+                        .unwrap();
+                    if d.success && best.is_none_or(|(bd, _, _)| d.distance < bd) {
+                        best = Some((d.distance, c, d.parameter));
+                    }
+                }
+                best.unwrap()
+            };
+            let (_, edge_curve, _) = nearest(at(half, 0.5));
+            for i in 0..=20 {
+                worst = worst.max(nearest(at(half, f64::from(i) / 20.0)).0);
+            }
+            let ivl = edge_curve.natural_interval();
+            let end = edge_curve
+                .drop_point(
+                    k,
+                    &ivl,
+                    at(half, 0.0),
+                    None,
+                    BIG_DOUBLE,
+                    None,
+                    SolverOperation::Minimize,
+                )
+                .unwrap();
+            let theirs = edge_curve
+                .evaluate(k, end.parameter, 1, true, false)
+                .unwrap()[1];
+            let (p0, p1) = (half[0], half[1]);
+            let ours = Vec3::new(
+                p1[0] / p1[3] - p0[0] / p0[3],
+                p1[1] / p1[3] - p0[1] / p0[3],
+                p1[2] / p1[3] - p0[2] / p0[3],
+            );
+            let a = angle(ours, theirs);
+            worst_turn = worst_turn.max(a.min(PI - a));
+        }
+    }
+    eprintln!("{name}: checked spring curves off the fill's by {worst:.3e}, turned by {worst_turn:.3e} rad");
+    assert!(
+        worst <= 1e-11,
+        "{name}: checked spring curves off the fill's by {worst}"
+    );
+    assert!(
+        worst_turn <= 1e-9,
+        "{name}: rail directions turned by {worst_turn}"
+    );
 }
 
 /// Grades the Setback at `case.v` in `b` (module docs).
@@ -611,6 +710,7 @@ fn d_prism_unequal_corner_is_a_setback_beside_the_cylinder() {
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(r.ok, "{}", r.reason);
     graded(&mut k, &mut b, &case, 3);
+    springs_are_the_fills(&k, &b, &r, case.name, 3);
 }
 
 /// With `fillet_round_as_definition` on (as here), a Setback's fill patches keep the fill's
@@ -823,6 +923,7 @@ fn d_pocket_unequal_corner_is_a_concave_setback_beside_the_cylinder() {
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(r.ok, "{}", r.reason);
     graded(&mut k, &mut b, &case, 3);
+    springs_are_the_fills(&k, &b, &r, case.name, 3);
 }
 
 /// The 851 part's corner (41 1/6, -21, 10): the top, the front and the concave arc wall (the
@@ -964,6 +1065,7 @@ fn sphere_corner_is_a_setback_beside_the_sphere() {
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(r.ok, "{}", r.reason);
     graded(&mut k, &mut b, &case, 3);
+    springs_are_the_fills(&k, &b, &r, case.name, 3);
 }
 
 /// The point of a round of radius `r` whose ball's centre is `c`, along the bisector of its
@@ -1040,6 +1142,7 @@ fn cone_frustum_corner_is_a_setback_beside_the_cone() {
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(r.ok, "{}", r.reason);
     graded(&mut k, &mut b, &case, 3);
+    springs_are_the_fills(&k, &b, &r, case.name, 3);
 }
 
 /// The fork's `curved_countersink_corner` (below): the part, its three edges at the corner,
@@ -1336,8 +1439,13 @@ fn d_prism_asked_past_the_rails_names_the_setback_that_fits() {
         assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
         assert!(!r.ok, "{}: built", case.name);
         let named = match r.refusal {
-            Some(BlendRefusal::SetbackTooLong { vertex, largest }) => {
+            Some(BlendRefusal::SetbackTooLong {
+                vertex,
+                largest,
+                why,
+            }) => {
                 assert_eq!(vertex, v, "{}", case.name);
+                assert_eq!(why, SetbackTooLongWhy::PastRails, "{}", case.name);
                 assert!(
                     (largest - want).abs() <= 1e-9,
                     "{}: {largest} against {want}",
@@ -1389,13 +1497,28 @@ fn top_spring_least_rho(s: f64) -> f64 {
 /// at V. By the closed form above its top face's spring curve dips into the bore from asked
 /// 7.8068; main built asked 7.8 (the spring curve 6e-4 clear of the bore) and refused 8 to
 /// 9.5 late, "a round kept round a feature does not close on the body", naming nothing. The
-/// corner checks what it takes out of the top: refused as `SetbackTooLong` at V, naming the
-/// largest setback on 8.5's grid of thousandths whose spring curve stays on the face, 0.918 x
-/// 8.5 = 7.803 (3.3e-4 clear of the bore; the next, 7.8115, 4.1e-4 into it). Asked that, the
-/// corner builds, graded as the corners above.
+/// corner checks what it takes out of the top: refused as `SetbackTooLong` at V, naming a
+/// setback whose spring curve stays on the face and that lies within 1e-3 of that limit: the
+/// root, not the last point of a grid of thousandths below it (0.918 x 8.5 = 7.803, 3.8e-3
+/// short). The spring curve clears the bore there by the check's gap, the tolerances, which
+/// costs about 6e-4 of setback. It is the largest to the corner's tolerance: asked a
+/// tolerance more, the corner is refused. Asked it, the corner builds, graded as the corners
+/// above.
 #[test]
 fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() {
-    let (bore, asked, step) = (6.9, 8.5, 8.5 / 1000.0);
+    let (bore, asked) = (6.9, 8.5);
+    // the limit by the closed form: where the spring curve's least rho reaches the bore
+    let (mut clear, mut into) = (7.0, 8.0);
+    for _ in 0..50 {
+        let mid = 0.5 * (clear + into);
+        if top_spring_least_rho(mid) > bore {
+            clear = mid;
+        } else {
+            into = mid;
+        }
+    }
+    let limit = clear;
+    assert!((limit - 7.8068).abs() < 1e-4, "{limit}");
     let (mut k, mut b, edges, case) = d_prism_eight_case(Some(bore), 14);
     let v = vertex_at(&b, case.v);
     let r = round_asked(
@@ -1409,25 +1532,38 @@ fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() 
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(!r.ok, "asked {asked}: built");
     let named = match r.refusal {
-        Some(BlendRefusal::SetbackTooLong { vertex, largest }) => {
+        Some(BlendRefusal::SetbackTooLong {
+            vertex,
+            largest,
+            why,
+        }) => {
             assert_eq!(vertex, v);
+            assert_eq!(why, SetbackTooLongWhy::SpringLeaves);
             largest
         }
         other => panic!("{other:?}, {}", r.reason),
     };
-    // on the grid, its spring curve clear of the bore, the next one's not
-    let grid = (named / step).round();
-    assert!((grid * step - named).abs() <= 1e-12, "{named} off the grid");
+    // its spring curve clear of the bore, and within 1e-3 of the limit
     assert!(
         top_spring_least_rho(named) > bore,
         "{named}: {}",
         top_spring_least_rho(named)
     );
     assert!(
-        top_spring_least_rho(named + step) < bore,
-        "{}: {}",
-        named + step,
-        top_spring_least_rho(named + step)
+        named < limit && named > limit - 1e-3,
+        "{named} against the limit {limit}"
+    );
+    // the largest to the corner's tolerance: a tolerance more takes the spring curve off
+    let more = named + r.tol;
+    assert!(r.tol > 0.0, "{}", r.tol);
+    let (mut k, mut b, edges, _) = d_prism_eight_case(Some(bore), 14);
+    let r = round_asked(&mut k, &mut b, &edges, &[1.0, 1.5, 2.0], case.v, Some(more));
+    assert!(!r.ok, "asked {more}: built");
+    assert!(
+        matches!(r.refusal, Some(BlendRefusal::SetbackTooLong { .. })),
+        "asked {more}: {:?}, {}",
+        r.refusal,
+        r.reason
     );
     let (mut k, mut b, edges, case) = d_prism_eight_case(Some(bore), 14);
     let r = round_asked(
