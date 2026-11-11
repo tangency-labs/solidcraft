@@ -43,7 +43,7 @@
 //!   not checked; where upstream then dereferences a null pointer (a loop without loop
 //!   use, a loop use without face use or mate, an edge use without edge or curve, ...)
 //!   the port returns [`SolidError::InvalidInput`]. `NER` / `SER` returns are
-//!   [`SolidError::Upstream`] (`SM_ERR_NULL_POINTER`, `SM_ERR`). `FlipLoopOrientation`
+//!   a [`TopologyFailure`](crate::error::topology::TopologyFailure) (`SM_ERR_NULL_POINTER`, `SM_ERR`). `FlipLoopOrientation`
 //!   reads the mate's start as the same kind as the loop use's own (an edge use read
 //!   as a vertex use, or the reverse, is undefined behaviour upstream) and swaps the
 //!   owner of vertex uses that are loop vertex uses; any other combination is
@@ -387,7 +387,7 @@ pub fn shell(b: &Brep, lu: LoopuseId) -> Result<Option<ShellId>> {
 ///
 /// # Errors
 ///
-/// [`SolidError::Upstream`] (`SM_ERR`) as above; [`SolidError::NotFound`] for a
+/// a [`TopologyFailure`](crate::error::topology::TopologyFailure) (`SM_ERR`) as above; [`SolidError::NotFound`] for a
 /// dangling id.
 pub fn set_edgeuse(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result<()> {
     if is_edge_loopuse(b, lu)? {
@@ -398,7 +398,10 @@ pub fn set_edgeuse(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result
             }
         }
     }
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::topology_failed(
+        OP,
+        "the edge use is not on this edge loop use",
+    ))
 }
 
 /// `CollectEdgeuses`: makes the loop use an edge loop use starting at `eu` and walks
@@ -407,12 +410,12 @@ pub fn set_edgeuse(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result
 ///
 /// # Errors
 ///
-/// [`SolidError::Upstream`] `SM_ERR_NULL_POINTER` for a null `eu` or a CCW list that
+/// a [`TopologyFailure`](crate::error::topology::TopologyFailure) `SM_ERR_NULL_POINTER` for a null `eu` or a CCW list that
 /// ends (the edge uses walked so far stay updated) and `SM_ERR` after
 /// 100000 steps; [`SolidError::NotFound`] for a dangling id.
 pub fn collect_edgeuses(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> Result<()> {
     // check state - input must be NonNULL
-    let start = eu.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let start = eu.ok_or_else(|| SolidError::topology_missing(OP, "the edge use to start from"))?;
 
     // local
     let mut count: u64 = 0;
@@ -425,7 +428,10 @@ pub fn collect_edgeuses(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> R
     loop {
         // check state - Edgeuse must be NonNULL
         let Some(this) = cur else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::topology_missing(
+                OP,
+                "the next edge use round the loop",
+            ));
         };
 
         // set pEdgeuse useType to SmLoopuse_TYPE and its BackPtr to this Loopuse
@@ -443,7 +449,10 @@ pub fn collect_edgeuses(b: &mut Brep, lu: LoopuseId, eu: Option<EdgeuseId>) -> R
         // reality check - error past 100k edges
         count += 1;
         if count > MAX_COLLECT_STEPS {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the loop has more than 100000 edge uses",
+            ));
         }
     }
 
@@ -931,7 +940,7 @@ pub fn loop_loopuse(b: &Brep, l: LoopId) -> Result<Option<LoopuseId>> {
 
 /// The primary loop use, which upstream dereferences.
 fn primary(b: &Brep, l: LoopId) -> Result<LoopuseId> {
-    loop_loopuse(b, l)?.ok_or_else(|| null("SmLoop: loop without loop use"))
+    loop_loopuse(b, l)?.ok_or_else(|| null("loop without loop use"))
 }
 
 /// `GetFace`: the face of the primary loop use's face use.
@@ -941,7 +950,7 @@ fn primary(b: &Brep, l: LoopId) -> Result<LoopuseId> {
 /// [`SolidError::InvalidInput`] for a loop without loop use or a loop use without face
 /// use; [`SolidError::NotFound`] for a dangling id.
 pub fn loop_face(b: &Brep, l: LoopId) -> Result<Option<FaceId>> {
-    let fu = faceuse(b, primary(b, l)?)?.ok_or_else(|| null("SmLoop::GetFace: no face use"))?;
+    let fu = faceuse(b, primary(b, l)?)?.ok_or_else(|| null("loop face: no face use"))?;
     eu1::faceuse_face(b, fu)
 }
 
@@ -1097,13 +1106,13 @@ pub(crate) fn face_notify_as(
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a loop without loop use or mates of different
-/// kinds (see the module docs); [`SolidError::Upstream`] `SM_ERR_NULL_POINTER` for a
+/// kinds (see the module docs); a [`TopologyFailure`](crate::error::topology::TopologyFailure) `SM_ERR_NULL_POINTER` for a
 /// missing mate or start; those of [`collect_edgeuses`]; [`SolidError::Unported`] for
 /// a loop on a face (the post-edit notification, `topology.face_p4`);
 /// [`SolidError::NotFound`] for a dangling id.
 pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     let (lu1, lu2) = loop_loopuses(b, l)?;
-    let lu2 = lu2.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let lu2 = lu2.ok_or_else(|| SolidError::topology_missing(OP, "the loop's second loop use"))?;
     let face = match faceuse(b, lu1)? {
         Some(fu) => eu1::faceuse_face(b, fu)?,
         None => None,
@@ -1116,11 +1125,15 @@ pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     let start2 = b.loopuse(lu2)?.start;
     if let LoopuseStart::Vertexuse(vu1) = start1 {
         // get Vertexuses for both mated Loopuses
-        let vu1 = vu1.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let vu1 =
+            vu1.ok_or_else(|| SolidError::topology_missing(OP, "the loop use's vertex use"))?;
         let vu2 = match start2 {
             LoopuseStart::Vertexuse(Some(vu)) => vu,
             LoopuseStart::Vertexuse(None) | LoopuseStart::Edgeuse(None) | LoopuseStart::Unknown => {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::topology_missing(
+                    OP,
+                    "the mate loop use's vertex use",
+                ));
             }
             LoopuseStart::Edgeuse(Some(_)) => {
                 return Err(null("FlipLoopOrientation: mate is not a vertex loop use"));
@@ -1143,12 +1156,18 @@ pub fn flip_loop_orientation(b: &mut Brep, l: LoopId) -> Result<()> {
     } else {
         // get first Edgeuses for both mated Loopuses
         let LoopuseStart::Edgeuse(Some(eu1_)) = start1 else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::topology_missing(
+                OP,
+                "the loop use's first edge use",
+            ));
         };
         let eu2_ = match start2 {
             LoopuseStart::Edgeuse(Some(eu)) => eu,
             LoopuseStart::Edgeuse(None) | LoopuseStart::Vertexuse(None) | LoopuseStart::Unknown => {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::topology_missing(
+                    OP,
+                    "the mate loop use's first edge use",
+                ));
             }
             LoopuseStart::Vertexuse(Some(_)) => {
                 return Err(null("FlipLoopOrientation: mate is not an edge loop use"));
@@ -1233,12 +1252,12 @@ pub fn loop_is_connected_to(b: &Brep, l: LoopId, target: Option<EntityRef>) -> R
     };
     let this = EntityRef::Loop(l);
     let face_uses = |b: &Brep| -> Result<[Option<FaceuseId>; 2]> {
-        let f = loop_face(b, l)?.ok_or_else(|| null("SmLoop::IsConnectedTo: no face"))?;
+        let f = loop_face(b, l)?.ok_or_else(|| null("loop connection: no face"))?;
         let (a, c) = crate::topology::face::p2::faceuses(b, f)?;
         Ok([a, c])
     };
     let shell_of = |b: &Brep, fu: Option<FaceuseId>| -> Result<Option<ShellId>> {
-        let fu = fu.ok_or_else(|| null("SmLoop::IsConnectedTo: no face use"))?;
+        let fu = fu.ok_or_else(|| null("loop connection: no face use"))?;
         eu1::faceuse_shell(b, fu)
     };
     match target {
@@ -1257,7 +1276,7 @@ pub fn loop_is_connected_to(b: &Brep, l: LoopId, target: Option<EntityRef>) -> R
         EntityRef::Region(r) => {
             let [fu1, fu2] = face_uses(b)?;
             let region_of = |fu| -> Result<Option<crate::topology::RegionId>> {
-                let s = shell_of(b, fu)?.ok_or_else(|| null("SmLoop::IsConnectedTo: no shell"))?;
+                let s = shell_of(b, fu)?.ok_or_else(|| null("loop connection: no shell"))?;
                 eu1::shell_region(b, s)
             };
             Ok(region_of(fu1)? == Some(r) || region_of(fu2)? == Some(r))
@@ -1993,10 +2012,8 @@ mod tests {
             eu_or_vu(&b, lu(0)).unwrap(),
             Some(EntityRef::Edgeuse(eu(4)))
         );
-        assert!(matches!(
-            set_edgeuse(&mut b, lu(0), Some(eu(1))),
-            Err(SolidError::Upstream { code: 1001, .. })
-        ));
+        assert!(set_edgeuse(&mut b, lu(0), Some(eu(1)))
+            .is_err_and(|e| e.upstream_status() == Some(1001)));
         assert!(set_edgeuse(&mut b, lu(0), None).is_err());
         // CollectEdgeuses re-owns the CCW list
         collect_edgeuses(&mut b, lu(1), Some(eu(0))).unwrap();
@@ -2004,10 +2021,9 @@ mod tests {
             b.edgeuse(eu(6)).unwrap().owner,
             EdgeuseOwner::Loopuse(Some(lu(1)))
         );
-        assert!(matches!(
-            collect_edgeuses(&mut b, lu(1), None),
-            Err(SolidError::Upstream { code: 1006, .. })
-        ));
+        assert!(
+            collect_edgeuses(&mut b, lu(1), None).is_err_and(|e| e.upstream_status() == Some(1006))
+        );
         set_orientation(&mut b, lu(0), OrientType::Opposite).unwrap();
         assert_eq!(orientation(&b, lu(0)).unwrap(), OrientType::Opposite);
         set_loop(&mut b, lu(0), None).unwrap();

@@ -8,25 +8,19 @@
 //! |----------------------------------------|--------------------------------------------------|
 //! | [`PointSet3d`]                         | `SmPointSet3d`                                   |
 //! | [`PointSet3d::new`]                    | `SmPointSet3d(SmTArray<SmPoint3d>&, dTol3d, bPlanar, pOptNormal, bCopyData)` |
-//! | [`PointSet3d::new_with_kernel`]        | `SmPointSet3d(..)` (WR-10 / WR-14 kernel flags)  |
-//! | [`PointSet3d::set_best_fit_line_fix`]  | not upstream: WR-10 opt-in toggle                |
-//! | [`PointSet3d::set_tight_pbox_projection_fix`] | not upstream: WR-14 opt-in toggle         |
 //! | [`PointSet3d::clear_cache`]            | `SmPointSet3d::ClearCache`                       |
 //! | [`PointSet3d::points`]                 | `SmPointSet3d::GetPoints`                        |
 //! | [`PointSet3d::centroid`]               | `SmPointSet3d::GetCentroid`                      |
 //! | [`PointSet3d::normal`]                 | `SmPointSet3d::GetNormal()`                      |
 //! | [`PointSet3d::bbox`]                   | `SmPointSet3d::GetBBox`                          |
 //! | [`PointSet3d::tight_pbox`]             | `SmPointSet3d::GetTightPBox`                     |
-//! | [`PointSet3d::tight_pbox_with_fixes`]  | `SmPointSet3d::GetTightPBox` (WR-14 opt-in)      |
-//! | [`PointSet3d::tight_pbox_with_kernel`] | `SmPointSet3d::GetTightPBox` (WR-14 kernel flag) |
 //! | `set_up_axes` (private)                | `SmPointSet3d::SetUpAxes`                        |
 //! | `set_up_centroid` (private)            | `SmPointSet3d::SetUpCentroid`                    |
-//! | `set_up_bboxes` / `set_up_bboxes_with_fixes` (private) | `SmPointSet3d::SetUpBBoxes`      |
-//! | `set_up_tight_pseudo_box` / `set_up_tight_pseudo_box_with_fixes` (private) | `SmPointSet3d::SetUpTightPseudoBox` |
+//! | `set_up_bboxes` (private)              | `SmPointSet3d::SetUpBBoxes`                      |
+//! | `set_up_tight_pseudo_box` (private)    | `SmPointSet3d::SetUpTightPseudoBox`              |
 //! | [`DataRequest`]                        | `SmPointSetDataType` (the two box requests)      |
 //! | [`PointSequence`]                      | `SmPointSequence`                                |
 //! | [`PointSequence::new`]                 | `SmPointSequence(SmTArray<SmPoint3d>&, dTol3d, bClosed, bPlanar, pOptNormal, bCopyData)` |
-//! | [`PointSequence::new_with_kernel`]     | `SmPointSequence(..)` (WR-10 / WR-14 kernel flags) |
 //! | [`PointSequence::area`]                | `SmPointSequence::GetArea`                       |
 //! | `set_up_area` (private)                | `SmPointSequence::SetUpArea`                     |
 //! | `calc_quad_num` (private)              | `SmPointSequence::CalcQuadNum`                   |
@@ -56,24 +50,18 @@
 //!   read before then).
 //! - `SetUpCentroid` sums all blocks and caches the result (WR-15), unlike
 //!   upstream which drops the last block at positive multiples of 50.
-//! - `SetUpAxes` calls `smgu_BestFitPlaneToPoints`, whose best-fit line step
-//!   misclassifies collinear sets as `Scattered` / `Planar` (WR-10): [`PointSet3d::new`]
-//!   and [`PointSequence::new`] keep pinned C++ parity;
-//!   [`PointSet3d::new_with_kernel`], [`PointSequence::new_with_kernel`] and
-//!   [`PointSet3d::set_best_fit_line_fix`] forward
-//!   [`Kernel::fixes.best_fit_line_largest_scatter_eigenvector`](UpstreamFixes::best_fit_line_largest_scatter_eigenvector)
-//!   to [`best_fit_plane_to_points_opt_in`].
-//! - `SetUpTightPseudoBox` calls the `const` `ProjectPointToPlane` on its four boundary
-//!   points (`sBegPt0`, `sEndPt0`, `sBegPt1`, `sEndPt1`) and each candidate point
-//!   (`sThisPt`) and discards the returned projections, so the chord angles are measured
-//!   between the unprojected 3D points (WR-14, `plan/upstream-issues/`):
-//!   [`PointSet3d::tight_pbox`] (on a set built with [`PointSet3d::new`]) keeps pinned
-//!   C++ parity; [`PointSet3d::tight_pbox_with_fixes`],
-//!   [`PointSet3d::tight_pbox_with_kernel`], [`PointSet3d::new_with_kernel`],
-//!   [`PointSequence::new_with_kernel`] and
-//!   [`PointSet3d::set_tight_pbox_projection_fix`] forward
-//!   [`Kernel::fixes.point_set_tight_pbox_projects_points`](UpstreamFixes::point_set_tight_pbox_projects_points)
-//!   to assign the projected points before forming the chord vectors.
+//! - `SetUpAxes` calls `smgu_BestFitPlaneToPoints`, whose best-fit line is the
+//!   least-squares line (`WR-10`), so collinear sets are [`PointSetType::Linear`].
+//!   `SetUpBBoxes` runs `SetUpTightPseudoBox`'s hull-edge alignment for Linear sets as
+//!   well as Planar ones: pinned v1.0.1 ran it only for Planar sets, and reached
+//!   collinear sets only because its skewed line misclassified them as Planar. The
+//!   alignment keeps a rotated box only when its base area is smaller, so it never
+//!   loosens the box.
+//! - `SetUpTightPseudoBox` calls the `const` `ProjectPointToPlane` on its boundary and
+//!   candidate points and discards the results (`WR-14`). The port uses the projections,
+//!   so the hull chords lie in the box plane. `CCWAngleBetween` projects as well, but
+//!   for points far off the plane the unprojected chords' roundoff can decide an exact
+//!   tie between two rotations the wrong way.
 //! - The tolerance member `m_dDistTol3d` is an `SmTol3d`: the constructors store
 //!   `|tol3d|` ([`crate::geom::tol::tol3d`]) as upstream's conversion does.
 //! - `SM_DEBUG_CODE` blocks and `SM_DBG_WARN` messages are omitted.
@@ -84,11 +72,10 @@ use crate::error::Result;
 use crate::geom::extent1d::ExtentPointType;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{polygon_area, PointSetType};
-use crate::geom::geom_utility::p2::{best_fit_plane_to_points_opt_in, is_point_on_segment};
+use crate::geom::geom_utility::p2::{best_fit_plane_to_points, is_point_on_segment};
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::tol::{is_zero, tol3d as to_tol3d};
 use crate::geom::vector3d::{Point3, Vec3};
-use crate::kernel::{Kernel, UpstreamFixes};
 use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI};
 
 /// Which bounding-box data a box query needs (`SmPointSetDataType`, the
@@ -134,13 +121,6 @@ pub struct PointSet3d {
     dist_tol3d: f64,
     /// Which cached values are valid (`m_b*Set` flags, bits [`Cache`]).
     cache: Cache,
-    /// Whether `set_up_axes` enables the `WR-10` largest scatter eigenvector fix.
-    use_scatter_eigenvector: bool,
-    /// Whether [`PointSet3d::tight_pbox`] projects points onto the pseudo-box plane
-    /// before hull-angle selection (`WR-14`).
-    project_tight_pbox_points: bool,
-    /// Whether a cached `Cache::PBOX_REFINED` box was computed with `WR-14` enabled.
-    pbox_refined_projected: bool,
     point_set_type: PointSetType,
     centroid: Point3,
     x_axis: Vec3,
@@ -181,10 +161,6 @@ impl Cache {
     fn set(&mut self, bit: u8) {
         self.0 |= bit;
     }
-
-    fn unset(&mut self, bit: u8) {
-        self.0 &= !bit;
-    }
 }
 
 /// `v.MakeUnitOrthoVectors(pYRef, rX, rY, rZ)` with the status ignored, as the new
@@ -219,9 +195,6 @@ impl PointSet3d {
             // the member is an `SmTol3d`, whose constructor takes `fabs`
             dist_tol3d: to_tol3d(tol3d),
             cache: Cache::default(),
-            use_scatter_eigenvector: false,
-            project_tight_pbox_points: false,
-            pbox_refined_projected: false,
             point_set_type: PointSetType::Unknown,
             // `SmVector3d` members default to SM_UNDEF_DOUBLE components
             centroid: Vec3::UNDEF,
@@ -249,53 +222,9 @@ impl PointSet3d {
         s
     }
 
-    /// [`PointSet3d::new`] reading
-    /// [`Kernel::fixes.best_fit_line_largest_scatter_eigenvector`](UpstreamFixes::best_fit_line_largest_scatter_eigenvector)
-    /// for `SetUpAxes` (`WR-10`) and
-    /// [`Kernel::fixes.point_set_tight_pbox_projects_points`](UpstreamFixes::point_set_tight_pbox_projects_points)
-    /// for `SetUpTightPseudoBox` (`WR-14`).
-    #[must_use]
-    pub fn new_with_kernel(
-        k: &Kernel,
-        points: Vec<Point3>,
-        tol3d: f64,
-        normal: Option<&mut Vec3>,
-    ) -> Self {
-        let mut s = Self::new(points, tol3d, normal);
-        s.use_scatter_eigenvector = k.fixes.best_fit_line_largest_scatter_eigenvector;
-        s.project_tight_pbox_points = k.fixes.point_set_tight_pbox_projects_points;
-        s
-    }
-
-    /// Enables or disables the `WR-10` best-fit line eigenvector fix used when
-    /// `SetUpAxes` classifies the point set, clearing any cached best-fit axes/boxes
-    /// if the setting changes.
-    pub fn set_best_fit_line_fix(&mut self, enabled: bool) {
-        if self.use_scatter_eigenvector != enabled {
-            self.use_scatter_eigenvector = enabled;
-            if self.cache.has(Cache::MAX_DEV) {
-                self.clear_cache();
-            }
-        }
-    }
-
-    /// Enables or disables the `WR-14` plane-projection fix used when
-    /// `SetUpTightPseudoBox` refines the pseudo box via [`PointSet3d::tight_pbox`],
-    /// invalidating any cached refined pseudo box if the setting changes.
-    pub fn set_tight_pbox_projection_fix(&mut self, enabled: bool) {
-        if self.project_tight_pbox_points != enabled {
-            self.project_tight_pbox_points = enabled;
-            if self.cache.has(Cache::PBOX_REFINED) {
-                self.cache.unset(Cache::BBOX | Cache::PBOX_REFINED);
-                self.pbox_refined_projected = false;
-            }
-        }
-    }
-
     /// Forgets every cached property (`ClearCache`), e.g. after the points changed.
     pub fn clear_cache(&mut self) {
         self.cache = Cache::default();
-        self.pbox_refined_projected = false;
     }
 
     /// The points (`GetPoints`).
@@ -336,52 +265,12 @@ impl PointSet3d {
     /// The pseudo box rotated about its third basis vector to (roughly) minimise its
     /// base area (`GetTightPBox`); `pbox_z` as for [`PointSet3d::bbox`].
     ///
-    /// Preserves upstream's unprojected chord-angle behaviour (`WR-14`) on sets built
-    /// with [`PointSet3d::new`], and honours the `WR-14` setting configured via
-    /// [`PointSet3d::new_with_kernel`] or [`PointSet3d::set_tight_pbox_projection_fix`].
-    ///
     /// # Errors
     ///
     /// Only from the best-fit plane (not for finite points).
     pub fn tight_pbox(&mut self, pbox_z: Option<&mut Vec3>) -> Result<PseudoBox> {
-        let fixes = UpstreamFixes {
-            point_set_tight_pbox_projects_points: self.project_tight_pbox_points,
-            ..UpstreamFixes::default()
-        };
-        self.tight_pbox_with_fixes(pbox_z, &fixes)
-    }
-
-    /// [`PointSet3d::tight_pbox`] reading
-    /// [`UpstreamFixes::point_set_tight_pbox_projects_points`] (`WR-14`): when enabled,
-    /// `SetUpTightPseudoBox` projects the four boundary points and each candidate point
-    /// along `basis[2]` onto the plane through the pseudo-box centre before measuring
-    /// hull chord angles.
-    ///
-    /// # Errors
-    ///
-    /// Only from the best-fit plane (not for finite points).
-    pub fn tight_pbox_with_fixes(
-        &mut self,
-        pbox_z: Option<&mut Vec3>,
-        fixes: &UpstreamFixes,
-    ) -> Result<PseudoBox> {
-        self.set_up_bboxes_with_fixes(DataRequest::RefinePBox, pbox_z, fixes)?;
+        self.set_up_bboxes(DataRequest::RefinePBox, pbox_z)?;
         Ok(self.pbox)
-    }
-
-    /// [`PointSet3d::tight_pbox`] honouring
-    /// [`Kernel::fixes.point_set_tight_pbox_projects_points`](UpstreamFixes::point_set_tight_pbox_projects_points)
-    /// (`WR-14`).
-    ///
-    /// # Errors
-    ///
-    /// Only from the best-fit plane (not for finite points).
-    pub fn tight_pbox_with_kernel(
-        &mut self,
-        k: &Kernel,
-        pbox_z: Option<&mut Vec3>,
-    ) -> Result<PseudoBox> {
-        self.tight_pbox_with_fixes(pbox_z, &k.fixes)
     }
 
     /// `SetUpAxes`: caches normal, x and y axes (and, from the best-fit plane, the
@@ -427,11 +316,7 @@ impl PointSet3d {
         }
 
         // compute Point Normal from best fit plane to points
-        let fit = best_fit_plane_to_points_opt_in(
-            &self.points,
-            self.dist_tol3d,
-            self.use_scatter_eigenvector,
-        )?;
+        let fit = best_fit_plane_to_points(&self.points, self.dist_tol3d)?;
         self.point_set_type = fit.set_type;
         self.centroid = fit.point;
         self.normal = fit.normal;
@@ -509,32 +394,13 @@ impl PointSet3d {
 
     /// `SetUpBBoxes`: builds the boxes when needed and, for
     /// [`DataRequest::RefinePBox`], tightens the pseudo box.
-    fn set_up_bboxes(&mut self, reason: DataRequest, pbox_z: Option<&mut Vec3>) -> Result<()> {
-        self.set_up_bboxes_with_fixes(reason, pbox_z, &UpstreamFixes::default())
-    }
-
-    /// `SetUpBBoxes` reading [`UpstreamFixes::point_set_tight_pbox_projects_points`]
-    /// (`WR-14`).
-    fn set_up_bboxes_with_fixes(
-        &mut self,
-        reason: DataRequest,
-        mut pbox_z: Option<&mut Vec3>,
-        fixes: &UpstreamFixes,
-    ) -> Result<()> {
+    fn set_up_bboxes(&mut self, reason: DataRequest, mut pbox_z: Option<&mut Vec3>) -> Result<()> {
         // prep
         if let Some(z) = pbox_z.as_deref_mut() {
             *z = z.unitize_or_z();
         }
         let want_bboxes = reason == DataRequest::BBoxes;
         let want_refine = reason == DataRequest::RefinePBox;
-        let project_points = fixes.point_set_tight_pbox_projects_points;
-        if want_refine
-            && self.cache.has(Cache::PBOX_REFINED)
-            && self.pbox_refined_projected != project_points
-        {
-            self.cache.unset(Cache::BBOX | Cache::PBOX_REFINED);
-            self.pbox_refined_projected = false;
-        }
         let [_, _, basis2] = *self.pbox.basis();
         let z_matches = pbox_z
             .as_deref()
@@ -580,13 +446,14 @@ impl PointSet3d {
 
         // when asked and if needed - refine PBox
         if !self.cache.has(Cache::PBOX_REFINED) && want_refine {
-            let planar = self.cache.has(Cache::POINT_SET_TYPE)
-                && self.point_set_type == PointSetType::Planar;
-            if project_points {
-                self.set_up_tight_pseudo_box_with_fixes(planar, pbox_z, fixes)?;
-            } else {
-                self.set_up_tight_pseudo_box(planar, pbox_z)?;
-            }
+            // Upstream aligns the box with a hull edge only for Planar sets; a Linear
+            // set's hull is its segment, which the alignment finds as well (WR-10).
+            let align = self.cache.has(Cache::POINT_SET_TYPE)
+                && matches!(
+                    self.point_set_type,
+                    PointSetType::Planar | PointSetType::Linear
+                );
+            self.set_up_tight_pseudo_box(align, pbox_z)?;
         }
         Ok(())
     }
@@ -599,21 +466,6 @@ impl PointSet3d {
         extra_planar_work: bool,
         pbox_z: Option<&mut Vec3>,
     ) -> Result<()> {
-        self.set_up_tight_pseudo_box_with_fixes(
-            extra_planar_work,
-            pbox_z,
-            &UpstreamFixes::default(),
-        )
-    }
-
-    /// `SetUpTightPseudoBox` reading [`UpstreamFixes::point_set_tight_pbox_projects_points`]
-    /// (`WR-14`).
-    fn set_up_tight_pseudo_box_with_fixes(
-        &mut self,
-        extra_planar_work: bool,
-        pbox_z: Option<&mut Vec3>,
-        fixes: &UpstreamFixes,
-    ) -> Result<()> {
         const ROT_CNT: usize = 5;
 
         // no work - already computed
@@ -621,20 +473,13 @@ impl PointSet3d {
             return Ok(());
         }
 
-        let project_points = fixes.point_set_tight_pbox_projects_points;
-
         // set state
         self.cache.set(Cache::PBOX_REFINED);
-        self.pbox_refined_projected = project_points;
 
         // ensure the pseudo box is built
-        self.set_up_bboxes_with_fixes(DataRequest::BBoxes, pbox_z, fixes)?;
+        self.set_up_bboxes(DataRequest::BBoxes, pbox_z)?;
 
-        let plane_point = if project_points {
-            self.pbox.evaluate(0.5, 0.5, 0.5)
-        } else {
-            Vec3::ZERO
-        };
+        let plane_point = self.pbox.evaluate(0.5, 0.5, 0.5);
         let [mut plane_x, mut plane_y, mut plane_z] = *self.pbox.basis();
         let plane_normal = plane_x.cross(plane_y).unitize_or_z();
         let mut area = self.pbox.xy_area();
@@ -700,16 +545,9 @@ impl PointSet3d {
 
         // Upstream (`SmPointSet.cpp:777-780, 790`) calls the `const`
         // `ProjectPointToPlane(sPlanePoint, sPlaneZ)` on the four boundary points and
-        // each candidate point and discards its return value (`WR-14`); under default
-        // parity (`!project_points`) the raw 3D points are used, while opt-in assigns
-        // the projected points before forming the chord vectors.
-        let project = |p: Point3| {
-            if project_points {
-                p.project_point_to_plane(plane_point, plane_z)
-            } else {
-                p
-            }
-        };
+        // each candidate point and discards its return value (`WR-14`); the port uses
+        // the projections, so the chords lie in the box plane.
+        let project = |p: Point3| p.project_point_to_plane(plane_point, plane_z);
         let point_at = |i: usize| project(self.points.get(i).copied().unwrap_or(Vec3::ZERO));
         let beg_pt0 = point_at(beg_index0);
         let end_pt0 = point_at(end_index0);
@@ -835,27 +673,6 @@ impl PointSequence {
     pub fn new(points: Vec<Point3>, tol3d: f64, closed: bool, normal: Option<&mut Vec3>) -> Self {
         Self {
             set: PointSet3d::new(points, tol3d, normal),
-            closed,
-            area_set: false,
-            area: 0.0,
-        }
-    }
-
-    /// [`PointSequence::new`] reading
-    /// [`Kernel::fixes.best_fit_line_largest_scatter_eigenvector`](UpstreamFixes::best_fit_line_largest_scatter_eigenvector)
-    /// for `SetUpAxes` (`WR-10`) and
-    /// [`Kernel::fixes.point_set_tight_pbox_projects_points`](UpstreamFixes::point_set_tight_pbox_projects_points)
-    /// for `SetUpTightPseudoBox` (`WR-14`).
-    #[must_use]
-    pub fn new_with_kernel(
-        k: &Kernel,
-        points: Vec<Point3>,
-        tol3d: f64,
-        closed: bool,
-        normal: Option<&mut Vec3>,
-    ) -> Self {
-        Self {
-            set: PointSet3d::new_with_kernel(k, points, tol3d, normal),
             closed,
             area_set: false,
             area: 0.0,
@@ -1180,55 +997,26 @@ mod tests {
         assert_eq!(c.z, 4.0);
     }
 
+    /// WR-10: axis-aligned collinear points are Linear (pinned v1.0.1: Planar), with
+    /// `x_axis` along the line and a degenerate tight box.
     #[test]
-    fn wr10_point_set_axes_and_flag_lookup() {
-        let k_def = Kernel::default();
-        assert!(!k_def.fixes.best_fit_line_largest_scatter_eigenvector);
-        assert!(UpstreamFixes::NAMES.contains(&"best_fit_line_largest_scatter_eigenvector"));
-
-        let mut k_opt = Kernel::default();
-        *k_opt
-            .fixes
-            .flag_mut("best_fit_line_largest_scatter_eigenvector")
-            .unwrap() = true;
-        assert!(k_opt.fixes.best_fit_line_largest_scatter_eigenvector);
-        assert!(k_opt
-            .fixes
-            .flags()
-            .any(|(name, on)| name == "best_fit_line_largest_scatter_eigenvector" && on));
-
-        let mut fixes_roundtrip = k_opt.fixes;
-        *fixes_roundtrip
-            .flag_mut("best_fit_line_largest_scatter_eigenvector")
-            .unwrap() = false;
-        assert!(!fixes_roundtrip.best_fit_line_largest_scatter_eigenvector);
-
+    fn wr10_point_set_collinear_axes() {
         let pts_x = vec![
             Vec3::new(-3.0, 0.0, 0.0),
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(3.0, 0.0, 0.0),
         ];
 
-        // Default classifies axis-aligned collinear points as Planar.
-        let mut set_def = PointSet3d::new(pts_x.clone(), 1e-6, None);
-        let mut set_kdef = PointSet3d::new_with_kernel(&k_def, pts_x.clone(), 1e-6, None);
-        assert_eq!(set_def, set_kdef);
-        let n_def = set_def.normal().unwrap();
-        assert_eq!(set_def.point_set_type, PointSetType::Planar);
-        assert_eq!(n_def, set_kdef.normal().unwrap());
+        let mut set = PointSet3d::new(pts_x.clone(), 1e-6, None);
+        let n = set.normal().unwrap();
+        assert_eq!(set.point_set_type, PointSetType::Linear);
+        assert!(set.x_axis.dot(Vec3::X).abs() > 1.0 - 1e-12);
+        assert!(set.y_axis.dot(Vec3::X).abs() < 1e-12);
+        assert!(n.dot(Vec3::X).abs() < 1e-12);
+        assert!((set.x_axis.cross(set.y_axis) - n).length() < 1e-12);
+        assert!(set.max_dev <= 1e-15);
 
-        // Opt-in classifies collinear points as Linear: x_axis along the line tangent,
-        // y_axis and normal orthonormal and perpendicular to the line tangent.
-        let mut set_opt = PointSet3d::new_with_kernel(&k_opt, pts_x.clone(), 1e-6, None);
-        let n_opt = set_opt.normal().unwrap();
-        assert_eq!(set_opt.point_set_type, PointSetType::Linear);
-        assert!(set_opt.x_axis.dot(Vec3::X).abs() > 1.0 - 1e-12);
-        assert!(set_opt.y_axis.dot(Vec3::X).abs() < 1e-12);
-        assert!(n_opt.dot(Vec3::X).abs() < 1e-12);
-        assert!((set_opt.x_axis.cross(set_opt.y_axis) - n_opt).length() < 1e-12);
-        assert!(set_opt.max_dev <= 1e-15);
-
-        let bb = set_opt.bbox(None).unwrap();
+        let bb = set.bbox(None).unwrap();
         assert_eq!(bb.min_at(0), -3.0);
         assert_eq!(bb.max_at(0), 3.0);
         assert_eq!(bb.min_at(1), 0.0);
@@ -1236,57 +1024,56 @@ mod tests {
         assert_eq!(bb.min_at(2), 0.0);
         assert_eq!(bb.max_at(2), 0.0);
 
-        let pb = set_opt.tight_pbox(None).unwrap();
+        let pb = set.tight_pbox(None).unwrap();
         assert!(pb.xy_area() <= 1e-24);
 
-        // Toggling set_best_fit_line_fix invalidates cached best-fit axes, while
-        // preserving a user-given normal.
-        set_def.set_best_fit_line_fix(true);
-        let _ = set_def.normal().unwrap();
-        assert_eq!(set_def.point_set_type, PointSetType::Linear);
-        assert!(set_def.x_axis.dot(Vec3::X).abs() > 1.0 - 1e-12);
-
+        // A user-given normal is kept and the set stays Planar.
         let mut user_n = Vec3::new(0.0, 0.0, 4.0);
         let mut set_given = PointSet3d::new(pts_x.clone(), 1e-6, Some(&mut user_n));
-        set_given.set_best_fit_line_fix(true);
         assert_eq!(set_given.normal().unwrap(), Vec3::Z);
         assert_eq!(set_given.point_set_type, PointSetType::Planar);
 
-        // PointSequence::new_with_kernel inherits the WR-10 opt-in.
-        let mut seq_opt = PointSequence::new_with_kernel(&k_opt, pts_x, 1e-6, true, None);
-        assert!(seq_opt.area().unwrap().abs() <= 1e-15);
-        assert_eq!(seq_opt.point_set_type, PointSetType::Linear);
+        let mut seq = PointSequence::new(pts_x, 1e-6, true, None);
+        assert!(seq.area().unwrap().abs() <= 1e-15);
+        assert_eq!(seq.point_set_type, PointSetType::Linear);
         assert_eq!(
-            seq_opt.point_containment(Vec3::new(1.0, 0.0, 0.0)).unwrap(),
+            seq.point_containment(Vec3::new(1.0, 0.0, 0.0)).unwrap(),
             PointContainment::OnBoundary
         );
         assert_eq!(
-            seq_opt.point_containment(Vec3::new(1.0, 1.0, 0.0)).unwrap(),
+            seq.point_containment(Vec3::new(1.0, 1.0, 0.0)).unwrap(),
             PointContainment::Outside
         );
     }
 
+    /// WR-10 tight boxes (golden `geom.point_set` `gen0034`): six collinear points
+    /// along an oblique line, classified Linear, boxed about an explicit `+z`. Only
+    /// the 15-degree rotation search ran for Linear sets, leaving a 12.7 area box
+    /// (pinned v1.0.1 misclassified the set as Planar and its hull-edge alignment
+    /// found the line, area ~1e-13). The alignment now runs for Linear sets too: the
+    /// box lies along the line's projection and still holds every point.
     #[test]
-    fn wr14_flag_lookup_and_toggle() {
-        let k_def = Kernel::default();
-        assert!(!k_def.fixes.point_set_tight_pbox_projects_points);
-        assert!(UpstreamFixes::NAMES.contains(&"point_set_tight_pbox_projects_points"));
-        assert!(UpstreamFixes::all().point_set_tight_pbox_projects_points);
-
-        let mut k = Kernel::default();
-        *k.fixes
-            .flag_mut("point_set_tight_pbox_projects_points")
-            .unwrap() = true;
-        assert!(k.fixes.point_set_tight_pbox_projects_points);
-        assert!(k
-            .fixes
-            .flags()
-            .any(|(name, on)| name == "point_set_tight_pbox_projects_points" && on));
-
-        *k.fixes
-            .flag_mut("point_set_tight_pbox_projects_points")
-            .unwrap() = false;
-        assert!(!k.fixes.point_set_tight_pbox_projects_points);
+    fn wr10_linear_set_tight_box_aligns_with_the_line() {
+        let pts = vec![
+            Vec3::new(21.80485446950501, 2.127459047116308, -16.137096725968778),
+            Vec3::new(7.345372386578687, -0.9303172661055201, -20.022576112649997),
+            Vec3::new(12.803349297106683, 0.22389229820735135, -18.5559359759414),
+            Vec3::new(6.7065268606288875, -1.065415238899695, -20.19424347307935),
+            Vec3::new(7.529993876510043, -0.8912749812168781, -19.972965553340014),
+            Vec3::new(14.860701819016317, 0.6589648529063028, -18.003094541568345),
+        ];
+        let mut seq = PointSequence::new(pts.clone(), 1e-6, true, None);
+        seq.normal().unwrap();
+        assert_eq!(seq.point_set_type, PointSetType::Linear);
+        let mut z = Vec3::Z;
+        let pb = seq.tight_pbox(Some(&mut z)).unwrap();
+        // The line's projection onto z = 0 is 15.4 long; its box has no width.
+        let along = Vec3::new(pts[0].x - pts[3].x, pts[0].y - pts[3].y, 0.0);
+        assert!(pb.basis()[0].cross(along).length() < 1e-9 * along.length());
+        assert!(pb.xy_area() < 1e-9, "area {}", pb.xy_area());
+        for &p in &pts {
+            assert!(pb.contains_point(p, 1e-9));
+        }
     }
 
     /// Builds a 6-point convex footprint in the `(nx, ny)` frame rotated by `theta = 0.08`
@@ -1315,139 +1102,64 @@ mod tests {
             .collect()
     }
 
+    /// WR-14: the tight box measures hull-chord angles between points projected onto
+    /// the box plane (upstream discards the projections). Planar sets at any elevation
+    /// select the `+0.08` rad hull edge. For points up to 4e5 off the plane, the
+    /// unprojected chords tie the `+0.08` rad edge with the `-0.08` rad chamfer and
+    /// roundoff picks the chamfer, whose rotated box is rejected (area > 75); the
+    /// projected chords select the long edge, a box about 30% smaller.
     #[test]
-    fn wr14_nonplanar_point_set_projects_before_hull_angle_selection() {
-        let k_def = Kernel::default();
-        let mut k_opt = Kernel::default();
-        k_opt.fixes.point_set_tight_pbox_projects_points = true;
-
-        let n0 = Vec3::new(1.0, 2.0, 3.0);
-        let [nz, nx, ny] = n0.make_unit_ortho_vectors(None).unwrap();
-        let ws = [2.0e5, -2.0e5, -3.0e5, 4.0e5, 3.0e5, -4.0e5];
-        let pts = wr14_tilted_hull_points(nx, ny, nz, 0.08, ws);
-
-        // Default (`false`) measures chord angles between unprojected 3D points:
-        // out-of-plane `nz` offsets skew `CCWAngleBetween` onto the `-0.08` rad short
-        // chamfer, whose rotated box is larger than the initial box and is rejected.
-        let mut n_def = n0;
-        let mut set_def = PointSet3d::new(pts.clone(), 1e-9, Some(&mut n_def));
-        assert!(n_def.closer_than(1e-15, nz));
-        let pb_def = set_def.tight_pbox(None).unwrap();
-
-        let mut n_kdef = n0;
-        let mut set_kdef =
-            PointSet3d::new_with_kernel(&k_def, pts.clone(), 1e-9, Some(&mut n_kdef));
-        assert_eq!(set_kdef.tight_pbox(None).unwrap(), pb_def);
-
-        // Opt-in (`true`) projects boundary and candidate points onto the pseudo-box
-        // plane before forming chords, selecting `+0.08` rad along the long hull edge
-        // and shrinking both XY area and 3D volume by ~32%.
-        let mut n_opt = n0;
-        let mut set_opt = PointSet3d::new_with_kernel(&k_opt, pts.clone(), 1e-9, Some(&mut n_opt));
-        let pb_opt = set_opt.tight_pbox(None).unwrap();
-
-        let mut n_seq = n0;
-        let mut seq_opt =
-            PointSequence::new_with_kernel(&k_opt, pts.clone(), 1e-9, true, Some(&mut n_seq));
-        assert_eq!(seq_opt.tight_pbox(None).unwrap(), pb_opt);
-
-        assert!(pb_def.basis()[0].closer_than(1e-12, nx));
-        let basis_rot = pb_def.basis()[0].angle_between(pb_opt.basis()[0]).unwrap();
-        assert!((basis_rot - 0.08).abs() < 1e-10);
-        assert!(pb_def.xy_area() > 75.0);
-        assert!(pb_opt.xy_area() < 53.0);
-        assert!(pb_opt.xy_area() < 0.70 * pb_def.xy_area());
-        assert!(pb_def.volume() > 6.0e7);
-        assert!(pb_opt.volume() < 4.2e7);
-        assert!(pb_opt.volume() < 0.70 * pb_def.volume());
-
-        // Both modes must produce valid bounding boxes containing every 3D input point.
-        for &p in &pts {
-            assert!(pb_def.contains_point(p, 1e-7));
-            assert!(pb_opt.contains_point(p, 1e-7));
-        }
-
-        // Switching fixes via `tight_pbox_with_kernel` and `set_tight_pbox_projection_fix`
-        // invalidates `Cache::PBOX_REFINED` and rebuilds from the unrotated axes.
-        assert_eq!(
-            set_def.tight_pbox_with_kernel(&k_opt, None).unwrap(),
-            pb_opt
-        );
-        assert_eq!(set_def.tight_pbox(None).unwrap(), pb_def);
-        set_def.set_tight_pbox_projection_fix(true);
-        assert_eq!(set_def.tight_pbox(None).unwrap(), pb_opt);
-        set_def.set_tight_pbox_projection_fix(false);
-        assert_eq!(set_def.tight_pbox(None).unwrap(), pb_def);
-
-        // Passing an explicit `Some(&mut pbox_z)` also forwards the WR-14 projection fix.
-        let mut z_def = n0;
-        let pb_def_z = set_def
-            .tight_pbox_with_fixes(Some(&mut z_def), &k_def.fixes)
-            .unwrap();
-        let mut z_opt = n0;
-        let pb_opt_z = set_def
-            .tight_pbox_with_fixes(Some(&mut z_opt), &k_opt.fixes)
-            .unwrap();
-        assert_eq!(z_def, z_opt);
-        assert!(pb_opt_z.xy_area() < 0.70 * pb_def_z.xy_area());
-        for &p in &pts {
-            assert!(pb_def_z.contains_point(p, 1e-7));
-            assert!(pb_opt_z.contains_point(p, 1e-7));
-        }
-    }
-
-    #[test]
-    fn wr14_planar_point_sets_match_in_both_modes() {
-        let k_def = Kernel::default();
-        let mut k_opt = Kernel::default();
-        k_opt.fixes.point_set_tight_pbox_projects_points = true;
-
-        // 1. Planar set in `z = 0` with `normal = None` (best-fit plane): exact match.
+    fn wr14_tight_box_on_projected_points() {
+        // Planar set in `z = 0` with `normal = None` (best-fit plane).
         let pts_xy0 = wr14_tilted_hull_points(Vec3::X, Vec3::Y, Vec3::Z, 0.06, [0.0; 6]);
-        let mut set_xy0_def = PointSet3d::new(pts_xy0.clone(), 1e-9, None);
-        let mut set_xy0_opt = PointSet3d::new_with_kernel(&k_opt, pts_xy0.clone(), 1e-9, None);
-        let pb_xy0_def = set_xy0_def.tight_pbox(None).unwrap();
-        let pb_xy0_opt = set_xy0_opt.tight_pbox(None).unwrap();
-        assert_eq!(pb_xy0_def, pb_xy0_opt);
+        let mut set_xy0 = PointSet3d::new(pts_xy0.clone(), 1e-9, None);
+        let pb_xy0 = set_xy0.tight_pbox(None).unwrap();
         for &p in &pts_xy0 {
-            assert!(pb_xy0_opt.contains_point(p, 1e-12));
+            assert!(pb_xy0.contains_point(p, 1e-12));
         }
 
-        // 2. Planar set at non-zero elevation `z = 3.5` with explicit `+Z` normal: exact match.
-        let pts_xy_elev = wr14_tilted_hull_points(Vec3::X, Vec3::Y, Vec3::Z, 0.06, [3.5; 6]);
-        let mut z1 = Vec3::new(0.0, 0.0, 2.0);
-        let mut z2 = Vec3::new(0.0, 0.0, 2.0);
-        let mut set_elev_def = PointSet3d::new(pts_xy_elev.clone(), 1e-9, Some(&mut z1));
-        let mut set_elev_opt =
-            PointSet3d::new_with_kernel(&k_opt, pts_xy_elev.clone(), 1e-9, Some(&mut z2));
-        let pb_elev_def = set_elev_def.tight_pbox_with_kernel(&k_def, None).unwrap();
-        let pb_elev_opt = set_elev_opt.tight_pbox_with_kernel(&k_opt, None).unwrap();
-        assert_eq!(pb_elev_def, pb_elev_opt);
-        for &p in &pts_xy_elev {
-            assert!(pb_elev_opt.contains_point(p, 1e-12));
+        // The same footprint at `z = 3.5` with an explicit `+Z` normal gives the same
+        // rotation.
+        let pts_elev = wr14_tilted_hull_points(Vec3::X, Vec3::Y, Vec3::Z, 0.06, [3.5; 6]);
+        let mut z = Vec3::new(0.0, 0.0, 2.0);
+        let mut set_elev = PointSet3d::new(pts_elev.clone(), 1e-9, Some(&mut z));
+        let pb_elev = set_elev.tight_pbox(None).unwrap();
+        assert!((pb_elev.xy_area() - pb_xy0.xy_area()).abs() < 1e-11);
+        for &p in &pts_elev {
+            assert!(pb_elev.contains_point(p, 1e-12));
         }
 
-        // 3. Oblique planar set (`w = 7.5` along `nz` for `n0 = (1, 2, 3)`): points already
-        // lie on the plane through `pbox.evaluate(0.5, 0.5, 0.5)`, so both modes select the
-        // `+0.08` rad hull edge and produce matching boxes up to floating-point roundoff.
+        // Oblique planar set (`w = 7.5` along `nz` for `n0 = (1, 2, 3)`): the box turns
+        // onto the `+0.08` rad hull edge.
         let n0 = Vec3::new(1.0, 2.0, 3.0);
         let [nz, nx, ny] = n0.make_unit_ortho_vectors(None).unwrap();
         let pts_obl = wr14_tilted_hull_points(nx, ny, nz, 0.06, [7.5; 6]);
-        let mut n_obl_def = n0;
-        let mut n_obl_opt = n0;
-        let mut set_obl_def = PointSet3d::new(pts_obl.clone(), 1e-9, Some(&mut n_obl_def));
-        let mut set_obl_opt =
-            PointSet3d::new_with_kernel(&k_opt, pts_obl.clone(), 1e-9, Some(&mut n_obl_opt));
-        let pb_obl_def = set_obl_def.tight_pbox(None).unwrap();
-        let pb_obl_opt = set_obl_opt.tight_pbox(None).unwrap();
-        for (b_d, b_o) in pb_obl_def.basis().iter().zip(pb_obl_opt.basis().iter()) {
-            assert!((*b_d - *b_o).length() < 1e-12);
-        }
-        assert!((pb_obl_def.xy_area() - pb_obl_opt.xy_area()).abs() < 1e-11);
-        assert!((pb_obl_def.volume() - pb_obl_opt.volume()).abs() < 1e-11);
+        let mut n_obl = n0;
+        let mut set_obl = PointSet3d::new(pts_obl.clone(), 1e-9, Some(&mut n_obl));
+        let pb_obl = set_obl.tight_pbox(None).unwrap();
+        let rot = nx.angle_between(pb_obl.basis()[0]).unwrap();
+        assert!((rot - 0.08).abs() < 1e-10);
+        assert!((pb_obl.xy_area() - pb_xy0.xy_area()).abs() < 1e-11);
         for &p in &pts_obl {
-            assert!(pb_obl_def.contains_point(p, 1e-9));
-            assert!(pb_obl_opt.contains_point(p, 1e-9));
+            assert!(pb_obl.contains_point(p, 1e-9));
+        }
+
+        // Points far off the box plane: the long hull edge is selected.
+        let ws = [2.0e5, -2.0e5, -3.0e5, 4.0e5, 3.0e5, -4.0e5];
+        let pts_far = wr14_tilted_hull_points(nx, ny, nz, 0.08, ws);
+        let mut n_far = n0;
+        let mut set_far = PointSet3d::new(pts_far.clone(), 1e-9, Some(&mut n_far));
+        let pb_far = set_far.tight_pbox(None).unwrap();
+        let rot_far = nx.angle_between(pb_far.basis()[0]).unwrap();
+        assert!((rot_far - 0.08).abs() < 1e-10, "rotation {rot_far}");
+        assert!(pb_far.xy_area() < 53.0, "area {}", pb_far.xy_area());
+        assert!(pb_far.volume() < 4.2e7, "volume {}", pb_far.volume());
+        let mut z_far = n0;
+        let pb_far_z = set_far.tight_pbox(Some(&mut z_far)).unwrap();
+        assert!(pb_far_z.xy_area() < 53.0, "area {}", pb_far_z.xy_area());
+        for &p in &pts_far {
+            assert!(pb_far.contains_point(p, 1e-7));
+            assert!(pb_far_z.contains_point(p, 1e-7));
         }
     }
 }

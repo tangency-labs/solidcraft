@@ -45,7 +45,7 @@ use solidcore::surface::surface_cache::p1::{
 use solidcore::surface::trim_srf_cache::TrimSrfCache;
 use solidcore::surface::volume::Volume;
 use solidcore::topology::{Brep, EdgeId, VertexId};
-use solidcore::{EntityRef, Result as ScResult, SolidError};
+use solidcore::{EntityRef, Result as ScResult};
 
 /// Differential runner for the two part-9 methods.
 pub struct Runner;
@@ -571,7 +571,9 @@ fn rust(i: &Input) -> ScResult<Output> {
         }
     }
     let status = result.as_ref().err().map_or(0., |e| match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => 1007.,
     });
     let mut out = vec![

@@ -1,0 +1,11 @@
+[
+  {"note": "Dialogs in the left column: the design tree over the view (#6710). Create Sketch holds the left column, the view's top-left corner shows the design's name folded; opened, its Origin rows pick a plane for the dialog as the browser's do, and the tree goes with the dialog."},
+  {"call": "ui.prefs", "params": {"dialog_place": "left_column"}},
+  {"start": "sketch.create"},
+  {"expect": {"dialog": "Sketch", "shown_handles": ["dialog_tree:header"], "hidden_handles": ["fold:Origin"]}},
+  {"click": {"handle": "dialog_tree:header"}},
+  {"expect": {"shown_handles": ["fold:Origin"]}},
+  {"click": {"chevron": "Origin"}},
+  {"click": {"browser": "XZ"}},
+  {"expect": {"sketching": true, "dialog": null, "hidden_handles": ["dialog_tree:header"]}}
+]

@@ -658,10 +658,7 @@ impl<'a> Map<'a> {
                     v: uv.y,
                 })
             }
-            Err(SolidError::Upstream {
-                code: SM_ERR_NOT_WITHIN_TOLERANCE,
-                ..
-            }) => Err(SolidError::invalid_input(
+            Err(e) if is_off_surface(&e) => Err(SolidError::invalid_input(
                 OP,
                 "a boundary point off its surface",
             )),
@@ -808,7 +805,7 @@ impl<'a> EdgeCurve<'a> {
 
     /// The parameters strictly between `from` and `to` where u or v is stationary (or
     /// the curve meets the axis), and the edge's middle, in loop order.
-    fn stationary(&self, k: &Kernel, map: &Map<'_>) -> Result<Vec<f64>> {
+    fn stationary(&self, map: &Map<'_>) -> Result<Vec<f64>> {
         let (lo, hi) = (self.from.min(self.to), self.from.max(self.to));
         let mut ts = Vec::new();
         for d in 0..2 {
@@ -825,7 +822,7 @@ impl<'a> EdgeCurve<'a> {
                         ts.push(t);
                     }
                 }
-                None => ts.extend(self.certified(k, map, d, lo, hi)?),
+                None => ts.extend(self.certified(map, d, lo, hi)?),
             }
         }
         // the edge's middle too: an edge from pole to pole has an angle there only
@@ -844,7 +841,7 @@ impl<'a> EdgeCurve<'a> {
     /// stationary (every one where it is), without a closed form: the certified roots
     /// ([`roots`]) of [`candidates`] on each exact Bezier piece of the curve, and the
     /// pieces' ends.
-    fn certified(&self, k: &Kernel, map: &Map<'_>, d: usize, lo: f64, hi: f64) -> Result<Vec<f64>> {
+    fn certified(&self, map: &Map<'_>, d: usize, lo: f64, hi: f64) -> Result<Vec<f64>> {
         let step = matches!(
             self.curve.kind(),
             CurveKind::Line(_) | CurveKind::Ellipse(_)
@@ -856,7 +853,7 @@ impl<'a> EdgeCurve<'a> {
                 reason: "stationary points on this kind of surface (no polynomial for them)",
             })?;
             // the piece's ends too: a root on a knot is no piece's interior root
-            for s in [0.0, 1.0].into_iter().chain(roots(k, &c)?) {
+            for s in [0.0, 1.0].into_iter().chain(roots(&c)?) {
                 let t = piece.param(s);
                 if t > lo && t < hi {
                     ts.push(t);
@@ -940,7 +937,7 @@ impl Bezier {
             _ => {
                 let nurb = curve_nurb(curve)?;
                 let mut out = Vec::new();
-                for seg in create_bez_segments(&nurb).map_err(SolidError::nl_ser(OP))? {
+                for seg in create_bez_segments(&nurb).map_err(SolidError::nurbs_routine(OP))? {
                     let (Some(&k0), Some(&k1)) = (seg.knots().first(), seg.knots().last()) else {
                         continue;
                     };
@@ -1202,7 +1199,7 @@ fn variations(c: &[f64], zero: f64) -> usize {
 /// [`MAX_ISOLATION_DEPTH`] times (below the parameter's rounding), gives its middle,
 /// which stands for its roots. More than [`MAX_ISOLATION_BRACKETS`] brackets is an
 /// error. A polynomial zero to rounding everywhere has no roots (it is constant).
-fn roots(k: &Kernel, c: &[f64]) -> Result<Vec<f64>> {
+fn roots(c: &[f64]) -> Result<Vec<f64>> {
     let scale = size(c);
     if !scale.is_finite() {
         return Err(SolidError::invalid_input(OP, "a rate not finite"));
@@ -1241,8 +1238,8 @@ fn roots(k: &Kernel, c: &[f64]) -> Result<Vec<f64>> {
                 sign: if first < 0.0 { 1.0 } else { -1.0 },
             };
             let (fl, fu) = (f.sign * first, f.sign * last);
-            let (s, _) = LocalSolve1d::new_with_kernel(k)
-                .solve_by_bisection(&mut f, ROOT_STEPS, s0, s1, fl, fu)?;
+            let (s, _) =
+                LocalSolve1d::new().solve_by_bisection(&mut f, ROOT_STEPS, s0, s1, fl, fu)?;
             out.push(s);
             continue;
         }
@@ -1488,7 +1485,7 @@ fn loop_box(k: &Kernel, map: &Map<'_>, edges: &[BoundaryEdge<'_>]) -> Result<Loo
     for (i, e) in edges.iter().enumerate() {
         let c = EdgeCurve::new(k, e)?;
         let mut ts = vec![c.from];
-        ts.extend(c.stationary(k, map)?);
+        ts.extend(c.stationary(map)?);
         ts.push(c.to);
         for t in ts {
             let (p, _) = c.at(k, t, false)?;
@@ -1662,6 +1659,13 @@ fn turn(
     };
     Ok(turn(k, map, e, (ta, xa), (tm, xm), d, depth + 1)?
         + turn(k, map, e, (tm, xm), (tb, xb), d, depth + 1)?)
+}
+
+/// Whether the inversion answered that the point is off its surface
+/// (`SM_ERR_NOT_WITHIN_TOLERANCE`): by its status, so also a typed failure that replaced the
+/// `Upstream` (#13790).
+fn is_off_surface(error: &SolidError) -> bool {
+    error.upstream_status() == Some(SM_ERR_NOT_WITHIN_TOLERANCE)
 }
 
 #[cfg(test)]
@@ -2498,5 +2502,27 @@ mod tests {
             vec![edge(&top, 0.0, 360.0, true)],
         ];
         assert!(refused(&twice, none, TOL));
+    }
+
+    /// #13790: a typed `SM_ERR_NOT_WITHIN_TOLERANCE` that replaced the inversion's
+    /// `Upstream` is the same off-surface answer.
+    #[test]
+    fn off_surface_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        let upstream = SolidError::Upstream {
+            operation: "surface::x",
+            code: SM_ERR_NOT_WITHIN_TOLERANCE,
+            entity: None,
+        };
+        assert!(is_off_surface(&upstream));
+        for typed in replaced_upstream("surface::x", SM_ERR_NOT_WITHIN_TOLERANCE, None) {
+            assert!(is_off_surface(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream("surface::x", crate::error::SM_ERR, None)
+            .into_iter()
+            .chain(native_failures("surface::x", SM_ERR_NOT_WITHIN_TOLERANCE))
+        {
+            assert!(!is_off_surface(&other), "{other:?}");
+        }
     }
 }

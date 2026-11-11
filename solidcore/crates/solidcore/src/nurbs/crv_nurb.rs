@@ -34,7 +34,7 @@
 //! | [`Curve::is_closed_continuity`]         | `N_CrvIsClosedContinuity`       |
 //!
 //! Deviations:
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The `NL_STACKS` arguments and the memory error paths have no counterpart.
 //! - Routines that write into an output curve that is NULL, an existing curve or the
@@ -70,7 +70,7 @@
 // Branches keep upstream's `if( x NEQ NL_NOZ ) ... else ...` order for traceability.
 #![allow(clippy::if_not_else)]
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
 use crate::nurbs::bezier::check_short_degree;
@@ -90,17 +90,17 @@ use crate::nurbs::math::{
 /// The Greville abscissa of control point `idx`: the average of the `degree` knots
 /// `U[idx+1..=idx+degree]` (`N_CrvGetGrevilleAbscissa`).
 ///
-/// Errors with [`NlibCode::Index`] when `degree < 1` or `idx + degree` exceeds the
+/// Errors with [`NurbsFailure::Index`] when `degree < 1` or `idx + degree` exceeds the
 /// highest knot index.
 pub fn greville_abscissa(knots: &[f64], degree: usize, idx: usize) -> Result<f64> {
     const OP: &str = "nurbs::crv_nurb::greville_abscissa";
     if degree < 1 {
-        return Err(SolidError::nlib(OP, NlibCode::Index));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Index));
     }
     let window = idx
         .checked_add(degree)
         .and_then(|end| knots.get(idx + 1..=end))
-        .ok_or(SolidError::nlib(OP, NlibCode::Index))?;
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Index))?;
     // The Greville abscissa is the average of 'degree' knot values.
     let mut g = 0.0;
     for &k in window {
@@ -224,7 +224,7 @@ impl Curve {
     /// osculating circle (`N_CrvEvalCurvature`). With `circle` the point and tangent
     /// come from [`Curve::eval_frenet_frame`].
     ///
-    /// Errors with [`NlibCode::Numerical`] when the curvature (or, with `circle`, the
+    /// Errors with [`NurbsFailure::Numerical`] when the curvature (or, with `circle`, the
     /// radius) is not computable, and with the errors of [`Curve::derivs`],
     /// [`Curve::eval_frenet_frame`] and the tangent normalisation.
     pub fn eval_curvature(&self, u: f64, side: Side, circle: bool) -> Result<Curvature> {
@@ -241,14 +241,14 @@ impl Curve {
         let den = d1.length();
         let den = den * den * den;
         if float_op_is_bad(num, den, FloatOp::Division) {
-            return Err(SolidError::nlib(OP, NlibCode::Numerical));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
         }
         let kap = num / den;
 
         // Get osculating circle.
         if circle {
             if float_op_is_bad(1.0, kap, FloatOp::Division) {
-                return Err(SolidError::nlib(OP, NlibCode::Numerical));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
             }
             let rad = 1.0 / kap;
             let f = self.eval_frenet_frame(u, side)?;
@@ -273,7 +273,7 @@ impl Curve {
     /// The point at `u` (`N_CrvEval`): the non-vanishing basis functions times their
     /// control points, mapped to Euclidean space.
     ///
-    /// Errors with [`NlibCode::Parameter`] when `u` is outside the knot range, and
+    /// Errors with [`NurbsFailure::Parameter`] when `u` is outside the knot range, and
     /// with the errors of [`crate::nurbs::knots::KnotVector::basis_eval`].
     pub fn eval(&self, u: f64, side: Side) -> Result<Vec3> {
         const OP: &str = "nurbs::crv_nurb::Curve::eval";
@@ -284,7 +284,14 @@ impl Curve {
 
         // Check parameter.
         if knt.is_param_out_of_bounds(u) {
-            return Err(SolidError::nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(
+                OP,
+                NurbsFailure::ParameterOutside {
+                    parameter: u,
+                    lo: get(self.knots(), 0, OP)?,
+                    hi: get(self.knots(), sx(self.m(), OP)?, OP)?,
+                },
+            ));
         }
 
         // Compute non-vanishing B-splines (on the stack, as upstream's `N`).
@@ -324,9 +331,9 @@ impl Curve {
     /// Derivatives `C^(k)(u)` for `k = 0..=der` (`N_CrvDerivs`, algorithm A2.3 with
     /// the rational quotient rule). Derivatives above the degree are zero.
     ///
-    /// Errors with [`NlibCode::Parameter`] when `u` is outside `[U[0], U[m]]`, with
-    /// [`NlibCode::MaxDerivative`] when `der > NL_MAXDER`, and with
-    /// [`NlibCode::Numerical`] when a basis quotient is not computable.
+    /// Errors with [`NurbsFailure::Parameter`] when `u` is outside `[U[0], U[m]]`, with
+    /// [`NurbsFailure::DerivativeOrder`] when `der > NL_MAXDER`, and with
+    /// [`NurbsFailure::Numerical`] when a basis quotient is not computable.
     pub fn derivs(&self, u: f64, side: Side, der: usize) -> Result<Vec<Vec3>> {
         self.derivs_on(u, side, der, true)
     }
@@ -355,15 +362,28 @@ impl Curve {
 
         // Check parameter and order of derivatives.
         if check && (u < get(uk, 0, OP)? || u > get(uk, m, OP)?) {
-            return Err(SolidError::nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(
+                OP,
+                NurbsFailure::ParameterOutside {
+                    parameter: u,
+                    lo: get(uk, 0, OP)?,
+                    hi: get(uk, m, OP)?,
+                },
+            ));
         }
         if der > MAX_DERIVATIVE {
-            return Err(SolidError::nlib(OP, NlibCode::MaxDerivative));
+            return Err(SolidError::nurbs(
+                OP,
+                NurbsFailure::DerivativeOrder {
+                    given: der,
+                    max: MAX_DERIVATIVE,
+                },
+            ));
         }
         if pu > MAX_DEGREE {
             return Err(SolidError::InvalidInput {
                 operation: OP,
-                reason: "degree above NL_MAXDEG (upstream scratch array size)",
+                reason: "degree above the largest degree the NURBS routines handle",
             });
         }
         let der = sx(der, OP)?;
@@ -397,7 +417,7 @@ impl Curve {
                 let num = get2(&ndu, r, j - 1, OP)?;
                 let den = get2(&ndu, j, r, OP)?;
                 if float_op_is_bad(num, den, FloatOp::Division) {
-                    return Err(SolidError::nlib(OP, NlibCode::Numerical));
+                    return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
                 }
                 let temp = num / den;
                 set2(&mut ndu, r, j, saved + right * temp, OP)?;
@@ -503,7 +523,7 @@ impl Curve {
 
     /// Point and unit tangent at `u` (`N_CrvEvalTangent`).
     ///
-    /// Errors with the errors of [`Curve::derivs`] and with [`NlibCode::Geometry`]
+    /// Errors with the errors of [`Curve::derivs`] and with [`NurbsFailure::Geometry`]
     /// when the first derivative cannot be normalised.
     pub fn eval_tangent(&self, u: f64, side: Side) -> Result<(Vec3, Vec3)> {
         const OP: &str = "nurbs::crv_nurb::Curve::eval_tangent";
@@ -516,13 +536,13 @@ impl Curve {
     /// Point and Frenet frame at `u` (`N_CrvEvalFrenetFrame`): unit tangent, unit
     /// binormal `C' x C''` and normal `B x T`.
     ///
-    /// Errors with [`NlibCode::Degree`] for degrees below 2, with the errors of
-    /// [`Curve::derivs`], and with [`NlibCode::Geometry`] when the tangent or the
+    /// Errors with [`NurbsFailure::Degree`] for degrees below 2, with the errors of
+    /// [`Curve::derivs`], and with [`NurbsFailure::Geometry`] when the tangent or the
     /// binormal cannot be normalised.
     pub fn eval_frenet_frame(&self, u: f64, side: Side) -> Result<FrenetFrame> {
         const OP: &str = "nurbs::crv_nurb::Curve::eval_frenet_frame";
         if self.degree() <= 1 {
-            return Err(SolidError::nlib(OP, NlibCode::Degree));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Degree));
         }
         let cd = self.derivs(u, side, 2)?;
         let c0 = get(&cd, 0, OP)?;
@@ -664,9 +684,9 @@ impl Curve {
     /// direction `e` ([`Projection::Parallel`]) or from the center `e`
     /// ([`Projection::Perspective`]) (`N_CrvProjectOntoPlane`).
     ///
-    /// Errors (parallel) with [`NlibCode::Geometry`] when `n` or `e` cannot be
-    /// normalised and with [`NlibCode::Input`] when `e` is parallel to the plane;
-    /// (perspective) with [`NlibCode::Numerical`] when a control point's projection
+    /// Errors (parallel) with [`NurbsFailure::Geometry`] when `n` or `e` cannot be
+    /// normalised and with [`NurbsFailure::Input`] when `e` is parallel to the plane;
+    /// (perspective) with [`NurbsFailure::Numerical`] when a control point's projection
     /// is not computable.
     pub fn project_onto_plane(&self, o: Vec3, n: Vec3, e: Vec3, prj: Projection) -> Result<Curve> {
         const OP: &str = "nurbs::crv_nurb::Curve::project_onto_plane";
@@ -680,7 +700,7 @@ impl Curve {
                 let (en, _) = normalize(e)?;
                 let ne = nn.dot(en);
                 if ne.abs() < LINE_TOL {
-                    return Err(SolidError::nlib(OP, NlibCode::Input));
+                    return Err(SolidError::nurbs(OP, NurbsFailure::Input));
                 }
                 let ne = n.dot(e);
                 for (q, p) in qw.iter_mut().zip(pw) {
@@ -704,7 +724,7 @@ impl Curve {
                     let ep = e - pe;
                     let nep = n.dot(ep);
                     if float_op_is_bad(neo, nep, FloatOp::Division) {
-                        return Err(SolidError::nlib(OP, NlibCode::Numerical));
+                        return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
                     }
                     let alf = neo / nep;
                     let bet = 1.0 - alf;
@@ -805,7 +825,7 @@ impl Curve {
     /// within `tol` ([`Curve::is_line`]); consecutive linear spans merge while their
     /// union stays a line.
     ///
-    /// Errors with [`NlibCode::Degree`] for degrees below 2 and with the errors of
+    /// Errors with [`NurbsFailure::Degree`] for degrees below 2 and with the errors of
     /// [`Curve::extract_seg`].
     pub fn linear_segs(&self, tol: f64) -> Result<Vec<LinearSeg>> {
         const OP: &str = "nurbs::crv_nurb::Curve::linear_segs";
@@ -816,7 +836,7 @@ impl Curve {
         let m = sx(self.m(), OP)?;
 
         if p < 2 {
-            return Err(SolidError::nlib(OP, NlibCode::Degree));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Degree));
         }
 
         let mut segs = vec![LinearSeg {
@@ -1224,8 +1244,8 @@ impl Curve {
     /// Derivative of the curvature at `u` (`N_CrvGetCurvatureDeriv`); `0` where
     /// `|C' x C''| < NL_MTOL`.
     ///
-    /// Errors with the errors of [`Curve::derivs`], with [`NlibCode::Geometry`] when
-    /// the binormal cannot be normalised and with [`NlibCode::Numerical`] when the
+    /// Errors with the errors of [`Curve::derivs`], with [`NurbsFailure::Geometry`] when
+    /// the binormal cannot be normalised and with [`NurbsFailure::Numerical`] when the
     /// final quotient is not computable.
     pub fn curvature_deriv(&self, u: f64, side: Side) -> Result<f64> {
         const OP: &str = "nurbs::crv_nurb::Curve::curvature_deriv";
@@ -1256,7 +1276,7 @@ impl Curve {
         let den = den * den * den * den * den;
 
         if float_op_is_bad(num, den, FloatOp::Division) {
-            return Err(SolidError::nlib(OP, NlibCode::Numerical));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
         }
         Ok(num / den)
     }
@@ -1265,14 +1285,14 @@ impl Curve {
     /// end points within `tols[0]`, end tangents within `tols[1]` degrees (`n >= 1`),
     /// end curvatures within `tols[2]` (`n = 2`).
     ///
-    /// Errors with [`NlibCode::Input`] for `n > 2`, with the errors of
-    /// [`Curve::derivs`], with [`NlibCode::Geometry`] when the tangent angle is not
-    /// computable and with [`NlibCode::Numerical`] when a curvature is not;
+    /// Errors with [`NurbsFailure::Input`] for `n > 2`, with the errors of
+    /// [`Curve::derivs`], with [`NurbsFailure::Geometry`] when the tangent angle is not
+    /// computable and with [`NurbsFailure::Numerical`] when a curvature is not;
     /// `InvalidInput` when `tols` lacks a tolerance that is read.
     pub fn is_closed_continuity(&self, n: usize, tols: &[f64]) -> Result<bool> {
         const OP: &str = "nurbs::crv_nurb::Curve::is_closed_continuity";
         if n > 2 {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         let tol = |i: usize| tols.get(i).copied().ok_or_else(|| oob(OP));
 
@@ -1302,7 +1322,7 @@ impl Curve {
                 let dd = at(d, 1)?.length();
                 let dd = dd * dd * dd;
                 if float_op_is_bad(dn, dd, FloatOp::Division) {
-                    return Err(SolidError::nlib(OP, NlibCode::Numerical));
+                    return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
                 }
                 Ok(dn / dd)
             };
@@ -1422,14 +1442,22 @@ mod tests {
         assert!(d[1].dot(p).abs() < 1e-12);
         assert_eq!(
             c.eval(2.0, Side::Left).unwrap_err(),
-            SolidError::nlib("nurbs::crv_nurb::Curve::eval", NlibCode::Parameter)
+            SolidError::nurbs(
+                "nurbs::crv_nurb::Curve::eval",
+                NurbsFailure::ParameterOutside {
+                    parameter: 2.0,
+                    lo: 0.0,
+                    hi: 1.0
+                }
+            )
+        );
+        assert_eq!(
+            c.eval(2.0, Side::Left).unwrap_err().to_string(),
+            "nurbs::crv_nurb::Curve::eval: parameter 2 is outside the domain [0, 1]"
         );
         assert!(matches!(
             c.derivs(0.5, Side::Left, 5),
-            Err(SolidError::Nlib {
-                code: NlibCode::MaxDerivative,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::DerivativeOrder { .. }))
         ));
     }
 

@@ -15,7 +15,7 @@
 //!   `l` are their lengths); the curve and the knot vector are return values (so
 //!   `N_CrvSizeArrays` cannot fail); work arrays and banded matrices are row-major
 //!   blocks indexed as upstream, with accesses outside a whole block returning
-//!   [`SolidError::InvalidInput`]; errors are [`SolidError::Nlib`] values; the
+//!   [`SolidError::InvalidInput`]; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason); the
 //!   `NL_STACKS` arguments, `N_InitNurbs` / `N_EndNurbs` and the routine-name strings
 //!   have no counterpart.
 //! - `ROUND(x)` is `(NL_INDEX)(x + 0.5)`, a truncation toward zero, as upstream.
@@ -25,7 +25,7 @@
 //!   [`SolidError::InvalidInput`] where upstream's signed arithmetic is undefined
 //!   behaviour. Every count that fits keeps the upstream sum and behaviour.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::basis_derivs;
 use crate::nurbs::crv_basic::Curve;
@@ -64,7 +64,7 @@ fn scale_pt(alpha: f64, p: Vec3) -> Vec3 {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `n > m` (also for empty `u`) or `n <= k + l`;
+/// [`NurbsFailure::Input`] when `n > m` (also for empty `u`) or `n <= k + l`;
 /// `InvalidInput` for an access outside upstream's arrays, or for a `k + l` or
 /// `n + p + 1` sum that overflows the signed index (undefined behaviour upstream).
 pub fn knots_end_derivs(u: &[f64], n: usize, p: usize, k: usize, l: usize) -> Result<Vec<f64>> {
@@ -75,11 +75,11 @@ pub fn knots_end_derivs(u: &[f64], n: usize, p: usize, k: usize, l: usize) -> Re
 
     // Initialize
     if n > m {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let kl = add(k, l, OP)?;
     if n <= kl {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let nc = n - kl;
 
@@ -141,11 +141,11 @@ pub fn knots_end_derivs(u: &[f64], n: usize, p: usize, k: usize, l: usize) -> Re
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `p > n`, `k >= p`, `l >= p`, `m < n` or `n <= k + l`;
-/// [`NlibCode::Numerical`] for a zero leading derivative basis value; errors of
+/// [`NurbsFailure::Input`] when `p > n`, `k >= p`, `l >= p`, `m < n` or `n <= k + l`;
+/// [`NurbsFailure::Numerical`] for a zero leading derivative basis value; errors of
 /// [`param_values`], [`knots_end_derivs`], [`basis_derivs`],
 /// [`KnotVector::basis_i_eval`], [`KnotVector::basis_eval`], of the LU decomposition
-/// and of the solve (no points: `m = -1 < n`, [`NlibCode::Input`]); `InvalidInput` for
+/// and of the solve (no points: `m = -1 < n`, [`NurbsFailure::Input`]); `InvalidInput` for
 /// an access outside upstream's arrays.
 #[allow(clippy::too_many_lines)]
 pub fn approx_end_derivs(
@@ -169,16 +169,16 @@ pub fn approx_end_derivs(
 
     // Check for error and curve memory
     if p > n {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     if k >= p || l >= p {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     if k < 0 || l < 0 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     if m < n || n <= k + l {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let mut pw = alloc(n, CPoint::default(), OP)?;
 
@@ -203,7 +203,7 @@ pub fn approx_end_derivs(
 
         let ndii = nd_at(&nd, i, i, OP)?;
         if float_op_is_bad(1.0, ndii, FloatOp::Division) {
-            return Err(SolidError::nlib(OP, NlibCode::Numerical));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
         }
         let fac = 1.0 / ndii;
 
@@ -229,7 +229,7 @@ pub fn approx_end_derivs(
 
         let ndpi = nd_at(&nd, i, p - i, OP)?;
         if float_op_is_bad(1.0, ndpi, FloatOp::Division) {
-            return Err(SolidError::nlib(OP, NlibCode::Numerical));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
         }
         let fac = 1.0 / ndpi;
 
@@ -393,21 +393,9 @@ mod tests {
     #[test]
     fn no_points_is_an_input_error() {
         let e = approx_end_derivs(&[], &[], &[], 3, 3, ParamMethod::Uniform).unwrap_err();
-        assert!(matches!(
-            e,
-            SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            }
-        ));
+        assert!(matches!(e.nurbs_failure(), Some(NurbsFailure::Input)));
         let e = knots_end_derivs(&[], 0, 3, 0, 0).unwrap_err();
-        assert!(matches!(
-            e,
-            SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            }
-        ));
+        assert!(matches!(e.nurbs_failure(), Some(NurbsFailure::Input)));
     }
 
     #[test]
@@ -447,10 +435,7 @@ mod tests {
         // A count that fits the index but not the allocation still fails softly.
         assert!(matches!(
             knots_end_derivs(&[0.0, 1.0], 1, 1 << 30, 0, 0),
-            Err(SolidError::Nlib {
-                code: NlibCode::Memory,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
         ));
     }
 }
