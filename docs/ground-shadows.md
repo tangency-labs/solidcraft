@@ -37,6 +37,7 @@ the viewport's displayed opacity, including its existing 5% minimum for transpar
 
 The renderer reuses the normal vertex/index buffers, including GPU-evaluated bodies
 and live previews, with palette opacity and all placements of shared meshes.
+Preview ghosts show removed material or a body's former position and cast no shadow.
 The projection ignores camera culling and keeps its own small placement buffers.
 No body triangles are copied into another CPU mesh. Three
 256 × 256 RGBA8 images use 768 KiB; no shadow depth map is required. A separable

@@ -2047,7 +2047,7 @@ struct ShadowGeometry {
     state: std::sync::Arc<solidcraft_engine::doc::ModelState>,
     bytes: std::sync::Arc<Vec<u8>>,
     palette: std::sync::Arc<crate::gpu::Palette>,
-    projection: Option<std::sync::Arc<solidcraft_gpu::view::ground_shadow::Projection>>,
+    projection: Option<std::sync::Arc<solidcraft_viewport_gpu::view::ground_shadow::Projection>>,
 }
 
 /// Changing sides of the ground only changes whether this small shadow is drawn; it never
@@ -2147,7 +2147,13 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, framed: Vec<solidcraft_engin
         shadow_ellipse(sc, dark, at);
     }
     if app.preferences.ground_shadow_style == crate::prefs::GroundShadowStyle::Projected
-        && let Some(mut projection) = solidcraft_gpu::view::ground_shadow::Projection::new(all, z, &app.cam, dark as f32 / 255.0 * 0.8, Vec::new())
+        && let Some(mut projection) = solidcraft_viewport_gpu::view::ground_shadow::Projection::new(
+            solidcraft_engine::render::view_bounds(&all),
+            z,
+            &app.cam,
+            dark as f32 / 255.0 * 0.8,
+            Vec::new(),
+        )
     {
         projection.fallback = sc.shadow.split_off(first);
         sc.projected_shadow = Some(std::sync::Arc::new(projection));

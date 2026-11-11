@@ -26,7 +26,7 @@ fn projected_ground_shadow_preserves_gaps_and_display_opacity() {
                 app.cam.back().to_f32(),
                 [eye[0], eye[1], eye[2], 0.0],
                 256,
-                tess.then_some(solidcraft_gpu::SHADER),
+                tess.then_some(solidcraft_viewport_gpu::SHADER),
                 [0.0; 8],
                 [0.0; 36],
             )
@@ -57,7 +57,7 @@ fn projected_ground_shadow_preserves_gaps_and_display_opacity() {
             app.cam.back().to_f32(),
             [eye[0], eye[1], eye[2], 0.0],
             256,
-            Some(solidcraft_gpu::SHADER),
+            Some(solidcraft_viewport_gpu::SHADER),
             [0.0; 8],
             [0.0; 36],
         )
@@ -75,7 +75,8 @@ fn projected_ground_shadow_preserves_gaps_and_display_opacity() {
 
 #[test]
 fn projected_shadow_keeps_the_grouped_ellipse_fallback_and_ground_preference() {
-    use solidcraft_engine::{geom::Aabb3, render::UpAxis};
+    use solidcraft_engine::geom::Aabb3;
+    use solidcraft_viewport::UpAxis;
 
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     for up in [UpAxis::Z, UpAxis::Y] {

@@ -2,8 +2,8 @@
 //! of the viewing camera; a bounded separable Gaussian is recomputed only when casters change.
 
 use solidcore_record::Vec3;
-use solidcraft_geom::Aabb3;
-use solidcraft_render::Camera;
+use solidcraft_viewport::vec::Bounds;
+use solidcraft_viewport::{Camera, UpAxis};
 use wgpu::util::DeviceExt;
 
 use super::{
@@ -19,9 +19,9 @@ mod measurement;
 
 #[derive(Clone)]
 pub struct Projection {
-    coverage: Aabb3,
+    coverage: Bounds,
     height: f64,
-    up: solidcraft_render::UpAxis,
+    up: UpAxis,
     axes: [[f32; 4]; 2],
     corners: [[f32; 3]; 4],
     pub fallback: Vec<u8>,
@@ -31,11 +31,12 @@ pub struct Projection {
 impl Projection {
     /// Bounds and height follow the existing ellipse, in the camera's up-axis frame.
     /// Blur sigma is 5 texels (about 2% of the model span), independent of caster height.
-    pub fn new(coverage: Aabb3, height: f64, cam: &Camera, opacity: f32, fallback: Vec<u8>) -> Option<Self> {
+    pub fn new(coverage: Bounds, height: f64, cam: &Camera, opacity: f32, fallback: Vec<u8>) -> Option<Self> {
         if coverage.is_empty() || !coverage.min.is_finite() || !coverage.max.is_finite() || !height.is_finite() || !(0.0..=1.0).contains(&opacity) {
             return None;
         }
-        let span = coverage.size().x.max(coverage.size().y);
+        let size = coverage.max - coverage.min;
+        let span = size.x.max(size.y);
         if !span.is_finite() || span <= 0.0 {
             return None;
         }
@@ -61,7 +62,7 @@ impl Projection {
     }
 
     /// Expand only projection parameters for a preview; no unchanged model batch is rebuilt.
-    pub(super) fn with_preview(&self, preview: Option<Aabb3>) -> Option<Self> {
+    pub(super) fn with_preview(&self, preview: Option<Bounds>) -> Option<Self> {
         let bb = preview.filter(|b| !b.is_empty() && b.min.is_finite() && b.max.is_finite())?;
         let cam = Camera { up: self.up, ..Default::default() };
         let mut coverage = self.coverage;
@@ -266,16 +267,17 @@ impl Resources {
         if let Some((_, transform)) = &moving {
             queue.write_buffer(&self.moving_uniform, 0, &bytes(transform));
         }
-        let batches: Vec<_> = batches
+        let [model, preview] = batches;
+        // Preview ghosts show removed material or a body's old position.
+        let batches: Vec<_> = [(model, &self.mask_uniform_bind, true), (preview, &self.mask_uniform_bind, false)]
             .into_iter()
-            .map(|batch| (batch, &self.mask_uniform_bind))
-            .chain(moving.map(|(batch, _)| (batch, &self.moving_uniform_bind)))
+            .chain(moving.map(|(batch, _)| (batch, &self.moving_uniform_bind, true)))
             .collect();
         // Shadow coverage uses every placement, independent of the viewing camera's culling
         // and LOD. Only the small placement records are copied; triangle buffers stay shared.
         let placements: Vec<Vec<LevelDraw>> = batches
             .iter()
-            .map(|(batch, _)| {
+            .map(|(batch, _, _)| {
                 batch
                     .instanced
                     .iter()
@@ -295,11 +297,13 @@ impl Resources {
             .collect();
         {
             let mut pass = pass(encoder, &self.mask);
-            for ((batch, mask_bind), placements) in batches.into_iter().zip(&placements) {
+            for ((batch, mask_bind, casts_ghost), placements) in batches.into_iter().zip(&placements) {
                 pass.set_bind_group(0, mask_bind, &[]);
                 pass.set_bind_group(1, scene_bind(batch, fallback_bind), &[]);
                 pass.set_pipeline(&self.mask_pipeline);
-                for triangles in [&batch.tris, &batch.open_tris, &batch.glass, &batch.trans, &batch.ghost].into_iter().flatten() {
+                for triangles in
+                    [&batch.tris, &batch.open_tris, &batch.glass, &batch.trans].into_iter().chain(casts_ghost.then_some(&batch.ghost)).flatten()
+                {
                     for (buffer, count) in &triangles.parts {
                         pass.set_vertex_buffer(0, buffer.slice(..));
                         pass.draw(0..*count, 0..1);
@@ -417,16 +421,19 @@ mod tests {
     fn shadow_cache_reuses_camera_motion_refreshes_clipping_and_releases_disabled_images() -> Result<(), Box<dyn std::error::Error>> {
         use super::super::{Frame, GpuScene, GpuTarget, Renderer};
         use std::sync::{Arc, Mutex};
-        let (adapter, device, queue) = match crate::open_headless() {
+        let (adapter, device, queue) = match crate::open_headless(crate::test_env::policy()) {
             Ok(device) => device,
-            Err(crate::GpuError::NoAdapter(_)) => return Ok(()),
+            Err(e @ crate::GpuError::NoAdapter(_)) => {
+                crate::test_env::skip_unless_required(crate::test_env::required(), &e);
+                return Ok(());
+            }
             Err(e) => return Err(e.into()),
         };
         eprintln!("shadow cache adapter: {:?}", adapter.get_info());
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false };
         let mut renderer = Renderer::new(&device, target, None);
-        let bounds = Aabb3 { min: Vec3::new(-1.0, -1.0, 1.0), max: Vec3::new(1.0, 1.0, 2.0) };
+        let bounds = Bounds { min: Vec3::new(-1.0, -1.0, 1.0), max: Vec3::new(1.0, 1.0, 2.0) };
         let mut scene = GpuScene {
             projected_shadow: Some(Arc::new(Projection::new(bounds, 0.99, &Camera::default(), 0.3, Vec::new()).ok_or("projection rejected")?)),
             ..Default::default()
@@ -451,6 +458,7 @@ mod tests {
             pv_hide: false,
             preview_bounds: None,
             view_proj: Camera::default().view_proj(1.0, 10.0).to_f32(),
+            turned_depth: None,
             back: [0.0, 0.0, 1.0],
             size_px: [256.0; 2],
             clip: [0.0; 4],
@@ -541,11 +549,31 @@ mod tests {
         frame.moving = None;
         assert_eq!(prepare(&frame)?, Some(4));
         assert!((centre.get() - original_centre).abs() < 1e-6, "ending the drag removes its caster");
-        frame.clip = [1.0, 0.0, 0.0, 0.0];
-        assert_eq!(prepare(&frame)?, Some(5));
+        let preview = |ghost| {
+            let mut scene = GpuScene::default();
+            let color = scene.color([150, 150, 150, 255]);
+            for point in [[0.25, -0.8, 1.0], [1.1, -0.8, 1.0], [1.0, 0.8, 1.0]] {
+                if ghost {
+                    scene.ghost_tri(point, [0.0, 0.0, 1.0], color);
+                } else {
+                    scene.tri(point, [0.0, 0.0, 1.0], color);
+                }
+            }
+            Arc::new(Mutex::new(Some(scene)))
+        };
         frame.pv_key += 1;
-        frame.preview_bounds = Some(Aabb3 { min: Vec3::new(100.0, 0.0, -20.0), max: Vec3::new(103.0, 4.0, -8.0) });
+        frame.pv_slot = preview(true);
+        assert_eq!(prepare(&frame)?, Some(5));
+        assert!((centre.get() - original_centre).abs() < 1e-6, "removed material must not cast a preview shadow");
+        frame.pv_key += 1;
+        frame.pv_slot = preview(false);
         assert_eq!(prepare(&frame)?, Some(6));
+        assert!(centre.get() > original_centre + 5.0, "solid preview geometry must still cast a shadow");
+        frame.clip = [1.0, 0.0, 0.0, 0.0];
+        assert_eq!(prepare(&frame)?, Some(7));
+        frame.pv_key += 1;
+        frame.preview_bounds = Some(Bounds { min: Vec3::new(100.0, 0.0, -20.0), max: Vec3::new(103.0, 4.0, -8.0) });
+        assert_eq!(prepare(&frame)?, Some(8));
         frame.key += 1;
         frame.slot = Arc::new(Mutex::new(Some(GpuScene::default())));
         assert_eq!(prepare(&frame)?, None);
@@ -557,11 +585,12 @@ mod tests {
 
     #[test]
     fn projection_keeps_the_original_ground_height_and_maps_both_up_axes() {
-        for up in [solidcraft_render::UpAxis::Z, solidcraft_render::UpAxis::Y] {
+        for up in [UpAxis::Z, UpAxis::Y] {
             let cam = Camera { up, ..Default::default() };
             for bottom in [-20.0, 20.0] {
-                let bounds = Aabb3 { min: Vec3::new(-1.5, -2.0, bottom), max: Vec3::new(1.5, 2.0, bottom + 12.0) };
-                let coverage = bounds.union(&Aabb3 { min: Vec3::new(100.0, 0.0, -40.0), max: Vec3::new(103.0, 4.0, -28.0) });
+                let mut coverage = Bounds { min: Vec3::new(-1.5, -2.0, bottom), max: Vec3::new(1.5, 2.0, bottom + 12.0) };
+                coverage.add(Vec3::new(100.0, 0.0, -40.0));
+                coverage.add(Vec3::new(103.0, 4.0, -28.0));
                 let p = Projection::new(coverage, bottom - 0.014, &cam, 0.3, Vec::new()).unwrap();
                 for (corner, expected) in p.corners.iter().zip([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]) {
                     let point = Vec3::new(f64::from(corner[0]), f64::from(corner[1]), f64::from(corner[2]));
@@ -573,6 +602,6 @@ mod tests {
                 }
             }
         }
-        assert!(Projection::new(Aabb3::EMPTY, 0.0, &Camera::default(), 0.3, Vec::new()).is_none());
+        assert!(Projection::new(Bounds::EMPTY, 0.0, &Camera::default(), 0.3, Vec::new()).is_none());
     }
 }

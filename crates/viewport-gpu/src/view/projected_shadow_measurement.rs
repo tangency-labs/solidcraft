@@ -1,5 +1,7 @@
 //! Explicit manual measurement against the original ellipse; ignored by normal CI.
-//! Set WGPU_BACKEND, SOLIDCRAFT_GPU=hardware|software and SOLIDCRAFT_BENCH_OUTPUT_DIR.
+//! Set WGPU_BACKEND, VIEWPORT_TEST_GPU=hardware|software and SOLIDCRAFT_BENCH_OUTPUT_DIR.
+//! The split viewport uses procedural boxes and a torus with fixed subdivisions.
+//! Earlier timings used CAD-generated meshes and remain historical.
 use super::super::{BlockBytes, Frame, GpuScene, GpuTarget, Renderer, SceneBlock};
 use super::*;
 use serde_json::json;
@@ -13,7 +15,7 @@ use std::{
 #[test]
 #[ignore = "manual large-mesh timestamp measurement"]
 fn measure_projected_shadow_large_mesh() -> Result<(), Box<dyn std::error::Error>> {
-    let (adapter, _) = crate::select::pick(crate::select::Policy::from_env().map_err(std::io::Error::other)?).ok_or("no adapter")?;
+    let (adapter, _) = crate::select::pick(crate::test_env::policy()).ok_or("no adapter")?;
     let flags = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
     if !adapter.features().contains(flags) {
         return Err("no encoder timestamps".into());
@@ -24,33 +26,24 @@ fn measure_projected_shadow_large_mesh() -> Result<(), Box<dyn std::error::Error
         ..Default::default()
     }))?;
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let mut session = solidcraft_engine::Session::default();
-    session.execute("solid.torus", &json!({"major":14,"minor":4,"center":[0,0,9],"operation":"new"}))?;
-    let mesh = session.world_state()?.bodies.first().ok_or("no body")?.mesh();
-    let bounds = mesh.bounds();
+    let mut model = GpuScene::default();
+    let color = model.color([190, 195, 205, 255]);
+    let bounds = append_torus(&mut model, color);
+    let triangle_count = model.tris.len() / (3 * super::super::TRI_SIZE);
     let cam = Camera::default();
     let query = device.create_query_set(&wgpu::QuerySetDescriptor { label: None, ty: wgpu::QueryType::Timestamp, count: 2 });
     let buffer = |usage| device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 16, usage, mapped_at_creation: false });
     let resolve = buffer(wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC);
     let read = buffer(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ);
     let mut rows = Vec::new();
-    let large = 500_000usize / mesh.triangles.len().max(1) + 1;
+    let large = 500_000usize / triangle_count + 1;
     for copies in [1usize, large] {
-        let mut model = GpuScene::default();
-        for tri in &mesh.triangles {
-            for index in tri {
-                let p = mesh.positions.get(*index as usize).ok_or("bad vertex")?;
-                let n = mesh.normals.get(*index as usize).copied().unwrap_or(Vec3::Z);
-                let color = model.color([190, 195, 205, 255]);
-                model.tri(p.to_f32(), n.to_f32(), color);
-            }
-        }
         let body_bytes = model.tris.len() * copies;
         let block = SceneBlock {
             key: 77,
             bytes: Arc::new(BlockBytes {
                 vertices: Arc::new(model.tris.repeat(copies)),
-                opaque: Arc::new(std::iter::once(0..(model.tris.len() * copies / super::super::TRI_SIZE) as u32).collect()),
+                opaque: Arc::new(std::iter::once(0..u32::try_from(body_bytes / super::super::TRI_SIZE)?).collect()),
                 ..Default::default()
             }),
         };
@@ -99,9 +92,9 @@ fn measure_projected_shadow_large_mesh() -> Result<(), Box<dyn std::error::Error
                 let bytes: u64 = renderer.model.blocks.values().filter_map(|b| b.vertices.as_ref()).map(wgpu::Buffer::size).sum();
                 assert_eq!(bytes, body_bytes as u64, "same existing model buffer size for both modes");
             }
-            rows.push(json!({"copies":copies,"triangles":mesh.triangles.len()*copies,"body_buffer_bytes":body_bytes,
+            rows.push(json!({"copies":copies,"triangles":triangle_count*copies,"body_buffer_bytes":body_bytes,
                 "projected":projected,"cpu_metadata_and_cached_prepare_ms":summary(&mut cpu),"gpu_refresh_ms":summary(&mut gpu),"first_use":cold,
-                "extra_mask_texture_bytes":if projected {256*256*12}else{0}}));
+                "extra_mask_texture_bytes":if projected {SIZE*SIZE*12}else{0}}));
         }
     }
     if let Some(error) = pollster::block_on(scope.pop()) {
@@ -109,10 +102,11 @@ fn measure_projected_shadow_large_mesh() -> Result<(), Box<dyn std::error::Error
     }
     let output = std::env::var_os("SOLIDCRAFT_BENCH_OUTPUT_DIR").map(std::path::PathBuf::from).ok_or("set SOLIDCRAFT_BENCH_OUTPUT_DIR")?;
     std::fs::create_dir_all(&output)?;
+    let info = adapter.get_info();
     std::fs::write(
         output.join("projected-shadow-large-mesh.json"),
-        serde_json::to_vec_pretty(&json!({"adapter":adapter.get_info().name,
-        "backend":format!("{:?}",adapter.get_info().backend),"rows":rows,
+        serde_json::to_vec_pretty(&json!({"adapter":info.name,"backend":format!("{:?}",info.backend),"rows":rows,
+        "fixture":"Procedural torus, 64 major by 32 minor subdivisions, with overlapping copies. Earlier timings used CAD-generated meshes.",
         "notes":"Prepare-only refresh, same cached model buffers; excludes opaque model paint and engine recompute. Overlapping torus copies intentionally stress mask overdraw beyond the former 500k cap. First use includes model upload and lazy shadow pipeline creation."}))?,
     )?;
     Ok(())
@@ -120,7 +114,7 @@ fn measure_projected_shadow_large_mesh() -> Result<(), Box<dyn std::error::Error
 #[test]
 #[ignore = "manual timestamp measurement; no CI performance threshold"]
 fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
-    let (adapter, _) = crate::select::pick(crate::select::Policy::from_env().map_err(std::io::Error::other)?).ok_or("no matching adapter")?;
+    let (adapter, _) = crate::select::pick(crate::test_env::policy()).ok_or("no matching adapter")?;
     let info = adapter.get_info();
     let flags = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
     let timestamps = adapter.features().contains(flags);
@@ -141,12 +135,6 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
         tess: false,
         oit: false,
     };
-    let mut session = solidcraft_engine::Session::default();
-    for corner in [[-65, -10, 0], [45, -10, 0]] {
-        session.execute("solid.box", &json!({"length":20,"width":20,"height":20,"corner":corner,"operation":"new"}))?;
-    }
-    session.execute("solid.torus", &json!({"major":14,"minor":4,"center":[0,0,9],"operation":"new"}))?;
-    let meshes: Vec<_> = session.world_state()?.bodies.iter().map(|b| b.mesh()).collect();
     let cam = Camera {
         target: Vec3::new(8.379000844961002, 2.6776676413414724, 7.806862777456871),
         distance: 131.41653316382525,
@@ -154,22 +142,21 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
         pitch: 0.65,
         ..Default::default()
     };
-    let bounds: Vec<_> = meshes.iter().map(|m| m.bounds()).collect();
     let mut geometry = GpuScene::default();
-    for mesh in &meshes {
-        for triangle in &mesh.triangles {
-            for index in triangle {
-                let p = mesh.positions.get(*index as usize).ok_or("bad position")?;
-                let n = mesh.normals.get(*index as usize).copied().unwrap_or(Vec3::Z);
-                let color = geometry.color([190, 195, 205, 255]);
-                geometry.tri(p.to_f32(), n.to_f32(), color);
-            }
-        }
-    }
+    let color = geometry.color([190, 195, 205, 255]);
+    let size = Vec3::new(20.0, 20.0, 20.0);
+    let left = Vec3::new(-65.0, -10.0, 0.0);
+    let right = Vec3::new(45.0, -10.0, 0.0);
+    let left_box = Bounds { min: left, max: left + size };
+    let right_box = Bounds { min: right, max: right + size };
+    append_box(&mut geometry, left_box, color);
+    append_box(&mut geometry, right_box, color);
+    let bounds = [left_box, right_box, append_torus(&mut geometry, color)];
+    let vertex_count = geometry.tris.len() / super::super::TRI_SIZE;
     let model_block = SceneBlock {
         key: 77,
         bytes: Arc::new(BlockBytes {
-            opaque: Arc::new(std::iter::once(0..(geometry.tris.len() / super::super::TRI_SIZE) as u32).collect()),
+            opaque: Arc::new(std::iter::once(0..u32::try_from(vertex_count)?).collect()),
             vertices: Arc::new(geometry.tris),
             ..Default::default()
         }),
@@ -234,17 +221,7 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
     let mut update_rows = Vec::new();
     let mut pipeline_rows = Vec::new();
     for (width, height) in [(1670u32, 838u32), (3340, 1676)] {
-        let mut model = GpuScene::default();
-        for mesh in &meshes {
-            for tri in &mesh.triangles {
-                for index in tri {
-                    let p = mesh.positions.get(*index as usize).ok_or("bad index")?;
-                    let n = mesh.normals.get(*index as usize).copied().unwrap_or(Vec3::Z);
-                    let color = model.color([190, 195, 205, 255]);
-                    model.tri(p.to_f32(), n.to_f32(), color);
-                }
-            }
-        }
+        let model = GpuScene { tris: model_block.bytes.vertices.as_ref().clone(), palette: geometry.palette.clone(), ..Default::default() };
         let body_frame = comparison_frame(model, &cam, width, height, 1);
         let mut body_renderer = Renderer::new(&device, target, None);
         let mut encoder = device.create_command_encoder(&Default::default());
@@ -404,8 +381,9 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
         return Err(error.to_string().into());
     }
     let result = json!({"adapter":info.name,"backend":format!("{:?}",info.backend),"timestamps":timestamps,"inside_pass":inside,
-        "triangles":meshes.iter().map(|m|m.triangles.len()).sum::<usize>(),"updates":update_rows,"cached":cached_rows,
+        "triangles":vertex_count/3,"updates":update_rows,"cached":cached_rows,
         "renderer_init_cpu":pipeline_rows,
+        "fixture":"Two procedural boxes and a procedural torus with 64 major by 32 minor subdivisions. Earlier timings used CAD-generated meshes.",
         "notes":"Cached shadow uses the production Renderer after the shared opaque model in the same MSAA4 pass; full pass includes model and clears. Stored MSAA4 attachments prevent unused-output elimination; presentation, MSAA resolve and final downsample are excluded. 3340x1676 is SSAA2 working resolution."});
     let output = std::env::var_os("SOLIDCRAFT_BENCH_OUTPUT_DIR").map(std::path::PathBuf::from).ok_or("set SOLIDCRAFT_BENCH_OUTPUT_DIR")?;
     std::fs::create_dir_all(&output)?;
@@ -420,15 +398,63 @@ fn summary(values: &mut [f64]) -> serde_json::Value {
     json!({"median":values.get(values.len()/2),"p95":values.get(values.len().saturating_mul(95)/100),"samples":values.len()})
 }
 
-fn bounds_in_frame(bounds: &[Aabb3], cam: &Camera) -> Aabb3 {
-    let mut combined = Aabb3::EMPTY;
+/// The same torus dimensions as the original fixture, with a fixed render-only tessellation.
+fn append_torus(scene: &mut GpuScene, color: super::super::PaletteIndex) -> Bounds {
+    const MAJOR_SEGMENTS: u32 = 64;
+    const MINOR_SEGMENTS: u32 = 32;
+    const MAJOR_RADIUS: f64 = 14.0;
+    const MINOR_RADIUS: f64 = 4.0;
+    const CENTER_Z: f64 = 9.0;
+
+    let vertex = |major, minor| {
+        let (sin_major, cos_major) = (std::f64::consts::TAU * f64::from(major % MAJOR_SEGMENTS) / f64::from(MAJOR_SEGMENTS)).sin_cos();
+        let (sin_minor, cos_minor) = (std::f64::consts::TAU * f64::from(minor % MINOR_SEGMENTS) / f64::from(MINOR_SEGMENTS)).sin_cos();
+        let center = Vec3::new(MAJOR_RADIUS * cos_major, MAJOR_RADIUS * sin_major, CENTER_Z);
+        let normal = Vec3::new(cos_major * cos_minor, sin_major * cos_minor, sin_minor);
+        (center + normal * MINOR_RADIUS, normal)
+    };
+    for major in 0..MAJOR_SEGMENTS {
+        for minor in 0..MINOR_SEGMENTS {
+            let a = vertex(major, minor);
+            let b = vertex(major + 1, minor);
+            let c = vertex(major + 1, minor + 1);
+            let d = vertex(major, minor + 1);
+            for (position, normal) in [a, b, c, a, c, d] {
+                scene.tri(position.to_f32(), normal.to_f32(), color);
+            }
+        }
+    }
+    let radius = MAJOR_RADIUS + MINOR_RADIUS;
+    Bounds { min: Vec3::new(-radius, -radius, CENTER_Z - MINOR_RADIUS), max: Vec3::new(radius, radius, CENTER_Z + MINOR_RADIUS) }
+}
+
+fn append_box(scene: &mut GpuScene, bounds: Bounds, color: super::super::PaletteIndex) {
+    let corners = box_corners(&bounds);
+    for (normal, [a, b, c, d]) in [
+        (-Vec3::Z, [0, 2, 3, 1]),
+        (Vec3::Z, [4, 5, 7, 6]),
+        (-Vec3::X, [0, 4, 6, 2]),
+        (Vec3::X, [1, 3, 7, 5]),
+        (-Vec3::Y, [0, 1, 5, 4]),
+        (Vec3::Y, [2, 6, 7, 3]),
+    ] {
+        for index in [a, b, c, a, c, d] {
+            scene.tri(corners[index].to_f32(), normal.to_f32(), color);
+        }
+    }
+}
+
+fn box_corners(b: &Bounds) -> [Vec3; 8] {
+    std::array::from_fn(|i| {
+        Vec3::new(if i & 1 == 0 { b.min.x } else { b.max.x }, if i & 2 == 0 { b.min.y } else { b.max.y }, if i & 4 == 0 { b.min.z } else { b.max.z })
+    })
+}
+
+fn bounds_in_frame(bounds: &[Bounds], cam: &Camera) -> Bounds {
+    let mut combined = Bounds::EMPTY;
     for b in bounds.iter().filter(|b| !b.is_empty()) {
-        for i in 0..8 {
-            combined.add(cam.to_frame(Vec3::new(
-                if i & 1 == 0 { b.min.x } else { b.max.x },
-                if i & 2 == 0 { b.min.y } else { b.max.y },
-                if i & 4 == 0 { b.min.z } else { b.max.z },
-            )));
+        for corner in box_corners(b) {
+            combined.add(cam.to_frame(corner));
         }
     }
     combined
@@ -451,6 +477,7 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         pv_hide: false,
         preview_bounds: None,
         view_proj: cam.view_proj(f64::from(width) / f64::from(height), 200.0).to_f32(),
+        turned_depth: None,
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
         clip: [0.0; 4],
@@ -473,12 +500,12 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
     }
 }
 
-fn ellipse(sc: &mut GpuScene, b: Aabb3, cam: &Camera, alpha: u8) {
+fn ellipse(sc: &mut GpuScene, b: Bounds, cam: &Camera, alpha: u8) {
     if b.is_empty() {
         return;
     }
     let dark = u32::from(alpha);
-    let size = b.size();
+    let size = b.max - b.min;
     let c = b.center();
     let z = b.min.z - 0.001 * (1.0 + b.diagonal());
     let (rx, ry) = (size.x * 0.62 + size.z * 0.15, size.y * 0.62 + size.z * 0.15);
