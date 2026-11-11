@@ -122,7 +122,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                 json!({
                     "command": string("Command id (see list_commands)"),
                     "params": {"type": "object", "description": "The command's parameters"},
-                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies. When a sketch command creates more points than its new curves have ends (spline poles), `created.points` becomes `created.point_count` (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies. When a sketch command creates more points than its new curves have ends (spline poles), `created.points` becomes `created.point_count`. A `created` list of more than 20 ids (a drawing of many curves) is left out and counted instead: `curve_count`, `constraint_count`, `dimension_count` (and `point_count`); `sketch.inspect` lists every id (default true)"},
                     "expect": expect_schema(),
                 }),
                 &["command"],
@@ -160,7 +160,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "coalesce_parameters": {"type": "boolean", "description": "Set each run of consecutive plain parameter edits (parameters.change or set_parameter with a name and a value, or changes) together, rebuilding the design once for the run instead of once per edit; a run that is refused goes step by step, naming the refused step. Other steps still see the design up to date. Each step keeps its own result; the run is one undo step (default false)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
                     "profile": {"type": "boolean", "description": "Like timings, and each step's `profile`: {boolean_ms, tessellate_ms, other_ms}, its time in kernel booleans, in tessellation and the rest (default false)"},
-                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created`, and `created.points` becomes `created.point_count` when there are more points than the new curves have ends (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created`, and `created.points` becomes `created.point_count` when there are more points than the new curves have ends; a `created` list of more than 20 ids is left out and counted instead (`curve_count` and the like); `sketch.inspect` lists every id (default true)"},
                     "expect": expect_schema(),
                 }),
                 &[],
@@ -1879,9 +1879,14 @@ fn topology_cylinders(faces: &Value, edges: &Value) -> Value {
         .collect()
 }
 
+/// A `created` list longer than this (a drawing of hundreds of curves) is left out of a compact
+/// reply and counted instead (`curve_count` and the like, as `point_count`): the ids are no
+/// sequence an agent could derive, each kind of curve counts on its own. `sketch.inspect` has them.
+const COMPACT_LIST: usize = 20;
+
 /// A command's result without what the design already had (`execute` or `batch` with `verbose: false`): a
 /// feature's full body list (its created, changed and removed bodies stay), and the sketch ids
-/// a sketch command repeats outside `created`.
+/// a sketch command repeats outside `created`. Long `created` lists are counted instead of listed.
 fn compact(mut v: Value) -> Value {
     let Some(o) = v.as_object_mut() else { return v };
     if o.contains_key("created_bodies") {
@@ -1902,6 +1907,15 @@ fn compact(mut v: Value) -> Value {
         if curves > 0 && points > 2 * curves {
             created.remove("points");
             created.insert("point_count".into(), json!(points));
+        }
+    }
+    if let Some(created) = o.get_mut("created").and_then(Value::as_object_mut) {
+        for (k, count) in
+            [("points", "point_count"), ("curves", "curve_count"), ("constraints", "constraint_count"), ("dimensions", "dimension_count")]
+        {
+            let Some(n) = created.get(k).and_then(Value::as_array).map(Vec::len).filter(|n| *n > COMPACT_LIST) else { continue };
+            created.remove(k);
+            created.insert(count.into(), json!(n));
         }
     }
     v

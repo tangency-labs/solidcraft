@@ -139,7 +139,10 @@ fn append_boundary_intersections(
             || result.curve_types.len() != count
             || result.deviations.len() != count
         {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::surface_failed(
+                OP,
+                "the intersection result's lists differ in length",
+            ));
         }
     }
     for (i, first) in out.curves_3d.iter().enumerate() {
@@ -218,7 +221,9 @@ fn bbox(k: &Kernel, cone: &Cone, domain: &Extent2d) -> Result<Extent3d> {
             },
         )?
         .normal
-        .ok_or_else(|| SolidError::sm_err(OP))
+        .ok_or_else(|| {
+            SolidError::surface_failed(OP, "the surface's bounding box could not be computed")
+        })
 }
 
 fn angle_in_sweep(cone: &Cone, axis: Vec3, direction: Vec3, tol: f64) -> Result<bool> {
@@ -939,7 +944,10 @@ fn nurbs_uv_status_ignored(cone: &Cone, k: &Kernel, step_uv: Point2) -> Result<P
 
 fn ellipse_contains(k: &Kernel, curve: &Curve, point: Point3) -> Result<bool> {
     let CurveKind::Ellipse(ellipse) = curve.kind() else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(
+            OP,
+            "the curve is not an ellipse",
+        ));
     };
     Ok(ellipse.step_inversion(k, point, true, 0.0).1 != Some(CurveLocationType::Exterior))
 }
@@ -1591,14 +1599,8 @@ mod tests {
                     let error =
                         append_boundary_intersections(&k, &mut out, second, 1e-7).unwrap_err();
                     assert!(
-                        matches!(
-                            error,
-                            SolidError::Upstream {
-                                operation: OP,
-                                code: crate::error::SM_ERR,
-                                ..
-                            }
-                        ),
+                        error.operation() == OP
+                            && error.upstream_status() == Some(crate::error::SM_ERR),
                         "first={first} field={field} count={count}: {error}"
                     );
                     // No removals occurred before the contract failure.

@@ -3661,6 +3661,7 @@ impl Document {
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
             .chain(a.exploded.iter().map(|v| v.id))
+            .chain(self.configs.rows.iter().map(|r| r.id))
             .max()
             .unwrap_or(0);
         let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
@@ -3916,10 +3917,14 @@ impl Document {
         for b in &mut st.bodies {
             let c = self.body_color(b);
             let face_colors = if authored_faces { self.face_colors(b) } else { self.imported_face_colors(b) };
-            let faces: Vec<solidcraft_kernel::FacePaint> =
-                face_colors.into_iter().map(|(face, l)| solidcraft_kernel::FacePaint { face, color: l.rgb(), opacity: l.opacity as f32 }).collect();
+            let faces: Vec<solidcraft_kernel::FacePaint> = face_colors
+                .into_iter()
+                .map(|(face, l)| solidcraft_kernel::FacePaint { face, color: l.rgb(), opacity: l.opacity as f32, name: l.file_name() })
+                .collect();
             let opacity = self.model_body_opacity(b) as f32;
-            let paint = solidcraft_kernel::Paint { opacity, faces };
+            // The look's name goes with its colour (a STEP `COLOUR_RGB` name), so it comes back on import.
+            let name = c.and_then(|_| self.model_display_look(b)).and_then(|l| l.file_name());
+            let paint = solidcraft_kernel::Paint { opacity, faces, name };
             if c != b.body.color() || b.body.paint() != Some(&paint) {
                 b.body = b.body.clone().with_color(c).with_paint(Some(paint));
             }

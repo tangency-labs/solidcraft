@@ -44,6 +44,9 @@ pub struct Row {
     pub steps: Option<(usize, usize)>,
     /// Waiting for the one before it.
     pub queued: bool,
+    /// Done, and waiting for the person to finish what they are doing (or for its design's tab)
+    /// before it lands.
+    pub waiting: bool,
     /// Asked to stop, and finishing its current step.
     pub cancelling: bool,
     /// Gone because it was cancelled (fading out).
@@ -76,7 +79,7 @@ enum Cancel {
 
 impl Row {
     fn new(key: String, label: String) -> Self {
-        Row { key, label, steps: None, queued: false, cancelling: false, cancelled: false, cancel: None, agent: false }
+        Row { key, label, steps: None, queued: false, waiting: false, cancelling: false, cancelled: false, cancel: None, agent: false }
     }
 
     /// Whether its X does anything.
@@ -100,6 +103,9 @@ impl Row {
         }
         if self.queued {
             return Some(solidcraft_ui_text::tr("operations.queued").to_string());
+        }
+        if self.waiting {
+            return Some(solidcraft_ui_text::tr("operations.waiting").to_string());
         }
         let (done, total) = self.steps.filter(|(_, total)| *total > 1)?;
         Some(format!("{} / {total}", (done + 1).min(total)))
@@ -138,7 +144,14 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
         } else {
             Cancel::File
         };
-        rows.push(Row { steps: file.steps, queued: file.queued, cancelling: file.cancelled, cancel: Some(cancel), ..Row::new(key, label) });
+        rows.push(Row {
+            steps: file.steps,
+            queued: file.queued,
+            waiting: file.waiting,
+            cancelling: file.cancelled,
+            cancel: Some(cancel),
+            ..Row::new(key, label)
+        });
     }
     if let Some(job) = &app.applying {
         let command: Option<&str> = match app.dialog.as_ref().and_then(crate::dialogs::Dialog::command) {
@@ -236,7 +249,7 @@ struct Shown {
 }
 
 /// The panel's rows, kept from frame to frame for the fades.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Panel {
     /// Oldest first: the bottom row.
     shown: Vec<Shown>,
@@ -244,6 +257,16 @@ pub struct Panel {
     pub(crate) rect: Option<Rect>,
     /// Operations cancelled, which fade out as cancelled rather than as done.
     cancelled: Vec<String>,
+    /// Whether [`show`] had room to show the panel's rows. The card over the design falls back to
+    /// a file operation when it has not; it reads the last frame's value, because it decides
+    /// before the panel is laid out. True until the first frame, which assumes the room is there.
+    pub(crate) panel_drew: bool,
+}
+
+impl Default for Panel {
+    fn default() -> Self {
+        Panel { shown: Vec::new(), rect: None, cancelled: Vec::new(), panel_drew: true }
+    }
 }
 
 impl Panel {
@@ -297,10 +320,18 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     app.operations.rect = None;
     if !app.preferences.operations_panel {
         app.operations = Panel::default();
+        app.operations.panel_drew = false;
         return;
     }
     let now = crate::now_ms();
-    let rows = current(app);
+    let mut rows = current(app);
+    // "Wait for files to open" gives a file operation the card over the design, with its own
+    // Cancel: its row here would say the same thing twice. The card used as a fallback (no room
+    // for the panel) keeps the row, so the panel can measure whether it has room again.
+    if app.preferences.file_operations_wait {
+        rows.retain(|r| !r.key.starts_with("file:"));
+        app.operations.shown.retain(|s| !s.row.key.starts_with("file:"));
+    }
     app.operations.update(rows, now);
     if app.operations.is_empty() {
         return;
@@ -328,9 +359,13 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
         placed.push((row.clone(), alpha, y));
         target -= ROW + gap;
     }
-    let Some(top) = placed.iter().map(|(_, _, y)| *y - ROW).reduce(f32::min) else { return };
+    let Some(top) = placed.iter().map(|(_, _, y)| *y - ROW).reduce(f32::min) else {
+        app.operations.panel_drew = false;
+        return;
+    };
     let panel = Rect::from_min_max(pos2(column.left(), top - pad), pos2(column.right(), bottom));
     if panel.height() <= 0.0 || panel.top() < view.top() || panel.width() < 120.0 {
+        app.operations.panel_drew = false;
         return;
     }
     // Clicks on the panel are its own, not the view's.
@@ -338,6 +373,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     painter.rect(panel, t.radius_sm, t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     crate::scenario::publish_rect("operations:panel", panel);
     app.operations.rect = Some(panel);
+    app.operations.panel_drew = true;
     let mut cancel = None;
     for (row, alpha, y) in placed {
         let r = Rect::from_min_max(pos2(panel.left() + pad, y - ROW), pos2(panel.right() - pad, y));
@@ -393,7 +429,7 @@ fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alph
         }
         Some(_) => {}
         // Not told how far it is: a stripe going to and fro.
-        None if !row.queued && !row.cancelling && !row.cancelled => {
+        None if !row.queued && !row.waiting && !row.cancelling && !row.cancelled => {
             let phase = (ui.ctx().input(|i| i.time) * 0.8).fract() as f32;
             let w = bar.width() * 0.3;
             let left = bar.left() + (bar.width() - w) * (1.0 - (phase * 2.0 - 1.0).abs());

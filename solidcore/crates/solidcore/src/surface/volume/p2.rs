@@ -346,7 +346,10 @@ impl Volume {
 
         // check input - ParamBox must be maintained within Natural ParamDomain
         if !self.is_box_in_param_domain(k, param_box, true)? {
-            return Err(SolidError::sm_err(OP_BOX));
+            return Err(SolidError::surface_failed(
+                OP_BOX,
+                "the parameter box is outside the parameter domain",
+            ));
         }
 
         // when asked for InSpace Boxes
@@ -508,7 +511,10 @@ impl Volume {
         if !trim_to_legal_param_space
             && !self.is_pseudo_box_in_in_space_domain(k, in_space_pseudo_box, true)?
         {
-            return Err(SolidError::sm_err(OP_MAP_BOX));
+            return Err(SolidError::surface_failed(
+                OP_MAP_BOX,
+                "the pseudo box maps outside the in-space domain",
+            ));
         }
 
         let next = self.next_map.as_deref().filter(|_| with_compounding);
@@ -655,8 +661,9 @@ impl Volume {
                 proj_box,
                 proj_pseudo_box,
                 |p| {
-                    self.evaluate_point_written(p, true)?
-                        .ok_or(SolidError::sm_err(OP_BOX))
+                    self.evaluate_point_written(p, true)?.ok_or_else(|| {
+                        SolidError::surface_failed(OP_BOX, "the point could not be evaluated")
+                    })
                 },
             ),
             VolumeKind::BSpline(b) => b.evaluate_bounding_box_simple(
@@ -1211,7 +1218,10 @@ impl Volume {
                     next.inv_map_point(k, out_point, None, next_in_pseudo_box.as_ref(), true)?;
                 // quit when mapping back to 1st OutSpace fails
                 if !r.success {
-                    return Err(SolidError::sm_err(OP_SOLVE));
+                    return Err(SolidError::surface_failed(
+                        OP_SOLVE,
+                        "mapping back to the first out-space failed",
+                    ));
                 }
                 r.points
             }
@@ -1492,7 +1502,10 @@ impl Volume {
             UNBEND_VOLUME_TYPE => UnbendVolume::read_from_db(db, version),
             TWIST_VOLUME_TYPE => TwistVolume::read_from_db(db, version),
             VOLUME_TYPE => Err(unsupported("SmVolume_TYPE without a volume to fill")),
-            _ => Err(SolidError::sm_err(OP_READ)),
+            _ => Err(SolidError::surface_failed(
+                OP_READ,
+                "the volume type is unknown",
+            )),
         }
     }
 
@@ -1567,7 +1580,12 @@ impl Volume {
                     reason: "SmVolume_TYPE, which ReadFromDB cannot fill",
                 })
             }
-            VolumeKind::BSpline(_) => return Err(SolidError::sm_err(OP_WRITE)),
+            VolumeKind::BSpline(_) => {
+                return Err(SolidError::surface_failed(
+                    OP_WRITE,
+                    "a B-spline volume cannot be written",
+                ))
+            }
             VolumeKind::Transform(t) => t.write_rows_to_db(db),
             VolumeKind::Bend(b) => b.write_to_db(db),
             VolumeKind::Unbend(u) => u.write_to_db(db),

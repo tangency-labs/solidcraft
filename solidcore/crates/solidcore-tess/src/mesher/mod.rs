@@ -1190,6 +1190,24 @@ fn plan_or_fill(
     }
 }
 
+/// The triangles of a fan over the loop `range` of `uvs` from its first node, leaving out each
+/// one with two corners on one node (`same`) or no area in (u, v), each counter-clockwise.
+fn fan(range: std::ops::Range<usize>, uvs: &[[f64; 2]], same: &dyn Fn(u32, u32) -> bool) -> Vec<[u32; 3]> {
+    let (Ok(start), Ok(end)) = (u32::try_from(range.start), u32::try_from(range.end)) else { return Vec::new() };
+    let at = |i: u32| uvs.get(i as usize).copied();
+    (start + 1..end.saturating_sub(1))
+        .filter_map(|i| {
+            let t = [start, i, i + 1];
+            let (a, b, c) = (at(t[0])?, at(t[1])?, at(t[2])?);
+            let area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
+            if same(t[0], t[1]) || same(t[1], t[2]) || same(t[2], t[0]) || area == 0.0 || !area.is_finite() {
+                return None;
+            }
+            Some(if area > 0.0 { t } else { [t[0], t[2], t[1]] })
+        })
+        .collect()
+}
+
 /// A face's boundary loops as closed polygons in its surface's (u, v), as the planner
 /// triangulates them (and [`crate::isoparms`] clips its lines to them): every node in order, the
 /// 3D point each stands for, and each loop's range.
@@ -1435,6 +1453,14 @@ fn plan_face(
     let pole_pair = |i: u32, j: u32| i != j && fixed.get(i as usize).zip(fixed.get(j as usize)).is_some_and(|(p, q)| p == q);
     let mut triangles = triangles;
     triangles.retain(|t| !(pole_pair(t[0], t[1]) || pole_pair(t[1], t[2]) || pole_pair(t[2], t[0])));
+    // A lenient fill left with nothing (a sliver below the tolerance whose boundary nodes are
+    // few points in space, each twice, its pcurves apart in (u, v) where its edges meet: every
+    // Delaunay triangle had two corners on one point): the outer loop fanned from its first node, the
+    // triangles with no two corners on one node, counter-clockwise in (u, v). The face is drawn
+    // between its own edges' nodes, and still named in the stats as a defect upstream.
+    if lenient == Lenient::Yes && triangles.is_empty() {
+        triangles = fan(ranges.first().cloned().unwrap_or(0..0), &uvs, &pole_pair);
+    }
     // A lenient fill leaves out the sides that cross: the boundary is followed everywhere else.
     if lenient == Lenient::No && !closed_boundary(&ranges, &fixed, &uvs, &triangles) {
         return Err(fail("triangulation does not follow the boundary"));

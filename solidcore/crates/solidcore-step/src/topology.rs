@@ -421,7 +421,7 @@ fn read_with<'a>(
         skipped |= any;
         shells.push(faces);
     }
-    b.finish(item, name, shells, if skipped { Kind::Open } else { kind })
+    b.finish(item, name, shells, if skipped { Kind::Open { voids: kind == Kind::Voids } } else { kind })
 }
 
 /// A face of a solid read on its own ([`read_faces_with`]).
@@ -550,8 +550,12 @@ enum Kind {
     Solid,
     Voids,
     Model,
-    /// A solid with faces left out ([`read_solid_without`]): its shells are sheets only.
-    Open,
+    /// A solid with faces left out ([`read_solid_without`]): its shells are sheets, but for a
+    /// shell still closed, which bounds a region of its own (a void's cavity, where `voids`: the
+    /// solid's shells after the first are its voids).
+    Open {
+        voids: bool,
+    },
 }
 
 /// A curve the edge can be read on, and how its parameter relates to its vertices.
@@ -1335,9 +1339,16 @@ impl<'b, 'a> Builder<'b, 'a> {
                     regions.push(Region { shells: vec![index(v)?], void: true });
                 }
             }
-            Kind::Open => {
+            Kind::Open { voids } => {
                 if let Some(r) = regions.first_mut() {
                     r.shells = (0..index(shells.len())?).collect();
+                }
+                // A closed shell bounds two regions: the cavity inside a void still whole, or
+                // the inside of an outer shell or a model's shell still whole.
+                for (k, c) in closed.iter().enumerate() {
+                    if *c {
+                        regions.push(Region { shells: vec![index(k)?], void: voids && k > 0 });
+                    }
                 }
             }
             Kind::Model => {
@@ -1351,7 +1362,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 }
             }
         }
-        let sheet = kind == Kind::Open || !closed.iter().any(|c| *c);
+        let sheet = matches!(kind, Kind::Open { .. }) || !closed.iter().any(|c| *c);
 
         // Canonical order: faces walking regions → shells → oriented faces.
         let nf = self.faces.len();
