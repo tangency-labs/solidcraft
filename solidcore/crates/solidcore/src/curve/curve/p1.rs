@@ -2630,24 +2630,29 @@ mod tests {
             .unwrap(),
         );
         let value = (1.0 + a * a).sqrt();
-        for requested in [SolutionRequested::Single, SolutionRequested::All] {
+        // 1.0 is the tolerance of #13677: wide enough to hold every point of the curve
+        for (tolerance, requested) in [
+            (1e-9, SolutionRequested::Single),
+            (1e-9, SolutionRequested::All),
+            (1.0, SolutionRequested::All),
+        ] {
             let mut got = projected_answers(
                 &curve,
                 (0.0, 2.0),
                 SolverOperation::ProjectedMaximize,
                 Vec3::ZERO,
-                1e-9,
+                tolerance,
                 requested,
             );
             got.sort_by(|a, b| a.0.total_cmp(&b.0));
-            assert!(!got.is_empty(), "{requested:?}");
+            assert!(!got.is_empty(), "{tolerance} {requested:?}");
             assert!(
                 got.iter()
                     .all(|(t, v)| (*t == 0.0 || *t == 2.0) && (v - value).abs() < 1e-12),
-                "{requested:?}: {got:?}"
+                "{tolerance} {requested:?}: {got:?}"
             );
             if requested == SolutionRequested::All {
-                assert_eq!(got.len(), 2, "{got:?}");
+                assert_eq!(got.len(), 2, "{tolerance}: {got:?}");
             }
         }
     }
