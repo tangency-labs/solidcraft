@@ -14,11 +14,11 @@
 //!
 //! | Cause                                  | Class ([`ErrorKind`])                         |
 //! |----------------------------------------|-----------------------------------------------|
-//! | [`BlendFailure::NoRoom`]               | the reason's ([`no_room_class`]), 101 to 124 (or the offset's 200, 204) |
+//! | [`BlendFailure::NoRoom`]               | the reason's ([`no_room_class`]), 101 to 124 or 128 |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
 //! | [`BlendFailure::StageFailed`]          | [`ErrorKind::StageFailed`] (127)              |
-//! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | [`ErrorKind::StageFailed`] (127) |
+//! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
 //! the C++ reports for it (crate-private, read through [`crate::SolidError::sm_status`] and
@@ -39,10 +39,11 @@
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
-//! shape the blend sites were converted to before the record. Each is a stage that failed
-//! with no reason the kernel names, so its class is [`ErrorKind::StageFailed`], a defect;
-//! its phrase stays in its message. They go class by class: a site that has a finer cause
-//! moves to it, and one that has none to [`BlendFailure::StageFailed`].
+//! shape the blend sites were converted to before the record, some of them refusals not yet
+//! moved onto it. Each keeps the kind of its status, as before the record, and reads as
+//! neither a defect nor a refusal ([`BlendFailure::is_phrase`]); its phrase stays in its
+//! message. They go class by class: a site that has a finer cause moves to it, and one that
+//! has none to [`BlendFailure::StageFailed`], built on purpose.
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. No cause
 //! names an entity of its own: a failure is at the entity the site it replaces named
@@ -67,7 +68,7 @@ use crate::blend::fillet_executive::NoRoomReason;
 #[non_exhaustive]
 pub enum BlendFailure {
     /// A blend larger than its faces allow, for the reason named (classes 101 to 124, and
-    /// the offset's 200 and 204; [`no_room_class`]). A refusal: the failure's fit, where the
+    /// 128; [`no_room_class`]). A refusal: the failure's fit, where the
     /// check computed one, is the size that builds.
     NoRoom(NoRoomReason),
     /// The solve of the ball's position at a station of the blend did not converge: a defect,
@@ -95,41 +96,41 @@ pub enum BlendFailure {
     /// it was built ([`Failure::origin`]).
     StageFailed,
     /// The routine could not continue, as the phrase says (for example "the fillet's law
-    /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause: class
-    /// [`ErrorKind::StageFailed`].
+    /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
+    /// ([`BlendFailure::is_phrase`]).
     Failed(&'static str),
     /// Something the routine needs is missing, as the phrase says (for example "the edge
     /// use's edge"). Upstream `NER(ptr)` on a `NULL` pointer, or a `NULL` it would
-    /// dereference. A phrase cause: class [`ErrorKind::StageFailed`].
+    /// dereference. A phrase cause ([`BlendFailure::is_phrase`]).
     Missing(&'static str),
     /// A value the routine is given or computes with is not usable, as the phrase says
     /// (for example "a G^n section's order"). Upstream returns `SM_ERR_INVALID_INPUT` as a
-    /// status here. A phrase cause: class [`ErrorKind::StageFailed`] (an argument check is
-    /// [`crate::SolidError::InvalidInput`]).
+    /// status here, so its kind is [`ErrorKind::InvalidInput`]. A phrase cause
+    /// ([`BlendFailure::is_phrase`]); an argument check is [`crate::SolidError::InvalidInput`].
     InvalidValue(&'static str),
     /// A consistency check of the routine's own data did not hold, as the phrase says
-    /// (upstream `AERN`, `SM_ERR_ASSERT_FAILURE`). A phrase cause: class
-    /// [`ErrorKind::StageFailed`].
+    /// (upstream `AERN`, `SM_ERR_ASSERT_FAILURE`). A phrase cause
+    /// ([`BlendFailure::is_phrase`]).
     Inconsistent(&'static str),
     /// Intersections the routine needs are not usable, as the phrase says (for example "the
     /// two surfaces meet in more than two points"); upstream `SM_ERR_BAD_INTERSECTIONS`. A
-    /// phrase cause: class [`ErrorKind::StageFailed`].
+    /// phrase cause ([`BlendFailure::is_phrase`]).
     BadIntersections(&'static str),
     /// An iteration did not converge, as the phrase says; upstream
-    /// `SM_ERR_NOT_CONVERGING`. A phrase cause: class [`ErrorKind::StageFailed`].
+    /// `SM_ERR_NOT_CONVERGING`. A phrase cause ([`BlendFailure::is_phrase`]).
     NotConverged(&'static str),
     /// A parameter lies outside its domain, as the phrase says; upstream
-    /// `SM_ERR_OUTSIDE_OF_DOMAIN`. A phrase cause: class [`ErrorKind::StageFailed`].
+    /// `SM_ERR_OUTSIDE_OF_DOMAIN`. A phrase cause ([`BlendFailure::is_phrase`]).
     OutsideDomain(&'static str),
     /// A result is farther than the tolerance from where it must be, as the phrase says;
-    /// upstream `SM_ERR_NOT_WITHIN_TOLERANCE`. A phrase cause: class
-    /// [`ErrorKind::StageFailed`].
+    /// upstream `SM_ERR_NOT_WITHIN_TOLERANCE`. A phrase cause
+    /// ([`BlendFailure::is_phrase`]).
     NotWithinTolerance(&'static str),
     /// A stage the routine calls failed, as the phrase says, and the routine answers with
     /// that stage's `status` (upstream `SER` of the stage's status, or a status chosen at
     /// run time). The stage's error is not kept as a cause: it may be a solidcore-side
-    /// failure, which the bare status it replaces did not carry. A phrase cause: class
-    /// [`ErrorKind::StageFailed`].
+    /// failure, which the bare status it replaces did not carry. A phrase cause
+    /// ([`BlendFailure::is_phrase`]).
     PassedOn {
         /// What failed.
         what: &'static str,
@@ -140,9 +141,8 @@ pub enum BlendFailure {
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
 /// refusal classes 101 to 124 (the cliff overflow's own refusals grouped by what decides
-/// them), or the offset's [`ErrorKind::OffsetFolds`] and [`ErrorKind::OffsetCollapses`],
-/// which are the same failures. [`ErrorKind::CliffSubtractionLeavesNoSolid`] is the one
-/// defect among them.
+/// them), or [`ErrorKind::TangentContinuationEnd`] (128).
+/// [`ErrorKind::CliffSubtractionLeavesNoSolid`] is the one defect among them.
 #[must_use]
 pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
     use NoRoomReason as R;
@@ -152,10 +152,10 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::FaceConsumed => ErrorKind::FaceConsumed,
         R::BandsOverlap => ErrorKind::BandsOverlap,
         R::BallsFold => ErrorKind::BallsFold,
-        R::OffsetFolds => ErrorKind::OffsetFolds,
+        R::OffsetFolds => ErrorKind::ChamferOffsetFolds,
         R::CutsThePart => ErrorKind::CutsThePart,
         R::BreaksThrough => ErrorKind::BreaksThrough,
-        R::OffsetCollapses => ErrorKind::OffsetCollapses,
+        R::OffsetCollapses => ErrorKind::BallOffsetCollapses,
         R::CornersTakeWholeEdge => ErrorKind::CornersTakeWholeEdge,
         R::RoundIntoMaterial | R::RailRunsPastFaceIntoMaterial => ErrorKind::RunsIntoMaterial,
         R::OverflowWithConcaveBlend | R::OverflowWithRollover | R::OverflowWithGlobalMerge => {
@@ -178,7 +178,8 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::EndPastSideEdge => ErrorKind::EndPastSideEdge,
         R::EndOverflowsSideEdge => ErrorKind::EndOverflowsSideEdge,
         R::EndRollsIntoSmoothEnd => ErrorKind::EndRollsIntoSmoothEnd,
-        R::EndAtSeamVertex | R::TangentContinuationEndUnsupported => ErrorKind::EndAtSeamVertex,
+        R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
+        R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
     }
 }
 
@@ -207,16 +208,17 @@ impl BlendFailure {
     /// The failure's class, its stable [`ErrorKind`], derived from the cause: the reason's
     /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
-    /// trim loop, and [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`] and every
-    /// phrase cause.
+    /// trim loop, and [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`]. A phrase
+    /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
+    /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
     pub const fn class(&self) -> ErrorKind {
         match self {
             Self::NoRoom(reason) => no_room_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
-            Self::StageFailed
-            | Self::Failed(_)
+            Self::StageFailed => ErrorKind::StageFailed,
+            Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
             | Self::Inconsistent(_)
@@ -224,7 +226,32 @@ impl BlendFailure {
             | Self::NotConverged(_)
             | Self::OutsideDomain(_)
             | Self::NotWithinTolerance(_)
-            | Self::PassedOn { .. } => ErrorKind::StageFailed,
+            | Self::PassedOn { .. } => ErrorKind::of_status(self.comparison_status()),
+        }
+    }
+
+    /// True for a phrase cause ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]): a
+    /// site not yet converted to the record. Its class is its status's kind, as before the
+    /// record, and it reads as neither a defect nor a refusal
+    /// ([`crate::SolidError::is_defect`], [`crate::SolidError::is_refusal`]) until it moves to
+    /// a typed cause.
+    #[must_use]
+    pub const fn is_phrase(&self) -> bool {
+        match self {
+            Self::NoRoom(_)
+            | Self::StationDidNotConverge { .. }
+            | Self::TrimLoopOpen
+            | Self::TrimLoopDoesNotSeparate
+            | Self::StageFailed => false,
+            Self::Failed(_)
+            | Self::Missing(_)
+            | Self::InvalidValue(_)
+            | Self::Inconsistent(_)
+            | Self::BadIntersections(_)
+            | Self::NotConverged(_)
+            | Self::OutsideDomain(_)
+            | Self::NotWithinTolerance(_)
+            | Self::PassedOn { .. } => true,
         }
     }
 
@@ -309,8 +336,8 @@ impl crate::SolidError {
     }
 
     /// [`crate::SolidError::Failed`] for a blend routine that could not continue, as the
-    /// phrase says, with status [`SM_ERR`] (upstream `return SE(SM_ERR)`): class
-    /// [`ErrorKind::StageFailed`].
+    /// phrase says, with status [`SM_ERR`] (upstream `return SE(SM_ERR)`): a phrase
+    /// cause.
     #[must_use]
     #[track_caller]
     pub(crate) fn blend_failed(operation: &'static str, what: &'static str) -> Self {
@@ -319,7 +346,7 @@ impl crate::SolidError {
 
     /// [`crate::SolidError::Failed`] for something a blend routine needs that is not there,
     /// as the phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a
-    /// `NULL` pointer): class [`ErrorKind::StageFailed`].
+    /// `NULL` pointer): a phrase cause.
     #[must_use]
     #[track_caller]
     pub(crate) fn blend_missing(operation: &'static str, what: &'static str) -> Self {
@@ -328,7 +355,7 @@ impl crate::SolidError {
 
     /// [`crate::SolidError::Failed`] for a value a blend routine is given or computes with
     /// that is not usable, as the phrase says, with status [`SM_ERR_INVALID_INPUT`]
-    /// (upstream `return(SM_ERR_INVALID_INPUT)`): class [`ErrorKind::StageFailed`].
+    /// (upstream `return(SM_ERR_INVALID_INPUT)`): a phrase cause.
     #[must_use]
     #[track_caller]
     pub(crate) fn blend_invalid_value(operation: &'static str, what: &'static str) -> Self {
@@ -355,7 +382,7 @@ mod tests {
     use crate::SolidError;
 
     #[test]
-    fn blend_failures_keep_the_status_of_the_upstream_they_replace_and_are_stage_failures() {
+    fn blend_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
         let cases = [
             (BlendFailure::Failed("x"), SM_ERR),
             (BlendFailure::Missing("x"), SM_ERR_NULL_POINTER),
@@ -401,10 +428,11 @@ mod tests {
                 assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
                 assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
                 assert_eq!(super::super::upstream_status(&typed), Some(code));
-                // the class is the cause's, not the status's: a phrase cause is a stage that
-                // failed with no reason the kernel names, a defect
-                assert_eq!(typed.kind(), ErrorKind::StageFailed, "{failure:?}");
-                assert!(typed.is_defect() && !typed.is_refusal() && !typed.sized());
+                // a phrase cause keeps its status's kind, and is neither a defect nor a refusal
+                // until its site is converted
+                assert_eq!(typed.kind(), before.kind(), "{failure:?}");
+                assert!(failure.is_phrase(), "{failure:?}");
+                assert!(!typed.is_defect() && !typed.is_refusal() && !typed.sized());
                 assert_eq!(typed.operation(), before.operation(), "{failure:?}");
                 assert_eq!(typed.entity(), before.entity(), "{failure:?}");
                 assert_eq!(typed.is_port_failure(), before.is_port_failure());
@@ -440,7 +468,7 @@ mod tests {
         );
         assert_eq!(
             SolidError::blend_invalid_value("blend::op", "x").kind(),
-            ErrorKind::StageFailed
+            ErrorKind::InvalidInput
         );
         assert_eq!(SolidError::sm_err("blend::op").blend_failure(), None);
     }
@@ -505,7 +533,10 @@ mod tests {
                 ErrorKind::BandsOverlap,
             ),
             (BlendFailure::NoRoom(R::BallsFold), ErrorKind::BallsFold),
-            (BlendFailure::NoRoom(R::OffsetFolds), ErrorKind::OffsetFolds),
+            (
+                BlendFailure::NoRoom(R::OffsetFolds),
+                ErrorKind::ChamferOffsetFolds,
+            ),
             (BlendFailure::NoRoom(R::CutsThePart), ErrorKind::CutsThePart),
             (
                 BlendFailure::NoRoom(R::BreaksThrough),
@@ -513,7 +544,7 @@ mod tests {
             ),
             (
                 BlendFailure::NoRoom(R::OffsetCollapses),
-                ErrorKind::OffsetCollapses,
+                ErrorKind::BallOffsetCollapses,
             ),
             (
                 BlendFailure::NoRoom(R::CornersTakeWholeEdge),
@@ -613,7 +644,7 @@ mod tests {
             ),
             (
                 BlendFailure::NoRoom(R::TangentContinuationEndUnsupported),
-                ErrorKind::EndAtSeamVertex,
+                ErrorKind::TangentContinuationEnd,
             ),
             (
                 BlendFailure::StationDidNotConverge {
@@ -640,6 +671,36 @@ mod tests {
             assert_eq!(e.sized(), class.sized(), "{cause:?}");
             assert!(!e.is_port_failure(), "{cause:?}");
         }
+    }
+
+    #[test]
+    fn only_a_stage_failure_built_on_purpose_is_a_defect() {
+        // a refusal not yet on the record, as `record_no_room` returns it: a phrase cause
+        let refusal = SolidError::blend_failed(
+            "blend::fillet_executive::p3",
+            "the blend is too large for its faces",
+        );
+        assert_eq!(refusal.kind(), ErrorKind::Failed);
+        assert!(!refusal.is_defect() && !refusal.is_refusal() && !refusal.sized());
+        let missing = SolidError::blend_missing("blend::op", "the edge use's edge");
+        assert_eq!(missing.kind(), ErrorKind::Missing);
+        assert!(!missing.is_defect() && !missing.is_refusal());
+        // a phrase cause passing on an offset status keeps that status's kind but is still not
+        // classed
+        let passed = SolidError::blend(
+            "blend::op",
+            BlendFailure::PassedOn {
+                what: "x",
+                status: crate::error::SM_ERR_OFFSET_WALLS_TOUCH,
+            },
+        );
+        assert_eq!(passed.kind(), ErrorKind::OffsetWallsTouch);
+        assert!(!passed.is_defect() && !passed.is_refusal());
+        // a stage failure built on purpose is class 127, a defect
+        let stage = SolidError::blend("blend::op", BlendFailure::StageFailed);
+        assert_eq!(stage.kind(), ErrorKind::StageFailed);
+        assert_eq!(stage.kind().code(), 127);
+        assert!(stage.is_defect() && !stage.is_refusal() && !stage.sized());
     }
 
     #[test]
@@ -735,9 +796,21 @@ mod tests {
             Some(refusal.to_string())
         );
         assert!(refusal.source().is_none());
-        // a stage failure whose kept cause is a sized refusal reads as both
-        assert!(collapsed.is_defect() && collapsed.is_refusal() && collapsed.sized());
-        assert!(!refusal.is_defect());
+        // a phrase collapse over a refusal reads as the refusal, not also as a defect
+        assert!(!collapsed.is_defect() && collapsed.is_refusal() && collapsed.sized());
+        assert!(!refusal.is_defect() && refusal.is_refusal());
+        // so does a stage failure built on purpose over a refusal: the deepest class decides
+        let stage = Failure::new("blend::op", BlendFailure::StageFailed)
+            .caused_by(refusal.clone())
+            .into_error();
+        assert!(!stage.is_defect() && stage.is_refusal() && stage.sized());
+        // and a refusal over a stage failure reads as the defect
+        let defect = SolidError::blend("blend::stage", BlendFailure::StageFailed);
+        assert!(defect.is_defect() && !defect.is_refusal());
+        let over = Failure::new("blend::op", BlendFailure::NoRoom(R::BallDoesNotFit))
+            .caused_by(defect)
+            .into_error();
+        assert!(over.is_defect() && !over.is_refusal() && !over.sized());
         // the message still shows the chain, as before
         assert_eq!(
             collapsed.to_string(),

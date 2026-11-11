@@ -1327,11 +1327,9 @@ pub enum ErrorKind {
     /// A fillet or chamfer is too large to build; the error names the largest size
     /// that builds.
     FilletTooLarge = 100,
-    // The blend's classes, 101 to 127 (the classes of the typed blend failure record,
-    // `error::blend`), in their order. 106 and 109 are not used: those two classes are the
-    // offset's, `OffsetFolds` (200) and `OffsetCollapses` (204), the same failures
-    // (an offset that folds where a face curves tighter than it, an offset that collapses
-    // where it is as wide as a face is round).
+    // The blend's classes, 101 to 128 (the classes of the typed blend failure record,
+    // `error::blend`), in their order: the record's numbers less 200, then the classes added
+    // after them.
     /// The rolling ball does not fit a face it rolls on.
     BallDoesNotFit = 101,
     /// A contact line leaves the face it rolls on, and the kernel does not build over the cliff beyond.
@@ -1342,10 +1340,18 @@ pub enum ErrorKind {
     BandsOverlap = 104,
     /// The balls fold over one another along the edge.
     BallsFold = 105,
+    /// A face curves tighter than a chamfer's offset along it: the blend's counterpart of the
+    /// offset's [`ErrorKind::OffsetFolds`] (200), the same geometric event with a different way
+    /// out (a smaller chamfer, not a thinner wall).
+    ChamferOffsetFolds = 106,
     /// The blend would take all of the part between its contact lines and cut it in pieces.
     CutsThePart = 107,
     /// The blend's section would break through a wall into the hollow behind it.
     BreaksThrough = 108,
+    /// The ball is as wide as a face it rolls on, so its centre stays put: the blend's
+    /// counterpart of the offset's [`ErrorKind::OffsetCollapses`] (204), the same geometric
+    /// event with a different way out (a smaller ball, not a shorter distance).
+    BallOffsetCollapses = 109,
     /// The blend's corners take the whole of its edge.
     CornersTakeWholeEdge = 110,
     /// A blend past its faces runs off a face into the material.
@@ -1382,6 +1388,11 @@ pub enum ErrorKind {
     TrimLeaks = 126,
     /// A stage of the blend failed with no reason the kernel names: a defect.
     StageFailed = 127,
+    /// A round that ends where its edge runs on tangentially into an edge that is not
+    /// blended, in a shape the kernel does not build. Not a matter of size: the way out is to
+    /// blend the edge it runs on into with it
+    /// ([`crate::blend::blend_refusal::BlendRefusal::ContinuesInto`]).
+    TangentContinuationEnd = 128,
     /// An offset face's offset folds: the wall is thicker than a radius of curvature.
     OffsetFolds = 200,
     /// Loops of an offset face touch without crossing: the offset walls would meet.
@@ -1446,8 +1457,10 @@ impl ErrorKind {
                 | Self::FaceConsumed
                 | Self::BandsOverlap
                 | Self::BallsFold
+                | Self::ChamferOffsetFolds
                 | Self::CutsThePart
                 | Self::BreaksThrough
+                | Self::BallOffsetCollapses
                 | Self::CornersTakeWholeEdge
                 | Self::RunsIntoMaterial
                 | Self::CliffOverflowRefused
@@ -1462,6 +1475,7 @@ impl ErrorKind {
                 | Self::EndOverflowsSideEdge
                 | Self::EndRollsIntoSmoothEnd
                 | Self::EndAtSeamVertex
+                | Self::TangentContinuationEnd
                 | Self::OffsetFolds
                 | Self::OffsetWallsTouch
                 | Self::OffsetLoopsCross
@@ -1472,13 +1486,15 @@ impl ErrorKind {
 
     /// True for a refusal a size that builds is the way out of (false for a missing
     /// construction and for a defect): every refusal class but a contact line that leaves its
-    /// face, and the offset's that the size of its wall decides.
+    /// face, a round that ends where its edge runs on tangentially, and the offset's that the
+    /// size of its wall does not decide.
     #[must_use]
     pub const fn sized(self) -> bool {
         self.is_refusal()
             && !matches!(
                 self,
                 Self::RailLeavesFace
+                    | Self::TangentContinuationEnd
                     | Self::OffsetWallsTouch
                     | Self::OffsetLoopsCross
                     | Self::OffsetEdgeVanishes
@@ -1509,8 +1525,10 @@ impl ErrorKind {
             Self::FaceConsumed => "face_consumed",
             Self::BandsOverlap => "bands_overlap",
             Self::BallsFold => "balls_fold",
+            Self::ChamferOffsetFolds => "chamfer_offset_folds",
             Self::CutsThePart => "cuts_the_part",
             Self::BreaksThrough => "breaks_through",
+            Self::BallOffsetCollapses => "ball_offset_collapses",
             Self::CornersTakeWholeEdge => "corners_take_whole_edge",
             Self::RunsIntoMaterial => "runs_into_material",
             Self::CliffOverflowRefused => "cliff_overflow_refused",
@@ -1529,6 +1547,7 @@ impl ErrorKind {
             Self::StationDidNotConverge => "station_did_not_converge",
             Self::TrimLeaks => "trim_leaks",
             Self::StageFailed => "stage_failed",
+            Self::TangentContinuationEnd => "tangent_continuation_end",
             Self::OffsetFolds => "offset_folds",
             Self::OffsetWallsTouch => "offset_walls_touch",
             Self::OffsetLoopsCross => "offset_loops_cross",
@@ -1788,27 +1807,45 @@ impl SolidError {
         }
     }
 
-    /// True when this error, or an error in its cause chain ([`SolidError::cause`], down to
-    /// [`SolidError::root_cause`]), is the kernel's fault ([`ErrorKind::is_defect`]): report
-    /// it. It follows the chain as [`SolidError::is_port_failure`] does.
+    /// The class that decides whether this error is a defect or a refusal: that of the
+    /// deepest error in its cause chain ([`SolidError::cause`], down to
+    /// [`SolidError::root_cause`]) whose kind is a defect or a refusal, so a stage failure
+    /// over a refusal reads as the refusal. A blend phrase cause
+    /// ([`blend::BlendFailure::is_phrase`]) is neither until its site is converted, whatever
+    /// its status's kind; `None` when no error in the chain is classed.
+    fn deciding_class(&self) -> Option<ErrorKind> {
+        std::iter::successors(Some(self), |e| e.cause())
+            .filter(|e| {
+                !e.blend_failure()
+                    .is_some_and(blend::BlendFailure::is_phrase)
+            })
+            .map(Self::kind)
+            .filter(|k| k.is_defect() || k.is_refusal())
+            .last()
+    }
+
+    /// True when this error is the kernel's fault ([`ErrorKind::is_defect`]): report it. The
+    /// deepest classed error in its cause chain decides, as [`SolidError::is_port_failure`]
+    /// follows the chain; a blend phrase cause is not one. Never true together with
+    /// [`SolidError::is_refusal`].
     #[must_use]
     pub fn is_defect(&self) -> bool {
-        std::iter::successors(Some(self), |e| e.cause()).any(|e| e.kind().is_defect())
+        self.deciding_class().is_some_and(ErrorKind::is_defect)
     }
 
-    /// True when this error, or an error in its cause chain, is a refusal
-    /// ([`ErrorKind::is_refusal`]): a fact of the geometry, so the way out is a different
-    /// input.
+    /// True when this error is a refusal ([`ErrorKind::is_refusal`]): a fact of the geometry,
+    /// so the way out is a different input. The deepest classed error in its cause chain
+    /// decides; a blend phrase cause is not one.
     #[must_use]
     pub fn is_refusal(&self) -> bool {
-        std::iter::successors(Some(self), |e| e.cause()).any(|e| e.kind().is_refusal())
+        self.deciding_class().is_some_and(ErrorKind::is_refusal)
     }
 
-    /// True when this error, or an error in its cause chain, is a refusal a size that builds
-    /// is the way out of ([`ErrorKind::sized`]).
+    /// True when this error is a refusal a size that builds is the way out of
+    /// ([`ErrorKind::sized`]), decided as [`SolidError::is_refusal`] is.
     #[must_use]
     pub fn sized(&self) -> bool {
-        std::iter::successors(Some(self), |e| e.cause()).any(|e| e.kind().sized())
+        self.deciding_class().is_some_and(ErrorKind::sized)
     }
 
     /// Where the failure is on the caller's body, for a [`SolidError::Failed`] ([`Site`]).
@@ -2317,8 +2354,10 @@ mod tests {
             (ErrorKind::FaceConsumed, 103, "face_consumed"),
             (ErrorKind::BandsOverlap, 104, "bands_overlap"),
             (ErrorKind::BallsFold, 105, "balls_fold"),
+            (ErrorKind::ChamferOffsetFolds, 106, "chamfer_offset_folds"),
             (ErrorKind::CutsThePart, 107, "cuts_the_part"),
             (ErrorKind::BreaksThrough, 108, "breaks_through"),
+            (ErrorKind::BallOffsetCollapses, 109, "ball_offset_collapses"),
             (
                 ErrorKind::CornersTakeWholeEdge,
                 110,
@@ -2373,6 +2412,11 @@ mod tests {
             ),
             (ErrorKind::TrimLeaks, 126, "trim_leaks"),
             (ErrorKind::StageFailed, 127, "stage_failed"),
+            (
+                ErrorKind::TangentContinuationEnd,
+                128,
+                "tangent_continuation_end",
+            ),
             (ErrorKind::OffsetFolds, 200, "offset_folds"),
             (ErrorKind::OffsetWallsTouch, 201, "offset_walls_touch"),
             (ErrorKind::OffsetLoopsCross, 202, "offset_loops_cross"),
@@ -2401,31 +2445,34 @@ mod tests {
                 ErrorKind::FaceConsumed => 17,
                 ErrorKind::BandsOverlap => 18,
                 ErrorKind::BallsFold => 19,
-                ErrorKind::CutsThePart => 20,
-                ErrorKind::BreaksThrough => 21,
-                ErrorKind::CornersTakeWholeEdge => 22,
-                ErrorKind::RunsIntoMaterial => 23,
-                ErrorKind::CliffOverflowRefused => 24,
-                ErrorKind::CliffEndFaceNotPlanar => 25,
-                ErrorKind::CliffOverflowShape => 26,
-                ErrorKind::CliffSubtractionLeavesNoSolid => 27,
-                ErrorKind::CreaseAcrossTangentEdge => 28,
-                ErrorKind::RailBelowResolution => 29,
-                ErrorKind::RailPastAxis => 30,
-                ErrorKind::JoinOffsetsDiffer => 31,
-                ErrorKind::StripBelowResolution => 32,
-                ErrorKind::EndPastSideEdge => 33,
-                ErrorKind::EndOverflowsSideEdge => 34,
-                ErrorKind::EndRollsIntoSmoothEnd => 35,
-                ErrorKind::EndAtSeamVertex => 36,
-                ErrorKind::StationDidNotConverge => 37,
-                ErrorKind::TrimLeaks => 38,
-                ErrorKind::StageFailed => 39,
-                ErrorKind::OffsetFolds => 40,
-                ErrorKind::OffsetWallsTouch => 41,
-                ErrorKind::OffsetLoopsCross => 42,
-                ErrorKind::OffsetEdgeVanishes => 43,
-                ErrorKind::OffsetCollapses => 44,
+                ErrorKind::ChamferOffsetFolds => 20,
+                ErrorKind::CutsThePart => 21,
+                ErrorKind::BreaksThrough => 22,
+                ErrorKind::BallOffsetCollapses => 23,
+                ErrorKind::CornersTakeWholeEdge => 24,
+                ErrorKind::RunsIntoMaterial => 25,
+                ErrorKind::CliffOverflowRefused => 26,
+                ErrorKind::CliffEndFaceNotPlanar => 27,
+                ErrorKind::CliffOverflowShape => 28,
+                ErrorKind::CliffSubtractionLeavesNoSolid => 29,
+                ErrorKind::CreaseAcrossTangentEdge => 30,
+                ErrorKind::RailBelowResolution => 31,
+                ErrorKind::RailPastAxis => 32,
+                ErrorKind::JoinOffsetsDiffer => 33,
+                ErrorKind::StripBelowResolution => 34,
+                ErrorKind::EndPastSideEdge => 35,
+                ErrorKind::EndOverflowsSideEdge => 36,
+                ErrorKind::EndRollsIntoSmoothEnd => 37,
+                ErrorKind::EndAtSeamVertex => 38,
+                ErrorKind::StationDidNotConverge => 39,
+                ErrorKind::TrimLeaks => 40,
+                ErrorKind::StageFailed => 41,
+                ErrorKind::TangentContinuationEnd => 42,
+                ErrorKind::OffsetFolds => 43,
+                ErrorKind::OffsetWallsTouch => 44,
+                ErrorKind::OffsetLoopsCross => 45,
+                ErrorKind::OffsetEdgeVanishes => 46,
+                ErrorKind::OffsetCollapses => 47,
             }
         };
         for (i, &(kind, code, name)) in PINNED.iter().enumerate() {
@@ -2434,14 +2481,22 @@ mod tests {
             assert_eq!(kind.name(), name, "{kind:?}");
             assert_eq!(kind.to_string(), name);
         }
-        let mut codes: Vec<u16> = PINNED.iter().map(|r| r.1).collect();
-        codes.dedup();
-        assert_eq!(codes.len(), PINNED.len(), "codes are unique and ascending");
-        assert!(PINNED.windows(2).all(|w| w[0].1 < w[1].1));
-        // the blend's classes (101 to 127): defects, refusals and the sized ones
+        assert!(
+            PINNED.windows(2).all(|w| w[0].1 < w[1].1),
+            "codes are unique and ascending"
+        );
+        // the blend's classes: 101 to 127 are the record's numbers less 200, with no gap; 128
+        // follows them
+        let blend: Vec<u16> = PINNED
+            .iter()
+            .map(|r| r.1)
+            .filter(|c| (101..200).contains(c))
+            .collect();
+        assert_eq!(blend, (101..=128).collect::<Vec<u16>>());
+        // defects, refusals and the sized ones
         let defects = [115, 125, 126, 127];
-        let unsized_refusals = [102];
-        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=127).contains(&r.1)) {
+        let unsized_refusals = [102, 128];
+        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=128).contains(&r.1)) {
             assert_eq!(kind.is_defect(), defects.contains(&code), "{kind:?}");
             assert_eq!(kind.is_refusal(), !defects.contains(&code), "{kind:?}");
             assert_eq!(
