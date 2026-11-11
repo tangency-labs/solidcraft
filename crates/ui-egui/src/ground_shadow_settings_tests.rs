@@ -18,6 +18,7 @@ fn ground_shadow_preserves_legacy_preferences_and_validates_the_style() {
 #[test]
 fn ground_shadow_selector_is_shared_persistent_and_cancelable_without_changing_ao() {
     let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width":1024,"height":576}));
     h.call("engine.execute", json!({"command":"solid.box","params":{"length":10,"width":10,"height":10}}));
     h.call("ui.inspect", json!({}));
     let camera = h.app.cam;
@@ -31,8 +32,13 @@ fn ground_shadow_selector_is_shared_persistent_and_cancelable_without_changing_a
     assert!(!h.app.preferences.ambient_occlusion);
     // Close the View menu before opening another window, as a normal click outside does.
     h.call("ui.key", json!({"key":"Escape"}));
-    h.call("ui.prefs", json!({"open":"Graphics"}));
+    h.call("ui.prefs", json!({"open":"Graphics","language":"en"}));
     reveal_preference(&mut h, "view:ground_shadow_selector");
+    let label = h.app.tr("ui.ground_shadow_style");
+    let label_rect = crate::scenario::rect_of(&format!("dialog:label:{label}")).unwrap();
+    let label_font = egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label);
+    let text_width = h.ctx.fonts_mut(|fonts| fonts.layout_no_wrap(label.to_owned(), label_font, egui::Color32::WHITE).size().x);
+    assert!(label_rect.width() >= text_width, "the Graphics row must fit the full shadow style label");
     let p = crate::scenario::handle_at("view:ground_shadow_selector").unwrap();
     h.call("ui.click", json!({"x":p.x,"y":p.y}));
     let p = crate::scenario::handle_at("view:ground_shadow:off").unwrap();
