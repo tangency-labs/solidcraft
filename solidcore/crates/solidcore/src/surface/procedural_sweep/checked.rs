@@ -38,7 +38,8 @@ pub(super) type KeptSection = (ScrewOffsetSection, [f64; 2]);
 pub(super) struct CheckedCache {
     // (boxed: the section is large, and a definition is kept in every swept face)
     section: OnceLock<Option<Box<KeptSection>>>,
-    spans: OnceLock<Vec<SpanTurn>>,
+    /// One slot per station span, each filled on its first use.
+    spans: OnceLock<Vec<OnceLock<SpanTurn>>>,
     /// [`ProceduralSweep::checked_turn_rotation`] by `(t, ending)`.
     turns: Memo<(u64, bool), (Turn, Rotation)>,
     /// The points [`ProceduralSweep::verify_runtime_point`] passed, by `(u, v, point)`.
@@ -249,29 +250,25 @@ fn finite_box(a: Box3) -> bool {
 }
 
 impl ProceduralSweep {
-    /// Each station span's turn constants, derived once per definition.
-    fn span_turns(&self) -> &[SpanTurn] {
-        self.checked_cache.spans.get_or_init(|| {
-            self.stations
-                .windows(2)
-                .map(|pair| match *pair {
-                    [a, b] => SpanTurn {
-                        tau_box: span_tau_box(a, b),
-                        tau: span_tau(a, b).ok(),
-                    },
-                    // windows(2) gives pairs only; an unreachable arm refuses on use
-                    _ => SpanTurn {
-                        tau_box: Ivl::whole(),
-                        tau: None,
-                    },
-                })
+    /// Station span `index`'s turn constants, derived on its first use and kept (a long
+    /// coil has many spans, and a face or a query meets few of them); `None` past the
+    /// spans. `[a, b]` is that span, as [`Self::checked_span_index`] reads it.
+    fn span_turn(&self, index: usize, a: f64, b: f64) -> Option<SpanTurn> {
+        let slots = self.checked_cache.spans.get_or_init(|| {
+            (0..self.stations.len().saturating_sub(1))
+                .map(|_| OnceLock::new())
                 .collect()
-        })
+        });
+        let slot = slots.get(index)?;
+        Some(*slot.get_or_init(|| SpanTurn {
+            tau_box: span_tau_box(a, b),
+            tau: span_tau(a, b).ok(),
+        }))
     }
 
     /// [`span_tau_box`] of span `index`, `[a, b]`, from the kept table.
     fn span_tau_box_at(&self, index: usize, a: f64, b: f64) -> Ivl {
-        match self.span_turns().get(index) {
+        match self.span_turn(index, a, b) {
             Some(span) => span.tau_box,
             None => span_tau_box(a, b),
         }
@@ -280,7 +277,7 @@ impl ProceduralSweep {
     /// [`span_tau`] of span `index`, `[a, b]`, from the kept table; a refusal is
     /// derived afresh, so it carries the same error.
     fn span_tau_at(&self, index: usize, a: f64, b: f64) -> Result<f64> {
-        match self.span_turns().get(index).and_then(|span| span.tau) {
+        match self.span_turn(index, a, b).and_then(|span| span.tau) {
             Some(tau) => Ok(tau),
             None => span_tau(a, b),
         }
@@ -780,8 +777,13 @@ mod tests {
         let kept = bits(&definition);
         let spans = definition.checked_cache.spans.get().unwrap();
         assert_eq!(spans.len(), stations.len() - 1);
-        for (span, pair) in spans.iter().zip(stations.windows(2)) {
+        for (index, pair) in stations.windows(2).enumerate() {
             let (a, b) = (pair[0], pair[1]);
+            let span = definition.span_turn(index, a, b).unwrap();
+            assert_eq!(
+                spans[index].get().copied().map(|s| s.tau_box),
+                Some(span.tau_box)
+            );
             assert_eq!(span.tau_box, span_tau_box(a, b));
             assert_eq!(
                 span.tau.map(f64::to_bits),
