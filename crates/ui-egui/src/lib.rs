@@ -32,6 +32,7 @@ pub mod control_job;
 mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
+pub mod creative_mode;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
@@ -3704,6 +3705,8 @@ impl SolveApp {
         }
         if render_workspace::active(self) {
             render_ui::overlays(self, ui);
+        } else {
+            creative_mode::overlays(self, ui);
         }
         // Measure current persistent sketch chrome before the host's early
         // confirmation pair. Its answer still precedes this frame's dialog.

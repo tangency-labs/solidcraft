@@ -1,0 +1,7 @@
+{
+  "en": {
+    "prefs.creative_mode": "Creative Mode",
+    "prefs.creative_mode.section": "Creative Mode",
+    "prefs.creative_mode_help": "Shape the model directly: pulling a flat face applies on release without a window, and the commands that fit the selection float above it."
+  }
+}
