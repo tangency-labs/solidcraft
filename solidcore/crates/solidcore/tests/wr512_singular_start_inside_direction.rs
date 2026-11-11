@@ -141,14 +141,16 @@ fn default_kernel_refuses_the_arc_round() {
     assert_refused(r);
 }
 
-/// The default kernel with the flag: the C++ body with the fork's line, to 1e-9 (the gate's
-/// tolerance; the same construction and integration on both sides).
+/// The default kernel with the flag: the C++ body with the fork's line, to 1e-8. The default
+/// takes the arc round's torus span from its start section (WR-568), which the pinned C++
+/// does not: 9531.3100487 against 9531.3100143, 3.6e-9 relative; with upstream's span the
+/// two agree to 1e-12.
 #[test]
 fn the_flag_builds_the_arc_round() {
     let mut k = Kernel::default();
     k.fixes.ssi_singular_start_inside_direction = true;
     let (mut b, r) = both_rounds(&mut k);
-    assert_built(&mut k, &mut b, r, 1e-9);
+    assert_built(&mut k, &mut b, r, 1e-8);
 }
 
 /// Every fix with the blend corner End: the arc round's end on the front round, where the
