@@ -483,6 +483,16 @@ fn cases() -> Vec<Case> {
             vec![spot([20.0, 15.0, 20.0], DOWN, 20.0, None)],
         )
         .faces(1),
+        // A counterbore for the screw's head: ISO 4762 M4 (dk 7, k 4) plus the 0.5 mm gap.
+        Case::new(
+            "type/counterbore-head-m4/through",
+            block(),
+            json!({"position": [20, 15, 20], "clearance": "M4", "head": "ISO 4762", "name": "H"}),
+            cyl(4.0, 4.5) + cyl(2.25, 15.5),
+            2.25,
+            vec![spot([20.0, 15.0, 20.0], DOWN, 20.0, None)],
+        )
+        .faces(3),
         // Extents: to an object.
         Case::new(
             "extent/to-face/bottom",
@@ -1023,6 +1033,24 @@ fn a_refused_hole_names_the_value_at_fault() {
     assert!(e.contains("`fit` must be close, normal or loose, not `tight`") && !e.contains("M1.6"), "{e}");
     let e = refused(json!({"clearance": "M100"}));
     assert!(e.contains("no clearance hole for `M100`") && e.contains("M1.6 to M64"), "{e}");
+    // A counterbore for a screw's head: the standard, the size in it, the screw size, the type
+    // and the gap are each named when they are at fault.
+    let e = refused(json!({"clearance": "M4", "head": "DIN 912"}));
+    assert!(e.contains("no head standard `DIN 912`") && e.contains("ISO 4762") && e.contains("ISO 7380-1"), "{e}");
+    let e = refused(json!({"clearance": "M2.5", "head": "ISO 7380-1"}));
+    assert!(e.contains("no ISO 7380-1 head for `M2.5`") && e.contains("M3 to M16"), "{e}");
+    let e = refused(json!({"diameter": 4.5, "head": "ISO 4762"}));
+    assert!(e.contains("`head` needs `clearance`"), "{e}");
+    let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "type": "countersink", "cs_diameter": 9}));
+    assert!(e.contains("`head` needs `type: counterbore`"), "{e}");
+    let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "head_gap": -1}));
+    assert!(e.contains("`head_gap` must be 0 to 7 mm") && e.contains("not -1"), "{e}");
+    let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "head_gap": "width"}));
+    assert!(e.contains("head_gap:"), "{e}");
+    let e = refused(json!({"clearance": "M4", "head": "ISO 4762", "cb_depth": true}));
+    assert!(e.contains("`cb_depth` must be a number or an expression"), "{e}");
+    let e = refused(json!({"clearance": "M4", "head": 4762}));
+    assert!(e.contains("`head` must be a text"), "{e}");
     for angle in [json!(0), json!(200), json!(-90), json!(0.1)] {
         let e = refused(json!({"diameter": 3, "type": "countersink", "cs_diameter": 6, "cs_angle": angle}));
         assert!(e.contains("the countersink angle must be more than 0.115° and less than 180°") && !e.contains("wider"), "{angle}: {e}");

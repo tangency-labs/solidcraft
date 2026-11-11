@@ -1,0 +1,3110 @@
+{
+ "cases": [
+  {
+   "name": "issue1463_rig726_s1_ccw_pz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_ccw_pz_180",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 180.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_ccw_pz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_ccw_mz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_ccw_mz_180",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 180.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_ccw_mz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_cw_pz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_cw_pz_180",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 180.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_cw_pz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_cw_mz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_cw_mz_180",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 180.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1_cw_mz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       10.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       10.0
+      ],
+      "end": [
+       18.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       22.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       22.0
+      ],
+      "end": [
+       30.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8.0,
+       0.0,
+       10.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1em3_ccw_pz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1em3_ccw_pz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1em3_ccw_mz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1em3_ccw_mz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1em3_cw_pz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.01
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1em3_cw_pz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.01
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1em3_cw_mz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.01
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1em3_cw_mz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.01
+      ],
+      "end": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.018000000000000002,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.022
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.022
+      ],
+      "end": [
+       0.03,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.03,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       0.008,
+       0.0,
+       0.0
+      ],
+      "end": [
+       0.008,
+       0.0,
+       0.01
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1e3_ccw_pz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1e3_ccw_pz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1e3_ccw_mz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1e3_ccw_mz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       0.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1e3_cw_pz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       10000.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1e3_cw_pz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       10000.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1e3_cw_mz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       10000.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig726_s1e3_cw_mz_90",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       10000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       10000.0
+      ],
+      "end": [
+       18000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       18000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       22000.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       22000.0
+      ],
+      "end": [
+       30000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       30000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       0.0
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       8000.0,
+       0.0,
+       0.0
+      ],
+      "end": [
+       8000.0,
+       0.0,
+       10000.0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 90.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_drilled_hole_pz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       2,
+       0,
+       5
+      ],
+      "end": [
+       2,
+       0,
+       1
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       2,
+       0,
+       1
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_drilled_hole_pz_120",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       2,
+       0,
+       5
+      ],
+      "end": [
+       2,
+       0,
+       1
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       2,
+       0,
+       1
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 120.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_drilled_hole_mz_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       2,
+       0,
+       5
+      ],
+      "end": [
+       2,
+       0,
+       1
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       2,
+       0,
+       1
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_drilled_hole_mz_120",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       2,
+       0,
+       5
+      ],
+      "end": [
+       2,
+       0,
+       1
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       2,
+       0,
+       1
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     -1
+    ],
+    "angle_deg": 120.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1463_rig4008_tool_ccw_180",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       2.6,
+       20.0,
+       2
+      ],
+      "end": [
+       9.6,
+       20.0,
+       2
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       9.6,
+       20.0,
+       2
+      ],
+      "end": [
+       9.6,
+       20.0,
+       23
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       9.6,
+       20.0,
+       23
+      ],
+      "end": [
+       2.6,
+       20.0,
+       23
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       2.6,
+       20.0,
+       23
+      ],
+      "end": [
+       2.6,
+       20.0,
+       2
+      ]
+     }
+    ],
+    "base": [
+     0,
+     20,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 180.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1463_rig4008_tool_cw_180",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1463; SmPrimitiveCreation::CreateRotationalSweep",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "line",
+      "start": [
+       2.6,
+       20.0,
+       23
+      ],
+      "end": [
+       9.6,
+       20.0,
+       23
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       9.6,
+       20.0,
+       23
+      ],
+      "end": [
+       9.6,
+       20.0,
+       2
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       9.6,
+       20.0,
+       2
+      ],
+      "end": [
+       2.6,
+       20.0,
+       2
+      ]
+     },
+     {
+      "kind": "line",
+      "start": [
+       2.6,
+       20.0,
+       2
+      ],
+      "end": [
+       2.6,
+       20.0,
+       23
+      ]
+     }
+    ],
+    "base": [
+     0,
+     20,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "angle_deg": 180.0,
+    "cap": true
+   }
+  }
+ ]
+}

@@ -1308,7 +1308,7 @@ fn edge_round_actions_keep_the_picked_body() {
             let mut unscoped = p.clone();
             unscoped.as_object_mut().unwrap().remove("body");
             let err = s.scratch().execute(id, &unscoped).unwrap_err().to_string();
-            assert!(err.contains("edges meet"), "{err}");
+            assert!(err.contains("[10, 0, 20] lies on edges of 2 bodies, Plate and Block"), "{err}");
             perform(&mut s.scratch(), &a.act, &errors(&s)).unwrap();
             tried += 1;
         }

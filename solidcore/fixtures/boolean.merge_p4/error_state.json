@@ -1,0 +1,212 @@
+{
+  "cases": [
+    {
+      "name": "null-error-surviving-primary-kind0",
+      "inputs": {
+        "primary": [
+          0,
+          2,
+          3,
+          4,
+          1,
+          2,
+          3
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "null-error-surviving-other-kind0",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          0,
+          2,
+          3,
+          4,
+          1,
+          2,
+          3
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "null-error-surviving-primary-kind1",
+      "inputs": {
+        "primary": [
+          1,
+          2,
+          3,
+          4,
+          1,
+          2,
+          3
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "null-error-surviving-other-kind1",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          1,
+          2,
+          3,
+          4,
+          1,
+          2,
+          3
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "null-error-surviving-primary-kind2",
+      "inputs": {
+        "primary": [
+          2,
+          2,
+          3,
+          4,
+          1,
+          2,
+          3
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "null-error-surviving-other-kind2",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          2,
+          2,
+          3,
+          4,
+          1,
+          2,
+          3
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "null-error-surviving-primary-kind3",
+      "inputs": {
+        "primary": [
+          3,
+          2,
+          3,
+          4,
+          1,
+          2,
+          3
+        ],
+        "other": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    },
+    {
+      "name": "null-error-surviving-other-kind3",
+      "inputs": {
+        "primary": [
+          -1,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        "other": [
+          3,
+          2,
+          3,
+          4,
+          1,
+          2,
+          3
+        ],
+        "operation": 1,
+        "distinct_contexts": true,
+        "caller_lock": true
+      }
+    }
+  ]
+}

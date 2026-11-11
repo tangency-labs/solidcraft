@@ -9,8 +9,10 @@
 //!
 //! Update Links from the toolbar runs the same way (#5329): it reads every linked design again
 //! and rebuilds it, which takes a while in an assembly of many parts, so the overlay names the
-//! linked design being read and its rebuild's progress.
+//! linked design being read and its rebuild's progress. Insert Design reads the saved design it
+//! inserts the same way (#11593): a large one rebuilds for a while.
 
+use crate::i18n::LocaleNames as _;
 use crate::ui_kit::{Container, Surface};
 #[cfg(not(target_arch = "wasm32"))]
 use solidcraft_engine::geom::prelude::*;
@@ -35,6 +37,9 @@ pub enum Kind {
     Open,
     /// Insert CAD bodies, meshes or sketch drawing geometry into the active design.
     Insert,
+    /// Insert a saved design into the active design as a linked component
+    /// (`component.insert_design`): reading a large design takes a while (#11593).
+    InsertDesign,
     /// Open a design an earlier run autosaved before it closed.
     Recover { id: String, dir: Option<String> },
     /// Export a snapshot of the current design without adopting the worker's session.
@@ -70,6 +75,10 @@ pub struct Request {
     /// The level the caller's own `param_check` named and the warnings it found before the run:
     /// the reply says both (#9184).
     pub(crate) param_check: Option<(solidcraft_engine::schema::ParamCheck, Vec<String>)>,
+    /// The status line once the file is in, in place of the usual one.
+    pub note: Option<String>,
+    /// Which operation it is ([`crate::operations::serial`]).
+    pub serial: u64,
 }
 
 impl Request {
@@ -85,10 +94,13 @@ impl Request {
             chat_turn: None,
             mesh: false,
             param_check: None,
+            note: None,
+            serial: crate::operations::serial(),
         }
     }
+    /// It adds what it reads to the active design.
     fn insert(&self) -> bool {
-        self.kind == Kind::Insert
+        matches!(self.kind, Kind::Insert | Kind::InsertDesign)
     }
     /// It reads files the active design already names, and changes that design in place.
     fn reads_again(&self) -> bool {
@@ -106,6 +118,7 @@ impl Request {
             Kind::Insert if self.mesh || solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
+            Kind::InsertDesign => ("component.insert_design", self.params()),
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
             Kind::UpdateLinks => ("component.update_links", Value::Object(self.options.clone())),
@@ -270,6 +283,13 @@ impl FileLoad {
     }
     /// Signal cancellation, release the import slot and drop queued requests.
     pub fn cancel(&mut self) {
+        self.cancel_running();
+        for q in self.queued.drain(..) {
+            q.answer(Err("file operation cancelled".into()));
+        }
+    }
+    /// Signal the running request's cancellation and release its slot; queued requests go on.
+    pub(crate) fn cancel_running(&mut self) {
         if let Some(r) = &self.running {
             r.progress.cancel();
         }
@@ -281,10 +301,60 @@ impl FileLoad {
         {
             r.request.answer(Err("file operation cancelled".into()));
         }
-        for q in self.queued.drain(..) {
+    }
+    /// Drop the `index`th queued request (from 0), answering it as cancelled.
+    pub(crate) fn cancel_queued(&mut self, index: usize) {
+        if let Some(q) = self.queued.remove(index) {
             q.answer(Err("file operation cancelled".into()));
         }
     }
+    /// The operations panel's view of the requests: the running one (if any), then the queued
+    /// ones in the order they will run. Each is its command, its file's name, how far it is
+    /// (`done` of `total`, when that is known) and whether it was cancelled.
+    pub(crate) fn operations(&self) -> Vec<FileOperation> {
+        let entry = |request: &Request| FileOperation {
+            serial: request.serial,
+            command: request.command().0,
+            name: match &request.kind {
+                Kind::Recover { .. } => request.path.clone(),
+                _ => std::path::Path::new(&request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
+            },
+            steps: None,
+            queued: true,
+            cancelled: false,
+        };
+        let running = self.running.as_ref().map(|r| FileOperation { steps: steps(r), queued: false, cancelled: r.cancelled(), ..entry(&r.request) });
+        running.into_iter().chain(self.queued.iter().map(entry)).collect()
+    }
+}
+
+/// A file operation as the operations panel shows it ([`FileLoad::operations`]).
+#[derive(Clone, Debug)]
+pub(crate) struct FileOperation {
+    pub serial: u64,
+    pub command: &'static str,
+    pub name: String,
+    pub steps: Option<(usize, usize)>,
+    pub queued: bool,
+    pub cancelled: bool,
+}
+
+/// How far a running request is: the long work inside a feature (a large STEP file read), the
+/// linked designs read again, or the features rebuilt; `None` when that is not known yet.
+fn steps(r: &Running) -> Option<(usize, usize)> {
+    if r.request.kind == Kind::UpdateLinks
+        && let Some((_, i, n)) = r.progress.item()
+    {
+        return Some((i, n));
+    }
+    // As the card reads them: in the web app a design opened a few features a frame counts them
+    // itself ([`Running::features`], [`Running::work`]).
+    let phase = r.phase.load(Ordering::Relaxed);
+    if let Some((_, d, t)) = r.work().filter(|(_, d, t)| r.request.kind == Kind::ExportDxf || (phase == 0 && d < t)) {
+        return Some((d, t));
+    }
+    let (done, total) = r.features();
+    (total > 0).then_some(if phase == 0 { (done, total) } else { (total, total) })
 }
 
 pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
@@ -328,6 +398,17 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 app.insert_path_with(&request.path, &request.options, request.mesh);
                 Ok(Value::Null)
             }
+            Kind::InsertDesign => {
+                let (command, params) = request.command();
+                let r = solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params));
+                if r.is_ok() {
+                    app.fit_view();
+                    if let Some(note) = &request.note {
+                        app.set_status(note.clone(), false);
+                    }
+                }
+                r
+            }
             Kind::Open => {
                 app.open_path_with(&request.path, &request.options);
                 // Opened in place of the blank tab it made, with no switch to it.
@@ -346,7 +427,7 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 let (command, params) = request.command();
                 let r = app.run(command, params);
                 if r.is_ok() && !request.path.is_empty() {
-                    app.set_status(crate::i18n::format("ui.saved_to", &[("path", &request.path)]), false);
+                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
                 }
                 r
             }
@@ -479,6 +560,8 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         chat_turn: req.chat_turn,
         mesh: false,
         param_check,
+        note: None,
+        serial: crate::operations::serial(),
     };
     let _ = begin_request(app, request);
     None
@@ -882,10 +965,8 @@ fn step_opening(
 /// load ended meanwhile (`stop`).
 #[cfg(not(target_arch = "wasm32"))]
 fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -> bool) -> Option<egui::ColorImage> {
-    use solidcraft_engine::{
-        geom::Aabb3,
-        render::{Camera, Rgb, Scene, SceneMesh, StandardView},
-    };
+    use solidcraft_engine::geom::Aabb3;
+    use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
     let mut scene = Scene::default();
     let mut bounds = Aabb3::EMPTY;
     let mut triangles = 0usize;
@@ -906,7 +987,7 @@ fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -
     }
     let mut camera = Camera::default();
     camera.set_view(StandardView::Iso);
-    camera.fit(&bounds);
+    camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
     scene.radius = bounds.diagonal();
     if stop() || !preview_work_fits(&scene, &camera) {
         return None;
@@ -917,10 +998,8 @@ fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -
 #[cfg(not(target_arch = "wasm32"))]
 fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::ColorImage> {
     use solidcore_record::Vec3;
-    use solidcraft_engine::{
-        geom::{Aabb3, Mesh},
-        render::{Camera, Rgb, Scene, SceneMesh, StandardView},
-    };
+    use solidcraft_engine::geom::{Aabb3, Mesh};
+    use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
     let mut scene = Scene::default();
     let mut bounds = Aabb3::EMPTY;
     for cached in preview.meshes {
@@ -953,7 +1032,7 @@ fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::
     }
     let mut camera = Camera::default();
     camera.set_view(StandardView::Iso);
-    camera.fit(&bounds);
+    camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
     scene.radius = bounds.diagonal();
     if !preview_work_fits(&scene, &camera) {
         return None;
@@ -963,7 +1042,7 @@ fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::
 
 /// The preview picture, drawn on the GPU by the renderer the app installs (none: no picture).
 #[cfg(not(target_arch = "wasm32"))]
-fn preview_image(scene: &solidcraft_engine::render::Scene, camera: &solidcraft_engine::render::Camera) -> Option<egui::ColorImage> {
+fn preview_image(scene: &solidcraft_viewport::Scene, camera: &solidcraft_viewport::Camera) -> Option<egui::ColorImage> {
     match solidcraft_engine::capture::rgba(scene, camera, 320, 200) {
         Ok(picture) => Some(egui::ColorImage::from_rgba_unmultiplied([320, 200], &picture.rgba)),
         Err(e) => {
@@ -977,7 +1056,7 @@ fn preview_image(scene: &solidcraft_engine::render::Scene, camera: &solidcraft_e
 /// not monopolize the file worker or a software GPU. Counts each triangle's pixel box at twice the
 /// picture's size.
 #[cfg(not(target_arch = "wasm32"))]
-fn preview_work_fits(scene: &solidcraft_engine::render::Scene, camera: &solidcraft_engine::render::Camera) -> bool {
+fn preview_work_fits(scene: &solidcraft_viewport::Scene, camera: &solidcraft_viewport::Camera) -> bool {
     let mut pixels = 0.0;
     let projection = camera.view_proj(640.0 / 400.0, scene.radius.max(1.0));
     for body in &scene.meshes {
@@ -1114,7 +1193,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         match job {
             Ok(made) if request.kind == Kind::ExportDxf => {
                 if !request.path.is_empty() {
-                    app.set_status(crate::i18n::format("ui.saved_to", &[("path", &request.path)]), false);
+                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
                 }
                 request.answer(Ok(made.result));
             }
@@ -1134,7 +1213,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 {
                     panel.depth = app.session.undo.len();
                 }
-                let language = crate::i18n::Locale::for_language(&app.preferences.language);
+                let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
                 app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]), false);
                 // A design it could not read is said as when that was all it was asked.
                 if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
@@ -1190,7 +1269,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 } else {
                     app.set_status(
                         if made.result.get("read_only").and_then(Value::as_bool) == Some(true) {
-                            crate::i18n::tr("document.opened_read_only").to_string()
+                            solidcraft_ui_text::tr("document.opened_read_only").to_string()
                         } else if let Some(summary) = crate::timeline::import_status(app, &made.result) {
                             summary
                         } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
@@ -1198,7 +1277,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                         } else {
                             // Built here, outside the window's language scope: in the language
                             // chosen, as the other statuses of this file are.
-                            let language = crate::i18n::Locale::for_language(&app.preferences.language);
+                            let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
                             // An opened design is named as its tab names it, an inserted one as
                             // its component is named.
                             let name = if request.insert() {
@@ -1224,6 +1303,9 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     );
                     if !request.insert() {
                         app.say_newer_file();
+                    }
+                    if let Some(note) = &request.note {
+                        app.set_status(note.clone(), false);
                     }
                 }
                 request.answer(Ok(made.result));
@@ -1295,9 +1377,9 @@ fn load_steps(
         ["file_load.step_read", "file_load.step_rebuild", "file_load.step_show"]
     };
     let count = |key: &str, done: usize, total: usize| {
-        Some(crate::i18n::format(key, &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())]))
+        Some(solidcraft_ui_text::format(key, &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())]))
     };
-    let percent = |d: usize, t: usize| Some(crate::i18n::format("file_load.step_percent", &[("percent", &(d * 100 / t.max(1)).to_string())]));
+    let percent = |d: usize, t: usize| Some(solidcraft_ui_text::format("file_load.step_percent", &[("percent", &(d * 100 / t.max(1)).to_string())]));
     let (current, detail) = match (phase, work) {
         (1.., _) => (2, None),
         (_, Some(("reading", d, t))) if cad => (0, percent(d, t)),
@@ -1320,9 +1402,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::Recover { .. } => r.request.path.clone(),
         // The linked design being read again, once the worker is on one.
         Kind::UpdateLinks => match r.progress.item() {
-            Some((name, i, n)) => {
-                crate::i18n::format("file_load.link_item", &[("name", &name), ("done", &(i + 1).min(n).to_string()), ("total", &n.to_string())])
-            }
+            Some((name, i, n)) => solidcraft_ui_text::format(
+                "file_load.link_item",
+                &[("name", &name), ("done", &(i + 1).min(n).to_string()), ("total", &n.to_string())],
+            ),
             None => app.session.doc.name.clone(),
         },
         Kind::ReloadCloud => app.session.doc.name.clone(),
@@ -1360,12 +1443,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Anchored at its top: the card grows downwards (the saved preview) and Cancel stays put.
     let top = egui::pos2(centre.x, (centre.y - 120.0).max(cover.top() + 8.0));
     let title = if cancelled && export {
-        crate::i18n::tr_label("dxf.cancelling")
+        solidcraft_ui_text::tr_label("dxf.cancelling")
     } else if cancelled {
-        crate::i18n::tr("file_load.waiting")
+        solidcraft_ui_text::tr("file_load.waiting")
     } else {
-        crate::i18n::tr(match r.request.kind {
-            Kind::Insert => "file_load.inserting",
+        solidcraft_ui_text::tr(match r.request.kind {
+            Kind::Insert | Kind::InsertDesign => "file_load.inserting",
             Kind::Open => "file_load.opening",
             Kind::Recover { .. } => "file_load.recovering",
             Kind::ExportDxf => "dxf.exporting",
@@ -1374,7 +1457,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         })
     };
     let icon = match r.request.kind {
-        Kind::Insert => "import",
+        Kind::Insert | Kind::InsertDesign => "import",
         Kind::Open => "open",
         Kind::Recover { .. } => "restore",
         Kind::ExportDxf => "export",
@@ -1382,50 +1465,50 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::ReloadCloud => "import",
     };
     let (closed, action) = ui_kit::Window::new(card_id, icon, title)
-        .cards(((cover.width() - 16.0) / crate::theme::Tokens::get().form_card_width).clamp(0.5, 1.3))
+        .cards(((cover.width() - 16.0) / solidcraft_theme::Tokens::get().form_card_width).clamp(0.5, 1.3))
         .placed(egui::Align2::CENTER_TOP, top)
-        .actions("", crate::i18n::tr("ui.cancel"), None)
+        .actions("", solidcraft_ui_text::tr("ui.cancel"), None)
         .show(ctx, true, |ui| {
             ui_kit::text(ui, &format!("{name}…"), ui_kit::Text::Report("name", false));
             if let Some(preview) = r.preview.as_ref().filter(|_| !cancelled) {
                 let w = ui.available_width();
                 ui.image((preview.id(), egui::vec2(w, w * 200.0 / 320.0)));
                 let note = match r.built {
-                    Some(built) => crate::i18n::format("file_load.built", &[("built", &built.to_string()), ("total", &total.to_string())]),
-                    None => crate::i18n::tr("file_load.preview_note").to_string(),
+                    Some(built) => solidcraft_ui_text::format("file_load.built", &[("built", &built.to_string()), ("total", &total.to_string())]),
+                    None => solidcraft_ui_text::tr("file_load.preview_note").to_string(),
                 };
                 ui_kit::text(ui, &note, ui_kit::Text::Note("preview"));
             }
             // An open or an import goes through three steps the card lists; the other operations
             // (and a cancelled one) say what they are doing in a line.
-            let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::Recover { .. });
+            let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::InsertDesign | Kind::Recover { .. });
             if stepped {
                 let cad = matches!(r.request.kind, Kind::Open | Kind::Insert)
                     && (solidcraft_engine::io::is_step_path(&r.request.path) || solidcraft_engine::io::is_iges_path(&r.request.path));
                 let (labels, current, detail) = load_steps(cad, phase, r.progress.work(), (done, total));
-                let labels = labels.map(crate::i18n::tr);
+                let labels = labels.map(solidcraft_ui_text::tr);
                 ui_kit::steps(ui, "file_load", &labels, current, detail.as_deref());
             } else {
                 let status = if cancelled && export {
-                    crate::i18n::tr_label("dxf.cancel_wait").to_string()
+                    solidcraft_ui_text::tr_label("dxf.cancel_wait").to_string()
                 } else if cancelled {
-                    crate::i18n::tr("file_load.stopping").to_string()
+                    solidcraft_ui_text::tr("file_load.stopping").to_string()
                 } else {
                     match (phase, work) {
                         (_, work) if r.request.kind == Kind::ExportDxf => crate::dialogs_view_dxf::progress_text(work),
                         (_, Some(("reading", d, t))) => {
-                            crate::i18n::format("file_load.reading_percent", &[("percent", &(d * 100 / t.max(1)).to_string())])
+                            solidcraft_ui_text::format("file_load.reading_percent", &[("percent", &(d * 100 / t.max(1)).to_string())])
                         }
                         (_, Some((_, d, t))) => {
-                            crate::i18n::format("file_load.converting", &[("done", &(d + 1).to_string()), ("total", &t.to_string())])
+                            solidcraft_ui_text::format("file_load.converting", &[("done", &(d + 1).to_string()), ("total", &t.to_string())])
                         }
-                        (1, _) => crate::i18n::tr("file_load.preparing_view").to_string(),
-                        (2, _) => crate::i18n::tr("file_load.preparing_thumbnail").to_string(),
-                        _ if total > 0 => crate::i18n::format(
+                        (1, _) => solidcraft_ui_text::tr("file_load.preparing_view").to_string(),
+                        (2, _) => solidcraft_ui_text::tr("file_load.preparing_thumbnail").to_string(),
+                        _ if total > 0 => solidcraft_ui_text::format(
                             "file_load.rebuilding",
                             &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())],
                         ),
-                        _ => crate::i18n::tr("file_load.reading").to_string(),
+                        _ => solidcraft_ui_text::tr("file_load.reading").to_string(),
                     }
                 };
                 ui_kit::steps(ui, "file_load", &[status.as_str()], 0, None);
@@ -1458,7 +1541,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         // The worker stops at its next cancellation checkpoint; its scratch design and
         // result channels are isolated from any file operation started afterwards.
         app.file_load.cancel();
-        app.set_status(if export { crate::i18n::tr_label("dxf.cancelled") } else { "file operation cancelled" }, false);
+        app.set_status(if export { solidcraft_ui_text::tr_label("dxf.cancelled") } else { "file operation cancelled" }, false);
     }
 }
 
@@ -1470,6 +1553,7 @@ mod tests {
     /// on the last once the parts are done; a design's steps follow its features.
     #[test]
     fn the_card_follows_an_import_through_its_three_steps() {
+        crate::i18n::install();
         let step = |phase, work, features| {
             let (_, current, detail) = load_steps(true, phase, work, features);
             (current, detail)
@@ -1660,7 +1744,7 @@ mod tests {
             let id = h.app.session.active_sketch.unwrap();
             assert_eq!(h.app.session.model.state().sketch(id).unwrap().plane, solidcore_record::Plane::XY);
             assert_eq!(h.app.session.doc.sketch(id).unwrap().curves.len(), 2);
-            h.app.cam.set_view(solidcraft_engine::render::StandardView::Top);
+            h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
             h.app.fit_view();
             h.run(&json!([{ "shot": format!("insert-{file}") }])).unwrap();
             h.app.drop_path(&path);
@@ -1814,6 +1898,7 @@ mod tests {
                 positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0].into(),
                 triangles: vec![0, 1, 2].into(),
                 color: Some([0.8, 0.2, 0.1]),
+                corner_normals: Default::default(),
             }],
         };
         let picture = saved_picture(preview).unwrap();
@@ -1830,6 +1915,7 @@ mod tests {
                 positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0].into(),
                 triangles: (0..10_000).flat_map(|_| [0, 1, 2]).collect(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         };
         assert!(saved_picture(preview).is_none());

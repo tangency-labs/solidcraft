@@ -38,11 +38,12 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
             let axis = [normal.x, normal.y, normal.z].iter().position(|c| c.abs() > 0.5);
             (pl.origin, normal, axis)
         }
-        // A construction plane (name or id): where it is now.
+        // A construction plane (name or id): where it stands in the world, its component placed,
+        // as the viewport draws it. The cut and the reply are in the world.
         Some(v @ (Value::String(_) | Value::Number(_))) => {
             let r = super::features::plane_param(s, Some(v), cmd)?;
             let solidcraft_doc::PlaneRef::Construction { feature } = &r else { return Err(bad(cmd, "`plane` must be a plane")) };
-            let st = s.model.state();
+            let st = s.world_state()?;
             let c = st
                 .construct
                 .iter()

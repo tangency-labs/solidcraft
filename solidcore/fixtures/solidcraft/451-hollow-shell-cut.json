@@ -1,0 +1,452 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/451",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4182",
+ "test": "crates/engine/src/boolean_regression_tests.rs: spherical_shell_cuts_and_joins_a_block_crossing_its_hollow",
+ "summary": "Cutting with a hollow tool, a spherical shell r 18.5 to 40 revolved a full turn from a half ring in XY about the X axis, removed an 8 mm block lying wholly in the hollow, and could not cut a 12 x 8 x 8 block from x = 8 to 20 crossing the inner sphere. The revolve swept the profile's two edges on the axis into zero-area faces joining the spheres at the poles, and the boolean took the tool's void shell as a body of its own. Geometry is the PR test's (the issue's two blocks, plus x = 8 to 50 through both spheres and a join); a last case builds the same shell as a difference of two spheres. Volumes: the block's part inside r = R over its 8 x 8 section is F(R), integrated in closed form (G below, so F = 4*G(4, 4)); cross-checked by Richardson-extrapolated midpoint quadrature (agrees to 3e-10) and against the PR's Simpson values. The half-ring profile's inner arc runs 0 to 180 degrees, against the loop's direction (arcs are counter-clockwise only). The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "block_inside_hollow_cut",
+   "note": "#451 case 1: an 8 mm block centred on the origin (its corners at r 6.93, well inside r 18.5) cut by the revolved shell. The block never meets the shell, so it stays as it is; SolidCraft removed it entirely. Pinned SMLib revolves this two-loop profile into two solid shells, not a solid with a void (WR-442, tangency-labs/solidcore#478), so the case turns on the opt-in fix `revolve_nested_shells_as_cavities`; without it the result matches the C++ one and not the expected values below.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -4.0,
+      -4.0,
+      -4.0
+     ],
+     "size": [
+      8.0,
+      8.0,
+      8.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "shell",
+     "axis_point": [
+      0,
+      0,
+      0
+     ],
+     "axis_dir": [
+      1,
+      0,
+      0
+     ],
+     "angle_deg": 360,
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        18.5,
+        0
+       ],
+       "to": [
+        40.0,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 40.0,
+       "start_deg": 0,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        -40.0,
+        0
+       ],
+       "to": [
+        -18.5,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 18.5,
+       "start_deg": 0,
+       "end_deg": 180
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "shell"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 512.0,
+     "tol": 0.01,
+     "formula": "8^3: the block lies wholly in the hollow (max r = sqrt(48) < 18.5)"
+    }
+   },
+   "fixes": [
+    "revolve_nested_shells_as_cavities"
+   ]
+  },
+  {
+   "name": "block_crossing_inner_sphere_cut",
+   "note": "#451 case 2: a 12 x 8 x 8 block from x = 8 to 20 crossing the inner sphere through its pole (18.5, 0, 0) on the revolve axis, cut by the revolved shell. What remains is the block inside r 18.5, ending in a piece of the inner sphere; SolidCraft could not cut it. Pinned SMLib revolves this two-loop profile into two solid shells, not a solid with a void (WR-442, tangency-labs/solidcore#478), so the case turns on the opt-in fix `revolve_nested_shells_as_cavities`; without it the result matches the C++ one and not the expected values below.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      8.0,
+      -4.0,
+      -4.0
+     ],
+     "size": [
+      12.0,
+      8.0,
+      8.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "shell",
+     "axis_point": [
+      0,
+      0,
+      0
+     ],
+     "axis_dir": [
+      1,
+      0,
+      0
+     ],
+     "angle_deg": 360,
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        18.5,
+        0
+       ],
+       "to": [
+        40.0,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 40.0,
+       "start_deg": 0,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        -40.0,
+        0
+       ],
+       "to": [
+        -18.5,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 18.5,
+       "start_deg": 0,
+       "end_deg": 180
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "shell"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 653.3429089562032,
+     "tol": 0.01,
+     "formula": "F(18.5) - 8*64, F(18.5) = 1165.3429089562, F(R) = int_{-4}^{4} int_{-4}^{4} sqrt(R^2 - y^2 - z^2) dy dz = 4*G(4, 4), G(x, y) = [x*(3R^2 - x^2)*atan(y/s) + y*(3R^2 - y^2)*atan(x/s) + 2*x*y*s - 2R^3*atan(x*y/(R*s))]/6, s = sqrt(R^2 - x^2 - y^2); the inner sphere stays between x = 8 and 20 over the section (sqrt(18.5^2 - 32) = 17.61 > 8, 18.5 < 20)"
+    }
+   },
+   "fixes": [
+    "revolve_nested_shells_as_cavities"
+   ]
+  },
+  {
+   "name": "block_crossing_both_spheres_cut",
+   "note": "The PR test's third cut: the block from x = 8 to 50 crosses both spheres through their poles (18.5, 0, 0) and (40, 0, 0). Two pieces remain, one in the hollow and one beyond r 40. Pinned SMLib revolves this two-loop profile into two solid shells, not a solid with a void (WR-442, tangency-labs/solidcore#478), so the case turns on the opt-in fix `revolve_nested_shells_as_cavities`; without it the result matches the C++ one and not the expected values below.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      8.0,
+      -4.0,
+      -4.0
+     ],
+     "size": [
+      42.0,
+      8.0,
+      8.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "shell",
+     "axis_point": [
+      0,
+      0,
+      0
+     ],
+     "axis_dir": [
+      1,
+      0,
+      0
+     ],
+     "angle_deg": 360,
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        18.5,
+        0
+       ],
+       "to": [
+        40.0,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 40.0,
+       "start_deg": 0,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        -40.0,
+        0
+       ],
+       "to": [
+        -18.5,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 18.5,
+       "start_deg": 0,
+       "end_deg": 180
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "shell"
+    }
+   ],
+   "expect": {
+    "lumps": 2,
+    "volume": {
+     "value": 1301.896263966058,
+     "tol": 0.01,
+     "formula": "[F(18.5) - 8*64] + [50*64 - F(40)], F(18.5) = 1165.3429089562, F(40) = 2551.4466449901, F(R) = int_{-4}^{4} int_{-4}^{4} sqrt(R^2 - y^2 - z^2) dy dz = 4*G(4, 4), G(x, y) = [x*(3R^2 - x^2)*atan(y/s) + y*(3R^2 - y^2)*atan(x/s) + 2*x*y*s - 2R^3*atan(x*y/(R*s))]/6, s = sqrt(R^2 - x^2 - y^2); the outer sphere stays between x = 20 and 50 over the section (sqrt(40^2 - 32) = 39.60)"
+    }
+   },
+   "fixes": [
+    "revolve_nested_shells_as_cavities"
+   ]
+  },
+  {
+   "name": "block_crossing_inner_sphere_join",
+   "note": "The PR test's join: the block from x = 8 to 20 joined with the revolved shell. The result is the shell with its hollow partly filled (still a void, so lumps are not checked). Pinned SMLib revolves this two-loop profile into two solid shells, not a solid with a void (WR-442, tangency-labs/solidcore#478), so the case turns on the opt-in fix `revolve_nested_shells_as_cavities`; without it the result matches the C++ one and not the expected values below.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      8.0,
+      -4.0,
+      -4.0
+     ],
+     "size": [
+      12.0,
+      8.0,
+      8.0
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "shell",
+     "axis_point": [
+      0,
+      0,
+      0
+     ],
+     "axis_dir": [
+      1,
+      0,
+      0
+     ],
+     "angle_deg": 360,
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        18.5,
+        0
+       ],
+       "to": [
+        40.0,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 40.0,
+       "start_deg": 0,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        -40.0,
+        0
+       ],
+       "to": [
+        -18.5,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 18.5,
+       "start_deg": 0,
+       "end_deg": 180
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "block",
+     "b": "shell"
+    }
+   ],
+   "expect": {
+    "volume": {
+     "value": 242214.06723490456,
+     "tol": 0.01,
+     "formula": "4/3*pi*(40^3 - 18.5^3) + F(18.5) - 8*64, F(18.5) = 1165.3429089562, F(R) = int_{-4}^{4} int_{-4}^{4} sqrt(R^2 - y^2 - z^2) dy dz = 4*G(4, 4), G(x, y) = [x*(3R^2 - x^2)*atan(y/s) + y*(3R^2 - y^2)*atan(x/s) + 2*x*y*s - 2R^3*atan(x*y/(R*s))]/6, s = sqrt(R^2 - x^2 - y^2); the block lies inside r 40 (max r = sqrt(432) = 20.78)"
+    }
+   },
+   "fixes": [
+    "precise_properties_body_length_scale",
+    "revolve_nested_shells_as_cavities"
+   ]
+  },
+  {
+   "name": "block_crossing_inner_sphere_cut_by_sphere_difference",
+   "note": "Control: the same cut as block_crossing_inner_sphere_cut, with the shell built as a sphere r 40 minus a sphere r 18.5 instead of a revolve (no revolve poles; a tool with a curved void, which the PR's second fix covers).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      8.0,
+      -4.0,
+      -4.0
+     ],
+     "size": [
+      12.0,
+      8.0,
+      8.0
+     ]
+    },
+    {
+     "op": "sphere",
+     "id": "outer",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 40.0
+    },
+    {
+     "op": "sphere",
+     "id": "inner",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 18.5
+    },
+    {
+     "op": "difference",
+     "id": "shell",
+     "a": "outer",
+     "b": "inner"
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "block",
+     "b": "shell"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 653.3429089562032,
+     "tol": 0.01,
+     "formula": "F(18.5) - 8*64, as block_crossing_inner_sphere_cut"
+    }
+   }
+  }
+ ]
+}
