@@ -1060,7 +1060,7 @@ impl SolidError {
     /// `if (NL_YES == N_...) SER(SM_ERR)`), letting [`SolidError::Unported`] and
     /// [`SolidError::Cancelled`] through. Being replaced by
     /// [`SolidError::nurbs_routine`], which keeps the error as the cause.
-    /// Use as `.map_err(SolidError::nl_ser(OP))`.
+    /// Pass `nl_ser(OP)` to `map_err`.
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
