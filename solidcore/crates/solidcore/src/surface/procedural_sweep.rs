@@ -347,9 +347,11 @@ pub struct ProceduralSweep {
     /// Every mutation of S or its parameter map invalidates this independent slot.
     runtime_allowance: OnceLock<f64>,
     /// Values the checked evaluator derives from the definition alone (its exact
-    /// screw section, each station span's turn constants), cleared with
-    /// `runtime_allowance`: a hit returns the bits a fresh derivation would.
-    checked_cache: checked::CheckedCache,
+    /// screw section, each station span's turn constants, its latest checked turns and
+    /// points), cleared with `runtime_allowance`: a hit returns the bits a fresh
+    /// derivation would. Copies share it until one is edited, since every edit clears it
+    /// first (and replaces it in that copy alone).
+    checked_cache: std::sync::Arc<checked::CheckedCache>,
 }
 
 /// `sum_{n >= 0} (-1)^n c(n) p0 r^n` enclosed, for `0 <= p0`, `0 <= r` and terms that fall
@@ -361,16 +363,20 @@ fn alternating(p0: Ivl, r: Ivl, c: impl Fn(u32) -> Ivl) -> Ivl {
     let mut power = p0;
     let mut sum = Ivl::from(0.0);
     let mut n = 0;
+    // `term` is always `c(n) * power` for the current `n` and `power`: the term tested
+    // against the sum is the one added next, and the one left out is the remainder, each
+    // formed once.
+    let mut term = c(n) * power;
     while n < SERIES_TERMS {
-        let term = c(n) * power;
         sum = if n % 2 == 0 { sum + term } else { sum - term };
         power = power * r;
         n += 1;
-        if (c(n) * power).mag() <= sum.mig() * f64::powi(2.0, -64) {
+        term = c(n) * power;
+        if term.mag() <= sum.mig() * f64::powi(2.0, -64) {
             break;
         }
     }
-    let rest = (c(n) * power).mag();
+    let rest = term.mag();
     sum + Ivl::new(-rest, rest)
 }
 
@@ -548,7 +554,7 @@ impl ProceduralSweep {
             bound: 0.0,
             map: SweepMap::default(),
             runtime_allowance: OnceLock::new(),
-            checked_cache: checked::CheckedCache::default(),
+            checked_cache: std::sync::Arc::default(),
         };
         sweep.bound = sweep.certify()?;
         Ok(sweep)
@@ -747,9 +753,8 @@ impl ProceduralSweep {
                 p.get(1).copied().unwrap_or(Vec3::ZERO),
             )
         };
-        let turn = self.checked_turn_at_side(wt.y, left)?;
+        let (turn, rotation) = self.checked_turn_rotation(wt.y, left)?;
         let (theta, rate) = (turn.theta, turn.rate);
-        let rotation = checked::Rotation::new(theta)?;
         let (first_t, last_t) = (
             self.stations.first().copied().unwrap_or(0.0),
             self.stations.last().copied().unwrap_or(0.0),
@@ -1135,7 +1140,7 @@ impl ProceduralSweep {
                 ..SweepMap::default()
             },
             runtime_allowance: OnceLock::new(),
-            checked_cache: checked::CheckedCache::default(),
+            checked_cache: std::sync::Arc::default(),
         };
         Ok((sweep, net))
     }
@@ -1163,7 +1168,7 @@ impl ProceduralSweep {
                 ..SweepMap::default()
             },
             runtime_allowance: OnceLock::new(),
-            checked_cache: checked::CheckedCache::default(),
+            checked_cache: std::sync::Arc::default(),
         })
     }
 }
@@ -1294,6 +1299,44 @@ impl<'a> DefinitionRef<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The alternating series forms each term once; its sums are, bit for bit, those of the
+    /// loop that formed the next term twice (to test it, then to add it), for atan and for
+    /// the lift's error bound over the spans' range of `tau`.
+    #[test]
+    fn the_alternating_series_forms_each_term_once() {
+        fn twice(p0: Ivl, r: Ivl, c: impl Fn(u32) -> Ivl) -> Ivl {
+            let mut power = p0;
+            let mut sum = Ivl::from(0.0);
+            let mut n = 0;
+            while n < SERIES_TERMS {
+                let term = c(n) * power;
+                sum = if n % 2 == 0 { sum + term } else { sum - term };
+                power = power * r;
+                n += 1;
+                if (c(n) * power).mag() <= sum.mig() * f64::powi(2.0, -64) {
+                    break;
+                }
+            }
+            let rest = (c(n) * power).mag();
+            sum + Ivl::new(-rest, rest)
+        }
+        let same =
+            |a: Ivl, b: Ivl| a.lo.to_bits() == b.lo.to_bits() && a.hi.to_bits() == b.hi.to_bits();
+        for x in [0.0, 1e-300, 1e-9, 0.01, 0.123_456_789, 0.25, 0.4, 0.5] {
+            let xi = Ivl::from(x);
+            let c = |n: u32| reciprocal(2 * n + 1);
+            assert!(same(atan_point(x), twice(xi, xi * xi, c)), "atan {x}");
+        }
+        for tau in [1e-6, 0.01, 0.1, 0.2, 0.5] {
+            let t2 = Ivl::from(tau) * Ivl::from(tau);
+            let c = |n: u32| reciprocal((2 * n + 1) * (2 * n + 3));
+            assert!(
+                same(alternating(t2, t2, c), twice(t2, t2, c)),
+                "kappa {tau}"
+            );
+        }
+    }
 
     /// At a corner of the profile inside a face, the first-order partials and the higher-order
     /// ones take the same profile span, so they give the same tangent.

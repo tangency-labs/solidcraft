@@ -5,7 +5,7 @@
 //! uniform model-space cap. The cap is an accuracy requirement, not an assumed
 //! libm error estimate: every successful call proves it, otherwise it refuses.
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use super::screw_offset::ScrewOffsetSection;
 use super::{Ivl, ProceduralSweep, TAU};
@@ -30,11 +30,78 @@ pub(super) type KeptSection = (ScrewOffsetSection, [f64; 2]);
 /// the value of the same expression a fresh derivation evaluates, so a hit cannot
 /// change an answer; a failed derivation is not kept. Cleared with the runtime
 /// allowance ([`ProceduralSweep::invalidate_runtime_allowance`]).
-#[derive(Clone, Debug, Default)]
+///
+/// It also remembers the latest checked turns and points ([`Memo`]): each is a pure
+/// function of the definition and its exact input bits, kept only when it succeeded, so a
+/// hit returns what the check computes afresh.
+#[derive(Debug, Default)]
 pub(super) struct CheckedCache {
     // (boxed: the section is large, and a definition is kept in every swept face)
     section: OnceLock<Option<Box<KeptSection>>>,
     spans: OnceLock<Vec<SpanTurn>>,
+    /// [`ProceduralSweep::checked_turn_rotation`] by `(t, ending)`.
+    turns: Memo<(u64, bool), (Turn, Rotation)>,
+    /// The points [`ProceduralSweep::verify_runtime_point`] passed, by `(u, v, point)`.
+    points: Memo<[u64; 5], ()>,
+}
+
+/// Slots of a [`Memo`].
+const MEMO_SLOTS: usize = 1024;
+
+/// The latest results of a pure function of exact bits, at most one per slot of a table
+/// filled on first use: a key's slot is chosen from its bits alone (never an address), and a
+/// later key in the same slot replaces it. A hit is a result the function gave for the same
+/// key, so it is the result it gives again; which keys are kept never changes an answer,
+/// only how often it is computed. The evaluator's own refusals are never kept. The table is
+/// locked for each look-up, so a definition shared between threads stays consistent; a
+/// poisoned lock is a miss.
+pub(super) struct Memo<K, V> {
+    slots: Mutex<Option<Box<Slots<K, V>>>>,
+}
+
+/// A [`Memo`]'s table: a key and its result per slot, or nothing yet.
+type Slots<K, V> = [Option<(K, V)>; MEMO_SLOTS];
+
+impl<K, V> Default for Memo<K, V> {
+    fn default() -> Self {
+        Self {
+            slots: Mutex::new(None),
+        }
+    }
+}
+
+impl<K, V> std::fmt::Debug for Memo<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Memo")
+    }
+}
+
+/// The slot of a key whose bits are `bits` (a multiplicative mix, deterministic).
+fn memo_slot(bits: &[u64]) -> usize {
+    let h = bits.iter().fold(0x243f_6a88_85a3_08d3_u64, |h, &b| {
+        (h ^ b).wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(29)
+    });
+    // the top bits are the best mixed; the mask keeps the slot below MEMO_SLOTS
+    usize::try_from(h >> 48).map_or(0, |slot| slot & (MEMO_SLOTS - 1))
+}
+
+impl<K: Copy + PartialEq, V: Copy> Memo<K, V> {
+    fn get(&self, key: K, slot: usize) -> Option<V> {
+        let slots = self.slots.lock().ok()?;
+        match slots.as_ref()?.get(slot)? {
+            Some((k, v)) if *k == key => Some(*v),
+            _ => None,
+        }
+    }
+
+    fn put(&self, key: K, slot: usize, value: V) {
+        if let Ok(mut slots) = self.slots.lock() {
+            let table = slots.get_or_insert_with(|| Box::new([None; MEMO_SLOTS]));
+            if let Some(entry) = table.get_mut(slot) {
+                *entry = Some((key, value));
+            }
+        }
+    }
 }
 
 /// A station span's turn constants: `tan(width / 4)` enclosed, and its scalar candidate
@@ -117,6 +184,7 @@ pub(super) fn powi(x: f64, n: usize) -> Result<f64> {
     verify(candidate, enclosure, enclosure.mag())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Rotation {
     sine: f64,
     cosine: f64,
@@ -134,6 +202,7 @@ impl Rotation {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Turn {
     pub theta: f64,
     pub rate: f64,
@@ -283,6 +352,33 @@ impl ProceduralSweep {
         })
     }
 
+    /// [`Self::checked_turn_at_side`] at `(t, ending)` and the checked [`Rotation`] by its
+    /// angle, kept by the exact bits of `t` ([`CheckedCache`]). `ending` only chooses between
+    /// the two spans that meet at a station (a `t` clamped to the ends included), so it is part
+    /// of the key there alone: strictly inside a span both sides are the same computation.
+    ///
+    /// # Errors
+    /// Those of the turn's check, then of the rotation's.
+    pub(super) fn checked_turn_rotation(&self, t: f64, ending: bool) -> Result<(Turn, Rotation)> {
+        let at_station = match (self.stations.first(), self.stations.last()) {
+            (Some(&first), Some(&last)) if t > first && t < last => {
+                // the comparisons `checked_span_index` takes the span with
+                let at = self.stations.partition_point(|&s| s < t);
+                self.stations.get(at).is_some_and(|&s| s == t)
+            }
+            _ => true,
+        };
+        let key = (t.to_bits(), ending && at_station);
+        let slot = memo_slot(&[key.0, u64::from(key.1)]);
+        if let Some(kept) = self.checked_cache.turns.get(key, slot) {
+            return Ok(kept);
+        }
+        let turn = self.checked_turn_at_side(t, ending)?;
+        let rotation = Rotation::new(turn.theta)?;
+        self.checked_cache.turns.put(key, slot, (turn, rotation));
+        Ok((turn, rotation))
+    }
+
     /// Monotone mathematical turn range, including exact station endpoints.
     pub(crate) fn mathematical_turn_range(&self, range: Ivl) -> Result<Ivl> {
         if !range.lo.is_finite() || !range.hi.is_finite() || range.lo > range.hi {
@@ -352,7 +448,7 @@ impl ProceduralSweep {
     /// Stored records contain no runtime cache and always prove their own cap.
     pub(super) fn invalidate_runtime_allowance(&mut self) {
         let _ = self.runtime_allowance.take();
-        self.checked_cache = CheckedCache::default();
+        self.checked_cache = std::sync::Arc::default();
     }
 
     fn compute_runtime_evaluation_allowance(&self) -> Result<f64> {
@@ -495,6 +591,11 @@ impl ProceduralSweep {
     }
 
     pub(super) fn verify_runtime_point(&self, uv: Point2, candidate: Point3) -> Result<()> {
+        let key = [uv.x, uv.y, candidate.x, candidate.y, candidate.z].map(f64::to_bits);
+        let slot = memo_slot(&key);
+        if self.checked_cache.points.get(key, slot).is_some() {
+            return Ok(());
+        }
         let Some(enclosure) = self.checked_point_enclosure(uv)? else {
             return Ok(());
         };
@@ -502,6 +603,7 @@ impl ProceduralSweep {
         if !error.is_finite() || error > self.runtime_evaluation_allowance()? {
             return Err(bad("screw point exceeds its checked runtime allowance"));
         }
+        self.checked_cache.points.put(key, slot, ());
         Ok(())
     }
 }
@@ -697,5 +799,69 @@ mod tests {
         moved.swap_map();
         assert!(moved.checked_cache.spans.get().is_none());
         assert!(moved.checked_cache.section.get().is_none());
+    }
+
+    /// The kept turns and points are what the checks give afresh, bit for bit, at stations
+    /// (where the side chooses the span), inside spans and past the ends; a point kept as
+    /// passed does not pass another candidate at the same parameters; copies share what is kept
+    /// until one is edited.
+    #[test]
+    fn kept_turns_and_points_are_the_fresh_ones() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::ScrewMotion;
+
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.3, 0.7, 1.2, 1.25];
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 0.3).unwrap();
+        let bits = |(turn, rotation): (Turn, Rotation)| {
+            [
+                turn.theta,
+                turn.rate,
+                turn.tau,
+                rotation.sine,
+                rotation.cosine,
+            ]
+            .map(f64::to_bits)
+        };
+        for t in [-1.0, 0.0, 0.17, 0.3, 0.5, 0.7, 1.2, 1.22, 1.25, 2.0] {
+            for ending in [false, true] {
+                let turn = definition.checked_turn_at_side(t, ending).unwrap();
+                let fresh = bits((turn, Rotation::new(turn.theta).unwrap()));
+                for _ in 0..2 {
+                    let kept = definition.checked_turn_rotation(t, ending).unwrap();
+                    assert_eq!(bits(kept), fresh, "t {t}, ending {ending}");
+                }
+            }
+        }
+        // at a station between spans of unequal widths the two sides differ
+        let [left, right] =
+            [true, false].map(|e| definition.checked_turn_rotation(0.3, e).unwrap());
+        assert_ne!(bits(left), bits(right));
+
+        let uv = Point2::new(0.37, 0.5);
+        let point = definition.evaluate_definition(uv, 0, 0).unwrap()[0][0];
+        definition.verify_runtime_point(uv, point).unwrap();
+        definition.verify_runtime_point(uv, point).unwrap();
+        assert!(definition
+            .verify_runtime_point(uv, point + Vec3::X)
+            .is_err());
+
+        let mut copy = definition.clone();
+        assert!(std::sync::Arc::ptr_eq(
+            &copy.checked_cache,
+            &definition.checked_cache
+        ));
+        copy.swap_map();
+        assert!(!std::sync::Arc::ptr_eq(
+            &copy.checked_cache,
+            &definition.checked_cache
+        ));
+        assert!(definition.checked_cache.spans.get().is_some());
     }
 }
