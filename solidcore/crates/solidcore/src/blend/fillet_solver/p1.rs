@@ -3469,17 +3469,11 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
     let (uv, uv_owner) = eu::uv_trim_curve(b, prim)?;
     let uv_owner = uv_owner
         .filter(|_| uv.is_some())
-        .ok_or(SolidError::blend_missing(
-            OP_T,
-            "the rail edge use's uv trim curve",
-        ))?;
+        .ok_or_else(|| SolidError::blend_missing(OP_T, "the rail edge use's uv trim curve"))?;
     let (orig, orig_owner) = eu::uv_trim_curve(b, mate)?;
     let orig_owner = orig_owner
         .filter(|_| orig.is_some())
-        .ok_or(SolidError::blend_missing(
-            OP_T,
-            "the mate edge use's uv trim curve",
-        ))?;
+        .ok_or_else(|| SolidError::blend_missing(OP_T, "the mate edge use's uv trim curve"))?;
     let mut trim = *trim_interval;
     let missing = |what: &'static str| SolidError::blend_missing(OP_T, what);
     // `SmBSplineCurve::Trim` reads `SmTol::GetZoneTol3d(this)`: for a curve owned by an
