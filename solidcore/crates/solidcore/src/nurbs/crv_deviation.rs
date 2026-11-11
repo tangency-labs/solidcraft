@@ -31,13 +31,13 @@
 //! the count `eval::collapse` gives de Boor's `p` levels) and its computed distance from the
 //! data point rounded up by `γ_8`.
 //!
-//! Deviations: none (no upstream counterpart). Non-rational 3D curves only; their knot
-//! vectors clamped on one domain.
+//! Deviations: none (no upstream counterpart). Non-rational 3D curves only, of degree 1 to
+//! [`MAX_DEGREE`]; their knot vectors clamped on one domain.
 
 use crate::error::{Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::Curve;
-use crate::nurbs::knots::Side;
+use crate::nurbs::knots::{Side, MAX_DEGREE};
 use crate::nurbs::math::{gamma, NOW, NOZ};
 
 const OP: &str = "nurbs::crv_deviation::certified_distance";
@@ -64,6 +64,12 @@ pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result
         ));
     }
     // a NaN distance would be dropped by `f64::max`: every number is checked first
+    if !shaped(c) {
+        return Err(SolidError::invalid_input(
+            OP_FIT,
+            "a degree of 0 or past the most, or knots that do not fit the points",
+        ));
+    }
     if !finite(c)
         || !params.iter().all(|u| u.is_finite())
         || !points
@@ -143,6 +149,14 @@ pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
     Ok(bound)
 }
 
+/// Whether `c`'s degree is one NLib takes (1 to [`MAX_DEGREE`]) and its knots fit its control
+/// points (their count plus the degree plus one), checked before any arithmetic on the
+/// degree.
+fn shaped(c: &Curve) -> bool {
+    let p = c.degree();
+    (1..=MAX_DEGREE).contains(&p) && c.knots().len() == c.cpts().len() + p + 1
+}
+
 /// Whether every control point coordinate and knot of `c` is finite.
 fn finite(c: &Curve) -> bool {
     c.cpts()
@@ -156,6 +170,12 @@ fn finite(c: &Curve) -> bool {
 fn check(c: &Curve) -> Result<()> {
     if !finite(c) {
         return Err(SolidError::invalid_input(OP, "numbers not finite"));
+    }
+    if !shaped(c) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a degree of 0 or past the most, or knots that do not fit the points",
+        ));
     }
     if c.cpts().iter().any(|p| p.w != NOW) {
         return Err(SolidError::invalid_input(OP, "a rational curve"));
@@ -341,6 +361,28 @@ mod tests {
         ));
         assert!(matches!(
             interpolation_bound(&nan, &params, &on[..]),
+            Err(SolidError::InvalidInput { .. })
+        ));
+    }
+
+    #[test]
+    fn an_extreme_degree_is_refused_not_overflowed() {
+        let c = spline(&WAVE, 3);
+        let pw = WAVE
+            .iter()
+            .map(|&[x, y, z]| CPoint::from_point(Vec3::new(x, y, z)))
+            .collect();
+        let wild = Curve::new(pw, usize::MAX, clamped_uniform(6, 3).unwrap()).unwrap();
+        assert!(matches!(
+            certified_distance(&c, &wild),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            certified_distance(&wild, &c),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            interpolation_bound(&wild, &[0.0], &[Vec3::new(0.0, 0.0, 0.0)]),
             Err(SolidError::InvalidInput { .. })
         ));
     }
