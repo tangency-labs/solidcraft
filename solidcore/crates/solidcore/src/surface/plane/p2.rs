@@ -257,7 +257,10 @@ impl Plane {
             if !(s.x == 1.0 && s.y == 1.0 && s.z == 1.0) {
                 // scaling must be isotropic
                 if !are_same(s.x, s.y) || !are_same(s.x, s.z) {
-                    return Err(SolidError::sm_err(OP_XFORM));
+                    return Err(SolidError::surface_failed(
+                        OP_XFORM,
+                        "a plane cannot be scaled non-uniformly",
+                    ));
                 }
             }
         }
@@ -266,7 +269,7 @@ impl Plane {
         let nurb = self
             .base
             .gw_nurb()
-            .ok_or(SolidError::null_pointer(OP_XFORM))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_XFORM, "the plane's NURB"))?;
         let bss = BSplineSurface::from_nurb(nurb.clone(), true);
         let mut plane = None;
         for tol_scale in [1.0, 10.0, 100.0, 1000.0] {
@@ -276,7 +279,9 @@ impl Plane {
             }
         }
         // Something wrong here if scaling a plane does not produce a plane.
-        let plane = plane.ok_or(SolidError::sm_err(OP_XFORM))?;
+        let plane = plane.ok_or_else(|| {
+            SolidError::surface_failed(OP_XFORM, "the transformed NURB is not a plane")
+        })?;
 
         // save the transformed plane parameters
         self.position = plane.position;
@@ -302,7 +307,10 @@ impl Plane {
 
         // Make sure trim domain in inside of natural domain
         if !trim_domain.is_contained_by(&natural_domain, EFF_ZERO_PARAM) {
-            return Err(SolidError::sm_err(OP_TRIM));
+            return Err(SolidError::surface_failed(
+                OP_TRIM,
+                "the trim domain is not inside the natural domain",
+            ));
         }
 
         // See if no trimming necessary - just return
@@ -544,7 +552,9 @@ impl Plane {
         // Force XAxis and YAxis to be nicely perpendicular
         if x_axis.dot(y_axis).abs() > EFF_ZERO {
             y_axis = x_axis.cross(y_axis).cross(x_axis);
-            y_axis = y_axis.unitize().map_err(|_| SolidError::sm_err(OP_NURB))?;
+            y_axis = y_axis.unitize().map_err(|_| {
+                SolidError::surface_failed(OP_NURB, "the y axis is parallel to the x axis")
+            })?;
         }
 
         // The opt-in upstream fix anchors the origin using the final axes, so a nonzero
@@ -608,8 +618,12 @@ impl Plane {
         let b = self
             .base_with_nurb()?
             .calculate_bounding_box(k, uv_domain, &req)?;
-        let mut bbox = b.normal.ok_or(SolidError::null_pointer(OP_PP))?;
-        let mut pbox = b.pseudo.ok_or(SolidError::null_pointer(OP_PP))?;
+        let mut bbox = b
+            .normal
+            .ok_or_else(|| SolidError::surface_missing(OP_PP, "the plane's bounding box"))?;
+        let mut pbox = b
+            .pseudo
+            .ok_or_else(|| SolidError::surface_missing(OP_PP, "the plane's pseudo box"))?;
         // When asked, expand the normal and pseudo boxes by the zone tolerance
         bbox.expand_absolute(zone_tolerance(owner)?);
         pbox.expand_absolute(zone_tolerance(owner)?);
@@ -724,7 +738,9 @@ impl Plane {
         // Arrive here when planes are not parallel.
 
         // unitize lineDir and set OriginCross = avg(midPoint1, midPoint2)
-        let line_dir = line_dir.unitize().map_err(|_| SolidError::sm_err(OP_PP))?;
+        let line_dir = line_dir.unitize().map_err(|_| {
+            SolidError::surface_failed(OP_PP, "the planes' line direction is the zero vector")
+        })?;
         let origin_cross = if this_bounded && !other_bounded {
             origin_this
         } else if !this_bounded && other_bounded {
@@ -1956,5 +1972,45 @@ mod tests {
         let mut db = DatabaseReader::new();
         db.open_for_read(bytes[..100].to_vec(), FileType::Binary);
         assert!(Plane::read_from_db(&mut db, 30).is_err());
+    }
+
+    /// The plane's failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+            (
+                OP_XFORM,
+                SurfaceFailure::Failed("a plane cannot be scaled non-uniformly"),
+                crate::error::SM_ERR,
+            ),
+            (
+                OP_PP,
+                SurfaceFailure::Missing("the plane's bounding box"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                OP_TRIM,
+                SurfaceFailure::Failed("the trim domain is not inside the natural domain"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }
