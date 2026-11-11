@@ -269,9 +269,9 @@ pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<Sessio
     copy.pending_moves.clear();
     // A study sets the values it keys, and the joints' other values follow the solve; joint values
     // set every value they give.
-    let study = choice.study.and_then(|at| Some((copy.doc.assembly.studies.iter().find(|m| m.id == at.id)?, at.step)));
+    let study = choice.study.and_then(|at| at.drawn(&copy.doc.assembly.studies));
     let (want, given): (Vec<(u64, Vec<f64>)>, BTreeSet<(u64, usize)>) = match study {
-        Some((m, step)) => (values_at(&copy, m, f64::from(step.min(m.steps))), keyed(m)),
+        Some((m, step)) => (values_at(&copy, m, f64::from(step)), keyed(m)),
         None => {
             let want: Vec<(u64, Vec<f64>)> =
                 choice.pose.iter().map(|(joint, bits)| (*joint, bits.iter().map(|b| f64::from_bits(*b)).collect())).collect();
@@ -307,7 +307,7 @@ pub fn gone_joints(s: &Session, view: &ResolvedView) -> Vec<u64> {
 /// its study gone, it draws the design's placement.
 pub fn position_reason(s: &Session, view: &ResolvedView) -> Option<String> {
     if let Pose::Study(at) = view.pose.value {
-        let gone = !s.doc.assembly.studies.iter().any(|m| m.id == at.id);
+        let gone = at.drawn(&s.doc.assembly.studies).is_none();
         return gone.then(|| "its position names a motion study the design no longer has".into());
     }
     let gone = gone_joints(s, view).len();

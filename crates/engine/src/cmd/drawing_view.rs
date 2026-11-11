@@ -757,11 +757,11 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
     let (joints, study): (Vec<u64>, Option<StudyStepResult>) = match &view.pose.value {
         Pose::Designed => return PoseResult { setting, drawn: None, skipped: None, study: None },
         Pose::Joints(joints) => (joints.iter().map(|j| j.joint).collect(), None),
-        Pose::Study(at) => match s.doc.assembly.studies.iter().find(|m| m.id == at.id) {
-            Some(m) => {
+        Pose::Study(at) => match at.drawn(&s.doc.assembly.studies) {
+            Some((m, step)) => {
                 // Each joint it keys once, as `motion.play` lists them.
                 let keyed: BTreeSet<u64> = m.keys.iter().map(|k| k.joint).collect();
-                (keyed.into_iter().collect(), Some(StudyStepResult { id: m.id, name: m.name.clone(), step: at.step.min(m.steps) }))
+                (keyed.into_iter().collect(), Some(StudyStepResult { id: m.id, name: m.name.clone(), step }))
             }
             None => (Vec::new(), None),
         },

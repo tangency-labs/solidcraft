@@ -115,6 +115,14 @@ pub struct StudyStep {
     pub step: u32,
 }
 
+impl StudyStep {
+    /// Its study among `studies` and the step a view draws of it: a step past the study's end draws
+    /// its last. None when the design no longer has the study.
+    pub fn drawn<'a>(&self, studies: &'a [crate::motion::MotionStudy]) -> Option<(&'a crate::motion::MotionStudy, u32)> {
+        studies.iter().find(|m| m.id == self.id).map(|m| (m, self.step.min(m.steps)))
+    }
+}
+
 /// The position of its assembly a view draws (#13048): as the design places its parts (the
 /// default), with some of its joints at values of its own, or at a step of one of its motion
 /// studies. The design is never changed: the view draws a copy. A joint or study the design no
