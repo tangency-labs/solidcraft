@@ -40,13 +40,24 @@ pub(crate) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             editor: appearance,
             enabled: true,
             header_actions: None,
+            move_command: "view.render_dock",
         },
         &mut side,
         &mut width,
         false,
         |ui, options| {
             if appearance {
-                action.set(ui_kit::inspector_header(ui, options.icon, options.title, &scope));
+                action.set(ui_kit::inspector_header(
+                    ui,
+                    options.icon,
+                    options.title,
+                    &scope,
+                    ui_kit::InspectorNames {
+                        close: "render:appearance:close",
+                        remove: "render:appearance:remove",
+                        remove_label: solidcraft_ui_text::tr("render.inspector_remove"),
+                    },
+                ));
             } else {
                 ui_kit::panel::header(ui, options.icon, options.title, || action.set(Some(ui_kit::InspectorAction::Close)));
             }
@@ -125,7 +136,7 @@ pub(super) fn output_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
             ("render.start", app.tr("cmd.render_start").to_owned(), "render:output:render"),
             (
                 "render.batch",
-                crate::i18n::format("render.batch_all_shots", &[("count", &app.session.doc.render.setups.len().to_string())]),
+                solidcraft_ui_text::format("render.batch_all_shots", &[("count", &app.session.doc.render.setups.len().to_string())]),
                 "render:output:all-shots",
             ),
         ] {

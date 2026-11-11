@@ -20,6 +20,8 @@ appearance.paste                  appearance only: colours and textures
 appearance.pick_up                appearance only: colours and textures
 appearance.replace                appearance only: colours and textures
 assembly.bom                      a bill of materials report
+assembly.constraint.create        assembly placement: tested in joints_relations_tests.rs
+assembly.constraint.edit          assembly placement: tested in joints_relations_tests.rs
 body.rename                       a body name
 browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
@@ -33,6 +35,7 @@ canvas.decal                      reference images, and sketches traced from the
 canvas.delete                     reference images, and sketches traced from them (sketch only)
 canvas.edit                       reference images, and sketches traced from them (sketch only)
 canvas.insert                     reference images, and sketches traced from them (sketch only)
+canvas.straighten                 reference images, and sketches traced from them (sketch only); crates/engine/src/cmd/sketch_canvas.rs tests
 canvas.to_sketch                  reference images, and sketches traced from them (sketch only)
 component.break_link              component links
 component.copies                  a listing of identical copies
@@ -53,6 +56,9 @@ component.replace_with_link       component links
 component.show_history            the History bar: which features it lists
 component.unlock                  component locking
 component.update_links            component links
+construct.axis                    builds with the first construct.axis.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
+construct.plane                   builds with the first construct.plane.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
+construct.point                   builds with the first construct.point.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
 diagnostics.crash_report          crash reports
 diagnostics.crash_reports         crash reports
 diagnostics.crash_reports.clear   crash reports
@@ -83,6 +89,7 @@ file.save_as                      saving the design
 file.save_mesh                    saving a display mesh
 file.send_to_slicer               hands the file to a slicer
 file.slicers                      a listing of slicers
+frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
 frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library
 inspect.accessibility             display analysis: shading
@@ -91,6 +98,7 @@ inspect.colored_components        display: component colours
 inspect.compare_picture           display analysis: a picture compared with the outline
 inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
+inspect.parameter_variants        inspect: independent rebuilds and regressions in crates/engine/src/cmd/parameter_sweep_tests.rs
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
@@ -107,6 +115,7 @@ material.inspect                  materials and their properties
 material.list                     materials and their properties
 material.properties.directional   materials and their properties
 material.properties.validate      materials and their properties
+model.body_features               a listing of the model's timeline per body; crates/engine/src/schema/inspect_tests.rs
 model.edges                       a listing of the model's topology
 model.faces                       a listing of the model's topology
 model.threads                     a listing of the model's topology
@@ -114,6 +123,10 @@ motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
 motion.export_animation           writes an animation
 motion.list                       a listing of motion studies
+note.add                          notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
+note.delete                       notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
+note.list                         notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
+note.update                       notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
 panel.action                      controller actions; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
 panel.activate                    application panel layout; no geometry (engine/UI/MCP tests)
 panel.close                       application panel layout; no geometry (engine/UI/MCP tests)
@@ -121,8 +134,11 @@ panel.collapse                    application panel layout; no geometry (engine/
 panel.dismiss                     application panel layout; no geometry (engine/UI/MCP tests)
 panel.float                       application panel layout; no geometry (engine/UI/MCP tests)
 panel.focus                       application panel layout; no geometry (engine/UI/MCP tests)
+panel.focus.next                  application panel layout; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
+panel.focus.previous              application panel layout; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
 panel.list                        application panel layout; no geometry (engine/UI/MCP tests)
 panel.move                        application panel layout; no geometry (engine/UI/MCP tests)
+panel.move.next_zone              application panel layout; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
 panel.native_close                application panel layout; no geometry (engine/UI/MCP tests)
 panel.open                        application panel layout; no geometry (engine/UI/MCP tests)
 panel.peek                        application panel layout; no geometry (engine/UI/MCP tests)
@@ -130,6 +146,12 @@ panel.popout                      application panel layout; no geometry (engine/
 panel.reset_pair                  application panel layout; no geometry (engine/UI/MCP tests)
 panel.resize                      application panel layout; no geometry (engine/UI/MCP tests)
 panel.resize_pair                 application panel layout; no geometry (engine/UI/MCP tests)
+panel.sash.down                   application panel layout; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
+panel.sash.left                   application panel layout; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
+panel.sash.reset                  application panel layout; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
+panel.sash.right                  application panel layout; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
+panel.sash.up                     application panel layout; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
+panel.toggle                      application panel layout; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
 parameters.comment                parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.complete               parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.delete                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
@@ -217,6 +239,7 @@ select.filter                     the selection
 select.same_look                  the selection
 select.set                        the selection
 selection.delete                  deletes what is selected through the commands that own each kind
+selection.get                     reads the selection, read only; crates/engine/src/cmd/edit_tests.rs
 settings.profile.apply            settings profiles: preferences saved, applied and shared
 settings.profile.delete           settings profiles: preferences saved, applied and shared
 settings.profile.export           settings profiles: preferences saved, applied and shared
@@ -320,6 +343,8 @@ timeline.play                     plays the history back in the view: no new geo
 timeline.rename                   a feature name
 timeline.rename_group             a group name
 ui.assistant                      the view: camera, layout, display
+ui.palette                        the view: the command search; tested in crates/ui-egui/src/keymap.rs
+ui.toggle_visibility              the view: hides what the app has selected; tested in crates/ui-egui/src/keymap.rs
 view.ambient_occlusion            the view: camera, layout, display
 view.angle_readout                the view: camera, layout, display
 view.apply                        the view: camera, layout, display

@@ -1,0 +1,12 @@
+id = "surface.surface_point_solve_p3"
+upstream = ["source/SMLib/src/SmSurfacePointSolve.cpp"]
+rust_module = "surface::surface_point_solve::p3"
+depends_on = ["geom.extent1d", "geom.extent2d", "geom.object", "geom.vector2d", "geom.vector3d", "nurbs.b_spline_surface_p1", "surface.surface_p1", "surface.surface_p2", "surface.surface_p4", "surface.surface_point_solve_p1", "surface.surface_point_solve_p2"]
+soft_depends_on = ["curve.curve_p3", "curve.curve_p5", "curve.iso_curve", "geom.solution_array", "geom.tol"]
+est_lines = 1282
+layer = 34
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "PARTIAL: native difftest 1365 cases, 1235 pass, 130 deferred, 0 failed, max_rel_err=0.0; deferred: surface.surface_p3 96, surface.surface_p8 34; no absolute floors. 134 fixture cases, 15 upstream Surface.sms points, 1216 fixed-seed generated. Ports all five assigned functions, including the upstream-disabled CheckCrease; exact geometry evaluation copies with a 64-level owned-geometry bound, analytic/STEP/revolution iso curves, and sweep-only STEP derivatives. PR #106 review fixes tolerant left-operand seam comparison (2 formerly failing regressions plus 4 threshold controls), adds 36 STEP-wrapped sphere/torus/cone-shaped revolution pole/seam cases, integrates latest p4/p5 back-edges and threads caller Kernel through local/drop/patch solves. PR #106; 5 fns; largest: SmSurfPtSolveStepper::FindNextStep, SmSurfPtSolveStepper::CheckCrease, SmSurface::LocalPointSolve_1, SmSurfPtSolveStepper::FindBoundarySolution; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit Re-run after merging PR #106 (surface.surface_point_solve_p3 wired, 2026-10-15): 1365 cases, 1331 pass, 34 deferred (surface.surface_p8 34), 0 failed, max_rel_err 0. Re-run after wiring PR #118 (surface.surface_p8 and its back-edges, GlobalPointSolve_0 included): 1365 cases, 1365 pass, 0 deferred, 0 failed, max_rel_err 0; green."

@@ -1,0 +1,142 @@
+{
+  "cases": [
+    {
+      "name": "linear_geometry_rectangle_distance_4",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:1196 (SmApiCreateLinearSweep); independent prism volume 2*3*distance",
+      "inputs": {
+        "op": "linear",
+        "observe_geometry": true,
+        "curves": [
+          {
+            "kind": "line",
+            "start": [
+              2,
+              3,
+              5
+            ],
+            "end": [
+              4,
+              3,
+              5
+            ]
+          },
+          {
+            "kind": "line",
+            "start": [
+              4,
+              3,
+              5
+            ],
+            "end": [
+              4,
+              6,
+              5
+            ]
+          },
+          {
+            "kind": "line",
+            "start": [
+              4,
+              6,
+              5
+            ],
+            "end": [
+              2,
+              6,
+              5
+            ]
+          },
+          {
+            "kind": "line",
+            "start": [
+              2,
+              6,
+              5
+            ],
+            "end": [
+              2,
+              3,
+              5
+            ]
+          }
+        ],
+        "dir": [
+          0,
+          0,
+          1
+        ],
+        "dist": 4,
+        "cap": true
+      }
+    },
+    {
+      "name": "linear_geometry_rectangle_distance_7",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:1196 (SmApiCreateLinearSweep); independent prism volume 2*3*distance",
+      "inputs": {
+        "op": "linear",
+        "observe_geometry": true,
+        "curves": [
+          {
+            "kind": "line",
+            "start": [
+              2,
+              3,
+              5
+            ],
+            "end": [
+              4,
+              3,
+              5
+            ]
+          },
+          {
+            "kind": "line",
+            "start": [
+              4,
+              3,
+              5
+            ],
+            "end": [
+              4,
+              6,
+              5
+            ]
+          },
+          {
+            "kind": "line",
+            "start": [
+              4,
+              6,
+              5
+            ],
+            "end": [
+              2,
+              6,
+              5
+            ]
+          },
+          {
+            "kind": "line",
+            "start": [
+              2,
+              6,
+              5
+            ],
+            "end": [
+              2,
+              3,
+              5
+            ]
+          }
+        ],
+        "dir": [
+          0,
+          0,
+          1
+        ],
+        "dist": 7,
+        "cap": true
+      }
+    }
+  ]
+}

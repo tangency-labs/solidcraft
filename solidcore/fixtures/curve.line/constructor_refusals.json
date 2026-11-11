@@ -1,0 +1,60 @@
+{
+ "cases": [
+  {
+   "name": "segment_coincident_ends_refused",
+   "note": "Constructor status (both sides refuse; compared as a status): SmLine::CreateLineSegment with coincident ends over [0, 1]. It was the setup of offset.offset_executive_p1 coincident_analytic_line_constructor_rejection (now shortest_buildable_analytic_line), which now runs just inside the limit.",
+   "inputs": {
+    "make": {
+     "kind": "segment",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      0,
+      0,
+      0
+     ],
+     "interval": [
+      0,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "ends"
+     }
+    ]
+   }
+  },
+  {
+   "name": "segment_1e_14_refused",
+   "note": "Constructor status (both sides refuse; compared as a status): SmLine::CreateLineSegment of a 1e-14 line over [0, 1] (1e-12 builds). It was the setup of offset.offset_executive_p1 shortest_buildable_analytic_line, which now runs just inside the limit.",
+   "inputs": {
+    "make": {
+     "kind": "segment",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1e-14,
+      0,
+      0
+     ],
+     "interval": [
+      0,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "ends"
+     }
+    ]
+   }
+  }
+ ]
+}

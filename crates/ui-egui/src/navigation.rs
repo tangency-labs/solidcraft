@@ -14,28 +14,12 @@ use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::render::Camera;
+use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
 use crate::prefs::{OrbitAround, pivot_under};
 use crate::space_mouse::{BridgeMotion, Motion};
 use crate::viewport::{Hit, NavMode, axis_rect, nearest_quarter_turn, pick, pick_cached, projection};
-
-/// Take a predominantly horizontal wheel gesture for a hovered scroll viewport.
-/// Leave vertical input for its enclosing page, and leave horizontal input
-/// unconsumed when this viewport is already at the requested end.
-pub(crate) fn take_horizontal_wheel(ui: &egui::Ui, offset: f32, max_offset: f32) -> f32 {
-    ui.input_mut(|input| {
-        let delta = input.smooth_scroll_delta;
-        if delta.x == 0.0 || delta.x.abs() <= delta.y.abs() {
-            return 0.0;
-        }
-        if (offset - delta.x).clamp(0.0, max_offset) != offset {
-            input.smooth_scroll_delta.x = 0.0;
-        }
-        delta.x
-    })
-}
 
 /// What a page's camera may do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +36,11 @@ impl NavCaps {
     pub const MODEL: NavCaps = NavCaps { orbit: true, pick: true };
     /// The Render workspace's product preview: shared navigation and product picking.
     pub const RENDER: NavCaps = NavCaps { orbit: true, pick: true };
+
+    /// Whether the navigation bar shows `slot` on a page with these caps.
+    pub fn shows(self, slot: &crate::navigation_bar::Slot) -> bool {
+        slot.available(self.orbit, self.pick)
+    }
 }
 
 /// Give a panel the wheel delta left by its children, one movable axis at a time.
@@ -462,7 +451,7 @@ pub(crate) struct KeyHold {
 
 /// A menu, the command box or a focused widget has the keyboard, so the view keys are not ours.
 fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::Id>) -> bool {
-    (app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_LAYOUT)
+    (app.prefs_window.shell.open && app.prefs_window.shell.section == crate::prefs::PAGE_LAYOUT)
         || egui::Popup::is_any_open(ctx)
         || app.viewport.context_menu.is_some()
         || app.ui.palette_open
@@ -470,11 +459,26 @@ fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::I
         || ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some())
 }
 
+/// How much one keyboard zoom press changes the camera distance (#717).
+const KEY_ZOOM_FACTOR: f64 = 1.25;
+
+/// The zoom direction a key asks for (true: in), if it is a keyboard zoom key (#717). `+` is
+/// Shift+`=` on many layouts, so Shift is accepted on all of them; the keys say what they mean,
+/// so the invert-zoom preference does not apply.
+fn zoom_key(key: egui::Key) -> Option<bool> {
+    match key {
+        egui::Key::PageUp | egui::Key::Plus | egui::Key::Equals => Some(true),
+        egui::Key::PageDown | egui::Key::Minus => Some(false),
+        _ => None,
+    }
+}
+
 /// View keys (#1541): the arrows turn the view 15° (with Shift a quarter turn, as the navigation
 /// cube's arrows), Ctrl+arrows pan it a tenth of the view, and Ctrl+8 looks straight at the
-/// selected face, plane or sketch. Held longer than a tap, an arrow keeps turning the view at a
-/// steady rate (`step_key_hold`); the operating system's key repeat does nothing. Not while a
-/// menu, the command box or a focused widget has the arrows. Returns whether the key was used.
+/// selected face, plane or sketch. PageUp/PageDown and +/− zoom (#717). Held longer than a tap,
+/// an arrow keeps turning the view at a steady rate (`step_key_hold`); the operating system's key
+/// repeat does nothing. Not while a menu, the command box or a focused widget has the keys.
+/// Returns whether the key was used.
 pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, mods: egui::Modifiers, repeat: bool) -> bool {
     use egui::Key;
     let menu_open = view_keys_blocked(app, ctx, None);
@@ -485,6 +489,26 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
     let result = crate::render_workspace::result_active(app);
     if key == Key::Num8 && ctrl && !mods.shift && !result {
         crate::viewport::look_at_selection(app);
+        return true;
+    }
+    // Keyboard zoom (#717): PageUp/PageDown and +/−, around the view's centre (no cursor anchor —
+    // the keyboard does not know where the pointer is). Ctrl belongs to other shortcuts (the
+    // Preferences page zooms the UI with Ctrl+Plus/Minus), so plain keys only; OS repeat does
+    // nothing, like the arrows.
+    if !ctrl && let Some(zoom_in) = zoom_key(key) {
+        if !repeat {
+            let f = if zoom_in { 1.0 / KEY_ZOOM_FACTOR } else { KEY_ZOOM_FACTOR };
+            let zoom = |app: &mut SolveApp| {
+                app.cancel_view_animation();
+                app.viewport.orbit_free = None;
+                app.cam.zoom_at(f, None);
+            };
+            if result {
+                crate::render_workspace::with_result_camera(app, zoom);
+            } else {
+                zoom(app);
+            }
+        }
         return true;
     }
     let (action, dx, dy): (&'static str, f32, f32) = match key {
@@ -735,7 +759,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let zoom_held = (inside || app.viewport.zoom_shortcut_drag)
         && ui.input(|input| crate::keymap::drag_zoom_held(app, input))
         && !view_keys_blocked(app, ui.ctx(), Some(resp.id))
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !crate::dim_view::editing();
     if primary_pressed {
         app.viewport.zoom_shortcut_drag = inside && zoom_held;
@@ -906,7 +930,12 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                     let press = ui.input(|i| i.pointer.press_origin());
                     let anchor = model_zoom_anchor(app, rect, press.or(hover), caps.orbit);
                     let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
-                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
+                    let horizontal = app.preferences.nav == "maya"
+                        && app.preferences.maya_horizontal_zoom
+                        && button == Some(crate::prefs::NavButton::Right)
+                        && mods.alt;
+                    let movement = if horizontal { -delta.x } else { delta.y };
+                    app.cam.zoom_at((f64::from(movement) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
                 }
                 _ => {}
             }
@@ -1630,7 +1659,7 @@ mod tests {
     fn touchpad_free_orbit_setting_reaches_the_shared_command() {
         use super::*;
         for caps in [NavCaps::MODEL, NavCaps::RENDER, NavCaps { orbit: false, pick: false }] {
-            for up in [solidcraft_engine::render::UpAxis::Y, solidcraft_engine::render::UpAxis::Z] {
+            for up in [solidcraft_viewport::UpAxis::Y, solidcraft_viewport::UpAxis::Z] {
                 for free in [false, true] {
                     let ctx = egui::Context::default();
                     let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
@@ -1665,7 +1694,7 @@ mod tests {
     #[test]
     fn touchpad_free_orbit_keeps_the_rigid_pivot_in_both_projections() {
         use super::*;
-        for up in [solidcraft_engine::render::UpAxis::Y, solidcraft_engine::render::UpAxis::Z] {
+        for up in [solidcraft_viewport::UpAxis::Y, solidcraft_viewport::UpAxis::Z] {
             for fov in [0.0, 0.6] {
                 for around in [OrbitAround::Origin, OrbitAround::Cursor] {
                     let ctx = egui::Context::default();
@@ -1729,7 +1758,7 @@ mod tests {
     #[test]
     fn every_standard_direction_preserves_its_nearby_quarter_orientation() {
         use super::*;
-        use solidcraft_engine::render::UpAxis;
+        use solidcraft_viewport::UpAxis;
         for up in [UpAxis::Z, UpAxis::Y] {
             for fov in [0.0, 0.6] {
                 for direction in snap_directions() {
@@ -1758,7 +1787,7 @@ mod tests {
     #[test]
     fn free_orbit_shift_snaps_direction_and_quarter_turn_roll() {
         use super::*;
-        use solidcraft_engine::render::UpAxis;
+        use solidcraft_viewport::UpAxis;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
         for up in [UpAxis::Z, UpAxis::Y] {
             for fov in [0.0, 0.6] {
@@ -1788,7 +1817,7 @@ mod tests {
     #[test]
     fn free_orbit_shift_keeps_the_pivot_and_resumes_the_unsnapped_drag() {
         use super::*;
-        use solidcraft_engine::render::UpAxis;
+        use solidcraft_viewport::UpAxis;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
         for up in [UpAxis::Z, UpAxis::Y] {
             for fov in [0.0, 0.6] {
@@ -1870,7 +1899,7 @@ mod tests {
     #[test]
     fn free_orbit_upright_turns_about_the_vertical_axis_past_the_pole() {
         use super::*;
-        for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+        for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
             let mut h = crate::scenario::Harness::new();
             h.app.preferences.free_orbit = true;
             h.app.preferences.free_orbit_upright = true;
@@ -1912,14 +1941,14 @@ mod tests {
     #[test]
     fn solidworks_mouse_orbit_passes_the_pole_and_shift_snaps() {
         use serde_json::json;
-        for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+        for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
             for button in ["middle", "right"] {
                 let mut h = crate::scenario::Harness::new();
                 h.app.home.open = false;
                 h.app.preferences.nav = "solidworks".into();
                 h.app.preferences.free_orbit = true;
                 h.app.ui.up_axis = up;
-                h.app.cam = solidcraft_engine::render::Camera { yaw: 0.0, pitch: 1.4, up, ..Default::default() };
+                h.app.cam = solidcraft_viewport::Camera { yaw: 0.0, pitch: 1.4, up, ..Default::default() };
                 let before = h.app.cam;
                 h.call("ui.drag", json!({"x0":800,"y0":400,"x1":800,"y1":480,"button":button,"steps":40}));
                 assert!((h.app.cam.back().dot(before.back()) - 0.64_f64.cos()).abs() < 1e-6, "{up:?} {button}: {:?}", h.app.cam);
@@ -2062,7 +2091,8 @@ mod tests {
         ];
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let dirs = [root.join("src"), root.join("../../apps/solidcraft/src"), root.join("../../apps/solidcraft-web/src")];
-        let allowed = ["navigation.rs"];
+        // The kit's wheel.rs scrolls strips (a horizontal wheel over a hovered scroll area), not cameras.
+        let allowed = ["navigation.rs", "wheel.rs"];
         let mut offenders = Vec::new();
         let mut scanned = 0;
         let mut stack: Vec<std::path::PathBuf> = dirs.iter().filter(|d| d.is_dir()).cloned().collect();
@@ -2147,7 +2177,8 @@ mod tests {
                                 out.textures_delta.clear();
                             };
                             let from = pos2(200.0, 300.0);
-                            let to = from + vec2(0.0, dy);
+                            let horizontal = preset == "maya" && !tool;
+                            let to = from + if horizontal { vec2(dy, 0.0) } else { vec2(0.0, dy) };
                             frame(vec![Event::PointerMoved(from)]);
                             frame(vec![Event::PointerButton { pos: from, button, pressed: true, modifiers: mods }]);
                             frame(vec![Event::PointerMoved(to)]);
@@ -2156,7 +2187,7 @@ mod tests {
                             assert!(app.cam.is_valid());
                             assert_ne!(app.cam.distance, before.distance, "the drag must zoom");
                             // Creo zooms in on a downward drag by default; the preference reverses that too.
-                            let default_zooms_out = if preset == "creo" { dy < 0.0 } else { dy > 0.0 };
+                            let default_zooms_out = if preset == "creo" || horizontal { dy < 0.0 } else { dy > 0.0 };
                             assert_eq!(
                                 app.cam.distance > before.distance,
                                 default_zooms_out != reverse,
@@ -2711,7 +2742,7 @@ mod tests {
             let mut app = crate::SolveApp::new(session, crate::Services::default());
             if app.session.active_sketch.is_some() {
                 // Square to the sketch, as a sketch opens.
-                app.cam = solidcraft_engine::render::Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() };
+                app.cam = solidcraft_viewport::Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() };
             }
             let before = app.cam;
             app.viewport.bridge_motion = Some(orbit);
@@ -2721,6 +2752,86 @@ mod tests {
             assert_eq!(turned, turns, "{caps:?}");
             assert_eq!(app.cam.target != before.target, !turns, "{caps:?}: pans where it doesn't turn");
         }
+    }
+
+    #[test]
+    fn maya_right_drag_zooms_horizontally_without_turning_or_editing() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"nav":"maya"}));
+        h.settle();
+        let before = h.app.cam;
+        let at = h.app.viewport.rect.expect("viewport").center();
+        let drag = |h: &mut crate::scenario::Harness, dx: f32, dy: f32| {
+            h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":at.x+dx,"y1":at.y+dy,"button":"right","alt":true,"steps":20}));
+        };
+        drag(&mut h, 60.0, 0.0);
+        assert!(h.app.cam.distance < before.distance, "Alt+right drag to the right zooms in");
+        drag(&mut h, -60.0, 0.0);
+        assert!((h.app.cam.distance - before.distance).abs() < 1e-6, "left reverses the zoom");
+        drag(&mut h, 0.0, 60.0);
+        assert!((h.app.cam.distance - before.distance).abs() < 1e-6, "vertical movement does not zoom");
+        assert_eq!(h.app.cam.target, before.target);
+        assert_eq!(h.app.cam.back(), before.back());
+        assert!(h.app.tool.is_none() && h.app.dialog.is_none());
+        assert!(h.app.session.undo.is_empty() && h.app.session.selection.is_empty());
+    }
+
+    #[test]
+    fn maya_zoom_axis_keeps_other_presets_and_the_zoom_tool_vertical() {
+        use crate::prefs::{NAV_PRESETS, NavButton};
+        use crate::viewport::NavMode;
+        use serde_json::json;
+        for preset in NAV_PRESETS {
+            for binding in preset.bindings.iter().filter(|binding| binding.mode == NavMode::Zoom) {
+                for horizontal in [false, true] {
+                    let mut h = crate::scenario::Harness::new();
+                    h.call("ui.prefs", json!({"nav":preset.id,"maya_horizontal_zoom":horizontal}));
+                    let at = h.app.viewport.rect.expect("viewport").center();
+                    let before = h.app.cam;
+                    let button = match binding.button {
+                        NavButton::Left => "left",
+                        NavButton::Middle => "middle",
+                        NavButton::Right => "right",
+                    };
+                    let drag = |h: &mut crate::scenario::Harness, dx: f32, dy: f32| {
+                        let out = h.call(
+                            "ui.drag",
+                            json!({"x0":at.x,"y0":at.y,"x1":at.x+dx,"y1":at.y+dy,
+                            "button":button,"alt":binding.keys.alt,"ctrl":binding.keys.ctrl,"shift":binding.keys.shift,"steps":20}),
+                        );
+                        assert_eq!(out["ok"], true, "{out}");
+                    };
+                    let uses_x = preset.id == "maya" && horizontal;
+                    drag(&mut h, 40.0, 0.0);
+                    if uses_x {
+                        assert!(h.app.cam.distance < before.distance);
+                    } else {
+                        assert_eq!(h.app.cam.distance, before.distance, "{} ignores horizontal zoom", preset.id);
+                    }
+                    h.app.cam = before;
+                    drag(&mut h, 0.0, 40.0);
+                    if uses_x {
+                        assert_eq!(h.app.cam.distance, before.distance, "Maya ignores vertical zoom");
+                    } else {
+                        assert_eq!(h.app.cam.distance < before.distance, preset.reverse_drag_zoom, "{} keeps its vertical direction", preset.id);
+                    }
+                    assert_eq!(h.app.cam.target, before.target);
+                    assert_eq!(h.app.cam.back(), before.back());
+                    assert!(h.app.session.undo.is_empty());
+                }
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"nav":"maya"}));
+        h.app.run("view.tool", json!({"tool":"zoom"})).unwrap();
+        h.settle();
+        let at = h.app.viewport.rect.expect("viewport").center();
+        let before = h.app.cam;
+        h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":at.x+40.0,"y1":at.y,"steps":20}));
+        assert_eq!(h.app.cam.distance, before.distance, "the fixed Zoom tool ignores horizontal motion");
+        h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":at.x,"y1":at.y+40.0,"steps":20}));
+        assert!(h.app.cam.distance > before.distance, "the fixed Zoom tool keeps vertical zoom");
     }
 
     /// Surface anchoring for the cap, bridge and drag-zoom is opt-in (#7435), independent of
@@ -2841,7 +2952,7 @@ mod tests {
     #[test]
     fn the_3d_mouse_turns_a_sketch_only_after_the_view_is_tilted() {
         use crate::space_mouse::{DeviceMotion, Motion};
-        use solidcraft_engine::render::Camera;
+        use solidcraft_viewport::Camera;
         let mut s = solidcraft_engine::Session::default();
         s.execute("sketch.create", &serde_json::json!({"plane": "XY"})).unwrap();
         let mut app = crate::SolveApp::new(s, crate::Services::default());
@@ -2878,7 +2989,7 @@ mod tests {
     #[test]
     fn the_3d_mouse_turns_a_square_on_sketch_when_the_preference_allows_it() {
         use crate::space_mouse::{BridgeMotion, DeviceMotion, Motion};
-        use solidcraft_engine::render::Camera;
+        use solidcraft_viewport::Camera;
         let mut s = solidcraft_engine::Session::default();
         s.execute("sketch.create", &serde_json::json!({"plane": "XY"})).unwrap();
         let mut app = crate::SolveApp::new(s, crate::Services::default());
@@ -2956,6 +3067,44 @@ mod view_key_tests {
         assert!(crate::keymap::RESERVED.contains(&crate::keymap::key_name(egui::Key::Num8, egui::Modifiers::COMMAND).as_str()));
     }
 
+    /// #717: PageUp/PageDown and +/− zoom the view; the keys are reserved like the arrows, OS
+    /// repeat does nothing, and a focused text field keeps them for typing.
+    #[test]
+    fn zoom_keys_zoom_the_view() {
+        let mut h = Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.frames(2);
+        let near = |a: f64, b: f64| ((a / b) - 1.0).abs() < 1e-9;
+        let before = h.app.cam.distance;
+        h.step(&json!({"key": "PageUp"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25), "PageUp zooms in: {}", h.app.cam.distance);
+        h.step(&json!({"key": "PageDown"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before), "PageDown zooms back out: {}", h.app.cam.distance);
+        h.step(&json!({"key": "Plus"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25), "Plus zooms in");
+        h.step(&json!({"key": "Equals"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25 / 1.25), "Equals zooms in too");
+        h.step(&json!({"key": "Minus"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25), "Minus zooms out");
+        for name in ["PageUp", "PageDown", "Plus", "Shift+Plus", "Minus", "Equals"] {
+            assert!(crate::keymap::RESERVED.contains(&name), "{name} must be reserved");
+        }
+        // OS key repeat does nothing, and a focused widget keeps the keys for typing (#717).
+        let ctx = egui::Context::default();
+        let d = h.app.cam.distance;
+        assert!(crate::navigation::view_key(&mut h.app, &ctx, egui::Key::PageUp, egui::Modifiers::NONE, true));
+        assert_eq!(h.app.cam.distance, d, "key repeat does nothing");
+        ctx.memory_mut(|m| m.request_focus(egui::Id::unique("field")));
+        assert!(!crate::navigation::view_key(&mut h.app, &ctx, egui::Key::PageUp, egui::Modifiers::NONE, false));
+        assert_eq!(h.app.cam.distance, d, "a focused widget keeps the key");
+    }
+
     fn arrow(pressed: bool, repeat: bool) -> egui::Event {
         egui::Event::Key { key: egui::Key::ArrowLeft, physical_key: None, pressed, repeat, modifiers: egui::Modifiers::NONE }
     }
@@ -2968,8 +3117,8 @@ mod view_key_tests {
         let mut output = ctx.run_ui(egui::RawInput { events: vec![arrow(true, false)], focused: true, ..Default::default() }, |ui| {
             assert!(ui.memory(|memory| memory.focused().is_none()));
             assert!(!egui::Popup::is_any_open(ui.ctx()));
-            app.prefs_window.open = true;
-            app.prefs_window.section = crate::prefs::PAGE_LAYOUT;
+            app.prefs_window.shell.open = true;
+            app.prefs_window.shell.section = crate::prefs::PAGE_LAYOUT;
             let before = app.cam;
             let log = app.session.log.len();
             assert!(!super::view_key(&mut app, ui.ctx(), egui::Key::ArrowLeft, egui::Modifiers::NONE, false));
@@ -2977,11 +3126,11 @@ mod view_key_tests {
             assert_eq!(app.session.log.len(), log);
             assert!(app.viewport.key_hold.is_none());
 
-            app.prefs_window.section = crate::prefs::PAGE_GENERAL;
+            app.prefs_window.shell.section = crate::prefs::PAGE_GENERAL;
             assert!(super::view_key(&mut app, ui.ctx(), egui::Key::ArrowLeft, egui::Modifiers::NONE, false));
             assert!(app.viewport.key_hold.is_some(), "General retains unfocused arrow camera preview");
             app.now += super::TAP_SECONDS + 1.0;
-            app.prefs_window.section = crate::prefs::PAGE_LAYOUT;
+            app.prefs_window.shell.section = crate::prefs::PAGE_LAYOUT;
             let before = app.cam;
             assert!(ui.input(|input| input.key_down(egui::Key::ArrowLeft)));
             super::step_key_hold(&mut app, ui.ctx());
@@ -3081,7 +3230,7 @@ mod view_key_tests {
     /// do; the keys are ordinary shortcuts, so one can be moved to another command and back.
     #[test]
     fn ctrl_digits_turn_to_the_standard_views_and_can_be_rebound() {
-        use solidcraft_engine::render::StandardView;
+        use solidcraft_viewport::StandardView;
         let mut h = Harness::new();
         h.app.preferences.look_at_anim = false;
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();

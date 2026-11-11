@@ -1889,6 +1889,7 @@
   "material.editor.preserved_appearance": "Сачувани изглед",
   "material.editor.public_reference": "Јавна референца",
   "material.editor.reference": "Референца",
+  "material.editor.remove": "Уклони",
   "material.editor.save_or_discard": "Сачувајте или одбаците нацрт материјала пре доделе материјала.",
   "material.editor.saved": "Материјал је сачуван. Доделе телима остају непромењене.",
   "material.editor.scope": "Сачувај чува овај материјал без доделе телима. Празна својства и услови остају непознати. Густина са картице не мења додељену густину ни масу.",

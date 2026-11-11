@@ -1,0 +1,8 @@
+#### UB-263. `SmCrvOnSurf::CalculateContinuities` reports an uninitialised continuity when `EvaluateContinuity` fails (always for an `SmTangentField`)
+- **Severity:** Crash / undefined behaviour
+- **Area:** Curves
+- **Location:** `source/SMLib/src/SmCrvOnSurf.cpp:909`, `SmCrvOnSurf::CalculateContinuities` (the loop at `:935`); `source/SMLib/src/SmCurve.cpp:3716`, `SmCurve::EvaluateContinuity`.
+- **What happens:** the local `eThisContinuity` is declared without an initial value and passed to `EvaluateContinuity` for every interior break, whose status is ignored. `EvaluateContinuity` returns through `SER` before writing `rContinuityType` when either `Evaluate(t, 3, ...)` fails, so the uninitialised value (or the previous break's) is stored in `rContinuitiesAtKnots` and compared into `reMinContinuityInCurve`, and the call returns `SM_SUCCESS`. `SmTangentField` derives from `SmCrvOnSurf` without overriding `CalculateContinuities`, and its `Evaluate` fails (`SM_ERR`) for more than one derivative, so every interior break of a tangent field gets an indeterminate continuity (the reference build returned values such as `25265`).
+- **Trigger:** `CalculateContinuities` on an `SmTangentField` whose `GetKnots` has an interior break (a UV curve with an interior knot, or a surface knot line crossed by it).
+- **How found:** generated difftest case (`curve.tangent_field`, `write_read` cases).
+- **Confirmed:** yes, case `wr0001` of `curve.tangent_field` (C++ min continuity and interior entries `25265`). The port keeps the previous break's value and starts from `SM_CT_UNDEFINED`; the runner compares the status, the count and the end entries, and the minimum and interior entries only without interior breaks.
