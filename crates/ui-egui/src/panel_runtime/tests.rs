@@ -13456,14 +13456,14 @@ fn production_render_panels_reopen_independently_with_existing_controls() {
 #[test]
 fn production_short_render_assistant_keeps_conversation_above_the_pinned_composer() {
     let mut h = production_content_harness(false, true);
-    h.call("ui.resize", serde_json::json!({"width":1600,"height":720}));
+    h.call("ui.resize", serde_json::json!({"width":1600,"height":480}));
     h.app.ui.tab = "RENDER".into();
     for draft in [String::new(), "Retained panel draft\n".repeat(40)] {
         h.app.agent_chat.input = draft.clone();
         h.frames(8);
         let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
         let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
-        assert!(conversation.height() < 64.0, "exercise the short viewport that formerly expanded over the composer");
+        assert!(conversation.height() < 64.0, "exercise the short viewport that formerly expanded over the composer: {conversation:?}");
         assert!(
             !conversation.is_positive() || conversation.bottom() <= composer.top() + 1.0,
             "a short transcript viewport must not paint or scroll over the composer: draft bytes={}, conversation={conversation:?}, composer={composer:?}",
