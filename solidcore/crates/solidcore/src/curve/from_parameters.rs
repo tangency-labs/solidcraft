@@ -432,7 +432,13 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
                 return Err(bad("curve owner requires a non-identity UV map"));
             }
             let uv_interval = cos.uv_curve().natural_interval();
-            if !(lo >= uv_interval.min() && hi <= uv_interval.max()) {
+            // An interval past the UV curve's ends by the rounding of the kernel's parameter
+            // ends on them, as a spline's does on its knots.
+            let (lo, hi) = (
+                onto_ends(lo, [lo, hi], &uv_interval),
+                onto_ends(hi, [lo, hi], &uv_interval),
+            );
+            if !(lo >= uv_interval.min() && hi <= uv_interval.max() && lo < hi) {
                 return Err(bad("edge interval outside UV curve"));
             }
             let uv_curve = record_trim(
@@ -525,21 +531,28 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
         reason: "an edge curve with no B-spline form has no exact record",
     })?;
     let knots = base.natural_interval();
-    let slack = 1e-12 * (1.0 + lo.abs().max(hi.abs()));
-    let onto = |t: f64| {
-        if t < knots.min() && t >= knots.min() - slack {
-            knots.min()
-        } else if t > knots.max() && t <= knots.max() + slack {
-            knots.max()
-        } else {
-            t
-        }
-    };
     Ok(RecordCurve {
         curve: spline_record(&base)?,
         nurbs: None,
-        interval: [onto(lo), onto(hi)],
+        interval: [
+            onto_ends(lo, [lo, hi], &knots),
+            onto_ends(hi, [lo, hi], &knots),
+        ],
     })
+}
+
+/// `t`, a parameter of the edge interval `[lo, hi]`, on the ends of `ends` where it lies past
+/// one by no more than the rounding of the kernel's parameter (10⁻¹² of the interval's size);
+/// otherwise `t` as it is.
+fn onto_ends(t: f64, [lo, hi]: [f64; 2], ends: &Extent1d) -> f64 {
+    let slack = 1e-12 * (1.0 + lo.abs().max(hi.abs()));
+    if t < ends.min() && t >= ends.min() - slack {
+        ends.min()
+    } else if t > ends.max() && t <= ends.max() + slack {
+        ends.max()
+    } else {
+        t
+    }
 }
 
 /// The B-spline a curve is (every kernel line, conic and spline is one, its NURB made on a

@@ -866,3 +866,50 @@ fn a_segment_projects_onto_a_box_s_record_face_at_its_index() {
         "a direction of no length"
     );
 }
+
+/// Two thread grooves as SolidCraft's Thread feature sweeps them (an M12 in a 10.2 mm hole, an
+/// M10x1.5 over 10.23 turns) cross the record boundary and back: the record holds an edge whose
+/// interval runs past its UV curve's end by the rounding of the kernel's parameter, and an end
+/// cap whose plane was built from rounded corners with its axes a few units in the last place
+/// off square. Each record is taken back by the kernel and agrees with its topology.
+#[test]
+fn a_thread_grooves_screw_sweep_crosses_the_record_and_back() {
+    let p = |y: f64, z: f64| [0.0, y, z];
+    let m12 = polygon(&[
+        p(4.877784714610771, -2.5072862971081844),
+        p(6.0, -1.8593750000000004),
+        p(6.0, -1.6406249999999996),
+        p(4.877784714610771, -0.9927137028918156),
+    ]);
+    let m10 = polygon(&[
+        p(4.188101183952089, -1.6875),
+        p(5.075, -2.199551270189222),
+        p(5.075, -0.800448729810778),
+        p(4.188101183952089, -1.3125),
+    ]);
+    for (profile, origin, pitch, turns) in [
+        (&m12, [0.0, 0.0, -1.75], 1.75, 13.428571428571429),
+        (&m10, [0.0, 0.0, -1.5], 1.5, 10.230000000000002),
+    ] {
+        let tolerance = pitch * 1e-4;
+        let made = screw_sweep(
+            profile,
+            origin,
+            Z,
+            pitch,
+            turns,
+            None,
+            tolerance
+        )
+        .unwrap();
+        let (record, _) = made.to_record().unwrap();
+        solidcore_ops::record_check::validate_built(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
+        let (back, _) = Body::from_record(&record, true).unwrap();
+        let (a, b) = (made.volume(1e-8).unwrap(), back.volume(1e-8).unwrap());
+        assert!(
+            (a - b).abs() <= 1e-9 * a,
+            "{turns} turns: {a} made, {b} read back"
+        );
+    }
+}
