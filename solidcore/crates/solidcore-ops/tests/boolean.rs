@@ -7,7 +7,7 @@ use std::io::Read as _;
 use serde_json::Value;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
 use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
-use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error};
+use solidcore_ops::{make_box, make_sphere, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::brep::Brep as Record;
 
 fn all_fixes() {
@@ -63,6 +63,66 @@ fn boxes_touching_along_an_edge_union_to_a_closed_body() {
     let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
     assert!(near(volume(&u), 2.0), "{}", volume(&u));
     assert_eq!(u.solid_count().unwrap(), 2);
+}
+
+/// A 20 mm box with a closed void at its middle: a 10 mm cube void, or a sphere void of radius 5.
+fn box_with_void(cube: bool) -> Body {
+    let tool = if cube {
+        make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap()
+    } else {
+        make_sphere([10.0, 10.0, 10.0], 5.0).unwrap()
+    };
+    let b = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]).unwrap();
+    boolean(b, tool, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+#[test]
+fn a_union_that_fills_a_void_is_the_whole_box() {
+    all_fixes();
+    // Every face of the void is deleted, and the region they joined is material. The tool's
+    // faces lie on the void's, or inside the box's material, so none of them is copied in.
+    let fillers = [
+        (true, make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap()),
+        (true, make_box([4.0, 4.0, 4.0], [12.0, 12.0, 12.0]).unwrap()),
+        (true, make_box([5.0, 4.0, 4.0], [12.0, 12.0, 12.0]).unwrap()),
+        (false, make_sphere([10.0, 10.0, 10.0], 5.0).unwrap()),
+        (false, make_sphere([10.0, 10.0, 10.0], 6.0).unwrap()),
+        (
+            false,
+            make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap(),
+        ),
+    ];
+    for (n, (cube, filler)) in fillers.into_iter().enumerate() {
+        let u = boolean(box_with_void(cube), filler, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        assert!(near(volume(&u), 8000.0), "filler {n}: {}", volume(&u));
+        assert_eq!(u.counts().unwrap(), [6, 12, 8], "filler {n}");
+        assert!(u.is_manifold_solid().unwrap(), "filler {n}");
+        assert!(u.to_record().is_ok(), "filler {n}");
+    }
+    // A filler that leaves part of the void keeps that part: 20³ − 10 · 10 · 1.
+    let part = make_box([6.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    let u = boolean(box_with_void(true), part, BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    assert!(near(volume(&u), 7900.0), "{}", volume(&u));
+}
+
+#[test]
+fn a_cube_on_a_void_is_kept_out_by_a_difference_and_shares_nothing_with_it() {
+    all_fixes();
+    let cube = || make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    // The faces bound material on opposite sides: a difference keeps them, so the box is
+    // unchanged, and an intersection deletes them and leaves nothing.
+    let d = boolean(box_with_void(true), cube(), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    assert!(near(volume(&d), 7000.0), "{}", volume(&d));
+    assert_eq!(d.counts().unwrap(), [12, 24, 16]);
+    assert!(boolean(box_with_void(true), cube(), BooleanOp::Intersect)
+        .unwrap()
+        .is_none());
 }
 
 #[test]
