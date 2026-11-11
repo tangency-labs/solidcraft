@@ -31,6 +31,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use solidcore_record::Plane;
 use solidcore_record::Vec2;
+use solidcraft_doc::config::RowKey;
 use solidcraft_doc::display_units::unit_scale;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
@@ -58,11 +59,11 @@ use crate::drawing_view::{
 };
 use crate::params::bad;
 use crate::schema::drawing_view::{
-    AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, CopyParams, CreateResult, DPI_RANGE, DrawnJointResult,
-    EditParams, EditResult, ExplodedParam, ExtentsResult, FromResult, InspectParams, InspectResult, LineResult, LinesStatusResult, MeasureParam,
-    MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams,
-    ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, StudyPoseParam, StudyStepResult,
-    ToSheetResult, ViewLineParam, ViewResult, ViewSet,
+    AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, CopyParams, CreateResult, DPI_RANGE,
+    DrawnJointResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FromResult, InspectParams, InspectResult, LineResult, LinesStatusResult,
+    MeasureParam, MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult,
+    ProjectedParams, ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, StudyPoseParam,
+    StudyStepResult, ToSheetResult, ViewLineParam, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -462,6 +463,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             hide: setting(resolved.hide, own.hide.clone().map(Some), path_lists),
             exploded: setting(resolved.exploded, own.exploded, exploded_value),
             pose,
+            configuration: setting(resolved.configuration, own.configuration, configuration_value),
         },
         reference_shown_percent: view.reference_shown_percent,
         boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
@@ -497,6 +499,11 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let found = Found {
         exploded: set.exploded.as_ref().map(|chosen| chosen.as_ref().map(|chosen| exploded_of(s, chosen, EDIT)).transpose()).transpose()?,
         pose: set.pose.as_ref().map(|chosen| chosen.as_ref().map(|chosen| pose_of(s, chosen, EDIT)).transpose()).transpose()?,
+        configuration: set
+            .configuration
+            .as_ref()
+            .map(|chosen| chosen.as_ref().map(|chosen| configuration_of(s, chosen, EDIT)).transpose())
+            .transpose()?,
     };
     let descendants = descendants(s.drawing(EDIT)?, id, |_| true);
     let apart = found.exploded.is_some() || found.pose.is_some();
@@ -559,11 +566,13 @@ fn descendants(d: &Drawing, id: u64, follows: impl Fn(&View) -> bool) -> Vec<u64
 }
 
 /// What an edit's choices name in the design, found there before it changes anything: its exploded
-/// view ([`exploded_of`]) and its position ([`pose_of`]), each `None` when the edit leaves it.
+/// view ([`exploded_of`]), its position ([`pose_of`]) and its configuration ([`configuration_of`]),
+/// each `None` when the edit leaves it.
 #[derive(Default)]
 struct Found {
     exploded: Option<Option<Exploded>>,
     pose: Option<Option<Pose>>,
+    configuration: Option<Option<ViewConfiguration>>,
 }
 
 /// `set` made on view `id` of `d`, with what it names in the design as `found`: the fields it changes,
@@ -619,6 +628,9 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
     if let Some(pose) = &found.pose {
         own.pose = pose.clone();
     }
+    if let Some(configuration) = found.configuration {
+        own.configuration = configuration;
+    }
     if let Some(percent) = set.reference_shown_percent {
         view.reference_shown_percent = percent;
     }
@@ -651,6 +663,7 @@ fn changed_fields(a: &View, b: &View) -> Vec<String> {
         ("hide", x.hide != y.hide),
         ("exploded", x.exploded != y.exploded),
         ("pose", x.pose != y.pose),
+        ("configuration", x.configuration != y.configuration),
         ("reference_shown_percent", a.reference_shown_percent != b.reference_shown_percent),
         ("view", a.kind != b.kind),
         ("place", a.place != b.place),
@@ -682,6 +695,23 @@ fn extents_result(extents: &Extents, unmeasured: Option<Unmeasured>) -> ExtentsR
 /// An exploded choice as inspect shows it and a view saves it: `"assembled"`, or `{"view": id}`.
 fn exploded_value(exploded: Exploded) -> Value {
     serde_json::to_value(exploded).unwrap_or(Value::Null)
+}
+
+/// A configuration as inspect shows it and a view saves it: `"active"`, or `{"row": id}`.
+fn configuration_value(configuration: ViewConfiguration) -> Value {
+    serde_json::to_value(configuration).unwrap_or(Value::Null)
+}
+
+/// `chosen` as a view saves it, for `cmd`: active, or a row of the design's configuration table found
+/// by its id or its name, as `config.activate` finds one, saved by its id.
+fn configuration_of(s: &Session, chosen: &ConfigurationParam, cmd: &str) -> Result<ViewConfiguration> {
+    let key = match chosen {
+        ConfigurationParam::Active => return Ok(ViewConfiguration::Active),
+        ConfigurationParam::Id(id) => RowKey::Id(*id),
+        ConfigurationParam::Name(name) => RowKey::Name(name),
+    };
+    let row = s.doc.configs.row(key).ok_or_else(|| bad(cmd, format!("no configuration `{key}` in the design")))?;
+    Ok(ViewConfiguration::Row(row.id))
 }
 
 /// `chosen` as a view saves it, for `cmd`: assembled, or an exploded view of the design found by its
@@ -990,7 +1020,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
         line_group: None,
         exploded: request.exploded.as_ref().map(|chosen| exploded_of(s, chosen, BASE)).transpose()?,
         pose: request.pose.as_ref().map(|chosen| pose_of(s, chosen, BASE)).transpose()?,
-        configuration: None,
+        configuration: request.configuration.as_ref().map(|chosen| configuration_of(s, chosen, BASE)).transpose()?,
     };
     let place = ViewPlace::At([position.x, position.y]);
     let kind = ViewKind::Base { source, view: direction };

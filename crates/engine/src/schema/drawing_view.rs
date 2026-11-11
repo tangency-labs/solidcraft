@@ -249,20 +249,36 @@ pub enum ExplodedParam {
     Name(String),
 }
 
+/// A view's choice of something in the design, as given: `keyword` in any case, or the thing by its
+/// id (a whole number) or its name (text). Anything else is refused with one `message`, rather than
+/// serde's "did not match any variant".
+enum Named {
+    Keyword,
+    Id(u64),
+    Name(String),
+}
+
+fn named<'de, D: serde::Deserializer<'de>>(d: D, keyword: &str, message: &str) -> Result<Named, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        Id(u64),
+        Name(String),
+    }
+    Ok(match Either::deserialize(d).map_err(|_| serde::de::Error::custom(message))? {
+        Either::Id(id) => Named::Id(id),
+        Either::Name(name) if name.eq_ignore_ascii_case(keyword) => Named::Keyword,
+        Either::Name(name) => Named::Name(name),
+    })
+}
+
 impl<'de> Deserialize<'de> for ExplodedParam {
-    /// One message for anything that is neither, rather than serde's "did not match any variant".
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<ExplodedParam, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Either {
-            Id(u64),
-            Name(String),
-        }
         let message = "exploded is \"assembled\", or an exploded view of the design by its name or id";
-        Ok(match Either::deserialize(d).map_err(|_| serde::de::Error::custom(message))? {
-            Either::Id(id) => ExplodedParam::Id(id),
-            Either::Name(name) if name.eq_ignore_ascii_case("assembled") => ExplodedParam::Assembled,
-            Either::Name(name) => ExplodedParam::Name(name),
+        Ok(match named(d, "assembled", message)? {
+            Named::Keyword => ExplodedParam::Assembled,
+            Named::Id(id) => ExplodedParam::Id(id),
+            Named::Name(name) => ExplodedParam::Name(name),
         })
     }
 }
@@ -274,6 +290,38 @@ impl JsonSchema for ExplodedParam {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
             "description": "Which state of the assembly the view draws: \"assembled\" (as the design places its parts), or one of the design's exploded views by its name or id. \"assembled\" in any case is the assembly: choose an exploded view of that name by its id. The design never changes.",
+            "oneOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]
+        })
+    }
+}
+
+/// Which configuration of the design a view draws (#13048), as given: `"active"`, or a row of the
+/// design's configuration table by its id (a whole number) or its name (text).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConfigurationParam {
+    Active,
+    Id(u64),
+    Name(String),
+}
+
+impl<'de> Deserialize<'de> for ConfigurationParam {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<ConfigurationParam, D::Error> {
+        let message = "configuration is \"active\", or a row of the design's configuration table by its name or id";
+        Ok(match named(d, "active", message)? {
+            Named::Keyword => ConfigurationParam::Active,
+            Named::Id(id) => ConfigurationParam::Id(id),
+            Named::Name(name) => ConfigurationParam::Name(name),
+        })
+    }
+}
+
+impl JsonSchema for ConfigurationParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ViewConfiguration".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Which configuration of the design the view draws: \"active\" (the design's active configuration, as the design is now), or a row of its configuration table by its id (a number, as config.table lists it) or its name (text). \"active\" in any case is the active configuration: choose a row of that name by its id. The view saves the row's id, so a rename keeps it. The design never changes.",
             "oneOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]
         })
     }
@@ -511,6 +559,9 @@ pub struct ViewSet {
     /// The position of its assembly it draws.
     #[serde(deserialize_with = "super::present")]
     pub pose: Option<Option<PoseParam>>,
+    /// The configuration of the design it draws.
+    #[serde(deserialize_with = "super::present")]
+    pub configuration: Option<Option<ConfigurationParam>>,
     /// How far the view's boundary grows from the model's box towards the box that also holds its
     /// reference parts, each side on its own: 0 to 100.
     #[serde(deserialize_with = "super::present")]
@@ -573,6 +624,9 @@ pub struct SettingsResult {
     /// The position of its assembly it draws: `"designed"`, `{"joints": [...]}` as saved (radians
     /// and mm), or `{"study": {"id": .., "step": ..}}`.
     pub pose: PoseResult,
+    /// The configuration of the design it draws: `"active"`, or `{"row": id}` for a row of the
+    /// design's configuration table.
+    pub configuration: SettingResult<Value>,
 }
 
 /// A view's position as inspect shows it: the setting, and for a position of its own what it draws.
@@ -761,6 +815,10 @@ pub struct BaseParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PoseParam")]
     pub pose: Option<PoseParam>,
+    /// The configuration of the design it draws (the active one when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ConfigurationParam")]
+    pub configuration: Option<ConfigurationParam>,
 }
 
 /// What `drawing.view.projected` takes: its parent, the side of it it sits on, and where.

@@ -2259,6 +2259,96 @@ fn hostile_exploded_choices_are_refused() {
     }
 }
 
+/// A block whose length is parameter `L` (100 mm), with configuration rows Default (as it is) and
+/// Long (`L` = 120 mm), drawn as [`three_views`]: the session, the views and Long's row id.
+fn configured_views() -> (Session, [u64; 3], u64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "100 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 50, "height": 20, "body_name": "Block"}));
+    run(&mut s, "config.configure", json!({"params": ["L"]}));
+    let table = run(&mut s, "config.row", json!({"name": "Long", "values": {"L": "120 mm"}}));
+    let long = table["rows"].as_array().and_then(|rows| rows.iter().find(|row| row["name"] == "Long")).and_then(|row| row["id"].as_u64());
+    let (s, views) = three_views_of(s);
+    (s, views, long.unwrap())
+}
+
+/// A view takes its configuration by a row's name or id, or "active", and saves the row's id, so a
+/// rename leaves it on its row. A projected view follows its parent's until it sets its own, and
+/// inspect says where each comes from; `null` follows the parent again. Choosing what it already
+/// draws changes nothing.
+#[test]
+fn a_view_takes_a_configuration_by_name_or_id_and_saves_the_rows_id() {
+    let (mut s, [front, right, top], long) = configured_views();
+    let steps = s.undo.len();
+    let edited = edit_view(&mut s, front, json!({"configuration": "Long"}));
+    assert_eq!(edited["changed"], json!(["configuration"]), "{edited}");
+    let mut followers: Vec<Value> = edited["followers"].as_array().cloned().unwrap_or_default();
+    followers.sort_by_key(|f| f.to_string());
+    let mut expected = vec![json!(ids::encode(right)), json!(ids::encode(top))];
+    expected.sort_by_key(|f| f.to_string());
+    assert_eq!(followers, expected, "{edited}");
+    assert_eq!(s.undo.len(), steps + 1);
+    assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(long)));
+    let followed = json!({"value": {"row": long}, "from": "parent", "parent": ids::encode(front), "set": null});
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], followed);
+    // Renamed in the design, the view stays on its row.
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "config.row", json!({"name": "Long", "rename": "Longer"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(long)));
+    // By id it is the same row: nothing changes and no step is made.
+    let steps = s.undo.len();
+    assert_eq!(edit_view(&mut s, front, json!({"configuration": long}))["changed"], json!([]));
+    assert_eq!(s.undo.len(), steps);
+    // "active" is a choice of its own under a parent that draws another row.
+    edit_view(&mut s, right, json!({"configuration": "ACTIVE"}));
+    let own = json!({"value": "active", "from": "parent", "parent": ids::encode(right), "set": null});
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], own);
+    edit_view(&mut s, right, json!({"configuration": null}));
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], followed, "null follows the parent again");
+    edit_view(&mut s, front, json!({"configuration": null}));
+    let base = json!({"value": "active", "from": "default", "set": null});
+    assert_eq!(inspect_view(&mut s, front)["settings"]["configuration"], base);
+    // A base view made with a row saves its id.
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, made) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:2", "position_mm": [200, 80], "configuration": "Longer"}));
+    assert_eq!(saved(&s, made).settings.configuration, Some(ViewConfiguration::Row(long)));
+}
+
+/// Making or editing a view refuses a configuration the design hasn't got, or that isn't one, with its
+/// reason, and leaves the drawing and the undo steps as they were. A row is named by its name (text)
+/// or its id (a whole number), never by the form a view saves it in.
+#[test]
+fn hostile_configuration_choices_are_refused() {
+    let (mut s, [front, ..], long) = configured_views();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let cases = [
+        (json!("Tall"), "no configuration `Tall`"),
+        (json!(long.to_string()), "no configuration"),
+        (json!(999_999), "no configuration `999999`"),
+        (json!(-1), "configuration"),
+        (json!(1.5), "configuration"),
+        (json!(1e300), "configuration"),
+        (json!([]), "configuration"),
+        (json!({"row": long}), "configuration"),
+        (json!(""), "no configuration"),
+        (json!("x".repeat(100_000)), "no configuration"),
+    ];
+    for (choice, says) in cases {
+        let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "configuration": choice}));
+        assert!(e.contains(says), "{choice}: {}", e.chars().take(200).collect::<String>());
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(&mut s, front, json!({"configuration": choice}));
+        assert!(e.contains(says), "{choice}: {}", e.chars().take(200).collect::<String>());
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{choice}");
+    }
+    // A design with no configuration table has no row to name.
+    let (mut plain, [view, ..]) = three_views();
+    assert!(edit_refused(&mut plain, view, json!({"configuration": "Long"})).contains("no configuration `Long`"));
+    edit_view(&mut plain, view, json!({"configuration": "active"}));
+}
+
 /// A view's height on its sheet: [`hinge_pair`]'s top view is 40 mm with the leaf flat, 20 mm with it
 /// turned up square.
 fn height(s: &mut Session, id: u64) -> f64 {

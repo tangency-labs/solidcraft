@@ -28,6 +28,7 @@ fn schemas_and_the_key_check_agree() {
     ];
     assert_keys(input_schema_for::<SnapshotParams>(), &keys);
     let base = [
+        "configuration",
         "exploded",
         "hide",
         "pose",
