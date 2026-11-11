@@ -41,6 +41,59 @@ fn tilts_and_twists_turn_the_cap_the_right_way() {
     assert!((twisted[2] - rest[2]).abs() < 1e-6, "a twist alone keeps the cap's height");
 }
 
+/// The logical axes the view reads for a raw reading, through the chain navigation uses: the
+/// user's choice of which motion drives which row, then the driver's mapping with the user's own
+/// inversions folded in.
+fn view_axes(raw: [i16; 6], source: [usize; 6], reverse: [bool; 6]) -> crate::space_mouse::Motion {
+    let axes = crate::space_mouse::reassigned(raw.into(), source);
+    crate::space_mouse::DriverMapping::object_mode().with_user_axes(reverse, [1.0; 6]).apply(axes)
+}
+
+#[test]
+fn the_picture_reads_the_device_as_the_view_reads_it() {
+    // The user turned the tilt row over, because their device reports the tilt the other way.
+    let raw = [0, 0, 0, 200, 0, 0];
+    let reverse = [false, false, false, true, false, false];
+    let (_, travel, _) = corner_reading(None, raw, crate::space_mouse::SAME_AXES, reverse);
+    let view = view_axes(raw, crate::space_mouse::SAME_AXES, reverse);
+    // The picture tilts the way the view tilts: the other way round from the raw reading.
+    assert!(travel[3] < 0.0, "the picture tilts the way the user turned the row");
+    assert!(view.rotation[0] < 0.0, "and the view tilts with it");
+    // The cap in the picture leans that way too: its top away from the user.
+    let leaned = apply(&Pose::new(travel).turn, [0.0, 0.0, 1.0]);
+    assert!(leaned[1] > 0.1, "the cap's top leans away from the user");
+}
+
+#[test]
+fn the_picture_shows_the_motion_the_row_reads() {
+    // The user drives the view's first axis with the device's second motion.
+    let raw = [0, 100, 0, 0, 0, 0];
+    let source = [1usize, 0, 2, 3, 4, 5];
+    let (_, travel, moving) = corner_reading(None, raw, source, [false; 6]);
+    // The row shows the motion it reads, and its marker lights.
+    assert!(travel[0] > 0.0, "the row shows the motion it reads");
+    assert!(moving[0], "and its marker lights");
+    assert_eq!(travel[1], 0.0, "the other row reads the motion that is still");
+    assert!(!moving[1]);
+}
+
+#[test]
+fn the_picture_is_the_device_as_it_is_by_default() {
+    let raw = [100, -200, 300, -400, 500, -600];
+    let (_, travel, moving) = corner_reading(None, raw, crate::space_mouse::SAME_AXES, [false; 6]);
+    let expected = raw.map(|value| f32::from(value) / f32::from(solidcraft_space_mouse::FULL_SCALE));
+    assert_eq!(travel, expected, "the default assignment leaves the picture as it was");
+    assert_eq!(moving, [true; 6]);
+}
+
+#[test]
+fn a_broken_assignment_reads_as_the_default() {
+    // Two rows reading the same motion: the view falls back to the default, and so does the picture.
+    let raw = [0, 100, 0, 0, 0, 0];
+    let (_, travel, _) = corner_reading(None, raw, [0, 0, 2, 3, 4, 5], [false; 6]);
+    assert_eq!(travel[1], 100.0 / f32::from(solidcraft_space_mouse::FULL_SCALE));
+}
+
 #[test]
 fn hostile_readings_stay_finite() {
     for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 1e30] {

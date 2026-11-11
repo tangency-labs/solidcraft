@@ -5906,7 +5906,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let area = if position == SpaceMouseGhost::LeftWindow { rect } else { crate::shell::content_rect(app, rect) };
         let area = crate::shell::bottom_overlay_rect(app, area);
         let picture = crate::space_mouse_model::corner_rect(area, position, &obstacles);
-        crate::space_mouse_model::corner(ui, picture, calibration, app.space_mouse.raw.into());
+        crate::space_mouse_model::corner(
+            ui,
+            picture,
+            calibration,
+            app.space_mouse.raw.into(),
+            app.preferences.space_mouse_axis_source,
+            app.preferences.space_mouse_reverse,
+        );
     }
     // Last, so it sits over the overlays; only where a click would reach the model.
     let badge_at = hover.filter(|p| {

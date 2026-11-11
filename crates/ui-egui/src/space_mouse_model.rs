@@ -226,8 +226,20 @@ pub(crate) fn corner_rect(view: egui::Rect, position: crate::prefs::SpaceMouseGh
 /// The device in a corner of the 3D view (`rect`, from `corner_rect`), see-through so it doesn't hide the design:
 /// cap or trackball as `calibration` says, moving as the device does. A device without a
 /// calibration is read as it reports: each axis as a share of the full deflection a reading is
-/// scaled to (`FULL_SCALE`).
-pub(crate) fn corner(ui: &mut egui::Ui, rect: egui::Rect, calibration: Option<&Calibration>, raw: [i16; 6]) {
+/// scaled to (`FULL_SCALE`). The rows are the view's own: a row shows the motion it reads
+/// (`source`), turned the way the user turned that row (`reverse`), so the picture and the view
+/// read the device the same way.
+pub(crate) fn corner(ui: &mut egui::Ui, rect: egui::Rect, calibration: Option<&Calibration>, raw: [i16; 6], source: [usize; 6], reverse: [bool; 6]) {
+    let (kind, travel, moving) = corner_reading(calibration, raw, source, reverse);
+    crate::scenario::publish_rect("space_mouse:corner", rect);
+    let mut corner = ui.new_child(egui::UiBuilder::new().id_salt("sc_space_mouse_corner").max_rect(rect));
+    corner.set_opacity(0.6);
+    draw(&corner, "corner", rect, kind, travel, moving);
+}
+
+/// What the corner picture shows for a reading: the kind of device, how far each row has moved,
+/// and which markers light.
+fn corner_reading(calibration: Option<&Calibration>, raw: [i16; 6], source: [usize; 6], reverse: [bool; 6]) -> (Kind, [f32; 6], [bool; 6]) {
     let (kind, travel, moving) = match calibration {
         Some(calibration) => (calibration.kind, calibration.travel(raw), calibration.apply(raw).map(|value| value != 0)),
         None => {
@@ -235,11 +247,23 @@ pub(crate) fn corner(ui: &mut egui::Ui, rect: egui::Rect, calibration: Option<&C
             (Kind::ReturnToCenter, travel, travel.map(|value| value.abs() > 0.05))
         }
     };
-    let travel = still_unless_moving(kind, travel, moving);
-    crate::scenario::publish_rect("space_mouse:corner", rect);
-    let mut corner = ui.new_child(egui::UiBuilder::new().id_salt("sc_space_mouse_corner").max_rect(rect));
-    corner.set_opacity(0.6);
-    draw(&corner, "corner", rect, kind, travel, moving);
+    let (travel, moving) = by_row(travel, moving, source, reverse);
+    (kind, still_unless_moving(kind, travel, moving), moving)
+}
+
+/// The reading as the view reads it: a row takes the motion it reads (`source`), turned the way
+/// the user turned that row (`reverse`). An assignment that doesn't drive each motion once reads
+/// as the default, as the view does.
+fn by_row(travel: [f32; 6], moving: [bool; 6], source: [usize; 6], reverse: [bool; 6]) -> ([f32; 6], [bool; 6]) {
+    let source = if crate::space_mouse::drives_each_once(source) { source } else { crate::space_mouse::SAME_AXES };
+    let mut values = [0.0; 6];
+    let mut lights = [false; 6];
+    for (row, from) in source.iter().enumerate() {
+        let value = travel.get(*from).copied().unwrap_or(0.0);
+        values[row] = if reverse.get(row).copied().unwrap_or(false) { -value } else { value };
+        lights[row] = moving.get(*from).copied().unwrap_or(false);
+    }
+    (values, lights)
 }
 
 /// A trackball's reading is a speed: within the dead zone it is noise, and rolling the picture by
