@@ -386,9 +386,10 @@ and a fresh CI run:
    Heavy CI runs after review: a pull request gets the formatting and repository checks and a
    quick compile (`cargo check`) when you push. Once a maintainer has reviewed it they add the
    `approved-for-ci` label when the PR is ready to merge, which runs the full CI (build, tests,
-   goldens, Clippy); every push after that runs the full set again. Maintainers merge approved
-   PRs in groups by area, so PRs that touch the same code meet a conflict at most once. The one
-   exception is the pull request that first vendored SolidCore: it must land with a real merge
+   goldens, Clippy); every push after that runs the full set again. Once CI passes, a maintainer
+   (or the maintainer bot) marks the PR `ready to merge` and adds it to the merge queue, which
+   tests each group of queued PRs together before it lands on `main`; you don't merge it
+   yourself. The one exception is the pull request that first vendored SolidCore: it must land with a real merge
    commit, because a squash merge drops the subtree parent and the mirror can no longer
    fast-forward SolidCore (`.github/workflows/solidcore-mirror.yml`).
 4. Reference the issue (`Fixes #12`). In the PR, say what you tested and how. For geometry work, include the measured numbers (and
@@ -444,9 +445,10 @@ the agent or a maintainer can attach it.
 Keep an eye on your PR's status, but don't push to it only to catch up with `main` (no merge of
 `main`, no Update branch button, no rebase for that alone): every push restarts the whole CI
 run for everyone waiting behind it, and `main`'s own run catches what lands in between. When you
-push a change anyway, or GitHub reports a conflict, rebase onto the latest `main` (push your
-branch with `--force-with-lease`) or merge `main` in once, and resolve conflicts without losing
-others' changes. Don't re-run CI on an unchanged commit either: a real failure fails again.
+push a change anyway, or GitHub reports a conflict, rebase onto the latest `main` and push your
+own branch with `--force-with-lease`; never merge `main` into a pull request, and never force-push
+`main` or a branch someone else works on. Resolve conflicts without losing others' changes.
+Don't re-run CI on an unchanged commit either: a real failure fails again.
 Re-run only a job that runner trouble cancelled, with "Re-run failed jobs". While a task remains
 active, follow an open PR through its status changes; at handoff, clearly identify anything
 still awaiting merge.

@@ -24,4 +24,4 @@ Flowcharts and Mermaid diagrams cannot substitute for evidence of visible behavi
 
 ## Integration status
 
-Record the upstream commit and PR status checked before handoff, any conflicts resolved, and validation after integration. Keep up with upstream merges and monitor this PR while the task is active; rebase before pushing and never force-push.
+Record the upstream commit and PR status checked before handoff, any conflicts resolved, and validation after integration. Keep up with upstream merges and monitor this PR while the task is active; when you push, rebase onto the latest `main` (never merge `main` in) and push your own branch with `--force-with-lease`; never force-push `main` or a branch someone else works on.

@@ -147,7 +147,8 @@ change without that is not reviewed. Never loosen a tolerance or a floor to keep
 **The C++ is a reading reference.** `upstream/` is read for test inputs, expected values and
 known constructions (§4b). Nothing in this repository builds, links or runs it.
 
-**Git.** Work happens through pull requests to github.com/tangency-labs/solidcore. Never
+**Git.** Work happens through pull requests to github.com/tangency-labs/solidcraft (solidcore
+lives there at `solidcore/`; github.com/tangency-labs/solidcore is a read-only mirror). Never
 push to `main` directly, never force-push shared branches, never rewrite `main`'s
 history, never `reset`/`checkout`/`restore` files you did not write. Stage explicit
 paths only (never `git add -A`/`git add .`). End every commit message with your

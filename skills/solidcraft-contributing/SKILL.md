@@ -46,9 +46,10 @@ not modelling a part through MCP.
 - **One topic and one issue per PR.** Never commit `plan/`, build directories (`target*/`) or generated
   reference data; check `git ls-files` before pushing. Run `cargo xtask ci` before every commit.
   Commit after every feature arc that builds.
-- **Merge flow.** The heavy CI jobs start when a maintainer adds `approved-for-ci`; approved PRs go
-  through the merge queue (`gh pr merge N -R tangency-labs/solidcraft --squash --auto`), which runs the
-  full suite on each group before it lands on `main`. Never force-push `main`.
+- **Merge flow.** The heavy CI jobs start when a maintainer adds `approved-for-ci`. Once CI passes, a
+  maintainer (or the maintainer bot) marks the PR `ready to merge` and adds it to the merge queue, which
+  runs the full suite on each group before it lands on `main`. Contributors don't merge or queue their
+  own PRs: mark the PR ready and keep CI green. Never force-push `main`.
 - **Do not push only to catch up with `main`** (no merge of `main`, no Update branch, no rebase for
   that alone): every push restarts the whole CI run, and `main`'s own run catches what lands in between.
   When you push anyway, or GitHub reports a conflict, rebase onto the latest `main` and push your own
