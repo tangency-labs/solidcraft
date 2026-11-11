@@ -320,7 +320,10 @@ fn net_distance_with_cross<M: NetMetric>(
             "a weight of the net is not positive",
         ));
     }
-    let first = ph.first().copied().ok_or_else(|| SolidError::sm_err(OP))?;
+    let first = ph
+        .first()
+        .copied()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the first homogeneous control"))?;
     let c = M::euclid(first);
     let mut d_points = 0.0_f64;
     let mut reach = 0.0_f64;
@@ -334,12 +337,11 @@ fn net_distance_with_cross<M: NetMetric>(
             let vi = ph
                 .get(i)
                 .map(|q| q.1)
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "a homogeneous control's weight"))?;
             for (j, &(_, wj)) in pb.iter().enumerate() {
-                let vj = ph
-                    .get(j)
-                    .map(|q| q.1)
-                    .ok_or_else(|| SolidError::sm_err(OP))?;
+                let vj = ph.get(j).map(|q| q.1).ok_or_else(|| {
+                    SolidError::blend_missing(OP, "a homogeneous control's weight")
+                })?;
                 cross = cross.max(M::cross(wi, vi, wj, vj));
             }
         }
@@ -469,11 +471,17 @@ fn bezier_spans(knots: &[f64], degree: usize, count: usize) -> Result<Vec<Bezier
 
 impl BezierNet {
     fn new(net: &BSplineSurface) -> Result<Self> {
-        let nurb = net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+        let nurb = net
+            .gw_nurb()
+            .ok_or_else(|| SolidError::blend_missing(OP, "the net's NURBS form"))?;
         let (p, q) = nurb.degrees();
         let (n, m, _, _) = nurb.array_sizes();
-        let nu = n.checked_add(1).ok_or_else(|| SolidError::sm_err(OP))?;
-        let nv = m.checked_add(1).ok_or_else(|| SolidError::sm_err(OP))?;
+        let nu = n
+            .checked_add(1)
+            .ok_or_else(|| SolidError::blend_failed(OP, "the net's control count overflows"))?;
+        let nv = m
+            .checked_add(1)
+            .ok_or_else(|| SolidError::blend_failed(OP, "the net's control count overflows"))?;
         if nu
             .checked_mul(nv)
             .is_none_or(|n| n > MAPPED_MAX_COEFFICIENTS)
@@ -488,7 +496,10 @@ impl BezierNet {
         }
         for row in nurb.rows() {
             if row.len() != nv {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the net's rows are not all the same length",
+                ));
             }
             for c in row {
                 let w = if c.w == NOW { 1.0 } else { c.w };
@@ -541,13 +552,13 @@ impl BezierNet {
                     .get(u.first + i)
                     .and_then(|row| row.get(v.first + j))
                     .copied()
-                    .ok_or_else(|| SolidError::sm_err(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "a net control point"))?;
                 let (s, t) = if swapped { (j, i) } else { (i, j) };
                 let s = if flip[0] { ds - s } else { s };
                 let t = if flip[1] { dt - t } else { t };
-                *net.get_mut(s)
-                    .and_then(|r| r.get_mut(t))
-                    .ok_or_else(|| SolidError::sm_err(OP))? = point;
+                *net.get_mut(s).and_then(|r| r.get_mut(t)).ok_or_else(|| {
+                    SolidError::blend_missing(OP, "the mapped net's control point")
+                })? = point;
             }
         }
         Ok(net)
@@ -576,10 +587,15 @@ fn insert_interval_knot(
 ) -> Result<Vec<IHpt>> {
     let unchanged = k
         .checked_sub(degree)
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+        .ok_or_else(|| SolidError::blend_failed(OP, "the knot index is below the degree"))?;
     (0..=points.len())
         .map(|i| {
-            let at = |i| points.get(i).copied().ok_or_else(|| SolidError::sm_err(OP));
+            let at = |i| {
+                points
+                    .get(i)
+                    .copied()
+                    .ok_or_else(|| SolidError::blend_missing(OP, "a curve control point"))
+            };
             if i <= unchanged {
                 return at(i);
             }
@@ -589,11 +605,11 @@ fn insert_interval_knot(
             let lo = knots
                 .get(i)
                 .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "a knot below the span"))?;
             let hi = knots
                 .get(i + degree)
                 .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "a knot above the span"))?;
             let alpha = (Ivl::from(knot) - Ivl::from(lo)) / (Ivl::from(hi) - Ivl::from(lo));
             if !alpha.lo.is_finite() || !alpha.hi.is_finite() {
                 return Err(SolidError::invalid_input(
@@ -629,9 +645,9 @@ fn refine_bezier(
             let next = next
                 .filter(|n| *n <= MAPPED_MAX_COEFFICIENTS)
                 .ok_or_else(|| SolidError::invalid_input(OP, "mapped net coefficient budget"))?;
-            *work = work
-                .checked_add(next)
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            *work = work.checked_add(next).ok_or_else(|| {
+                SolidError::blend_failed(OP, "the refinement work count overflows")
+            })?;
             if *work > MAPPED_MAX_WORK {
                 return Err(SolidError::invalid_input(
                     OP,
@@ -641,14 +657,20 @@ fn refine_bezier(
             let k = knots
                 .partition_point(|x| *x <= knot)
                 .checked_sub(1)
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+                .ok_or_else(|| {
+                    SolidError::blend_failed(OP, "the knot lies before the first knot")
+                })?;
             let mut refined = Vec::new();
             if u {
                 let mut cols = Vec::new();
                 for j in 0..columns {
                     let column = net
                         .iter()
-                        .map(|row| row.get(j).copied().ok_or_else(|| SolidError::sm_err(OP)))
+                        .map(|row| {
+                            row.get(j).copied().ok_or_else(|| {
+                                SolidError::blend_missing(OP, "a net column's control")
+                            })
+                        })
                         .collect::<Result<Vec<_>>>()?;
                     cols.push(insert_interval_knot(
                         &column, knots, degree, knot, k, inserted,
@@ -657,7 +679,11 @@ fn refine_bezier(
                 for i in 0..=rows {
                     refined.push(
                         cols.iter()
-                            .map(|col| col.get(i).copied().ok_or_else(|| SolidError::sm_err(OP)))
+                            .map(|col| {
+                                col.get(i).copied().ok_or_else(|| {
+                                    SolidError::blend_missing(OP, "a refined column's control")
+                                })
+                            })
                             .collect::<Result<Vec<_>>>()?,
                     );
                 }
@@ -708,7 +734,11 @@ fn interval_patch(net: &[Vec<IHpt>], s: [Ivl; 2], t: [Ivl; 2]) -> Result<Vec<Vec
     for j in 0..columns {
         let column = net
             .iter()
-            .map(|r| r.get(j).copied().ok_or_else(|| SolidError::sm_err(OP)))
+            .map(|r| {
+                r.get(j)
+                    .copied()
+                    .ok_or_else(|| SolidError::blend_missing(OP, "a net column's control"))
+            })
             .collect::<Result<Vec<_>>>()?;
         cut_columns.push(interval_sub_curve(&column, s[0], s[1]));
     }
@@ -716,7 +746,11 @@ fn interval_patch(net: &[Vec<IHpt>], s: [Ivl; 2], t: [Ivl; 2]) -> Result<Vec<Vec
         .map(|i| {
             let row = cut_columns
                 .iter()
-                .map(|c| c.get(i).copied().ok_or_else(|| SolidError::sm_err(OP)))
+                .map(|c| {
+                    c.get(i)
+                        .copied()
+                        .ok_or_else(|| SolidError::blend_missing(OP, "a refined column's control"))
+                })
                 .collect::<Result<Vec<_>>>()?;
             Ok(interval_sub_curve(&row, t[0], t[1]))
         })
@@ -779,8 +813,12 @@ impl CoveredSpan {
 // each exterior direction. Explicit boundary strips cover every mapped parameter,
 // including outward rounding bands; no part of the actual net is discarded.
 fn covered_spans(spans: &[BezierSpan], range: [Ivl; 2], clamped: bool) -> Result<Vec<CoveredSpan>> {
-    let first = *spans.first().ok_or_else(|| SolidError::sm_err(OP))?;
-    let last = *spans.last().ok_or_else(|| SolidError::sm_err(OP))?;
+    let first = *spans
+        .first()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the first span"))?;
+    let last = *spans
+        .last()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the last span"))?;
     let [lo, hi] = [range[0].lo, range[1].hi];
     let mut result = Vec::new();
     if clamped && lo < first.range[0] {
@@ -865,8 +903,12 @@ pub(crate) fn same_basis(
     if a != [0.0; 2] || b != [1.0; 2] {
         return Ok(false);
     }
-    let x = actual.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
-    let y = expected.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let x = actual
+        .gw_nurb()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the saved net's NURBS form"))?;
+    let y = expected
+        .gw_nurb()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the regenerated net's NURBS form"))?;
     let (xs, ys) = (x.array_sizes(), y.array_sizes());
     let (xd, yd) = (x.degrees(), y.degrees());
     Ok(if swapped {
@@ -905,7 +947,9 @@ pub(crate) fn same_basis_net_distance(
     }
     let x = interval_coefficients(actual)?;
     let y = interval_coefficients(expected)?;
-    let nurb = expected.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let nurb = expected
+        .gw_nurb()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the regenerated net's NURBS form"))?;
     let (p, q) = nurb.degrees();
     let rows = y.len();
     let columns = y.first().map_or(0, Vec::len);
@@ -936,7 +980,7 @@ pub(crate) fn same_basis_net_distance(
             } else {
                 x.get(i).and_then(|r| r.get(j))
             };
-            let &a = a.ok_or_else(|| SolidError::sm_err(OP))?;
+            let &a = a.ok_or_else(|| SolidError::blend_missing(OP, "a saved net control point"))?;
             let point = IntervalMetric::euclid(e);
             out.push(Pair {
                 point,
@@ -961,7 +1005,7 @@ pub(crate) fn same_basis_net_distance(
                     pairs
                         .get(i)
                         .and_then(|r| r.get(j))
-                        .ok_or_else(|| SolidError::sm_err(OP))
+                        .ok_or_else(|| SolidError::blend_missing(OP, "a paired control point"))
                 })
                 .collect::<Result<_>>()?;
             bound = bound.max(span_distance(&active)?);
@@ -981,7 +1025,10 @@ struct Pair {
 /// [`net_distance_with`] in [`IntervalMetric`] on one span's active coefficient pairs of
 /// [`same_basis_net_distance`], from their terms formed once.
 fn span_distance(active: &[&Pair]) -> Result<f64> {
-    let c = active.first().ok_or_else(|| SolidError::sm_err(OP))?.point;
+    let c = active
+        .first()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the span's first active control"))?
+        .point;
     let mut d_points = 0.0_f64;
     let mut reach = 0.0_f64;
     for pair in active {
@@ -1016,10 +1063,16 @@ fn span_distance(active: &[&Pair]) -> Result<f64> {
 /// checked finite with positive weights, within the mapped certificates' coefficient
 /// budget.
 fn interval_coefficients(net: &BSplineSurface) -> Result<Vec<Vec<IHpt>>> {
-    let nurb = net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let nurb = net
+        .gw_nurb()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the net's NURBS form"))?;
     let (n, m, _, _) = nurb.array_sizes();
-    let nu = n.checked_add(1).ok_or_else(|| SolidError::sm_err(OP))?;
-    let nv = m.checked_add(1).ok_or_else(|| SolidError::sm_err(OP))?;
+    let nu = n
+        .checked_add(1)
+        .ok_or_else(|| SolidError::blend_failed(OP, "the net's control count overflows"))?;
+    let nv = m
+        .checked_add(1)
+        .ok_or_else(|| SolidError::blend_failed(OP, "the net's control count overflows"))?;
     let (p, q) = nurb.degrees();
     if p > MAPPED_MAX_DEGREE
         || q > MAPPED_MAX_DEGREE
@@ -1038,7 +1091,10 @@ fn interval_coefficients(net: &BSplineSurface) -> Result<Vec<Vec<IHpt>>> {
     let mut out = Vec::new();
     for row in nurb.rows() {
         if row.len() != nv {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the net's rows are not all the same length",
+            ));
         }
         let mut r = Vec::new();
         for c in row {
