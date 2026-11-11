@@ -191,10 +191,10 @@ impl SurfOfRevolution {
             self.anal_uv_domain = *new_step_uv_domain;
         }
         let v_ivl = new_step_uv_domain.v_interval();
-        let gen = self.gen_curve.as_mut().ok_or(SolidError::surface_missing(
-            OP_ADJUST,
-            "the generator curve",
-        ))?;
+        let gen = self
+            .gen_curve
+            .as_mut()
+            .ok_or_else(|| SolidError::surface_missing(OP_ADJUST, "the generator curve"))?;
         gen_adjust_step_interval(k, gen, &v_ivl)?;
         if k.fixes.ellipse_step_interval_checks {
             self.anal_uv_domain = *new_step_uv_domain;

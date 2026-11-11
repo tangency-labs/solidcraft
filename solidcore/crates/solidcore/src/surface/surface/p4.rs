@@ -913,7 +913,8 @@ impl SurfaceEval<'_> {
 
         // On the high side of the 'good' domain, this must be flipped (because it's
         // decreasing).
-        let surface = surface.ok_or(SolidError::surface_missing(OP_EVAL_NORMAL, "the surface"))?;
+        let surface =
+            surface.ok_or_else(|| SolidError::surface_missing(OP_EVAL_NORMAL, "the surface"))?;
         let domain = surface.natural_uv_domain_with_nurb(k)?;
         if sing_u {
             let mut n = duv.cross(dv);
@@ -1744,10 +1745,12 @@ impl Surface {
                             && cache.point_test_enabled
                             && !cache.face_was_modified
                         {
-                            let face = cache.face()?.ok_or(SolidError::surface_missing(
-                                "surface::surface::p4::global_point_solve",
-                                "the cache's face",
-                            ))?;
+                            let face = cache.face()?.ok_or_else(|| {
+                                SolidError::surface_missing(
+                                    "surface::surface::p4::global_point_solve",
+                                    "the cache's face",
+                                )
+                            })?;
                             let queries = context.face_queries().ok_or_else(|| {
                                 SolidError::unported(
                                     "prepared face classifier for fast drop",

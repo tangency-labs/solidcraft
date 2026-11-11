@@ -2441,7 +2441,7 @@ impl Surface {
         // get or create SurfaceCache with Subdivision Tree containing Bounding boxes
         // (smsurf_GetSurfaceCache returns NULL when no cache can be made: NER)
         let mut cache = ignored_surface_result(get_surface_cache::<()>(k, self, None))?
-            .ok_or(SolidError::surface_missing(OP_BOX, "the surface's cache"))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_BOX, "the surface's cache"))?;
         let top = cache
             .get_tree(k)?
             .top_node()
@@ -2906,7 +2906,7 @@ impl Surface {
 
                     let uv_curve = curves_uv
                         .get_mut(ii)
-                        .ok_or(SolidError::surface_missing(OP, "the UV curve"))?;
+                        .ok_or_else(|| SolidError::surface_missing(OP, "the UV curve"))?;
                     if !matches!(uv_curve.kind(), CurveKind::BSpline(_)) {
                         return Err(SolidError::surface_missing(
                             OP,

@@ -856,7 +856,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         };
         let handle = fields
             .surface
-            .ok_or(SolidError::surface_missing(OP_BLOCK, "the node's surface"))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_BLOCK, "the node's surface"))?;
         // upstream works on the node's surface itself (`pAux->mBA_pSurface`); the cache is
         // edited below, so an evaluation copy (exact knots, owner kept) stands for it: the
         // copy constructor's knot fix-up would move near-coincident knots and so the splits.
@@ -1057,10 +1057,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         let mut curr: Vec<NodeId> = base_nodes.clone();
         let mut next: Vec<NodeId> = Vec::with_capacity(base_nodes.len());
         let at = |v: &[NodeId], i: usize| -> Result<NodeId> {
-            v.get(i).copied().ok_or(SolidError::surface_failed(
-                OP_BLOCK,
-                "a base node is out of range",
-            ))
+            v.get(i)
+                .copied()
+                .ok_or_else(|| SolidError::surface_failed(OP_BLOCK, "a base node is out of range"))
         };
 
         // assemble U and V splits until there is just one

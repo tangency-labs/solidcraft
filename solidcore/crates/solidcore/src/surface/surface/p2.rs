@@ -5228,12 +5228,9 @@ pub fn surface_cache<O: Copy + PartialEq>(
 pub fn original_surface<O: Copy + PartialEq>(tree: &Tree<O>, _node: &TreeNode<O>) -> Result<O> {
     const OP: &str = "surface::surface::p2::original_surface";
     match tree.owner() {
-        Some(TreeOwner::SurfaceCache | TreeOwner::TrimSrfCache | TreeOwner::TessSrfCache) => {
-            tree.owner_object()?.ok_or(SolidError::surface_failed(
-                OP,
-                "the tree's owner names no surface",
-            ))
-        }
+        Some(TreeOwner::SurfaceCache | TreeOwner::TrimSrfCache | TreeOwner::TessSrfCache) => tree
+            .owner_object()?
+            .ok_or_else(|| SolidError::surface_failed(OP, "the tree's owner names no surface")),
         _ => Err(SolidError::surface_failed(
             OP,
             "the tree is not owned by a surface cache",
@@ -5455,7 +5452,7 @@ impl<'s> SurfaceEval<'s> {
 
         let surface = self
             .surface
-            .ok_or(SolidError::surface_missing(OP_EVAL, "the surface"))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_EVAL, "the surface"))?;
         let flags = EvaluateFlags {
             u_side: if self.u_from_left {
                 Side::Left

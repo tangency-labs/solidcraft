@@ -664,14 +664,9 @@ impl Cone {
             } else {
                 tgt_nurb_domain.v_interval()
             };
-            let gen = off_cone
-                .rev
-                .gen_curve
-                .as_mut()
-                .ok_or(SolidError::surface_missing(
-                    OP_OFFSET,
-                    "the offset cone's generator curve",
-                ))?;
+            let gen = off_cone.rev.gen_curve.as_mut().ok_or_else(|| {
+                SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
+            })?;
             ignore_status(gen.edit_parameterization(k, &tgt_gen_nurb_ivl))?;
 
             // rebuild the PolarCurve to make sure all is coordinated (status ignored)
@@ -768,14 +763,9 @@ impl Cone {
         // translate the NewCone->GenCurve from current center line (status ignored)
         let mut mv = Axis2Placement::IDENTITY;
         mv.translate(off_vec);
-        let gen = off_cone
-            .rev
-            .gen_curve
-            .as_mut()
-            .ok_or(SolidError::surface_missing(
-                OP_OFFSET,
-                "the offset cone's generator curve",
-            ))?;
+        let gen = off_cone.rev.gen_curve.as_mut().ok_or_else(|| {
+            SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
+        })?;
         ignore_status(gen.transform(k, &mv, None))?;
 
         Ok(Some(off_cone))

@@ -665,7 +665,7 @@ impl SurfOfRevolution {
             let own = self
                 .gen_curve
                 .as_mut()
-                .ok_or(SolidError::surface_missing(OP_GEN, "the generator curve"))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
             gen_adjust_step_interval(k, own, &surf_gen_step_ivl)?;
             gen_adjust_step_interval(k, &mut gen_curve, &surf_gen_step_ivl)?;
         }
@@ -802,7 +802,7 @@ impl SurfOfRevolution {
     pub(crate) fn gen(&self) -> Result<&Curve> {
         self.gen_curve
             .as_ref()
-            .ok_or(SolidError::surface_missing(OP_GEN, "the generator curve"))
+            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))
     }
 
     /// The generating curve (`GetGenCurve`).
@@ -1303,10 +1303,9 @@ impl SurfOfRevolution {
         // when polar conversion is possible
         let mut exact_conversion = false;
         if self.have_polar_conversion() {
-            let circle = self.polar_curve().ok_or(SolidError::surface_missing(
-                OP_GEN,
-                "the polar conversion circle",
-            ))?;
+            let circle = self.polar_curve().ok_or_else(|| {
+                SolidError::surface_missing(OP_GEN, "the polar conversion circle")
+            })?;
             let (x, exact) = self
                 .polar
                 .convert_to_polar_parameter(k, circle, swapped.x)?;
