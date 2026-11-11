@@ -641,8 +641,12 @@ impl core::fmt::Display for Failure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}: {}", self.operation, self.reason)?;
         // a reason that names no entity of its own is followed by the failure's
-        if let (Reason::Failed(_) | Reason::Topology(_), Some(entity)) = (&self.reason, self.entity)
-        {
+        let names_none = match &self.reason {
+            Reason::Failed(_) | Reason::Topology(_) => true,
+            Reason::Offset(o) => o.replaces_upstream_status(),
+            _ => false,
+        };
+        if let (true, Some(entity)) = (names_none, self.entity) {
             write!(f, " ({entity})")?;
         }
         if let Some(cause) = &self.cause {
@@ -1095,9 +1099,11 @@ impl SolidError {
     /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
     /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
     /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
-    /// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`] or [`curve::CurveFailure`] that
-    /// replaced one ([`sweep::SweepFailure::replaces_upstream_status`],
-    /// [`curve::CurveFailure::replaces_upstream_status`])). The callers that branch on an
+    /// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`], [`curve::CurveFailure`] or
+    /// [`offset::OffsetFailure`] that replaced one
+    /// ([`sweep::SweepFailure::replaces_upstream_status`],
+    /// [`curve::CurveFailure::replaces_upstream_status`],
+    /// [`offset::OffsetFailure::replaces_upstream_status`])). The callers that branch on an
     /// upstream status use it so that they treat both alike; it goes with `Upstream` in
     /// the last PR of the typed-errors work.
     #[must_use]
@@ -1116,6 +1122,7 @@ impl SolidError {
                 | Reason::Surface(_) => Some(f.status),
                 Reason::Sweep(w) if w.replaces_upstream_status() => Some(f.status),
                 Reason::Curve(c) if c.replaces_upstream_status() => Some(f.status),
+                Reason::Offset(o) if o.replaces_upstream_status() => Some(f.status),
                 _ => None,
             },
             _ => None,
@@ -1337,9 +1344,11 @@ impl SolidError {
 /// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
 /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
 /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
-/// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`] or [`curve::CurveFailure`] that
-/// replaced one ([`sweep::SweepFailure::replaces_upstream_status`],
-/// [`curve::CurveFailure::replaces_upstream_status`])).
+/// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`], [`curve::CurveFailure`] or
+/// [`offset::OffsetFailure`] that replaced one
+/// ([`sweep::SweepFailure::replaces_upstream_status`],
+/// [`curve::CurveFailure::replaces_upstream_status`],
+/// [`offset::OffsetFailure::replaces_upstream_status`])).
 ///
 /// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
 /// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the
@@ -2336,16 +2345,17 @@ mod tests {
 pub(crate) mod replaced_upstream_samples {
     use super::SolidError;
 
-    /// The typed failures of three areas that replaced an `Upstream` with `code` (#13790):
-    /// an intersection's, a geometry utility's and a topology routine's, at `entity` when one is given.
+    /// The typed failures of four areas that replaced an `Upstream` with `code` (#13790):
+    /// an intersection's, a geometry utility's, a topology routine's and an offset routine's,
+    /// at `entity` when one is given.
     pub(crate) fn replaced_upstream(
         operation: &'static str,
         code: i32,
         entity: Option<crate::error::EntityRef>,
-    ) -> [SolidError; 3] {
+    ) -> [SolidError; 4] {
         use crate::error::{
-            geom::GeomFailure, intersect::IntersectFailure, topology::TopologyFailure, Failure,
-            Reason,
+            geom::GeomFailure, intersect::IntersectFailure, offset::OffsetFailure,
+            topology::TopologyFailure, Failure, Reason,
         };
         let typed = |reason: Reason| {
             let f = Failure::new(operation, reason).with_status(code);
@@ -2363,6 +2373,9 @@ pub(crate) mod replaced_upstream_samples {
                 "replaced an upstream status",
             ))),
             typed(Reason::Topology(TopologyFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Offset(OffsetFailure::Failed(
                 "replaced an upstream status",
             ))),
         ]
