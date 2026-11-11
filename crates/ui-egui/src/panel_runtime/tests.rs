@@ -26,6 +26,7 @@ fn panel_surface_policy_keeps_disabled_host_storage_small() {
 
 #[test]
 fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
+    crate::test_support::host_data();
     use egui::Color32;
     use solidcraft_color::srgb::{decode8, encode8};
     let high_contrast = crate::theme_files::resolve(crate::theme_files::find("high-contrast", &[]).unwrap());
@@ -13487,4 +13488,230 @@ fn production_fixed_bottom_history_ignores_a_legacy_collapsed_preference() {
     let section = h.app.panel_runtime().unwrap().layout().layout().containing(&id("history")).unwrap();
     assert_eq!(section.location.zone(), Zone::Bottom);
     assert!(!section.collapsed);
+}
+
+#[test]
+fn universal_chrome_controls_have_real_accessible_widgets_and_stable_ids_at_both_scales() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen};
+    for scale in [1.0, 2.0] {
+        for preset in ["docks", "tabs", "collapsed", "overflow", "floating", "inline"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.ctx.set_pixels_per_point(scale);
+            h.call("ui.resize", serde_json::json!({"width":800,"height":600}));
+            enable_host_specimen(&mut h.app, preset).unwrap();
+            h.frames(3);
+            let before = h.app.universal_panel_frame().unwrap().controls.clone();
+            assert!(!before.is_empty(), "actual chrome at scale {scale}: {preset}");
+            let tree = h.output.accesskit_update.as_ref().expect("real egui accessibility update");
+            let mut ids = std::collections::HashSet::new();
+            for control in &before {
+                assert!(ids.insert(control.id), "semantic IDs cannot collide: {control:?}");
+                assert!(!control.accessible_name.is_empty());
+                control.bounds.validate().unwrap();
+                let interactive = !matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Surface { .. }));
+                if interactive && control.enabled {
+                    let node = tree
+                        .nodes
+                        .iter()
+                        .find(|(id, _)| *id == control.id.accesskit_id())
+                        .map(|(_, node)| node)
+                        .unwrap_or_else(|| panic!("exported control needs its own actual widget: {control:?}"));
+                    assert_eq!(node.label(), Some(control.accessible_name.as_str()), "actual widget/metadata name parity: {control:?}");
+                    let expected_role = match &control.target {
+                        HostControlTarget::Pointer(HostPointerTarget::Tab { .. }) => egui::accesskit::Role::Tab,
+                        HostControlTarget::Pointer(HostPointerTarget::Sash { .. } | HostPointerTarget::Resize { .. }) => {
+                            egui::accesskit::Role::Splitter
+                        }
+                        HostControlTarget::Scroll { .. } => egui::accesskit::Role::ScrollBar,
+                        HostControlTarget::PanelMenu { .. } | HostControlTarget::Shared { .. } => egui::accesskit::Role::MenuItem,
+                        HostControlTarget::Pointer(_) | HostControlTarget::Content { .. } => egui::accesskit::Role::Button,
+                    };
+                    assert_eq!(node.role(), expected_role, "the actual widget role follows its typed target: {control:?}");
+                    if matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. })) {
+                        assert_eq!(control.accessible_name, solidcraft_ui_text::tr("ui.panel_host.menu"));
+                    }
+                }
+            }
+            h.frames(2);
+            let after = &h.app.universal_panel_frame().unwrap().controls;
+            for control in before {
+                let retained = after.iter().find(|other| other.target == control.target).expect("same semantic target on the next frame");
+                assert_eq!(retained.id, control.id, "status/service update cannot change widget identity");
+                assert_eq!(retained.bounds, control.bounds);
+            }
+        }
+    }
+}
+
+#[test]
+fn universal_host_slots_and_menu_button_stay_bounded_at_minimum_and_small_window_sizes() {
+    use crate::panel_runtime::enable_host_specimen;
+    for scale in [1.0, 2.0] {
+        for (width, height) in [(1280, 800), (800, 600), (480, 320)] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.ctx.set_pixels_per_point(scale);
+            h.call("ui.resize", serde_json::json!({"width":width,"height":height}));
+            enable_host_specimen(&mut h.app, "tabs").unwrap();
+            h.frames(3);
+            let host = &h.app.universal_panel_frame().unwrap().layout;
+            host.resolved.validate().unwrap();
+            for section in &host.sections {
+                assert!(section.outer.contains_rect(section.header));
+                assert!(section.header.contains_rect(section.menu));
+                if let Some(body) = section.body {
+                    assert!(section.outer.contains_rect(body));
+                    assert!(body.origin.y >= section.header.origin.y + section.header.size.height);
+                }
+                assert_eq!(section.header.size.height, host.metrics.header_height);
+                if let Some(strip) = section.tab_strip {
+                    assert_eq!(strip.origin.y, section.header.origin.y);
+                    assert_eq!(strip.size.height, section.header.size.height);
+                    assert!(section.header.contains_rect(strip));
+                    assert!(section.outer.contains_rect(strip));
+                    if let Some(body) = section.body {
+                        assert!(body.origin.y >= strip.origin.y + strip.size.height);
+                    }
+                }
+                if let Some(footer) = section.footer {
+                    assert!(section.outer.contains_rect(footer));
+                    if let Some(body) = section.body {
+                        assert_eq!(footer.origin.y, body.origin.y + body.size.height);
+                    }
+                    assert_eq!(footer.size.height, host.metrics.footer_height);
+                }
+                assert!(section.menu.size.width > 0.0 && section.menu.size.height > 0.0, "shared actions remain reachable when content fits");
+            }
+            for overflow in &host.overflow {
+                assert!(!overflow.sections.is_empty());
+                if let Some(bounds) = overflow.bounds {
+                    assert!(host.capacity.contains_rect(bounds));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn universal_collapsed_header_keeps_actions_and_one_click_restores_the_same_controller() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen, inspect_host_specimen};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "collapsed").unwrap();
+    h.frames(3);
+    let before = inspect_host_specimen(&mut h.app).unwrap();
+    let frame = h.app.universal_panel_frame().unwrap();
+    assert!(frame.layout.sections.iter().all(|section| section.collapsed && section.body.is_none() && section.footer.is_none()));
+    assert!(frame.controls.iter().any(|control| matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance, action }) if instance.0 == "specimen-0" && action.0 == "apply")
+        && control.enabled));
+    assert!(frame.controls.iter().any(|control| matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::Close { instance }) if instance.0 == "specimen-0")));
+    assert!(!frame.controls.iter().any(|control| matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::Close { instance }) if instance.0 == "specimen-1")));
+    let expand = frame
+        .controls
+        .iter()
+        .find(|control| {
+            matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::Collapse { instance }) if instance.0 == "specimen-0")
+        })
+        .unwrap();
+    let at = crate::panel_runtime::egui_rect(expand.bounds).center();
+    h.call("ui.click", serde_json::json!({"x":at.x,"y":at.y}));
+    h.frames(2);
+    let restored = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|section| section.instance.0 == "specimen-0").unwrap();
+    assert!(!restored.collapsed);
+    assert!(restored.body.is_some());
+    let after = inspect_host_specimen(&mut h.app).unwrap();
+    let controller = |value: &serde_json::Value| {
+        value["runtime"]["probe"]["controllers"].as_array().unwrap().iter().find(|state| state["instance"] == "specimen-0").unwrap().clone()
+    };
+    let old = controller(&before);
+    let new = controller(&after);
+    assert_eq!(old["renders"], 0);
+    assert!(new["renders"].as_u64().unwrap() > 0);
+    assert_eq!(old["controller_identity"], new["controller_identity"]);
+    assert_eq!(old["cancels"], new["cancels"]);
+    assert_eq!(old["draft"], new["draft"]);
+    assert_eq!(before["session"]["camera"], after["session"]["camera"]);
+}
+
+#[test]
+fn universal_sole_content_gap_is_navigable_while_declared_fill_uses_the_column() {
+    use crate::panel_runtime::{enable_host_specimen, logical_rect};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "content_fill").unwrap();
+    h.frames(3);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let content = frame.layout.sections.iter().find(|section| section.instance.0 == "specimen-0").unwrap();
+    let fill = frame.layout.sections.iter().find(|section| section.instance.0 == "specimen-1").unwrap();
+    assert!(fill.outer.size.height > content.outer.size.height);
+    let outer = crate::panel_runtime::egui_rect(content.outer);
+    let gap = egui::Rect::from_center_size(egui::pos2(outer.center().x, outer.bottom() + 20.0), egui::vec2(4.0, 4.0));
+    assert!(frame.layout.usable.contains_rect(logical_rect(gap)));
+    assert!(!frame.layout.consumes_pointer(solidcraft_engine::panels::Point { x: gap.center().x, y: gap.center().y }));
+    assert!(frame.layout.resolved.rails.is_empty() && frame.layout.overflow.is_empty());
+}
+
+#[test]
+fn universal_inline_specimen_uses_one_total_row_with_real_content_and_shared_controls() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "inline").unwrap();
+    h.frames(3);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let section = frame.layout.sections.first().unwrap();
+    assert!(section.inline && !section.collapsed);
+    assert_eq!(section.header, section.outer);
+    assert!(section.outer.size.height <= solidcraft_theme::PANEL_INLINE_MAX_HEIGHT);
+    assert!(section.body.is_none() && section.footer.is_none());
+    assert!(!frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::HeaderAction { .. }))));
+    let runtime = h.app.panel_runtime().unwrap();
+    let instance = runtime.layout().layout().instance(&section.instance).unwrap();
+    assert!(runtime.layout().registry().get(&instance.kind).unwrap().header_actions.is_empty(), "the inline log declares no custom or debug actions");
+    assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. }))));
+    assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Collapse { .. }))));
+    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.inline")).is_some());
+    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.caption")).is_none());
+}
+
+#[test]
+fn universal_registered_header_command_invokes_only_the_declared_synthetic_binding() {
+    use crate::panel_runtime::{enable_host_specimen, inspect_host_specimen};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "collapsed").unwrap();
+    h.frames(3);
+    let before = inspect_host_specimen(&mut h.app).unwrap();
+    h.app.run_panel_command("panel.action", &serde_json::json!({"target":{"type":"instance","id":"specimen-0"},"action":"apply"})).unwrap();
+    let after = inspect_host_specimen(&mut h.app).unwrap();
+    let applies = |value: &serde_json::Value| {
+        value["runtime"]["probe"]["controllers"].as_array().unwrap().iter().find(|state| state["instance"] == "specimen-0").unwrap()["applies"]
+            .as_u64()
+            .unwrap()
+    };
+    assert_eq!(applies(&after), applies(&before) + 1);
+    assert_eq!(after["runtime"]["probe"]["content_command_calls"], before["runtime"]["probe"]["content_command_calls"].as_u64().unwrap() + 1);
+    assert_eq!(before["session"], after["session"]);
+    let rejected = h.app.run_panel_command("panel.action", &serde_json::json!({"target":{"type":"instance","id":"specimen-1"},"action":"apply"}));
+    assert_eq!(rejected.unwrap_err().rule, solidcraft_engine::panels::Rule::Capability);
+    let undeclared = h.app.run_panel_command("panel.action", &serde_json::json!({"target":{"type":"instance","id":"specimen-0"},"action":"cancel"}));
+    assert_eq!(undeclared.unwrap_err().rule, solidcraft_engine::panels::Rule::Capability, "a content action is not automatically a header action");
+    let refused = inspect_host_specimen(&mut h.app).unwrap();
+    assert_eq!(applies(&after), applies(&refused));
+    assert_eq!(after["runtime"]["probe"]["content_command_calls"], refused["runtime"]["probe"]["content_command_calls"]);
+    let editor = |value: &serde_json::Value| {
+        value["runtime"]["probe"]["controllers"].as_array().unwrap().iter().find(|state| state["instance"] == "specimen-0").unwrap().clone()
+    };
+    assert_eq!(editor(&after)["cancels"], editor(&refused)["cancels"]);
+    assert_eq!(editor(&after)["transaction_live"], editor(&refused)["transaction_live"]);
+    assert_eq!(before["session"], refused["session"]);
 }

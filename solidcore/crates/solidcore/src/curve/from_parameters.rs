@@ -570,17 +570,48 @@ fn p3(a: [f64; 3]) -> Point3 {
 }
 
 /// A record frame's origin and axes, the axes checked unit and square to rounding.
-fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3)> {
+/// Unit and square axes, each within 8 ulps of 1: the record construction's
+/// and the exact-form check's shared frame test.
+fn unit_square(x: Vec3, y: Vec3) -> bool {
     let ulps = 8.0 * f64::EPSILON;
-    let (x, y) = (p3(f.x_axis), p3(f.y_axis));
     let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-    if !(unit(x) && unit(y) && x.dot(y).abs() <= ulps) {
+    unit(x) && unit(y) && x.dot(y).abs() <= ulps
+}
+
+fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3)> {
+    let (x, y) = (p3(f.x_axis), p3(f.y_axis));
+    if !unit_square(x, y) {
         return Err(SolidError::invalid_input(
             OP,
             "the frame's axes are not unit and square",
         ));
     }
     Ok((p3(f.origin), x, y))
+}
+
+/// Check an ellipse's attached rational form against its analytic support using
+/// the same exact-class certificate as record construction. Public curve
+/// parameters remain the attached form's parameters.
+pub(crate) fn ellipse_form_is_exact(e: &Ellipse) -> Result<bool> {
+    let placement = e.position();
+    let (o, x, y) = (placement.origin(), placement.x_axis(), placement.y_axis());
+    let (rx, ry) = (e.x_radius(), e.y_radius());
+    if !(rx > 0.0
+        && ry > 0.0
+        && rx.is_finite()
+        && ry.is_finite()
+        && [o.x, o.y, o.z].iter().all(|x| x.is_finite())
+        && unit_square(x, y))
+    {
+        return Ok(false);
+    }
+    let mut form = e.base().clone_exact();
+    for point in form.get_or_create_gw_nurb()?.cpts_mut() {
+        if point.z == NOZ {
+            point.z = 0.0;
+        }
+    }
+    curve_on_quadrics(&form, &quadrics(o, x, y, rx, ry, false))
 }
 
 /// The plane of a conic and its sphere (a circle) or elliptic cylinder (an ellipse), as

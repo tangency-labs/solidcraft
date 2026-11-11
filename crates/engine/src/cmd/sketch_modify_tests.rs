@@ -1621,6 +1621,33 @@ fn transform_scales_dimension_formulas_once_and_keeps_unselected_dimensions() {
     assert!(close(s.doc.eval(height["param"].as_str().unwrap(), length).unwrap(), 60.0), "dependent dimensions scale only once");
 }
 
+/// #14411: Scale takes the driving dimensions of what it scales with it, as Transform does: a
+/// 40 × 20 rectangle filleted r5, scaled 2× about the origin, is 80 × 40 with r10 corners, not a
+/// skewed shape the solver bent to keep the old radius.
+#[test]
+fn scale_scales_the_dimensions_it_takes_with_it() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 20], [0, 20]], "closed": true}));
+    run(&mut s, "sketch.fillet", json!({"points": ["l1.end", "l2.end", "l3.end", "l4.end"], "radius": 5}));
+    let curves = ["l1", "l2", "l3", "l4", "a1", "a2", "a3", "a4"];
+    let radius = sketch(&s).constraints.iter().find_map(|c| c.param.clone()).unwrap();
+    let out = run(&mut s, "sketch.scale", json!({"entities": curves, "base": [0, 0], "factor": 2}));
+    assert_eq!(out["sketch"]["solved"], true, "{out}");
+    assert!(close(s.doc.eval(&radius, solidcraft_doc::expr::Kind::Length).unwrap(), 10.0), "{:?}", s.doc.param(&radius));
+    let sk = sketch(&s);
+    for (id, a, b) in [("l1", [10.0, 0.0], [70.0, 0.0]), ("l2", [80.0, 10.0], [80.0, 30.0])] {
+        let (p, q) = (
+            sk.point(sk.resolve_point(&format!("{id}.start")).unwrap()).unwrap(),
+            sk.point(sk.resolve_point(&format!("{id}.end")).unwrap()).unwrap(),
+        );
+        assert!(p.dist(Vec2::new(a[0], a[1])) < 1e-6 && q.dist(Vec2::new(b[0], b[1])) < 1e-6, "{id}: {p:?} {q:?}");
+    }
+    let area = 80.0 * 40.0 - (4.0 - std::f64::consts::PI) * 100.0;
+    assert!((profiles(&s)[0] - area).abs() < 1e-6, "{:?}", profiles(&s));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(close(s.doc.eval(&radius, solidcraft_doc::expr::Kind::Length).unwrap(), 5.0), "one undo restores the radius");
+}
+
 /// #1485: after a circle is trimmed between two construction lines, clicking the trimmed end
 /// picks the construction line's end lying there, not the arc's own; the tangent arc still starts
 /// from the trimmed arc, tangent to it.
@@ -4226,7 +4253,10 @@ fn trim_hover_made_once_and_extend_previews_per_end_answer_as_afresh() {
             let Some(piece) = piece else { continue };
             if k % 4 == 1 {
                 let mut after = sk.clone();
-                super::remove_piece(&mut after, ci, at, "sketch.trim").unwrap();
+                let (_, removed) = super::remove_piece(&mut after, ci, at, "sketch.trim").unwrap();
+                if c.kind.is_freeform() {
+                    assert_eq!(piece, removed, "{} at {at:?}", c.id);
+                }
                 let mid = if piece.len() > 2 { piece[piece.len() / 2] } else { (piece[0] + piece[1]) * 0.5 };
                 assert!(!(0..after.curves.len()).filter_map(|i| after.shape(i)).any(|sh| sh.dist(mid) < 1e-6), "{} at {at:?}", c.id);
                 trimmed += 1;
@@ -5735,4 +5765,69 @@ fn split_failures_name_the_public_command() {
     assert!(text.contains("invalid parameters for `sketch.break`"), "{text}");
     assert!(!text.contains("invalid parameters for `split`"), "{text}");
     assert!(!text.contains("sketch.modify"), "{text}");
+}
+
+/// #2980: a rectangle drawn from the origin and a circle, all moved: they move as drawn. The
+/// corner's coincidence with the origin is let go instead of pulling that corner back and
+/// bending the rectangle; its own horizontals and verticals stay.
+#[test]
+fn moving_shapes_held_to_the_origin_moves_them_whole() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, -30]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [-5, 20], "radius": 12}));
+    let sk = sketch(&s);
+    let at_origin = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Coincident { .. })).map(|c| c.id.clone());
+    assert!(at_origin.is_some(), "the rectangle's corner is held on the origin");
+    let before: Vec<(String, Vec2)> = sk.points.iter().filter(|p| p.id != "origin").map(|p| (p.id.clone(), p.pos)).collect();
+    let ids: Vec<String> = sk.curves.iter().map(|c| c.id.clone()).collect();
+    let r = run(&mut s, "sketch.move", json!({"entities": ids, "translate": [15.5, 0]}));
+    assert_eq!(r["released"], json!([{"id": at_origin.clone().unwrap(), "kind": "Coincident"}]), "{r}");
+    let after = sketch(&s);
+    for (id, p) in &before {
+        let q = after.points.iter().find(|q| &q.id == id).map(|q| q.pos).unwrap();
+        assert!(q.dist(*p + Vec2::new(15.5, 0.0)) < 1e-9, "{id} went from {p:?} to {q:?}");
+    }
+    assert_eq!(after.constraints.len(), sk.constraints.len() - 1, "only the origin's coincidence is let go");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(sketch(&s).constraints.len(), sk.constraints.len(), "undo brings it back");
+}
+
+/// A point far from the move says nothing about how exactly the moved line has to stay level with
+/// the line that stays: a short move still breaks that relation, so it is still let go.
+#[test]
+fn a_far_away_point_does_not_keep_a_constraint_the_move_broke() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let stays = ids(&run(&mut s, "sketch.line", json!({"points": [[5, 5], [15, 5]], "connect": false}))["curves"])[0].clone();
+    let moved = ids(&run(&mut s, "sketch.line", json!({"points": [[30, 5], [30, 20]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"points": [format!("{moved}.start"), format!("{stays}.end")], "mode": "horizontal"}));
+    let level = sketch(&s).constraints.iter().find(|c| matches!(c.kind, ConstraintKind::HorizontalPoints { .. })).map(|c| c.id.clone()).unwrap();
+    run(&mut s, "sketch.point", json!({"point": [1e8, 0], "id": "far"}));
+    let r = run(&mut s, "sketch.move", json!({"entities": [moved], "translate": [0, 1]}));
+    assert_eq!(r["released"], json!([{"id": level, "kind": "Horizontal"}]), "{r}");
+}
+
+/// #12294: a spline offset together with a line is trimmed and unlinked, so a distance that names a
+/// parameter drives nothing. The reply says so; a linked offset of the same parameter does not.
+#[test]
+fn an_unlinked_offset_says_its_parameter_drives_nothing() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "wall", "expression": "1 mm"}));
+    let sp = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[-20, 0], [-10, 15], [10, 15], [20, 0]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[20, 0], [-20, 0]]}));
+    let r = run(&mut s, "sketch.offset", json!({"curves": [sp], "distance": "wall", "side": [0, 5], "param": "w_in"}));
+    assert!(r["param"].is_null(), "{r}");
+    let warning = r["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("not linked to its source"), "{r}");
+    // A rectangle's offset is linked: its parameter drives it and nothing is said.
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "wall", "expression": "1 mm"}));
+    let lines: Vec<String> = [[[0, 0], [20, 0]], [[20, 0], [20, 10]], [[20, 10], [0, 10]], [[0, 10], [0, 0]]]
+        .iter()
+        .map(|p| ids(&run(&mut s, "sketch.line", json!({"points": p}))["curves"])[0].clone())
+        .collect();
+    let r = run(&mut s, "sketch.offset", json!({"curves": lines, "distance": "wall", "side": [10, 5]}));
+    assert!(r["param"].is_string(), "{r}");
+    assert!(r.get("warning").is_none(), "{r}");
 }

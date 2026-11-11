@@ -271,7 +271,7 @@ fn list_for_dialog(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let typed = typed.filter(|_| key.2);
-    let stored = stored.filter(|_| key.2).and_then(|agent| app.services.secrets.clone().map(|secrets| (secrets, agent)));
+    let stored = app.services.secrets.clone().zip(stored.filter(|_| key.2));
     start_listing(app, ctx, key, move || match stored {
         Some((secrets, agent)) => secrets.get(&agent).map_err(|e| trf("ui.ai_keychain_error", &[("error", &e)])),
         None => Ok(typed),
@@ -538,7 +538,6 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "assistant_connecting", tr("prefs.assistant_connecting"), |ui| {
         for (label, help, handle, value) in [
-            ("ai.prefs.allow_control", "ai.prefs.allow_control_note", "agent_control", &mut app.preferences.agent_control),
             ("ai.prefs.connect_apps", "ai.prefs.connect_apps_note", "connect_ai_apps", &mut app.preferences.connect_ai_apps),
             ("ai.prefs.background_commands", "ui.agent_off_thread_note", "agent_off_thread", &mut app.preferences.agent_off_thread),
             ("ai.prefs.connect_at_start", "ai.prefs.connect_at_start_note", "agent_connect_at_start", &mut app.preferences.agent_connect_at_start),
@@ -734,7 +733,7 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 (app.ui.agent_cursor.show, app.ui.agent_cursor.speed.label(), app.ui.agent_cursor.follow_camera)
             },
-            |ui, (visible, speed, follow)| ui_kit::settings_pointer_preview(ui, visible, solidcraft_ui_text::tr_label(&speed), follow),
+            |ui, (visible, speed, follow)| crate::prefs::figures::pointer_preview(ui, visible, solidcraft_ui_text::tr_label(&speed), follow),
         );
     });
 }
@@ -746,6 +745,8 @@ fn mcp_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     ui_kit::settings_section(ui, "mcp_agents", tr("ui.mcp_agents"), |ui| {
+        // Dims with AI features off, as it did under Connecting.
+        ui.add_enabled_ui(app.preferences.ai_features, |ui| control_channel(app, ui));
         ui.horizontal(|ui| {
             let response =
                 ui_kit::checkbox(ui, tr("ui.mcp_compact"), &mut app.preferences.mcp_compact).backing_on_hover_text(tr("ui.mcp_compact_note"));
@@ -753,6 +754,55 @@ fn mcp_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::help_icon(ui, tr("ui.mcp_compact_note"));
         });
     });
+}
+
+/// "Let AI agents connect": the app's control channel on or off, its port, and whether it
+/// listens, at once ([`crate::control_switch`]).
+fn control_channel(app: &mut SolveApp, ui: &mut egui::Ui) {
+    use crate::control_switch::{MIN_PORT, StartError, Status};
+    let status = app.control_switch.status();
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
+        let response = ui_kit::checkbox(ui, tr("ai.prefs.allow_control"), &mut app.preferences.agent_control)
+            .backing_on_hover_text(tr("ai.prefs.allow_control_note"));
+        crate::scenario::publish_handle("prefs:agent_control", response.rect.center());
+        ui_kit::help_icon(ui, tr("ai.prefs.allow_control_note"));
+        let port = |port: u16| port.to_string();
+        let badge = match &status {
+            Status::Listening(p) => {
+                Some((solidcraft_ui_text::format("ai.prefs.control_listening", &[("port", &port(*p))]), ui_kit::SettingsBadgeTone::Success))
+            }
+            Status::FromLaunch(p) => {
+                Some((solidcraft_ui_text::format("ai.prefs.control_listening", &[("port", &port(*p))]), ui_kit::SettingsBadgeTone::Neutral))
+            }
+            Status::Error(_) => Some((tr("ai.prefs.control_not_listening").to_owned(), ui_kit::SettingsBadgeTone::Warning)),
+            Status::Off => None,
+        };
+        if let Some((text, tone)) = badge {
+            ui_kit::settings_state_badge(ui, &text, tone);
+        }
+    });
+    let label = tr("ai.prefs.control_port");
+    ui_kit::settings_form(ui, ui_kit::ContentWidth::label(ui, label), |ui| {
+        ui_kit::row(ui, label, |ui| {
+            ui.add_enabled_ui(app.preferences.agent_control, |ui| {
+                let t = solidcraft_theme::Tokens::get();
+                ui_kit::settings_control_width(ui, t.space_24 * 3.0 + t.space_8, |ui| {
+                    let response = ui_kit::number_field(ui, &mut app.preferences.agent_control_port, MIN_PORT..=u16::MAX, 1.0, "")
+                        .backing_on_hover_text(tr("ai.prefs.control_port_note"));
+                    crate::scenario::publish_target("prefs:agent_control_port", response.rect);
+                });
+            });
+        });
+    });
+    let note = match status {
+        Status::FromLaunch(p) => Some(solidcraft_ui_text::format("ai.prefs.control_from_launch", &[("port", &p.to_string())])),
+        Status::Error(StartError::PortTaken(p)) => Some(solidcraft_ui_text::format("ai.prefs.control_port_taken", &[("port", &p.to_string())])),
+        Status::Error(StartError::Failed(e)) => Some(solidcraft_ui_text::format("ai.prefs.control_failed", &[("error", &e)])),
+        Status::Listening(_) | Status::Off => None,
+    };
+    if let Some(note) = note {
+        ui_kit::text(ui, &note, ui_kit::Text::Hint("control_channel"));
+    }
 }
 
 /// The agents: found and added, with Test, Default, a permission override and Remove.
@@ -772,7 +822,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         if app.agent_chat.detecting.is_some() {
             ui_kit::text(ui, tr("ui.agent_chat_detecting"), ui_kit::Text::Hint("detecting"));
         } else if all.is_empty() {
-            if std::env::var_os("FLATPAK_ID").is_some() {
+            if super::panel::sandboxed() {
                 super::panel::no_agents(ui);
             } else {
                 ui_kit::empty_box(ui, "assistant_agents", tr("ai.prefs.no_agents"));
@@ -937,7 +987,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                         handles: &handles,
                                         current: &entry.model,
                                         current_value: &entry.model,
-                                        hint: tr("ui.agent_chat_model_search"),
+                                        hint: super::model_search_hint(true),
                                         choices: &choices,
                                         custom: true,
                                         note: note.as_deref(),
@@ -1231,7 +1281,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                                 handles: "ai_add:model",
                                 current,
                                 current_value: &s.model,
-                                hint: tr("ui.agent_chat_model_search"),
+                                hint: super::model_search_hint(true),
                                 choices: &choices,
                                 custom: true,
                                 note: note.as_deref(),
@@ -1262,7 +1312,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, tr(if has_keychain { "ui.ai_key_note" } else { "ui.ai_no_keychain" }), ui_kit::Text::Note("keychain"));
                     if let Some(url) = s.insecure_http_endpoint() {
                         let mut allow = s.allow_insecure_http();
-                        let r = ui_kit::checkbox(ui, tr("ai.http.allow"), &mut allow).on_hover_text(tr("ai.http.warning"));
+                        let r = ui_kit::checkbox(ui, tr("ai.http.allow"), &mut allow).backing_on_hover_text(tr("ai.http.warning"));
                         solidcraft_ui_registry::publish_target("ai_add:allow_insecure_http", r.rect);
                         if r.changed() {
                             if allow {

@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use solidcraft_engine::Session;
-use solidcraft_engine::render::{Camera, StandardView};
+use solidcraft_viewport::{Camera, StandardView};
 
 use crate::SolveApp;
 use crate::start_page;
@@ -135,7 +135,7 @@ pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     if b.is_empty() {
         return None;
     }
-    cam.fit(&b);
+    cam.fit(&solidcraft_engine::render::view_bounds(&b));
     // Fill the card: the fit leaves room for a whole window's margins.
     cam.distance *= 0.7;
     let scene = solidcraft_engine::view::scene(s, &cam).ok()?;
@@ -225,7 +225,7 @@ fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] ident
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = identity.filter(|p| cache_path(key).as_ref() == Some(p)) {
         let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-        if let Some(bytes) = solidcraft_engine::render::png(THUMB[0], THUMB[1], rgba)
+        if let Some(bytes) = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba)
             && let Some(dir) = path.parent()
             && std::fs::create_dir_all(dir).is_ok()
         {
@@ -901,10 +901,17 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     } else {
         friendly_path(path).into()
     };
-    let mut menu =
-        vec![start_page::MenuEntry { label: app.tr_label("Remove from list").into(), icon: "delete", chosen: FileAction::ForgetRecent(index) }];
+    let mut menu = vec![start_page::MenuEntry {
+        label: app.tr_label("Remove from list").into(),
+        icon: "delete".into(),
+        chosen: FileAction::ForgetRecent(index),
+    }];
     if !cfg!(target_arch = "wasm32") {
-        menu.push(start_page::MenuEntry { label: app.tr_label("Show in folder").into(), icon: "folder", chosen: FileAction::ShowInFolder(index) });
+        menu.push(start_page::MenuEntry {
+            label: app.tr_label("Show in folder").into(),
+            icon: "folder".into(),
+            chosen: FileAction::ShowInFolder(index),
+        });
     }
     start_page::Recent {
         title,
@@ -1230,7 +1237,7 @@ mod tests {
             session.run_script(&script).unwrap();
             let image = thumbnail(&session).unwrap();
             let rgba = image.pixels.iter().flat_map(|p| p.to_srgba_unmultiplied()).collect();
-            let png = solidcraft_engine::render::png(THUMB[0], THUMB[1], rgba).unwrap();
+            let png = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap();
             std::fs::write(dir.join(format!("{i}.png")), png).unwrap();
             hashes.push(format!("{:x}", Sha256::digest(serde_json::to_vec(&script).unwrap())));
             eprintln!("{}: {:.3} s", sample.name, began.elapsed().as_secs_f64());
