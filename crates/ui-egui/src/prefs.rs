@@ -1489,6 +1489,9 @@ preference_settings! {
     view_dxf_dashed: bool = false;
     /// Model-space chord tolerance for current-view DXF curves, in millimetres.
     view_dxf_tolerance: f64 = 0.01;
+    /// Where the current-view DXF drawing puts its 0,0: "target" (the point the camera looks
+    /// at) or "origin" (the model's origin as seen from the camera).
+    view_dxf_zero: String = "target".into();
     /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
     send_slicer: String = String::new();
     /// Slicers that can load a file into the window that is already open do so (default on).

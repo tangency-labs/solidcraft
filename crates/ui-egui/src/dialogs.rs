@@ -414,6 +414,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             ViewDxf {
                 dashed: bool,
                 tolerance: f64,
+                /// Put the drawing's 0,0 on the model's origin instead of the camera target.
+                zero_origin: bool,
             },
             /// Insert SVG / DXF: where the picked drawing goes (`dialogs_insert_drawing`).
             InsertDrawing(crate::dialogs_insert_drawing::Place),
@@ -5148,8 +5150,8 @@ fn run_primed(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
 }
 
 pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
-    if let Kind::ViewDxf { dashed, tolerance } = &d.kind {
-        return crate::dialogs_view_dxf::run(app, *dashed, *tolerance);
+    if let Kind::ViewDxf { dashed, tolerance, zero_origin } = &d.kind {
+        return crate::dialogs_view_dxf::run(app, *dashed, *tolerance, *zero_origin);
     }
     if let Kind::ViewNavigator(form) = &d.kind {
         return crate::view_gizmo::run_dialog(app, form, &d.inputs);
