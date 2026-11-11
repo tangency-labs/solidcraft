@@ -4,7 +4,7 @@
 //! face on the sheet's surface; a cut through a pocket takes it with the material; what the
 //! sheet can't keep is refused, and the sheet stays as it was.
 
-use std::f64::consts::PI;
+use std::f64::consts::{PI, SQRT_2};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
@@ -779,4 +779,88 @@ fn a_hole_inside_a_bend_on_the_flat_after_one_across_its_tangent_line() {
     let want = v0 - (v0 - flat(&holes[..1])) - (v0 - flat(&holes[1..]));
     let got = flat(&holes);
     assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+}
+
+/// The flat pattern's outlines' area, its cut-outs not taken off, and how many cut-outs it has.
+fn flat_outline(s: &mut Session) -> (f64, usize) {
+    let f = flat(s);
+    let area = |l: &Value| {
+        let pts: Vec<(f64, f64)> =
+            l.as_array().into_iter().flatten().map(|p| (p[0].as_f64().unwrap_or(f64::NAN), p[1].as_f64().unwrap_or(f64::NAN))).collect();
+        pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| a.0 * b.1 - b.0 * a.1).sum::<f64>().abs() / 2.0
+    };
+    (f["outline"].as_array().map_or(0.0, |o| o.iter().map(area).sum()), f["cutouts"].as_array().map_or(0, Vec::len))
+}
+
+/// A 120 x 80 base (T 1, R 1, K 0.44, the rule's gap `gap`) with walls 35 high on its front
+/// (y = 0) and right (x = 120) edges, made by one flange feature, so that the gap closes their
+/// corner; then a rectangle on the XZ plane from (70, `z0`) to (119, `z1`) cut 3 either side of
+/// it, through the front wall up to the right wall's inside face: past the front wall's end. The
+/// folded sheet loses what the front wall had of the rectangle, and its flat loses that from its
+/// outline, a notch open at the wall's end, with no new cut-out.
+fn cut_past_a_walls_end(gap: f64, z0: f64, z1: f64) {
+    let mut s = session();
+    rule(&mut s, "Corner", 1.0, 0.44, 1.0, gap);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [120, 80]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Base", "body_name": "Plate"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[60, 0, 1], [120, 40, 1]], "height": 35}));
+    // By hand (T 1, R 1). The base lies at z 0..1; each wall's bend turns 90° round an axis
+    // R + T = 2 in from the base's edge and 2 up, so the base keeps 118 x 78 (x 0..118, y 2..80)
+    // and each bend is a quarter annulus of radii 1 and 2, (π/4)(2² − 1²) = 3π/4 mm² across, 118
+    // long on the front and 78 on the right. Each wall stands 33 high, z 2..35. The walls' inside
+    // faces are y = 1 and x = 119; the gap g lies between their inside corners, across the
+    // corner's 45° line, each set back g/√2 from the other's inside face: the front wall runs
+    // x 0..119 − g/√2 and the right wall y 1 + g/√2..80, each c = T + g/√2 short of the base's
+    // far edge (as `tray_volume` has it).
+    let t = 1.0;
+    let c = t + gap / SQRT_2;
+    let whole = t * (118.0 * 78.0 + 33.0 * ((120.0 - c) + (80.0 - c))) + 0.75 * PI * (118.0 + 78.0);
+    let v0 = exact_volume(&s);
+    assert!((v0 - whole).abs() < 1e-6 * whole, "gap {gap}: {v0} vs {whole}");
+    let (outline0, cutouts0) = flat_outline(&mut s);
+    run(&mut s, "sketch.create", json!({"name": "Cut", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [70.0, z0], "p1": [119, z1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": 6, "direction": "symmetric", "operation": "cut"}));
+    // The box x 70..119, y −3..3, z z0..z1 takes, of the sheet, the front wall's material (y 0..1)
+    // over x 70..120 − c, to the wall's end, and z z0 up to the wall's top (35) at most: T times
+    // that. Nothing else: the right wall lies at x 119..120, where the box ends, and the base and
+    // the bends below z = 2.
+    let notch = (120.0 - c - 70.0) * (z1.min(35.0) - z0);
+    let want = whole - t * notch;
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "gap {gap}, z {z0}..{z1}: {} vs {want}", exact_volume(&s));
+    // The front wall's flat part lies in the flat as it is, so the flat's outline loses the notch,
+    // open at the wall's end; a window below the top is no cut-out.
+    let (outline, cutouts) = flat_outline(&mut s);
+    assert_eq!(cutouts, cutouts0, "gap {gap}, z {z0}..{z1}: no new cut-out");
+    assert!((outline0 - outline - notch).abs() < 1e-6 * outline0, "gap {gap}, z {z0}..{z1}: the outline lost {} of {notch}", outline0 - outline);
+}
+
+/// A notch down through a wall's top, from x 70 to the next wall's inside face, past the wall's
+/// end where one flange feature closed their corner with the rule's gap: the wall loses it to its
+/// end. At gaps 0.25 and 0.4 its reading failed in the kernel ("SMLib failed (status 1001)").
+/// By hand (see `cut_past_a_walls_end`), z 15..35: at g 0.25, c = 1.1767767, the sheet holds
+/// 9204 + 33 · 197.6464466 + 147π = 16188.1469 and the notch is 48.8232233 x 20 = 976.4645,
+/// leaving 15211.6824 mm³; at g 0.4, c = 1.2828427, 16181.1465 less 48.7171573 x 20 = 974.3431,
+/// 15206.8034 mm³.
+#[test]
+fn a_notch_past_a_walls_end_at_a_closed_corner_takes_it_to_the_end() {
+    for gap in [0.25, 0.4] {
+        cut_past_a_walls_end(gap, 15.0, 40.0);
+    }
+}
+
+/// A window through a wall below its top, from x 70 to the next wall's inside face, past the
+/// wall's end where one flange feature closed their corner with the rule's gap: a notch open at
+/// the wall's end, not a hole. It failed at every gap ("a cut-out of the flat lost its piece").
+/// By hand (see `cut_past_a_walls_end`), z 12..25: at g 0.25, 16188.1469 less 48.8232233 x 13 =
+/// 634.7019, 15553.4450 mm³; at g 0.8, c = 1.5656854, 9204 + 33 · 196.8686292 + 147π =
+/// 16162.4789 less 48.4343146 x 13 = 629.6461, 15532.8328 mm³.
+#[test]
+fn a_window_past_a_walls_end_at_a_closed_corner_is_a_notch_open_at_the_end() {
+    for gap in [0.25, 0.8] {
+        cut_past_a_walls_end(gap, 12.0, 25.0);
+    }
 }

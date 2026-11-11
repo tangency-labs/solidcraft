@@ -3,7 +3,9 @@
 //! stays the master and the folded part, its flat and its DXF are all built from it alike:
 //!
 //! - where the cut goes through, the panel's outline loses it, as if the panel had been drawn so:
-//!   no record of the cut is kept;
+//!   no record of the cut is kept; but where it reaches an edge a rip cut the panel back to (the
+//!   gap that closes a corner), it is kept as a cut of the sheet's, in the panel's chart: the
+//!   panel's outline runs on to the rip's line, past its material, for the rip to cut back;
 //! - where it stops inside the thickness on a floor parallel to the panel, the panel keeps a
 //!   recess, from its own face or the face one thickness into the material, to the floor's depth;
 //!   a later cut through a recess takes it with the material.
@@ -33,8 +35,8 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
 use solidcore_record::brep::Loop as Bounds;
-use solidcore_record::{Loop2, Plane, Region2, Vec2};
-use solidcraft_develop::{Cut, Development, Fold, Joint, JointKind, Rigid2, Rigid3, Surface};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcraft_develop::{Cut, Development, EdgeFrom, Fold, Joint, JointKind, Rigid2, Rigid3, Surface};
 use solidcraft_geom::brep::query::Query;
 use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, planar_regions_boolean};
 
@@ -222,6 +224,35 @@ fn gone_by_loops(footprint: &[Region2], near: &[Region2], tol: f64) -> Option<Ve
 fn touches(g: &Region2, of: &[Region2], near: f64) -> bool {
     let pts = g.outer.polyline(near.max(1e-6));
     of.iter().flat_map(|r| &r.outer.segs).any(|s| (&pts).into_iter().any(|p| s.point_at(s.closest_param(*p).clamp(0.0, 1.0)).dist(*p) <= near))
+}
+
+/// The edges the rips give panel `p` of the development `dev`, in the panel's chart: where a rip
+/// cut the panel back from its own edge along it (see [`EdgeFrom::Rip`]), as a corner closed
+/// with a gap has it. None for a panel no rip cuts.
+fn rip_edges(dev: &Development, p: usize) -> Vec<Seg2> {
+    let (Some(Some(laid)), Some(Some(at))) = (dev.panels.get(p), dev.placements.get(p)) else { return Vec::new() };
+    let back = at.inverse();
+    std::iter::once(&laid.region.outer)
+        .chain(&laid.region.holes)
+        .zip(&laid.origins)
+        .flat_map(|(l, from)| l.segs.iter().zip(from))
+        .filter(|(_, from)| matches!(from, EdgeFrom::Rip(_)))
+        .map(|(s, _)| back.seg(s))
+        .collect()
+}
+
+/// Whether region `g` reaches any of `edges`: its outline crosses one or comes within `near` of
+/// it (a point of the chords of either within `near` of the other), or it holds one.
+fn reaches(g: &Region2, edges: &[Seg2], near: f64) -> bool {
+    let sag = near.max(1e-6);
+    let close = |s: &Seg2, p: Vec2| s.point_at(s.closest_param(p).clamp(0.0, 1.0)).dist(p) <= near;
+    let pts = g.outer.polyline(sag);
+    !solidcraft_develop::crossings(&g.outer.segs, edges).is_empty()
+        || edges.iter().any(|e| {
+            g.outer.contains(e.start())
+                || (&pts).into_iter().any(|p| close(e, *p))
+                || e.polyline(sag).into_iter().any(|p| g.outer.segs.iter().any(|s| close(s, p)))
+        })
 }
 
 /// A panel's frame in its body: where the fold puts it, or in the flat, where the development
@@ -729,17 +760,29 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             if whole.is_some() {
                 gone_from.push((p, through.clone()));
             }
-            match left(&panel.region, &through, &holders(sk, p), tol)? {
-                Left::Kept(kept, parted) => {
-                    if let Some(x) = out.sheet.panels.get_mut(p) {
-                        x.region = kept;
+            // A panel's region runs on past its material to each rip's line, for the rip to cut
+            // it back (a corner closed with a gap). What went through ends at the rip's new
+            // edge, inside the region: taken from the region, a cut that reaches that edge would
+            // be a hole the rip leaves on the outline, or would leave a strip as wide as the
+            // rip's cut, which the rip cuts back across along the region's own edges. It is a
+            // cut of the sheet's instead, in the panel's chart, cut from the panel's material as
+            // the rips leave it (see [`crate::sheet_surface::pieces`]).
+            let rips = rip_edges(&dev, p);
+            let (ripped, through): (Vec<Region2>, Vec<Region2>) = through.into_iter().partition(|g| reaches(g, &rips, tol));
+            out.sheet.cuts.extend(ripped.into_iter().map(|region| Cut { panel: p, region }));
+            if !through.is_empty() {
+                match left(&panel.region, &through, &holders(sk, p), tol)? {
+                    Left::Kept(kept, parted) => {
+                        if let Some(x) = out.sheet.panels.get_mut(p) {
+                            x.region = kept;
+                        }
+                        out.loose.extend(parted.into_iter().map(|region| Loose { panel: p, region }));
                     }
-                    out.loose.extend(parted.into_iter().map(|region| Loose { panel: p, region }));
-                }
-                Left::Apart => {
-                    // The panel stays whole: what went through is a cut of the sheet's, in the
-                    // panel's chart.
-                    out.sheet.cuts.extend(through.iter().map(|r| Cut { panel: p, region: r.clone() }));
+                    Left::Apart => {
+                        // The panel stays whole: what went through is a cut of the sheet's, in the
+                        // panel's chart.
+                        out.sheet.cuts.extend(through.iter().map(|r| Cut { panel: p, region: r.clone() }));
+                    }
                 }
             }
         }
