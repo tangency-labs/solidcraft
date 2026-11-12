@@ -78,7 +78,6 @@ fn kernel(on: bool, checks: bool) -> Kernel {
     if checks {
         k.fixes.bspline_check_min_radius = true;
         k.fixes.uv_trim_checks_on_surface = true;
-        k.fixes.curve_check_zero_speed_tangent_end = true;
     }
     k
 }
