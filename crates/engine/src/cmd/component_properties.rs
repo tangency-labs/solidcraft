@@ -239,6 +239,9 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
         if let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.definition_name()) {
             sheet.correct_perforation_mass_properties(&mut measured, &solidcraft_doc::IDENTITY).ok()?;
         }
+        if let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name()) {
+            sheet.correct_perforation_mass_properties(&mut measured, &solidcraft_doc::IDENTITY).ok()?;
+        }
         measured.gyration()
     });
     let spread: BTreeMap<usize, Tensor3> = spread_bodies.into_iter().zip(spreads).filter_map(|(i, g)| Some((i, g.flatten()?))).collect();
@@ -261,6 +264,17 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
             let transform: Mat = doc.model_body_offset(body).map(|offset| solidcraft_doc::mat_mul(&transform, offset)).unwrap_or(transform);
             let mut measured = measure_placed(body, transform)?;
             if let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
+                let mut corrected = body.measure()?;
+                corrected.volume = measured.volume;
+                corrected.area = measured.area;
+                corrected.centroid = measured.centroid;
+                sheet.correct_perforation_properties(&mut corrected, &transform)?;
+                measured.volume = corrected.volume;
+                measured.area = corrected.area;
+                measured.centroid = corrected.centroid;
+            }
+            // A sheet made from surfaces (#6748): its perforation fields' holes the same way.
+            if let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
                 let mut corrected = body.measure()?;
                 corrected.volume = measured.volume;
                 corrected.area = measured.area;

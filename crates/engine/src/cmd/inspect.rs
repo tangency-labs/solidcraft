@@ -147,6 +147,16 @@ pub(super) fn measure_body(
         let placement = solidcraft_doc::mat_mul(&b.source_transform, &inverse);
         sheet.correct_perforation_properties(&mut measured, &placement)?;
     }
+    // A sheet made from surfaces (#6748): its perforation fields' holes the same way.
+    if let Some(state) = definitions
+        && let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
+    {
+        let definition = state.body(b.definition_name()).ok_or_else(|| EngineError::Other(format!("missing sheet body `{}`", sheet.body)))?;
+        let inverse = solidcraft_doc::mat_inverse(&definition.source_transform)
+            .ok_or_else(|| EngineError::Other(format!("invalid sheet placement for `{}`", sheet.body)))?;
+        let placement = solidcraft_doc::mat_mul(&b.source_transform, &inverse);
+        sheet.correct_perforation_properties(&mut measured, &placement)?;
+    }
     Ok(measured)
 }
 
@@ -214,25 +224,10 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             }
             b["sheet_metal"] = json!(true);
         }
-    }
-    // A sheet made from surfaces (#6748): its perforation fields the same way.
-    let surface_sheets = s.model.state().surface_sheets.clone();
-    for b in &mut bodies {
-        let Some(sk) = surface_sheets.iter().find(|x| b["name"].as_str() == Some(x.body.as_str())) else { continue };
-        b["sheet_metal"] = json!(true);
-        let open = sk.perforated_area();
-        if open > 0.0 {
-            if let Some(v) = b["volume_mm3"].as_f64() {
-                let nv = v - open * sk.thickness;
-                if let Some(m) = b["mass_g"].as_f64().filter(|_| v > 0.0) {
-                    b["mass_g"] = json!(m * nv / v);
-                }
-                b["volume_mm3"] = json!(nv);
-            }
-            let shown = sk.shown();
-            let bores: f64 =
-                shown.perforations.iter().map(|p| shown.perforation_holes(p).len() as f64 * std::f64::consts::PI * p.diameter * sk.thickness).sum();
-            b["area_mm2"] = json!(b["area_mm2"].as_f64().unwrap_or(0.0) - 2.0 * open + bores);
+        // A sheet made from surfaces (#6748) is sheet metal too: its perforation fields' holes
+        // are taken off where each body is measured (`measure_body`).
+        if definitions.surface_sheets.iter().any(|sk| sk.body == source) {
+            b["sheet_metal"] = json!(true);
         }
     }
     let skipped = bodies.iter().filter(|b| b["closed"] == false).count();

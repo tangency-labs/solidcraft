@@ -341,7 +341,7 @@ fn sort_zones(dev: &Development, pieces: Vec<(Piece, Region2)>) -> Result<Vec<(P
 
 /// Whether an edge of `region`'s outline runs along the line from `a` to `b` for more than a
 /// rounding.
-fn along(region: &Region2, [a, b]: [Vec2; 2]) -> bool {
+pub(crate) fn along(region: &Region2, [a, b]: [Vec2; 2]) -> bool {
     let l = a.dist(b);
     let Some(u) = (b - a).normalized() else { return false };
     let on = |p: Vec2| (p - a).cross(u).abs() <= ON_LINE && (-ON_LINE..=l + ON_LINE).contains(&(p - a).dot(u));
