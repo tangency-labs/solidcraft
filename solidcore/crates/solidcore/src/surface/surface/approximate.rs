@@ -137,10 +137,11 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when no subdivision level is within the tolerance, the starter
-    /// surface's degree is above 3, or a Bezier patch runs past the starter's control
-    /// net (a starter whose end knots are not of full multiplicity); those of the
-    /// evaluations, of the starter surface's
+    /// `SM_ERR` when no subdivision level is within the tolerance, or the starter
+    /// surface's degree is above 3 (a Bezier patch past the starter's control net is
+    /// `SM_ERR` too, a guard: the clamped starter with full inner knots has three
+    /// control points per span and one more); those of the evaluations, of the
+    /// starter surface's
     /// construction and of knot insertion; `InvalidInput` for a root surface chain
     /// deeper than [`MAX_GEOMETRY_NESTING`].
     pub fn approximate_surface(
@@ -1028,11 +1029,11 @@ mod tests {
     }
 
     #[test]
-    fn a_starter_with_simple_end_knots_overruns_its_net() {
-        // a cubic whose end knots are simple too (0 1 .. 7, 4 control points): its
-        // Bezier patches between knots run past the control net even with the inner
-        // knots raised to full multiplicity, an error (upstream: success with no
-        // surface)
+    fn a_starter_given_with_simple_end_knots_is_clamped_and_fits() {
+        // a cubic whose end knots are simple too (0 1 .. 7, 4 control points): its NURB
+        // is clamped to the valid span [3, 4], so with its inner knots raised to full
+        // multiplicity its net has three points per span and one more, and no Bezier
+        // patch runs past it (the overrun check is a guard)
         let pts: Vec<Point3> = (0..4)
             .flat_map(|i| {
                 let x = f64::from(i);
@@ -1056,11 +1057,15 @@ mod tests {
             uv_domain: None,
         })
         .unwrap();
-        let r = Surface::from(s).approximate_surface(&kernel(), 1e-3, 3, false);
-        assert_eq!(
-            r.unwrap_err(),
-            SolidError::surface_failed(OP_APPROX, "a Bezier starter index is past the control net")
-        );
+        let r = Surface::from(s)
+            .approximate_surface(&kernel(), 1e-3, 3, false)
+            .unwrap();
+        // the cubic is reproduced by its Hermite data
+        assert!(r.achieved_tol < 1e-12, "{}", r.achieved_tol);
+        let SurfaceKind::BSpline(b) = r.surface.unwrap().kind() else {
+            panic!("not a B-spline");
+        };
+        assert_eq!(b.number_control_points(SurfParamType::U), 4);
     }
 
     #[test]
