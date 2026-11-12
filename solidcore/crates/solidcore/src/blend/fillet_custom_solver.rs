@@ -2053,7 +2053,10 @@ macro_rules! fillet_intersector_ops {
                 points: &[TsectPnt],
                 uv1: &mut BSplineCurve,
                 uv2: &mut BSplineCurve,
-            ) -> Result<Option<Surface>> {
+            ) -> Result<(
+                Option<Surface>,
+                Option<crate::blend::law_corners::LawCornerPieces>,
+            )> {
                 IntersectorOps::create_fillet_surface(
                     &mut self.base,
                     k,
@@ -2064,6 +2067,17 @@ macro_rules! fillet_intersector_ops {
                     uv1,
                     uv2,
                 )
+            }
+
+            fn keep_law_corner_pieces(
+                &mut self,
+                pieces: crate::blend::law_corners::LawCornerPieces,
+            ) -> Result<()> {
+                IntersectorOps::keep_law_corner_pieces(&mut self.base, pieces)
+            }
+
+            fn skins_varying_balls(&self) -> Result<bool> {
+                IntersectorOps::skins_varying_balls(&self.base)
             }
 
             fn set_fillet_surface(

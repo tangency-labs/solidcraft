@@ -215,6 +215,17 @@ pub enum FilletSolverType {
     ConstRadiusAssisted = 6,
 }
 
+impl FilletSolverType {
+    /// Whether the solver's ball changes its radius along the round (a radius law, or a
+    /// constant chord between faces whose angle changes), so a circular section is the
+    /// circle along which the balls' envelope touches the ball rather than its great
+    /// circle (the fork's `SmGnSectionFSG::CircleSurface`, WR-685, f2ec002).
+    #[must_use]
+    pub const fn ball_radius_varies(self) -> bool {
+        matches!(self, Self::VariableRadius | Self::ConstDist)
+    }
+}
+
 /// `SmFilletSurfaceGeneratorType`; discriminants are the upstream values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FilletSurfaceGeneratorType {

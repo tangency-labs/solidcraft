@@ -1314,6 +1314,76 @@ fn wr711_exact_circles_of_one_arc_count_keep_the_progressive_round_on_its_balls(
     );
 }
 
+/// The largest distance from a variable round's skin to the union of its balls, sampled
+/// on a 400 x 33 grid of the round's face where the edge runs (`y` in [2, 18], clear of the
+/// ends, where the surface runs on past the balls of `s` in [0, 1]), and the solver's
+/// approximation tolerance there (4 x the edge's tolerance, `TOL_FACTOR`). The round's
+/// faces and the points measured are counted, so a result with no round, or with every point
+/// filtered away, fails rather than measuring nothing.
+fn skin_off_balls(law: [f64; 5]) -> (f64, f64) {
+    let mut k = solidcraft_kernel();
+    let mut b = box_10_20_30(&mut k).unwrap();
+    let e = pick(&k, &b, [10.0, 10.0, 30.0]);
+    let tol = 4.0 * edge::tolerance(&b, e).unwrap();
+    spline_round(&mut k, &mut b, e, law).unwrap();
+    let curve = greville_cubic_curve(law);
+    let planes = box_planes(10.0, 20.0, 30.0);
+    let ids: Vec<FaceId> = b.faces().ids().collect();
+    let mut off: f64 = 0.0;
+    let (mut rounds, mut measured) = (0usize, 0usize);
+    for f in ids {
+        let srf = face::surface(&b, f).unwrap().unwrap().clone();
+        if planes.iter().any(|&q| on_face(&k, &srf, q)) {
+            continue;
+        }
+        rounds += 1;
+        let dom = face::uv_domain(&b, f).unwrap();
+        for a in 0..=400 {
+            for c in 0..=32 {
+                let uv = Point2::new(
+                    dom.min().x + (dom.max().x - dom.min().x) * f64::from(a) / 400.0,
+                    dom.min().y + (dom.max().y - dom.min().y) * f64::from(c) / 32.0,
+                );
+                let x = srf.evaluate_point(&k, uv).unwrap();
+                if (2.0..=18.0).contains(&x.y) {
+                    off = off.max(distance_to_balls_union(&curve, x));
+                    measured += 1;
+                }
+            }
+        }
+    }
+    // one round face, and the edge's middle 16 of 20 is most of its 401 x 33 grid
+    assert_eq!(rounds, 1, "law {law:?}: {rounds} round faces");
+    assert!(
+        measured > 401 * 33 / 2,
+        "law {law:?}: {measured} points measured"
+    );
+    (off, tol)
+}
+
+/// #15256: a variable round's skin, not only its rails, lies within the solver's
+/// approximation tolerance of its balls between the trace's stations. Before, the stations
+/// were accepted on the rails alone and the skin between them was unbounded: the
+/// progressive law 8.7e-5 off (2.2 times the 4e-5 tolerance), `[2, 4, 2, 4, 2]` 4.1e-4
+/// (10.2 times) and `[3, 3, 3, 3, 1]` 3.2e-4 (7.9 times).
+#[test]
+fn a_variable_round_s_skin_lies_within_its_tolerance_of_its_balls() {
+    for law in [
+        HOLDS_LAW,
+        [2.0, 2.0, 6.0, 3.0, 1.0],
+        [1.0, 3.0, 5.0, 3.0, 1.0],
+        [2.0, 4.0, 2.0, 4.0, 2.0],
+        [3.0, 3.0, 3.0, 3.0, 1.0],
+    ] {
+        let (off, tol) = skin_off_balls(law);
+        println!("law {law:?}: skin {off:.3e} off its balls, tolerance {tol:e}");
+        assert!(
+            off <= tol,
+            "law {law:?}: skin {off:e} off its balls, past {tol:e}"
+        );
+    }
+}
+
 /// `cf1c08b` + `0389af2`: the folded cubic law `[2, 2, 40, 3, 2]` is refused (the great
 /// circles built it folded, far off the union of its balls, before the G^n section's flag was
 /// retired).

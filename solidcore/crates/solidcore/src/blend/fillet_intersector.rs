@@ -86,8 +86,21 @@
 //! - **Dead code.** Step 11 of `FlushCurve` (the self-intersection blending) is
 //!   guarded by the constant `bTempTrySelfIntHandler = FALSE` and never runs; it is
 //!   not ported.
+//! - **Skin between stations.** (not upstream, #15256) Upstream accepts a span on its
+//!   rails alone, so a skin of balls' touch circles is unbounded between stations.
+//!   Where the solver's surface is the exact touch circles of balls whose radius varies
+//!   ([`FilletSolverOps::skins_varying_balls`]), `FlushCurve` measures the built skin in
+//!   each span's middle against the balls' envelope there (`skin_splits`) and adds the
+//!   middle section as a station where it is farther than the tolerance, then builds
+//!   again. The geometry builder of steps 5b to 10 is `build_flush_geometry`, step 5
+//!   `equalise_spans` and step 5a `solve_mid_point`; the pieces a round whose law has
+//!   corners keeps are handed to the solver once, for the final skin
+//!   ([`FilletSolverOps::keep_law_corner_pieces`]).
 //! - **Loops.** `FlushCurve`'s span equalisation stops once the knot count exceeds
-//!   three times its start, as upstream; each pass at most doubles it. No recursion.
+//!   three times its start, as upstream; each pass at most doubles it. The skin's
+//!   stations are added in at most `SKIN_ROUNDS` rounds and to at most
+//!   `SKIN_STATION_FACTOR` times the stations the curve starts with; past either the
+//!   round is refused. No recursion.
 //! - **Not ported.** `Dump` and the `SM_DEBUG_CODE` drawing blocks; `SM_ASSERT`s.
 
 use crate::blend::fillet_custom_solver::{offset_evaluate_1st, ConstantRadiusAssistedFs};
@@ -95,6 +108,7 @@ use crate::blend::fillet_geom::p1::{set_rail_curve, FilletBrep, FilletGeomId};
 use crate::blend::fillet_solver::p1::{compute_uv_vectors, FilletSolver};
 use crate::blend::fillet_solver::p3::StepSolveOutcome;
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
+use crate::blend::law_corners::LawCornerPieces;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
@@ -121,7 +135,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, max4, min2, EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::surface::surface::p2::{drop_vectors, TsectCurveType};
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::{edge, EdgeId};
 
@@ -145,6 +159,111 @@ const PARAMS_TO_TEST: [f64; NUM_TEST_POINTS] = [0.5, 0.17, 0.83, 0.33, 0.67];
 
 /// The two surfaces, in upstream index order.
 const SRFS: [SrfIndex; 2] = [SrfIndex::First, SrfIndex::Second];
+
+/// The most rounds in which `FlushCurve` adds stations where a skin of balls' touch
+/// circles is farther than the tolerance from them (#15256). Between stations the skin
+/// is a cubic interpolant, whose distance from the balls falls about sixteenfold each
+/// time a span is halved: the farthest measured, 10.2 times the tolerance, needs one
+/// round, and six reach a skin `16^6` times the tolerance off.
+const SKIN_ROUNDS: usize = 6;
+
+/// The most stations a curve's skin may take, as a multiple of the stations it starts
+/// with (#15256): each round at most doubles them, and the span equalisation after it
+/// at most triples them again.
+const SKIN_STATION_FACTOR: usize = 64;
+
+/// The shares of the skin's section where `FlushCurve` measures it against the balls
+/// (#15256): both rails and seven points between.
+const SKIN_SHARES: [f64; 9] = [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0];
+
+/// What steps 5b to 10 of `FlushCurve` build from its stations: the fillet geometry
+/// they go to, the centre line, the rails and their UV curves, the fillet surface and
+/// the pieces a round whose law has corners keeps.
+struct FlushGeometry<G> {
+    fillet_geom: G,
+    center_line: BSplineCurve,
+    curve1: BSplineCurve,
+    curve2: BSplineCurve,
+    uv1: BSplineCurve,
+    uv2: BSplineCurve,
+    fillet_surface: Option<Surface>,
+    kept: Option<LawCornerPieces>,
+}
+
+/// The balls' envelope to first order at a section (#15256): the ball (centre `c`,
+/// radius `r`) and, where its centre moves, the unit direction `a` of the centre line
+/// and the cosine and sine of the angle between `a` and the envelope's normal along the
+/// touch circle, `cos = -r' / |c'|`. The envelope of the balls `|x - c - c' t| = r + r' t`
+/// is the cone tangent to the true envelope along the whole touch circle.
+#[derive(Debug, Clone, Copy)]
+struct EnvelopeCone {
+    c: Point3,
+    r: f64,
+    axis: Option<(Vec3, f64, f64)>,
+}
+
+impl EnvelopeCone {
+    /// The cone at the section with centre `cent` moving at `cent_d`, and rail points
+    /// `p1`, `p2` moving at `d1`, `d2`, all along the trace: `r` is the mean distance from
+    /// the centre to the rail points and `r'` its rate, read off the rails as
+    /// `CircularCrossSectionFsg::create_surface_from_curves_of_balls` reads it.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` where the radius changes faster than the centre moves (`|r'| >= |c'|`):
+    /// the balls have no envelope there.
+    fn at_section(
+        cent: Point3,
+        cent_d: Vec3,
+        [(p1, d1), (p2, d2)]: [(Point3, Vec3); 2],
+    ) -> Result<Self> {
+        let v1 = p1 - cent;
+        let v2 = p2 - cent;
+        let r1 = v1.length();
+        let r2 = v2.length();
+        let r = 0.5 * (r1 + r2);
+        let speed = cent_d.length();
+        if speed <= EFF_ZERO || r1 <= EFF_ZERO || r2 <= EFF_ZERO {
+            return Ok(Self {
+                c: cent,
+                r,
+                axis: None,
+            });
+        }
+        let rate = 0.5 * (v1.dot(d1 - cent_d) / r1 + v2.dot(d2 - cent_d) / r2);
+        let cos = -rate / speed;
+        let sin_sq = 1.0 - cos * cos;
+        if !(sin_sq > 0.0) {
+            return Err(SolidError::blend_failed(
+                OP_FLUSH,
+                "the balls have no envelope at a section",
+            ));
+        }
+        Ok(Self {
+            c: cent,
+            r,
+            axis: Some((cent_d / speed, cos, sqrt(sin_sq))),
+        })
+    }
+
+    /// The signed distance from `x` to the cone (positive outside the balls), in closed
+    /// form: `min_t |x - c - c' t| - r - r' t = rho sin + h cos - r`, `h` the height of
+    /// `x` along the centre line from `c` and `rho` its distance from the line; without
+    /// a moving centre, the distance to the ball. It is the distance to the balls'
+    /// envelope on the touch circle, and departs from it only to second order in the
+    /// distance from the circle along the trace.
+    fn distance(&self, x: Point3) -> f64 {
+        let p = x - self.c;
+        match self.axis {
+            Some((a, cos, sin)) => {
+                let h = p.dot(a);
+                let rho = (p - a * h).length();
+                rho * sin + h * cos - self.r
+            }
+            None => p.length() - self.r,
+        }
+    }
+}
 
 // ---- co-ported enums ------------------------------------------------------------------------
 
@@ -381,7 +500,9 @@ pub trait FilletSolverOps {
 
     /// `m_pFSG->CreateSurface(*this, pCenterLine, pCurve1, pCurve2, sPnts, pSur[0],
     /// pUV1, pSur[1], pUV2, pFilletSurface)`: the fillet surface (the generator may
-    /// change the curves in place).
+    /// change the curves in place), and the pieces a round whose law has corners keeps
+    /// (the fork's `AddLawCornerPieces`), which `FlushCurve` hands to
+    /// [`Self::keep_law_corner_pieces`] once its stations are final.
     ///
     /// # Errors
     ///
@@ -397,7 +518,26 @@ pub trait FilletSolverOps {
         points: &[TsectPnt],
         uv1: &mut BSplineCurve,
         uv2: &mut BSplineCurve,
-    ) -> Result<Option<Surface>>;
+    ) -> Result<(Option<Surface>, Option<LawCornerPieces>)>;
+
+    /// `rFilletSolver.AddLawCornerPieces(..)` (the fork's 7babe17): keeps the pieces of
+    /// the round [`Self::create_fillet_surface`] built.
+    ///
+    /// # Errors
+    ///
+    /// The solver's failure.
+    fn keep_law_corner_pieces(&mut self, pieces: LawCornerPieces) -> Result<()>;
+
+    /// Whether the fillet surface is the exact touch circles of balls whose radius varies
+    /// along the round, skinned between the stations (#15256): a circular generator with
+    /// exact, unmirrored arcs, for a solver whose ball changes its radius
+    /// ([`FilletSolverType::ball_radius_varies`]). `FlushCurve` then holds the skin, not
+    /// only the rails, to the tolerance.
+    ///
+    /// # Errors
+    ///
+    /// The solver's failure.
+    fn skins_varying_balls(&self) -> Result<bool>;
 
     /// `pFilletGeom->SetFilletSurface(pFilletSurface)` (after deleting the old one); the
     /// geometry is stored in `pseudo`.
@@ -614,7 +754,7 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         points: &[TsectPnt],
         uv1: &mut BSplineCurve,
         uv2: &mut BSplineCurve,
-    ) -> Result<Option<Surface>> {
+    ) -> Result<(Option<Surface>, Option<LawCornerPieces>)> {
         // the virtual m_pFSG->CreateSurface(*this, pCenterLine, pCurve1, pCurve2,
         // sPnts, pSur[0], pUV1, pSur[1], pUV2, ..): the base's generator (SM_ERR for
         // the base class); it reads the solver's tolerance and GetSolverType()
@@ -641,7 +781,17 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
                 [uv1, uv2],
                 None,
             )
-            .map(|(surface, _)| Some(surface))
+            .map(|(surface, kept)| (Some(surface), kept))
+    }
+
+    fn keep_law_corner_pieces(&mut self, pieces: LawCornerPieces) -> Result<()> {
+        self.solver.law_corner_pieces.push(pieces);
+        Ok(())
+    }
+
+    fn skins_varying_balls(&self) -> Result<bool> {
+        // a constant radius solver's ball keeps its radius
+        Ok(false)
     }
 
     fn rail_surface_evaluate_1st_derivatives(
@@ -1770,18 +1920,8 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             return Ok(());
         }
 
-        let uv_domains = self.base.base.uv_domains;
-        let curve_trace_direction = self.base.base.curve_trace_direction;
-
         // new curve locals
         let mut knots: Vec<f64> = Vec::new();
-        let mut ctrl_pts_3d: Vec<Point3> = Vec::new();
-        let mut uv_ctrl_pts: [Vec<Point3>; 2] = [Vec::new(), Vec::new()];
-        let mut rail_ctrl_pts_3d: [Vec<Point3>; 2] = [Vec::new(), Vec::new()];
-
-        let mut curve_type = TsectCurveType::Crossing;
-        let mut max_deviation = 0.0;
-        let mut max_angle = 0.0;
 
         // 3. If the final span is tiny, remove it by consolidating it with
         // the previous span.
@@ -1807,6 +1947,192 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         }
 
         // 5. add knots so that each span is similiarly sized
+        self.equalise_spans(solver, k, &mut pnts, &mut knots)?;
+
+        // 5c. (not upstream, #15256) where the skin is the touch circles of balls whose
+        //     radius varies, hold the skin, not only the rails, to the tolerance: steps
+        //     5b to 10 build the curves and the skin, then each span's middle section is
+        //     solved and the skin measured against it (`skin_splits`); a span whose skin
+        //     is farther than the tolerance takes that section as a station, the spans are
+        //     equalised again and everything is built again, at most `SKIN_ROUNDS` times.
+        let skin_held = self.holds_skin(solver)?;
+        let station_cap = pnts.len().saturating_mul(SKIN_STATION_FACTOR);
+        let (deviations, curve_types) = (out.deviations.len(), out.curve_types.len());
+        let mut round = 0;
+        let built = loop {
+            out.deviations.truncate(deviations);
+            out.curve_types.truncate(curve_types);
+            let built = self.build_flush_geometry(solver, k, pseudo, &pnts, &knots, out)?;
+            let Some(skin) = built.fillet_surface.as_ref().filter(|_| skin_held) else {
+                break built;
+            };
+            let splits = self.skin_splits(solver, k, &pnts, skin)?;
+            if splits.is_empty() {
+                break built;
+            }
+            if round == SKIN_ROUNDS || pnts.len().saturating_add(splits.len()) > station_cap {
+                return Err(SolidError::blend_failed(
+                    OP_FLUSH,
+                    "the skin stays farther than the tolerance from its balls",
+                ));
+            }
+            for (j, knot, mid) in splits.into_iter().rev() {
+                knots.insert(j + 1, knot);
+                pnts.insert(j + 1, mid);
+            }
+            self.equalise_spans(solver, k, &mut pnts, &mut knots)?;
+            round += 1;
+        };
+        let FlushGeometry {
+            fillet_geom,
+            center_line,
+            curve1,
+            curve2,
+            uv1,
+            uv2,
+            fillet_surface,
+            kept,
+        } = built;
+
+        // the fork's `rFilletSolver.AddLawCornerPieces` (7babe17), once for the final skin
+        if let Some(kept) = kept {
+            solver.keep_law_corner_pieces(kept)?;
+        }
+
+        // 11. Correct self-intersecting fillet-surface: never runs upstream
+        //     (bTempTrySelfIntHandler is a FALSE constant).
+
+        // 12. Save Fillet Surface and rail curve data
+        solver.set_fillet_surface(pseudo, &fillet_geom, fillet_surface)?;
+        solver.set_center_line_curve(pseudo, &fillet_geom, center_line)?;
+        solver.set_rail_curve(pseudo, &fillet_geom, 0, curve1)?;
+        solver.set_rail_mate_uv_curve(pseudo, &fillet_geom, 0, uv1)?;
+        solver.set_rail_curve(pseudo, &fillet_geom, 1, curve2)?;
+        solver.set_rail_mate_uv_curve(pseudo, &fillet_geom, 1, uv2)?;
+
+        // restore FilletSolver offset distances in offset Surfaces stored in the FilletSolver
+        solver.reload_surface_offsets()?;
+
+        // all done
+        Ok(())
+    }
+
+    /// Whether `FlushCurve` holds the skin to the tolerance between stations (#15256):
+    /// the solver's surface is the exact touch circles of balls whose radius varies
+    /// ([`FilletSolverOps::skins_varying_balls`]) and no smoothing handler changes the
+    /// curves (it edits the previous piece in place, so it runs once).
+    ///
+    /// # Errors
+    ///
+    /// The solver's.
+    fn holds_skin<S: FilletSolverOps<FilletGeom = G>>(&self, solver: &S) -> Result<bool> {
+        Ok(solver.skins_varying_balls()?
+            && solver.self_intersection_handler()? != Some(HandlingAlgorithmType::Smoothing))
+    }
+
+    /// The spans of `skin` (built on the stations `pnts`) farther than the tolerance
+    /// from the balls in their middle (#15256), each with its middle knot and the
+    /// solver's section there ([`Self::solve_mid_point`], the section the span
+    /// equalisation adds). The skin's iso-curve at the middle knot is measured at
+    /// [`SKIN_SHARES`] against [`EnvelopeCone`], the envelope of the section's ball
+    /// family to first order, by its closed-form distance.
+    ///
+    /// What this is and is not (`docs/definitions-and-certificates.md` §7): the
+    /// section is the solver's converged Newton solution, not an enclosure; the cone
+    /// touches the balls' envelope along that section's whole touch circle, and departs
+    /// from it only to second order in the distance from the circle along the trace;
+    /// the points measured are a sample (nine on the middle iso-curve of each span), so
+    /// the test refines the construction but certifies nothing. Only a B-spline skin is
+    /// measured: a definition's net is certified against its definition. Leaves the
+    /// solver's offsets loaded.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::solve_mid_point`], the rails' evaluations and
+    /// [`EnvelopeCone::at_section`]; `InvalidInput` for a skin that does not run over
+    /// its stations' parameters.
+    fn skin_splits<S: FilletSolverOps<FilletGeom = G>>(
+        &self,
+        solver: &mut S,
+        k: &Kernel,
+        pnts: &[TsectPnt],
+        skin: &Surface,
+    ) -> Result<Vec<(usize, f64, TsectPnt)>> {
+        let SurfaceKind::BSpline(net) = skin.kind() else {
+            solver.reload_surface_offsets()?;
+            return Ok(Vec::new());
+        };
+        let domain = net.natural_uv_domain();
+        let tol = self.base.base.this_approx_tol_3d;
+        let (Some(first), Some(last)) = (pnts.first(), pnts.last()) else {
+            solver.reload_surface_offsets()?;
+            return Ok(Vec::new());
+        };
+        let size = 1.0 + first.curve_parameter.abs().max(last.curve_parameter.abs());
+        if (domain.min().x - first.curve_parameter).abs() > EFF_ZERO * size
+            || (domain.max().x - last.curve_parameter).abs() > EFF_ZERO * size
+        {
+            return Err(SolidError::invalid_input(
+                OP_FLUSH,
+                "the skin does not run over its stations' parameters",
+            ));
+        }
+
+        // each span's middle section, with the offsets loaded
+        solver.reload_surface_offsets()?;
+        let mut mids = Vec::new();
+        for (j, pair) in pnts.windows(2).enumerate() {
+            let [pj, pj1] = pair else {
+                continue;
+            };
+            let frac = 0.5;
+            let knot = (1.0 - frac) * pj.curve_parameter + frac * pj1.curve_parameter;
+            mids.push((j, knot, self.solve_mid_point(solver, k, pj, pj1, frac)?));
+        }
+
+        // its rail points and derivatives on the faces, and the skin against its circle
+        solver.set_surfaces_to_zero_offset()?;
+        let mut splits = Vec::new();
+        for (j, knot, mid) in mids {
+            let mut rails = [(Point3::ZERO, Vec3::ZERO); 2];
+            for ((rail, s), slot) in SRFS.into_iter().enumerate().zip(rails.iter_mut()) {
+                let uv_d = mid.uv_deriv(s);
+                let (pnt, du, dv) =
+                    solver.rail_surface_evaluate_1st_derivatives(k, rail, mid.uv_pos(s))?;
+                *slot = (pnt, du * uv_d.x + dv * uv_d.y);
+            }
+            let cone = EnvelopeCone::at_section(mid.crv_pos(), mid.crv_deriv(), rails)?;
+            let mut held = true;
+            for share in SKIN_SHARES {
+                let v = domain.min().y + share * (domain.max().y - domain.min().y);
+                let off = cone
+                    .distance(skin.evaluate_point(k, Point2::new(knot, v))?)
+                    .abs();
+                // (written to accept: a NaN distance splits the span)
+                held &= off <= tol;
+            }
+            if !held {
+                splits.push((j, knot, mid));
+            }
+        }
+        solver.reload_surface_offsets()?;
+        Ok(splits)
+    }
+
+    /// Step 5 of `FlushCurve`: splits every span more than `2.8` times the size of a
+    /// neighbour at its middle, with the solver's section there
+    /// ([`Self::solve_mid_point`]), until no span is or the knots have tripled.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::solve_mid_point`]; `InvalidInput` for more knots than points.
+    fn equalise_spans<S: FilletSolverOps<FilletGeom = G>>(
+        &self,
+        solver: &mut S,
+        k: &Kernel,
+        pnts: &mut Vec<TsectPnt>,
+        knots: &mut Vec<f64>,
+    ) -> Result<()> {
         let mut done = false;
         let maximum_delta_factor = 2.8;
         let orig_num_knots = knots.len();
@@ -1869,55 +2195,107 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                         ))
                     }
                 };
-                let mut mid_pnt = TsectPnt::new();
-                find_guess_mid_tsect_pnt(&pj, &pj1, frac, &mut mid_pnt);
-
-                let plane_orig = mid_pnt.crv_pos();
-                let uv1 = mid_pnt.uv_pos(SrfIndex::First);
-                let uv2 = mid_pnt.uv_pos(SrfIndex::Second);
-                let plane_normal = mid_pnt.crv_deriv().unitize()?;
-
-                // find filletPoint on given plane satisfying geometry
-                //   requirements implemented in derived SmFilletSolver class
-                let found_solution = solver.point_on_plane_solve(
-                    k,
-                    plane_orig,
-                    plane_normal,
-                    &uv_domains[0],
-                    &uv_domains[1],
-                    uv1,
-                    uv2,
-                    &mut mid_pnt,
-                )?;
-                if !found_solution {
-                    return Err(SolidError::blend_failed(
-                        OP_FLUSH,
-                        "no mid-point section was found",
-                    ));
-                }
-
-                // save the rail UVCurve points for the new mid-span point
-                let uvs = [
-                    mid_pnt.uv_pos(SrfIndex::First),
-                    mid_pnt.uv_pos(SrfIndex::Second),
-                ];
-
-                // get the rail 3DCurve sample values
-                solver.compute_point_values(
-                    k,
-                    uvs,
-                    &uv_domains[0],
-                    &uv_domains[1],
-                    curve_trace_direction,
-                    &mut mid_pnt,
-                    Some(&pj),
-                )?;
+                let mid_pnt = self.solve_mid_point(solver, k, &pj, &pj1, frac)?;
 
                 // add the completed mid-span point to the sPnts array
                 pnts.insert(j + 1, mid_pnt);
                 j += 2;
             }
         }
+        Ok(())
+    }
+
+    /// Step 5a of `FlushCurve`: the solver's section at share `frac` of the span from
+    /// `pj` to `pj1`, on the plane through the interpolated point square to its
+    /// interpolated tangent, with its rail values.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the plane has no solution; those of the solver.
+    fn solve_mid_point<S: FilletSolverOps<FilletGeom = G>>(
+        &self,
+        solver: &mut S,
+        k: &Kernel,
+        pj: &TsectPnt,
+        pj1: &TsectPnt,
+        frac: f64,
+    ) -> Result<TsectPnt> {
+        let uv_domains = self.base.base.uv_domains;
+        let curve_trace_direction = self.base.base.curve_trace_direction;
+        let mut mid_pnt = TsectPnt::new();
+        find_guess_mid_tsect_pnt(pj, pj1, frac, &mut mid_pnt);
+
+        let plane_orig = mid_pnt.crv_pos();
+        let uv1 = mid_pnt.uv_pos(SrfIndex::First);
+        let uv2 = mid_pnt.uv_pos(SrfIndex::Second);
+        let plane_normal = mid_pnt.crv_deriv().unitize()?;
+
+        // find filletPoint on given plane satisfying geometry
+        //   requirements implemented in derived SmFilletSolver class
+        let found_solution = solver.point_on_plane_solve(
+            k,
+            plane_orig,
+            plane_normal,
+            &uv_domains[0],
+            &uv_domains[1],
+            uv1,
+            uv2,
+            &mut mid_pnt,
+        )?;
+        if !found_solution {
+            return Err(SolidError::blend_failed(
+                OP_FLUSH,
+                "no mid-point section was found",
+            ));
+        }
+
+        // save the rail UVCurve points for the new mid-span point
+        let uvs = [
+            mid_pnt.uv_pos(SrfIndex::First),
+            mid_pnt.uv_pos(SrfIndex::Second),
+        ];
+
+        // get the rail 3DCurve sample values
+        solver.compute_point_values(
+            k,
+            uvs,
+            &uv_domains[0],
+            &uv_domains[1],
+            curve_trace_direction,
+            &mut mid_pnt,
+            Some(pj),
+        )?;
+
+        Ok(mid_pnt)
+    }
+
+    /// Steps 5b to 10 of `FlushCurve` over the stations `pnts` at `knots`: the centre
+    /// line, the rails and their UV curves, smoothed by a smoothing self-intersection
+    /// handler, and the fillet surface (with the pieces a round whose law has corners
+    /// keeps); the curve's type and deviation are appended to `out`. Leaves the solver's
+    /// offsets at zero.
+    ///
+    /// # Errors
+    ///
+    /// As `FlushCurve`'s steps.
+    #[allow(clippy::too_many_lines)]
+    fn build_flush_geometry<S: FilletSolverOps<FilletGeom = G>>(
+        &self,
+        solver: &mut S,
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
+        pnts: &[TsectPnt],
+        knots: &[f64],
+        out: &mut TsectCurves,
+    ) -> Result<FlushGeometry<G>> {
+        let uv_domains = self.base.base.uv_domains;
+        let mut ctrl_pts_3d: Vec<Point3> = Vec::new();
+        let mut uv_ctrl_pts: [Vec<Point3>; 2] = [Vec::new(), Vec::new()];
+        let mut rail_ctrl_pts_3d: [Vec<Point3>; 2] = [Vec::new(), Vec::new()];
+
+        let mut curve_type = TsectCurveType::Crossing;
+        let mut max_deviation = 0.0;
+        let mut max_angle = 0.0;
 
         // 5b. SolidCraft (the fork's 6eecf04): where the fillet radius has a corner, the
         //     center curve and rails turn. A point there carries the average of the
@@ -1925,6 +2303,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         //     before the corner (`incoming`), the span that starts there those from after
         //     it, so the curves keep the turn.
         let mut incoming: Vec<Option<TsectPnt>> = Vec::new();
+        let mut pnts = pnts.to_vec();
         let count = pnts.len();
         for (kk, slot) in pnts.iter_mut().enumerate() {
             let mut point_in = None;
@@ -2053,11 +2432,11 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         let mut surface2_uv_curves: Vec<BSplineCurve> = Vec::new();
         let [uv_ctrl_pts0, uv_ctrl_pts1] = &uv_ctrl_pts;
         let [rail_pts0, rail_pts1] = &rail_ctrl_pts_3d;
-        flush_crv(3, &ctrl_pts_3d, &knots, &mut curves_3d)?;
-        flush_crv(2, uv_ctrl_pts0, &knots, &mut surface1_uv_curves)?;
-        flush_crv(2, uv_ctrl_pts1, &knots, &mut surface2_uv_curves)?;
-        flush_crv(3, rail_pts0, &knots, &mut curves_3d)?;
-        flush_crv(3, rail_pts1, &knots, &mut curves_3d)?;
+        flush_crv(3, &ctrl_pts_3d, knots, &mut curves_3d)?;
+        flush_crv(2, uv_ctrl_pts0, knots, &mut surface1_uv_curves)?;
+        flush_crv(2, uv_ctrl_pts1, knots, &mut surface2_uv_curves)?;
+        flush_crv(3, rail_pts0, knots, &mut curves_3d)?;
+        flush_crv(3, rail_pts1, knots, &mut curves_3d)?;
         out.deviations.push(max_deviation);
         out.curve_types.push(curve_type);
 
@@ -2107,6 +2486,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
         // 10. Generate the fillet surface from the rail curves and centerline
         let mut fillet_surface = None;
+        let mut kept = None;
         if solver.has_surface_generator()? {
             let created = solver.create_fillet_surface(
                 k,
@@ -2117,7 +2497,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                 &mut uv1,
                 &mut uv2,
             );
-            let Some(s) = keep_unported(created)? else {
+            let Some((s, pieces)) = keep_unported(created)? else {
                 solver.set_status(FilStatus::SurfSkinningFailure)?;
                 return Err(SolidError::blend_failed(
                     OP_FLUSH,
@@ -2125,24 +2505,19 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                 ));
             };
             fillet_surface = s;
+            kept = pieces;
         }
 
-        // 11. Correct self-intersecting fillet-surface: never runs upstream
-        //     (bTempTrySelfIntHandler is a FALSE constant).
-
-        // 12. Save Fillet Surface and rail curve data
-        solver.set_fillet_surface(pseudo, &fillet_geom, fillet_surface)?;
-        solver.set_center_line_curve(pseudo, &fillet_geom, center_line)?;
-        solver.set_rail_curve(pseudo, &fillet_geom, 0, curve1)?;
-        solver.set_rail_mate_uv_curve(pseudo, &fillet_geom, 0, uv1)?;
-        solver.set_rail_curve(pseudo, &fillet_geom, 1, curve2)?;
-        solver.set_rail_mate_uv_curve(pseudo, &fillet_geom, 1, uv2)?;
-
-        // restore FilletSolver offset distances in offset Surfaces stored in the FilletSolver
-        solver.reload_surface_offsets()?;
-
-        // all done
-        Ok(())
+        Ok(FlushGeometry {
+            fillet_geom,
+            center_line,
+            curve1,
+            curve2,
+            uv1,
+            uv2,
+            fillet_surface,
+            kept,
+        })
     }
 
     /// `EvaluateLawPoint`: the solver's point on the plane through `plane_origin`
@@ -2802,8 +3177,16 @@ mod tests {
             _points: &[TsectPnt],
             _uv1: &mut BSplineCurve,
             _uv2: &mut BSplineCurve,
-        ) -> Result<Option<Surface>> {
-            Ok(None)
+        ) -> Result<(Option<Surface>, Option<LawCornerPieces>)> {
+            Ok((None, None))
+        }
+
+        fn keep_law_corner_pieces(&mut self, _pieces: LawCornerPieces) -> Result<()> {
+            Ok(())
+        }
+
+        fn skins_varying_balls(&self) -> Result<bool> {
+            Ok(false)
         }
 
         fn set_fillet_surface(

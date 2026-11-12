@@ -2551,10 +2551,7 @@ impl CircularCrossSectionFsg {
         // ball changes its radius along the round (a radius law, or a constant chord
         // between faces whose angle changes); the others' balls touch the round along
         // their great circles.
-        let ball_radius_varies = matches!(
-            solver_type,
-            FilletSolverType::VariableRadius | FilletSolverType::ConstDist
-        );
+        let ball_radius_varies = solver_type.ball_radius_varies();
         // the centre line is a plain SmBSplineCurve here, so its virtuals are the
         // B-spline ones
         let mut cl = Curve::from(core::mem::take(center_line));
