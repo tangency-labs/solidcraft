@@ -292,3 +292,13 @@ jobs:
         run: |
           chmod +x dist/goldens
           dist/goldens --all --goldens --jobs 0 --no-report
+      # The check above allows floats 1e-9 apart. Every platform computes the same bits
+      # (solidcore::math::det, one pure-Rust libm), so a set blessed on any machine must be
+      # this run's exactly: re-bless every unit and require no difference.
+      - name: Every unit bit for bit (re-bless, no difference)
+        run: |
+          dist/goldens --all --bless --jobs 0 --no-report > /dev/null
+          git diff --stat -- crates/goldens/expected
+          # the rows that differ, so the cause can be found from this log
+          git diff -U0 -- crates/goldens/expected | cut -c1-2000 | head -n 200
+          git diff --quiet -- crates/goldens/expected
