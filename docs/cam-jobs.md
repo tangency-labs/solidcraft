@@ -49,7 +49,8 @@ message. With `dry_run`, the reply carries `passed: false` and `failures`.
 ### The reply
 
 `name`, `machine`, `post`, `operations` (each with `name`, `kind`, `tool`, `moves`,
-`cut_length`, `cut_minutes`, `warnings`), `program_lines`, `program_head` (the first lines),
+`cut_length`, `cut_minutes`, `rewinds`, `max_tilt_deg`, `a_deg` (indexed ones), `warnings`),
+`program_lines`, `program_head` (the first lines),
 `readback` (`max_tip_deviation`, `max_axis_deviation_deg`, `allowed_tip`, `allowed_axis_deg`,
 `cut_minutes`, `pass`), `cut_minutes` (the program's time at feed as written), `passed`,
 `failures`, `dry_run`, `outputs` (`gcode`, `preview`) and `notes` (a post that writes no work
@@ -85,12 +86,13 @@ silently left at its default. That holds for the tools, the machine and the post
 | --- | --- |
 | `name` | The program's name, in its header. Default: the design's name. |
 | `machine` | `"3axis"`, `"4axis_a"` (a rotary table about +X, the A axis, through work zero), or a whole machine as the CAM crate's `Machine` JSON (`name`, `rotaries: [{letter, direction, center, carrier, limits?, reversed?}]`, `linear_limits?`, `work_origin?`; radians). |
+| `machine_path` | The machine's JSON in a file, read from the job file's folder when relative. Give this or `machine`; a key the file does not know is refused. |
 | `a_reversed` | With `4axis_a`: the controller's positive A turns the table the other way. |
 | `a_limits_deg` | With `4axis_a`: `[lowest, highest]` A in degrees. Default: it turns without end. |
 | `post` | A built-in post (`cam.post.list` lists them): `linuxcnc_4axis`, `grblhal_4axis`. |
 | `post_path` | A post as a JSON file: the CAM crate's `Post5` (`cam.post.get {"name": …}` returns one to start from). This is how a machine's own post is matched: copy the closest built-in post and change its header, tool change, spindle, comments, decimals, inverse time and rotary settings until its output matches. |
 | `work_offset` | 1 to 6 (G54 to G59), for posts whose header writes `{work_offset}`. Default: 1. |
-| `origin` | The design point that is work zero, `[x, y, z]`. Default: the design's origin. |
+| `origin` | The design point that is work zero, `[x, y, z]`. On a 4th axis the A axis is work X through it. Default: the design's origin. |
 | `bodies` | The part's bodies by name: the surface the 3D operations follow, drawn in the preview. Default: every visible body. |
 | `tolerance` | 0.0001 to 1 mm (default 0.01): how far a toolpath may be from the profiles and surfaces it follows. |
 | `tools` | The tools, as the CAM crate's `Tool` JSON (below). Give this or `tool_library_path`. |
@@ -101,7 +103,11 @@ silently left at its default. That holds for the tools, the machine and the post
 
 Work coordinates are the design's coordinates less `origin`. The operations' polygons and
 heights are in work coordinates, and a sketch is read through the same shift. On a 4th axis
-the rotary axis is work X through work zero; a contour or a pocket runs with A held at zero.
+the rotary axis is work X through work zero: model the part with its turning axis along the
+design's X through the origin, or give `origin` as a point on that axis. A 3-axis operation
+runs with A held at zero unless it is indexed. A rotary toolpath's tip at angle θ and radius ρ
+is at `(x, ρ sin θ, ρ cos θ)` with `A = θ`: A = +90° brings the work's +Y side up under the
+tool.
 
 ### Tessellation
 
@@ -148,10 +154,17 @@ bottom}` in work coordinates.
 | `steep_shallow` | As `scallop`, with `threshold_deg` (40), `overlap` (a tenth of the diameter), `stepdown` (the spacing × sin threshold), `shallow`: `scallop` \| `parallel` (scallop), `angle_deg` (with `parallel`; 0) |
 | `pencil` | `heights`; `min_angle_deg` (30); `passes` (0: the crease alone); `stepover` (tool's, else 10% of its diameter); `min_length` (the tool's radius); `boundary`; `stock_to_leave` (0); `step`; `tolerance`; `climb` |
 | `rest_finish` | `heights`; `previous_tool` (a tool number of the job); `threshold` (twice the tolerance); `scallop_height` or `stepover`; `overlap` (a quarter of the diameter); `boundary`; `stock_to_leave` (0); `step`; `tolerance`; `climb` |
+| `indexed` | `a_deg` and `operation`: any of the 3-axis operations above, run with A held at `a_deg` (3+1); optionally `name`, used when the inner operation has none. The inner operation carries the tool and feeds. See [4th-axis jobs](#4th-axis-jobs-indexed-rotary-and-wrapped-operations). |
+| `indexed_pattern` | `a_deg: [angles]` or `count` (evenly over a turn, from `start_deg`, 0), and `operation`: any 3-axis operation, run as an `indexed` operation at each angle, named `<name> A<angle>` |
+| `rotary_finish` | `pattern`: `{type: "lines", angle_step_deg, zigzag?}`, `{type: "helix", pitch}` or `{type: "rings", stepover, zigzag?}`; `clearance` and `retract` (radii from the A axis); `floor` (0); `range: [min x, max x]` (the part's extent); `step`; `tolerance`; `stock_to_leave` (0); `max_angle_step_deg` (2) |
+| `rotary_roughing` | As `rotary_finish`, with `stock_radius` (required), `stepdown` (in radius) and `stock_to_leave` (0.25) |
+| `wrap` | `radius` (of the cylinder the path is drawn on); `points: [[x, y, z], …]` (x along the axis, y the arc length round it, z the depth: 0 on the cylinder, negative into it) or `sketch` + `curve` (a curve id; its sketch x and y are taken as x and arc length) with `depth` (0); `clearance` (5) and `retract` (1) above the cylinder; `max_angle_step_deg` (2) |
+| `wrap_pocket` | `radius` (of the cylinder the profile is drawn on); `sketch` + `profiles?` or `polygon: [[x, arc length], …]` (unrolled); `bottom` (the floor's depth from the cylinder, negative into it); `top` (0); `stepdown`; `stepover`; `clearance` (5) and `retract` (1) above the cylinder; `climb`; `stock_to_leave` (walls); `ramp_angle_deg`; `tolerance`; `max_angle_step_deg` (2) |
+| `wrap_contour` | As `wrap_pocket`, with `side` (outside) instead of `stepover`: the profile's boundary followed in depth levels |
 
 A sketch an operation uses must lie on a plane square to the tool, facing +Z or -Z (one facing
 away is read as seen from the tool, mirrored), in the design's root component. Contours and
-pockets are written with arcs kept (`G2`/`G3`). The moves of a 3D operation are merged before
+pockets, indexed or not, are written with arcs kept (`G2`/`G3`). The moves of a 3D operation are merged before
 they are written: a run of straight cuts at one feed whose points all lie within the merging
 tolerance of one line becomes that line, and, where the post writes arcs (`arcs`, and
 `helical_arcs` for one that changes Z), a run that lies within it of an arc in the XY plane
@@ -256,6 +269,108 @@ sharp wall-and-floor corner a 10 mm ball leaves up to 5.6 mm; `rest_finish` with
 0.016 mm, and cuts nothing on the floor further out or on the top. A pencil pass on a fillet
 joint tighter than the ball runs within 0.003 mm of where the ball touches both faces.
 
+
+## 4th-axis jobs: indexed, rotary and wrapped operations
+
+These run on a table about +X (`machine: "4axis_a"`, or a machine of one rotary axis from
+`machine` or `machine_path`). Each is planned in work coordinates, written through the post and
+read back through the machine, like the others.
+
+### Indexed operations
+
+```json
+{"type": "indexed", "a_deg": 90,
+ "operation": {"name": "side pocket", "type": "pocket", "tool": 1, "polygon": [[-6, -6], [6, -6], [6, 6], [-6, 6]],
+               "heights": {"clearance": 40, "retract": 20, "top": 15, "bottom": 10}}}
+```
+
+runs a 3-axis operation with A held at `a_deg` (3+1). Its heights, polygons, boundaries and
+sketches are in the frame that angle brings under the tool: its Z is the tool axis, so at A =
+90° the frame's Z is work +Y. The reply gives the operation `kind: "indexed pocket"`, its
+`a_deg`, and `max_tilt_deg` (the angle between the tool and work +Z). The name may be on the
+`indexed` entry instead of its inner operation.
+
+```json
+{"type": "indexed_pattern", "a_deg": [0, 90, 180, 270],
+ "operation": {"name": "flat", "type": "parallel", "tool": 1, "heights": {"clearance": 40, "retract": 17, "top": 15, "bottom": 0}}}
+```
+
+runs one 3-axis operation at several A angles, as that many `indexed` entries would: each is
+named `<name> A<angle>` (`flat A0`, `flat A90`, …) and written exactly as an `indexed` entry with
+that name and angle. `count: 6` spreads six angles evenly over a turn from `start_deg` (0). A
+pattern has 1 to 200 angles, and a job's operations, every angle counted, are at most 200.
+
+### Rotary finishing and roughing
+
+`rotary_finish` follows the part with the tool radial while A turns. `rotary_roughing` takes
+round stock of `stock_radius` down to the part in levels of radius, `stepdown` apart, leaving
+`stock_to_leave`. Their `pattern` is one of:
+
+- `{"type": "lines", "angle_step_deg": 15, "zigzag": true}`: passes along X, at most that far
+  apart round the axis;
+- `{"type": "helix", "pitch": 1}`: one pass going round and round, `pitch` mm along +X a turn;
+- `{"type": "rings", "stepover": 2, "zigzag": true}`: circumferential passes, a full turn of A
+  at each X, X stepping between them. The rings are evenly spaced over `range`, both ends
+  included, at most `stepover` apart (exactly it when it divides the range). With `zigzag` (the
+  default) every other ring turns back, so A stays within one turn. Rings are linked by feeding
+  across X when that is short and clear. For roughing, rings farther apart than the tool is
+  wide are refused.
+
+`clearance` and `retract` are radii from the A axis; `range` is from where to where along X
+(default: the part's extent).
+
+### Wrapped paths, pockets and contours
+
+`wrap` wraps a flat path round a cylinder of `radius`: its points are `[x, arc length, depth]`,
+or a sketch curve whose x is along the axis and y the arc length round it, at `depth`.
+
+`wrap_pocket` and `wrap_contour` cut a closed 2D profile into a cylinder of `radius` round the
+A axis, the tool pointing at the axis. The profile is drawn unrolled: x along the axis, y the
+arc length round the cylinder at `radius` (a polygon, or a sketch on a plane facing +Z whose
+x and y are taken that way, in work coordinates). It is cut in levels from `top` down to
+`bottom` (depths from the cylinder, negative into it), at most `stepdown` apart; the floor is
+the cylinder of radius `radius + bottom`, exactly.
+
+Unrolling distorts with depth. The profile keeps its angles as it goes down (a wall at arc
+length y is the radial plane at A = y / radius), but a tool of radius r at a level of radius ρ
+must have its centre r from the wall in arc length *at ρ*, which is an angle of r / ρ: wider in
+angle the deeper the level. So every level is planned on its own: the profile's arc lengths are
+scaled by ρ / radius (the unrolled plane at the cutting radius, where lengths are true), the
+pocket or contour is offset there and wrapped at ρ. Along X nothing is distorted. A radial
+tool's side is parallel to its axis, so above the tip it stays farther from a radial wall than
+at the tip: a wall is left as steps no taller than a stepdown, and at the tip at most
+r − ρ·atan(r / ρ) ≈ r³ / (3ρ²) short of it (0.02 mm for a 6 mm tool at radius 20), never cut
+into.
+
+Lines are kept exact; curves and the offset arcs are followed in chords within a quarter of the
+tolerance each and the wrapped moves within half of it. Rotary and wrapped cuts are written as
+short moves, each turning A by at most `max_angle_step_deg` (2), in inverse time where the post
+says so; a post with `rewind` brings a long cut back within the table's limits, and the reply
+counts each operation's `rewinds` (their time at feed is in its `cut_minutes`). Everything one
+level of a wrapped operation cuts must fit within one turn at that level, or the operation is
+refused.
+
+### The setup check
+
+Before anything is written, every rotary operation's clearance is held against the part along
+the stretch of X it works over (its moves, the tool's radius either side): where its rapids go
+round and where A turns, the tool must be outside the part's largest radius about the A axis
+there, by more than the job's tolerance. That is the `clearance` of `rotary_finish` and
+`rotary_roughing` (which must also clear its `stock_radius`), and `radius + clearance` for
+`wrap`, `wrap_pocket` and `wrap_contour`. The part's radius is read on its bodies as the 3D
+operations take them (tessellated within a quarter of the tolerance).
+
+A turns into an operation where the one before it left the tool: the post rises there (to its
+`clearance`, or else to the new operation's highest rapid, never down) and turns A before it
+moves across. So whenever A turns between two operations with the same tool, of any kind (a
+plain 3-axis one included), the tool's end at that height must be outside the part's largest
+radius within the tool's radius of the X where it stands. Raising the earlier operation's
+clearance, or the post's, fixes it. An `indexed` or `indexed_pattern` operation turns A only as
+it starts; where the tool's place is not known (the program's first operation, or after a tool
+change) its own clearance is held against the X it works over instead. A post whose
+`safe_rotate` lines take the tool to the machine's top before every turn is not held to either.
+A job that fails is refused with the operation, the height and how far the part (or the stock)
+reaches.
 
 ## `cam.post.list` and `cam.post.get`
 

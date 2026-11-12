@@ -749,3 +749,486 @@ fn steep_shallow_and_outward_scallop_on_a_stepped_block_read_back() {
     let r = run(&mut s, "cam.job", json!({"job": finish_job(tools, rest), "dry_run": true}));
     assert_eq!(r["passed"], true, "{r}");
 }
+
+/// A block 40 × 30 × 30 about the X axis with a 12 × 12 pocket 5 mm deep in its +Y face.
+fn pocketed_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 30, "corner": [-20, -15, -15], "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 12, "width": 10, "height": 12, "corner": [-6, 10, -6], "operation": "cut"}));
+    s
+}
+
+fn side_pocket_job() -> Value {
+    json!({
+        "machine": "4axis_a",
+        "post": "linuxcnc_4axis",
+        "tools": [flat(1, 4.0)],
+        "operations": [{
+            "type": "indexed", "a_deg": 90,
+            "operation": {
+                "name": "side pocket", "type": "pocket", "tool": 1,
+                "polygon": [[-6, -6], [6, -6], [6, 6], [-6, 6]],
+                "heights": {"clearance": 40, "retract": 20, "top": 15, "bottom": 10},
+                "stepdown": 2.5, "stepover": 1.5
+            }
+        }]
+    })
+}
+
+/// A cylinder of radius 10 along X from -20 to 20.
+fn bar() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 40, "axis": "X", "base": [-20, 0, 0], "body_name": "Bar"}));
+    s
+}
+
+fn barrel_job() -> Value {
+    json!({
+        "machine": "4axis_a",
+        "post": "linuxcnc_4axis",
+        "tools": [ball(3, 4.0)],
+        "operations": [{
+            "name": "barrel", "type": "rotary_finish", "tool": 3,
+            "pattern": {"type": "lines", "angle_step_deg": 15},
+            "clearance": 25, "retract": 15, "range": [-15, 15]
+        }]
+    })
+}
+
+/// The cuts of a written program as `(x, a in radians, z)`: on the 4th axis the tip is under
+/// the tool at Y 0, Z its radius.
+fn written_cuts(text: &str) -> Vec<(f64, f64, f64)> {
+    use solidcraft_cam::kinematics::AxisLetter;
+    parse5(text, &[AxisLetter::A])
+        .unwrap()
+        .into_iter()
+        .filter_map(|b| match b {
+            JointWords::Feed { linear, rotary, .. } => Some((linear.x, rotary[0], linear.z)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The frame A = 90° brings under the tool has its Z along work +Y, as docs/cam-jobs.md says:
+/// a pocket indexed there cuts the block's side.
+#[test]
+fn a_pocket_indexed_at_90_degrees_cuts_the_side_and_keeps_its_arcs() {
+    let frame = solidcraft_cam::indexed::frame_for_index(&solidcraft_cam::kinematics::Machine::four_axis_a(), &[90f64.to_radians()]).unwrap();
+    assert!((frame.z.y - 1.0).abs() < 1e-9, "{frame:?}");
+    let mut s = pocketed_block();
+    let dir = Dir::new("side");
+    let out = dir.file("side.ngc");
+    let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+        run(&mut s, "cam.job", json!({"job": side_pocket_job(), "output": out}))
+    });
+    assert_clean(&r);
+    let op = &r["operations"][0];
+    assert_eq!(op["name"], "side pocket", "{r}");
+    assert_eq!(op["kind"], "indexed pocket", "{r}");
+    assert_eq!(op["a_deg"].as_f64(), Some(90.0), "{r}");
+    assert!((op["max_tilt_deg"].as_f64().unwrap() - 90.0).abs() < 1e-6, "the tool comes in along work +Y: {r}");
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(text.contains("A90"), "{text}");
+    assert!(text.contains("G2") || text.contains("G3"), "the pocket's arcs are kept: {text}");
+    let c = run(&mut s, "cam.gcode.check", json!({"path": out}));
+    assert!(c["errors"].as_array().is_some_and(Vec::is_empty), "{c}");
+    assert_eq!(c["rotary_ranges"][0]["letter"], "A", "{c}");
+    // In program coordinates the pocket's floor is 10 mm up the turned block, its walls a tool
+    // radius in from the 12 mm square.
+    for (x, _, z) in written_cuts(&text) {
+        assert!(z >= 10.0 - 1e-6 && x.abs() <= 4.0 + 1e-3, "{x} {z}");
+    }
+    let preview = dir.file("side.html");
+    solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+        run(&mut s, "cam.job", json!({"job": side_pocket_job(), "output": dir.file("again.ngc"), "preview": preview}))
+    });
+    assert!(std::fs::read_to_string(&preview).unwrap().contains("3+1 A90"), "the preview says the setup");
+    // An indexed operation needs one rotary axis, and an angle.
+    let mut job = side_pocket_job();
+    job["machine"] = json!("3axis");
+    let e = s.execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("one rotary axis"), "{e}");
+    let mut job = side_pocket_job();
+    job["operations"][0]["a_deg"] = json!(1e308);
+    assert!(s.execute("cam.job", &json!({"job": job, "dry_run": true})).is_err());
+}
+
+#[test]
+fn a_rotary_finish_on_a_bar_reads_back_and_turns_a_full_turn() {
+    let mut s = bar();
+    let dir = Dir::new("bar");
+    let out = dir.file("bar.ngc");
+    let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+        run(&mut s, "cam.job", json!({"job": barrel_job(), "output": out}))
+    });
+    assert_clean(&r);
+    let op = &r["operations"][0];
+    assert_eq!(op["kind"], "rotary_finish", "{r}");
+    assert!(op["max_tilt_deg"].as_f64().is_some_and(|t| t > 170.0), "the tool goes all round: {r}");
+    assert!((op["cut_minutes"].as_f64().unwrap() - r["readback"]["cut_minutes"].as_f64().unwrap()).abs() < 1e-6, "{r}");
+    let c = run(&mut s, "cam.gcode.check", json!({"path": out}));
+    assert!(c["errors"].as_array().is_some_and(Vec::is_empty), "{c}");
+    assert!(c["g93_blocks"].as_u64().is_some_and(|n| n > 0), "cuts that turn A are in inverse time: {c}");
+    let a = &c["rotary_ranges"][0];
+    assert_eq!(a["letter"], "A", "{c}");
+    assert!(a["max_deg"].as_f64().unwrap() - a["min_deg"].as_f64().unwrap() >= 330.0, "{c}");
+    // The tip stays on the bar: never inside radius 10 less the tolerance, in machine Z.
+    let low = c["bounds"][0][2].as_f64().unwrap();
+    assert!(low > 9.9, "{c}");
+    // Rings step over exactly in the written program, a whole turn of A each.
+    let mut job = barrel_job();
+    job["operations"][0]["pattern"] = json!({"type": "rings", "stepover": 2.5});
+    let out = dir.file("rings.ngc");
+    let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+        run(&mut s, "cam.job", json!({"job": job, "output": out}))
+    });
+    assert_clean(&r);
+    let cuts = written_cuts(&std::fs::read_to_string(&out).unwrap());
+    let mut rings: Vec<(f64, f64, f64)> = Vec::new();
+    for &(x, a, _) in &cuts {
+        match rings.last_mut() {
+            Some((rx, lo, hi)) if (x - *rx).abs() <= 1e-3 => {
+                *lo = lo.min(a);
+                *hi = hi.max(a);
+            }
+            _ => rings.push((x, a, a)),
+        }
+    }
+    rings.retain(|(_, lo, hi)| hi - lo > 6.0);
+    assert_eq!(rings.len(), 13, "{rings:?}");
+    for (k, (x, lo, hi)) in rings.iter().enumerate() {
+        assert!((x - (-15.0 + 2.5 * k as f64)).abs() <= 1e-3, "ring {k} at {x}");
+        assert!(hi - lo >= std::f64::consts::TAU - 0.07, "ring {k} turns {}", hi - lo);
+    }
+}
+
+/// Roughing round stock of radius 14 down to the bar leaves its `stock_to_leave`, and refuses to
+/// start without the stock's radius.
+#[test]
+fn a_rotary_rough_takes_the_round_stock_down_to_the_bar() {
+    let mut s = bar();
+    let mut job = barrel_job();
+    job["operations"][0] = json!({
+        "name": "rough", "type": "rotary_roughing", "tool": 3, "pattern": {"type": "lines", "angle_step_deg": 10},
+        "stock_radius": 14, "clearance": 20, "retract": 15, "range": [-15, 15], "stepdown": 1.5, "stock_to_leave": 0.5
+    });
+    let dir = Dir::new("rough");
+    let out = dir.file("rough.ngc");
+    let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+        run(&mut s, "cam.job", json!({"job": job, "output": out}))
+    });
+    assert_clean(&r);
+    assert_eq!(r["operations"][0]["kind"], "rotary_roughing", "{r}");
+    let cuts = written_cuts(&std::fs::read_to_string(&out).unwrap());
+    let lowest = cuts.iter().map(|c| c.2).fold(f64::INFINITY, f64::min);
+    assert!((10.5 - 0.02..12.0).contains(&lowest), "the last level keeps the stock to leave off the bar: {lowest}");
+    job["operations"][0].as_object_mut().unwrap().remove("stock_radius");
+    let e = s.execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("stock_radius"), "{e}");
+}
+
+/// The bar with a slot wrapped round it: 6 mm wide along X, 2 mm deep, a quarter turn round
+/// from A −45° to +45° (a rectangle on XZ above the axis revolved about X both ways, cut).
+fn slotted_bar() -> Session {
+    let mut s = bar();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Slot"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-3, -8], "p1": [3, -12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Slot", "axis": "X", "angle": "90 deg", "direction": "symmetric", "operation": "cut"}));
+    s
+}
+
+/// The slot of `slotted_bar` as a wrapped operation of `kind` with a 4 mm flat endmill.
+fn slot_job(kind: &str) -> Value {
+    let q = 10.0 * std::f64::consts::FRAC_PI_4;
+    let mut op = json!({
+        "name": "slot", "type": kind, "tool": 1, "radius": 10,
+        "polygon": [[-3, -q], [3, -q], [3, q], [-3, q]],
+        "bottom": -2, "stepdown": 1
+    });
+    if kind == "wrap_contour" {
+        op["side"] = json!("inside");
+    } else {
+        op["stepover"] = json!(1.5);
+    }
+    json!({"machine": "4axis_a", "post": "linuxcnc_4axis", "tools": [flat(1, 4.0)], "operations": [op]})
+}
+
+#[test]
+fn a_wrapped_slot_is_cut_to_its_width_at_the_floor_radius() {
+    for kind in ["wrap_pocket", "wrap_contour"] {
+        let mut s = slotted_bar();
+        let dir = Dir::new("slot");
+        let out = dir.file("slot.ngc");
+        let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+            run(&mut s, "cam.job", json!({"job": slot_job(kind), "output": out}))
+        });
+        assert_clean(&r);
+        assert_eq!(r["operations"][0]["kind"], kind, "{r}");
+        let text = std::fs::read_to_string(&out).unwrap();
+        assert!(text.contains("G93"), "cuts that turn A are in inverse time");
+        let cuts = written_cuts(&text);
+        // The floor is at radius 8, exactly, and nothing goes deeper.
+        let lowest = cuts.iter().map(|c| c.2).fold(f64::INFINITY, f64::min);
+        assert!((lowest - 8.0).abs() <= 1e-3, "{kind}: {lowest}");
+        let floor: Vec<&(f64, f64, f64)> = cuts.iter().filter(|c| (c.2 - 8.0).abs() <= 1e-3).collect();
+        let (xlo, xhi) = floor.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| (lo.min(c.0), hi.max(c.0)));
+        let (alo, ahi) = floor.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| (lo.min(c.1), hi.max(c.1)));
+        // Unwrapped at the floor: the slot's 6 mm along X and its quarter turn round, at
+        // radius 8, are the centres' travel plus the tool's 4 mm.
+        assert!((xhi - xlo + 4.0 - 6.0).abs() <= 2e-3, "{kind}: {xlo}..{xhi}");
+        let arc = (ahi - alo) * 8.0 + 4.0;
+        assert!((arc - 8.0 * std::f64::consts::FRAC_PI_2).abs() <= 0.02, "{kind}: {arc}");
+        assert!(alo > -std::f64::consts::FRAC_PI_4 && ahi < std::f64::consts::FRAC_PI_4, "{kind}: A within the slot");
+    }
+    // A path wrapped round the bar: a groove going a third of the way round as it runs along X.
+    let mut s = bar();
+    let mut job = slot_job("wrap_pocket");
+    job["operations"] = json!([{
+        "name": "groove", "type": "wrap", "tool": 1, "radius": 10,
+        "points": [[-10, 0, -0.5], [0, 10, -0.5], [10, 20, -0.5]]
+    }]);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    assert_eq!(r["operations"][0]["kind"], "wrap", "{r}");
+    job["operations"][0]["points"] = json!([[0, 0, 5]]);
+    assert!(s.execute("cam.job", &json!({"job": job, "dry_run": true})).is_err());
+}
+
+/// A bar 40 long with a 30 mm square section about X: a flat face 15 mm out at each quarter turn.
+fn square_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 30, "corner": [-20, -15, -15], "body_name": "Block"}));
+    s
+}
+
+fn face_op(name: &str, clearance: f64) -> Value {
+    json!({
+        "name": name, "type": "parallel", "tool": 1,
+        "heights": {"clearance": clearance, "retract": 17, "top": 15, "bottom": 0},
+        "stepover": 3, "boundary": {"rect": [[-10, -6], [10, 6]]}
+    })
+}
+
+fn faces_job(operations: Value) -> Value {
+    json!({"machine": "4axis_a", "post": "linuxcnc_4axis", "tools": [flat(1, 4.0)], "operations": operations})
+}
+
+/// A post file in `dir` that goes to the machine's top (`G53 G0 Z0`) before A turns, in place of
+/// rising to the clearance height: such a post is never refused for a clearance the part reaches.
+fn with_top_turning_post(mut job: Value, dir: &Dir) -> Value {
+    let mut post = Post5::linuxcnc_4axis();
+    post.safe_rotate = vec!["G53 G0 Z0".into()];
+    post.clearance_retract = false;
+    let path = dir.file("top-turning.post.json");
+    std::fs::write(&path, serde_json::to_string(&post).unwrap()).unwrap();
+    if let Some(o) = job.as_object_mut() {
+        o.remove("post");
+        o.insert("post_path".into(), json!(path));
+    }
+    job
+}
+
+#[test]
+fn an_indexed_pattern_is_the_indexed_operations_it_stands_for() {
+    let mut s = square_block();
+    let dir = Dir::new("pattern");
+    let write = |s: &mut Session, job: Value, file: &str| {
+        let out = dir.file(file);
+        let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+            run(s, "cam.job", json!({"job": job, "output": out}))
+        });
+        assert_clean(&r);
+        (r, std::fs::read_to_string(&out).unwrap())
+    };
+    let pattern = faces_job(json!([{"type": "indexed_pattern", "a_deg": [0, 90, 180, 270], "operation": face_op("face", 40.0)}]));
+    let (r, text) = write(&mut s, pattern, "pattern.ngc");
+    let four: Vec<Value> =
+        [0, 90, 180, 270].iter().map(|a| json!({"type": "indexed", "a_deg": a, "operation": face_op(&format!("face A{a}"), 40.0)})).collect();
+    let (r4, text4) = write(&mut s, faces_job(json!(four)), "four.ngc");
+    assert_eq!(text, text4, "the pattern writes what the four indexed operations write");
+    assert_eq!(r["operations"], r4["operations"]);
+    let ops = r["operations"].as_array().unwrap();
+    let names: Vec<&str> = ops.iter().filter_map(|o| o["name"].as_str()).collect();
+    assert_eq!(names, ["face A0", "face A90", "face A180", "face A270"]);
+    let angles: Vec<f64> = ops.iter().filter_map(|o| o["a_deg"].as_f64()).collect();
+    assert_eq!(angles, [0.0, 90.0, 180.0, 270.0]);
+    assert!(ops.iter().all(|o| o["kind"] == "indexed parallel"), "{r}");
+    for a in ["A90", "A180", "A270"] {
+        assert!(text.split_whitespace().any(|w| w.trim_end_matches('.') == a), "{a}: {text}");
+    }
+    // A count spreads the angles evenly over a turn: the same four.
+    let count = faces_job(json!([{"type": "indexed_pattern", "count": 4, "operation": face_op("face", 40.0)}]));
+    let (_, text_count) = write(&mut s, count, "count.ngc");
+    assert_eq!(text_count, text);
+    // Both, neither, too many, and no name at all: refused.
+    let mut unnamed = face_op("", 40.0);
+    unnamed["name"] = json!("");
+    for bad in [
+        json!({"type": "indexed_pattern", "a_deg": [0], "count": 2, "operation": face_op("f", 40.0)}),
+        json!({"type": "indexed_pattern", "operation": face_op("f", 40.0)}),
+        json!({"type": "indexed_pattern", "count": 201, "operation": face_op("f", 40.0)}),
+        json!({"type": "indexed_pattern", "a_deg": [], "operation": face_op("f", 40.0)}),
+        json!({"type": "indexed_pattern", "a_deg": [0], "start_deg": 5, "operation": face_op("f", 40.0)}),
+        json!({"type": "indexed_pattern", "count": 4, "operation": unnamed}),
+    ] {
+        match s.execute("cam.job", &json!({"job": faces_job(json!([bad.clone()])), "dry_run": true})) {
+            Err(EngineError::BadParams { .. }) => {}
+            other => panic!("{bad}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_clearance_inside_the_part_is_refused() {
+    // The square bar reaches 21.21 mm from the axis at its corners: A turning at a clearance
+    // of 18 would swing them into the tool.
+    let mut s = square_block();
+    let job = faces_job(json!([{"type": "indexed_pattern", "count": 4, "operation": face_op("face", 18.0)}]));
+    let e = s.execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+    let msg = e.to_string();
+    assert!(matches!(e, EngineError::BadParams { .. }) && msg.contains("face A0") && msg.contains("21.21") && msg.contains("part"), "{msg}");
+    // A post that turns A at the machine's top instead is not refused for it.
+    let dir = Dir::new("top-turn");
+    let job = with_top_turning_post(job, &dir);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["operations"].as_array().map(Vec::len), Some(4), "{r}");
+    // A wrapped pocket whose rapids would go round just outside the cylinder it is drawn on, in
+    // a part that reaches farther: refused before anything is written.
+    let mut slot = slot_job("wrap_pocket");
+    slot["operations"][0]["radius"] = json!(8);
+    slot["operations"][0]["bottom"] = json!(0);
+    slot["operations"][0]["clearance"] = json!(1);
+    slot["operations"][0]["retract"] = json!(0.5);
+    let e = slotted_bar().execute("cam.job", &json!({"job": slot, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("not outside the part"), "{e}");
+    // Roughing from round stock: the clearance must clear the stock as well.
+    let mut job = barrel_job();
+    job["operations"][0] = json!({
+        "name": "rough", "type": "rotary_roughing", "tool": 3, "pattern": {"type": "rings", "stepover": 3},
+        "stock_radius": 14, "clearance": 14, "retract": 14, "range": [-15, 15]
+    });
+    let e = bar().execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("not outside the stock"), "{e}");
+}
+
+/// A stepped bar about X: a 30 mm square section from X −20 to 0 (its corners 21.21 mm from
+/// the axis) and a 20 mm one from 0 to 20 (14.14 mm).
+fn stepped_bar() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 30, "height": 30, "corner": [-20, -15, -15], "body_name": "Big"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, -10, -10], "body_name": "Small"}));
+    s
+}
+
+#[test]
+fn a_turn_between_operations_is_checked_where_the_tool_turns() {
+    let mut s = stepped_bar();
+    // A 3-axis finish of the big section's top (15 mm up), its rapids `clearance` mm up.
+    let big = |clearance: f64| {
+        json!({
+            "name": "big", "type": "parallel", "tool": 1,
+            "heights": {"clearance": clearance, "retract": 17, "top": 15, "bottom": 0},
+            "stepover": 3, "boundary": {"rect": [[-16, -6], [-4, 6]]}
+        })
+    };
+    // The small section's side at A 90°, its rapids 16 mm up: clear of the small section.
+    let small = json!({"type": "indexed", "a_deg": 90, "operation": {
+        "name": "small", "type": "parallel", "tool": 1,
+        "heights": {"clearance": 16, "retract": 12, "top": 10, "bottom": 0},
+        "stepover": 3, "boundary": {"rect": [[5, -5], [15, 5]]}
+    }});
+    // `big` leaves the tool 18 mm up over the big section, and A turns to 90° there: its corners,
+    // 21.21 mm out, swing into the tool. Each operation is clear where it works.
+    let e = s.execute("cam.job", &json!({"job": faces_job(json!([big(18.0), small.clone()])), "dry_run": true})).unwrap_err();
+    let msg = e.to_string();
+    assert!(matches!(e, EngineError::BadParams { .. }), "{msg}");
+    assert!(msg.contains("`small`") && msg.contains("`big`") && msg.contains("21.21"), "{msg}");
+    // From 25 mm up the turn is clear.
+    let r = run(&mut s, "cam.job", json!({"job": faces_job(json!([big(25.0), small.clone()])), "dry_run": true}));
+    assert_clean(&r);
+    // The other way round A turns over the small section, at 18 mm (the post rises to `big`'s
+    // clearance first): clear, and so not refused.
+    let r = run(&mut s, "cam.job", json!({"job": faces_job(json!([small.clone(), big(18.0)])), "dry_run": true}));
+    assert_clean(&r);
+    // A post that goes to the machine's top before turning is never refused for it.
+    let dir = Dir::new("top-turn");
+    let job = with_top_turning_post(faces_job(json!([big(18.0), small])), &dir);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["operations"].as_array().map(Vec::len), Some(2), "{r}");
+}
+
+/// A machine file beside the job is read as the job's machine; `machine` and `machine_path`
+/// together, a misspelt key in the file, and a file that is no object are refused.
+#[test]
+fn a_machine_file_beside_the_job_is_its_machine() {
+    let mut s = bar();
+    let dir = Dir::new("machine");
+    let machine = serde_json::to_value(solidcraft_cam::kinematics::Machine::four_axis_a()).unwrap();
+    std::fs::write(dir.0.join("mill.machine.json"), machine.to_string()).unwrap();
+    let mut job = barrel_job();
+    let o = job.as_object_mut().unwrap();
+    o.remove("machine");
+    o.insert("machine_path".into(), json!("mill.machine.json"));
+    let job_path = dir.file("bar.cam.json");
+    std::fs::write(&job_path, job.to_string()).unwrap();
+    let r = run(&mut s, "cam.job", json!({"job_path": job_path, "dry_run": true}));
+    assert_clean(&r);
+    assert_eq!(r["machine"], machine["name"], "{r}");
+    job["machine"] = json!("4axis_a");
+    std::fs::write(&job_path, job.to_string()).unwrap();
+    let e = s.execute("cam.job", &json!({"job_path": job_path, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("not both"), "{e}");
+    job.as_object_mut().unwrap().remove("machine");
+    std::fs::write(&job_path, job.to_string()).unwrap();
+    let mut misspelt = machine.clone();
+    misspelt["rotarys"] = json!([]);
+    std::fs::write(dir.0.join("mill.machine.json"), misspelt.to_string()).unwrap();
+    let e = s.execute("cam.job", &json!({"job_path": job_path, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("rotarys"), "{e}");
+    std::fs::write(dir.0.join("mill.machine.json"), "[1, 2]").unwrap();
+    let e = s.execute("cam.job", &json!({"job_path": job_path, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("machine file"), "{e}");
+}
+
+#[test]
+fn hostile_rotary_jobs_are_refused_without_panics() {
+    let mut s = bar();
+    let job = |op: Value| json!({"job": {"machine": "4axis_a", "post": "linuxcnc", "tools": [ball(3, 4.0)], "operations": [op]}, "dry_run": true});
+    let lines = json!({"type": "lines", "angle_step_deg": 15});
+    let cases = [
+        json!({"name": "r", "type": "rotary_finish", "tool": 3, "pattern": lines, "clearance": 15, "retract": 25}),
+        json!({"name": "r", "type": "rotary_finish", "tool": 3, "pattern": {"type": "lines", "angle_step_deg": 0}, "clearance": 25, "retract": 15}),
+        json!({"name": "r", "type": "rotary_finish", "tool": 3, "pattern": {"type": "helix", "pitch": -1}, "clearance": 25, "retract": 15}),
+        json!({"name": "r", "type": "rotary_finish", "tool": 3, "pattern": {"type": "rings", "stepover": 1e308}, "clearance": 25, "retract": 15}),
+        json!({"name": "r", "type": "rotary_finish", "tool": 3, "pattern": {"type": "spiral"}, "clearance": 25, "retract": 15}),
+        json!({"name": "r", "type": "rotary_finish", "tool": 3, "pattern": lines, "clearance": 1e308, "retract": 15}),
+        json!({"name": "r", "type": "rotary_finish", "tool": 3, "pattern": lines, "clearance": 25, "retract": 15, "range": [5, -5]}),
+        json!({"name": "r", "type": "rotary_finish", "tool": 3, "pattern": lines, "clearance": 25, "retract": 15, "max_angle_step_deg": 0}),
+        json!({"name": "r", "type": "rotary_roughing", "tool": 3, "pattern": lines, "stock_radius": -1, "clearance": 25, "retract": 15}),
+        json!({"name": "r", "type": "rotary_roughing", "tool": 3, "pattern": lines, "stock_radius": 14, "clearance": 25, "retract": 15, "stepdown": 0}),
+        json!({"name": "w", "type": "wrap", "tool": 3, "radius": 10}),
+        json!({"name": "w", "type": "wrap", "tool": 3, "radius": -10, "points": [[0, 0, 0], [1, 1, 0]]}),
+        json!({"name": "w", "type": "wrap", "tool": 3, "radius": 10, "points": [[0, 0, 0], [1, 1, 0]], "curve": "c"}),
+        json!({"name": "w", "type": "wrap", "tool": 3, "radius": 10, "sketch": "Nope", "curve": "c"}),
+        json!({"name": "p", "type": "wrap_pocket", "tool": 3, "radius": 10, "bottom": -2}),
+        json!({"name": "p", "type": "wrap_pocket", "tool": 3, "radius": 10, "polygon": [[0, 0], [1, 0], [0, 1]], "bottom": 5}),
+        json!({"name": "p", "type": "wrap_contour", "tool": 3, "radius": 0, "polygon": [[0, 0], [1, 0], [0, 1]], "bottom": -1}),
+        json!({"type": "indexed", "a_deg": 90, "operation": {"type": "pocket", "tool": 3, "polygon": [[0, 0], [1, 0], [0, 1]], "heights": {"clearance": 40, "retract": 20, "top": 15, "bottom": 10}}}),
+        json!({"name": "i", "type": "indexed", "a_deg": 90, "operation": {"type": "indexed", "a_deg": 0}}),
+    ];
+    for p in cases.iter().map(|c| job(c.clone())) {
+        match s.execute("cam.job", &p) {
+            Err(EngineError::Internal(_, msg)) => panic!("{p}: panicked: {msg}"),
+            Err(_) => {}
+            Ok(v) => panic!("{p}: accepted: {v}"),
+        }
+    }
+    // A rotary operation on a 3-axis machine.
+    let mut j = job(cases[0].clone());
+    j["job"]["machine"] = json!("3axis");
+    j["job"]["operations"][0]["retract"] = json!(15);
+    j["job"]["operations"][0]["clearance"] = json!(25);
+    let e = s.execute("cam.job", &j).unwrap_err();
+    assert!(e.to_string().contains("rotary axis"), "{e}");
+}

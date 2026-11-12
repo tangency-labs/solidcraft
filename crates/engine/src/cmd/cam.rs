@@ -5,7 +5,9 @@
 //!
 //! `cam.job` plans every operation in work coordinates (the design less the job's origin): the
 //! 2D ones on profiles, the 3D ones on the part's bodies tessellated from their exact surfaces
-//! within a quarter of the job's tolerance. It writes the program through the job's post for
+//! within a quarter of the job's tolerance. On a 4th axis a 3-axis operation may be indexed (A
+//! held at an angle), and the rotary and wrapped operations turn A as they cut
+//! (`cam_xrotary.rs`, with the check that A never turns the part into the tool). It writes the program through the job's post for
 //! its machine, reads that back and compares it with the toolpaths. A program that fails the
 //! check is not written unless the call allows it. Every path is checked against the session's
 //! folders (`vfs`, which MCP's `--allow-path` confines) before anything is computed or written.
@@ -32,14 +34,16 @@ use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::cam::{
     BoundarySpec, CamGcodeCheckParams, CamGcodeCheckReply, CamJob, CamJobParams, CamJobReply, CamPostGetParams, CamPostGetReply, CamPostListParams,
-    CamPostListReply, Common, HeightsSpec, MachineSpec, OperationReport, OperationSpec, Outputs, ParseErrorReport, PostEntry, ReadbackReport,
-    RotaryRange, SideSpec,
+    CamPostListReply, Common, HeightsSpec, MachineSpec, Op3Spec, OperationReport, OperationSpec, Outputs, ParseErrorReport, PostEntry,
+    ReadbackReport, RotaryRange, SideSpec,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 #[path = "cam_finish3d.rs"]
 mod finish3d;
+#[path = "cam_xrotary.rs"]
+mod xrotary;
 
 const JOB_CONTRACT: TypedContract<CamJobParams> = TypedContract::new();
 const POST_LIST_CONTRACT: TypedContract<CamPostListParams> = TypedContract::new();
@@ -53,18 +57,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&JOB_CONTRACT)
         .output(output_schema_for::<CamJobReply>)
         .params(
-            "job: {…} | job_path: .json (the CAM job, docs/cam-jobs.md: name?, machine: \"3axis\" | \"4axis_a\" | Machine JSON, \
-             a_reversed?, a_limits_deg?: [min, max], post: built-in name (cam.post.list) | post_path: Post5 JSON file, work_offset?: 1-6, \
-             origin?: [x,y,z] (the design point that is work zero), bodies?: [names] (the surface 3D operations follow, drawn in the \
+            "job: {…} | job_path: .json (the CAM job, docs/cam-jobs.md: name?, machine: \"3axis\" | \"4axis_a\" | Machine JSON \
+             | machine_path: Machine JSON file, a_reversed?, a_limits_deg?: [min, max], post: built-in name (cam.post.list) | post_path: Post5 JSON file, work_offset?: 1-6, \
+             origin?: [x,y,z] (the design point that is work zero; on a 4th axis the A axis is work X through it), bodies?: [names] (the surface 3D operations follow, drawn in the \
              preview; default every visible body), tolerance?: mm (default 0.01; 3D operations plan on the bodies tessellated within a \
              quarter of it), tools: [Tool JSON] | tool_library_path, operations: [{name, type: contour | pocket (sketch + profiles? | \
              polygon: [[x,y],…], stepdown?, side? (contour: outside | inside | on), stepover? (pocket), ramp_angle_deg?) | parallel | \
              roughing | waterline | scallop | steep_shallow | pencil | rest_finish (boundary?: {rect?, polygon?, holes?}, stepover?, \
-             step?, …), tool: number, heights: {clearance, retract, top, bottom}, climb?, stock_to_leave?, tolerance?, spindle_rpm?, \
+             step?, …) | indexed {a_deg, operation, name?} | indexed_pattern {a_deg: [..] | count, start_deg?, operation, name?} | \
+             rotary_finish | rotary_roughing (pattern: lines | helix | rings, clearance, retract, stock_radius?) | wrap | wrap_pocket | \
+             wrap_contour (radius, …), tool: number, heights: {clearance, retract, top, bottom}, climb?, stock_to_leave?, tolerance?, spindle_rpm?, \
              feeds?: {cut, plunge, descent?}, coolant?, enabled?}]; unknown keys are refused); output: G-code path (required unless dry_run); preview?: \
              HTML path, another file than output (the part and toolpaths, self-contained); dry_run?: plan and check, write nothing; \
              allow_unsafe?: write even when the read-back fails (its first line then says so) → name, machine, post, operations: [{name, \
-             kind, tool, moves, cut_length, cut_minutes, warnings}], program_lines, program_head, readback: {max_tip_deviation, \
+             kind, tool, moves, cut_length, cut_minutes, rewinds, max_tilt_deg, a_deg?, warnings}], program_lines, program_head, readback: {max_tip_deviation, \
              max_axis_deviation_deg, allowed_tip, allowed_axis_deg, cut_minutes, pass}, cut_minutes, passed, failures, dry_run, outputs: \
              {gcode?, preview?}, notes. Without dry_run or allow_unsafe a failed check refuses and nothing is written",
         ),
@@ -293,11 +299,25 @@ fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
 
-/// The job's machine.
-fn machine_of(cmd: &str, job: &CamJob) -> Result<Machine> {
+/// The job's machine: `machine`, or the file `machine_path` (read from `base`, the job file's
+/// folder, when relative).
+fn machine_of(cmd: &str, job: &CamJob, base: Option<&Path>) -> Result<Machine> {
     let a_options = job.a_reversed.is_some() || job.a_limits_deg.is_some();
-    let Some(spec) = &job.machine else {
-        return Err(bad(cmd, "the job needs a `machine` (`3axis`, `4axis_a` or Machine JSON)"));
+    let file;
+    let spec = match (&job.machine, &job.machine_path) {
+        (Some(_), Some(_)) => return Err(bad(cmd, "give the job `machine` or `machine_path`, not both")),
+        (None, None) => return Err(bad(cmd, "the job needs a `machine` (`3axis`, `4axis_a` or Machine JSON) or a `machine_path`")),
+        (Some(m), None) => m,
+        (None, Some(path)) => {
+            let path = beside(base, path);
+            match read_json(cmd, &path, "machine_path")? {
+                Value::Object(m) => {
+                    file = MachineSpec::Custom(m);
+                    &file
+                }
+                _ => return Err(bad(cmd, format!("machine_path {path}: a machine file holds the CAM crate's Machine JSON object"))),
+            }
+        }
     };
     let machine = match spec {
         MachineSpec::Preset(name) => match name.trim().to_ascii_lowercase().replace('-', "_").as_str() {
@@ -721,14 +741,24 @@ fn split_budget(budget: f64) -> (f64, Option<(f64, f64)>) {
 /// merged within and the one it was planned within.
 type Planned3 = (Toolpath, Resolved, &'static str, Option<(f64, f64)>);
 
-/// Whether `spec` follows the part's surface (a 3D operation).
-fn on_surface(spec: &OperationSpec) -> bool {
-    !matches!(spec, OperationSpec::Contour(_) | OperationSpec::Pocket(_))
+/// Whether `spec` is planned on the part's surface (a 3D or rotary operation, or one indexed).
+fn needs_part(spec: &OperationSpec) -> bool {
+    let flat = |op: &Op3Spec| matches!(op, Op3Spec::Contour(_) | Op3Spec::Pocket(_));
+    match spec {
+        OperationSpec::Contour(_)
+        | OperationSpec::Pocket(_)
+        | OperationSpec::Wrap(_)
+        | OperationSpec::WrapPocket(_)
+        | OperationSpec::WrapContour(_) => false,
+        OperationSpec::Indexed(o) => !flat(&o.operation),
+        OperationSpec::IndexedPattern(o) => !flat(&o.operation),
+        _ => true,
+    }
 }
 
-/// An operation planned in `frame`: a 3D one's runs of moves merged where its tolerance leaves
+/// A 3-axis operation planned in `frame`: a 3D one's runs of moves merged where its tolerance leaves
 /// room, and its slowed descents worked out again from the coordinates as the post writes them.
-fn plan_path(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<(Toolpath, Resolved, &'static str)> {
+fn plan_path(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<(Toolpath, Resolved, &'static str)> {
     let name = spec.common().name;
     let (path, r, kind, merge) = plan_raw(ctx, spec, frame)?;
     let b = &ctx.post.base;
@@ -744,14 +774,8 @@ fn plan_path(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<(Tool
     let feed_step = 10f64.powi(-i32::from(b.feed_decimals)) * b.units.mm();
     // A 3D finish's moves down a wall go down at its descent feed, its entries (straight down)
     // at the plunge feed: the larger of the two bounds both.
-    let takes_descent = matches!(
-        spec,
-        OperationSpec::Parallel(_)
-            | OperationSpec::Scallop(_)
-            | OperationSpec::SteepShallow(_)
-            | OperationSpec::Pencil(_)
-            | OperationSpec::RestFinish(_)
-    );
+    let takes_descent =
+        matches!(spec, Op3Spec::Parallel(_) | Op3Spec::Scallop(_) | Op3Spec::SteepShallow(_) | Op3Spec::Pencil(_) | Op3Spec::RestFinish(_));
     let down = match r.descent {
         Some(d) if takes_descent => d.max(r.feeds.plunge),
         _ => r.feeds.plunge,
@@ -760,10 +784,10 @@ fn plan_path(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<(Tool
     Ok((path, r, kind))
 }
 
-/// An operation as planned (see [`Planned3`]).
-fn plan_raw(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<Planned3> {
+/// A 3-axis operation as planned (see [`Planned3`]).
+fn plan_raw(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<Planned3> {
     match spec {
-        OperationSpec::Contour(o) => {
+        Op3Spec::Contour(o) => {
             let c = o.common();
             let r = ctx.resolve(&c)?;
             let (leave, tol) = (o.stock_to_leave.unwrap_or(0.0), ctx.tolerance(c.name, o.tolerance)?);
@@ -784,7 +808,7 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<Planne
             let path = contour(&regions, &r.tool, &params, &cut).map_err(|e| ctx.bad(c.name, e))?;
             Ok((path, r, "contour", None))
         }
-        OperationSpec::Pocket(o) => {
+        Op3Spec::Pocket(o) => {
             let c = o.common();
             let r = ctx.resolve(&c)?;
             let (leave, tol) = (o.stock_to_leave.unwrap_or(0.0), ctx.tolerance(c.name, o.tolerance)?);
@@ -800,7 +824,7 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<Planne
             let path = pocket(&regions, &r.tool, &params, &cut).map_err(|e| ctx.bad(c.name, e))?;
             Ok((path, r, "pocket", None))
         }
-        OperationSpec::Parallel(o) => {
+        Op3Spec::Parallel(o) => {
             let c = o.common();
             let r = ctx.resolve(&c)?;
             let surface = ctx.surface_in(c.name, frame)?;
@@ -826,7 +850,7 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<Planne
             let path = parallel(&surface, &r.tool, &params).map_err(|e| ctx.bad(c.name, e))?;
             Ok((path, r, "parallel", merge))
         }
-        OperationSpec::Roughing(o) => {
+        Op3Spec::Roughing(o) => {
             let c = o.common();
             let r = ctx.resolve(&c)?;
             let surface = ctx.surface_in(c.name, frame)?;
@@ -846,7 +870,7 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<Planne
             let path = roughing(&surface, &r.tool, &params).map_err(|e| ctx.bad(c.name, e))?;
             Ok((path, r, "roughing", merge))
         }
-        OperationSpec::Waterline(o) => {
+        Op3Spec::Waterline(o) => {
             let c = o.common();
             let r = ctx.resolve(&c)?;
             let surface = ctx.surface_in(c.name, frame)?;
@@ -864,14 +888,14 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<Planne
             let path = waterline(&surface, &r.tool, &params).map_err(|e| ctx.bad(c.name, e))?;
             Ok((path, r, "waterline", merge))
         }
-        OperationSpec::Scallop(o) => finish3d::plan_scallop(ctx, o, &*ctx.surface_in(&o.name, frame)?),
-        OperationSpec::SteepShallow(o) => finish3d::plan_steep_shallow(ctx, o, &*ctx.surface_in(&o.name, frame)?),
-        OperationSpec::Pencil(o) => finish3d::plan_pencil(ctx, o, &*ctx.surface_in(&o.name, frame)?),
-        OperationSpec::RestFinish(o) => finish3d::plan_rest_finish(ctx, o, &*ctx.surface_in(&o.name, frame)?),
+        Op3Spec::Scallop(o) => finish3d::plan_scallop(ctx, o, &*ctx.surface_in(&o.name, frame)?),
+        Op3Spec::SteepShallow(o) => finish3d::plan_steep_shallow(ctx, o, &*ctx.surface_in(&o.name, frame)?),
+        Op3Spec::Pencil(o) => finish3d::plan_pencil(ctx, o, &*ctx.surface_in(&o.name, frame)?),
+        Op3Spec::RestFinish(o) => finish3d::plan_rest_finish(ctx, o, &*ctx.surface_in(&o.name, frame)?),
     }
 }
 
-/// The `name` of `spec`.
+/// The `name` of `spec` (an indexed one's inner operation's, else its own).
 fn spec_name(spec: &OperationSpec) -> &str {
     spec.common().name
 }
@@ -882,37 +906,80 @@ fn op_enabled(spec: &OperationSpec) -> bool {
 }
 
 /// An operation as written (its machine operation), its moves with the tool axis (for the
-/// preview), and its report.
+/// preview and the checks), its report, and the axes it moves (for the preview).
 struct Planned {
     op: MachineOperation,
     poses: Toolpath5,
     tool: Tool,
     report: OperationReport,
+    axes: String,
 }
 
-/// One operation planned with every rotary at zero: on a 3-axis machine and a 4th axis alike,
-/// in work coordinates.
-fn plan(ctx: &Ctx<'_>, spec: &OperationSpec) -> Result<Planned> {
-    let name = spec_name(spec);
-    if name.trim().is_empty() {
-        return Err(bad(ctx.cmd, "every operation needs a `name`"));
-    }
-    let rotary = vec![0.0; ctx.machine.rotaries.len()];
-    let frame = frame_for_index(ctx.machine, &rotary).map_err(|e| ctx.bad(name, e))?;
-    let (path, r, kind) = plan_path(ctx, spec, &frame)?;
+/// The 3-axis operation `op` planned with the rotaries at `rotary`: with every one at zero in
+/// work coordinates, indexed (`a_deg`, A held at that angle) in the frame the angle brings
+/// under the tool.
+fn plan_indexed(ctx: &Ctx<'_>, op: &Op3Spec, rotary: Vec<f64>, a_deg: Option<f64>) -> Result<Planned> {
+    let c = op.common();
+    let frame = frame_for_index(ctx.machine, &rotary).map_err(|e| ctx.bad(c.name, e))?;
+    let (path, r, kind) = plan_path(ctx, op, &frame)?;
     let stats = path.stats();
-    let io = IndexedOperation { name: name.into(), tool: r.tool.clone(), spindle_rpm: r.rpm, coolant: spec.common().coolant, rotary, path };
-    let poses = io.poses(ctx.machine, ctx.post.base.arc_tolerance).map_err(|e| ctx.bad(name, e))?;
+    let io = IndexedOperation { name: c.name.into(), tool: r.tool.clone(), spindle_rpm: r.rpm, coolant: c.coolant, rotary, path };
+    let poses = io.poses(ctx.machine, ctx.post.base.arc_tolerance).map_err(|e| ctx.bad(c.name, e))?;
     let report = OperationReport {
-        name: name.into(),
-        kind: kind.into(),
+        name: c.name.into(),
+        kind: if a_deg.is_some() { format!("indexed {kind}") } else { kind.into() },
         tool: r.tool.number,
         moves: io.path.moves.len(),
         cut_length: stats.cut_length,
         cut_minutes: stats.cut_minutes,
-        warnings: Vec::new(),
+        max_tilt_deg: poses.stats().max_tilt.to_degrees(),
+        a_deg,
+        ..OperationReport::default()
     };
-    Ok(Planned { op: MachineOperation::Indexed(io), poses, tool: r.tool, report })
+    let axes = match a_deg {
+        Some(a) => format!("3+1 A{}°", num(a)),
+        None => "3-axis".into(),
+    };
+    Ok(Planned { op: MachineOperation::Indexed(io), poses, tool: r.tool, report, axes })
+}
+
+/// One operation planned: a 3-axis one with every rotary at zero (on a 3-axis machine and a 4th
+/// axis alike, in work coordinates), an indexed one at its angle, a rotary or wrapped one turning
+/// A as it cuts.
+fn plan(ctx: &Ctx<'_>, spec: &OperationSpec) -> Result<Planned> {
+    if spec_name(spec).trim().is_empty() {
+        return Err(bad(ctx.cmd, "every operation needs a `name` (an `indexed` one may carry it on itself or on its inner `operation`)"));
+    }
+    let zero = || vec![0.0; ctx.machine.rotaries.len()];
+    match spec {
+        OperationSpec::Contour(o) => plan_indexed(ctx, &Op3Spec::Contour(o.clone()), zero(), None),
+        OperationSpec::Pocket(o) => plan_indexed(ctx, &Op3Spec::Pocket(o.clone()), zero(), None),
+        OperationSpec::Parallel(o) => plan_indexed(ctx, &Op3Spec::Parallel(o.clone()), zero(), None),
+        OperationSpec::Roughing(o) => plan_indexed(ctx, &Op3Spec::Roughing(o.clone()), zero(), None),
+        OperationSpec::Waterline(o) => plan_indexed(ctx, &Op3Spec::Waterline(o.clone()), zero(), None),
+        OperationSpec::Scallop(o) => plan_indexed(ctx, &Op3Spec::Scallop(o.clone()), zero(), None),
+        OperationSpec::SteepShallow(o) => plan_indexed(ctx, &Op3Spec::SteepShallow(o.clone()), zero(), None),
+        OperationSpec::Pencil(o) => plan_indexed(ctx, &Op3Spec::Pencil(o.clone()), zero(), None),
+        OperationSpec::RestFinish(o) => plan_indexed(ctx, &Op3Spec::RestFinish(o.clone()), zero(), None),
+        OperationSpec::Indexed(o) => {
+            // The inner operation's name, else the wrapper's.
+            let name = spec_name(spec).to_string();
+            let mut inner = (*o.operation).clone();
+            name.clone_into(xrotary::name3_mut(&mut inner));
+            if ctx.machine.rotaries.len() != 1 {
+                return Err(ctx.bad(&name, "an indexed operation's `a_deg` needs a machine with one rotary axis (`machine: \"4axis_a\"`)"));
+            }
+            let a = ctx.degrees(&name, o.a_deg, "`a_deg`")?;
+            plan_indexed(ctx, &inner, vec![a], Some(o.a_deg))
+        }
+        OperationSpec::RotaryFinish(o) => xrotary::plan_rotary_finish(ctx, o),
+        OperationSpec::RotaryRoughing(o) => xrotary::plan_rotary_roughing(ctx, o),
+        OperationSpec::Wrap(o) => xrotary::plan_wrap(ctx, o),
+        OperationSpec::WrapPocket(o) => xrotary::plan_wrap_pocket(ctx, o),
+        OperationSpec::WrapContour(o) => xrotary::plan_wrap_contour(ctx, o),
+        // `xrotary::plan_op` plans a pattern as its indexed operations.
+        OperationSpec::IndexedPattern(_) => Err(ctx.bad(spec_name(spec), "an indexed pattern is planned as its indexed operations")),
+    }
 }
 
 /// The program's name: the job's, else the design's.
@@ -994,14 +1061,16 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         return Err(bad(cmd, "`work_offset` must be 1 to 6 (G54 to G59)"));
     }
     let name = job_name(cmd, s, &job)?;
-    let machine = machine_of(cmd, &job)?;
+    let machine = machine_of(cmd, &job, base)?;
     let (post_name, post) = post_of(cmd, &job, base)?;
     let tools = tools_of(cmd, &job, base)?;
     let bodies = part_bodies(cmd, s, &job)?;
     let mut notes = Vec::new();
-    // The part as a surface, for the 3D operations only.
+    // The part as a surface: for the 3D and rotary operations, and on a rotary machine for the
+    // check that A never turns the part into the tool.
     let chord = tol * CHORD_SHARE;
-    let part = if job.operations.iter().any(|o| op_enabled(o) && on_surface(o)) {
+    let rotary = !machine.rotaries.is_empty();
+    let part = if job.operations.iter().any(|o| op_enabled(o) && needs_part(o)) || (rotary && !bodies.is_empty()) {
         Some(part_surface(cmd, s, &bodies, origin, chord, &mut notes)?)
     } else {
         None
@@ -1013,9 +1082,19 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     // Every operation planned, in order, then the program written in memory.
     let span = solidcraft_profile::span("cam", "job.plan");
     let ctx = Ctx { cmd, s, machine: &machine, tools: &tools, origin, tol, post: &post, part: part.as_ref(), chord };
-    let planned: Vec<Planned> = job.operations.iter().filter(|o| op_enabled(o)).map(|o| plan(&ctx, o)).collect::<Result<_>>()?;
+    let mut planned: Vec<Planned> = Vec::with_capacity(job.operations.len());
+    for spec in job.operations.iter().filter(|o| op_enabled(o)) {
+        let ops = xrotary::plan_op(&ctx, spec, planned.len())?;
+        xrotary::add_checked(&ctx, spec, &mut planned, ops)?;
+    }
     let program = MachineProgram { name: name.clone(), operations: planned.iter().map(|p| p.op.clone()).collect(), work_offset: job.work_offset };
-    let (text, _) = emit_program_report(&program, &post, &machine).map_err(|e| cam_err(cmd, "writing the program", e))?;
+    let (text, written) = emit_program_report(&program, &post, &machine).map_err(|e| cam_err(cmd, "writing the program", e))?;
+    // The rewinds' feeds are time at feed of their operations too, so the operations' minutes add
+    // up to the program's as read back.
+    for (p, w) in planned.iter_mut().zip(&written) {
+        p.report.cut_minutes += w.rewind_minutes;
+        p.report.rewinds = w.rewinds;
+    }
     drop(span);
 
     // The program as written, read back through the machine and held against the toolpaths.
@@ -1207,10 +1286,10 @@ fn preview_page(name: &str, tris: &[f64], planned: &[Planned], text: &str) -> St
         acc
     });
     let stats = |r: &OperationReport| format!("{} moves · cut {} mm · {} min", r.moves, num(r.cut_length.round()), num(r.cut_minutes));
-    let scene = |title: &str, short: &str, desc: &str, poses: Vec<[f64; 7]>, stats: String, tool: Option<&Tool>| {
+    let scene = |title: &str, axes: &str, short: &str, desc: &str, poses: Vec<[f64; 7]>, stats: String, tool: Option<&Tool>| {
         json!({
             "name": escape_html(title),
-            "axes": "3-axis",
+            "axes": escape_html(axes),
             "short": escape_html(short),
             "desc": escape_html(desc),
             "tris": tris,
@@ -1225,8 +1304,10 @@ fn preview_page(name: &str, tris: &[f64], planned: &[Planned], text: &str) -> St
     let all: Vec<[f64; 7]> = planned.iter().flat_map(|p| pose_rows(&p.poses)).collect();
     let (moves, length, minutes) =
         planned.iter().fold((0, 0.0, 0.0), |(m, l, t), p| (m + p.report.moves, l + p.report.cut_length, t + p.report.cut_minutes));
+    let job_axes: std::collections::BTreeSet<&str> = planned.iter().map(|p| p.axes.as_str()).collect();
     scenes.push(scene(
         name,
+        &job_axes.into_iter().collect::<Vec<_>>().join(", "),
         &format!("the whole job, {} operations", planned.len()),
         &format!("Every operation of the job, in program order: {}.", planned.iter().map(|p| p.report.name.as_str()).collect::<Vec<_>>().join(", ")),
         all,
@@ -1243,7 +1324,7 @@ fn preview_page(name: &str, tris: &[f64], planned: &[Planned], text: &str) -> St
             t.kind.label(),
             if t.description.is_empty() { String::new() } else { format!(", {}", t.description) }
         );
-        scenes.push(scene(&p.report.name, &p.report.kind, &desc, pose_rows(&p.poses), stats(&p.report), Some(t)));
+        scenes.push(scene(&p.report.name, &p.axes, &p.report.kind, &desc, pose_rows(&p.poses), stats(&p.report), Some(t)));
     }
     // `</` would end the script early; `<\/` is the same string in JSON and JavaScript.
     let data = json!({ "scenes": scenes }).to_string().replace("</", "<\\/");

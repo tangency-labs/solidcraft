@@ -54,9 +54,13 @@ pub struct CamJob {
     #[serde(default)]
     pub name: Option<String>,
     /// `3axis`, `4axis_a` (a rotary table about +X, the A axis, through work zero), or a whole
-    /// machine as the CAM crate's `Machine` JSON.
+    /// machine as the CAM crate's `Machine` JSON. Give this or `machine_path`.
     #[serde(default)]
     pub machine: Option<MachineSpec>,
+    /// The machine as the CAM crate's `Machine` JSON in a file, read from the job file's folder
+    /// when relative. Give this or `machine`.
+    #[serde(default)]
+    pub machine_path: Option<String>,
     /// With `4axis_a`: the controller's positive A turns the table the other way. Default: false.
     #[serde(default)]
     pub a_reversed: Option<bool>,
@@ -165,6 +169,33 @@ pub enum SideSpec {
     On,
 }
 
+/// How the passes of a rotary operation run.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PatternSpec {
+    /// Passes along X, at most `angle_step_deg` apart round the axis.
+    Lines {
+        /// Degrees between passes round the axis.
+        angle_step_deg: f64,
+        /// Every other pass runs back. Default: true.
+        #[serde(default)]
+        zigzag: Option<bool>,
+    },
+    /// One pass going round and round, `pitch` mm along +X per turn.
+    Helix {
+        /// Advance along X per turn, mm.
+        pitch: f64,
+    },
+    /// Circumferential passes: a full turn of A at each X, at most `stepover` mm apart along X.
+    Rings {
+        /// Most distance between rings along X, mm.
+        stepover: f64,
+        /// Every other ring turns back, so A stays within a turn. Default: true.
+        #[serde(default)]
+        zigzag: Option<bool>,
+    },
+}
+
 /// Declares an operation's struct with the fields every operation has, then its own.
 macro_rules! operation {
     ($(#[$doc:meta])* $name:ident { $($(#[$fdoc:meta])* pub $field:ident : $ty:ty,)* }) => {
@@ -172,7 +203,8 @@ macro_rules! operation {
         #[derive(Clone, Debug, Deserialize, JsonSchema)]
         #[serde(deny_unknown_fields)]
         pub struct $name {
-            /// The operation's name, written as a comment in the program.
+            /// The operation's name, written as a comment in the program. Required, except
+            /// inside `indexed` or `indexed_pattern`, which may carry it instead.
             #[serde(default)]
             pub name: String,
             /// Plan and write this operation. `false` keeps it in the job, turned off: it is not
@@ -389,10 +421,180 @@ operation! {
     }
 }
 
+operation! {
+    /// 4th-axis finishing: the part turns on the A axis while the tool, radial, follows it.
+    RotaryFinishOp {
+        /// Lines along X, one helix, or rings round the axis.
+        pub pattern: PatternSpec,
+        /// Radius from the rotary axis rapids go round at, mm.
+        pub clearance: f64,
+        /// Radius the tool feeds in from, mm; must clear the part.
+        pub retract: f64,
+        /// Smallest radius the tip may reach, mm. Default: 0.
+        #[serde(default)]
+        pub floor: Option<f64>,
+        /// From where to where along X, [min, max] mm. Default: the part's extent.
+        #[serde(default)]
+        pub range: Option<[f64; 2]>,
+        /// Distance between samples along a pass before refinement, mm. Default: a quarter of
+        /// the tool's diameter.
+        #[serde(default)]
+        pub step: Option<f64>,
+        /// Largest distance from the surface, mm. Default: the job's tolerance.
+        #[serde(default)]
+        pub tolerance: Option<f64>,
+        /// Material left on the surface, mm. Default: 0.
+        #[serde(default)]
+        pub stock_to_leave: Option<f64>,
+        /// Largest turn of the tool axis in one cutting move, degrees. Default: 2.
+        #[serde(default)]
+        pub max_angle_step_deg: Option<f64>,
+    }
+}
+
+operation! {
+    /// 4th-axis roughing of round stock down to the part, in levels of radius.
+    RotaryRoughingOp {
+        /// Lines along X, one helix, or rings round the axis.
+        pub pattern: PatternSpec,
+        /// The round stock's radius, mm. Required.
+        #[serde(default)]
+        pub stock_radius: Option<f64>,
+        /// Radius from the rotary axis rapids go round at, mm.
+        pub clearance: f64,
+        /// Radius the tool feeds in from, mm; at or outside the stock.
+        pub retract: f64,
+        /// The last level's radius, mm. Default: 0.
+        #[serde(default)]
+        pub floor: Option<f64>,
+        /// Most material per level, in radius, mm. Default: the tool's `stepdown`, else half its
+        /// diameter.
+        #[serde(default)]
+        pub stepdown: Option<f64>,
+        /// From where to where along X, [min, max] mm. Default: the part's extent.
+        #[serde(default)]
+        pub range: Option<[f64; 2]>,
+        /// Distance between samples along a pass before refinement, mm. Default: a quarter of
+        /// the tool's diameter.
+        #[serde(default)]
+        pub step: Option<f64>,
+        /// Largest distance from the surface, mm. Default: the job's tolerance.
+        #[serde(default)]
+        pub tolerance: Option<f64>,
+        /// Material left on the part, mm. Default: 0.25.
+        #[serde(default)]
+        pub stock_to_leave: Option<f64>,
+        /// Largest turn of the tool axis in one cutting move, degrees. Default: 2.
+        #[serde(default)]
+        pub max_angle_step_deg: Option<f64>,
+    }
+}
+
+operation! {
+    /// A flat path wrapped round the rotary axis (engraving, slots round a cylinder).
+    WrapOp {
+        /// The radius of the cylinder the path is drawn on, mm.
+        pub radius: f64,
+        /// The flat path [[x, y, z], ...]: x along the axis, y the arc length round it at
+        /// `radius` (mm), z the depth from the cylinder (0 on it, negative into it). Give this
+        /// or `sketch` and `curve`.
+        #[serde(default)]
+        pub points: Option<Vec<[f64; 3]>>,
+        /// A sketch whose curve `curve` is the path, its sketch x along the axis and y the arc
+        /// length round it.
+        #[serde(default)]
+        pub sketch: Option<SketchRef>,
+        /// With `sketch`: the curve's id.
+        #[serde(default)]
+        pub curve: Option<String>,
+        /// With `sketch`: the depth of the whole path from the cylinder, mm (negative into it).
+        /// Default: 0.
+        #[serde(default)]
+        pub depth: Option<f64>,
+        /// How far above the cylinder the tool travels between cuts, mm. Default: 5.
+        #[serde(default)]
+        pub clearance: Option<f64>,
+        /// How far above the cylinder feed begins, mm. Default: 1.
+        #[serde(default)]
+        pub retract: Option<f64>,
+        /// Largest turn of the tool axis in one move, degrees. Default: 2.
+        #[serde(default)]
+        pub max_angle_step_deg: Option<f64>,
+    }
+}
+
 // The 3D finishing strategies, declared with the macro above.
 #[path = "cam_finish3d.rs"]
 mod finish3d;
 pub use finish3d::{DirectionSpec, PencilOp, RestFinishOp, ScallopOp, ShallowSpec, SteepShallowOp};
+// Wrapped pockets and contours, and indexed patterns: their own file, inside this module for
+// the `operation!` macro.
+#[path = "cam_xrotary.rs"]
+mod xrotary;
+pub use xrotary::{IndexedPatternOp, WrapContourOp, WrapPocketOp};
+
+/// A 3-axis operation, as an indexed operation runs it.
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Op3Spec {
+    Contour(ContourOp),
+    Pocket(PocketOp),
+    Parallel(ParallelOp),
+    Roughing(RoughingOp),
+    Waterline(WaterlineOp),
+    Scallop(ScallopOp),
+    SteepShallow(SteepShallowOp),
+    Pencil(PencilOp),
+    RestFinish(RestFinishOp),
+}
+
+impl Op3Spec {
+    /// What every operation has.
+    pub fn common(&self) -> Common<'_> {
+        match self {
+            Op3Spec::Contour(o) => o.common(),
+            Op3Spec::Pocket(o) => o.common(),
+            Op3Spec::Parallel(o) => o.common(),
+            Op3Spec::Roughing(o) => o.common(),
+            Op3Spec::Waterline(o) => o.common(),
+            Op3Spec::Scallop(o) => o.common(),
+            Op3Spec::SteepShallow(o) => o.common(),
+            Op3Spec::Pencil(o) => o.common(),
+            Op3Spec::RestFinish(o) => o.common(),
+        }
+    }
+
+    /// [`Op3Spec::common`] of the operation inside `indexed` or `indexed_pattern`: named `outer`
+    /// when it has no name of its own, and turned off when either is.
+    fn inner_common<'a>(&'a self, outer: Option<&'a String>, enabled: Option<bool>) -> Common<'a> {
+        let mut c = self.common();
+        if c.name.trim().is_empty()
+            && let Some(n) = outer
+        {
+            c.name = n.as_str();
+        }
+        c.enabled &= enabled.unwrap_or(true);
+        c
+    }
+}
+
+/// A 3-axis operation run with the A axis held at `a_deg` (3+1): its heights, boundary and
+/// polygon are in the frame that angle brings under the tool.
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IndexedOp {
+    /// The operation's name, for an inner operation without one of its own.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Plan and write this operation (`false`: kept in the job, turned off). Default: true.
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// The A angle, degrees.
+    pub a_deg: f64,
+    /// The 3-axis operation (`contour`, `pocket`, `parallel`, `roughing`, `waterline`,
+    /// `scallop`, `steep_shallow`, `pencil` or `rest_finish`).
+    pub operation: Box<Op3Spec>,
+}
 
 /// One operation of a job, by `type`.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -407,10 +609,18 @@ pub enum OperationSpec {
     SteepShallow(SteepShallowOp),
     Pencil(PencilOp),
     RestFinish(RestFinishOp),
+    Indexed(IndexedOp),
+    RotaryFinish(RotaryFinishOp),
+    RotaryRoughing(RotaryRoughingOp),
+    Wrap(WrapOp),
+    WrapPocket(WrapPocketOp),
+    WrapContour(WrapContourOp),
+    IndexedPattern(IndexedPatternOp),
 }
 
 impl OperationSpec {
-    /// What every operation has.
+    /// What every operation has: an indexed one's inner operation's, named and turned on or off
+    /// by the indexed one where that says.
     pub fn common(&self) -> Common<'_> {
         match self {
             OperationSpec::Contour(o) => o.common(),
@@ -422,6 +632,13 @@ impl OperationSpec {
             OperationSpec::SteepShallow(o) => o.common(),
             OperationSpec::Pencil(o) => o.common(),
             OperationSpec::RestFinish(o) => o.common(),
+            OperationSpec::Indexed(o) => o.operation.inner_common(o.name.as_ref(), o.enabled),
+            OperationSpec::RotaryFinish(o) => o.common(),
+            OperationSpec::RotaryRoughing(o) => o.common(),
+            OperationSpec::Wrap(o) => o.common(),
+            OperationSpec::WrapPocket(o) => o.common(),
+            OperationSpec::WrapContour(o) => o.common(),
+            OperationSpec::IndexedPattern(o) => o.operation.inner_common(o.name.as_ref(), o.enabled),
         }
     }
 }
@@ -473,8 +690,16 @@ pub struct OperationReport {
     pub moves: usize,
     /// Distance at feed, mm.
     pub cut_length: f64,
-    /// Time at feed, minutes.
+    /// Time at feed, minutes, a rotary operation's rewinds included.
     pub cut_minutes: f64,
+    /// Times the post rewinds A in it to stay within its limits (a post with `rewind`); the time
+    /// at feed they add is in `cut_minutes`.
+    pub rewinds: usize,
+    /// Largest angle between the tool axis and work +Z, degrees.
+    pub max_tilt_deg: f64,
+    /// The A angle it is indexed at, degrees (indexed operations only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub a_deg: Option<f64>,
     pub warnings: Vec<String>,
 }
 
