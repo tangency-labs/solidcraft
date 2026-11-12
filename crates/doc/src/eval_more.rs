@@ -244,22 +244,70 @@ pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Fea
 /// Unit outward normal of the planar face through `p`: of the planar faces whose plane runs
 /// through it, the one nearest it. A face elsewhere in such a plane (the wall of a notch, the end
 /// of a rib, in line with a rim) is no pick of `p`, though its plane runs through it as exactly.
-fn planar_normal_at(b: &Body, p: Vec3) -> Option<Vec3> {
+pub(super) fn planar_normal_at(b: &Body, p: Vec3) -> Option<Vec3> {
+    if b.is_mesh() {
+        return None;
+    }
     let tol = (b.size() * 2e-3).max(1e-3);
-    let faces = b.faces(tol).ok()?;
-    let mesh = b.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)).ok()?;
-    let mut near = vec![f64::INFINITY; faces.len()];
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        if let (Some([u, v, w]), Some(d)) = (mesh.tri(t), near.get_mut(*f as usize)) {
-            *d = d.min(crate::appearance::closest_on_triangle(p, u, v, w).dist(p));
+    let rec = b.record();
+    let mut best: Option<(f64, f64, Vec3)> = None;
+
+    for (i, face) in rec.faces.iter().enumerate() {
+        let Some(plane) = b.planar_face(i) else { continue };
+        let h = plane.height(p).abs();
+        if h > tol * 5.0 {
+            continue;
+        }
+        let local_p = plane.to_local(p);
+        let mut loops: Vec<Ring<Vec2>> = Vec::new();
+        let mut min_edge_dist = f64::INFINITY;
+
+        for lp in &face.loops {
+            let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+            let mut pts = Vec::new();
+            for u in edges {
+                let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()) else { continue };
+                let [t0, t1] = edge.interval;
+                let n_samples = match &eval {
+                    solidcraft_geom::brep::eval::CurveEval::Line { .. } => 1,
+                    _ => 8,
+                };
+                for k in 0..n_samples {
+                    let frac0 = k as f64 / n_samples as f64;
+                    let frac1 = (k + 1) as f64 / n_samples as f64;
+                    let t_a = if u.forward { t0 + (t1 - t0) * frac0 } else { t1 - (t1 - t0) * frac0 };
+                    let t_b = if u.forward { t0 + (t1 - t0) * frac1 } else { t1 - (t1 - t0) * frac1 };
+                    if let (Some(a), Some(b)) = (eval.point(t_a), eval.point(t_b)) {
+                        let seg_dist = p.dist_to_segment(a, b);
+                        min_edge_dist = min_edge_dist.min(seg_dist);
+                        if pts.is_empty() || pts.last().is_some_and(|last: &Vec2| last.dist(plane.to_local(a)) > 1e-9) {
+                            pts.push(plane.to_local(a));
+                        }
+                    }
+                }
+            }
+            if pts.len() >= 3 {
+                loops.push(Ring::new(pts));
+            }
+        }
+
+        let is_inside = if let Some(outer) = loops.iter().max_by(|a, b| a.signed_area().abs().total_cmp(&b.signed_area().abs())) {
+            let inside_outer = outer.contains(local_p);
+            let inside_hole = loops.iter().filter(|lp| *lp as *const _ != outer as *const _).any(|hole| hole.contains(local_p));
+            inside_outer && !inside_hole
+        } else {
+            false
+        };
+
+        let face_dist = if is_inside { 0.0 } else { min_edge_dist };
+        let candidate = (face_dist, h, plane.normal());
+        if best.as_ref().is_none_or(|(bd, bh, _)| face_dist < *bd || ((face_dist - *bd).abs() < 1e-6 && h < *bh)) {
+            best = Some(candidate);
         }
     }
-    faces
-        .iter()
-        .filter_map(|f| f.plane_normal.map(|n| (n, ((p - f.centroid).dot(n)).abs(), near.get(f.index).copied().unwrap_or(f64::INFINITY))))
-        .filter(|(_, d, _)| *d < tol * 5.0)
-        .min_by(|a, b| a.2.total_cmp(&b.2).then(a.1.total_cmp(&b.1)))
-        .map(|(n, _, _)| n)
+
+    best.filter(|(d, ..)| *d < tol * 5.0).map(|(_, _, n)| n)
 }
 
 /// The curves of a chain as one polyline in sketch coordinates, in order.
