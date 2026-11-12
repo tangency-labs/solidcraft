@@ -12,6 +12,8 @@ use solidcore_record::brep;
 
 use crate::{Mesh, MeshSpec, PlanStats, TessError, TessPlan, WeldedMesh};
 
+use super::{SplitSide, edges, on_edges, size};
+
 fn record(body: &solidcore_ops::Body) -> brep::Brep {
     body.to_record().expect("the body's record").0
 }
