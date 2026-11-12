@@ -555,6 +555,22 @@ pub(super) fn primary_eu(pseudo: &FilletBrep, e: EdgeId, op: &'static str) -> Re
         .ok_or_else(|| SolidError::blend_missing(op, "the edge's primary edge use"))
 }
 
+/// The largest offset of `solver`'s surfaces (a round's radius, a chamfer's setback): how far
+/// its ball's centre stands off the faces. `0` where it has no offset surface yet.
+///
+/// # Errors
+///
+/// Those of [`FilletSolver::surface`].
+fn round_size(solver: &FilletSolver) -> Result<f64> {
+    let mut size = 0.0_f64;
+    for rail in 0..2 {
+        if let Some(slot) = solver.surface(rail)? {
+            size = size.max(slot.surface.offset_distance().abs());
+        }
+    }
+    Ok(size)
+}
+
 impl FilletCorner {
     /// `SmFilletCorner(crContext, cpVertex, pSolverEUs, pAllEUs, pExec, dApproxTol3d,
     /// dTangencyTolRadians)` and the derived constructors (CO-PORTED, module docs):
@@ -1086,6 +1102,12 @@ impl FilletCorner {
                                 // one convexity among three or four edges are the blend
                                 // corner's (SmBlendCorner::Classify: a Turn or a Join), built
                                 // by the two-blend construction moved from SmFilletNx2Corner
+                                // the blends join only where their balls are one within
+                                // the corner's tolerance (`blend_corner::join_tolerance_deg`)
+                                let mut size = 0.0_f64;
+                                for &eu in solver_eus {
+                                    size = size.max(round_size(solver_of(eu)?)?);
+                                }
                                 let blend = crate::blend::blend_corner::classify(
                                     k,
                                     b,
@@ -1093,6 +1115,11 @@ impl FilletCorner {
                                     solver_eus,
                                     &all_eus,
                                     tan_tol_deg,
+                                    crate::blend::blend_corner::join_tolerance_deg(
+                                        size,
+                                        approx_tol_3d,
+                                        tan_tol_deg,
+                                    ),
                                 )?;
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(blend);

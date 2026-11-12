@@ -32,6 +32,7 @@ use solidcore::topology::{edge, loopuse};
 use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
+use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
 use solidcore_ops::{
     blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
     make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
@@ -154,6 +155,76 @@ fn loop_edges(b: &Body, corners: [[f64; 2]; 4], z: f64) -> (Order, Vec<usize>) {
         })
         .collect();
     (order, edges)
+}
+
+/// A plate 2 thick whose top outline runs 50 along x and then 40 at a shallow angle off it,
+/// turning `kink` degrees (towards the plate for `convex`, away from it else), its other sides
+/// square to those two: the two top edges rounded r 1 or chamfered 1 turn round the sharp
+/// upright edge between them, mitred. Each edge loses its section's area A along its length
+/// (90 in all), and the mitre on the bisector takes the corner's part off one side and adds it
+/// on the other: the section's first moment M about the upright edge times tan(kink / 2), twice,
+/// off at the convex corner and on at the concave one. A round's A = (1 - pi/4) r^2 and
+/// M = (5/6 - pi/4) r^3; a chamfer's A = d^2 / 2 and M = d^3 / 6. Edges a few degrees off
+/// tangent used to be read as continuing each other (within the solvers' 10 degree tangency
+/// tolerance) and given one shared section: the two balls stand the radius times the angle
+/// apart there, the trim leaked and the blend failed with status 1001.
+#[test]
+fn blends_turn_round_a_shallow_sharp_corner() {
+    all_fixes();
+    let plate = |kink: f64, convex: bool| {
+        let t = if convex { -kink } else { kink }.to_radians();
+        let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+        let p = [
+            [0.0, 0.0],
+            [50.0, 0.0],
+            [50.0 + 40.0 * u[0], 40.0 * u[1]],
+            [50.0 + 40.0 * u[0] + 30.0 * n[0], 40.0 * u[1] + 30.0 * n[1]],
+            [0.0, -30.0],
+        ];
+        let profile: Vec<Curve> = (0..p.len())
+            .map(|i| {
+                let (a, b) = (p[i], p[(i + 1) % p.len()]);
+                Curve::Line {
+                    start: [a[0], a[1], 0.0],
+                    end: [b[0], b[1], 0.0],
+                }
+            })
+            .collect();
+        let b = extrude(
+            &profile,
+            [0.0, 0.0, 1.0],
+            2.0,
+            0.0,
+            DraftCorner::default(),
+            true,
+        )
+        .unwrap();
+        let edges = [
+            edge_at(&b, [25.0, 0.0, 2.0]),
+            edge_at(&b, [50.0 + 20.0 * u[0], 20.0 * u[1], 2.0]),
+        ];
+        (b, edges)
+    };
+    let round = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    let chamfer = (0.5, 1.0 / 6.0);
+    for kink in [0.5, 1.5, 3.0, 6.0] {
+        for convex in [true, false] {
+            for (kind, (a, m)) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+                let (b, edges) = plate(kink, convex);
+                let before = volume(&b);
+                blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
+                    panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
+                });
+                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let want = 90.0 * a + if convex { -corner } else { corner };
+                let off = before - volume(&b);
+                assert!(
+                    rel(off, want) < 1e-6,
+                    "{kind:?} at a {kink} degree corner (convex {convex}): {off} off, want {want}"
+                );
+            }
+        }
+    }
 }
 
 /// A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it (x 15..25, y 10..20), the boss's four

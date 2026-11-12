@@ -236,11 +236,10 @@ impl BlendCorner {
 /// `SmBlendCorner::Classify` without the Swept turn's checks
 /// (`SmFilletExecutive::GetSweptTurns()` FALSE): the event at a filleted vertex with two
 /// blended edge uses of one convexity among three or four (`all_eus`, the corner's ring).
-/// A Join where their edges continue each other (G1 within `tangency_tol_deg`) and every
-/// other edge of the ring is a tangent edge (`IsTangentEdge` within the same tolerance), or
-/// where their edges meet at 5 degrees or less at a face corner of the other convexity; else
-/// a Turn, Mitred. Not two solver edge uses among three or four: no event
-/// ([`BlendCornerEvent::None`]).
+/// A Join where their edges continue each other (G1 within `tangency_tol_deg`), or meet at
+/// 5 degrees or less at a face corner of the other convexity, and every other edge of the
+/// ring is a tangent edge (`IsTangentEdge`) within `join_tol_deg`; else a Turn, Mitred. Not
+/// two solver edge uses among three or four: no event ([`BlendCornerEvent::None`]).
 ///
 /// Not the fork's: a Join is one section both blends reach. Where an edge stands
 /// between their faces on a side, that section ends where the rails cross it, and the two
@@ -249,6 +248,13 @@ impl BlendCorner {
 /// whose faces are tangent only at the vertex (a ruled loft's side edge at its circular rim)
 /// is the Turn of `docs/generic-blend.md` §3.2: the blends meet on their crossing, a crease
 /// running on from the side edge.
+///
+/// Not the fork's either: the side edges are tangent within `join_tol_deg`, the angle at which
+/// the two balls are still one within the corner's tolerance ([`join_tolerance_deg`]), not
+/// within the solvers' tangency tolerance (10 degrees by default) the fork reads. A sketch's
+/// line running into an arc a degree off tangent leaves an upright edge whose faces meet at
+/// that degree: the two balls stand the radius times it apart, one section there leaves a gap
+/// the trim leaks through, and their mitre closes it.
 ///
 /// # Errors
 ///
@@ -261,6 +267,7 @@ pub fn classify(
     solver_eus: &[EdgeuseId],
     all_eus: &[EdgeuseId],
     tangency_tol_deg: f64,
+    join_tol_deg: f64,
 ) -> Result<BlendCorner> {
     let mut out = BlendCorner::default();
     let vertex =
@@ -280,21 +287,30 @@ pub fn classify(
     let e2 = eu1::edge(b, eu2_)?;
     let (g1, angle) = test_g1_continuity(k, b, Some(vertex), e1, e2, tangency_tol_deg)?;
     let angle_deg = angle.unwrap_or(90.0);
-    if g1
+    let continuing = g1
         || (angle_deg <= 5.0
-            && check_face_complimentary_corner_concavity(k, b, vertex, eu1_, eu2_, None)?)
-    {
-        // edges continuing each other with a sharp edge between their faces: the blends'
-        // balls where their rails cross it are two, so they turn there
-        if g1 && !side_edges_tangent(k, b, solver_eus, all_eus, tangency_tol_deg)? {
-            out.event = BlendCornerEvent::Turn;
-            return Ok(out);
-        }
-        out.event = BlendCornerEvent::Join;
-        return Ok(out);
-    }
-    out.event = BlendCornerEvent::Turn;
+            && check_face_complimentary_corner_concavity(k, b, vertex, eu1_, eu2_, None)?);
+    // with a sharp edge between their faces the blends' balls where their rails cross it are
+    // two, so they turn there
+    out.event = if continuing && side_edges_tangent(k, b, solver_eus, all_eus, join_tol_deg)? {
+        BlendCornerEvent::Join
+    } else {
+        BlendCornerEvent::Turn
+    };
     Ok(out)
+}
+
+/// The angle (degrees) at which two blends of sizes up to `size` meeting at a vertex are one
+/// section within `tol`: their balls' centres stand `size` off the faces, so faces meeting
+/// along a side edge at an angle `a` put them `size * a` apart. Capped at `tangency_tol_deg`, the solvers'
+/// tangency tolerance; that tolerance where `size` is not a positive length.
+#[must_use]
+pub fn join_tolerance_deg(size: f64, tol: f64, tangency_tol_deg: f64) -> f64 {
+    if size > EFF_ZERO && tol > 0.0 {
+        crate::math::rad_to_deg(tol / size).min(tangency_tol_deg)
+    } else {
+        tangency_tol_deg
+    }
 }
 
 /// Whether every edge of the corner's ring (`all_eus`) other than the blended ones
@@ -848,7 +864,7 @@ mod tests {
         let mut k = Kernel::default();
         let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0)
             .unwrap();
-        let err = classify(&k, &mut b, None, &[], &[], 1.0).unwrap_err();
+        let err = classify(&k, &mut b, None, &[], &[], 1.0, 1.0).unwrap_err();
         assert_eq!(
             err.blend_failure(),
             Some(&crate::error::blend::BlendFailure::Missing(
@@ -859,6 +875,18 @@ mod tests {
             crate::error::upstream_status(&err),
             Some(crate::error::SM_ERR_NULL_POINTER)
         );
+    }
+
+    /// Two balls of radius 2 stand 2 a apart where their faces meet at an angle a: one within
+    /// 4e-5 up to a = 2e-5 rad; never past the solvers' tangency tolerance, which is all there is
+    /// without a size.
+    #[test]
+    fn blends_join_where_their_balls_are_one_within_the_tolerance() {
+        let deg = crate::math::rad_to_deg(2e-5);
+        assert!((join_tolerance_deg(2.0, 4e-5, 10.0) - deg).abs() <= 1e-15);
+        assert_eq!(join_tolerance_deg(1e-9, 4e-5, 2.0), 2.0);
+        assert_eq!(join_tolerance_deg(0.0, 4e-5, 10.0), 10.0);
+        assert_eq!(join_tolerance_deg(2.0, 0.0, 10.0), 10.0);
     }
 
     #[test]
