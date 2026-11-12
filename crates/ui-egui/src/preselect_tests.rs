@@ -1869,7 +1869,12 @@ fn thread_choices_reset_to_the_face_and_can_freeze_the_same_size() {
     h.app.run("solid.cylinder", json!({"radius":4,"height":10})).unwrap();
     h.app.session.selection = vec![thread_face(&h.app, "Body1")];
     h.step(&json!({"start":"solid.thread"})).unwrap();
-    for handle in ["dialog:Size", "dialog:Size:6 mm", "dialog:Pitch", "dialog:Pitch:0.75 mm"] {
+    h.step(&json!({"click":{"handle":"dialog:Size"}})).unwrap();
+    // The second-choice sizes (M1 to M4.5) come before 6 mm: scroll to it before clicking.
+    let first = crate::scenario::handle_at("dialog:Size:1 mm").unwrap();
+    h.call("ui.scroll", json!({"x":first.x,"y":first.y,"delta":-120}));
+    h.frames(12);
+    for handle in ["dialog:Size:6 mm", "dialog:Pitch", "dialog:Pitch:0.75 mm"] {
         h.step(&json!({"click":{"handle":handle}})).unwrap();
     }
     let d = h.app.dialog.as_ref().unwrap();
@@ -1927,8 +1932,8 @@ fn thread_choices_can_start_without_a_face_and_recover_from_invalid_text() {
     h.step(&json!({"click":{"handle":"dialog:Size"}})).unwrap();
     // Plex's taller rows put 8 mm below the first page of this long popup. Scroll the
     // visible list before clicking its choice, as a person would, rather than a clipped handle.
-    let first = crate::scenario::handle_at("dialog:Size:1.6 mm").unwrap();
-    h.call("ui.scroll", json!({"x":first.x,"y":first.y,"delta":-60}));
+    let first = crate::scenario::handle_at("dialog:Size:1 mm").unwrap();
+    h.call("ui.scroll", json!({"x":first.x,"y":first.y,"delta":-200}));
     h.frames(12);
     h.step(&json!({"click":{"handle":"dialog:Size:8 mm"}})).unwrap();
     // The coarse pitch is written as ISO 261 writes it: without the pitch.
@@ -2061,6 +2066,19 @@ fn align_snaps_to_centres_and_edge_middles() {
     let p = apply_commands(&app, &d).unwrap().remove(0).1;
     assert_eq!(p["from"]["snap"], json!("face_center"));
     assert_eq!(p["to"]["snap"], json!("edge_mid"));
+}
+
+/// A snap point of no body (a sketch line's middle) aligns to where it is, not to the origin.
+#[test]
+fn align_takes_a_bodyless_snap_point_where_it_is() {
+    let mut app = boxed();
+    let mut d = start(&mut app, vec![], "solid.align");
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(30.0, 5.0, 0.0) }];
+    d.inputs[2].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(0.0, 0.0, 0.0) }];
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_ne!(p["from"], json!("origin"), "{p}");
+    assert_eq!(p["to"], json!("origin"), "{p}");
 }
 
 /// Align by frames (#6257): a sketch circle or point picked as To is a frame whatever the snap, a
@@ -3517,6 +3535,22 @@ fn plane_through_three_points_edit_in_a_moved_component_keeps_its_points() {
     h.step(&json!({"key": "Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     assert_eq!(h.app.session.doc.to_json(), before, "editing maps saved local references through world and back once");
+}
+
+/// #11228: a plane through an axis and a snapped middle reopens to edit and keeps the snap.
+#[test]
+fn plane_through_axis_and_a_snapped_point_reopens_and_keeps_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    let snap = json!({"type":"snap","of":{"type":"edge","at":[10,0,20]},"kind":"middle","at":[20,0,20]});
+    let made = h.app.run("construct.plane.axis_point", json!({"axis":{"axis":"Z"},"point":snap,"name":"Fence"})).unwrap();
+    let before = h.app.session.doc.to_json();
+    h.app.edit_feature(made["feature"].as_u64().unwrap());
+    h.frames(1);
+    assert!(h.app.dialog.is_some(), "the edit opens its dialog");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert_eq!(h.app.session.doc.to_json(), before, "the saved snap reference is kept");
 }
 
 /// Point Along Path asks for its position too, and a missing pick names the input.

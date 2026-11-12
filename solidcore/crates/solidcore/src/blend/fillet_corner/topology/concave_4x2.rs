@@ -234,10 +234,12 @@ impl FilletCorner {
             )?;
         } // end loop on all (both) non-filleted edges.
 
-        let fv_on_common_face =
-            fv_on_common_face.ok_or_else(|| SolidError::null_pointer(OP_NX2))?;
-        let fv_on_convex_edge =
-            fv_on_convex_edge.ok_or_else(|| SolidError::null_pointer(OP_NX2))?;
+        let fv_on_common_face = fv_on_common_face.ok_or_else(|| {
+            SolidError::blend_missing(OP_NX2, "the fillet vertex on the common face")
+        })?;
+        let fv_on_convex_edge = fv_on_convex_edge.ok_or_else(|| {
+            SolidError::blend_missing(OP_NX2, "the fillet vertex on the convex edge")
+        })?;
         pseudo
             .fillet_vertex_mut(fv_on_common_face)?
             .set_mate(0, Some(fv_on_convex_edge));
