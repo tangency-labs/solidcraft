@@ -32,7 +32,9 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
     assert_eq!(fields[4].0.label, "name", "no title: the key");
     assert_eq!(fields[4].0.kind, Kind::Text { min_length: None, max_length: Some(8) });
     assert_eq!(fields[5].0.kind, Kind::Choice(vec!["14.5".into(), "20".into(), "25".into()]));
-    assert_eq!(fields[5].1, Input::Choice(2), "the default, after the Choose… option");
+    assert_eq!(fields[5].1, Input::Choice(Some(1)), "the default");
+    let no_default = form(&json!({"type":"object","properties":{"p":{"type":"string","enum":["a","b"]}}})).unwrap();
+    assert_eq!(no_default[0].1, Input::Choice(None), "no default: nothing chosen yet");
     assert_eq!(form(&json!({"type":"object"})), Some(Vec::new()), "no properties: nothing to fill");
 }
 
@@ -62,25 +64,24 @@ fn run_waits_for_required_fields_and_valid_values() {
         "bore":{"type":"number","exclusiveMinimum":0},
         "note":{"type":"string"}}});
     let mut fields = form(&schema).unwrap();
-    let placeholders: Vec<bool> = fields.iter().map(|(f, _)| has_placeholder(f, false)).collect();
     let set = |fields: &mut Vec<(Field, Input)>, key: &str, input: Input| {
         fields.iter_mut().find(|(f, _)| f.key == key).unwrap().1 = input;
     };
-    assert_eq!(params(&fields, &placeholders), Err(Problem::Missing("teeth".into())));
+    assert_eq!(params(&fields), Err(Problem::Missing("teeth".into())));
     set(&mut fields, "teeth", Input::Typed("five".into()));
-    assert_eq!(params(&fields, &placeholders), Err(Problem::Invalid("teeth".into())));
+    assert_eq!(params(&fields), Err(Problem::Invalid("teeth".into())));
     set(&mut fields, "teeth", Input::Typed("5".into()));
-    assert_eq!(params(&fields, &placeholders), Err(Problem::Invalid("teeth".into())), "below its minimum");
+    assert_eq!(params(&fields), Err(Problem::Invalid("teeth".into())), "below its minimum");
     set(&mut fields, "teeth", Input::Typed("12".into()));
-    assert_eq!(params(&fields, &placeholders), Err(Problem::Missing("profile".into())), "Choose… is not a choice");
-    set(&mut fields, "profile", Input::Choice(2));
-    assert_eq!(params(&fields, &placeholders), Err(Problem::Missing("label".into())));
+    assert_eq!(params(&fields), Err(Problem::Missing("profile".into())), "Choose… is not a choice");
+    set(&mut fields, "profile", Input::Choice(Some(1)));
+    assert_eq!(params(&fields), Err(Problem::Missing("label".into())));
     set(&mut fields, "label", Input::Text("G1".into()));
     set(&mut fields, "bore", Input::Typed("0".into()));
-    assert_eq!(params(&fields, &placeholders), Err(Problem::Invalid("bore".into())), "exclusive minimum");
+    assert_eq!(params(&fields), Err(Problem::Invalid("bore".into())), "exclusive minimum");
     set(&mut fields, "bore", Input::Typed("5".into()));
     assert_eq!(
-        params(&fields, &placeholders),
+        params(&fields),
         Ok(json!({"teeth":12,"profile":"helical","label":"G1","bore":5.0})),
         "an empty optional field is left to the plugin's default"
     );

@@ -99,8 +99,9 @@ pub(crate) enum Input {
     /// A number or whole number with no default: typed, and empty until filled.
     Typed(String),
     Boolean(bool),
-    /// An index into the dropdown's options; with no default, option 0 is "Choose…".
-    Choice(usize),
+    /// The chosen option; `None` until one is chosen, when the schema gives no default (the
+    /// dropdown then leads with "Choose…").
+    Choice(Option<usize>),
     Text(String),
 }
 
@@ -192,7 +193,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
                     return None;
                 }
                 let chosen = default.and_then(Value::as_str).and_then(|d| options.iter().position(|o| o == d));
-                (Kind::Choice(options), Input::Choice(chosen.map_or(0, |i| i + 1)))
+                (Kind::Choice(options), Input::Choice(chosen))
             }
             None => {
                 let length = |k: &str| p.get(k).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
@@ -206,16 +207,11 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     Some((Field { key: key.to_owned(), label, tip: text("description"), required, kind }, input))
 }
 
-/// Whether the dropdown of `field` leads with a "Choose…" option (it has no default).
-fn has_placeholder(field: &Field, schema_default: bool) -> bool {
-    matches!(field.kind, Kind::Choice(_)) && !schema_default
-}
-
 /// The parameters the fields make, or why Run stays off. An optional field left empty is left out,
 /// so the plugin's own default stands.
-pub(crate) fn params(fields: &[(Field, Input)], placeholders: &[bool]) -> Result<Value, Problem> {
+pub(crate) fn params(fields: &[(Field, Input)]) -> Result<Value, Problem> {
     let mut out = Map::new();
-    for (i, (field, input)) in fields.iter().enumerate() {
+    for (field, input) in fields {
         let missing = || Problem::Missing(field.label.clone());
         let invalid = || Problem::Invalid(field.label.clone());
         let value = match (&field.kind, input) {
@@ -230,13 +226,8 @@ pub(crate) fn params(fields: &[(Field, Input)], placeholders: &[bool]) -> Result
                 t => Some(json!(t.parse::<i64>().map_err(|_| invalid())?)),
             },
             (Kind::Boolean, Input::Boolean(b)) => Some(json!(b)),
-            (Kind::Choice(options), Input::Choice(index)) => {
-                let index = if placeholders.get(i).copied().unwrap_or(false) { index.checked_sub(1) } else { Some(*index) };
-                match index {
-                    None => None,
-                    Some(index) => Some(json!(options.get(index).ok_or_else(invalid)?)),
-                }
-            }
+            (Kind::Choice(_), Input::Choice(None)) => None,
+            (Kind::Choice(options), Input::Choice(Some(index))) => Some(json!(options.get(*index).ok_or_else(invalid)?)),
             (Kind::Text { .. }, Input::Text(text)) if text.is_empty() => None,
             (Kind::Text { .. }, Input::Text(text)) => Some(json!(text)),
             _ => return Err(invalid()),
@@ -406,8 +397,6 @@ pub(crate) struct EntryDialog {
     pub(crate) read: bool,
     /// The fields, or `None` when the schema needs the agent or the CLI.
     pub(crate) fields: Option<Vec<(Field, Input)>>,
-    /// Which dropdowns lead with "Choose…".
-    placeholders: Vec<bool>,
     pub(crate) running: Option<Running>,
     pub(crate) error: Option<String>,
     /// A read entry's result, as indented JSON.
@@ -425,23 +414,11 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     let Some(plugin) = app.plugin_menu.listed.get(p).cloned() else { return };
     let Some(entry) = plugin.entries.get(e) else { return };
     let fields = form(&entry.input_schema);
-    let placeholders = fields
-        .iter()
-        .flatten()
-        .map(|(field, _)| {
-            let default = entry.input_schema.pointer(&format!("/properties/{}/default", field.key.replace('~', "~0").replace('/', "~1")));
-            has_placeholder(
-                field,
-                default.is_some_and(|d| matches!(&field.kind, Kind::Choice(o) if d.as_str().is_some_and(|d| o.iter().any(|o| o == d)))),
-            )
-        })
-        .collect();
     app.plugin_menu.dialog = Some(EntryDialog {
         label: entry_label(entry),
         entry: entry.name.clone(),
         read: entry.effect == solidcraft_engine::plugin::Effect::Read,
         fields,
-        placeholders,
         plugin,
         running: None,
         error: None,
@@ -460,7 +437,7 @@ impl EntryDialog {
             return Err(solidcraft_ui_text::format("ui.plugin_dialog_needs_groups", &[("groups", &missing.join(", "))]));
         }
         let Some(fields) = &self.fields else { return Err(app.tr("ui.plugin_dialog_unsupported").into()) };
-        params(fields, &self.placeholders).map_err(|problem| match problem {
+        params(fields).map_err(|problem| match problem {
             Problem::Missing(label) => solidcraft_ui_text::format("ui.plugin_dialog_missing", &[("field", &label)]),
             Problem::Invalid(label) => solidcraft_ui_text::format("ui.plugin_dialog_invalid", &[("field", &label)]),
         })
@@ -577,9 +554,8 @@ fn body(app: &SolveApp, ui: &mut egui::Ui, dialog: &mut EntryDialog, why_not: Op
         }
         Some(fields) => {
             ui.add_enabled_ui(editable, |ui| {
-                for (i, (field, input)) in fields.iter_mut().enumerate() {
-                    let placeholder = dialog.placeholders.get(i).copied().unwrap_or(false);
-                    field_row(app, ui, field, input, placeholder);
+                for (field, input) in fields.iter_mut() {
+                    field_row(app, ui, field, input);
                 }
             });
         }
@@ -601,7 +577,7 @@ fn body(app: &SolveApp, ui: &mut egui::Ui, dialog: &mut EntryDialog, why_not: Op
     }
 }
 
-fn field_row(app: &SolveApp, ui: &mut egui::Ui, field: &Field, input: &mut Input, placeholder: bool) {
+fn field_row(app: &SolveApp, ui: &mut egui::Ui, field: &Field, input: &mut Input) {
     let label = if field.required { format!("{} *", field.label) } else { field.label.clone() };
     let suffix = |unit: &Option<String>| unit.as_ref().map(|u| format!(" {u}")).unwrap_or_default();
     let response = match (&field.kind, input) {
@@ -627,10 +603,15 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, field: &Field, input: &mut Input
             ui_kit::row(ui, &label, |ui| ui_kit::text_field_reserving(ui, text, &hint, 0.0).1)
         }
         (Kind::Boolean, Input::Boolean(value)) => ui_kit::checkbox(ui, &label, value),
-        (Kind::Choice(options), Input::Choice(index)) => {
+        (Kind::Choice(options), Input::Choice(chosen)) => {
+            // Until something is chosen the dropdown leads with "Choose…", which is not a value.
             let choose = app.tr("ui.plugin_dialog_choose").to_owned();
-            let shown: Vec<&str> = placeholder.then_some(choose.as_str()).into_iter().chain(options.iter().map(String::as_str)).collect();
-            ui_kit::row(ui, &label, |ui| ui_kit::dropdown(ui, &format!("plugin_field_{}", field.key), index, &shown))
+            let lead = chosen.is_none();
+            let shown: Vec<&str> = lead.then_some(choose.as_str()).into_iter().chain(options.iter().map(String::as_str)).collect();
+            let mut index = chosen.unwrap_or(0);
+            let response = ui_kit::row(ui, &label, |ui| ui_kit::dropdown(ui, &format!("plugin_field_{}", field.key), &mut index, &shown));
+            *chosen = if lead { index.checked_sub(1) } else { Some(index) };
+            response
         }
         (Kind::Text { .. }, Input::Text(text)) => {
             let hint = if field.required { app.tr("ui.plugin_dialog_required_hint") } else { "" };
