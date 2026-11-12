@@ -58,12 +58,11 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut RotateMember, inputs: &mu
 }
 
 /// Brings the Angle up to date with the picks: a newly picked member's current turn, and a newly
-/// picked Parallel To line's angle. Editing, the step keeps its member: a pick on another member
-/// goes back to a side of the step's.
+/// picked Parallel To line's angle. Editing, the step keeps its member: a pick on another member,
+/// or a cleared pick, goes back to a side of the step's.
 pub fn sync(app: &SolveApp, c: &mut RotateMember, inputs: &mut [SelInput]) {
     let mut member = picked_body(inputs).and_then(|body| member_of(app, body));
     if c.step.is_some()
-        && member.is_some()
         && member != c.member
         && let (Some(m), Some(input)) = (&c.member, inputs.first_mut())
     {
@@ -100,6 +99,10 @@ pub fn commands(
     // The line goes with the angle it gave; an Angle edited since wins. Not worked out yet (or
     // refused): the command works it out, or says why not.
     let mut worked = true;
+    // A line picked that names no one line says why, rather than being left out.
+    if let Some(line) = items(inputs, 1).first() {
+        crate::dialogs::construct_ref(app, line)?;
+    }
     if let Some(key) = parallel_args(app, inputs) {
         let given = c.parallel.as_ref().filter(|(k, _)| *k == key).and_then(|(_, a)| a.as_ref());
         worked = given.is_some();

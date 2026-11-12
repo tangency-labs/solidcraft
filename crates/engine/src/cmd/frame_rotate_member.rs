@@ -85,14 +85,19 @@ fn parallel_angle(s: &Session, plane: &PlaneRef, member: &end_cap::Member, targe
         ParallelTurnError::NotALine => line_err(),
         ParallelTurnError::AlongAxis => bad(cmd, "That line runs along the member: its sides are already parallel to it"),
     })?;
-    let current = solidcraft_doc::frame::member_turns(&s.doc, &vals, member.feature)
-        .get(&member.line)
-        // Reduced to [-180°, 180°), so -30° stays -30° and a huge turn keeps its delta.
-        .map_or(0.0, |(_, radians)| (radians + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI);
+    let current =
+        solidcraft_doc::frame::member_turns(&s.doc, &vals, member.feature).get(&member.line).map_or(0.0, |(_, radians)| half_turns(*radians));
     let degrees = (current + delta).to_degrees();
     if !degrees.is_finite() {
         return Err(bad(cmd, "the turn is out of range"));
     }
     let degrees = (degrees * 1e9).round() / 1e9;
     Ok(Expr::new(format!("{degrees} deg")))
+}
+
+/// A turn reduced to [-180°, 180°), so -30° stays -30°. Reduced by whole turns first, as the
+/// member is built: a huge turn then keeps its delta (adding 180° to it first would round away).
+pub(super) fn half_turns(radians: f64) -> f64 {
+    use std::f64::consts::{PI, TAU};
+    (radians.rem_euclid(TAU) + PI).rem_euclid(TAU) - PI
 }
