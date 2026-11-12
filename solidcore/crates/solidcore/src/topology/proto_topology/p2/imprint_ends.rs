@@ -1,5 +1,5 @@
 //! Not upstream: fitting an intersection edge's ends to its proto vertices before
-//! `SmEdgeDefinition::Imprint` makes the edge (the SolidCraft fork's changes, opt-in).
+//! `SmEdgeDefinition::Imprint` makes the edge (the SolidCraft fork's changes).
 //!
 //! A cylinder minus a screw-swept thread groove crosses the shaft's rim at a grazing angle
 //! (3 degrees for an M33x3.5 external or an M10x1.5 internal thread), so where the groove
@@ -22,8 +22,8 @@
 //! Deviations: the fork's `GetOwner() != NULL` checks have no counterpart (curves live in
 //! the owner's store behind handles, none of them owned by an edge yet); replaced curves
 //! stay in that store, as the curves `ProtoTopologyManager::proto_edge_split` replaces do.
-//! WR-452 (trim, `Kernel::fixes.imprint_trims_edge_to_proto_vertex`), WR-453 (extend,
-//! `Kernel::fixes.imprint_extends_edge_to_proto_vertex`); both flags carry the fork's
+//! WR-452 (trim, always on; upstream has no trim) and WR-453 (extend, opt-in,
+//! `Kernel::fixes.imprint_extends_edge_to_proto_vertex`); both carry the fork's
 //! correction ffaf4e8 (WR-498, #1480, #470): an end goes to its proto vertex's position
 //! only when the proto vertex is one vertex in each B-rep.
 //! The fork's `sm_CreateExactlyExtendedCurve` (a8caccd) continues any `SmBSplineCurve`
@@ -58,7 +58,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// The block at the top of the fork's `SmEdgeDefinition::Imprint`: for each end of the
     /// definition's interval whose curve point is off its proto vertex, continue the
     /// curves to the vertex (`imprint_extends_edge_to_proto_vertex`) or else move the end
-    /// to the curve's point nearest the vertex (`imprint_trims_edge_to_proto_vertex`).
+    /// to the curve's point nearest the vertex (WR-452).
     /// Nothing changes for a closed proto edge or where no check passes.
     ///
     /// The point an end goes to (ffaf4e8, WR-498) is the proto vertex's position when
@@ -130,9 +130,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             {
                 continue;
             }
-            if k.fixes.imprint_trims_edge_to_proto_vertex {
-                self.trim_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, gap)?;
-            }
+            self.trim_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, gap)?;
         }
         Ok(())
     }

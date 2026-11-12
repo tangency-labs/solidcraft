@@ -19,7 +19,11 @@
 //! | [`inverse3`], [`inverse_of_columns2`], [`inverse_of_columns3`], [`inverse_of_columns4`] | (not upstream: #15009's, moved) |
 //! | [`contraction`], [`k_operator`] | `sm_GnEncloseOver`'s `C`, `q` and `K` (the fork's order), extracted (#15140) |
 //!
-//! Deviations: none; the bodies are #15009's as they were in `reach/net.rs`, bit for bit.
+//! Deviations: [`krawczyk`]'s centre, first box, widening and step count are #15009's as they
+//! were in `reach/net.rs`; its operator is the crate's one ([`contraction`], [`k_operator`],
+//! the fork's `sm_GnEncloseOver` order, #15140), so its boxes differ from #15009's by
+//! roundings only (each operation rounds outward; the order of the terms changed, not the
+//! maths).
 
 use crate::blend::fillet_section::certificate::inverse4;
 use crate::blend::fillet_section::interval::{cmax, round_up, Ivl};
@@ -85,18 +89,12 @@ pub(crate) fn krawczyk<const N: usize>(
         let Some(j) = jacobian(y)? else {
             return Ok(None);
         };
-        let mut k = y;
-        for (i, ((ki, row), (&m, &cfi))) in
-            k.iter_mut().zip(&c).zip(mid.iter().zip(&cf)).enumerate()
-        {
-            let mut v = Ivl::from(m) - cfi;
-            for (jj, (col, (&yj, &mj))) in j.iter().zip(y.iter().zip(&mid)).enumerate() {
-                // (I − C F′(Y))_ij, formed before it multiplies Y − ỹ
-                let identity = Ivl::from(if i == jj { 1.0 } else { 0.0 });
-                v = v + (identity - times(row, col)) * (yj - Ivl::from(mj));
-            }
-            *ki = v;
-        }
+        // the crate's one operator (#15140), in its order: `F′` by rows from the columns given
+        let rows: [[Ivl; N]; N] = core::array::from_fn(|r| {
+            core::array::from_fn(|col| j.get(col).and_then(|cl| cl.get(r)).copied().unwrap_or(ZERO))
+        });
+        let (cm, _) = contraction(&c, &rows);
+        let k = k_operator(&mid, &c, &f, &cm, &y);
         let inside = k.iter().zip(&y).all(|(a, b)| a.lo > b.lo && a.hi < b.hi);
         if inside {
             let mut out = k;

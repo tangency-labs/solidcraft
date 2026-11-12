@@ -2231,7 +2231,7 @@ fn tangent_chain(app: &mut SolveApp) {
         let Sel::Edge { body, index, .. } = s else { continue };
         let Some(b) = st.body(body) else { continue };
         let m = b.mesh();
-        for i in m.tangent_chain(*index, 2f64.to_radians()) {
+        for i in m.tangent_chain(*index, solidcraft_engine::geom::TANGENT_CHAIN) {
             let Some(e) = m.edges.get(i) else { continue };
             let Some(mid) = e.get(e.len() / 2).copied() else { continue };
             let x = Sel::Edge { body: body.clone(), index: i, point: mid };

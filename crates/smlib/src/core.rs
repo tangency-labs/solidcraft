@@ -129,7 +129,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.new_edge_vertex_tolerance_covers_gap = true;
     f.torus_signed_gen_curve_interval = true;
     f.point_solve_keeps_triangle_guess = true;
-    f.imprint_trims_edge_to_proto_vertex = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;

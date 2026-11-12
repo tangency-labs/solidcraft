@@ -198,3 +198,28 @@ order, and the design's later features name the piece they work on by that name 
 names its pieces so its later features find them: each name goes to the piece the points those
 features picked lie on. A name no later feature uses keeps SMLib's order. Designs saved since
 format 14 name pieces after their faces and are not affected.
+
+## Edge references after the kernel swap
+
+Designs saved before the SMLib kernel replay their timeline on the new kernel. A face, edge or
+vertex reference that no longer finds what it named is reported on its feature ("no longer
+exists as it was picked; reselect it"). It is never picked again silently. The new kernel names
+some faces differently. A fillet or chamfer edge reference is found at its saved pick point in
+two such cases, and only where that point decides exactly one edge:
+
+- One of the edge's two faces is gone, but its feature still made faces of the body (renamed,
+  not removed). The edge is the one of the remaining face that the pick lies on, clear of its
+  ends (#14959).
+- A face is named after the faces around it (`F44:top#[F43:side:l7]`) and that neighbour list
+  changed (the face still has one, a different one), so the name finds that face only by its
+  stem or finds several faces. For example,
+  joining one extrude over another's footprint names the walls it joins differently, and it can
+  leave two faces of that stem. The candidates are the edges between faces answering to the
+  name's two faces, at least one of them by a neighbour list that is not its own. The edge is
+  the one candidate whose exact curve passes through the saved point, within the pick tolerance.
+  If no candidate passes through the point, or several do, the reference asks to be picked again.
+  A named face that was split into pieces is not renamed: an edge that split with it still asks.
+
+Tests: `a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone`,
+`a_chamfer_saved_under_a_top_faces_old_neighbours_is_found_at_its_pick`,
+`a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again` (`crates/engine/src/face_name_tests.rs`).

@@ -9166,7 +9166,7 @@ pub fn tangent_face_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<(usize, Vec3)> {
             }
             let Some(mid) = e.get(e.len() / 2).copied() else { continue };
             if let (Some(n1), Some(n2)) = (normal_near(f, mid), normal_near(other, mid))
-                && n1.dot(n2) > 2f64.to_radians().cos()
+                && n1.dot(n2) > solidcraft_geom::TANGENT_CHAIN.cos()
             {
                 chosen.push(other);
             }
@@ -9298,7 +9298,7 @@ fn chamfer_with(
     };
     Ok(match side {
         Some(s) => kernel::chamfer_sides(b, edges, d, s, flip)?,
-        None => match kernel::chamfer(b, edges, d) {
+        None => match kernel::chamfer_carrying_face(b, edges, d) {
             Err(kernel::KernelError::TooLarge(why)) => {
                 let hint = kernel::named_fit(&why);
                 return Err(with_largest_fit(why, "distance", || kernel::chamfer_max_why(b, edges, d, hint)).into());
@@ -11462,7 +11462,7 @@ mod chain_tests {
         let boss = picked(Vec3::new(20.0, 0.0, 30.0));
         let step = picked(Vec3::new(20.0, 0.0, 10.0));
         assert_ne!(boss, step);
-        assert!(b.mesh().tangent_chain(boss, 2f64.to_radians()).contains(&step), "the mesh walk took the step");
+        assert!(b.mesh().tangent_chain(boss, solidcraft_geom::TANGENT_CHAIN).contains(&step), "the mesh walk took the step");
         assert_eq!(b.blend_chain(boss, Vec3::new(20.0, 0.0, 30.0)), vec![boss]);
     }
 

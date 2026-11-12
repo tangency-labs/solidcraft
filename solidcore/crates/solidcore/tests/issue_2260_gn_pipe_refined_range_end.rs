@@ -159,7 +159,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "imprint_extends_edge_to_proto_vertex",
     "imprint_reuses_coincident_face_edge",
     "imprint_skips_collapsed_definition",
-    "imprint_trims_edge_to_proto_vertex",
     "internal_pole_row_through_knot",
     "iso_curve_sliver_domain_is_degenerate",
     "iso_curve_uv_line_both_params",

@@ -147,6 +147,9 @@ pub struct ViewportState {
     /// greys out with it.
     pub(crate) corner_ok: bool,
     pub gpu: Option<GpuTarget>,
+    /// The view's pipelines could not be built (the thread compiling them at start failed): the
+    /// view says so where the model would be, instead of staying empty (#1210).
+    pub gpu_unavailable: bool,
     /// The GPU plan evaluation still compiling: `gpu.tess` once it is ready (#4860).
     pub(crate) tess_ready: Option<solidcraft_viewport_egui::TessReady>,
     /// What the GPU drew last frame, shared with the renderer (the frame-rate details, #2548).
@@ -5243,6 +5246,15 @@ pub(crate) fn preview_should_roll_back(app: &SolveApp, held: crate::tool_modifie
     app.dialog.as_ref().is_some_and(|d| d.previews()) && app.preview.active && crate::tool_modifiers::preview_reselect(held, manipulator_dragging)
 }
 
+/// The view has no GPU pipelines (their compile failed at start, #1210): it says so in its middle,
+/// in the theme's text colour, rather than showing an empty view.
+fn unavailable_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
+    let t = Tokens::get();
+    let galley =
+        painter.layout(app.tr("starting.view_unavailable").to_owned(), FontId::proportional(t.font_body), t.text, (rect.width() * 0.6).max(200.0));
+    painter.galley(rect.center() - galley.size() / 2.0, galley, t.text);
+}
+
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::joint_handles::sync(app);
     let t = Tokens::get();
@@ -5456,6 +5468,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.lowered_noted = true;
             app.set_status(app.tr("ui.gpu_memory_lowered"), false);
         }
+    } else if app.viewport.gpu_unavailable {
+        unavailable_note(app, &painter, rect);
     }
     let overlay_rect = crate::shell::bottom_overlay_rect(app, rect);
     crate::viewport_details::legacy_legends(app, ui, overlay_rect);
@@ -5741,7 +5755,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             let m = b.mesh();
             let items: Vec<Sel> = m
-                .tangent_chain(index, 2f64.to_radians())
+                .tangent_chain(index, solidcraft_engine::geom::TANGENT_CHAIN)
                 .into_iter()
                 .filter_map(|i| m.edges.get(i).map(|e| Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) }))
                 .collect();

@@ -102,6 +102,11 @@ pub struct ExtrudeParams {
     /// The body whose face to use, where faces of several bodies meet at `face` (or `faces`).
     #[serde(default)]
     pub face_body: Option<String>,
+    /// With `face` or `faces`: start on the face's plane as a fixed plane, which won't follow later
+    /// changes to the face (for a face whose history can't keep an attachment, such as a converted
+    /// mesh's).
+    #[serde(default)]
+    pub fixed: Option<bool>,
     /// With `face`, among placed instances: the body whose placement `face` is read in (read by
     /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
     /// body nearest the point.
@@ -237,6 +242,9 @@ pub struct RevolveParams {
     /// The body whose face to use, where faces of several bodies meet at `face`.
     #[serde(default)]
     pub face_body: Option<String>,
+    /// With `face`: the face's plane as a fixed plane, as `solid.extrude`'s.
+    #[serde(default)]
+    pub fixed: Option<bool>,
     /// With `face`, among placed instances: the body whose placement `face` is read in (read by
     /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
     /// body nearest the point.
