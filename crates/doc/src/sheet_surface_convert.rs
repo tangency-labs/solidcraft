@@ -785,14 +785,18 @@ fn tear(
 /// end on the anchor's line and reaches the band between that and the tangent line. The zone then
 /// carries on that side, as the blank does: a flange on a slanted edge continues the plate's
 /// edges beside it. `None` for a panel that runs on past the end, or ends square to it otherwise.
-fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) -> (Option<f64>, Option<f64>) {
+/// With each, whether that side runs from the end of the panel's edge along its anchor on across
+/// its tangent line, its far end clear past it: the panel's outline then leaves the bend's band
+/// there, and all of the panel that lies past the zone's end in the band is the corner the side
+/// cuts off between its tangent line and its anchor.
+fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) -> (Option<(f64, bool)>, Option<(f64, bool)>) {
     let t = sheet.thickness;
     let (width, setback) = (bend.allowance(t, sheet.k_factor), bend.setback(t));
     let reach = (width.abs() + setback + t) * 4.0;
     // Across the joint in the flat, out from the `a` anchor: each panel's points, its anchor's
     // line (`base`) and its tangent line. The `a` panel's material lies left of its anchor, the
     // `b` panel's right of its own, which lies `width - 2·setback` out.
-    let side = |an: &Anchor, into: Vec2, base: f64, sign: f64, tangent: f64| -> Option<f64> {
+    let side = |an: &Anchor, into: Vec2, base: f64, sign: f64, tangent: f64| -> Option<(f64, bool)> {
         let region = &sheet.panels.get(an.panel)?.region;
         let flat = |p: Vec2| ((p - an.origin).dot(an.dir), base + sign * (p - an.origin).dot(into));
         // Each loop's segments in order, its lines laid out (a curve, `None`, has no line to
@@ -811,7 +815,14 @@ fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) ->
             ((s - end).abs() <= reach).then_some(s)
         };
         let on_anchor = |p: (f64, f64)| (p.1 - base).abs() <= tol;
-        let mut beside: Option<(f64, f64)> = None;
+        // A side's ends lie either side of the tangent line, each clear of it: the side crosses
+        // it, rather than stopping on it (a step out to the tangent line, beyond which the panel
+        // runs on along it) or short of it.
+        let crosses = |(g0, g1): ((f64, f64), (f64, f64))| {
+            let (h0, h1) = (g0.1 - tangent, g1.1 - tangent);
+            (h0 < 0.0) != (h1 < 0.0) && h0.abs() > tol && h1.abs() > tol
+        };
+        let mut beside: Option<(f64, f64, bool)> = None;
         for segs in &lines {
             let n = segs.len();
             for (k, &(p, q)) in segs.iter().enumerate().filter_map(|(k, s)| s.as_ref().map(|s| (k, s))) {
@@ -826,16 +837,16 @@ fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) ->
                     let slant = if dy.abs() > 1e-9 * (ds.abs() + dy.abs()) { (ds / dy * base).abs() } else { 0.0 };
                     let off = (corner.0 - end).abs();
                     if off <= slant + tol
-                        && beside.is_none_or(|(o, _)| off < o)
+                        && beside.is_none_or(|(o, ..)| off < o)
                         && let Some(s) = meets((g0, g1))
                     {
-                        beside = Some((off, s));
+                        beside = Some((off, s, crosses((g0, g1))));
                     }
                 }
             }
         }
-        if let Some((_, s)) = beside {
-            return Some(s);
+        if let Some((_, s, across)) = beside {
+            return Some((s, across));
         }
         let mut found = None;
         for &(p, q) in lines.iter().flatten().flatten() {
@@ -850,7 +861,8 @@ fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) ->
             }
             found = meets((p, q)).or(found);
         }
-        found
+        // With no edge on its anchor, the panel's material past the end is not read here.
+        found.map(|s| (s, false))
     };
     (side(&b.a, b.a.dir.perp(), 0.0, -1.0, -setback), side(&b.b, -b.b.dir.perp(), width - 2.0 * setback, 1.0, width - setback))
 }
@@ -2335,10 +2347,13 @@ type Overlaps = (Option<(Part, Part, Vec3)>, Vec<(Part, Part, String)>);
 /// a bend). Where the stretches of a split edge meet, each bend's end there butts the other's
 /// (`butt` says which ends do, by the bend's joint and whether the end is at its anchors' length or
 /// their origin, see [`SurfaceSheet::junctions`]): it is no corner, ends square across its joint
-/// and is cut nothing. Elsewhere the rule's bend relief ([`Reliefs::bend_end`]) is cut in
-/// whichever panel runs on past the end. A bend's edge is its anchors' first [`Bend::length`], so
-/// a sheet settled again ends its bends where it did; the corners are the sheet's again. Why any
-/// relief asked for was not cut comes back; `at` names a point in what is said.
+/// and is cut nothing. A free end carries on the outline of each panel that ends there (see
+/// [`outline_ends`]); where both panels' sides run on across their tangent lines, neither runs on,
+/// and both stop at their tangent lines past the end. Elsewhere the rule's bend relief
+/// ([`Reliefs::bend_end`]) is cut in whichever panel runs on past the end. A bend's edge is its
+/// anchors' first [`Bend::length`], so a sheet settled again ends its bends where it did; the
+/// corners are the sheet's again. Why any relief asked for was not cut comes back; `at` names a
+/// point in what is said.
 pub(crate) fn settle(
     sheet: &mut Sheet,
     places: &[Rigid3],
@@ -2495,8 +2510,20 @@ pub(crate) fn settle(
                 let end = if e == 0 { 0.0 } else { b.len };
                 let (n, f) = outline_ends(sheet, b, bend, end, tol);
                 if let (Some(slot), true) = (ends.get_mut(i).and_then(|x| x.get_mut(e)), n.is_some() || f.is_some()) {
-                    slot.0 = n.unwrap_or(end);
-                    slot.1 = f.unwrap_or(end);
+                    slot.0 = n.map_or(end, |(s, _)| s);
+                    slot.1 = f.map_or(end, |(s, _)| s);
+                    // Where both panels' sides run on across their tangent lines, neither panel
+                    // runs on past the end: all either has past the zone's end in the bend's band
+                    // is the corner its side cuts off between its tangent line and its anchor,
+                    // which the zone's end takes the place of (the blank's outline runs from the
+                    // one side along the zone's end to the other). Kept, it stays flat out to the
+                    // sharp past the bend's end; where the two sides slant alike (two walls of a
+                    // hopper meeting at a corner, their rims level), both corners reach the sharp
+                    // there, inside each other's metal. So past the end both panels stop at their
+                    // tangent lines, as at a notch, and no bend relief is cut: no panel runs on.
+                    if let (Some((_, true)), Some((_, true))) = (n, f) {
+                        slot.2 = Relief::Notch;
+                    }
                 }
             }
         }

@@ -214,7 +214,8 @@ pub enum Relief {
     #[default]
     None,
     /// Past the end both panels stop at their tangent lines: where the bend meets another at a
-    /// corner, or where a rip cuts the panels beside it.
+    /// corner, where a rip cuts the panels beside it, or at a free end whose zone carries on both
+    /// panels' outlines, neither panel running on past it.
     Notch,
     /// A bend relief in each panel that runs on past the end: a slot `width` along past the
     /// end, cut from `depth` inside the panel's tangent line out through its edge. None is cut
