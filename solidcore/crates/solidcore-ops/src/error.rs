@@ -3,6 +3,8 @@
 
 use solidcore::SolidError;
 
+pub use solidcore::topology::brep::SolidTest;
+
 /// SMLib's `SM_ERR_INVALID_INPUT`, the status of input the kernel refuses.
 pub const INVALID_INPUT: i32 = solidcore::error::SM_ERR_INVALID_INPUT;
 
@@ -18,6 +20,11 @@ pub enum Error {
     Empty,
     /// The kernel reported success, but a solid input gave a result that is not a closed solid.
     NotSolid,
+    /// A body that is not a closed solid facing out, and the test it fails (the kernel's
+    /// [`SolidTest`], the first that fails in the order the tests run). [`Error::NotSolid`]
+    /// stays for the calls that return it; [`crate::Body::check_solid`] returns this one.
+    #[non_exhaustive]
+    NotSolidBecause(SolidTest),
     /// No room for the operation: an inward offset (a shell's wall, faces moved in) leaves none
     /// inside the body, or a blend is larger than the faces it rolls on allow.
     NoRoom,
@@ -124,6 +131,43 @@ pub enum Error {
         /// The join's index: after piece `join`.
         join: usize,
     },
+    /// The curves bounding a patch (`crate::surface`) that do not meet end to end: the end of
+    /// curve `join` is not proved within the model's zone tolerance of an end of the next one
+    /// (for the last join, `join + 1` the number of curves, of the first), `gap` apart (the
+    /// kernel's distance between the nearest ends).
+    BoundaryGap {
+        /// The join's index: after curve `join`.
+        join: usize,
+        /// How far apart the ends are.
+        gap: f64,
+    },
+    /// A curve network (`crate::network`) whose u-curve `u` and v-curve `v` do not cross
+    /// once: the kernel's intersector found `count` crossings.
+    NoCrossing {
+        /// The u-curve's index.
+        u: usize,
+        /// The v-curve's index.
+        v: usize,
+        /// How many crossings were found.
+        count: usize,
+    },
+    /// A curve network whose u-curve `u` and v-curve `v` are not proved within the model's
+    /// zone tolerance at the network's common crossing parameters: `gap` bounds how far apart
+    /// they are there (the curves do not cross at one parameter of each family).
+    NetworkGap {
+        /// The u-curve's index.
+        u: usize,
+        /// The v-curve's index.
+        v: usize,
+        /// The certified bound of their distance.
+        gap: f64,
+    },
+    /// A change to a curve that would move it farther than the tolerance asked (a knot
+    /// removed, its degree lowered): the kernel's certified bound of how far it would move.
+    PastTolerance {
+        /// The certified bound of the move.
+        bound: f64,
+    },
     /// An extension that cannot run as far as asked (a weight of the extended surface would
     /// vanish, a pole, an apex or a full turn is reached, or its length there cannot be
     /// measured to the kernel's stop): the longest distance proved to work, when there is one.
@@ -145,6 +189,23 @@ pub enum Error {
     /// The kernel found its own state inconsistent part way through a call, or was called
     /// before the preparation it needs.
     Exception,
+    /// The kernel found one of its own invariants broken part way through a call (the
+    /// kernel's `SolidError::PortInvariant`): its class, that it is a defect, the operation, and
+    /// what did not hold. Not [`Error::Exception`], which ops' own consistency checks and a
+    /// missing preparation still give.
+    #[non_exhaustive]
+    Invariant {
+        /// The kernel's class of the failure (`SolidError::kind`, today
+        /// [`solidcore::error::ErrorKind::PortInvariant`]).
+        class: solidcore::error::ErrorKind,
+        /// True: the failure is the kernel's fault, not a fact of the input (a consistency check
+        /// of its own that did not hold), a bug to report, not a refusal.
+        defect: bool,
+        /// The kernel operation whose invariant failed.
+        operation: &'static str,
+        /// What did not hold.
+        reason: &'static str,
+    },
     /// A contact test the kernel's certified bracket of the boundary distance does not decide
     /// (`solidcore::query::contact`): the tolerance lies inside `[lower, upper]` (or the
     /// boundaries are apart but one body's enclosure of the other is not decided), or a
@@ -250,8 +311,9 @@ pub enum Error {
 }
 
 /// Why the kernel refuses an offset or a draft ([`Error::OffsetRefused`]), as its
-/// `OffsetFailure` names it.
+/// `OffsetFailure` names it. More reasons get names of their own, so match it with a wildcard.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum OffsetRefusal {
     /// The face's offset by `distance` is not proved regular, and no wall size would help:
     /// the face bends towards that side nowhere the kernel's sizing looked, so no radius of
@@ -308,10 +370,18 @@ pub enum OffsetRefusal {
         /// What the built body fails.
         what: solidcore::error::offset::Unsoundness,
     },
-    /// A reason this version of ops does not name yet: the kernel's own statement of it.
-    Other {
-        /// The kernel's statement of its reason.
-        message: String,
+    /// A failure the kernel states only in words so far: a routine's own failure (its phrase
+    /// causes `Failed`, `Missing`, `InvalidValue` and `Inconsistent`), or a reason this version
+    /// of ops does not name yet. Transitional: each gets a variant of its own here once the
+    /// kernel gives it a cause of its own.
+    Phrase {
+        /// The kernel's class of the failure.
+        class: solidcore::error::ErrorKind,
+        /// True when the failure is the kernel's fault, not a fact of the input (a consistency
+        /// check of its own that did not hold): a bug to report, not a refusal.
+        defect: bool,
+        /// The kernel's statement of it.
+        phrase: String,
     },
 }
 
@@ -361,7 +431,7 @@ impl std::fmt::Display for OffsetRefusal {
                 )
             }
             OffsetRefusal::Unsound { what } => write!(f, "the body built is unsound ({what:?})"),
-            OffsetRefusal::Other { message } => write!(f, "{message}"),
+            OffsetRefusal::Phrase { phrase, .. } => f.write_str(phrase),
         }
     }
 }
@@ -430,6 +500,9 @@ impl std::fmt::Display for Error {
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
+            Error::NotSolidBecause(test) => {
+                write!(f, "the body is not a closed solid facing out: {test}")
+            }
             Error::NoRoom => write!(f, "no room"),
             Error::RailPastTolerance {
                 asked,
@@ -496,8 +569,36 @@ impl std::fmt::Display for Error {
                 "the sweep path's pieces {join} and {} do not meet",
                 join.saturating_add(1)
             ),
+            Error::BoundaryGap { join, gap } => write!(
+                f,
+                "the boundary curves {join} and {} do not meet: {gap} apart",
+                join.saturating_add(1)
+            ),
+            Error::NoCrossing { u, v, count } => write!(
+                f,
+                "the network's u-curve {u} and v-curve {v} cross {count} times, not once"
+            ),
+            Error::NetworkGap { u, v, gap } => write!(
+                f,
+                "the network's u-curve {u} and v-curve {v} are up to {gap} apart where they cross"
+            ),
+            Error::PastTolerance { bound } => {
+                write!(f, "the change would move the curve by up to {bound}")
+            }
             Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
+            Error::Invariant {
+                class,
+                defect,
+                operation,
+                reason,
+            } => {
+                let defect = if *defect { ", a defect to report" } else { "" };
+                write!(
+                    f,
+                    "solidcore broke its own invariant in {operation} ({class}{defect}): {reason}"
+                )
+            }
             Error::ContactUndecided {
                 other,
                 lower,
@@ -559,7 +660,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// A kernel error as the operation's, by its type: a kernel status where it stands for one
 /// (input refused, not converged, the kernel's other failures), a refusal of what the kernel does
-/// not support or has not ported, a cancellation, or an inconsistency the kernel found in itself.
+/// not support or has not ported, a cancellation, a broken invariant of the kernel's
+/// ([`Error::Invariant`]), or a call made before the preparation it needs.
 #[must_use]
 pub(crate) fn status(e: SolidError) -> Error {
     use solidcore::error::{SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NOT_CONVERGING};
@@ -574,9 +676,13 @@ pub(crate) fn status(e: SolidError) -> Error {
         SolidError::Unsupported { reason, .. } => Error::Unsupported(reason),
         SolidError::Unported { upstream, .. } => Error::Unported(upstream),
         SolidError::Cancelled { .. } => Error::Cancelled,
-        SolidError::PortInvariant { .. } | SolidError::PreparationRequired { .. } => {
-            Error::Exception
-        }
+        e @ SolidError::PortInvariant { operation, reason } => Error::Invariant {
+            class: e.kind(),
+            defect: true,
+            operation,
+            reason,
+        },
+        SolidError::PreparationRequired { .. } => Error::Exception,
         // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for
         e => Error::Status(e.sm_status().unwrap_or(SM_ERR)),

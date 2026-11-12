@@ -80,6 +80,8 @@
 //! `sm_status` and the status numbers here move to a comparison-only module (or to
 //! difftest and the FFI), since nothing but the comparison needs them.
 
+#[cfg(test)]
+mod bare_scan;
 pub mod blend;
 pub mod boolean;
 pub mod curve;
@@ -2238,11 +2240,8 @@ mod tests {
             let text = std::fs::read_to_string(&path)
                 .expect("read")
                 .replace("\r\n", "\n");
-            // this test's own needles sit in the test tail
-            let library = match text.find("#[cfg(test)]\nmod tests") {
-                Some(at) => &text[..at],
-                None => &text[..],
-            };
+            // this test's own needles sit in its test module
+            let library = bare_scan::library_text(&text);
             for needle in [
                 "SolidError::Nlib",
                 "Self::Nlib",
@@ -2266,10 +2265,7 @@ mod tests {
             let text = std::fs::read_to_string(src.join(rel))
                 .expect("read")
                 .replace("\r\n", "\n");
-            match text.find("#[cfg(test)]\nmod tests") {
-                Some(at) => text[..at].to_owned(),
-                None => text,
-            }
+            bare_scan::library_code(&text)
         };
         for rel in [
             "nurbs/b_spline_curve_n_lib.rs",

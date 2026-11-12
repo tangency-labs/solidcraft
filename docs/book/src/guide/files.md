@@ -93,6 +93,9 @@ copy of the body so the print face points down at Z = 0, with its centre of mass
 origin; the design itself does not move. The face is tinted and outlined in the viewport, and a
 copy made with Move/Copy or Mirror keeps it. A print face that is gone or no longer flat is
 reported, and the body is sent as it lies. Curved faces and mesh bodies can't be print faces.
+Scripts and agents can write the same laid-down copies to an STL or 3MF file without a slicer:
+`file.export_stl`, `file.export_3mf`, `file.export` and `file.save_mesh` take
+`lay_on_print_faces: true`, and the reply names the bodies that were laid on their print face.
 Known limitation: after a shell of a body that is already shelled, no face of that body can be
 marked, as no sketch can be attached to one either; this needs kernel work in solidcore.
 

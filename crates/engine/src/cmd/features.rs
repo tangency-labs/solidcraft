@@ -71,7 +71,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("box")
         .contract(&BOX_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z] (numbers in mm or length expressions; default: the origin); operation?, touching?, targets?: [body], name?, body_name?"),
+        .params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z] (numbers in mm or length expressions; default: the origin; a box placed by its center stays centred there when its size changes); operation?, touching?, targets?: [body], name?, body_name?"),
     CommandSpec::new("solid.cylinder", "Cylinder", crate::checked!("solid.cylinder", prim_cylinder))
         .at("SOLID", "CREATE")
         .icon("cylinder")
@@ -191,7 +191,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLIT_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-            "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal)",
+            "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal; each curve on its own, an open one extended past its ends) and loops?: bool (default false: true joins the curves end to end first, so a closed loop cuts along itself only)",
         ),
     CommandSpec::new("solid.split_body", "Split Body", crate::checked!("solid.split_body", split_body))
         .at("SOLID", "MODIFY")
@@ -1534,27 +1534,14 @@ fn prim_box(s: &mut Session, p: &Value) -> Result<Value> {
     for (e, n) in [(&l, "length"), (&w, "width"), (&h, "height")] {
         check_expr(s, e, Kind::Length, cmd, n)?;
     }
-    let corner = match (point_param(s, p, "corner", cmd)?, point_param(s, p, "center", cmd)?) {
-        (Some(c), _) => c,
-        // The corner half a size back from the centre (numbers stay numbers, in mm). The centre's
-        // bare numbers are millimetres, the sizes' the design's units.
-        (None, Some([cx, cy, cz])) => {
-            let unit = typed_length_unit(s);
-            let mm_per_unit = solidcraft_doc::expr::unit_info(&unit).map_or(1.0, |(_, k)| k);
-            let back = |c: Expr, size: &Expr| -> Expr {
-                match (c.parse::<f64>(), size.parse::<f64>()) {
-                    (Ok(a), Ok(b)) => format!("{}", a - b * mm_per_unit / 2.0).into(),
-                    _ => {
-                        let [c, size] = length_operands(s, [(&c, "mm"), (size, &unit)]);
-                        format!("({c}) - ({size}) / 2").into()
-                    }
-                }
-            };
-            [back(cx, &l), back(cy, &w), back(cz, &h)]
-        }
-        _ => point_expr(Vec3::ZERO),
+    // A box placed by its centre keeps that centre, so a later length, width or height grows it on
+    // both sides (#14487).
+    let (corner, centred) = match (point_param(s, p, "corner", cmd)?, point_param(s, p, "center", cmd)?) {
+        (Some(c), _) => (c, false),
+        (None, Some(c)) => (c, true),
+        _ => (point_expr(Vec3::ZERO), false),
     };
-    add_feature(s, p, FeatureKind::Box { corner, length: l, width: w, height: h, operation: operation(p, cmd)? })
+    add_feature(s, p, FeatureKind::Box { corner, length: l, width: w, height: h, operation: operation(p, cmd)?, centred })
 }
 
 fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2509,19 +2496,24 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// A copy keeps the look and the material of the body it came from (#6423): the copy is the same
-/// part in another place, so it looks the same.
+/// part in another place, so it looks the same. A feature makes the same number of copies of each
+/// source (a Move copy one, a Pattern its count less one), the sources' copies together and in
+/// the sources' order.
 fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd: &str) -> Result<()> {
     let id = reply.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no feature id"))?;
     let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
-    if copies.len() != sources.len() {
-        return Err(bad(cmd, "the copy did not make one body per body it copied"));
-    }
-    for (source, copy) in sources.iter().zip(copies.iter()) {
-        if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
-            s.doc_mut().appearances.bodies.insert(copy.clone(), look);
-        }
-        if let Some(material) = s.doc.materials.get(source).cloned() {
-            s.doc_mut().materials.insert(copy.clone(), material);
+    let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
+    let Some(each) = each else {
+        return Err(bad(cmd, "the copy did not make the same number of bodies for each body it copied"));
+    };
+    for (source, copies) in sources.iter().zip(copies.chunks(each)) {
+        for copy in copies {
+            if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
+                s.doc_mut().appearances.bodies.insert(copy.clone(), look);
+            }
+            if let Some(material) = s.doc.materials.get(source).cloned() {
+                s.doc_mut().materials.insert(copy.clone(), material);
+            }
         }
     }
     Ok(())
@@ -2599,7 +2591,15 @@ fn finish_pattern(
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
     if comps.is_empty() {
-        return add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() });
+        let copied = bodies.clone();
+        let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() })?;
+        // The pattern is added either way: when it made no copies (the feature failed to
+        // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
+        // and they keep no look, as before.
+        if !copied.is_empty() {
+            let _ = copy_keeps_appearance(s, &reply, &copied, "pattern");
+        }
+        return Ok(reply);
     }
     let cmd = "pattern (components)";
     let mats = solidcraft_doc::pattern_matrices(&s.doc, &s.model.state(), &pattern)?;
@@ -2959,6 +2959,7 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             plane: xy(),
             tool: Some(solidcraft_doc::FaceAt { body: BodyName(tb), point: Position(point) }),
             sketch: None,
+            loops: false,
         }
     } else if p.get("sketch").is_some_and(|v| !v.is_null()) {
         let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
@@ -2968,6 +2969,7 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             plane: xy(),
             tool: None,
             sketch: Some(SketchId(sketch)),
+            loops: bool_(p, "loops").unwrap_or(false),
         }
     } else {
         let plane = plane_param(s, p.get("plane"), cmd)?;
@@ -2977,6 +2979,7 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             plane,
             tool: None,
             sketch: None,
+            loops: false,
         }
     };
     add_face_feature(&picked, s, p, kind)

@@ -5,7 +5,7 @@
 //! | Rust                                   | Upstream                                  |
 //! |----------------------------------------|-------------------------------------------|
 //! | [`create_faces_with_curves`]           | `SmBrep::CreateFacesWithCurves`           |
-//! | [`create_planar_faces_with_3d_curves`] | `SmBrep::CreatePlanarFacesWith3DCurves`   |
+//! | [`create_planar_faces_with_3d_curves`], [`create_planar_faces_with_3d_curves_and_edges`] | `SmBrep::CreatePlanarFacesWith3DCurves` |
 //! | [`create_planar_face_with_3d_curves`]  | `SmBrep::CreatePlanarFaceWith3DCurves`    |
 //! | [`create_face_in_region_from_surface`] | `SmBrep::CreateFaceInRegionFromSurface`   |
 //! | [`create_face_from_surface`]           | `SmBrep::CreateFaceFromSurface`           |
@@ -131,6 +131,9 @@ pub struct NewFaces {
     pub shell: Option<ShellId>,
     /// `rResultingFaces` / `rNewFaces`.
     pub faces: Vec<FaceId>,
+    /// (not upstream; [`create_faces_with_curves`] only) The edge made from each curve,
+    /// in the order of the curves given.
+    pub curve_edges: Vec<Option<EdgeId>>,
 }
 
 fn invalid(reason: &'static str) -> SolidError {
@@ -467,6 +470,31 @@ pub fn create_planar_faces_with_3d_curves(
     tol_3d: f64,
     fenv: &mut FaceBuildEnv<'_, '_>,
 ) -> Result<Vec<FaceId>> {
+    create_planar_faces_with_3d_curves_and_edges(k, b, region, curves, tol_3d, fenv)
+        .map(|(faces, _)| faces)
+}
+
+/// The faces [`create_planar_faces_with_3d_curves_and_edges`] makes, and the edge made
+/// from each curve with that curve's index.
+pub type PlanarFacesAndEdges = (Vec<FaceId>, Vec<(EdgeId, usize)>);
+
+/// [`create_planar_faces_with_3d_curves`], also returning the edge made from each
+/// curve with that curve's index in `curves` (not upstream: the skin's face sources,
+/// tangency-labs/solidcore#3139). The faces are those
+/// [`create_planar_faces_with_3d_curves`] makes.
+///
+/// # Errors
+///
+/// Those of [`create_planar_faces_with_3d_curves`]; the edges add none (a curve that
+/// made no edge is left out).
+pub fn create_planar_faces_with_3d_curves_and_edges(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    curves: &[Curve],
+    tol_3d: f64,
+    fenv: &mut FaceBuildEnv<'_, '_>,
+) -> Result<PlanarFacesAndEdges> {
     let _ = tol_3d; // SM_REF1(d3DToleranceArg)
 
     // Check for region default.
@@ -492,7 +520,19 @@ pub fn create_planar_faces_with_3d_curves(
         Some(plane.plane),
         fenv,
     )?;
-    Ok(made.faces)
+    // one entry per ordered curve, in order (create_faces_with_curves pushes one per curve);
+    // were a count ever to differ, no edge is recorded, so the trace says `EdgeUntraced`
+    // rather than give a wall another curve's index
+    let edges = if made.curve_edges.len() == plane.ordered_curves.len() {
+        made.curve_edges
+            .iter()
+            .zip(&plane.ordered_curves)
+            .filter_map(|(&e, &ci)| e.map(|e| (e, ci)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Ok((made.faces, edges))
 }
 
 // ---- CreateFacesWithCurves ------------------------------------------------------------
@@ -665,6 +705,7 @@ pub fn create_faces_with_curves(
                     &mut made,
                     Some(&mut *fenv.env),
                 )?;
+                out.curve_edges.push(made.edge);
 
                 // A new face must be created when the loop exhausts:
                 if last_edge && made.face.is_none() {

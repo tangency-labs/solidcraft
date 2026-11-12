@@ -904,9 +904,9 @@ mod web {
                     self.files.panel.set(false);
                 }
                 "insert" => {
-                    if !solidcraft_ui_egui::mesh_units::ask(&mut self.app, &path, true) {
-                        self.app.insert_path(&path);
-                    }
+                    // The staged loader, as Open uses: a large STEP insert keeps the page drawing
+                    // (it asks an STL's or OBJ's units first, as the synchronous insert did).
+                    self.app.insert_path_async(&path);
                     self.files.panel.set(false);
                 }
                 "download" => match vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES) {

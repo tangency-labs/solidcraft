@@ -883,7 +883,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             let mut params = json!({"motion":if mode == NavMode::Pan {"pan"} else {"orbit"},"delta":[delta.x,delta.y]});
             if mode == NavMode::Orbit {
                 let pivot = match app.preferences.orbit_around {
-                    crate::prefs::OrbitAround::ViewCentre => None,
+                    crate::prefs::OrbitAround::ViewCentre => view_middle_pivot(app, rect),
                     crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
                     crate::prefs::OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
                         Some(pivot) => pivot,
@@ -1267,7 +1267,7 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     if app.preferences.free_orbit {
         target = snapped_quarter_roll(target, free);
     }
-    // The cursor and origin pivots stay still; the axis gizmo has no pivot (it orbits about the
+    // The cursor, origin and view-centre pivots stay still; the axis gizmo has no pivot (it orbits about the
     // view centre, see `axis_view`).
     let pivot = if around_cursor {
         match app.preferences.orbit_around {
@@ -1311,14 +1311,15 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
     }
 }
 
-/// Orbit by pixel deltas about the configured centre: the view's centre (default), the world
-/// origin, or the model point that was under the cursor when the drag began. The origin and the
-/// cursor pivot are kept still on screen; a cursor drag that begins over empty space turns around
-/// the centre of the visible geometry instead, so the model never swings around a far-off point.
-/// The cursor pivot is chosen once, when the drag begins.
+/// Orbit by pixel deltas about the configured centre: the view's centre (default, see
+/// [`view_middle`]), the world origin, or the model point that was under the cursor when the drag
+/// began. Every pivot is kept still on screen; a cursor drag that begins over empty space turns
+/// around the centre of the visible geometry instead, so the model never swings around a far-off
+/// point. The cursor pivot is chosen once, when the drag begins; the view-centre pivot too, while
+/// it stays under the middle of the view (see [`kept_view_middle`]).
 pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>) {
     let pivot = match app.preferences.orbit_around {
-        OrbitAround::ViewCentre => None,
+        OrbitAround::ViewCentre => view_middle_pivot(app, rect),
         OrbitAround::Origin => Some(Vec3::ZERO),
         OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
             Some(p) => p,
@@ -1356,13 +1357,16 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
     app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
 }
 
-/// What continuous orbit turns about, by Orbit around: the view's centre (none), the world origin,
-/// or around the cursor the model point in the middle of the view (else the middle of the bodies
-/// in view), chosen once when the spin starts. Turning about the view's centre instead let the
+/// What continuous orbit turns about, by Orbit around: the view's centre ([`view_middle`]), the
+/// world origin, or around the cursor the model point in the middle of the view (else the middle
+/// of the bodies in view), chosen once when the spin starts. Turning about the view's centre instead let the
 /// model swing out of view once earlier cursor orbits had left that centre off the model (#1044).
 fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
     match app.preferences.orbit_around {
-        OrbitAround::ViewCentre => None,
+        OrbitAround::ViewCentre => {
+            app.viewport.spin_pivot = kept_view_middle(app, rect, app.viewport.spin_pivot);
+            app.viewport.spin_pivot
+        }
         OrbitAround::Origin => Some(Vec3::ZERO),
         OrbitAround::Cursor => Some(match app.viewport.spin_pivot {
             Some(p) => p,
@@ -1373,6 +1377,51 @@ fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
             }
         }),
     }
+}
+
+/// The orbit pivot around the view's centre for the drag under way (see [`kept_view_middle`]).
+fn view_middle_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
+    app.viewport.orbit_pivot = kept_view_middle(app, rect, app.viewport.orbit_pivot);
+    app.viewport.orbit_pivot
+}
+
+/// [`view_middle`] for an orbit under way: the point it began with while that point is still under
+/// the free view's middle (turning about it keeps it there), else the point under it now, as after
+/// a pan or a zoom in the same gesture.
+fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>) -> Option<Vec3> {
+    let middle = app.viewport.layout.as_ref().map(|l| l.middle.center());
+    let proj = || projection(app, rect);
+    match kept.zip(middle) {
+        Some((p, m)) if proj().to_screen(p).is_some_and(|s| s.distance(m) < 0.5) => Some(p),
+        _ => view_middle(app, rect),
+    }
+}
+
+/// What orbit around the view's centre turns about: the point at the camera target's depth under
+/// the middle of the part of the view the panels leave free (`Layout::middle`). Home and Fit move
+/// the model towards that middle, as far as the compass and the navigation bar leave room. With
+/// the Browser open the middle lies beside the window's centre, and turning about the window's
+/// centre swung the model off to one side (#14651). `None`, so that the camera turns about its
+/// target, when the middle is within half a point of the window's centre, before the view is
+/// first laid out, in the Render workspace (which frames its own picture), and when the camera
+/// gives no finite point.
+pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
+    if crate::render_workspace::active(app) {
+        return None;
+    }
+    let middle = app.viewport.layout.as_ref()?.middle.center();
+    if !middle.is_finite() || middle.distance(rect.center()) < 0.5 {
+        return None;
+    }
+    let proj = projection(app, rect);
+    let (origin, dir) = proj.ray(middle);
+    let back = proj.cam.back();
+    let along = dir.dot(back);
+    if along.abs() < 1e-9 {
+        return None;
+    }
+    let p = origin + dir * ((proj.cam.target - origin).dot(back) / along);
+    p.is_finite().then_some(p)
 }
 
 /// An orbit drag so far: the camera it began with, the pointer's total motion since, the pivot
