@@ -1547,93 +1547,121 @@ fn pole_caps(s: &poles::Face, uvs: &[[f64; 2]], fixed: &[Vec3], ranges: &[std::o
     Ok(caps)
 }
 
-/// The fan's angle at the pole a cap's ring is sized for (radians): the largest smallest angle
-/// the mesh path takes ([`crate::MAX_MESH_MIN_ANGLE`]), so the fan's triangles keep any spec's.
-const RING_TURN: f64 = std::f64::consts::PI / 6.0;
+/// How much wider than the spec's angle a fan's angle at the pole is planned in the tangent
+/// plane: on a curved surface the ring's nodes lean away from it, so the angle in 3D is a little
+/// less ([`cap_ring`] checks it in 3D).
+const RING_MARGIN: f64 = 0.02;
 
-/// The farthest from its pole a cap's ring may lie (mm): a ring is divided so its chords keep
-/// the tolerance `tol`, and a chord turning [`RING_TURN`] round the pole sags `r (1 - cos(t/2))`
-/// from a ring of radius `r`, so no farther than `tol / (1 - cos(RING_TURN / 2))` (about 29
-/// times the tolerance), nor than the side asked `side`.
-fn ring_reach(tol: f64, side: f64) -> f64 {
-    (tol / (1.0 - (0.5 * RING_TURN).cos())).min(side)
+/// How near the farthest a ring may lie ([`ring_reach`]) the planner puts the nodes it asks for:
+/// a node put on an edge at a fraction of a chord lies about there, so the ring's chords keep the
+/// tolerance with room.
+const RING_ROOM: f64 = 0.9;
+
+/// How far the ring line of `cap` (straight in (u, v) from the boundary node before the pole to
+/// the one after it) turns round the pole in 3D, sampled, with the pole's point and the line's
+/// (u, v) ends.
+fn ring_turn(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3]) -> std::result::Result<(f64, Vec3, [f64; 2], [f64; 2]), String> {
+    const SAMPLES: usize = 64;
+    let (Some(&a), Some(&b), Some(&pole)) = (uvs.get(cap.before), uvs.get(cap.after), cap.copies.first().and_then(|&c| fixed.get(c))) else {
+        return Err("a pole's cap off its loop".into());
+    };
+    let point = |t: f64| {
+        let q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        s.derivs(q[0], q[1]).map(|d| d.0).ok_or_else(|| format!("the surface does not evaluate on a pole's ring at {q:?}"))
+    };
+    let mut turn = 0.0;
+    let mut last = point(0.0)?;
+    for i in 1..=SAMPLES {
+        let p = point(i as f64 / SAMPLES as f64)?;
+        turn += edges::turn(last - pole, p - pole);
+        last = p;
+    }
+    Ok((turn, pole, a, b))
+}
+
+/// The segments of a ring turning `turn` round its pole: as many as keep the fan's angle at the
+/// pole at least `min_angle` (with [`RING_MARGIN`]), and at least one per quarter turn, so the
+/// fan's triangles keep the angle at the pole by construction and are never obtuse there. A full
+/// turn at 25 degrees: 14 segments.
+fn ring_segments(turn: f64, min_angle: f64) -> usize {
+    let most = (turn / (min_angle * (1.0 + RING_MARGIN))).floor();
+    let least = (turn / std::f64::consts::FRAC_PI_2).ceil();
+    most.max(least).clamp(1.0, edges::MAX_EDGE_NODES as f64) as usize
+}
+
+/// The farthest from its pole a ring of `n` segments turning `turn` may lie (mm): each chord turns
+/// `turn / n` round the pole and sags `r (1 - cos(turn / 2n))` from a ring of radius `r`, which
+/// keeps the tolerance `tol` no farther than `tol / (1 - cos(turn / 2n))`; nor farther than the
+/// side asked `side`.
+fn ring_reach(tol: f64, side: f64, turn: f64, n: usize) -> f64 {
+    let half = 0.5 * turn / n.max(1) as f64;
+    (tol / (1.0 - half.cos())).min(side)
 }
 
 /// Where the boundary nodes either side of `cap`'s pole lie farther from it than its ring may
-/// ([`ring_reach`], with room of half again): the sides from them to the pole, each to be split
-/// on its edge at the ring's reach, so the next plan's ring passes there. Empty where the ring
-/// may pass through them.
+/// (`reach`): the sides from them to the pole, each to be split on its edge at [`RING_ROOM`] of
+/// the reach, so the next plan's ring passes there. Empty where the ring may pass through them.
 fn ring_too_far(cap: &PoleCap, fixed: &[Vec3], reach: f64) -> Vec<SplitSide> {
     let Some(&c0) = cap.copies.first() else { return Vec::new() };
     let (Some(&pole), Some(&before), Some(&after)) = (fixed.get(c0), fixed.get(cap.before), fixed.get(cap.after)) else { return Vec::new() };
     let mut out = Vec::new();
     let (db, da) = (pole.dist(before), pole.dist(after));
-    if db > 1.5 * reach {
-        out.push(SplitSide { from: before, to: pole, at: vec![1.0 - reach / db] });
+    let at = RING_ROOM * reach;
+    if db > reach {
+        out.push(SplitSide { from: before, to: pole, at: vec![1.0 - at / db] });
     }
-    if da > 1.5 * reach {
-        out.push(SplitSide { from: pole, to: after, at: vec![reach / da] });
+    if da > reach {
+        out.push(SplitSide { from: pole, to: after, at: vec![at / da] });
     }
     out
 }
 
 /// The inner nodes of the ring of `cap`: the line in (u, v) from the boundary node before the
-/// pole to the one after it, divided evenly into segments whose chords keep the tolerance `tol`
-/// as an edge's do (checked at their quarter points and middles), no longer than the side asked
-/// at the pole (`h`, or less where `size_at` asks), and at least one per quarter turn round the
-/// pole, so none of the fan's triangles is obtuse at it. Each node's (u, v) and point; an error
-/// where the surface does not evaluate on the ring.
-fn cap_ring(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], tol: f64, h: f64, size_at: Option<size::SizeAt<'_>>) -> std::result::Result<Vec<([f64; 2], Vec3)>, String> {
-    const SAMPLES: usize = 64;
+/// pole to the one after it (both ends count among its segments: a seam's two nodes are its
+/// ends), divided evenly into [`ring_segments`] for the spec's angle `min_angle`, then fewer while
+/// the fan's angle at the pole between two neighbours falls short of it in 3D (down to one per
+/// quarter turn), so the fan keeps the angle. Where the ring lies farther out than its chords can
+/// keep the tolerance `tol` (the planner could not put nodes nearer the pole), it is divided more
+/// finely instead, so its chords keep the tolerance, and the face is named short of the angle.
+/// Each node's (u, v) and point; an error where the surface does not evaluate on the ring.
+fn cap_ring(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], tol: f64, min_angle: f64) -> std::result::Result<Vec<([f64; 2], Vec3)>, String> {
     /// Rounds of dividing the ring more finely where a chord still sags past the tolerance.
     const MAX_FINER: usize = 16;
-    let (Some(&a), Some(&b), Some(&pole)) = (uvs.get(cap.before), uvs.get(cap.after), cap.copies.first().and_then(|&c| fixed.get(c))) else {
-        return Err("a pole's cap off its loop".into());
-    };
+    let (turn, pole, a, b) = ring_turn(s, cap, uvs, fixed)?;
     let at = |t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
     let point = |t: f64| {
         let q = at(t);
         s.derivs(q[0], q[1]).map(|d| d.0).ok_or_else(|| format!("the surface does not evaluate on a pole's ring at {q:?}"))
     };
-    // Its length, how far it turns round the pole, and how far it lies from it.
-    let (mut length, mut turn, mut far) = (0.0, 0.0, 0.0f64);
-    let mut last = point(0.0)?;
-    for i in 1..=SAMPLES {
-        let p = point(i as f64 / SAMPLES as f64)?;
-        length += last.dist(p);
-        turn += edges::turn(last - pole, p - pole);
-        far = far.max(p.dist(pole));
-        last = p;
+    let nodes = |n: usize| -> std::result::Result<Vec<([f64; 2], Vec3)>, String> {
+        (0..=n).map(|i| {
+            let t = i as f64 / n as f64;
+            Ok((at(t), point(t)?))
+        }).collect()
+    };
+    let least = ring_segments(turn, std::f64::consts::FRAC_PI_2);
+    let mut n = ring_segments(turn, min_angle);
+    let mut ring = nodes(n)?;
+    // Fewer while a neighbour pair's angle at the pole in 3D falls short of the spec's.
+    while n > least && ring.windows(2).any(|w| matches!(w, [x, y] if edges::turn(x.1 - pole, y.1 - pole) < min_angle)) {
+        n -= 1;
+        ring = nodes(n)?;
     }
-    let side = size::local(h, size_at, pole);
-    // The most one chord may turn round the pole and keep the tolerance on a ring this far out.
-    let most = if far > tol { 2.0 * (1.0 - tol / far).acos() } else { std::f64::consts::PI };
-    let mut n = (turn / std::f64::consts::FRAC_PI_2).ceil().max((turn / most).ceil()).max(1.0);
-    if side.is_finite() && side > 0.0 {
-        n = n.max((length / side).ceil());
-    }
-    let mut n = n.min(edges::MAX_EDGE_NODES as f64) as usize;
-    // Finer while a chord sags past the tolerance at its quarter points or middle.
+    // More finely where a chord sags past the tolerance.
     for _ in 0..MAX_FINER {
-        let mut sags = false;
-        for k in 0..n {
+        let sags = ring.windows(2).enumerate().any(|(k, w)| {
+            let [x, y] = w else { return false };
             let (t0, t1) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
-            let (p0, p1) = (point(t0)?, point(t1)?);
-            for f in [0.25, 0.5, 0.75] {
-                if point(t0 + f * (t1 - t0))?.dist_to_segment(p0, p1) > tol {
-                    sags = true;
-                }
-            }
-        }
+            [0.25, 0.5, 0.75].iter().any(|f| point(t0 + f * (t1 - t0)).is_ok_and(|p| p.dist_to_segment(x.1, y.1) > tol))
+        });
         if !sags || n >= edges::MAX_EDGE_NODES {
             break;
         }
         n = (n + n.div_ceil(4)).min(edges::MAX_EDGE_NODES);
+        ring = nodes(n)?;
     }
-    (1..n).map(|i| {
-        let t = i as f64 / n as f64;
-        Ok((at(t), point(t)?))
-    }).collect()
+    // The inner nodes: the ends are the boundary's.
+    Ok(ring.into_iter().skip(1).take(n.saturating_sub(1)).collect())
 }
 
 /// The fan of a pole's cap: the triangles from the pole's `copies` (boundary nodes, in loop
@@ -1804,10 +1832,14 @@ fn plan_face(
         if shape.sides == Sides::Split {
             let far: Vec<SplitSide> = caps
                 .iter()
-                .filter_map(|cap| {
-                    let pole = *cap.copies.first().and_then(|&c| fixed.get(c))?;
-                    Some(ring_too_far(cap, &fixed, ring_reach(tol, size::local(h, shape.size_at, pole))))
+                .map(|cap| {
+                    let (turn, pole, _, _) = ring_turn(s, cap, &uvs, &fixed)?;
+                    let reach = ring_reach(tol, size::local(h, shape.size_at, pole), turn, ring_segments(turn, shape.min_angle.to_radians()));
+                    Ok(ring_too_far(cap, &fixed, reach))
                 })
+                .collect::<std::result::Result<Vec<Vec<SplitSide>>, String>>()
+                .map_err(|why| fail(&why))?
+                .into_iter()
                 .flatten()
                 .collect();
             if !far.is_empty() {
@@ -1824,7 +1856,7 @@ fn plan_face(
         // replaced by the cap's ring.
         let mut runs: Vec<Vec<usize>> = ranges.iter().map(|r| r.clone().collect()).collect();
         for cap in &caps {
-            let ring = cap_ring(s, cap, &uvs, &fixed, tol, h, shape.size_at).map_err(|why| fail(&why))?;
+            let ring = cap_ring(s, cap, &uvs, &fixed, tol, shape.min_angle.to_radians()).map_err(|why| fail(&why))?;
             let first = nodes.len();
             for (q, p) in &ring {
                 nodes.push(*q);
