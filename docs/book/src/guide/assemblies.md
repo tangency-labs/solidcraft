@@ -551,6 +551,8 @@ description; **Change Part Size** renumbers them, keeping a field you changed yo
   the CSV.
 - `show_purchased_contents: true`, with `levels: "all"`, lists what a purchased part holds under
   its row too. The part is still one row, weighed whole.
+- A part a configuration switches off (it has no bodies and a suppressed feature of its own) is
+  left out of every list, parts list and balloon; `show_suppressed_parts: true` lists it as placed.
 - `group_by: ["part_number"]` (the default) puts definitions with the same part number in one
   row; a definition without a part number gets a row of its own. `["definition"]` gives every
   definition its own row.
