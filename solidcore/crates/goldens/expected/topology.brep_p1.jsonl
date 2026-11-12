@@ -120,7 +120,7 @@
 {"case":"Endcap_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"Endcap_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"Endcap_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"Endcap_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"Endcap_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"Endcap_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"Endcap_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"Endcap_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -278,7 +278,7 @@
 {"case":"Mouse_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"Mouse_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"Mouse_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"Mouse_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"Mouse_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"Mouse_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"Mouse_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"Mouse_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -441,7 +441,7 @@
 {"case":"box_with_large_fillet_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"box_with_large_fillet_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"box_with_large_fillet_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"box_with_large_fillet_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"box_with_large_fillet_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"box_with_large_fillet_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"box_with_large_fillet_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"box_with_large_fillet_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -597,7 +597,7 @@
 {"case":"cone_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"cone_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"cone_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"cone_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"cone_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"cone_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"cone_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"cone_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -799,7 +799,7 @@
 {"case":"disk_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"disk_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"disk_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"disk_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"disk_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"disk_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"disk_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"disk_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -954,7 +954,7 @@
 {"case":"ellips_ts2_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"ellips_ts2_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"ellips_ts2_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"ellips_ts2_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"ellips_ts2_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"ellips_ts2_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"ellips_ts2_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"ellips_ts2_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -1287,7 +1287,7 @@
 {"case":"plane_circ_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"plane_circ_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"plane_circ_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"plane_circ_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"plane_circ_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"plane_circ_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"plane_circ_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"plane_circ_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -1442,7 +1442,7 @@
 {"case":"plane_square_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"plane_square_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"plane_square_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"plane_square_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"plane_square_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"plane_square_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"plane_square_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"plane_square_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -1597,7 +1597,7 @@
 {"case":"sphere_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"sphere_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"sphere_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"sphere_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"sphere_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"sphere_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"sphere_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"sphere_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -1752,7 +1752,7 @@
 {"case":"surf_extrude_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"surf_extrude_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"surf_extrude_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"surf_extrude_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"surf_extrude_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"surf_extrude_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"surf_extrude_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"surf_extrude_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -1816,9 +1816,9 @@
 {"case":"surf_rev_edge_edge_blend_0_1_-1_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1006.0]}}
 {"case":"surf_rev_edge_edge_blend_0_1_5_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[215.31387185223466,290.93721781816765,10349.823081894167]],"n":108}}}
 {"case":"surf_rev_edge_edge_blend_0_3_3_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[185.57441713182908,196.46663236137766,5544.99401811624]],"n":81}}}
-{"case":"surf_rev_edge_edge_blend_1_0_1_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[352.7059024583693,670.3878429401775,16282.498739970926],[128.4864112620754,417.9681495381254,16990.70952480753],[170.71505712746614,452.9212858065092,22620.295744510346],[200.2949710478529,550.2367607485163,25576.270970751742],[204.57318921200607,676.6034810341645,26924.532903168783],[257.7339001897498,738.9991723892523,33239.95070580892],[244.72352625857488,707.0373397064719,29261.13121136486],[224.95448828037192,662.3970023473631,29659.043451608606],[221.31037942741352,727.2697310632633,28831.72885681062],[248.40005324652398,872.8085802888119,31954.304072844294],[60.85801598733093,60.85801598733093,4437.043064001092]],"n":2676}}}
-{"case":"surf_rev_edge_edge_blend_2_0_2_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[654.7787000650638,1112.0215036075085,59111.805376627126],[500.9364636722042,890.2259240248143,65908.8430214245],[516.302095652289,846.8349670806869,67194.15503743349],[557.8637867820875,847.8921668866075,71428.71378158515],[603.6882063821045,911.113866579964,79652.67882498205],[575.0035666966197,889.5710203050493,73842.5411910848],[574.5056101056471,860.5659749771816,72165.38624871167],[561.9816032388417,862.0720242998188,72992.83559269446],[478.70852846795196,856.3955203886927,61168.03139266288],[358.73943490882345,661.3813873218263,36247.93652523844],[30.625,30.625,600.125]],"n":2600}}}
-{"case":"surf_rev_edge_edge_blend_3_1_2_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[768.9043922643859,1295.9112569913113,73856.72781211237],[667.9267868732218,1116.0259019913562,88239.31136249959],[698.6794294500788,1131.0756858038167,90305.72494556177],[777.2169968196466,1192.740287968505,99742.4640635522],[924.6799269586286,1269.1817361358403,123099.47779620366],[956.0133272916439,1232.2950861496743,123709.35889587612],[1029.4263944506515,1238.0791131579836,132142.13265691698],[1059.532197479269,1276.6024242310682,136983.3344853047],[1038.594862651422,1301.6014973316992,135647.2666705874],[1103.8641390841406,1355.739460471626,140188.25649257845],[60.85801598733093,60.85801598733093,4437.043064001092]],"n":2676}}}
+{"case":"surf_rev_edge_edge_blend_1_0_1_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[352.7059024583693,670.3878429401775,16282.498739970926],[128.4864112620754,417.9681495381255,16990.709524807527],[170.71505712746614,452.9212858065092,22620.295744510346],[200.2949710478529,550.2367607485163,25576.270970751742],[204.57318921200607,676.6034810341645,26924.532903168783],[257.7339001897498,738.9991723892523,33239.95070580892],[244.72352625857488,707.0373397064719,29261.13121136486],[224.95448828037192,662.3970023473631,29659.043451608606],[221.31037942741358,727.2697310632633,28831.72885681062],[248.40005324652392,872.8085802888119,31954.304072844294],[60.85801598733093,60.85801598733093,4437.043064001092]],"n":2676}}}
+{"case":"surf_rev_edge_edge_blend_2_0_2_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[654.7787000650638,1112.0215036075083,59111.805376627126],[500.9364636722042,890.2259240248144,65908.84302142447],[516.3020956522889,846.8349670806869,67194.15503743349],[557.8637867820875,847.8921668866076,71428.71378158515],[603.6882063821045,911.113866579964,79652.67882498205],[575.0035666966197,889.5710203050493,73842.54119108482],[574.5056101056471,860.5659749771816,72165.38624871167],[561.9816032388417,862.0720242998188,72992.83559269446],[478.70852846795196,856.3955203886928,61168.03139266288],[358.73943490882345,661.3813873218263,36247.93652523844],[30.625,30.625,600.125]],"n":2600}}}
+{"case":"surf_rev_edge_edge_blend_3_1_2_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[768.9043922643859,1295.9112569913113,73856.72781211237],[667.9267868732217,1116.0259019913562,88239.31136249959],[698.6794294500788,1131.0756858038167,90305.72494556177],[777.2169968196466,1192.740287968505,99742.4640635522],[924.6799269586286,1269.1817361358403,123099.47779620366],[956.0133272916439,1232.2950861496743,123709.35889587612],[1029.4263944506515,1238.0791131579836,132142.13265691698],[1059.532197479269,1276.6024242310682,136983.3344853047],[1038.594862651422,1301.6014973316992,135647.2666705874],[1103.8641390841406,1355.739460471626,140188.25649257845],[60.85801598733093,60.85801598733093,4437.043064001092]],"n":2676}}}
 {"case":"surf_rev_find_sector_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.493369248423379,0.0]}}
 {"case":"surf_rev_find_sector_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,9.350480788743042,0.0]}}
 {"case":"surf_rev_find_sector_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0]}}
@@ -1907,7 +1907,7 @@
 {"case":"surf_rev_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"surf_rev_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"surf_rev_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"surf_rev_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"surf_rev_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"surf_rev_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"surf_rev_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"surf_rev_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -1974,8 +1974,8 @@
 {"case":"surf_sphere150_edge_edge_blend_1_0_1_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1001.0]}}
 {"case":"surf_sphere150_edge_edge_blend_2_0_2_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1001.0]}}
 {"case":"surf_sphere150_edge_edge_blend_3_1_2_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1001.0]}}
-{"case":"surf_sphere150_find_sector_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.049752469181040045,0.0]}}
-{"case":"surf_sphere150_find_sector_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,10.295630140986999,0.0]}}
+{"case":"surf_sphere150_find_sector_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.04975246918104079,0.0]}}
+{"case":"surf_sphere150_find_sector_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,10.295630140987,0.0]}}
 {"case":"surf_sphere150_find_sector_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0]}}
 {"case":"surf_sphere150_find_sector_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0]}}
 {"case":"surf_sphere150_find_sector_4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.99498743710662,0.0]}}
@@ -2008,11 +2008,11 @@
 {"case":"surf_sphere150_mark_loops_2_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0]}}
 {"case":"surf_sphere150_mark_loops_3_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"surf_sphere150_obj_map","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[48036.0,48070.0,287898.0]],"n":29}}}
-{"case":"surf_sphere150_parallel_proj_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[87.41727741795312,87.41727741795312,1701.8299454888293]],"n":29}}}
-{"case":"surf_sphere150_parallel_proj_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[87.41994788502089,87.41994788502089,1701.8627280450642]],"n":29}}}
+{"case":"surf_sphere150_parallel_proj_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[87.41727741795312,87.41727741795312,1701.8299454888295]],"n":29}}}
+{"case":"surf_sphere150_parallel_proj_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[87.41994788502086,87.41994788502086,1701.8627280450644]],"n":29}}}
 {"case":"surf_sphere150_parallel_proj_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0]}}
-{"case":"surf_sphere150_parallel_proj_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[74.4505609249308,94.24655240945577,1572.1085865149303]],"n":29}}}
-{"case":"surf_sphere150_parallel_proj_cubic","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[24.456603291167742,26.456603291167742,214.70036918654282]],"n":17}}}
+{"case":"surf_sphere150_parallel_proj_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[74.4505609249308,94.24655240945579,1572.1085865149303]],"n":29}}}
+{"case":"surf_sphere150_parallel_proj_cubic","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[24.456603291167742,26.456603291167742,214.7003691865428]],"n":17}}}
 {"case":"surf_sphere150_query_edge_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[19770170.42001,19770170.42001,98917159.10003]],"n":22}}}
 {"case":"surf_sphere150_query_eu_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[19770169.42001,19770169.42001,98917157.10003]],"n":22}}}
 {"case":"surf_sphere150_query_face_-1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[19770169.42001,19770169.42001,98917157.10003]],"n":22}}}
@@ -2062,7 +2062,7 @@
 {"case":"surf_sphere150_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"surf_sphere150_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"surf_sphere150_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"surf_sphere150_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"surf_sphere150_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"surf_sphere150_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"surf_sphere150_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"surf_sphere150_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -2217,7 +2217,7 @@
 {"case":"torus_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"torus_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"torus_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"torus_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"torus_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"torus_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"torus_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"torus_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -2372,7 +2372,7 @@
 {"case":"toruswvy_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"toruswvy_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"toruswvy_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"toruswvy_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"toruswvy_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"toruswvy_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"toruswvy_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"toruswvy_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}
@@ -2532,7 +2532,7 @@
 {"case":"vase_rev_set_est_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-7,1e-7,0.001,0.001,0.001,1e-7]}}
 {"case":"vase_rev_set_est_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-6,1e-6,0.3,0.3,0.3,1e-6]}}
 {"case":"vase_rev_set_est_100000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,100000.0,100000.0,100000.0,0.001]}}
-{"case":"vase_rev_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0000000000000002e-10,1.0000000000000002e-10,1e-9,1e-9,1e-9,1.0000000000000002e-10]}}
+{"case":"vase_rev_set_est_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1e-10,1e-10,1e-9,1e-9,1e-9,1e-10]}}
 {"case":"vase_rev_set_est_3000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.001,0.001,3000000.0,3000000.0,3000000.0,0.001]}}
 {"case":"vase_rev_set_est_50.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,50.0,50.0,50.0,0.00001]}}
 {"case":"vase_rev_set_est_9876543.21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.00001,0.00001,9876543.21,50.0,50.0,0.00001]}}

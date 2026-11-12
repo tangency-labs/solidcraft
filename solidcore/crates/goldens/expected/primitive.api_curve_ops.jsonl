@@ -276,7 +276,7 @@
 {"case":"gen0264","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,2.0,0.0,1.0]}}
 {"case":"gen0265","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,4.0,0.0,1.0,2.0,3.0]}}
 {"case":"gen0266","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[42247.129238903035,43257.84745604207,2622619.306821206]],"n":176}}}
-{"case":"gen0267","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1025497345319.6654,6498180034586.099,-7709445796790.674]],"n":39}}}
+{"case":"gen0267","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[1025497345319.6653,6498180034586.1,-7709445796790.695]],"n":39}}}
 {"case":"gen0268","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":65}}}
 {"case":"gen0269","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":60}}}
 {"case":"gen0270","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[1007.0]}}
@@ -579,7 +579,7 @@
 {"case":"gen0567","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[1007.0]}}
 {"case":"gen0568","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,12.0]}}
 {"case":"gen0569","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14217.323021001515,14456.680387763829,31831.76400132201]],"n":59}}}
-{"case":"gen0570","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14047.611875112356,14372.553780258384,26448.089410400222]],"n":59}}}
+{"case":"gen0570","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14047.611875112356,14372.553780258384,26448.08941040022]],"n":59}}}
 {"case":"gen0571","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":40}}}
 {"case":"gen0572","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[1007.0]}}
 {"case":"gen0573","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}

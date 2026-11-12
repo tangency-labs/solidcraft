@@ -129,7 +129,7 @@
 {"case":"gen0093","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[97.52648008973824,117.52648008973824,305.5794402692146]],"n":24},"status":[0.0]}}
 {"case":"gen0094","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[5.620568035776476,125.08473085400288,311.60679230153346]],"n":38},"status":[0.0]}}
 {"case":"gen0095","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[5e+20,5e+20,1.45e+22]],"n":52},"status":[0.0]}}
-{"case":"gen0096","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[-2.1349276785950764,92.17093300524105,26.14303736906928]],"n":38},"status":[0.0]}}
+{"case":"gen0096","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[-2.1349276785950764,92.17093300524105,26.143037369069507]],"n":38},"status":[0.0]}}
 {"case":"gen0097","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[27.97664436855151,27.97664436855151,1007.0954579550391]],"n":68},"status":[0.0]}}
 {"case":"gen0098","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[5e+20,5e+20,1.45e+22]],"n":52},"status":[0.0]}}
 {"case":"gen0099","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[155002.0,155002.0,2105004.0000000005]],"n":24},"status":[0.0]}}
@@ -438,7 +438,7 @@
 {"case":"global_visibility_box_with_large_fillet_placement","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[984.6595561129694,1004.6595561129694,126731.67032345173],[590.1225150756736,594.1225150756736,46121.905671179855]],"n":420},"status":[0.0]}}
 {"case":"global_visibility_box_with_large_fillet_z","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[934.2007078614258,958.2007078614258,115344.01838239767],[247.5,247.5,9890.0]],"n":332},"status":[0.0]}}
 {"case":"global_visibility_box_with_large_fillet_z_smooth","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[922.2007078614258,946.2007078614258,108871.43395534903],[259.5,259.5,7996.0]],"n":332},"status":[0.0]}}
-{"case":"global_visibility_cone_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[173.71010612598369,296.6322356051275,10002.563332118443]],"n":134},"status":[0.0]}}
+{"case":"global_visibility_cone_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[173.7101061259837,296.6322356051275,10002.563332118445]],"n":134},"status":[0.0]}}
 {"case":"global_visibility_cone_placement","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[196.39850466425324,296.0860944387516,13344.518028225988]],"n":134},"status":[0.0]}}
 {"case":"global_visibility_cone_z","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[189.2703688409112,334.46996051334514,14001.867691999265]],"n":156},"status":[0.0]}}
 {"case":"global_visibility_cylinder_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[508.4008453348967,731.7475501660637,45671.85055576709]],"n":200},"status":[0.0]}}
@@ -472,7 +472,7 @@
 {"case":"point_visible_torus_origin","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1.0],"status":[0.0]}}
 {"case":"silhouettes_box_with_large_fillet_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[274.19997639913635,699.596135140113,25743.961324510557]],"n":162},"status":[0.0]}}
 {"case":"silhouettes_box_with_large_fillet_z","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[433.1321654061611,889.7007078614258,39154.0119545608]],"n":231},"status":[0.0]}}
-{"case":"silhouettes_cone_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[21.433688211861437,269.97352994898444,2271.6205235086713]],"n":116},"status":[0.0]}}
+{"case":"silhouettes_cone_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[21.43368821186145,269.97352994898444,2271.6205235086722]],"n":116},"status":[0.0]}}
 {"case":"silhouettes_cone_z","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[38.26152176505169,242.52462311875658,4246.6901446951415]],"n":116},"status":[0.0]}}
 {"case":"silhouettes_cylinder_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[37.48808906076873,382.6953143421692,3876.7246869850655]],"n":116},"status":[0.0]}}
 {"case":"silhouettes_cylinder_z","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[43.64570774772913,648.1719104551389,7390.744804638114]],"n":185},"status":[0.0]}}
