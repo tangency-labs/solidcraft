@@ -17,8 +17,7 @@ use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::primitive::api_curves::create_arc;
 use solidcore::sweep::api_surfaces::{
-    create_skin_primitive, create_skin_primitive_with_sources, NotTraced, SkinPrimitive,
-    SkinSources,
+    create_skin_primitive, create_skin_primitive_with_sources, SkinPrimitive, SkinSources,
 };
 use solidcore::topology::face::p2 as face2;
 use solidcore::topology::FaceId;
@@ -147,10 +146,29 @@ fn the_traced_skin_is_the_skin() {
     same_skin(&plain, &traced);
 }
 
+/// The distance from `p` to line segment `c` (its points at its interval's ends).
+fn off_segment(k: &Kernel, c: &Curve, p: Point3) -> f64 {
+    let ivl = c.natural_interval();
+    let a = c.evaluate_point(k, ivl.min()).unwrap();
+    let b = c.evaluate_point(k, ivl.max()).unwrap();
+    let d = b - a;
+    let t = ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0);
+    p.distance(a + d * t)
+}
+
+/// Sections whose knots differ (tangency-labs/solidcraft#13632): a square of four sides
+/// against one whose top side is two lines, five curves. The skin rescales both sections'
+/// knots to [0, 1] and gives each the other's, so the trace runs through each section's
+/// knot map. Where the loops start and how they are parametrised are the planar faces' and
+/// the join's choices, so the walls are checked by what those cannot change: each wall holds
+/// at least one curve of each section, every curve is on some wall, and, by closed form,
+/// across the middle of each wall's span its surface lies on one of its first section's
+/// curves at the start of the loft and on one of its second's at the end, within the B-rep's
+/// tolerance. The two collinear halves meet straight on, a join the skin does not split at,
+/// so one wall holds both. The walls themselves are pinned as run fmt-13632-3 traced them.
 #[test]
-fn sections_with_different_knots_are_not_traced() {
+fn sections_whose_knots_differ_are_traced_through_the_skin_s_maps() {
     let mut k = Kernel::default();
-    // the second section's top side is two lines: five curves, knots 0..5 against 0..4
     let mut curves = square(0.0, 1.0, [0, 1, 2, 3], &[]);
     curves.extend([
         line([-1.0, -1.0, 5.0], [1.0, -1.0, 5.0]),
@@ -160,12 +178,49 @@ fn sections_with_different_knots_are_not_traced() {
         line([-1.0, 1.0, 5.0], [-1.0, -1.0, 5.0]),
     ]);
     let (made, sources) = skin(&mut k, &[4, 5], &curves, true);
-    assert!(!made.side_faces.is_empty());
+    let walls = traced(sources);
     assert_eq!(
-        sources,
-        SkinSources::NotTraced {
-            why: NotTraced::SectionsNotKnotIdentical
+        walls.iter().map(|(f, _)| *f).collect::<Vec<_>>(),
+        made.side_faces
+    );
+    // on a curve within the B-rep's own tolerance (`Brep::tolerance`, upstream
+    // `SmBrep::GetTolerance`, its zone tolerance): the distance under which the kernel
+    // takes two points as one, so the kernel's own test of a point lying on a curve
+    let tol = made.brep.tolerance();
+    let mut seen = [false; 9];
+    for (f, of) in &walls {
+        let (first, second): (Vec<usize>, Vec<usize>) = of.iter().partition(|&&c| c < 4);
+        assert!(!first.is_empty() && !second.is_empty(), "{f:?}: {of:?}");
+        for &c in of {
+            seen[c] = true;
         }
+        let surface = face2::surface(&made.brep, *f).unwrap().unwrap();
+        let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        for (u, these) in [(0.0, &first), (1.0, &second)] {
+            let p = surface.evaluate_point(&k, d.evaluate(u, 0.5)).unwrap();
+            let off = these
+                .iter()
+                .map(|&c| off_segment(&k, &curves[c], p))
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                off <= tol,
+                "{f:?} at u {u}: {p:?} is {off} off {these:?} (tol {tol})"
+            );
+        }
+    }
+    assert!(seen.iter().all(|&s| s), "{walls:?}");
+    let got: Vec<Vec<usize>> = walls.iter().map(|(_, of)| of.clone()).collect();
+    assert_eq!(
+        got,
+        [
+            vec![3, 8],
+            vec![3, 4],
+            vec![0, 4],
+            vec![0, 5],
+            vec![1, 5],
+            vec![1, 6],
+            vec![2, 6, 7]
+        ]
     );
 }
 
@@ -265,20 +320,137 @@ fn a_holed_square_s_inner_walls_are_the_hole_s_sides() {
     assert_eq!(seen, (0..8).collect::<Vec<_>>());
 }
 
+/// Open profiles (tangency-labs/solidcraft#13632): each is lofted as one composite, which
+/// the builder chains end to end, here taking the second section's curves out of order and
+/// one reversed. The builder says which curve each segment is, so each wall holds one curve
+/// of each section: the ones whose segments share its span. Each wall is checked by closed
+/// form, its surface through the two curves' midpoints at the loft's two ends.
 #[test]
-fn open_profiles_are_not_traced() {
+fn open_profiles_are_traced_through_the_builder_s_segments() {
     let mut k = Kernel::default();
     let curves = [
         line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
         line([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+        // the second section from its other end, its first curve given second and reversed
+        line([1.0, 1.0, 5.0], [1.0, 0.0, 5.0]),
         line([0.0, 0.0, 5.0], [1.0, 0.0, 5.0]),
-        line([1.0, 0.0, 5.0], [1.0, 1.0, 5.0]),
     ];
-    let (_, sources) = skin(&mut k, &[2, 2], &curves, false);
+    let (made, sources) = skin(&mut k, &[2, 2], &curves, false);
+    let walls = traced(sources);
     assert_eq!(
-        sources,
-        SkinSources::NotTraced {
-            why: NotTraced::OpenProfiles
-        }
+        walls.iter().map(|(f, _)| *f).collect::<Vec<_>>(),
+        made.side_faces
     );
+    let mut pairs = Vec::new();
+    for (f, of) in &walls {
+        let [a, b] = of[..] else {
+            panic!("{f:?}: {of:?}")
+        };
+        wall_runs_from(&k, &made, *f, &curves[a], &curves[b]);
+        pairs.push((a, b));
+    }
+    pairs.sort_unstable();
+    // the builder chains the second section from (1, 1): its first segment is curve 2
+    assert_eq!(pairs, [(0, 2), (1, 3)]);
+}
+
+/// #15263: the end sections share z = 0, and the middle square spans z = 5..15.
+/// Both caps of a valid arch must face down. Check shell orientation separately
+/// from the volume sign so a local reversal cannot masquerade as an inside-out solid.
+#[test]
+fn a_skin_returning_to_its_start_plane_has_two_outward_downward_caps() {
+    use solidcore::mass::integrator::properties::brep_volume_default;
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use solidcore::nurbs::knots::Side;
+    use solidcore::topology::{brep::p2 as brep2, edgeuse::p1 as eu1};
+
+    let sections = [
+        [[0., 0., 0.], [10., 0., 0.], [10., 10., 0.], [0., 10., 0.]],
+        [
+            [15., 0., 5.],
+            [15., 10., 5.],
+            [15., 10., 15.],
+            [15., 0., 15.],
+        ],
+        [[20., 0., 0.], [30., 0., 0.], [30., 10., 0.], [20., 10., 0.]],
+    ];
+    for joined_profiles in [false, true] {
+        let mut k = Kernel::default();
+        let curves: Vec<Curve> = sections
+            .iter()
+            .flat_map(|p| {
+                let mut sides: Vec<_> = (0..4)
+                    .map(|i| {
+                        BSplineCurve::create_line_segment(
+                            3,
+                            Point3::new(p[i][0], p[i][1], p[i][2]),
+                            Point3::new(p[(i + 1) % 4][0], p[(i + 1) % 4][1], p[(i + 1) % 4][2]),
+                        )
+                        .unwrap()
+                    })
+                    .collect();
+                if joined_profiles {
+                    vec![Curve::from(
+                        BSplineCurve::create_by_joining(&mut sides, None).unwrap(),
+                    )]
+                } else {
+                    sides.into_iter().map(Curve::from).collect()
+                }
+            })
+            .collect();
+        let refs: Vec<_> = curves.iter().map(Some).collect();
+        let count = if joined_profiles { 1 } else { 4 };
+        let (mut made, sources) =
+            create_skin_primitive_with_sources(&mut k, &[count; 3], &refs, 2, true).unwrap();
+        assert_eq!(made.brep.face_list().len(), 6);
+        assert_eq!(made.side_faces.len(), 4);
+        assert_eq!(made.start_faces.len(), 1);
+        assert_eq!(made.end_faces.len(), 1);
+        let walls = traced(sources);
+        assert_eq!(walls.len(), 4);
+        for (_, sources) in walls {
+            assert_eq!(sources.len(), 3, "{sources:?}");
+        }
+        assert!(brep2::is_manifold_solid(&made.brep).unwrap());
+        // A reversed cap would disagree with its neighbouring edge uses. Check the
+        // stitched exterior shell directly, independently of its signed volume.
+        for &f in made.brep.face_list() {
+            let outer = face2::outer_faceuse(&made.brep, f).unwrap().unwrap();
+            for eu in eu1::faceuse_edgeuses(&made.brep, outer, false, None).unwrap() {
+                let radial = eu1::radial(&made.brep, eu).unwrap().unwrap();
+                assert_ne!(
+                    eu1::orientation(&made.brep, eu).unwrap(),
+                    eu1::orientation(&made.brep, radial).unwrap(),
+                    "inconsistent exterior edge uses on {f:?}"
+                );
+            }
+        }
+        let mut cap_normals = Vec::new();
+        for &f in made.start_faces.iter().chain(&made.end_faces) {
+            let surface = face2::surface(&made.brep, f).unwrap().unwrap();
+            let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
+            let uv = d.evaluate(0.5, 0.5);
+            let p = surface.evaluate_point(&k, uv).unwrap();
+            let mut n = surface
+                .evaluate_normal(&k, uv, Side::Left, Side::Left)
+                .unwrap();
+            let outer = face2::outer_faceuse(&made.brep, f).unwrap().unwrap();
+            if eu1::faceuse_orientation(&made.brep, outer).unwrap() == OrientType::Opposite {
+                n = -n;
+            }
+            eprintln!("cap {f:?}: point {p:?}, outward normal {n:?}");
+            assert!(p.z.abs() < 1e-9, "cap point {p:?}");
+            cap_normals.push(n);
+        }
+        assert!(
+            cap_normals.iter().all(|n| n.z < -0.999999),
+            "cap outward normals {cap_normals:?}"
+        );
+        let v = brep_volume_default(&k, &mut made.brep, 1e-9).unwrap();
+        eprintln!("joined profiles {joined_profiles}: volume {v} mm3");
+        // Untwisted quadratic boundaries enclose 800/3 mm2, across a 10 mm width.
+        // The historical ~1338 mm3 is not the volume of this untwisted quadratic.
+        assert!((v - 8000.0 / 3.0).abs() < 1e-5, "signed volume {v}");
+        assert!(solidcore::topology::brep::is_outward_solid(&mut k, &mut made.brep).unwrap());
+    }
 }

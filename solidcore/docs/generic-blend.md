@@ -272,7 +272,7 @@ never returns "no kind": a configuration the table does not name is a Setback.
 | event | when | construction |
 |---|---|---|
 | **End** | one blend ends at the vertex | the end rib on the end face, S ∩ E; a tangent side is the tangent end of §3.1 |
-| **Join** | two blends meeting G1 and continuing each other, or one closed blend meeting itself G1, every other edge at the vertex tangent | one shared section |
+| **Join** | two blends meeting G1 and continuing each other, or one closed blend meeting itself G1, every other edge at the vertex tangent, its faces meeting so closely that the two balls are one within the corner's tolerance (faces meeting at an angle a put balls of radius r a distance r a apart), so an upright edge a degree or two off tangent between them makes a Turn | one shared section |
 | **Turn** | two blends sharing a face, turning at a sharp unrounded side edge (a boss base, a pocket's floor or rim; also blends meeting G1 where a side edge between their faces is sharp, such as a ruled loft's side edge at its rim), or one closed blend meeting itself at an angle (a teardrop's tip) | **Mitre** (default) or **Swept** (option) |
 | **Ball** | three equal rounds of one convexity at a vertex of three faces, the vertex not set back | the corner ball's sphere |
 | **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |

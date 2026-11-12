@@ -12,7 +12,6 @@ solid.draft
 solid.hole
 solid.loft
 solid.mirror
-solid.move
 solid.offset_face
 solid.pattern.path
 solid.pattern.rectangular

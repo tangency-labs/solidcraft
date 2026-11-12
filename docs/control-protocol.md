@@ -771,7 +771,7 @@ sends it a line whenever the active design changes (#6985):
 ### Slow commands and the window (#1989)
 
 With the preference **Preferences > AI > Keep the window responsive while agents run commands**
-on (`ui.prefs {"agent_off_thread": true}`; off by default), a design change in the desktop app
+on (the default; `ui.prefs {"agent_off_thread": false}` turns it off), a design change in the desktop app
 that takes longer than about 150 ms (an `engine.execute` of a
 modelling command, an `engine.batch` of them) computes off the window thread, so the window keeps
 drawing and answering while it runs:
@@ -789,8 +789,12 @@ drawing and answering while it runs:
   (another tab made active, a new file opened, its tab closed), the request fails at once with
   `… the design was replaced … nothing was applied`, and the requests behind it go on.
 - A row of the operations panel in the view's bottom-right corner names the command, with how
-  many of a batch's steps are done and a red X (with **Preferences > Layout > Show operations
-  in the view** off, a chip with **Stop** instead; `ui.operations` lists and cancels the rows).
+  many of a batch's steps are done (hover it for the steps still to come) and a red X (with
+  **Preferences > Layout > Show operations in the view** off, a chip with **Stop** instead;
+  `ui.operations` lists and cancels the rows). Each design change waiting behind it is a row of
+  its own, numbered by its place in the queue (1 runs next), whose X cancels just that one; the
+  panel shows the first 4 and one "N more waiting" row whose X cancels the rest, while
+  `ui.operations` lists every one of them, each cancellable by its own `key`.
   The X answers `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and
   the requests waiting behind it go on. The computation stops before its next feature or boolean,
   in the background. The agent can do the same for its own request with `control.cancel` (above).
@@ -891,7 +895,7 @@ no box selection.
 | `ui.confirm` | `accept?`: bool | answers the Delete confirmation (shown when a delete takes other features with it or makes some fail); without `accept`, what it lists |
 | `ui.messages` | `clear?`: `true` (empty the list), `open?`: bool (show or hide the Messages window) | every status message of this run, oldest first (the last 200; a message repeated in a row is one entry with a `count`): `messages` `[{text, error, at, count}]` (`at` in ms since the Unix epoch), and whether the window is `open` (#2763) |
 | `ui.documents` | `action?`: `new`, `switch`, `close`, `close_all`, `close_others`, `move`, `quit`; `index?`; `from?`, `to?` (move); `save_indices?`: array of tab indices to tick in the grouped save prompt; `save_row?`, `discard_row?`: tab index to save or discard and close in that prompt; `force?` (close without asking); `answer?`: `save`, `dont_save`, `cancel` (answers "save changes?"); `open_elsewhere?`: `read_only`, `anyway`, `cancel` (answers "open elsewhere" for the first Open waiting); `changed_on_disk?`: `save_copy`, `overwrite`, `cancel` (answers "changed on disk" before a Save) | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt, `save_prompt` (null or rows with `index`, `name`, `path` (null if never saved), `selected`), whether a quit is asking, whether the active design is `read_only`, the Opens waiting for "open elsewhere" (`open_elsewhere`) and a waiting "changed on disk" (`changed_on_disk`) |
-| `ui.operations` | `cancel?`: an operation's `key` | the operations under way, newest first, as the view's operations panel shows them: `key`, `label`, `steps` (`{done, total}` when the work counts them), `queued`, `cancelling`, `cancellable`, and whether the panel is `shown`. With `cancel`: cancels that operation as its X does (its work stops at its next check and nothing of it is applied; operations queued behind it go on); an error when no such operation is under way or it can't be cancelled (a save being written) |
+| `ui.operations` | `cancel?`: an operation's `key` | the operations under way, newest first, as the view's operations panel shows them: `key`, `label`, `steps` (`{done, total}` when the work counts them; `percent`: they are bytes, a file read or written), `queued`, `cancelling`, `cancellable`, `next` (on the row of an agent batch: the names of its steps still to come, at most 12, which the row shows as a tooltip); each design change held behind the agent's running one is a queued row of its own, which the X cancels (it is answered as cancelled and never runs); those that ended in the last minute (`finished`, newest first, at most 16): `key`, `label`, `outcome` (`done`, `failed` with its `error`, or `cancelled`) and `ms_ago` (one done within the app's wait was never under way, and isn't listed); and whether the panel is `shown`. With `cancel`: cancels that operation as its X does (its work stops at its next check and nothing of it is applied; operations queued behind it go on); a save stops unless it is already replacing its file, and leaves the file, its backup and the design's unsaved changes as they were (it then ends `cancelled`); an error when no such operation is under way or it can't be cancelled (an opened design's bodies being meshed) |
 | `ui.file` | `path`; `insert?`: bool | starts an interactive background Open or Insert; poll `ui.inspect.file_busy` for completion; the window stays responsive |
 | `ui.home` | `open?`: bool; `sample?`: index | the start page: show or hide it, open a built-in sample (once built); returns `open` and the recent designs |
 | `ui.shortcut` | `command`, `key?`, `slot?`, `replace?` | a command's keys (`key`: the first, shown in menus; `keys`: all), or rebinds it: `key` becomes its only key, or with `slot` replaces its key there (one past the last adds a key, `""` there removes that key); `""` without `slot` clears them; key names are case-insensitive and modifiers are normalized (`shift+ctrl+t` becomes `Ctrl+Shift+T`); unknown and reserved keys are refused; a key another command uses is refused unless `replace` |
@@ -963,9 +967,11 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
+- `dimension_colour` (`null` (default) or `[r, g, b]` numbers 0…255: the colour a sketch dimension draws its lines, arrows and value in; null uses the theme's dimension colours. Selection, hover and conflicts keep their own colours, #14121)
 - `dimension_input` (`view` (default): a sketch dimension's value is typed in a box on the dimension; `window`: placing a dimension with the Dimension tool, or double-clicking one, opens a small window at it with the value field (handle `dimwin:value`), arrows that step the value (`dimwin:up`, `dimwin:down`), a check (`dimwin:ok`, also Enter) and a cross (`dimwin:cancel`, also Esc), #7246)
 - `dimension_step_deg` (default 1, 0.001…180: what the dimension window's arrows, Up/Down and the wheel over its field add to an angle, in degrees)
 - `dimension_step_mm` (default 1, 0.001…1000: what the window's arrows, Up/Down and the wheel over its field add to a length, in millimetres, written in the unit the value is written in)
+- `dimension_text_scale` (default 1, 0.5…2.5: how far a sketch dimension's text is scaled; it applies in the open sketch and to Show Dimensions, #14121)
 - `escape_twice_finishes_sketch` (default true: in a sketch, two quick presses of Esc (0.4 s apart or less) with no tool or dialog left to cancel finish it, as before; false: Esc only cancels the tool, dialog or selection and the sketch stays open until Finish Sketch, #12069)
 - `export_name` (string, default empty: each export offers the design's name, or a mesh its body's; otherwise the name File › Export and Save As Mesh offer, with `{design}`, `{body}` (the exported body's name) and the design properties (`{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}`) replaced; [export file names](book/src/guide/files.md#export-file-names))
 - `extrude_arrow_face_stops` (default true: dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it, takes their exact distance and outlines them, #2398; false: the drag moves in round steps only, as before)
@@ -985,6 +991,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `joint_drag_trackball` (default true: dragging a part that a ball joint holds to a part fixed in place turns it by the smallest turn about the joint, like a trackball the size of the part; false: the grabbed point follows the pointer and the part may spin about it, as before #13262)
 - `joint_rotation_coarse` (default 10°): coarse Assembly Move rotation step, in 0.001…180°.
 - `joint_rotation_fine` (default 0.1°): fine Assembly Move rotation step, in 0.001…180°.
+- `keep_hover_while_navigating` (default true: the face under the pointer keeps its highlight while the view moves under it; off: the highlight goes off while the view moves, as before, #2130)
 - `keep_unsaved_also_asks` (default true; web app, with `keep_unsaved_in_browser` on: the browser's "leave site?" box still appears when the tab closes with unsaved work; off, it appears only while a copy isn't current yet, #10220)
 - `keep_unsaved_in_browser` (default false; web app: each open design's unsaved changes are kept current in the browser's private storage, and the next visit offers them back in a "Restore unsaved design?" window with Restore, Open saved version and Discard; off, nothing is kept, #10220)
 - `keep_work_on_tab_switch` (default false: each design tab keeps its open dialog or tool, with what was picked and typed in it, and its toolbar tab while another design is shown, and has them back when it is shown again; off, a switch cancels them and shows MODEL, #9360)
@@ -1057,13 +1064,13 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `toast_place` (`corner` (default: notices and offers stack in one column in the view's bottom-right corner, each 360 points wide, buttons right-aligned with the main action right-most, #7893), `centre` (at the bottom centre above the view toolbar, each as wide as its text, as before))
 - `trackpad_pan` (default true: two-finger scroll pans, except Touchpad always zooms; pinch zooms)
 - `trackpad_zoom_modifier` (`off` default, `cmd`, `alt`, or `ctrl`: hold this key alone for vertical scroll to zoom)
-- `ui_font` (an installed font family or a font file for the interface; empty for the built-in font)
+- `ui_font` (an installed font family or a font file for the interface; empty for the built-in font; a `Family-Weight.ttf` file also takes its heavier sibling files for bold text, see [interface fonts](fonts.md))
 - `ui_scale`
 - `up_axis` (`z`, `y`)
 - `view_confirm_corner` (default false: while a dialog or a sketch is open, a check and a cross at the view's top right, handles `view:confirm:ok` and `view:confirm:cancel`, do what the dialog's OK and Cancel do, or Finish Sketch and Cancel Sketch; the axis view or cube moves down below them, #6709)
 - `viewport_theme` (`theme` (default: the theme's own), `light`, `dark`: the 3D view in the Light or Dark theme's colours whatever the window uses, #4146)
 - `wheel_zoom_speed` (0.25 to 4, default 1: how far each wheel step zooms; the 3D mouse keeps its own speed)
-- `window_system` (Linux: `auto` (default: XWayland whenever there is an X display, native Wayland on niri), `wayland`, `x11`; saved in `graphics.json`, applies at the next start; `SOLIDCRAFT_WAYLAND` overrides it)
+- `window_system` (Linux: `auto` (default: XWayland whenever there is an X display, native Wayland on niri and Hyprland), `wayland`, `x11`; saved in `graphics.json`, applies at the next start; `SOLIDCRAFT_WAYLAND` overrides it)
 - `zoom_reverse`
 - `zoom_stop_at_model` (default false: the 3D mouse and navigation bridge stop zoom at the surface in the middle of the view; drag-zoom holds its press point; independent of `zoom_to_cursor`)
 - `zoom_to_cursor`

@@ -48,10 +48,10 @@ impl SurfaceEval {
     pub(crate) fn project_with(&self, starts: &Starts, p: Vec3, near: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
         self.0.project_with(starts, c::vec3(p), near, accept)
     }
-    /// Whether `uv` is at a pole along each direction, or within `reach` of one, by the
-    /// surface's speeds there ([`k::pcurve::pole_by_speed`]).
-    pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> [bool; 2] {
-        k::pcurve::pole_by_speed(&self.0, &self.0.domain(), uv, reach)
+    /// Whether `uv` is at a pole along each direction, or within `reach` mm of one
+    /// ([`k::SurfaceEval::pole_within`]); refused where that cannot be decided.
+    pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], String> {
+        self.0.pole_within(uv, reach).map_err(|e| e.to_string())
     }
 }
 
@@ -129,14 +129,13 @@ pub(crate) mod form {
         };
         Some((curve_out(label)?, i, form))
     }
-    /// The parameter box of a face on `label` over its boundary ([`k::form::extent_by`]), its
-    /// boundary points on a pole by the pcurves' speed rule, as the reader has always bounded its
-    /// faces: with the kernel's exact collapse test 7 STEP Tools parts get a loop of no (u, v)
-    /// area and are refused.
-    pub(crate) fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Option<[[f64; 2]; 2]> {
+    /// The parameter box of a face on `label` over its boundary ([`k::form::extent`]), a boundary
+    /// point on a pole where the label is collapsed there within `reach` mm (the face's
+    /// tolerance).
+    pub(crate) fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>], reach: f64) -> Option<[[f64; 2]; 2]> {
         let converted: Vec<Vec<(k::Curve, [f64; 2], bool)>> =
             loops.iter().map(|l| l.iter().map(|(cv, i, f)| Some((curve_in(cv)?, *i, *f))).collect::<Option<_>>()).collect::<Option<_>>()?;
         let borrowed: Vec<Vec<(&k::Curve, [f64; 2], bool)>> = converted.iter().map(|l| l.iter().map(|(cv, i, f)| (cv, *i, *f)).collect()).collect();
-        k::form::extent_by(&surface_in(label)?, &borrowed, &|eval, q| Ok(k::pcurve::pole_by_speed(eval, &eval.domain(), q, 0.0))).ok().flatten()
+        k::form::extent(&surface_in(label)?, &borrowed, reach).ok().flatten()
     }
 }

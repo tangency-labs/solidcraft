@@ -1018,6 +1018,7 @@ fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
         marker: 0,
         steps: 0,
         floating,
+        reorder: true,
         handles: BAR_HANDLES,
     }
 }

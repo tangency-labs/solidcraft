@@ -87,6 +87,31 @@ use crate::topology::{edge, face, loopuse, Brep, EdgeId, EdgeuseId, FaceId};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// The B-rep's regions in the order [`BrepData::from_brep`] lists them: the region list with
+/// the infinite region moved to its head. Region `i` of the data is `data_regions(b)[i]`, and
+/// its shells are that region's, in its list order.
+///
+/// # Errors
+///
+/// Those of the region list walk.
+pub fn data_regions(b: &Brep) -> Result<Vec<crate::topology::RegionId>> {
+    let regions = bl::regions(b, None)?;
+    match b.infinite_region() {
+        Some(infinite)
+            if regions.len() > 1
+                && regions.first() != Some(&infinite)
+                && regions.contains(&infinite) =>
+        {
+            // the list's regions are distinct: the infinite region moves to the head, the
+            // others keep their order
+            Ok(std::iter::once(infinite)
+                .chain(regions.into_iter().filter(|&r| r != infinite))
+                .collect())
+        }
+        _ => Ok(regions),
+    }
+}
+
 /// `SM_CURRENT_DATABASE_VERSION`: the version [`BrepData::write_to_file`] writes.
 pub const DATABASE_VERSION: u64 = 42;
 
@@ -1286,14 +1311,7 @@ impl BrepData {
         bd.attributes = extract_attributes(&mut table, b.key());
 
         // Regions: place infinite region at head of list
-        let mut regions = bl::regions(b, None)?;
-        let infinite = b.infinite_region();
-        if regions.len() > 1 && regions.first().copied() != infinite {
-            if let Some(i) = regions.iter().skip(1).position(|&r| Some(r) == infinite) {
-                let r = regions.remove(i + 1);
-                regions.insert(0, r);
-            }
-        }
+        let regions = data_regions(b)?;
         bd.num_regions = regions.len() as u64;
         let mut all_shells = Vec::new();
         for (i, &r) in regions.iter().enumerate() {

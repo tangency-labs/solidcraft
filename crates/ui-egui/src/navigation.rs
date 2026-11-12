@@ -208,6 +208,7 @@ pub(crate) fn immediate_wheel(
     options: egui::InputOptions,
     page_height: f32,
     gesture: &mut bool,
+    bracketed: &mut bool,
     coast: &mut TrackpadCoast,
     shift_orbits: bool,
     zoom_modifier: Option<egui::Modifiers>,
@@ -222,7 +223,7 @@ pub(crate) fn immediate_wheel(
         mouse_pan: egui::Vec2::ZERO,
     };
     for event in &input.events {
-        let egui::Event::MouseWheel { unit, delta, modifiers, phase, .. } = event else { continue };
+        let egui::Event::MouseWheel { unit, delta, modifiers, phase, source, .. } = event else { continue };
         let modifier_zoom = claims_scroll(*modifiers, zoom_modifier);
         if !modifier_zoom && modifiers.matches_any(options.zoom_modifier) {
             continue;
@@ -237,6 +238,10 @@ pub(crate) fn immediate_wheel(
                     }
                     *gesture = true;
                 }
+                // The platform opened a bracket around the gesture, which lasts until its
+                // End or Cancel (#2130). Only a finger's scroll opens one: a mouse wheel
+                // never sends an End, so it keeps the timeout recovery below.
+                *bracketed = point;
                 continue;
             }
             egui::TouchPhase::End | egui::TouchPhase::Cancel => {
@@ -246,9 +251,17 @@ pub(crate) fn immediate_wheel(
                     }
                     *gesture = false;
                 }
+                // The bracket closed: the gesture is over.
+                *bracketed = false;
                 continue;
             }
-            egui::TouchPhase::Move => {}
+            egui::TouchPhase::Move => {
+                if point && matches!(source, egui::MouseWheelSource::Trackpad) {
+                    // A finger keeps its bracket open between the moves: the fingers rest
+                    // on the pad and the platform says nothing until they lift again.
+                    *bracketed = true;
+                }
+            }
         }
         let points = wheel_points(*unit, *delta, options, page_height);
         if !points.is_finite() {
@@ -681,7 +694,16 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let zoom_modifier = app.preferences.trackpad_zoom_modifier.modifiers();
     let viewport = &mut app.viewport;
     let raw = ui.input(|i| {
-        immediate_wheel(i, options, page_height, &mut viewport.trackpad_gesture, &mut viewport.trackpad_coast, trackpad_orbit, zoom_modifier)
+        immediate_wheel(
+            i,
+            options,
+            page_height,
+            &mut viewport.trackpad_gesture,
+            &mut viewport.trackpad_gesture_bracketed,
+            &mut viewport.trackpad_coast,
+            trackpad_orbit,
+            zoom_modifier,
+        )
     });
     if raw.modifier_scroll {
         // Apply modifier scroll once, without egui's scroll smoothing or its tail.
@@ -694,8 +716,12 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     } else if !ui.input(|i| i.is_scrolling()) {
         app.viewport.trackpad_until_idle = false;
         // Self-healing: with no scroll activity no gesture can be mid-flight
-        // (its End was lost); a stuck flag would pan future mouse input.
-        app.viewport.trackpad_gesture = false;
+        // (its End was lost); a stuck flag would pan future mouse input. A gesture the
+        // platform bracketed is still in flight: the fingers rest on the pad between two
+        // moves, and only its own End or Cancel ends it (#2130).
+        if !app.viewport.trackpad_gesture_bracketed {
+            app.viewport.trackpad_gesture = false;
+        }
     }
     let mut pan =
         if trackpad_pan { raw.pan + if trackpad_orbit { egui::Vec2::ZERO } else { raw.shift_pan } } else { egui::Vec2::ZERO } + raw.mouse_pan;
@@ -883,7 +909,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             let mut params = json!({"motion":if mode == NavMode::Pan {"pan"} else {"orbit"},"delta":[delta.x,delta.y]});
             if mode == NavMode::Orbit {
                 let pivot = match app.preferences.orbit_around {
-                    crate::prefs::OrbitAround::ViewCentre => None,
+                    crate::prefs::OrbitAround::ViewCentre => view_middle_pivot(app, rect),
                     crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
                     crate::prefs::OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
                         Some(pivot) => pivot,
@@ -985,6 +1011,38 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let inside = inside && !zoom_drag;
     let primary_nav = if zoom_drag { Some(NavMode::Zoom) } else { primary_nav };
     CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, inside, axes, pinch, pan, primary_nav, mode }
+}
+
+/// Whether the view is moving under a pointer that stays where it is: the wheel, the
+/// trackpad or the pinch.
+///
+/// Such a gesture owns the view, not the pointer: the face under the pointer keeps its
+/// highlight for the whole gesture, the way Fusion does (#2130). The caller freezes the
+/// hover instead of clearing it. A mouse drag, the spin and an animated view move the
+/// pointer's own target instead, and their hover goes off as before.
+pub(crate) fn view_moving(app: &SolveApp, scroll: f32, pinch: f32, pan: egui::Vec2) -> bool {
+    scroll != 0.0
+        || pinch != 1.0
+        || pan != egui::Vec2::ZERO
+        // A bracketed trackpad scroll keeps the gesture alive between its events, so the
+        // highlight does not blink while the fingers rest between two moves.
+        || app.viewport.trackpad_gesture
+}
+
+/// The hover stays lit while the view moves under a still pointer, and goes off when the
+/// pointer's own target moves (a mouse drag, the spin, an animated view) (#2130).
+///
+/// This is the one place that decides it: the wheel, the trackpad and the pinch move the
+/// view under a pointer that stays where it is, so the face under it keeps its highlight
+/// for the whole gesture, the way Fusion does; a mouse drag moves the pointer's own
+/// target, so its hover goes off as before. With `keep_hover_while_navigating` off the
+/// highlight always goes off while the view moves, as it did before the freeze.
+pub(crate) fn hover_is_frozen(input: &CameraInput, app: &SolveApp) -> bool {
+    if !app.preferences.keep_hover_while_navigating {
+        return false;
+    }
+    let pointer_owns = input.middle || input.secondary_down || (input.primary_nav.is_some() && input.primary_down);
+    view_moving(app, input.scroll, input.pinch, input.pan) && !pointer_owns
 }
 
 /// How close to the view's edge (points) an orbit drag moves the cursor to the other side.
@@ -1267,7 +1325,7 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     if app.preferences.free_orbit {
         target = snapped_quarter_roll(target, free);
     }
-    // The cursor and origin pivots stay still; the axis gizmo has no pivot (it orbits about the
+    // The cursor, origin and view-centre pivots stay still; the axis gizmo has no pivot (it orbits about the
     // view centre, see `axis_view`).
     let pivot = if around_cursor {
         match app.preferences.orbit_around {
@@ -1311,14 +1369,15 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
     }
 }
 
-/// Orbit by pixel deltas about the configured centre: the view's centre (default), the world
-/// origin, or the model point that was under the cursor when the drag began. The origin and the
-/// cursor pivot are kept still on screen; a cursor drag that begins over empty space turns around
-/// the centre of the visible geometry instead, so the model never swings around a far-off point.
-/// The cursor pivot is chosen once, when the drag begins.
+/// Orbit by pixel deltas about the configured centre: the view's centre (default, see
+/// [`view_middle`]), the world origin, or the model point that was under the cursor when the drag
+/// began. Every pivot is kept still on screen; a cursor drag that begins over empty space turns
+/// around the centre of the visible geometry instead, so the model never swings around a far-off
+/// point. The cursor pivot is chosen once, when the drag begins; the view-centre pivot too, while
+/// it stays under the middle of the view (see [`kept_view_middle`]).
 pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>) {
     let pivot = match app.preferences.orbit_around {
-        OrbitAround::ViewCentre => None,
+        OrbitAround::ViewCentre => view_middle_pivot(app, rect),
         OrbitAround::Origin => Some(Vec3::ZERO),
         OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
             Some(p) => p,
@@ -1356,13 +1415,16 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
     app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
 }
 
-/// What continuous orbit turns about, by Orbit around: the view's centre (none), the world origin,
-/// or around the cursor the model point in the middle of the view (else the middle of the bodies
-/// in view), chosen once when the spin starts. Turning about the view's centre instead let the
+/// What continuous orbit turns about, by Orbit around: the view's centre ([`view_middle`]), the
+/// world origin, or around the cursor the model point in the middle of the view (else the middle
+/// of the bodies in view), chosen once when the spin starts. Turning about the view's centre instead let the
 /// model swing out of view once earlier cursor orbits had left that centre off the model (#1044).
 fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
     match app.preferences.orbit_around {
-        OrbitAround::ViewCentre => None,
+        OrbitAround::ViewCentre => {
+            app.viewport.spin_pivot = kept_view_middle(app, rect, app.viewport.spin_pivot);
+            app.viewport.spin_pivot
+        }
         OrbitAround::Origin => Some(Vec3::ZERO),
         OrbitAround::Cursor => Some(match app.viewport.spin_pivot {
             Some(p) => p,
@@ -1373,6 +1435,60 @@ fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
             }
         }),
     }
+}
+
+/// The orbit pivot around the view's centre for the drag under way (see [`kept_view_middle`]).
+fn view_middle_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
+    app.viewport.orbit_pivot = kept_view_middle(app, rect, app.viewport.orbit_pivot);
+    app.viewport.orbit_pivot
+}
+
+/// [`view_middle`] for an orbit under way: the point it began with while that point is still under
+/// the free view's middle (turning about it keeps it there), else the point under it now, as after
+/// a pan or a zoom in the same gesture.
+fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>) -> Option<Vec3> {
+    let middle = home_centre(app);
+    let proj = || projection(app, rect);
+    match kept.zip(middle) {
+        Some((p, m)) if proj().to_screen(p).is_some_and(|s| s.distance(m) < 0.5) => Some(p),
+        _ => view_middle(app, rect),
+    }
+}
+
+/// The screen point Home and Fit centre the model on, through the one function they use
+/// ([`crate::viewport_layout::framing_centre`]), so the pivot is exactly where Home leaves the model; the free
+/// view's middle (`Layout::middle`) when there is no model to frame.
+fn home_centre(app: &SolveApp) -> Option<Pos2> {
+    let layout = app.viewport.layout.as_ref()?;
+    let bounds = crate::viewport::view_bounds(app);
+    crate::viewport_layout::framing_centre(app.cam, &bounds, layout).or_else(|| Some(layout.middle.center()))
+}
+
+/// What orbit around the view's centre turns about: the point at the camera target's depth under
+/// the middle of the part of the view the panels leave free (`Layout::middle`). Home and Fit move
+/// the model towards that middle, as far as the compass and the navigation bar leave room. With
+/// the Browser open the middle lies beside the window's centre, and turning about the window's
+/// centre swung the model off to one side (#14651). `None`, so that the camera turns about its
+/// target, when the middle is within half a point of the window's centre, before the view is
+/// first laid out, in the Render workspace (which frames its own picture), and when the camera
+/// gives no finite point.
+pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
+    if crate::render_workspace::active(app) {
+        return None;
+    }
+    let middle = home_centre(app)?;
+    if !middle.is_finite() || middle.distance(rect.center()) < 0.5 {
+        return None;
+    }
+    let proj = projection(app, rect);
+    let (origin, dir) = proj.ray(middle);
+    let back = proj.cam.back();
+    let along = dir.dot(back);
+    if along.abs() < 1e-9 {
+        return None;
+    }
+    let p = origin + dir * ((proj.cam.target - origin).dot(back) / along);
+    p.is_finite().then_some(p)
 }
 
 /// An orbit drag so far: the camera it began with, the pointer's total motion since, the pivot
@@ -1461,12 +1577,47 @@ mod tests {
                 egui::InputOptions::default(),
                 600.0,
                 gesture,
+                &mut false,
                 &mut Default::default(),
                 false,
                 Some(egui::Modifiers::COMMAND),
             ),
             events,
         )
+    }
+
+    /// #2130: the platform's bracket around a trackpad gesture stays open from its
+    /// `Start` until its `End`, so the pause between two of its moves does not end it.
+    #[test]
+    fn a_trackpad_gesture_stays_bracketed_until_its_end() {
+        let options = egui::InputOptions::default();
+        let event = |phase, source| egui::Event::MouseWheel {
+            source,
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(8.0, 12.0),
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
+        let mut gesture = false;
+        let mut bracketed = false;
+        let mut coast = super::TrackpadCoast::default();
+
+        let mut input = egui::InputState::default();
+        input.events = vec![event(egui::TouchPhase::Start, egui::MouseWheelSource::Trackpad)];
+        super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, true, None);
+        assert!(gesture && bracketed, "the gesture starts inside its bracket");
+
+        // A move in the middle of the gesture keeps the bracket open.
+        let mut input = egui::InputState::default();
+        input.events = vec![event(egui::TouchPhase::Move, egui::MouseWheelSource::Trackpad)];
+        super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, true, None);
+        assert!(bracketed, "the bracket stays open between the moves");
+
+        // Its End closes the gesture and the bracket.
+        let mut input = egui::InputState::default();
+        input.events = vec![event(egui::TouchPhase::End, egui::MouseWheelSource::Trackpad)];
+        super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, true, None);
+        assert!(!gesture && !bracketed, "the End closes the gesture and its bracket");
     }
 
     #[test]
@@ -1497,7 +1648,7 @@ mod tests {
                         };
                         let mut input = egui::InputState::default();
                         input.events = if bracket { vec![event(P::Start), event(P::Move), event(P::End)] } else { vec![event(P::Move)] };
-                        let raw = super::immediate_wheel(&input, options, 600.0, &mut false, &mut Default::default(), true, chosen);
+                        let raw = super::immediate_wheel(&input, options, 600.0, &mut false, &mut false, &mut Default::default(), true, chosen);
                         let expected = match chosen {
                             Some(m) if m == M::COMMAND => [M::COMMAND, M::CTRL | M::COMMAND, M::MAC_CMD | M::COMMAND].contains(&held),
                             Some(m) if m == M::CTRL => [M::CTRL, M::CTRL | M::COMMAND].contains(&held),
