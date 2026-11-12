@@ -465,7 +465,7 @@ that cannot be read keeps its bodies, is tried again the next time, and holds up
 `update_changed_links`) turns this off.
 
 **Insert STEP** also links `.step` and `.stp` files on disk. Its component shows the same link
-in the Browser, with **Update Links** and **Break Link** in its menu. Saving the assembly stores
+in the Browser, and **Update Links** and **Break Link** (Insert › Links) work on it. Saving the assembly stores
 the source path relative to its folder. Updates replace the imported bodies in one undo step;
 references that still resolve are kept, and references that no longer resolve are reported. Missing
 or corrupt sources keep their previous bodies and are retried next time, without holding up
