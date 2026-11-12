@@ -22,10 +22,25 @@ scopes and unwind guards, so a running setup keeps `gpu-path-setup.json` (its ad
 settings folder and removes it when the setup answers or the app closes normally. A launch that
 finds it for the same adapter key leaves the setup failed with that explanation until the user
 chooses **Try again**; a driver update changes the key and so tries again.
-The path tracer runs on Vulkan, or on Metal on macOS (#3217). A viewport on D3D12 is reopened on the
-same GPU through Vulkan. Where there is no Vulkan or Metal driver (Windows over
-Remote Desktop or on the WARP software adapter, older drivers), the path executor reports
-itself unavailable and images render on the CPU. On an RTX 4090, D3D12 was never faster:
+The path tracer runs on Vulkan, or on Metal on macOS (#3217). On Windows, the viewport
+must already use Vulkan: opening a driver that startup deliberately avoided is unsafe.
+A Direct3D 12 session offers **Restart with Vulkan** in Render. The same saved choice is
+available in **Preferences > Graphics > Graphics API**. The host reads it before creating
+any adapter or device. Automatic keeps the existing Windows Direct3D 12 first policy.
+Elsewhere, an unsupported viewport backend may reopen the same GPU through Vulkan or Metal.
+Where there is no suitable driver or device (Remote Desktop, WARP, older drivers), the path
+executor reports itself unavailable and CPU image methods remain usable.
+
+Changing the API records its previous value in graphics.json. Before the first attempted
+startup, the host atomically marks that choice as started. Only presentation of the first
+frame confirms it. An interrupted attempt restores the previous choice on the next normal
+launch; a handled startup failure restores it before retrying. Safe mode, explicit launch
+overrides and process-local fallback launches leave a pending attempt untouched. This is
+startup recovery, not a timed image-confirmation or post-startup hang watchdog.
+Unrelated graphics preference changes preserve the backend and recovery metadata.
+The normal quit flow asks about unsaved documents before restart and reopens saved tabs.
+
+On an RTX 4090, D3D12 was never faster:
 equal per sample with DXC and about 55% slower with FXC, and it compiles the path shader
 at every start (about 82 s with DXC, about 2 hours with FXC), where Vulkan's compiled
 pipelines persist between runs.
@@ -90,7 +105,10 @@ The original integrator uses software BVH traversal, opaque GGX/Smith/Schlick an
 the symmetric diffuse attenuation defined by `render::surface`. Each hit evaluates
 the three existing directional studio lights with shadow visibility. Continuation
 samples a mixture of cosine-weighted diffuse and visible GGX normals with the combined
-PDF; Russian roulette begins after four hits. There are indirect bounces, but no
+PDF. The diffuse lobe gets 0.5 × (1 − metallic) of the uncoated samples, so a
+pure metal, which has no diffuse response, spends all of them on its specular
+lobe; the density weights the lobes the same way, so the estimate is unbiased.
+Russian roulette begins after four hits. There are indirect bounces, but no
 environment illumination in the default legacy lighting profile. All legacy opaque colors use
 linear-sRGB base color, metallic 0, roughness 0.5, IOR 1.5. Explicit face appearances
 take precedence over body appearances.
@@ -148,7 +166,9 @@ has at most two live jobs across both executors.
 
 Validation lives in `gpu::path::tests` and engine render job tests. Set
 `SOLIDCRAFT_REQUIRE_GPU=1` to make absence of an adapter fail device tests rather
-than skip them. BRDF parity is checked against the f64 oracle with 0.3% relative
+than skip them. The shared viewport crates (`solidcraft-viewport`, `-gpu`, `-egui`) read none of SolidCraft's
+variables: its own GPU tests take `VIEWPORT_TEST_GPU` (the adapter policy, as `SOLIDCRAFT_GPU`)
+and `VIEWPORT_TEST_REQUIRE_GPU=1` (a missing adapter fails), and CI sets both beside the app's. BRDF parity is checked against the f64 oracle with 0.3% relative
 plus 2e-5 absolute tolerance. The near-white furnace allows 0.07 absolute error:
 the existing single-scattering Schlick model is not a perfectly conserving pure
 Lambertian surface, even at IOR 1. Same-adapter determinism compares the actual
@@ -158,6 +178,45 @@ The ignored `path_performance` test builds a 1,048,576-triangle procedural spher
 and measures 1920×1080 dispatches, BVH construction and upload. Select sample count
 with `SOLIDCRAFT_PATH_BENCH_SAMPLES` (default 1). Run it explicitly with a clear GPU
 timing window; it is excluded from normal CI.
+
+## Clamping indirect light
+
+Polished metal can stay speckled however many samples a render takes: a rare path from
+a shiny surface to another and on to a bright light carries far more light than its
+neighbours, and the [denoiser](render-denoise.md) leaves smooth metal alone. The
+optional `clamp_indirect` job option limits such paths:
+
+```json
+{"command":"render.start","params":{"settings":{"width":800,"height":600},"progressive":true,"samples":1024,"denoise":true,"clamp_indirect":8}}
+```
+
+- From the first bounce on, each contribution a path adds (the direct light at one
+  surface or volume point, or one light, environment or sun hit) is scaled so its
+  largest channel is at most the limit, keeping its hue. What the camera's first hit
+  adds is never clamped: lights and the environment it sees directly, and the direct
+  light where it lands. Anything seen through glass or in a glass reflection is past
+  the first bounce, so it is clamped.
+- The limit is linear radiance before exposure, from 0.000001 to 1,000,000. Absent or
+  null means off; zero is refused rather than meaning off.
+- Light that rough, dispersive or thin-film glass connects to a light in a separate pass
+  after the path (the optical hard-light connections) is not clamped. Photon caustic
+  gathers and the direct light of a rough glass sheet are clamped like any other
+  contribution.
+- The clamp is compiled only into a separate version of each path program (opaque or
+  glass, with or without maps, the optical glass programs and the caustic camera
+  program), which the first job that sets it builds once per device and later ones
+  reuse. Jobs without it keep the ordinary programs, so their images do not change by a
+  single bit: even an untaken branch at the integrator's adds changes how the shader
+  compiler fuses them.
+- It is biased: it removes light, so it also dims real caustics, glints and bright
+  reflections of lights in shiny surfaces. A limit a few times the brightest radiance
+  a reflection should show keeps most real highlights; a lower one removes more speckle
+  and more real light.
+- It changes the path samples themselves, so the raw linear EXR master is clamped too,
+  not only the PNG.
+- Only the native `gpu-path` executor applies it; non-progressive requests and other
+  executors refuse it. Preflight reports it in `options.clamp_indirect` and an
+  `indirect_clamp` summary, and a saved GPU setup keeps it in `job.options`.
 
 ## Dispatch and device-loss behavior
 

@@ -280,12 +280,26 @@ fn results_still_save_and_export_the_script_once() {
     let saved = dir.0.join("box.json");
     let stl = dir.0.join("box.stl");
     let obj = dir.0.join("box.obj");
+    let glb = dir.0.join("box.glb");
     let result = json_output(
-        cli().arg("run").arg(dir.script()).arg("--results").arg("--save").arg(&saved).arg("--out").arg(&stl).arg("--out").arg(&obj).output().unwrap(),
+        cli()
+            .arg("run")
+            .arg(dir.script())
+            .arg("--results")
+            .arg("--save")
+            .arg(&saved)
+            .arg("--out")
+            .arg(&stl)
+            .arg("--out")
+            .arg(&obj)
+            .arg("--out")
+            .arg(&glb)
+            .output()
+            .unwrap(),
     );
     assert_eq!(result.as_array().unwrap().len(), 1);
     assert_eq!(body_count(&saved), 1);
-    for exported in [&stl, &obj] {
+    for exported in [&stl, &obj, &glb] {
         assert!(std::fs::metadata(exported).unwrap().len() > 0);
         assert_eq!(body_count(exported), 1);
     }
@@ -507,7 +521,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
         std::fs::read(&png).unwrap()
     };
     // Pictures are drawn on the GPU: without an adapter only the option checks below run.
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(_) => {
             let alone = shot("alone.png", &[shifted.as_os_str()]);
             let on_base = shot("on_base.png", &[shifted.as_os_str(), "--in".as_ref(), base.as_os_str()]);
@@ -515,7 +529,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
             assert_ne!(alone, on_base, "the script ran on the --in design");
             assert_ne!(base_only, on_base);
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("pictures left out: {e}")
         }
         Err(e) => panic!("{e}"),

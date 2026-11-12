@@ -328,6 +328,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
 #[cfg(test)]
 mod tests {
     use solidcore_record::Vec3;
+    use solidcraft_geom::MeshGeom;
 
     use super::delete_faces;
     use crate::{BoolOp, boolean, box_solid, chamfer, cylinder, fillet};

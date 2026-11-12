@@ -6,10 +6,14 @@
 //! none between two of its faces, as the fork does (tangency-labs/smlib@9ddf4a8).
 //!
 //! The sphere's own failure (loops of the wrong orientation, rails off their surfaces)
-//! needs analytic patches in six faces and is not built here. This guards the mechanism:
-//! a cylinder united with a disc extruded from two half arcs leaves the disc's two wall
-//! halves, coincident, with an edge between them; a round on the disc's top rim removes
-//! that edge by default and keeps it with the flag. Faces and volume are the same.
+//! needs analytic patches in six faces and is not built here. The body here: a cylinder
+//! united with a disc extruded from two half arcs leaves the disc's two wall halves merged
+//! into one face with the edge between them inside it, a slit (one face on both sides).
+//! A round on the disc's top rim removes that edge by default. With the keep it is an edge
+//! of the target, but a slit, which the clean-up checks all the same (WR-602, the default
+//! since `fillet_cleanup_removes_input_slits` was retired; the fork's
+//! tangency-labs/smlib@cac11ea), so it goes too. Faces, one-face edges and volume are the
+//! same either way.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -99,12 +103,12 @@ fn rounded(keep: bool) -> (usize, usize, f64) {
 }
 
 #[test]
-fn issue_423_default_removes_the_targets_own_edge() {
+fn issue_423_keep_still_removes_the_targets_own_slit() {
     let (faces, seams, _) = rounded(false);
     let (kept_faces, kept_seams, _) = rounded(true);
     assert_eq!(kept_faces, faces);
-    assert!(
-        kept_seams > seams,
+    assert_eq!(
+        kept_seams, seams,
         "kept {kept_seams} one-face edges, default {seams}"
     );
 }

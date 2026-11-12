@@ -22,13 +22,15 @@ use super::record::{
     QuadricKindRecord, QuadricRecord, RadiusRecord, SetbackCornerRecord, SetbackRoundRecord,
     SupportKindRecord, SupportRecord, SweptCornerRecord,
 };
+use super::record::{EndOrderRecord, MotionRecord, SectionBlendRecord, SectionFrameRecord};
 use super::{BlendDefinitionInput, BlendRef, ProceduralBlend, BLEND_MAX_DEPTH};
 use crate::blend::blend_corner::mixed::algebra::{Crv, Side};
 use crate::blend::blend_setback::{Face, FaceKind, Round};
 use crate::blend::fillet_exact::{classify_supports, BlendSpine, ClassInputs};
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_section::station::as_b_spline;
-use crate::error::{EntityRef, Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::Point3;
@@ -145,12 +147,16 @@ fn to_u32(x: usize) -> Result<u32> {
 
 /// A NURBS curve's stored numbers.
 fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
-    let nurb = c.nurb.as_ref().ok_or_else(|| SolidError::sm_err(OP_TO))?;
+    let nurb = c
+        .nurb
+        .as_ref()
+        .ok_or_else(|| SolidError::surface_failed(OP_TO, "the B-spline curve has no NURB"))?;
     let rational = nurb.is_rational();
     let points_3d = nurb.is_3d();
     let cpts = nurb.cpts();
     Ok(NurbsCurveRecord {
-        dim: u32::try_from(c.dim).map_err(|_| SolidError::sm_err(OP_TO))?,
+        dim: u32::try_from(c.dim)
+            .map_err(|_| SolidError::surface_failed(OP_TO, "the curve's dimension is past u32"))?,
         points_3d,
         degree: to_u32(nurb.degree())?,
         knots: nurb.knots().to_vec(),
@@ -164,7 +170,9 @@ fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
 
 /// A NURBS surface's stored numbers.
 fn surface_record(s: &BSplineSurface) -> Result<NurbsSurfaceRecord> {
-    let nurb = s.gw_nurb().ok_or_else(|| SolidError::sm_err(OP_TO))?;
+    let nurb = s
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP_TO, "the B-spline surface has no NURB"))?;
     let rational = nurb.is_rational();
     let mut points = Vec::new();
     let mut weights = Vec::new();
@@ -233,11 +241,11 @@ pub fn rebuild_for_face(
         if e.is_cancelled() {
             return e;
         }
-        SolidError::Upstream {
-            operation: OP_FACE,
-            code: SM_ERR_INVALID_INPUT,
-            entity: Some(EntityRef::Face(face)),
-        }
+        SolidError::surface_at(
+            OP_FACE,
+            SurfaceFailure::InvalidValue("the face's procedural blend record does not rebuild"),
+            EntityRef::Face(face),
+        )
     })
 }
 
@@ -285,7 +293,10 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
     let seeds = [curve_of(seed0)?, curve_of(seed1)?];
     let net = surface_of(&rec.net)?;
     let (Some(s0), Some(s1)) = (supports.first(), supports.get(1)) else {
-        return Err(SolidError::sm_err(OP_FROM));
+        return Err(SolidError::surface_failed(
+            OP_FROM,
+            "the record has fewer than two supports",
+        ));
     };
     if !(d.map.b[0] != 0.0 && d.map.b[1] != 0.0) {
         return Err(SolidError::invalid_input(
@@ -345,10 +356,20 @@ fn stored_point(
     i: usize,
     z: bool,
 ) -> Result<CPoint> {
-    let [x, y, pz] = *points.get(i).ok_or_else(|| SolidError::sm_err(OP_FROM))?;
+    let [x, y, pz] = *points.get(i).ok_or_else(|| {
+        SolidError::surface_failed(
+            OP_FROM,
+            "the control point index is past the end of the points",
+        )
+    })?;
     let w = match weights {
         Some(ws) => {
-            let w = *ws.get(i).ok_or_else(|| SolidError::sm_err(OP_FROM))?;
+            let w = *ws.get(i).ok_or_else(|| {
+                SolidError::surface_failed(
+                    OP_FROM,
+                    "the control point index is past the end of the weights",
+                )
+            })?;
             if w.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
                 return Err(SolidError::invalid_input(
                     OP_FROM,
@@ -392,7 +413,9 @@ fn surface_of(r: &NurbsSurfaceRecord) -> Result<BSplineSurface> {
             let at = i
                 .checked_mul(nv)
                 .and_then(|x| x.checked_add(j))
-                .ok_or_else(|| SolidError::sm_err(OP_FROM))?;
+                .ok_or_else(|| {
+                    SolidError::surface_failed(OP_FROM, "the control point index overflows")
+                })?;
             row.push(stored_point(&r.points, r.weights.as_ref(), at, true)?);
         }
         net.push(row);
@@ -440,7 +463,10 @@ pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord
         }
     };
     let Some(form) = as_b_spline(k, net)? else {
-        return Err(SolidError::sm_err(OP_EXACT_TO));
+        return Err(SolidError::surface_failed(
+            OP_EXACT_TO,
+            "the exact net has no B-spline form",
+        ));
     };
     let i = round.inputs;
     Ok(ExactRoundRecord {
@@ -548,7 +574,10 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
     };
     let leader = rec.leader.as_ref().map(curve_of).transpose()?;
     let (Some(s0), Some(s1)) = (supports.first(), supports.get(1)) else {
-        return Err(SolidError::sm_err(OP_EXACT_FROM));
+        return Err(SolidError::surface_failed(
+            OP_EXACT_FROM,
+            "the record has fewer than two supports",
+        ));
     };
     if rec.net.kind == ExactNetKindRecord::BallPatch {
         // a ball patch's sphere: the ball of its point class, from its supports
@@ -560,7 +589,10 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
             ));
         }
         let SurfaceKind::BSpline(form) = net.kind() else {
-            return Err(SolidError::sm_err(OP_EXACT_FROM));
+            return Err(SolidError::surface_failed(
+                OP_EXACT_FROM,
+                "the exact net is not a B-spline surface",
+            ));
         };
         net = Surface::from(BallPatch::create(form, blend.point, blend.radius)?);
     }
@@ -667,7 +699,10 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
         CornerDefinition::Setback(d) => {
             let fill = &*d.fill;
             let Some(form) = as_b_spline(k, surface)? else {
-                return Err(SolidError::sm_err(OP_CORNER_TO));
+                return Err(SolidError::surface_failed(
+                    OP_CORNER_TO,
+                    "the setback corner surface has no B-spline form",
+                ));
             };
             CornerRecord::Setback(SetbackCornerRecord {
                 faces: fill
@@ -701,7 +736,10 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
         }
         CornerDefinition::Mixed(d) => {
             let Some(form) = as_b_spline(k, surface)? else {
-                return Err(SolidError::sm_err(OP_CORNER_TO));
+                return Err(SolidError::surface_failed(
+                    OP_CORNER_TO,
+                    "the mixed corner surface has no B-spline form",
+                ));
             };
             let [b1, b2] = &d.blends;
             CornerRecord::Mixed(Box::new(MixedCornerRecord {
@@ -1018,4 +1056,196 @@ pub fn draft_rebuild(k: &Kernel, rec: &DraftRecord) -> Result<Surface> {
         d.recertify(k)?;
     }
     Ok(net)
+}
+
+const OP_SECTION_TO: &str = "surface::procedural_blend::convert::section_blend_to_record";
+const OP_SECTION_FROM: &str = "surface::procedural_blend::convert::section_blend_from_record";
+
+/// The record of a multi-section blend's surface (`sweep::section_blend`, #3140): its
+/// definition and its net, every number as the kernel stores it.
+///
+/// # Errors
+///
+/// `InvalidInput` for a surface that is not a section blend's, or a net that is not a
+/// B-spline surface; those of the form.
+pub fn section_blend_to_record(surface: &Surface) -> Result<SectionBlendRecord> {
+    use crate::sweep::section_blend::EndOrder;
+    let Some(BlendRef::SectionBlend { blend, net }) = surface.procedural_blend() else {
+        return Err(SolidError::invalid_input(
+            OP_SECTION_TO,
+            "the surface is not a section blend's",
+        ));
+    };
+    let SurfaceKind::BSpline(form) = net.kind() else {
+        return Err(SolidError::invalid_input(
+            OP_SECTION_TO,
+            "a section blend's net is a B-spline surface",
+        ));
+    };
+    let xyz = |p: Point3| [p.x, p.y, p.z];
+    let order = |o: EndOrder| match o {
+        EndOrder::G0 => EndOrderRecord::G0,
+        EndOrder::G1 => EndOrderRecord::G1,
+        EndOrder::G2 => EndOrderRecord::G2,
+        EndOrder::G3 => EndOrderRecord::G3,
+    };
+    let [o0, o1] = blend.orders();
+    Ok(SectionBlendRecord {
+        sections: blend
+            .sections()
+            .iter()
+            .map(|section| {
+                section
+                    .iter()
+                    .map(|f| SectionFrameRecord {
+                        p: xyz(f.p),
+                        leave: xyz(f.leave),
+                        bend: xyz(f.bend),
+                        bend_change: xyz(f.bend_change),
+                    })
+                    .collect()
+            })
+            .collect(),
+        orders: [order(o0), order(o1)],
+        crown: blend.crown(),
+        motions: blend
+            .motions()
+            .iter()
+            .map(|m| MotionRecord {
+                origin: xyz(m.rotate_n_move.origin()),
+                x_axis: xyz(m.rotate_n_move.x_axis()),
+                y_axis: xyz(m.rotate_n_move.y_axis()),
+                scale: m.scale.map(xyz),
+            })
+            .collect(),
+        net: surface_record(form)?,
+    })
+}
+
+/// The multi-section blend's surface a record holds, its definition kept on it, not yet
+/// re-certified: [`section_blend_rebuild`] does that.
+///
+/// # Errors
+///
+/// `InvalidInput` for a record its structural check refuses
+/// ([`SectionBlendRecord::validate`]); those of making the net.
+pub fn section_blend_from_record(rec: &SectionBlendRecord) -> Result<Surface> {
+    use crate::geom::axis2_placement::Axis2Placement;
+    use crate::sweep::section_blend::{EndOrder, Motion, SectionBlendDefinition, SectionFrame};
+    rec.validate()
+        .map_err(|e| SolidError::invalid_input(OP_SECTION_FROM, e.reason))?;
+    let p = |a: [f64; 3]| Point3::new(a[0], a[1], a[2]);
+    let order = |o: EndOrderRecord| match o {
+        EndOrderRecord::G0 => EndOrder::G0,
+        EndOrderRecord::G1 => EndOrder::G1,
+        EndOrderRecord::G2 => EndOrder::G2,
+        EndOrderRecord::G3 => EndOrder::G3,
+    };
+    let sections = rec
+        .sections
+        .iter()
+        .map(|section| {
+            section
+                .iter()
+                .map(|f| SectionFrame {
+                    p: p(f.p),
+                    leave: p(f.leave),
+                    bend: p(f.bend),
+                    bend_change: p(f.bend_change),
+                })
+                .collect()
+        })
+        .collect();
+    let motions = rec
+        .motions
+        .iter()
+        .map(|m| Motion {
+            rotate_n_move: Axis2Placement::from_stored(p(m.origin), p(m.x_axis), p(m.y_axis)),
+            scale: m.scale.map(p),
+        })
+        .collect();
+    let [o0, o1] = rec.orders;
+    let definition =
+        SectionBlendDefinition::from_parts(sections, [order(o0), order(o1)], rec.crown, motions);
+    let mut net = Surface::from(surface_of(&rec.net)?);
+    net.set_section_blend_definition(definition);
+    Ok(net)
+}
+
+/// [`section_blend_from_record`] and the net re-certified against the definition
+/// ([`crate::sweep::section_blend::SectionBlendDefinition::recertify`]): refused unless the
+/// definition rebuilds it exactly.
+///
+/// # Errors
+///
+/// Those of [`section_blend_from_record`] and of the re-certification.
+pub fn section_blend_rebuild(rec: &SectionBlendRecord) -> Result<Surface> {
+    let net = section_blend_from_record(rec)?;
+    if let Some(BlendRef::SectionBlend { blend, net: n }) = net.procedural_blend() {
+        blend.recertify(n)?;
+    }
+    Ok(net)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The record conversion failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+            (
+                OP_TO,
+                SurfaceFailure::Failed("the B-spline surface has no NURB"),
+                crate::error::SM_ERR,
+            ),
+            (
+                OP_EXACT_FROM,
+                SurfaceFailure::Failed("the record has fewer than two supports"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
+    }
+
+    /// The rebuild refusal keeps the face the bare status named.
+    #[test]
+    fn the_rebuild_refusal_keeps_its_face() {
+        use crate::error::surface::SurfaceFailure;
+        let face = EntityRef::Face(FaceId::from_index(3));
+        let typed = SolidError::surface_at(
+            OP_FACE,
+            SurfaceFailure::InvalidValue("the face's procedural blend record does not rebuild"),
+            face,
+        );
+        let before = SolidError::Upstream {
+            operation: OP_FACE,
+            code: crate::error::SM_ERR_INVALID_INPUT,
+            entity: Some(face),
+        };
+        assert_eq!(typed.sm_status(), before.sm_status());
+        assert_eq!(typed.upstream_status(), before.upstream_status());
+        assert_eq!(typed.kind(), before.kind());
+        assert_eq!(typed.operation(), before.operation());
+        assert_eq!(typed.entity(), Some(face));
+        assert_eq!(typed.is_status_answer(), before.is_status_answer());
+    }
 }

@@ -7,8 +7,7 @@
 //! `LargestSizeOnItsFaces` and `BandsMeetAt` (`SmFilletSolver.cpp`, `SmFilletSolver.h`) and
 //! the executive's `NoteFitOfPolygonsTakenWhole` and the circle-top fit of
 //! `CreateFilletBrep` (`SmFilletExecutive.cpp`) in commits a3d6d81 and 49f393d; 5e8c9c1
-//! brackets each bound strictly inside its search (twice the blend's own size). They run
-//! only with the opt-in `Kernel::fixes.fillet_gn_section_generator`.
+//! brackets each bound strictly inside its search (twice the blend's own size).
 //!
 //! | Rust                          | Upstream (fork)                                  |
 //! |-------------------------------|--------------------------------------------------|
@@ -92,12 +91,12 @@ impl Through {
         let base = self
             .bases
             .get(rail)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the rail's base surface"))?;
         let mut on = base.evaluate_point(k, uv)?;
         let slot = solver
             .base_mut()
             .surface_mut(rail)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         let off = slot.surface.surface.evaluate_point_extending(k, uv)?;
         if let Some(extended) = slot.surface.surface.extended_base_surface() {
             if !base.natural_uv_domain_with_nurb(k)?.contains_point(uv, 0.0)
@@ -139,10 +138,10 @@ pub fn ball_through(
         let base = solver.base();
         let s0 = base
             .surface(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         let s1 = base
             .surface(1)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         (
             [
                 s0.surface.base_surface().clone(),
@@ -176,7 +175,10 @@ pub fn ball_through(
         foot_at: Point3::UNDEF,
     };
     let (Some(base_k), Some(domain_k)) = (st.bases.get(lk), st.domains.get(lk)) else {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::blend_missing(
+            OP,
+            "the rail's base surface and domain",
+        ));
     };
     let drop = base_k.drop_point::<NoObject>(k, q, domain_k, &DropPointOptions::default())?;
     if !drop.success {
@@ -191,7 +193,10 @@ pub fn ball_through(
     let h = |st: &mut Through, solver: &mut SolverObject, rho: f64| -> Result<Option<f64>> {
         let c = q + n * (rho * ratio_k);
         let (Some(base_j), Some(domain_j)) = (st.bases.get(lj), st.domains.get(lj)) else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(
+                OP,
+                "the other rail's base surface and domain",
+            ));
         };
         let foot = base_j.drop_point::<NoObject>(
             k,
@@ -245,10 +250,11 @@ pub fn ball_through(
         let edgeuse = solver
             .base()
             .edgeuse(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let e = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-        let curve =
-            edge::evaluation_curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+        let e = eu::edge(target, edgeuse)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+        let curve = edge::evaluation_curve(target, e)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
         let ivl = edge::interval(target, e)?;
         let dropped = curve.drop_point(
             k,
@@ -315,7 +321,8 @@ pub fn largest_size_on_its_faces(
     } else {
         return Ok(None);
     }
-    let blended = eu::edge(target, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let blended = eu::edge(target, eu0)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let v0 = edge::vertex(target, blended)?;
     let ends = [v0, edge::other_vertex(target, blended, v0)?];
     for (rail, edgeuse) in [eu0, eu1].into_iter().enumerate() {
@@ -425,23 +432,24 @@ pub fn bands_meet_at(
     let own = this
         .base()
         .surface(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
         .surface
         .offset_distance()
         .abs();
     let other_own = other
         .base()
         .surface(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
         .surface
         .offset_distance()
         .abs();
     if !((other_own - own).abs() <= EFF_ZERO * (1.0 + own)) {
         return Ok(None); // no single size: their radii differ
     }
-    let e = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let e = eu::edge(target, edgeuse)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let curve = edge::evaluation_curve(target, e)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
         .clone();
     let ivl = edge::interval(target, e)?;
     let side = if mine == 0 {
@@ -466,7 +474,7 @@ pub fn bands_meet_at(
             let q = this
                 .base()
                 .surface(mine)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
                 .surface
                 .base_surface()
                 .evaluate_point(k, pnt.uv_pos(side))?;
@@ -607,8 +615,8 @@ pub fn polygon_fit(
     let mut middle = Point3::new(0.0, 0.0, 0.0);
     let mut ends: Vec<(Point3, Point3)> = Vec::new();
     for &e in &edges {
-        let curve =
-            edge::evaluation_curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve = edge::evaluation_curve(target, e)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
         let ivl = edge::interval(target, e)?;
         let a = curve.evaluate_point(k, ivl.min())?;
         let b = curve.evaluate_point(k, ivl.max())?;
@@ -618,8 +626,8 @@ pub fn polygon_fit(
     // t (ax x + ay y + b) is edge i's ball radius at (x, y)
     let mut lines: Vec<[f64; 4]> = Vec::new();
     for (&e, &(pa, pb)) in edges.iter().zip(&ends) {
-        let curve =
-            edge::evaluation_curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve = edge::evaluation_curve(target, e)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
         let half = curve.evaluate_point(k, edge::interval(target, e)?.evaluate(0.5))?;
         // straight: its middle on the chord
         let chord = pb - pa;
@@ -662,7 +670,7 @@ pub fn polygon_fit(
             .solver
             .base()
             .surface(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
             .surface
             .offset_distance()
             .abs();
@@ -793,7 +801,7 @@ pub fn circle_top_fit(
             * solver
                 .base()
                 .surface(0)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
                 .surface
                 .offset_distance()
                 .abs();
@@ -850,7 +858,7 @@ pub fn corner_takes_per_radius(
         let tangent = pv
             .get(1)
             .copied()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the curve's tangent"))?;
         *d = (if at_start { tangent } else { -tangent }).unitize()?;
     }
     let Some(&along) = dir.get(this) else {

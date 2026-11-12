@@ -280,7 +280,7 @@ fn solidcore_case(name: &'static str) -> Got {
             let v = volume(&body, 1e-8).unwrap_or_else(|e| panic!("{name}: volume: {e}"));
             let n = counts(&body).unwrap();
             let (rec, _) = native(&to_arrays(&body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-            solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+            solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
             Measured { volume: v, counts: n, kinds: kinds(&rec) }
         });
         judge(name, "solidcore", &c.expect, got)
@@ -333,7 +333,7 @@ fn fork_only_blends_are_not_supported_yet() {
 
 /// #199's bar, 14 x 6 x 10, its four upright edges rounded: past r 3 (a full round of the 6 mm
 /// ends) the two rounds on each end would cross. solidcore refuses it with the largest radius that
-/// builds and its edge (`SolidError::FilletRefused`, `fixes.fillet_gn_section_generator`): 3, and a
+/// builds and its edge (`SolidError::FilletRefused`): 3, and a
 /// point halfway up an upright edge; an equal chamfer of the 4 mm rib's top edges past 2, as its
 /// distance.
 #[test]
@@ -623,7 +623,7 @@ fn a_setback_corner_left_open_returns_its_hole() {
     assert_eq!(hole.edges.len(), 9);
     let flat = to_arrays(&open).unwrap();
     let (rec, _) = native(&flat).unwrap();
-    solidcraft_geom::brep::check::validate(&rec).unwrap();
+    solidcore_ops::record_check::validate(&rec).unwrap();
     let ends = &flat.ints[&crate::flat::EDGE_VERTICES];
     let end = |h: &crate::HoleEdge, last: bool| ends[2 * h.edge + usize::from(h.forward == last)];
     for (k, h) in hole.edges.iter().enumerate() {
@@ -658,7 +658,7 @@ fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() 
     for (at, alpha) in [(a, 0.75 * PI), (b, 0.5 * PI)] {
         let round = blend(&chamfered, Blend::Curvature, &[at], &[r], TOL, &[], &[], Corners::Filled).unwrap();
         let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
-        solidcraft_geom::brep::check::validate(&rec).unwrap();
+        solidcore_ops::record_check::validate(&rec).unwrap();
         let removed = v0 - volume(&round, 1e-8).unwrap();
         assert!(rel(removed, 40.0 * cut(alpha)) < 1e-6, "{removed} vs {}", 40.0 * cut(alpha));
     }
@@ -674,7 +674,7 @@ fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() 
     assert_eq!(blend(&chamfered, Blend::Curvature, &[[90.0; 3]], &[r], TOL, &[], &[], Corners::Filled).err(), Some(Error::NoMatch { point: 0 }));
 }
 
-/// A variable round is the union of its balls (solidcore#2262, `fillet_gn_section_generator`).
+/// A variable round is the union of its balls (solidcore#2262).
 /// Along the 30 mm top front edge: a law of one radius 2 takes the constant round's
 /// (1 - π/4) 4 · 30 = 25.752220; 1 to 3, the balls' union's 27.857434 (the great circles would take
 /// 27.898239), either way along the edge. Both come out 5.3e-5 of that over, as on the C++
@@ -686,7 +686,7 @@ fn a_variable_round_is_the_union_of_its_balls() {
     let removed = |radii: &[f64], start: [f64; 3]| {
         let r = fillet_variable(&b, TOP_FRONT, TOL, start, 1, &[0.0, 0.0, 1.0, 1.0], radii).unwrap();
         let (rec, _) = native(&to_arrays(&r).unwrap()).unwrap();
-        solidcraft_geom::brep::check::validate(&rec).unwrap();
+        solidcore_ops::record_check::validate(&rec).unwrap();
         ABC - volume(&r, 1e-8).unwrap()
     };
     let constant = removed(&[2.0, 2.0], [0.0, 0.0, 10.0]);
@@ -914,7 +914,7 @@ fn tabbed_plate_rounds_mitred_on_the_arcs_continuation() {
     let removed = volume(&plate, 1e-8).unwrap() - volume(&round, 1e-8).unwrap();
     assert!(rel(removed, want) < 1e-6, "removed {removed}, expected {want}");
     let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
-    solidcraft_geom::brep::check::validate(&rec).unwrap();
+    solidcore_ops::record_check::validate(&rec).unwrap();
     assert!(super::is_manifold_solid(&round).unwrap());
     assert!(super::check(&round, crate::check::CheckLevel::All).unwrap().is_valid());
 }

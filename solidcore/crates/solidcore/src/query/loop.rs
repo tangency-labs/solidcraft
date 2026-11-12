@@ -169,6 +169,80 @@ fn or_unknown<T>(k: &Kernel, r: Result<T>) -> Result<Option<T>> {
     }
 }
 
+/// Not upstream: whether `point` may lie within `reach` of `curve` over `interval`, so
+/// that [`drop_on_edge`] there can find it (a drop succeeds only for a solution closer than
+/// its tolerance). `false` only when the point lies outside the box of the curve's points
+/// over the interval, grown by `reach` and by an evaluation's rounding (`1e-6` of the box's
+/// size and of the coordinates, as [`WindingHull::excludes`]), in some coordinate. That box
+/// is, for a line, the box of its points at the interval's ends (its points between lie
+/// between them); for a B-spline with positive weights whose basis is well made (as many
+/// control points as its knots and degree call for, the knots in order) over an interval
+/// inside its domain, the box of its control points (each point is a convex combination of
+/// them). Every other curve may reach every point. Neither curve's copy for evaluation can
+/// fail, so leaving out its copy and drop changes no result.
+fn curve_box_reaches(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    point: Point3,
+    reach: f64,
+) -> bool {
+    use crate::curve::curve::CurveKind;
+    use crate::nurbs::math::NOW;
+    let mut lo = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut hi = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    let mut add = |e: Point3| {
+        lo = Point3::new(lo.x.min(e.x), lo.y.min(e.y), lo.z.min(e.z));
+        hi = Point3::new(hi.x.max(e.x), hi.y.max(e.y), hi.z.max(e.z));
+    };
+    match curve.kind() {
+        CurveKind::Line(_) => {
+            for t in [interval.min(), interval.max()] {
+                let Ok(e) = curve.evaluate_point(k, t) else {
+                    return true;
+                };
+                add(e);
+            }
+        }
+        CurveKind::BSpline(c) => {
+            let Some(nurb) = c.nurb.as_ref() else {
+                return true;
+            };
+            let p = nurb.degree();
+            let cpts = nurb.cpts();
+            let well_made = p >= 1
+                && cpts.len() > p
+                && nurb.knots().len() == cpts.len() + p + 1
+                && nurb
+                    .knots()
+                    .windows(2)
+                    .all(|w| matches!(w, [a, b] if a <= b));
+            let domain = c.natural_interval();
+            if !(well_made && interval.min() >= domain.min() && interval.max() <= domain.max()) {
+                return true;
+            }
+            for c in cpts {
+                if !(c.w == NOW || (c.w > 0.0 && c.w.is_finite())) {
+                    return true;
+                }
+                add(c.to_euclid());
+            }
+        }
+        _ => return true,
+    }
+    if ![lo.x, lo.y, lo.z, hi.x, hi.y, hi.z]
+        .iter()
+        .all(|v| v.is_finite())
+    {
+        return true;
+    }
+    let apart = |lo: f64, hi: f64, x: f64| {
+        let m = reach + 1e-6 * (1.0 + (hi - lo) + lo.abs().max(hi.abs()) + x.abs());
+        x < lo - m || x > hi + m
+    };
+    !(apart(lo.x, hi.x, point.x) || apart(lo.y, hi.y, point.y) || apart(lo.z, hi.z, point.z))
+}
+
 /// `LocalPointSolve(SM_SO_MINIMIZE)` of the test point on a UV trim curve: whether it
 /// converged and the solution. A failing solve has not converged (its status is
 /// ignored upstream and the flag is reset first); with the opt-in
@@ -421,18 +495,27 @@ pub(crate) fn contains_uv_point_with_topology(
         let this_edge = edge_of(b, this_eu)?;
 
         // low work: see if TgtPoint is on this EdgeCurve
+        // (not upstream) only where the curve's box, grown by the edge's tolerance, reaches
+        // the point: the drop finds the point only within that tolerance of the curve
+        // ([`curve_box_reaches`]). Upstream copies and drops onto every edge of the loop, so
+        // a face of n edges classified at n points made n^2 drops.
         let on_edge_curve = {
             let edge = b.edge(this_edge)?;
-            // the drop builds the edge curve's cache at the edge's tolerance
-            // (SmTol::GetApproxTol3d(&m_crCurve) reads pEdge->GetTolerance() through the
-            // owner)
-            let mut curve = edge
+            let curve = edge
                 .curve
                 .as_ref()
-                .ok_or_else(|| null("ContainsUVPoint: edge without curve"))?
-                .clone_for_evaluation()?;
-            curve.set_owner_zone_tol_3d(Some(edge.tolerance));
-            drop_on_edge(k, &curve, &edge.interval, point_3d, edge.tolerance)?
+                .ok_or_else(|| null("ContainsUVPoint: edge without curve"))?;
+            if curve_box_reaches(k, curve, &edge.interval, point_3d, edge.tolerance) {
+                k.work_counters.add_containment_edge_drop();
+                // the drop builds the edge curve's cache at the edge's tolerance
+                // (SmTol::GetApproxTol3d(&m_crCurve) reads pEdge->GetTolerance() through the
+                // owner)
+                let mut curve = curve.clone_for_evaluation()?;
+                curve.set_owner_zone_tol_3d(Some(edge.tolerance));
+                drop_on_edge(k, &curve, &edge.interval, point_3d, edge.tolerance)?
+            } else {
+                None
+            }
         };
         if let Some(param) = on_edge_curve {
             // TgtPoint is on EdgeCurve - set output and return

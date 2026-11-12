@@ -324,54 +324,211 @@ fn the_offset_refusals_are_typed() {
     use solidcore::error::Failure;
     use solidcore::error::{SM_ERR_OFFSET_EDGE_VANISHES, SM_ERR_OFFSET_WALLS_TOUCH};
     use solidcore::{FaceId, SolidError};
+    let none = |_: FaceId| -> Option<usize> { None };
     let up = |code| SolidError::Upstream {
         operation: "test",
         code,
         entity: None,
     };
     assert_eq!(
-        super::status(up(SM_ERR_OFFSET_WALLS_TOUCH)),
+        super::status(up(SM_ERR_OFFSET_WALLS_TOUCH), &none),
         Error::WallsTouch
     );
     assert!(matches!(
-        super::status(up(SM_ERR_OFFSET_EDGE_VANISHES)),
+        super::status(up(SM_ERR_OFFSET_EDGE_VANISHES), &none),
         Error::Unsupported(_)
     ));
     // the kernel's typed offset refusals (solidcore#2615)
     let refused = |o| Failure::new("test", o).into_error();
     assert_eq!(
-        super::status(refused(OffsetFailure::Folds {
-            face: FaceId::from_index(3),
-            distance: -11.0,
-            largest: 10.0,
-        })),
+        super::status(
+            refused(OffsetFailure::Folds {
+                face: FaceId::from_index(3),
+                distance: -11.0,
+                largest: 10.0,
+            }),
+            &none,
+        ),
         Error::WallFolds {
             largest: Some(10.0)
         }
     );
     assert_eq!(
-        super::status(refused(OffsetFailure::WallsTouch {
-            face: None,
-            contact: solidcore::error::offset::WallContact::Touch,
-        })),
+        super::status(
+            refused(OffsetFailure::WallsTouch {
+                face: None,
+                contact: solidcore::error::offset::WallContact::Touch,
+            }),
+            &none,
+        ),
         Error::WallsTouch
     );
     assert!(matches!(
-        super::status(refused(OffsetFailure::EdgeVanishes {
-            edge: None,
-            face: None,
-        })),
+        super::status(
+            refused(OffsetFailure::EdgeVanishes {
+                edge: None,
+                face: None,
+            }),
+            &none,
+        ),
         Error::Unsupported(_)
     ));
-    // an unresolved crossing stays the kernel's status, as before
+    // an unresolved crossing says how it crosses (#14783), no longer a bare status
     assert_eq!(
-        super::status(refused(OffsetFailure::LoopsCross {
+        super::status(
+            refused(OffsetFailure::LoopsCross {
+                face: None,
+                crossing: solidcore::error::offset::LoopCrossing::AtLoopVertex,
+            }),
+            &none,
+        ),
+        Error::OffsetRefused {
             face: None,
-            crossing: solidcore::error::offset::LoopCrossing::AtLoopVertex,
-        })),
-        Error::Status(solidcore::error::SM_ERR_BAD_INTERSECTIONS)
+            why: crate::OffsetRefusal::LoopsCross {
+                crossing: solidcore::error::offset::LoopCrossing::AtLoopVertex,
+            },
+        }
     );
-    assert_eq!(super::status(up(1001)), Error::Status(1001));
+    assert_eq!(super::status(up(1001), &none), Error::Status(1001));
+}
+
+/// Each of the kernel's other offset refusals as [`Error::OffsetRefused`] (#14783): its reason,
+/// and its face by the index the call's lookup gives, `None` for a face it does not find or a
+/// refusal that names none. Never the bare status they were before.
+#[test]
+fn every_other_offset_refusal_says_why_and_where() {
+    use crate::OffsetRefusal as R;
+    use solidcore::error::offset::{LoopCrossing, OffsetFailure as O, Unsoundness};
+    use solidcore::error::Failure;
+    use solidcore::FaceId;
+    let named = FaceId::from_index(3);
+    let other = FaceId::from_index(4);
+    // the call's lookup: face 3 is record face 7, face 4 is not the body's
+    let index = |f: FaceId| -> Option<usize> { (f == named).then_some(7) };
+    let refused = |o: O| super::status(Failure::new("test", o).into_error(), &index);
+    let cases = [
+        // (the kernel's fold kind, but no fold: its own reason, not `WallFolds`)
+        (
+            O::NotCertified {
+                face: named,
+                distance: -2.0,
+            },
+            Some(7),
+            R::NotCertified { distance: -2.0 },
+        ),
+        (
+            O::Collapses {
+                face: named,
+                distance: -5.0,
+                radius: 5.0,
+            },
+            Some(7),
+            R::Collapses {
+                distance: -5.0,
+                radius: 5.0,
+            },
+        ),
+        (
+            O::LoopsCross {
+                face: Some(named),
+                crossing: LoopCrossing::SharesEdge,
+            },
+            Some(7),
+            R::LoopsCross {
+                crossing: LoopCrossing::SharesEdge,
+            },
+        ),
+        (
+            O::DistanceUnresolved {
+                distance: 1e-9,
+                resolution: 1e-6,
+            },
+            None,
+            R::DistanceUnresolved {
+                distance: 1e-9,
+                resolution: 1e-6,
+            },
+        ),
+        (
+            O::ToleranceUnresolved { tolerance: 1e-13 },
+            None,
+            R::ToleranceUnresolved { tolerance: 1e-13 },
+        ),
+        (O::SeamOpened { face: named }, Some(7), R::SeamOpened),
+        (O::ExactCurveUncut, None, R::ExactCurveUncut),
+        (O::FacesApart { face: other }, None, R::FacesApart),
+        (
+            O::ReachUncertified { face: named },
+            Some(7),
+            R::ReachUncertified,
+        ),
+        (
+            O::ReachUncertified { face: other },
+            None,
+            R::ReachUncertified,
+        ),
+        (
+            O::LoopGapUncertified { face: Some(named) },
+            Some(7),
+            R::LoopGapUncertified,
+        ),
+        (
+            O::LoopGapUncertified { face: None },
+            None,
+            R::LoopGapUncertified,
+        ),
+        (
+            O::Unsound {
+                what: Unsoundness::Check {
+                    failures: 2,
+                    first: Some((1, 4)),
+                },
+            },
+            None,
+            R::Unsound {
+                what: Unsoundness::Check {
+                    failures: 2,
+                    first: Some((1, 4)),
+                },
+            },
+        ),
+        (
+            O::Unsound {
+                what: Unsoundness::VolumeUndecided,
+            },
+            None,
+            R::Unsound {
+                what: Unsoundness::VolumeUndecided,
+            },
+        ),
+    ];
+    for (o, face, why) in cases {
+        let got = refused(o);
+        assert_eq!(got, Error::OffsetRefused { face, why }, "{o:?}");
+        assert!(!got.to_string().contains("status"), "{got}");
+    }
+}
+
+/// A reason ops does not name yet (one the kernel adds later) is said in the kernel's words,
+/// never a bare status: [`super::unnamed`], the arm every unnamed reason takes, keeps the
+/// kernel's own statement, and the error says it.
+#[test]
+fn an_unnamed_offset_refusal_keeps_the_kernels_words() {
+    use solidcore::error::offset::OffsetFailure;
+    let o = OffsetFailure::ExactCurveUncut;
+    let why = super::unnamed(&o);
+    assert_eq!(
+        why,
+        crate::OffsetRefusal::Other {
+            message: o.to_string()
+        }
+    );
+    assert!(!o.to_string().is_empty());
+    let e = Error::OffsetRefused { face: Some(2), why };
+    assert_eq!(
+        e.to_string(),
+        format!("the offset is refused at face 2: {o}")
+    );
 }
 
 /// A face whose surface the kernel's room test cannot measure (an offset surface): the room
@@ -727,5 +884,140 @@ mod drafts {
         let o = order(&c);
         draft(&c, &o, &[curved(&c, &o)], [0.0; 3], Z, Z, 0.1).unwrap();
         assert!(marks(&c).is_empty());
+    }
+
+    /// 3 degrees, radians.
+    const THREE: f64 = 0.052_359_877_559_829_89;
+    /// tan 3 degrees.
+    const TAN_THREE: f64 = 0.052_407_779_283_041_21;
+
+    /// A boss r 10 about (20, 20), z 10 to 20, drawn as two faces: a circle extruded as two
+    /// half arcs, so its wall is split along the rulings through (10, 20) and (30, 20) and its
+    /// top has a vertex on each, where the two wall faces and the top meet.
+    fn split_boss(on_block: bool) -> crate::Body {
+        use crate::prism::extrude_planar_regions;
+        use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+        let half = |start: f64| Seg2::Arc {
+            center: Vec2::new(20.0, 20.0),
+            radius: 10.0,
+            start,
+            sweep: PI,
+        };
+        let disc = Region2 {
+            outer: Loop2 {
+                segs: vec![half(0.0), half(PI)],
+            },
+            holes: vec![],
+        };
+        let boss = extrude_planar_regions(&Plane::XY, &[disc], 10.0, 20.0).unwrap();
+        if !on_block {
+            return boss;
+        }
+        let block = make_box([0.0; 3], [40.0, 40.0, 10.0]).unwrap();
+        crate::boolean::boolean(block, boss, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap()
+    }
+
+    /// The top of a split boss (alone, and standing on a 40 x 40 x 10 block) drafted 3 degrees
+    /// about the line x = 25 on it, pulled along x, leaning in going along x: the top turns
+    /// to z = 20 - (x - 25) tan 3 degrees, 5 tan 3 degrees above z = 20 at the axis, so the boss
+    /// gains pi r^2 5 tan 3 degrees; leaning out it loses as much. The top's vertices on the
+    /// split rulings meet the turned top where the rulings cross it (#3005 refused them: two
+    /// faces of one cylinder at a vertex where a plane moves). Valid at every check level.
+    ///
+    /// The split wall's halves are extended past their rulings, so the top's new edges are
+    /// fitted, within the B-rep's tolerance (2e-5) of the ellipse: the volume is held to that
+    /// tolerance over the top's area (under 315). The same boss drawn as one face with a seam
+    /// keeps an exact ellipse and lands on the closed form to rounding.
+    #[test]
+    fn the_top_of_a_boss_split_along_its_rulings() {
+        all_fixes();
+        let x = [1.0, 0.0, 0.0];
+        let band = 2e-5 * 315.0;
+        for (split, on_block) in [(true, false), (true, true), (false, false)] {
+            for (angle, sign) in [(THREE, 1.0), (-THREE, -1.0)] {
+                let b = if split {
+                    split_boss(on_block)
+                } else {
+                    make_cylinder([20.0, 20.0, 10.0], 10.0, 10.0).unwrap()
+                };
+                let before = volume(&b);
+                let o = order(&b);
+                let top = face(&b, &o, |bx| {
+                    (bx.min().z - 20.0).abs() < 1e-9 && (bx.max().z - 20.0).abs() < 1e-9
+                });
+                draft(&b, &o, &[top], [25.0, 0.0, 0.0], x, x, angle).unwrap();
+                let want = before + sign * PI * 10.0 * 10.0 * 5.0 * TAN_THREE;
+                let got = volume(&b);
+                if split {
+                    assert!(
+                        (got - want).abs() < band,
+                        "{on_block} {angle}: {got} {want}"
+                    );
+                } else {
+                    assert!(rel(got, want) < 1e-9, "seam {angle}: {got} {want}");
+                }
+                let report = b.check(crate::CheckLevel::All).unwrap();
+                assert_eq!(
+                    report.failures, 0,
+                    "{split} {on_block} {angle}: {}",
+                    report.text
+                );
+            }
+        }
+    }
+
+    /// brep-bench's `draft/cylinder-parted-both-ways` (#14783): a cylinder of radius 10 from
+    /// z = 0 to 20, its side split at z = 10, each half drafted 3 degrees away from the parting
+    /// line about z = 10 (the upper with pull +z, the lower with pull -z). The kernel does not
+    /// yet bound how far the ends must reach to meet the cones (#13722), so the draft is
+    /// refused before anything changes: with its reason and the face it names as a record
+    /// index, not the bare status 1001 it was.
+    #[test]
+    fn a_cylinder_parted_both_ways_is_refused_saying_why_and_where() {
+        all_fixes();
+        let c = make_cylinder([0.0; 3], 10.0, 20.0).unwrap();
+        let o = order(&c);
+        let parting = crate::split::Tool {
+            surface: solidcore_record::brep::Surface::Plane {
+                origin: [0.0, 0.0, 10.0],
+                u_axis: [1.0, 0.0, 0.0],
+                v_axis: [0.0, 1.0, 0.0],
+            },
+            domain: [[-20.0, 20.0], [-20.0, 20.0]],
+        };
+        let (parted, _) = crate::split::split_faces(&c, &o, &[curved(&c, &o)], &[parting])
+            .unwrap()
+            .unwrap();
+        // the record index (through `o`) of the one face of `b` through `p`
+        let through = |b: &crate::Body, o: &Order, p: [f64; 3]| {
+            let hits: Vec<usize> = (0..o.faces.len())
+                .filter(|&i| b.face_distances(o, i, &[p]).unwrap()[0].is_some_and(|d| d < 1e-9))
+                .collect();
+            assert_eq!(hits.len(), 1, "faces through {p:?}: {hits:?}");
+            hits[0]
+        };
+        // each half drafted in turn; the refusal names the face its call drafts
+        let mut refused = None;
+        for (at, pull) in [([10.0, 0.0, 15.0], Z), ([10.0, 0.0, 5.0], [0.0, 0.0, -1.0])] {
+            let o = order(&parted);
+            let half = through(&parted, &o, at);
+            let r = draft(&parted, &o, &[half], [0.0, 0.0, 10.0], Z, pull, THREE);
+            println!("PARTED {at:?}: face {half} of {}: {r:?}", o.faces.len());
+            if let Err(e) = r {
+                refused = Some((e, half));
+                break;
+            }
+        }
+        let Some((Error::OffsetRefused { face, why }, half)) = refused else {
+            panic!("not refused with a reason: {refused:?}");
+        };
+        assert_eq!(why, crate::OffsetRefusal::ReachUncertified);
+        assert_eq!(
+            face,
+            Some(half),
+            "the refusal names the face its draft turns"
+        );
     }
 }

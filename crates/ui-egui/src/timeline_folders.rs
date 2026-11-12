@@ -288,22 +288,22 @@ fn counted(n: usize, thing: &str) -> String {
 
 fn folder_menu(app: &mut SolveApp, ui: &mut egui::Ui, folder: &Folder, view: &crate::timeline_fold::View, at: egui::Pos2) {
     let fold = if folder.open { "Fold Features" } else { "Show Each Feature" };
-    if crate::context_menu::button(ui, fold, "list").clicked() {
+    if crate::ui_kit::menu::button(ui, fold, "list").clicked() {
         set_open(app, folder.id, !folder.open);
         ui.close();
     }
-    if crate::context_menu::button(ui, "Rename", "rename").clicked() {
+    if crate::ui_kit::menu::button(ui, "Rename", "rename").clicked() {
         crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(folder.id), at);
         ui.close();
     }
     crate::timeline::edit_holes_item(app, ui, folder.id);
-    if crate::context_menu::button(ui, "Ungroup", "feature_group").backing_on_hover_text("Keep its features and folders in the history").clicked() {
+    if crate::ui_kit::menu::button(ui, "Ungroup", "feature_group").backing_on_hover_text("Keep its features and folders in the history").clicked() {
         app.tree.picked_timeline_groups.retain(|g| *g != folder.id);
         let _ = app.run("timeline.ungroup", json!({ "group": folder.id }));
         ui.close();
     }
     ui.separator();
-    if crate::context_menu::button(ui, "Select Features", "select").clicked() {
+    if crate::ui_kit::menu::button(ui, "Select Features", "select").clicked() {
         let features = &app.session.doc.features;
         let items: Vec<_> = view
             .indices(folder.start, folder.end)
@@ -316,7 +316,7 @@ fn folder_menu(app: &mut SolveApp, ui: &mut egui::Ui, folder: &Folder, view: &cr
         let _ = app.run("select.set", json!({ "items": items }));
         ui.close();
     }
-    if crate::context_menu::button(ui, "Roll History Marker Here", "rollback").clicked() {
+    if crate::ui_kit::menu::button(ui, "Roll History Marker Here", "rollback").clicked() {
         let end = view.index(folder.end);
         let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({ "position": end }) };
         let _ = app.run_heavy("timeline.roll_to", position);

@@ -913,17 +913,27 @@ fn unsupported_face_groups_are_atomic() {
     s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
     let before = serde_json::to_value(s.doc.as_ref()).unwrap();
     let (revision, undo) = (s.revision, s.undo.len());
-    for faces in [
-        json!([]),
-        json!([[5, 5, 10], [5, 5, 0]]),
-        json!([[5, 5, 10], [5, 0, 5]]),
-        json!([[5, 5, 10], [1000, 1000, 1000]]),
-        json!(vec![[5, 5, 10]; 1025]),
-    ] {
+    for faces in
+        [json!([]), json!([[5, 5, 10], [1000, 1000, 1000]]), json!([[5, 5, 10], [5, 0, 5], [1000, 1000, 1000]]), json!(vec![[5, 5, 10]; 1025])]
+    {
         assert!(s.execute("solid.extrude", &json!({"faces":faces,"distance":5,"operation":"join"})).is_err());
         assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), before);
         assert_eq!((s.revision, s.undo.len()), (revision, undo));
     }
+}
+
+/// Faces in different planes extrude each from the body as picked (#11492): the top and a side of
+/// a block, a later face is not the one the earlier extrusion grew.
+#[test]
+fn faces_in_different_planes_extrude_each_from_the_picked_body() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":40,"width":25,"height":3,"body_name":"Block"})).unwrap();
+    let before = s.undo.len();
+    s.execute("solid.extrude", &json!({"faces":[[20,12,3],[20,0,1.5]],"face_body":"Block","distance":10,"operation":"join"})).unwrap();
+    let volume = solidcraft_kernel::measure(&s.model.state().body("Block").unwrap().body).unwrap().volume;
+    // 3000 + 10000 (above the top) + 1200 (out of the y = 0 side, 3 mm high).
+    assert!((volume - 14_200.0).abs() < 1e-5, "{volume}");
+    assert_eq!(s.undo.len(), before + 1);
 }
 
 #[test]
@@ -1605,4 +1615,114 @@ fn pattern_of_an_untargeted_cut_still_cuts_its_own_components_body() {
     let (body1, plate2) = (volume(&s, "Body1"), volume(&s, "Plate2"));
     assert!((one_hole - body1).abs() < 0.02 * hole, "Body1 untouched: {one_hole} -> {body1}");
     assert!((plate - plate2 - 9.0 * hole).abs() < 0.02 * hole, "Plate2 cut: {plate} -> {plate2}");
+}
+
+/// #7317: a cut that opens on no face leaves a closed cavity and says so, with the void's volume.
+/// A cut that opens on the outside, one that touches no material and a cup shelled on purpose
+/// say nothing.
+#[test]
+fn cut_that_leaves_a_closed_cavity_says_so() {
+    let plot = || {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"corner": [-10, -20, 0], "length": 20, "width": 20, "height": 10, "operation": "new", "body_name": "Plot"}))
+            .unwrap();
+        s
+    };
+    let magnet = |height: f64| json!({"base": [0, -2.2, 5], "axis": [0, 1, 0], "radius": 3.1, "height": height, "operation": "cut", "targets": ["Plot"], "name": "Logement"});
+
+    // Through the y = 0 face: one shell, nothing to say.
+    let mut s = plot();
+    let open = s.execute("solid.cylinder", &magnet(2.3)).unwrap();
+    assert!(open["warning"].is_null(), "{open}");
+    assert_eq!(s.model.state().body("Plot").map(|b| b.body.shell_count()), Some(1));
+
+    // Shorter, it stops inside the body: a cavity of pi * 3.1² * 2.0 mm³, told in the reply and on the feature.
+    let mut s = plot();
+    let closed = s.execute("solid.cylinder", &magnet(2.0)).unwrap();
+    assert_eq!(s.model.state().body("Plot").map(|b| b.body.shell_count()), Some(2));
+    let note = closed["warning"].as_str().unwrap_or_default();
+    assert!(note.contains("closed cavity") && note.contains("60.38"), "{closed}");
+    assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), closed["warning"].as_str());
+
+    // The same feature edited from the opening height to the closed one.
+    let mut s = plot();
+    s.execute("solid.cylinder", &magnet(2.3)).unwrap();
+    s.execute("timeline.edit", &json!({"feature": "Logement", "set": {"height": "2.0"}})).unwrap();
+    assert!(s.model.results.last().and_then(|r| r.warning.as_deref()).is_some_and(|w| w.contains("closed cavity")));
+
+    // A cut that misses the body changes nothing and says nothing here.
+    let mut s = plot();
+    let away = s
+        .execute(
+            "solid.cylinder",
+            &json!({"base": [0, 50, 5], "axis": [0, 1, 0], "radius": 3.1, "height": 2.0, "operation": "cut", "targets": ["Plot"]}),
+        )
+        .unwrap();
+    assert!(!away["warning"].as_str().unwrap_or_default().contains("closed cavity"), "{away}");
+
+    // A cup made by cutting from its top: open, no warning.
+    let mut s = plot();
+    let cup = s
+        .execute("solid.box", &json!({"length": 16, "width": 16, "height": 10, "center": [0, -10, 6], "operation": "cut", "targets": ["Plot"]}))
+        .unwrap();
+    assert!(!cup["warning"].as_str().unwrap_or_default().contains("closed cavity"), "{cup}");
+}
+
+/// Issue #10: fuzzer seed 73. Extrude an arc-sided profile, fillet two top edges, then join a box.
+/// The join's boolean union used to be refused by solidcore's boolean check as "Bad Gap:
+/// Edge/Vertex gap across Edgeuse start larger than tol" (offset=7.7878382e-06,
+/// tolerance=7.5978919e-06). Every failing seed of the boolean fuzzer is a reproducible bug,
+/// fixed with a regression test that fails without the fix.
+/// Root cause not yet found — grows tolerances but gap may exceed platform-specific limits.
+#[ignore = "fails until the tolerance root cause for seed 73 is found (#10)"]
+#[test]
+fn fuzz_seed_73_boolean_join_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_73_boolean_join.json"));
+    let state = s.model.state();
+    // Every step ran: every body is a sound solid, and the join produced one body.
+    assert_eq!(state.bodies.len(), 1, "the join must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the joined body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the union must be a real solid: {}", m.volume);
+    println!("#10 seed 73: joined body volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 185. Box, join cylinder, cut cylinder, then rectangular pattern on the
+/// cut cylinder. The pattern's boolean result is refused as "SMLib's result is not a closed
+/// solid". Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a
+/// regression test that fails without the fix.
+/// Root cause not yet found — pattern boolean result tolerance, topologically different from
+/// seed 73's "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the pattern boolean root cause for seed 185 is found (#10)"]
+#[test]
+fn fuzz_seed_185_pattern_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_185_pattern.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the pattern must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the pattern result must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the pattern result must be a real solid: {}", m.volume);
+    println!("#10 seed 185: pattern result volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 178. Box, fillet, cut cylinder, cut box, shell, rectangular pattern,
+/// then fillet. The final fillet is refused as "SMLib fillet: SMLib's check refuses the result:
+/// Tolerance: Edge tolerance relative to brep tolerance (offset=0.083186985, tolerance=0.01)".
+/// Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test
+/// that fails without the fix.
+/// Root cause not yet found — fillet result tolerance, topologically different from seed 73's
+/// "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the fillet tolerance root cause for seed 178 is found (#10)"]
+#[test]
+fn fuzz_seed_178_fillet_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_178_fillet.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the fillet must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the filleted body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the fillet result must be a real solid: {}", m.volume);
+    println!("#10 seed 178: filleted body volume {volume:.2} mm³", volume = m.volume);
 }
