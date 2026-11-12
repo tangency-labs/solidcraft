@@ -32,6 +32,7 @@
 
 pub mod affine;
 pub mod blend;
+pub mod blend_definition;
 pub mod body;
 pub mod boolean;
 pub mod cancel;

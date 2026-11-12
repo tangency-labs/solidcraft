@@ -25,6 +25,7 @@ mod boolean_tests;
 mod convert;
 #[cfg(test)]
 mod convert_tests;
+pub(crate) mod definition;
 pub(crate) mod dump;
 pub(crate) mod file;
 pub(crate) mod history;
