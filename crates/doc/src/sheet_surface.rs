@@ -255,7 +255,7 @@ fn put_back(mut out: Vec<Region2>, carried: Vec<Loop2>) -> Result<Vec<Region2>> 
 /// [`CLEAR`] from each of its loops (see [`loops_apart`]), outside its material and holding none
 /// of it. Apart from every loop of `t`, `h` lies all inside or all outside each, and each of them
 /// all inside or all outside `h`: one point of each answers, exactly (see [`holds`]).
-fn loop_clear_of(h: &Loop2, t: &Region2) -> bool {
+pub(crate) fn loop_clear_of(h: &Loop2, t: &Region2) -> bool {
     let hb = loop_box(h);
     if boxes_clear(&hb, std::slice::from_ref(&loop_box(&t.outer))) {
         return true;

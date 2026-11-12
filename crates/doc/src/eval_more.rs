@@ -1746,8 +1746,35 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
             if boxes.iter().any(|(k, bx)| *k != Some(p) && !boxes_apart(&reach, &Some(*bx))) {
                 return Ok(Vec::new());
             }
-            if out.recesses.iter().any(|r| r.panel == p) || !out.sheet.cuts.is_empty() {
+            // What the hole takes from its panel, in the panel's chart: its circle across it, or
+            // the band its bore runs along inside it (as far as the bore runs, a hair past either
+            // end). It goes the general way where that meets a pocket on the panel or a cut
+            // through the sheet, read exactly; clear of them, it is cut here.
+            let footprint = if across {
+                Loop2::circle(Vec2::new(b.x, b.y), radius)
+            } else {
+                let past = t * 1e-2;
+                let (o, d) = (Vec2::new(b.x, b.y), Vec2::new(a.x, a.y));
+                let Some(d) = d.normalized() else { return Ok(Vec::new()) };
+                let side = Vec2::new(-d.y, d.x) * radius;
+                let (s, e) = (o + d * (u0 - past), o + d * (u1 + past));
+                Loop2::polygon(&[s - side, e - side, e + side, s + side])
+            };
+            if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region)) {
                 return Ok(Vec::new());
+            }
+            if !out.sheet.cuts.is_empty() {
+                // The cuts are drawn in the chart of a panel each reaches, and may reach this one
+                // across a joint: both are read in the flat, where the development places them.
+                let Ok(dev) = sk.develop() else { return Ok(Vec::new()) };
+                let Some(Some(here)) = dev.placements.get(p) else { return Ok(Vec::new()) };
+                let laid = here.region(&Region2 { outer: footprint, holes: Vec::new() }).outer;
+                for c in &out.sheet.cuts {
+                    let Some(Some(there)) = dev.placements.get(c.panel) else { return Ok(Vec::new()) };
+                    if !crate::sheet_surface::loop_clear_of(&laid, &there.region(&c.region)) {
+                        return Ok(Vec::new());
+                    }
+                }
             }
             let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
             if across {
