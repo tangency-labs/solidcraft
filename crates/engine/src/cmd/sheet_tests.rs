@@ -273,6 +273,25 @@ fn unsupported_sheet_machining_is_atomic_but_true_no_change_is_allowed() {
     assert!((volume(&mut s) - 15000.0).abs() < 1e-6);
 }
 
+/// The same 5° tapered cut as above, run through the plate instead of stopping in it: its walls
+/// run from face to face, and the sheet cuts it as its shadow, square through as a shop cuts it.
+#[test]
+fn a_tapered_cut_through_the_sheet_is_cut_as_its_shadow() {
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    rectangle_tool(&mut s, "Taper", [20.0, 20.0], [30.0, 30.0]);
+    // The sketch lies on the plate's face at z = 0 (the plate runs up to z = 2.5), and the cut runs
+    // up 5 mm, out through the top face. A positive taper grows the profile as it goes, so the
+    // section widens across the plate, from the sketch's 10 x 10 at z = 0 to 10 + 2 · 2.5 · tan 5°
+    // square at z = 2.5. The shadow is that widest section taken through the thickness:
+    // 15000 − 2.5 · (10 + 5 tan 5°)² = 15000 − 272.351 = 14727.649.
+    run(&mut s, "solid.extrude", json!({"sketch":"Taper","distance":5,"operation":"cut","taper":"5 deg"}));
+    let (t, side) = (2.5, 10.0 + 2.0 * 2.5 * 5f64.to_radians().tan());
+    let want = 100.0 * 60.0 * t - t * side * side;
+    assert!((volume(&mut s) - want).abs() < 1e-6, "{} vs {want}", volume(&mut s));
+    assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(1));
+}
+
 #[test]
 fn empty_sheet_intersection_keeps_geometry_and_metadata_together() {
     let mut s = Session::default();
@@ -3488,8 +3507,10 @@ fn fold_fixed_point_off_the_sheet_is_not_silently_ignored() {
 /// A tab whose fold line sits exactly at its root: the bend zone reaches the blank outline beside
 /// the tab and would take the base's material there, so the fold is refused, naming a corner at
 /// the tab's root, and the sheet stays as it was. Every edge is straight, so the error must not
-/// blame a slanted or curved edge (#262). With its zone starting at the root, or 1 mm into the
-/// tab, the same fold works.
+/// blame a slanted or curved edge (#262). The root's corners (40, 50) and (60, 50) are equally far
+/// from the line's middle (50, 50); the line is drawn from (40, 50) toward (60, 50), so (40, 50)
+/// comes first along it and is the one named. With its zone starting at the root, or 1 mm into
+/// the tab, the same fold works.
 #[test]
 fn fold_at_a_tab_root_names_the_real_cause() {
     let blank = json!([[0, 0], [100, 0], [100, 50], [60, 50], [60, 70], [40, 70], [40, 50], [0, 50]]);
@@ -3499,13 +3520,57 @@ fn fold_at_a_tab_root_names_the_real_cause() {
     let e = s.execute("sheet.fold", &json!({"points": [[40, 50, 0.8], [60, 50, 0.8]], "fixed": [50, 25, 0.8]})).unwrap_err().to_string();
     assert!(!e.contains("slanted or curved"), "all edges are straight: {e}");
     assert!(e.contains("bend zone") && e.contains("reaches a corner of the sheet's outline"), "name the bend zone reaching the outline: {e}");
-    assert!(e.contains("at (40.000, 50.000,") || e.contains("at (60.000, 50.000,"), "name a corner at the tab's root: {e}");
+    assert!(e.contains("at (40.000, 50.000,"), "name the root's corner first along the line as drawn: {e}");
     assert_eq!(s.doc.to_json(), before);
     for (y, position) in [(50, "start"), (51, "centerline")] {
         let mut ok = Session::default();
         outline_blank(&mut ok, blank.clone());
         run(&mut ok, "sheet.fold", json!({"points": [[40, y, 0.8], [60, y, 0.8]], "fixed": [50, 25, 0.8], "position": position}));
     }
+}
+
+/// Two tabs on a 100 x 50 base's top edge, case 262's sheet (0.8 thick, R 0.8, K 0.44), the fold
+/// line y = 60 drawn across tab A (x 10…30, y 50…70) only. Tab B beside it on the same line steps
+/// in at y = 60 (x 60…90 below the step, 55…90 above), so the zone, y = 60 ± BA/2, holds two of
+/// its corners, (55, 60) and (60, 60). Tab B does not fold: it stays whole, its zone too, and its
+/// corners refuse nothing. Tab A folds.
+#[test]
+fn a_corner_on_a_tab_that_stays_does_not_refuse_the_fold_of_the_tab_beside_it() {
+    let (t, k) = (0.8, 0.44);
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Steel 0.8", "thickness": "0.8 mm", "active": true, "bend_radius": "0.8 mm", "k_factor": 0.44}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+    run(
+        &mut s,
+        "sketch.line",
+        json!({"points": [[0, 0], [100, 0], [100, 50], [90, 50], [90, 70], [55, 70], [55, 60], [60, 60], [60, 50],
+                          [30, 50], [30, 70], [10, 70], [10, 50], [0, 50]], "closed": true}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Blank"}));
+    // The base 100 x 50, tab A 20 x 20, tab B 30 x 20 and its step 5 x 10, 0.8 thick:
+    // (5000 + 400 + 600 + 50) · 0.8 = 4840.
+    let flat_volume = (100.0 * 50.0 + 20.0 * 20.0 + 30.0 * 20.0 + 5.0 * 10.0) * t;
+    assert!(rel(volume(&mut s), flat_volume) < 1e-9, "{} vs {flat_volume}", volume(&mut s));
+    run(&mut s, "sheet.fold", json!({"points": [[10, 60, 0.8], [30, 60, 0.8]], "fixed": [50, 25, 0.8]}));
+    // A fold keeps the flat length: over its width w it takes a strip BA = θ(R + K·t) wide and puts
+    // a bend of θ((R + t)² − R²)/2 = θ·t·(R + t/2) per mm in its place, so it adds θ·w·t²·(½ − K)
+    // (case 262's formula), R dropping out. Tab A alone folds, w = 20, θ = π/2:
+    // 4840 + 20 · (π/2) · 0.8² · (½ − 0.44) = 4840 + 1.206 = 4841.206.
+    let want = flat_volume + 20.0 * FRAC_PI_2 * t * t * (0.5 - k);
+    assert!(rel(volume(&mut s), want) < 1e-8, "{} vs {want}", volume(&mut s));
+    // Tab A stands up, 70 − 60.905 = 9.095 past its zone; tab B lies flat and whole, its zone
+    // (y 59.095…60.905) and the step's corner there too.
+    let bb = bbox(&mut s);
+    assert!(bb["max"][2].as_f64().unwrap_or(f64::NAN) > 7.0, "tab A stands up: {bb}");
+    assert!(!contains(&s, [20.0, 65.0, 0.4]), "tab A no longer lies flat");
+    for p in [[75.0, 55.0, 0.4], [75.0, 60.0, 0.4], [75.0, 65.0, 0.4], [57.5, 60.5, 0.4], [57.5, 65.0, 0.4]] {
+        assert!(contains(&s, p), "tab B is whole at {p:?}");
+    }
+    // One bend, across tab A's 20 mm.
+    let f = flat(&mut s);
+    assert_eq!(f["bends"].as_array().map(Vec::len), Some(1), "{f}");
+    assert!((f["bends"][0]["length"].as_f64().unwrap_or(f64::NAN) - 20.0).abs() < 1e-9, "{f}");
 }
 
 /// An outline is its exact curves, so a corner of 5° in the bend zone is a corner like any other.

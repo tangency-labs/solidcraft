@@ -1407,24 +1407,60 @@ pub(super) fn surface_prism_cut(
 }
 
 /// Refuses a tapered extrude cut (or intersect) that changes a sheet made from surfaces it targets
-/// (#6748), as the flat model refuses it: its walls are not square to the sheet, so the sheet
-/// can't keep it (read back, only its floor would show). A sheet clear of every tool by their
-/// exact boxes is passed over by a cut: a cut beside the sheet changes nothing.
-pub(super) fn surface_taper_refused(st: &ModelState, tools: &[Body], targets: &[String], op: Operation) -> Result<()> {
+/// (#6748) where the sheet can't keep it, as the flat model refuses it:
+///
+/// - a cut that stops inside a flat panel's thickness: a cap of the extrude (an end of the
+///   interval `constructor` says it was drawn over) lies strictly between the faces of a flat
+///   panel parallel to its plane, in a panel a tool reaches by their exact boxes. Its walls are
+///   not square to the sheet, and read back only its floor would show: the panel would keep a
+///   pocket at its floor's size;
+/// - an intersect: what it keeps has walls that are not square to the sheet.
+///
+/// Any other tapered cut goes on to the reader as an untapered one does (see
+/// `sheet_surface_cuts`): one through the sheet has walls from face to face, and the reader cuts
+/// it as its shadow, square through as a shop cuts it, as it cuts a hole at a slant. A cut beside
+/// the sheet changes nothing. Where the extrude's interval isn't known, a cut is refused wherever
+/// it changes the sheet.
+pub(super) fn surface_taper_refused(
+    st: &ModelState,
+    tools: &[Body],
+    constructor: Option<&ExtrudeConstructor>,
+    targets: &[String],
+    op: Operation,
+) -> Result<()> {
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
     let reach: Vec<Option<Aabb3>> = tools.iter().map(exact_box).collect();
-    for sk in &st.surface_sheets {
-        if !(all || targets.is_empty() || targets.contains(&sk.body)) {
-            continue;
-        }
+    for sk in st.surface_sheets.iter().filter(|sk| all || targets.is_empty() || targets.contains(&sk.body)) {
         let Some(mb) = st.body(&sk.body) else { continue };
-        let target = exact_box(&mb.body);
-        if op == Operation::Cut && reach.iter().all(|tool| boxes_apart(tool, &target)) {
+        if op == Operation::Cut && constructor.is_some_and(|c| !stops_inside(sk, &reach, &c.plane, c.interval)) {
             continue;
         }
         super::sheet_boolean_unchanged(&mb.body, tools, op)?;
     }
     Ok(())
+}
+
+/// Whether an extrude drawn on `plane` over `interval` (along the plane's normal) stops inside a
+/// flat panel of `sk` that a tool reaches (`reach`: the tools' boxes): a cap of it strictly between
+/// the panel's faces, parallel to them. Past a rounding of the numbers its depths come from, a cap
+/// within a few units in the last place of a face is on it (see [`surface_thin_layer_refused`]).
+/// Where the sheet's pieces can't be placed, it is taken to stop inside one.
+fn stops_inside(sk: &crate::SurfaceSheet, reach: &[Option<Aabb3>], plane: &Plane, interval: (f64, f64)) -> bool {
+    let Some((panels, boxes)) = sk.pieces_in_space() else { return true };
+    let n = plane.normal();
+    let t = sk.thickness;
+    panels.iter().any(|(p, frame, _)| {
+        if frame.z.cross(n).len() > 1e-9 {
+            return false;
+        }
+        // The panel's faces along the normal.
+        let s0 = (frame.shift - plane.origin).dot(n);
+        let s1 = s0 + t * frame.z.dot(n);
+        let (p0, p1) = (s0.min(s1), s0.max(s1));
+        let ulps = 4.0 * f64::EPSILON * (frame.shift.len() + plane.origin.len() + interval.0.abs() + interval.1.abs() + t);
+        [interval.0, interval.1].into_iter().any(|cap| cap - p0 > ulps && p1 - cap > ulps)
+            && boxes.iter().any(|(k, b)| *k == Some(*p) && reach.iter().any(|r| !boxes_apart(r, &Some(*b))))
+    })
 }
 
 /// What the drills of hole feature `f` take from the sheets made from surfaces they reach, of the

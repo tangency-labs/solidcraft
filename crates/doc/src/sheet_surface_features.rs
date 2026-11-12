@@ -815,24 +815,6 @@ impl SurfaceSheet {
             "mould" | "mold" => l - (bend.radius + t) * (bend.angle / 2.0).tan(),
             o => return err(format!("unknown fold position `{o}` (centerline, start, end or mould)")),
         };
-        // A corner of the outline inside the bend zone (a fold right at a tab's root): the zone
-        // would not be a strip of the panel, and the material beside the tab would be lost. Name
-        // the corner nearest the middle of the line, and how far the line has to move to clear
-        // them all.
-        let corners: Vec<(Vec2, f64)> =
-            outline_corners(&region.outer).into_iter().map(|c| (c, c.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
-        let mid = Vec2::new((line[0].x + line[1].x) / 2.0, (line[0].y + line[1].y) / 2.0);
-        if let Some(&(c, _)) = corners.iter().min_by(|x, y| x.0.dist(mid).total_cmp(&y.0.dist(mid))) {
-            let to_fold = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(*s));
-            let to_stay = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(ba - *s));
-            // Where it lies on the sheet's surface.
-            let w = here.point(Vec3::new(c.x, c.y, 0.0));
-            return err(format!(
-                "the bend zone ({ba:.3} mm wide) reaches a corner of the sheet's outline at ({:.3}, {:.3}, {:.3}): \
-                 move the fold line at least {to_fold:.3} mm toward the side that folds or {to_stay:.3} mm toward the side that stays",
-                w.x, w.y, w.z
-            ));
-        }
         // The zone runs from the line `x · n = s0` (on the side that stays) to `s0 + ba`; its
         // anchors run along `u`, the side that stays on their left.
         let u = n.perp();
@@ -922,6 +904,31 @@ impl SurfaceSheet {
         }
         if moves.is_empty() {
             return err("the fold leaves nothing on its moving side");
+        }
+        // A corner of the outline inside the bend zone of a piece that folds (a fold right at a
+        // tab's root): the zone would not be a strip of the panel, and the material beside the
+        // tab would be lost. A corner on a piece the line does not reach stays with it, its zone
+        // too, and refuses nothing. Name the corner nearest the middle of the line, of two as near
+        // (a tab's root) the first along the line as drawn, as the pieces are ordered above, and
+        // how far the line has to move to clear them all.
+        let folds = |q: Vec2| moves.iter().any(|m| q.dot(u) >= m.span.0 - tol && q.dot(u) <= m.span.1 + tol);
+        let corners: Vec<(Vec2, f64)> =
+            outline_corners(&region.outer).into_iter().map(|c| (c, side(c))).filter(|&(c, s)| s > 1e-6 && s < ba - 1e-6 && folds(c)).collect();
+        let mid = Vec2::new((line[0].x + line[1].x) / 2.0, (line[0].y + line[1].y) / 2.0);
+        let nearest = corners.iter().min_by(|x, y| {
+            let (dx, dy) = (x.0.dist(mid), y.0.dist(mid));
+            if (dx - dy).abs() <= tol { x.0.dot(way).total_cmp(&y.0.dot(way)) } else { dx.total_cmp(&dy) }
+        });
+        if let Some(&(c, _)) = nearest {
+            let to_fold = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(*s));
+            let to_stay = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(ba - *s));
+            // Where it lies on the sheet's surface.
+            let w = here.point(Vec3::new(c.x, c.y, 0.0));
+            return err(format!(
+                "the bend zone ({ba:.3} mm wide) reaches a corner of the sheet's outline at ({:.3}, {:.3}, {:.3}): \
+                 move the fold line at least {to_fold:.3} mm toward the side that folds or {to_stay:.3} mm toward the side that stays",
+                w.x, w.y, w.z
+            ));
         }
         let one = |r: Vec<Region2>| -> Result<std::result::Result<Region2, &'static str>> {
             match <[Region2; 1]>::try_from(r) {

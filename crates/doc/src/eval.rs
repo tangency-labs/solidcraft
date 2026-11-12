@@ -5371,6 +5371,10 @@ fn feature_tools_with_constructor(
                         None => 0.0,
                     };
                 extrude_within_reach([base, base + sign * len])?;
+                // A tapered tool is never trimmed: its caps lie at the ends of this interval, as
+                // drawn. A tapered cut of a sheet made from surfaces is read by where they lie (see
+                // `surface_taper_refused`).
+                *constructor = Some(ExtrudeConstructor { plane: ss.plane, interval: (base, base + sign * len) });
                 let start_plane = ss.plane.offset(base);
                 let caps = [
                     Some(crate::lineage::extrude_cap_role(base)),
@@ -7452,13 +7456,14 @@ fn eval_feature(
                 st.cut_extents.insert(f.id, (c.plane, c.interval));
             }
             // A tapered cut's walls are not square to a sheet made from surfaces: refused where it
-            // changes one.
+            // stops inside a flat panel's thickness, and an intersect where it changes one. A
+            // tapered cut through the sheet goes on to be read as its shadow.
             if matches!(operation, Operation::Cut | Operation::Intersect)
                 && matches!(&f.kind, FeatureKind::Extrude { extent, .. } if extent.taper.is_some())
                 && !st.surface_sheets.is_empty()
             {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-                more::surface_taper_refused(st, &bodies, &crate::plain(targets), *operation)?;
+                more::surface_taper_refused(st, &bodies, constructor.as_ref(), &crate::plain(targets), *operation)?;
             }
             // A cut square through flat panels of sheets made from surfaces goes into their outlines.
             if *operation == Operation::Cut && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.surface_sheets.is_empty() {
