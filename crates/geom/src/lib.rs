@@ -35,13 +35,74 @@ mod mesh;
 pub mod mesh_distance;
 pub mod network;
 pub mod paper;
+pub mod pixel_grid;
 mod plane;
 mod profile;
 pub mod section;
 pub mod simplify;
 pub mod spline_space;
 pub mod stderr;
-pub mod tess;
+/// The plan evaluator, now the kernel's (`solidcore::eval::plan`), and the display plan, now
+/// solidcore-tess's (RFC 0003, item 1.1), under their old path.
+pub mod tess {
+    pub use solidcore::eval::plan::*;
+    pub use solidcore_tess::{FacePlan, TessPlan};
+
+    use solidcore_record::Vec3;
+
+    /// A vector of SolidCraft's as the kernel's.
+    pub fn to_kernel(v: Vec3) -> solidcore::Vec3 {
+        solidcore::Vec3::new(v.x, v.y, v.z)
+    }
+
+    /// A vector of the kernel's as SolidCraft's.
+    pub fn from_kernel(v: solidcore::Vec3) -> Vec3 {
+        Vec3::new(v.x, v.y, v.z)
+    }
+
+    /// A point and two derivatives of the kernel's as SolidCraft's.
+    pub fn from_kernel3((a, b, c): (solidcore::Vec3, solidcore::Vec3, solidcore::Vec3)) -> (Vec3, Vec3, Vec3) {
+        (from_kernel(a), from_kernel(b), from_kernel(c))
+    }
+
+    /// The kernel's partial derivatives ([`solidcore::eval::plan::partials`]) in SolidCraft's
+    /// vectors.
+    pub mod partials {
+        pub use solidcore::eval::plan::partials::{MAX_PARTIAL_ORDER, orders, trig_derivative};
+        use solidcore_record::Vec3;
+
+        /// A surface's partial derivatives at a point: `d[i][j]` is `∂^(i+j) S / ∂u^i ∂v^j`, filled
+        /// for `i + j ≤` [`MAX_PARTIAL_ORDER`] and zero past it.
+        pub type Partials = [[Vec3; MAX_PARTIAL_ORDER + 1]; MAX_PARTIAL_ORDER + 1];
+
+        /// A table of partials from `f(i, j)`; `None` when one is missing or not finite.
+        pub fn tabulate(mut f: impl FnMut(usize, usize) -> Option<Vec3>) -> Option<Partials> {
+            let mut d = [[Vec3::ZERO; MAX_PARTIAL_ORDER + 1]; MAX_PARTIAL_ORDER + 1];
+            for (i, j) in orders() {
+                let x = f(i, j).filter(|x| x.is_finite())?;
+                *d.get_mut(i)?.get_mut(j)? = x;
+            }
+            Some(d)
+        }
+
+        /// The kernel's table in SolidCraft's vectors.
+        pub fn from_kernel(d: solidcore::eval::plan::partials::Partials) -> Partials {
+            d.map(|row| row.map(super::from_kernel))
+        }
+    }
+
+    /// A plan evaluated into SolidCraft's [`crate::Mesh`].
+    pub trait EvaluateMesh {
+        /// The plan's mesh ([`TessPlan::evaluate`]), as SolidCraft's mesh.
+        fn evaluate_mesh(&self) -> crate::Mesh;
+    }
+
+    impl EvaluateMesh for TessPlan {
+        fn evaluate_mesh(&self) -> crate::Mesh {
+            self.evaluate().0
+        }
+    }
+}
 pub mod title_block;
 pub mod tspline;
 mod unit_vec3;

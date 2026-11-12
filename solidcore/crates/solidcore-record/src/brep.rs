@@ -11,6 +11,7 @@
 //! bounds are its `interval`, a face's its `domain` and loops.
 use serde::{Deserialize, Serialize};
 
+pub mod blend;
 mod curve2;
 pub mod envelope;
 pub mod history;
@@ -300,6 +301,14 @@ pub enum Surface {
         axis: [f64; 3],
         matrix: [[f64; 4]; 4],
         forward: bool,
+    },
+    /// A blend by its definition: a procedural blend's definition S, or a round of an exact
+    /// class's ([`blend::BlendDefinition`]). It has no (u, v) of its own: the face's `nurbs` is
+    /// its net B, certified within the definition's bound of S (an exact round's net is S), and
+    /// the face's (u, v) are the net's. The kernel rebuilds the definition and certifies the net
+    /// again before the face is an operand.
+    Blend {
+        definition: Box<blend::BlendDefinition>,
     },
 }
 
@@ -725,6 +734,10 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
             points(matrix, budget)?;
             curve(profile, depth + 1, budget)
         }
+        Surface::Blend { definition } => {
+            definition.validate().map_err(|e| Invalid(e.reason))?;
+            budget.add(definition.items())
+        }
     }
 }
 
@@ -837,12 +850,13 @@ impl Brep {
                             | Surface::BallPatch { .. }
                             | Surface::Torus { .. }
                             | Surface::PlacedRevolution { .. }
+                            | Surface::Blend { .. }
                     ),
-                    "NURBS form on a surface that is not a cylinder, cone, sphere, ball patch, torus or revolution",
+                    "NURBS form on a surface that is not a cylinder, cone, sphere, ball patch, torus, revolution or blend",
                 )?;
             }
-            // A cylinder, cone, sphere, ball patch, torus or revolution is a label: its geometry is
-            // its form.
+            // A cylinder, cone, sphere, ball patch, torus, revolution or blend is a label: its
+            // geometry is its form.
             require(
                 f.nurbs.is_some()
                     || !matches!(
@@ -853,8 +867,9 @@ impl Brep {
                             | Surface::BallPatch { .. }
                             | Surface::Torus { .. }
                             | Surface::PlacedRevolution { .. }
+                            | Surface::Blend { .. }
                     ),
-                "a cylinder, cone, sphere, ball patch, torus or revolution without its NURBS form",
+                "a cylinder, cone, sphere, ball patch, torus, revolution or blend without its NURBS form",
             )?;
             let [u, v] = parameter_natural(f.parameters())?;
             interval(&f.domain[0], u)?;

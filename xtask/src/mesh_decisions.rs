@@ -47,10 +47,10 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/engine/src/cmd/render.rs", "rendered pictures"),
     ("crates/engine/src/cmd/silhouette.rs", "a picture's view-aligned silhouette of the display meshes"),
     ("crates/engine/src/cmd/surface_analysis.rs", "view analyses: zebra, draft and curvature shading of the display mesh"),
-    ("crates/engine/src/cmd/view_dxf_meshes.rs", "a drawing's view lines from display meshes"),
-    ("crates/engine/src/cmd/view_dxf_scene.rs", "a drawing's hidden-line occlusion over display meshes"),
     ("crates/engine/src/cosmetic_threads.rs", "cosmetic thread hatching drawn on the displayed triangles"),
     ("crates/engine/src/fuzz.rs", "the fuzz harness, which frames what it built"),
+    ("crates/engine/src/mesh_lines/meshes.rs", "a drawing's view lines from display meshes"),
+    ("crates/engine/src/mesh_lines/scene.rs", "a drawing's hidden-line occlusion over display meshes"),
     ("crates/engine/src/product_scene.rs", "the scene a rendered picture draws"),
     ("crates/engine/src/render_jobs.rs", "rendered pictures"),
     ("crates/engine/src/slicer_files.rs", "the mesh export a 3D-printing slicer opens"),
@@ -60,7 +60,6 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/kernel/src/meshbody.rs", "mesh bodies"),
     ("crates/kernel/src/native/preview.rs", "a feature's preview mesh"),
     ("crates/kernel/src/polybool.rs", "mesh bodies: booleans of a body with a closed triangle mesh"),
-    ("crates/kernel/src/tess", "the mesher: a body's display tessellation"),
 ];
 
 /// Functions, in modules that also decide geometry, whose job is the display mesh itself, a
@@ -70,6 +69,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
         "crates/doc/src/document.rs:MeshData::generate_crease_normals",
         "mesh bodies: explicit shading metadata; positions, triangles and model decisions are unchanged",
     ),
+    ("crates/doc/src/construct.rs:lies_on_mesh", "mesh bodies: whether a face pick landed on a mesh body, which has no faces"),
     ("crates/doc/src/eval.rs:ImportDigests::of", "mesh-body imports: retained content identities, not tessellated-solid decisions"),
     ("crates/doc/src/eval.rs:MeshDigest::matches", "mesh-body imports: compares retained source-array identities"),
     ("crates/doc/src/eval.rs:ModelBody::display_plan", "the display plan"),

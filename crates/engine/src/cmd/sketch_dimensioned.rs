@@ -17,7 +17,7 @@ use solidcraft_doc::expr::{Kind, definition};
 use crate::{
     Result, Session,
     params::{bad, bool_, expr, str_},
-    schema::sketch_dimensioned::DrawDimensionedResult,
+    schema::{frame::SketchSolve, sketch_dimensioned::DrawDimensionedResult},
 };
 
 /// The dimension roles of a sketch creator, in the order `as_drawn` adds them, or None when
@@ -204,17 +204,32 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let located = if locate {
-        // The freedom left once the shape and its sizes are in: the last reply that reports it.
-        let dof = added.values().rev().chain([&out]).find_map(dof_of);
+        // The freedom left once the shape and its sizes are in, read from the sketch itself: `added`
+        // is keyed by role, so its last entry is not the last dimension placed.
+        let dof = solve_now(&scratch, &params).map(|solve| solve.dof as u64);
         place_from_origin(&mut scratch, &out, &params, dof)
     } else {
         Vec::new()
     };
+    // The creator's `sketch` is its solve before the dimensions: the reply's is the sketch's now.
+    let mut out = out;
+    if let (Some(solve), Some(object)) = (solve_now(&scratch, &params), out.as_object_mut()) {
+        object.insert("sketch".to_string(), serde_json::to_value(solve).map_err(|e| bad(cmd, e.to_string()))?);
+    }
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
     s.accept_computed(scratch);
     let reply = DrawDimensionedResult::new(out, added, defined, locate.then_some(located));
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The solve of the target sketch as it is now (what `sketch.dimension` reports after an edit), or
+/// None when the sketch cannot be read or solved.
+fn solve_now(scratch: &Session, params: &Value) -> Option<SketchSolve> {
+    let id = super::sketch_store::target(scratch, params, "sketch.draw.dimensioned").ok()?;
+    let mut sketch = super::sketch_store::read(&scratch.doc, id).ok()?.clone();
+    let report = super::solve_current(&mut sketch, &scratch.doc).ok()?;
+    Some(super::solve_info(&report))
 }
 
 /// The sketch's degrees of freedom as a command reported them.

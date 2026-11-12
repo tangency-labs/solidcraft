@@ -5,8 +5,7 @@
 //! merged at 5e8c9c1) adds `SmFilletSolver::BandCutsThePart` with `sm_EdgesCrossingPlane`
 //! and `sm_KeepsMaterialBehind` (`SmFilletSolver.cpp`, `SmFilletSolver.h`) in commits
 //! 862971f, e568e45 (the section intersected with every face, not sampled) and aac4288 (a
-//! run of cutting sections reaching an end of the edge is no cut). They run only with the
-//! opt-in `Kernel::fixes.fillet_gn_section_generator`.
+//! run of cutting sections reaching an end of the edge is no cut).
 //!
 //! | Rust                          | Upstream (fork)                          |
 //! |-------------------------------|------------------------------------------|
@@ -238,20 +237,15 @@ fn edges_crossing_plane(
             tol,
         )?;
         for sol in solutions.as_slice() {
-            let t = sol
-                .start
-                .parameters
-                .first()
-                .copied()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let t =
+                sol.start.parameters.first().copied().ok_or_else(|| {
+                    SolidError::blend_missing(OP, "the crossing's edge parameter")
+                })?;
             crossings.push(edge.curve.evaluate_point(k, t)?);
             if sol.solution_type == SolutionType::RangeOfValues {
-                let t = sol
-                    .end
-                    .parameters
-                    .first()
-                    .copied()
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                let t = sol.end.parameters.first().copied().ok_or_else(|| {
+                    SolidError::blend_missing(OP, "the crossing's end parameter on the edge")
+                })?;
                 crossings.push(edge.curve.evaluate_point(k, t)?);
             }
         }
@@ -381,7 +375,7 @@ fn keeps_material_behind(
                 let params = &sol.start.parameters;
                 let (Some(&t), Some(&u), Some(&v)) = (params.first(), params.get(1), params.get(2))
                 else {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::blend_missing(OP, "the crossing's parameters"));
                 };
                 let at = section.evaluate_point(k, t)?;
                 if at.distance(rail1) <= ends || at.distance(rail2) <= ends {
@@ -469,13 +463,13 @@ fn keeps(
         {
             let slot = base
                 .surface_mut(0)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
             at[0] = slot.surface.surface.evaluate_point_extending(k, uvs[0])?;
         }
         for (rail, uv) in uvs.into_iter().enumerate() {
             let slot = base
                 .surface(rail)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
             let p = slot.surface.surface.base_surface().evaluate_point(k, uv)?;
             if let Some(dst) = at.get_mut(rail + 1) {
                 *dst = p;
@@ -485,7 +479,7 @@ fn keeps(
         for (rail, uv) in uvs.into_iter().enumerate() {
             let slot = base
                 .surface(rail)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
             let offset = &slot.surface.surface;
             if let Some(extended) = offset.extended_base_surface() {
                 if !offset
@@ -659,7 +653,7 @@ fn section_breaks_through(
                 let params = &sol.start.parameters;
                 let (Some(&t), Some(&u), Some(&v)) = (params.first(), params.get(1), params.get(2))
                 else {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::blend_missing(OP, "the crossing's parameters"));
                 };
                 let at = section.evaluate_point(k, t)?;
                 if at.distance(rail1) <= ends || at.distance(rail2) <= ends {
@@ -753,7 +747,7 @@ impl Pieces<'_> {
             return Ok(*known);
         }
         let (Some(&t0), Some(&t1)) = (self.at.get(i), self.at.get(i + 1)) else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(OP, "the piece's end parameters"));
         };
         let class = if !(t1 - t0 > 0.0) {
             Piece::Point
@@ -877,9 +871,10 @@ pub(crate) fn band_cuts_the_part_cached(
     let Some(edgeuse) = base.edgeuse(0)? else {
         return Ok(None);
     };
-    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let edge_id = eu::edge(target, edgeuse)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let curve = edge::evaluation_curve(target, edge_id)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
         .clone();
     let ivl = edge::interval(target, edge_id)?;
     let (rolls, on_edge) = rolls_a_ball(solver);
@@ -908,7 +903,10 @@ pub(crate) fn band_cuts_the_part_cached(
         ts.push(t);
         let pv = curve.evaluate(k, t, 1, true, false)?;
         let (Some(&point), Some(&tangent)) = (pv.first(), pv.get(1)) else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(
+                OP,
+                "the edge curve's point and tangent",
+            ));
         };
         if !(tangent.length() > EFF_ZERO) {
             all_crossings.push(Vec::new());
@@ -1030,8 +1028,7 @@ pub(crate) fn band_cuts_the_part_cached(
     Ok(cut)
 }
 
-/// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through` with
-/// `fixes.fillet_gn_section_generator`): whether this convex blend's section breaks
+/// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through`): whether this convex blend's section breaks
 /// through the part somewhere along its edge (it leaves the part and comes back into it
 /// through an inner face, one sharing no edge with the blended faces: a hollow behind a
 /// wall, `section_breaks_through`), and where it would, the largest size that keeps every
@@ -1065,9 +1062,10 @@ pub(crate) fn band_breaks_through_the_part_cached(
     let Some(edgeuse) = base.edgeuse(0)? else {
         return Ok(None);
     };
-    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-    let curve =
-        edge::evaluation_curve(target, edge_id)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let edge_id = eu::edge(target, edgeuse)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+    let curve = edge::evaluation_curve(target, edge_id)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
     let ivl = edge::interval(target, edge_id)?;
     let (rolls, on_edge) = rolls_a_ball(solver);
     if !rolls || on_edge {

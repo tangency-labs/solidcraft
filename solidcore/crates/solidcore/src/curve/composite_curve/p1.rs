@@ -409,6 +409,10 @@ pub struct BuiltComposites {
     /// The input curves no composite uses (shorter than the same point tolerance;
     /// upstream leaves them with the caller), in input order.
     pub unused: Vec<Curve>,
+    /// For each composite, where each of its segments came from, in segment order: the
+    /// input curve's index, or `None` for a line the builder put across a gap (not upstream:
+    /// the skin's trace, tangency-labs/solidcraft#13632).
+    pub sources: Vec<Vec<Option<usize>>>,
 }
 
 impl CurveEvaluate for CompositeCurve {
@@ -429,12 +433,18 @@ impl CurveEvaluate for CompositeCurve {
         _non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
         // SmCurve::Evaluate (not overridden)
-        Err(SolidError::sm_err(OP))
+        Err(SolidError::curve_failed(
+            OP,
+            "a composite curve has no evaluation of its own",
+        ))
     }
 
     fn evaluate_point(&self, _k: &Kernel, _t: f64) -> Result<Point3> {
         // SmCurve::EvaluatePoint (not overridden)
-        Err(SolidError::sm_err(OP))
+        Err(SolidError::curve_failed(
+            OP,
+            "a composite curve has no point evaluation of its own",
+        ))
     }
 
     fn is_closed_virtual(&self, _k: &Kernel, _interval: &Extent1d, _tol: f64) -> Result<bool> {
@@ -1164,10 +1174,16 @@ impl CompositeCurve {
     ) -> Result<BuiltComposites> {
         // check input
         if same_point_tolerance <= 0.0 {
-            return Err(SolidError::sm_err(OP_BUILD));
+            return Err(SolidError::curve_failed(
+                OP_BUILD,
+                "the same-point tolerance is not positive",
+            ));
         }
         if !(distance_to_create_line == 0.0 || distance_to_create_line > same_point_tolerance) {
-            return Err(SolidError::sm_err(OP_BUILD));
+            return Err(SolidError::curve_failed(
+                OP_BUILD,
+                "the distance to create a line is neither zero nor above the same-point tolerance",
+            ));
         }
 
         // Get the max input tolerance.
@@ -1179,12 +1195,14 @@ impl CompositeCurve {
 
         // init output
         let mut composites: Vec<CompositeCurve> = Vec::new();
+        let mut sources: Vec<Vec<Option<usize>>> = Vec::new();
 
         let total = curves.len();
         if total == 0 {
             return Ok(BuiltComposites {
                 composites,
                 unused: Vec::new(),
+                sources: Vec::new(),
             });
         }
 
@@ -1193,11 +1211,10 @@ impl CompositeCurve {
         for c in curves {
             let mut item = CurveItem::new(c);
             // (status ignored upstream: GetEnds returns void)
-            if let Some(e) = ignored(
-                item.curve
-                    .as_ref()
-                    .map_or_else(|| Err(SolidError::sm_err(OP_BUILD)), |curve| curve.ends(k)),
-            )? {
+            if let Some(e) = ignored(item.curve.as_ref().map_or_else(
+                || Err(SolidError::curve_failed(OP_BUILD, "the item has no curve")),
+                |curve| curve.ends(k),
+            ))? {
                 item.start = e.start;
                 item.end = e.end;
             }
@@ -1290,6 +1307,7 @@ impl CompositeCurve {
                     same_point_tolerance,
                     distance_to_create_line,
                     &mut composites,
+                    &mut sources,
                 )?;
 
                 // Now look for 1st remaining curve segment to start another composite
@@ -1332,7 +1350,11 @@ impl CompositeCurve {
 
         // the curves no composite took stay with the caller
         let unused = items.into_iter().filter_map(|c| c.curve).collect();
-        Ok(BuiltComposites { composites, unused })
+        Ok(BuiltComposites {
+            composites,
+            unused,
+            sources,
+        })
     }
 }
 
@@ -1418,6 +1440,7 @@ fn flush_crv(
     same_point_tolerance: f64,
     distance_to_create_line: f64,
     composites: &mut Vec<CompositeCurve>,
+    sources: &mut Vec<Vec<Option<usize>>>,
 ) -> Result<()> {
     // locals: the curves (by item), senses and gaps of the composite being built,
     // and the line segments filling gaps (by position)
@@ -1515,10 +1538,17 @@ fn flush_crv(
         if create_composite {
             let use_gaps = gaps.len() == curves.len();
             let mut cs = Vec::new();
+            let mut from = Vec::new();
             for p in curves.drain(..) {
                 cs.push(match p {
-                    Pending::Item(i) => take_curve(items, i)?,
-                    Pending::Line(l) => Curve::from(l),
+                    Pending::Item(i) => {
+                        from.push(Some(i));
+                        take_curve(items, i)?
+                    }
+                    Pending::Line(l) => {
+                        from.push(None);
+                        Curve::from(l)
+                    }
                 });
             }
             let comp = CompositeCurve::with_curves(
@@ -1529,6 +1559,7 @@ fn flush_crv(
                 use_gaps.then_some(gaps.as_slice()),
             )?;
             composites.push(comp);
+            sources.push(from);
 
             // reset scratch arrays
             senses.clear();
@@ -1872,7 +1903,10 @@ pub fn create_corner(
         }
         OffsetCornerType::CurveExtension => {
             // No other corner cases implemented yet
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "an offset corner by curve extension is not implemented",
+            ));
         }
     }
     Ok(out)

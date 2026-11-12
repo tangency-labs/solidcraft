@@ -3,8 +3,7 @@
 //!
 //! Not in the pinned upstream: the SolidCraft fork's `source/SMLib/src/SmFilletSection.cpp`
 //! (`sm_FilletCurveCorners`, from tangency-labs/smlib@6eecf04), called by
-//! `SmGnSectionFSG::CircleSurface`, the fork's circular section, under
-//! `fixes.fillet_gn_section_generator` (WR-685, #2250).
+//! `SmGnSectionFSG::CircleSurface`, the fork's circular section (WR-685, #2250).
 //!
 //! | Rust                      | Fork (`SmFilletSection.cpp`) |
 //! |---------------------------|------------------------------|
@@ -24,7 +23,10 @@ fn pv(c: &BSplineCurve, t: f64, from_left: bool) -> Result<(Vec3, Vec3)> {
     let v = c.evaluate(t, 1, from_left, false)?;
     match *v.as_slice() {
         [p, d, ..] => Ok((p, d)),
-        _ => Err(SolidError::sm_err(OP_CORNERS)),
+        _ => Err(SolidError::blend_failed(
+            OP_CORNERS,
+            "the curve has no first derivative",
+        )),
     }
 }
 

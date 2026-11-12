@@ -42,6 +42,7 @@ use solidcraft_sketch::PatternAlignment;
 use super::check::whole;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
+use super::sketch_shapes::Created;
 use super::types::{LengthExpr, Point2, StringList};
 use crate::params::{self, expr, num, str_};
 
@@ -1030,7 +1031,7 @@ fn pattern_id(p: &Value) -> Option<String> {
     str_(p, "pattern").map(str::to_string)
 }
 
-fn alignment_schema(_: &mut SchemaGenerator) -> Schema {
+pub(super) fn alignment_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "enum": ["left", "center", "right"]})
 }
 
@@ -1041,8 +1042,8 @@ fn pattern_forms(circular: bool) -> &'static [&'static [&'static str]] {
 /// Make copies of sketch curves and points evenly round a centre, as an associative pattern: the
 /// copies follow the originals, and the pattern keeps its own constraints. The quantity includes
 /// the original. With `pattern`, edit the pattern that id names instead of making a new one:
-/// keys left out keep their values, surviving instance ids are kept, and the pattern's type and
-/// seed entities cannot change. One undo step.
+/// keys left out keep their values, surviving instance ids are kept, and the pattern's type
+/// cannot change. A changed `entities` list rebuilds every copy with fresh ids. One undo step.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = circular_required)]
 pub struct CircularPatternParams {
@@ -1124,8 +1125,8 @@ impl CircularPatternParams {
 /// copies follow the originals, and the pattern keeps its own constraints. Quantities include the
 /// original, at most 500 copies in all; a negative spacing reverses its direction. With
 /// `pattern`, edit the pattern that id names instead of making a new one: keys left out keep
-/// their values, surviving instance ids are kept, and the pattern's type and seed entities
-/// cannot change. One undo step.
+/// their values, surviving instance ids are kept, and the pattern's type cannot change. A changed
+/// `entities` list rebuilds every copy with fresh ids. One undo step.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = rectangular_required)]
 pub struct RectangularPatternParams {
@@ -1312,6 +1313,9 @@ pub struct TrimResult {
     pub result: TrimOutcome,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1331,6 +1335,9 @@ pub struct TrimPathResult {
     /// `true` for a `dry_run`, which changed nothing; left out otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<bool>,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1343,6 +1350,9 @@ pub struct BreakResult {
     pub curves: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1377,6 +1387,9 @@ pub struct FilletResult {
     pub moved_to_virtual_corner: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1393,6 +1406,9 @@ pub struct ChamferResult {
     pub moved_to_virtual_corner: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1438,6 +1454,13 @@ pub struct OffsetResult {
     /// or several instances each side of `sides` has its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub association: Option<String>,
+    /// Set when a distance that names a parameter drives nothing, because the offset was trimmed
+    /// and so is not linked to its source (#12294).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1468,6 +1491,9 @@ pub struct MirrorResult {
     pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1478,8 +1504,14 @@ pub struct MirrorResult {
 pub struct MoveResult {
     /// The curves moved, or with `copy` the copies made, by id.
     pub curves: Vec<String>,
+    /// The constraints tying the moved geometry to what stays that the move let go, as
+    /// `{id, kind}`.
+    pub released: Vec<Value>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1510,6 +1542,9 @@ pub struct PatternResult {
     pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

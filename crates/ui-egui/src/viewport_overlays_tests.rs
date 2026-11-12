@@ -690,7 +690,7 @@ fn compass_negative_ends_are_hollow_and_positive_ends_are_chunkier() {
             let original = c + vec2(38.0, 0.0);
             let painted = c + (original - c) * 0.84;
             let output = draw(&ctx, |ui| {
-                crate::icons::navigation::axis_tip(ui.painter(), c, name, direction.into(), painted, 0.5, false, t);
+                solidcraft_look::compass::axis_tip_scaled(ui.painter(), c, name, direction.into(), painted, 0.5, false, t, 1.0);
             });
             let circles: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Circle(c) = &s.shape { Some(c) } else { None }).collect();
             let end = circles.iter().find(|circle| circle.center == painted).unwrap();
@@ -934,7 +934,7 @@ fn a_hovered_compass_end_turns_white_and_its_letter_takes_the_axis_colour() {
             let original = c + vec2(38.0, 0.0);
             let painted = c + (original - c) * 0.84;
             let output = draw(&ctx, |ui| {
-                crate::icons::navigation::axis_tip(ui.painter(), c, name, direction.into(), painted, 0.5, true, t);
+                solidcraft_look::compass::axis_tip_scaled(ui.painter(), c, name, direction.into(), painted, 0.5, true, t, 1.0);
             });
             let circles: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Circle(c) = &s.shape { Some(c) } else { None }).collect();
             assert!(circles.iter().any(|circle| circle.center == painted && circle.fill == t.on_accent), "{name}: the hovered end is filled white");
@@ -2799,4 +2799,37 @@ fn a_section_card_shows_every_row_and_reads_like_its_pill() {
             assert!(description.settings.iter().any(|s| matches!(&s.value, V::Axis { current, .. } if current == normal)), "{plane}");
         }
     }
+}
+
+/// Notes (#1631): the callout is laid out in screen space at the projected anchor, so it
+/// faces the camera at any rotation, follows the anchor, and hidden notes are not drawn.
+#[test]
+fn note_callouts_are_screen_facing_and_follow_the_anchor() {
+    fn shot(h: &Harness) -> Vec<DrawnNote> {
+        let proj = display_proj(&h.app);
+        let mut out = Vec::new();
+        draw(&h.ctx, |ui| out = note_callouts(&h.app, ui.painter(), &proj));
+        out
+    }
+    let mut h = Harness::new();
+    h.app.run("note.add", json!({"anchor": [10.0, 5.0, 20.0], "text": "Check clearance here."})).unwrap();
+    h.settle();
+    let first = shot(&h);
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].text, "Check clearance here.");
+    assert!(first[0].text_rect.width() > 0.0 && first[0].text_rect.height() > 0.0);
+
+    // Another rotation: the same text, drawn at a new place — the callout faces the screen.
+    h.call("ui.view", json!({"view": "front"}));
+    h.settle();
+    let second = shot(&h);
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].text, first[0].text);
+    assert_ne!(second[0].anchor, first[0].anchor, "the anchor follows the model as it turns");
+
+    // A hidden note is kept but not drawn.
+    let id = h.app.session.doc.notes[0].id;
+    h.app.run("note.update", json!({"note": id, "hidden": true})).unwrap();
+    h.settle();
+    assert!(shot(&h).is_empty());
 }

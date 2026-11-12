@@ -433,8 +433,9 @@ pub use brep::ToleranceGaps;
 ///
 /// # Errors
 ///
-/// [`SolidError::Upstream`] (`SM_ERR`) for an edge use end without vertex (upstream's
-/// `NER`, after the reports and updates of the earlier edge uses);
+/// [`crate::error::topology::TopologyFailure::Failed`] (`SM_ERR`) for an edge use end
+/// without vertex (upstream's `NER`, after the reports and updates of the earlier edge
+/// uses);
 /// [`SolidError::InvalidInput`] for a level above 4 or broken topology links upstream
 /// would dereference; those of the gap and bounding box computations.
 pub fn validate_and_update_tolerances(
@@ -453,8 +454,9 @@ pub fn validate_and_update_tolerances(
     };
     let (status, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
     if status != SUCCESS {
-        return Err(SolidError::sm_err(
+        return Err(SolidError::topology_failed(
             "topology::brep::validation::validate_and_update_tolerances",
+            "an edge use's vertex use has no vertex",
         ));
     }
     Ok(gaps)
@@ -660,6 +662,39 @@ mod class {
 mod tests {
     use super::*;
     use crate::geom::assert_array::labels::BREP_TYPE;
+
+    /// An edge use end without vertex makes the tolerance update an `SM_ERR` that says
+    /// so.
+    #[test]
+    fn an_edge_use_end_without_vertex_is_a_typed_failure() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::ZERO,
+            1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        let e = b.edge_list()[0];
+        let eu = b.edge(e).unwrap().edgeuses[0];
+        let vu = crate::topology::edgeuse::p1::vertexuse(&b, eu)
+            .unwrap()
+            .unwrap();
+        b.vertexuse_mut(vu).unwrap().vertex = None;
+        let err = validate_and_update_tolerances(&mut k, &mut b, true, None, 0).unwrap_err();
+        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR), "{err:?}");
+        assert_eq!(
+            err.operation(),
+            "topology::brep::validation::validate_and_update_tolerances"
+        );
+        assert_eq!(
+            err.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Failed(
+                "an edge use's vertex use has no vertex"
+            ))
+        );
+    }
 
     /// A `SmBrep::AssertValid` check (`assert_valid`) whose list holds the failed report
     /// of `SmBrep` test `index` (list 0) with owner type `owner`.

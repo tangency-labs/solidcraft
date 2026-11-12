@@ -7,7 +7,9 @@
 //! face, when only a face of the same stem is left, when the name is on several bodies, or when
 //! the name was saved before format 14 ([`LEGACY_MARK`]), the name finds nothing and the feature
 //! that uses it fails, asking for the reference to be picked again
-//! ([`crate::DocError::Reselect`]). A face whose name was worked out from geometry, found where
+//! ([`crate::DocError::Reselect`]). An edge name has one more way: when no edge's faces answer
+//! to it, and one of its faces is gone from a feature still on the body, the reference's point
+//! decides (see [`renamed_edge`]). A face whose name was worked out from geometry, found where
 //! the reference's point no longer lies, is reported: only geometry decided.
 //! Saved numbered Project links also have a compatibility check for a whole face that
 //! contains the saved pick and comes directly from its original construction feature.
@@ -52,9 +54,11 @@ pub struct EdgeHit {
 /// The edge of a body a stored edge name finds: the edge with that name; else the one edge
 /// between the faces it names exactly (see [`exactly`]). A numbered name (`~k`) was one of
 /// several edges between its faces, told apart only by where they lay, so the one edge left
-/// between them is it only where the reference's point still lies on it. `Err` explains when
-/// there is none: no such edge, the named edge split into several, one of several edges whose
-/// faces now bound one edge elsewhere, or a name saved before format 14.
+/// between them is it only where the reference's point still lies on it. A name whose faces no
+/// edge's faces answer to at all, one of them gone from a feature that is still there, is the edge
+/// of the other face the reference's point lies on, clear of its ends (see [`renamed_edge`]).
+/// `Err` explains when there is none: no such edge, the named edge split into several, one of
+/// several edges whose faces now bound one edge elsewhere, or a name saved before format 14.
 pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
     if legacy_name(name).is_some() {
         return Err(format!("edge `{name}` was named by a build before format 14"));
@@ -72,18 +76,27 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
         let on = edge_near(b, &m, i, near);
         mid(i).map(|p| EdgeHit { edge: i, point: if on { near } else { p }, verified: verified(i), on_point: on }).ok_or_else(|| "edge".into())
     };
-    if let Some(i) = names.iter().position(|n| n == name) {
+    if let Some(i) = names.iter().position(|n| crate::persistent_name::same_edge(n, name)) {
         return exact(i);
     }
     // By the faces it separates: the best way any edge matches.
     let wanted = strip_edge_number(name);
-    let mut best: Option<(Match, Vec<usize>)> = None;
+    let (mut best, mut loose): (Option<(Match, Vec<usize>)>, bool) = (None, false);
     for (i, fs) in m.edge_faces.iter().enumerate() {
         let [fa, fb] = fs.as_slice() else { continue };
-        let Some(level) = edge_match(&faces, *fa as usize, *fb as usize, wanted).filter(|level| exactly(*level)) else { continue };
-        keep_best(&mut best, level, i);
+        let Some(level) = edge_match(&faces, *fa as usize, *fb as usize, wanted) else { continue };
+        if exactly(level) {
+            keep_best(&mut best, level, i);
+        } else {
+            loose = true;
+        }
     }
-    let (_, cands) = best.ok_or_else(|| format!("edge `{name}` no longer exists"))?;
+    let Some((_, cands)) = best else {
+        let picked = if loose { None } else { renamed_edge(b, &m, &faces, wanted, near) };
+        return picked
+            .map(|i| EdgeHit { edge: i, point: near, verified: false, on_point: true })
+            .ok_or_else(|| format!("edge `{name}` no longer exists"));
+    };
     // When the faces of several numbered edges bound one edge now, every one of their names
     // finds the faces of that edge: taking it for each would put them all on one edge (#13332).
     let numbered = wanted.len() != name.len();
@@ -96,6 +109,46 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     }
 }
 
+/// Find a saved Sketch Project edge in its body. Older designs can name the edge between
+/// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
+/// `F4:side:l6|F4:side:l7`). Recover it only when the faces it separates are whole, the saved
+/// point lies on it, and its name is exact. Other edge references still require the stored
+/// name as picked.
+pub(crate) fn locate_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
+    locate_edge(b, name, near).or_else(|miss| recover_numbered_projected_edge(b, name, near).ok_or(miss))
+}
+
+fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    // Each face of the name without its piece number (`F4:side:l6#2` is `F4:side:l6`).
+    let mut numbered = false;
+    let whole: Vec<&str> = name
+        .split('|')
+        .map(|part| match part.rsplit_once('#') {
+            Some((stem, number))
+                if !stem.is_empty()
+                    && strip_piece(stem) == stem
+                    && !number.is_empty()
+                    && !number.starts_with('0')
+                    && number.bytes().all(|digit| digit.is_ascii_digit()) =>
+            {
+                numbered = true;
+                stem
+            }
+            _ => part,
+        })
+        .collect();
+    if !numbered {
+        return None;
+    }
+    let hit = locate_edge(b, &whole.join("|"), near).ok().filter(|hit| hit.verified && hit.on_point)?;
+    // Each face it separates is whole: no other piece of it is left to be the one picked. The
+    // edge is verified by that name, so the faces it separates are the `whole` stems.
+    whole.iter().all(|face| faces_with_stem(b, face).len() == 1).then_some(hit)
+}
+
 /// Whether a face found at `level` is exactly the face a name named: the very name (or another
 /// name of that very face: a face its feature made from several roles has each), or the named
 /// piece told apart by the faces around it. A face the named one was merged into, or a face of
@@ -104,10 +157,82 @@ fn exactly(level: Match) -> bool {
     matches!(level, Match::Exact | Match::Piece)
 }
 
+/// How far from an edge a picked point may lie and still be on it.
+fn pick_reach(b: &ModelBody) -> f64 {
+    (b.body.size() * 2e-3).max(1e-3)
+}
+
 /// Whether the picked point `near` lies on edge `i` of body `b` (whose mesh is `m`): then a
 /// reference keeps it.
 fn edge_near(b: &ModelBody, m: &Mesh, i: usize, near: Vec3) -> bool {
-    m.edges.get(i).is_some_and(|e| e.windows(2).any(|w| near.dist_to_segment(w[0], w[1]) < (b.body.size() * 2e-3).max(1e-3)))
+    m.edges.get(i).is_some_and(|e| e.windows(2).any(|w| near.dist_to_segment(w[0], w[1]) < pick_reach(b)))
+}
+
+/// The edge of body `b` whose exact curve passes through the picked point `near`, by its index
+/// in the body's mesh `m` (the mesh's edges are the B-rep's, in its order: the edge's faces are
+/// checked too). A point at an end of the edge is on the edges that meet there as well, so it
+/// names none. `None` too for a mesh body, a point that is not finite, or a point a pick's reach
+/// from every edge but a periodic face's seam or a pole.
+fn edge_through(b: &ModelBody, m: &Mesh, near: Vec3) -> Option<usize> {
+    let reach = pick_reach(b);
+    let (d, i) = solidcraft_kernel::comb_edge_near(&b.body, near).ok().flatten()?;
+    let record = b.body.record();
+    let edge = record.edges.get(i)?;
+    let sorted = |mut fs: Vec<u32>| {
+        fs.sort_unstable();
+        fs.dedup();
+        fs
+    };
+    let same_faces = sorted(edge.uses.iter().map(|u| u.face).collect()) == sorted(m.edge_faces.get(i)?.clone());
+    let clear_of_ends = edge
+        .vertices
+        .iter()
+        .all(|v| record.vertices.get(*v as usize).is_some_and(|v| Vec3::new(v.point[0], v.point[1], v.point[2]).dist(near) > reach));
+    (d <= reach && same_faces && clear_of_ends).then_some(i)
+}
+
+/// The edge a stored edge name `wanted` (without its number) meant when no edge's faces answer to
+/// it at all: one of its two faces is still found exactly, the other finds no face although the
+/// feature that named it still made faces of body `b`, and the reference's point `near` lies on an
+/// edge of the face still found, clear of its ends (see [`edge_through`]). Then the point says
+/// which edge this is: that feature may have named the face differently once (a design saved when
+/// a round wall took the name of a later join's face), and the face may also be gone while the
+/// feature stays (a shorter tab); either way the edge the pick lies on is taken. Not where that
+/// edge's other face is one the same feature made: its face there was replaced (a sketch line
+/// swapped for another), and the reference asks again. A face whose feature made nothing on the
+/// body was removed with it, and so is the name. The point must be the
+/// reference's own pick: a caller that passes a point on another edge cannot take what this finds.
+fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
+    let count = faces.faces.len();
+    let found = |x: &str| {
+        let mut hits = (0..count).filter(|f| crate::history_names::matches(faces, *f, x).is_some_and(exactly));
+        hits.next().filter(|_| hits.next().is_none())
+    };
+    let lost = |y: &str| {
+        crate::persistent_name::made_by(y)
+            .filter(|id| faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(*id)))
+            .filter(|_| (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none()))
+    };
+    // Every way the name splits into two face names (a face name may hold `|` itself); they must
+    // agree on the face still found.
+    let mut kept: Vec<(usize, u64)> = Vec::new();
+    for (i, _) in wanted.match_indices('|') {
+        let (Some(x), Some(y)) = (wanted.get(..i), wanted.get(i + 1..)) else { continue };
+        for (x, y) in [(x, y), (y, x)] {
+            if let Some(hit) = found(x).filter(|f| kept.iter().all(|(k, _)| k != f)).zip(lost(y)) {
+                kept.push(hit);
+            }
+        }
+    }
+    let &[(face, lost_by)] = kept.as_slice() else { return None };
+    let edge = edge_through(b, m, near)?;
+    let uses = &b.body.record().edges.get(edge)?.uses;
+    // The edge's other face is not one of the lost face's feature: where that feature made the
+    // face at the pick, its face was replaced there (a sketch line swapped for another), not renamed.
+    let made_by = |f: usize| faces.faces.get(f).and_then(|name| crate::persistent_name::made_by(name));
+    let bounds_face = uses.iter().any(|u| u.face as usize == face);
+    let replaced = uses.iter().any(|u| u.face as usize != face && made_by(u.face as usize) == Some(lost_by));
+    (bounds_face && !replaced).then_some(edge)
 }
 
 /// The point of face `face` of a mesh nearest `p`, and how far it is.
@@ -334,7 +459,8 @@ impl EdgeHit {
 }
 
 /// The face a stored face name finds, on any body: the face with that name, or the named piece
-/// told apart by the faces around it. `None` when no face does, or several do.
+/// told apart by the faces around it, or a numbered piece of a face that is whole now (see
+/// [`recover_numbered_face_in`]). `None` when no face does, or several do.
 pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     if crate::sheet::split_sheet_face_name(name).is_some() {
         return sheet_locate(st, name, p).ok();
@@ -345,7 +471,30 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     // Every body's names are read below: work out the ones not known yet on all cores first
     // (each body's names are its own, whichever thread works them out).
     naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
-    locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p).ok()
+    match locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p) {
+        Ok(hit) => Some(hit),
+        Err(Miss::Gone) => recover_numbered_face_in(st, name, p),
+        Err(Miss::Several) => None,
+    }
+}
+
+/// A numbered piece of a round face (`F2:side:c1#2`, from the kernel before SMLib) on whichever
+/// one body recovers it as its whole face (#13252): see [`recover_numbered_projected_face`] for
+/// when that is safe. `None` when no body, or more than one, does.
+fn recover_numbered_face_in(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    if !name.contains('#') {
+        return None;
+    }
+    let mut found = None;
+    for (body, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()) {
+        if let Some((face, point)) = recover_numbered_projected_face(b, name, p) {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(FaceHit { body, face, point, verified: true, on_point: true });
+        }
+    }
+    found
 }
 
 /// The one body of `st` with a face the stored face name finds, as [`locate_face`] looks for it.
@@ -470,7 +619,7 @@ pub(crate) fn locate_on(body: &ModelBody, name: &str, p: Vec3) -> Option<FaceHit
 /// Find a saved manual Project face in its body. Older designs can name a numbered piece of
 /// a face that now evaluates whole. Recover it only when the original feature directly made
 /// the exact whole face and the face contains the
-/// old pick. Other face references still require the stored name as picked.
+/// old pick. [`locate_face`] does the same for the other stored face references (#13252).
 pub(crate) fn locate_projected_face(body: &ModelBody, name: &str, p: Vec3) -> Option<(usize, Vec3)> {
     if body.body.is_mesh() {
         return None;

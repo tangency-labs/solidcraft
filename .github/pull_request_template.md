@@ -10,6 +10,9 @@ Changes a default: no
 Changes a default: yes — <what>, old behaviour kept behind preference <name>
 Docs-only and bot PRs are exempt. -->
 
+<!-- A kernel change (solidcore/, crates/smlib/) that changes or deletes lines of an existing test or golden expectation needs a line saying why the old test was wrong (adding tests needs nothing):
+Test change: <reason> -->
+
 ## Validation
 
 What did you run, and what were the results? Include expected and measured values for geometry changes.

@@ -1,0 +1,212 @@
+{
+ "area": "shell",
+ "bodies": {
+  "b2": {
+   "keeping_splines": false,
+   "trusted": true
+  }
+ },
+ "calls": [
+  {
+   "inputs": [],
+   "op": "revolve",
+   "outputs": [
+    "b1"
+   ],
+   "params": {
+    "angle": 6.283185307179586,
+    "cap": true,
+    "direction": [
+     -1.0,
+     -0.0,
+     -0.0
+    ],
+    "origin": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "profile": [
+     {
+      "line": {
+       "end": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "start": [
+        40.0,
+        0.0,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        0.0,
+        0.0,
+        -15.0
+       ],
+       "start": [
+        0.0,
+        0.0,
+        0.0
+       ]
+      }
+     },
+     {
+      "line": {
+       "end": [
+        40.0,
+        0.0,
+        0.0
+       ],
+       "start": [
+        0.0,
+        0.0,
+        -15.0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "inputs": [
+    "b2"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b3"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b3"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b4"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b4"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b5"
+   ],
+   "params": {
+    "operand": 0
+   }
+  },
+  {
+   "inputs": [
+    "b5"
+   ],
+   "op": "shell",
+   "outputs": [
+    "b6"
+   ],
+   "params": {
+    "open_faces": {
+     "kind": "face",
+     "picked": [
+      {
+       "at": [],
+       "index": 1
+      }
+     ],
+     "points": [
+      [
+       0.0,
+       3.1411078843307365,
+       4.997542771220968
+      ]
+     ],
+     "tolerance": 0.05831051894845301
+    },
+    "thickness": -2.0
+   }
+  }
+ ],
+ "case": "11774-shell-cone-apex-open-base",
+ "expected": {
+  "area_mm2": 3680.727952342112,
+  "bbox": {
+   "max": [
+    40.0,
+    15.0,
+    15.0
+   ],
+   "min": [
+    0.0,
+    -15.0,
+    -15.0
+   ]
+  },
+  "body_count": 1,
+  "center_of_mass": [
+   12.432420809751424,
+   0.0,
+   0.0
+  ],
+  "faces": 3,
+  "method": "half-angle a with cos(a) = 40/sqrt(1825); the wall is the lateral face offset 2 normal to the cone, so the inner cone's radius at x = 0 is r' = 15 - 2/cos(a) = 12.863999063670617 and its apex is 2/sin(a) = 5.696002496903573 before the outer one, at h' = 40 r'/15 = 34.30399750312164. The base is open and the wall keeps 2 across the slant: V = pi/3 (15^2 40 - r'^2 h'). Area: the outer lateral pi 15 sqrt(1825), the inner lateral pi r' sqrt(h'^2 + r'^2), the base ring pi (15^2 - r'^2). Faces: outer cone, inner cone, base ring = 3. Centre of mass on the axis at x = (15^2 40^2/4 - r'^2 h'^2/4) / (15^2 40 - r'^2 h')",
+  "source": "analytic",
+  "sources": [
+   "tangency-labs/solidcraft#11774"
+  ],
+  "volume_mm3": 3480.1408323900278,
+  "what": "a cone (r 15 at x = 0, apex at x = 40) shelled 2 with its base open: before tangency-labs/solidcraft#11774 was fixed the shell refused with status 1001, because the offset cone truncated at its new apex kept its parameter box at the box's other end, the rim's UV moved, and the executive could not pair the rim edge use with its offset copy"
+ },
+ "expressible": true,
+ "operation_expressible": true,
+ "outcome": {
+  "ran": true,
+  "raw_counts": {
+   "edges": 4,
+   "faces": 3,
+   "vertices": 4
+  }
+ },
+ "records": "11774-shell-cone-apex-open-base.bodies.json.gz",
+ "result": [
+  {
+   "body": "Cone",
+   "made": "b6"
+  }
+ ],
+ "rig": {
+  "error": null,
+  "known_failing": null,
+  "measured": {
+   "area_mm2": 3680.727952345433,
+   "body_count": 1,
+   "edges": 6,
+   "faces": 3,
+   "vertices": 6,
+   "volume_mm3": 3480.1408323550913
+  },
+  "refused_with": null,
+  "status": "pass"
+ },
+ "sources": [
+  "tangency-labs/solidcraft#11774"
+ ],
+ "traced_ops": [
+  "revolve",
+  "copy",
+  "copy",
+  "tagged",
+  "shell"
+ ],
+ "ungraded": [],
+ "what": "a cone (r 15 at x = 0, apex at x = 40) shelled 2 with its base open: before tangency-labs/solidcraft#11774 was fixed the shell refused with status 1001, because the offset cone truncated at its new apex kept its parameter box at the box's other end, the rim's UV moved, and the executive could not pair the rim edge use with its offset copy",
+ "why_not": [],
+ "gallery_note": "the shell builds: the truncated offset cone's parameter box is anchored at the rim's end, so the rim pair matches and the mitre circle replaces the rim's raw offset curve"
+}

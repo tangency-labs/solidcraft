@@ -24,6 +24,7 @@ use solidcore_record::Vec2;
 use super::check::{located, parse_issue, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
+use super::sketch_shapes::Created;
 use super::types::{AngleExpr, LengthExpr, Point2, Point3, SketchRef, not_blank_pattern, present};
 use crate::params;
 
@@ -53,6 +54,11 @@ pub struct ConstructionLineParams {
     /// A segment of this length from `at` instead of an infinite line, held by a length
     /// dimension. For the horizontal, vertical, angle, parallel and perpendicular methods.
     pub length: Option<LengthExpr>,
+    /// Positive distance from the reference, on the side of `at`. For a parallel line that is
+    /// the picked line; for a horizontal line, the sketch X axis; for a vertical line, the
+    /// sketch Y axis. A typed value becomes a driving dimension.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
     /// `false` makes a line with a `length` a normal sketch line, ready for a profile, instead
     /// of construction geometry (default `true`). An infinite line is always construction.
     pub construction: Option<bool>,
@@ -81,6 +87,9 @@ pub struct ConstructionLineResult {
     pub curves: Vec<String>,
     pub constraints: Vec<String>,
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
@@ -151,6 +160,61 @@ fn spline_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error>
         Value::String(s) => Ok(s),
         _ => Err(serde::de::Error::custom("must be a spline id")),
     }
+}
+
+/// Give a fit point spline a tangent handle at each fit point, where the curve already runs.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SplineHandlesParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// What `sketch.spline.handles` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineHandlesResult {
+    /// The spline's curve id (unchanged).
+    pub curve: String,
+    /// The handle point ids, in fit point order.
+    pub handles: Vec<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Remove a fit point spline's tangent handles: the curve runs through its fit points as if the
+/// handles had never been moved.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SplineResetHandlesParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// What `sketch.spline.reset_handles` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineResetHandlesResult {
+    /// The spline's curve id (unchanged).
+    pub curve: String,
+    /// The removed handle point ids, in fit point order.
+    pub removed: Vec<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `sketch.spline.reverse` returns.
@@ -234,7 +298,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
     let mut forms = vec![
         json!(point),
         json!({
-            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters.",
+            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
             "type": "array", "items": coordinate, "minItems": 2, "maxItems": 2
         }),
         json!({"description": "An existing point's id such as \"l1.end\" or \"p3\", or a snap such as \"mid:l1\".", "type": "string"}),
@@ -1115,6 +1179,8 @@ pub struct ArcSlotResult {
     pub drawn: DrawResult,
     /// The id of the construction arc along the slot's middle.
     pub centre_arc: Option<String>,
+    /// The point held halfway along the construction centre arc.
+    pub middle: Option<String>,
 }
 
 /// What `sketch.centerline` and `sketch.infinite` return.

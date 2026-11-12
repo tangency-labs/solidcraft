@@ -30,11 +30,10 @@
 //!   conversions and intersections they run.
 //! - **`STEPInversion`** returns the parameter and location only on success: upstream
 //!   writes them before returning `SM_ERR` for a point outside the sweep interval or
-//!   not on the generator, and the port returns that error alone. With
-//!   `Kernel::fixes.revolution_frame_from_profile_origin` (WR-738) a planar
+//!   not on the generator, and the port returns that error alone. A planar
 //!   generator's point is also turned onto the start plane's -X half plane when it
 //!   does not lie on the generator on the +X one, so a profile that crosses the axis
-//!   inverts on both sides; upstream turns it onto the +X half plane only.
+//!   inverts on both sides (WR-738); upstream turns it onto the +X half plane only.
 //! - **Generator.** As in `p1` the generator is a [`Curve`] derived from
 //!   `SmBSplineCurve`; `CreateOffsetSurface`'s composite-curve branch for any other
 //!   generator is unreachable. Upstream's `STEPInversion` switches the generator's
@@ -86,32 +85,24 @@ const OP_TRIM: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::trim_w
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
 
-// `SM_ERR_OUTSIDE_OF_DOMAIN` (`SmMessages.h`).
-use crate::error::{SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_OUTSIDE_OF_DOMAIN};
+use crate::error::surface::SurfaceFailure;
 
 /// The error of [`SurfOfRevolution::step_inversion_with_outputs`] for a point whose
 /// rotation into the generator's plane does not drop onto the generator (upstream
 /// `SM_ERR` after setting `SM_LT_EXTERIOR`): an answer, not a failure, in the
 /// SolidCraft fork (tangency-labs/smlib dfc7cb6, `SM_ERR_NOT_WITHIN_TOLERANCE`).
 pub(crate) fn is_off_generator(e: &SolidError) -> bool {
-    matches!(
-        e,
-        SolidError::Upstream {
-            operation: OP_STEP_INV,
-            code: crate::error::SM_ERR,
-            ..
-        }
-    )
+    // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
+    e.upstream_status() == Some(crate::error::SM_ERR) && e.operation() == OP_STEP_INV
 }
 
-/// `SM_ERR_NOT_WITHIN_TOLERANCE` of `operation`: an analytic inversion's answer that
-/// the point is off the surface (tangency-labs/smlib dfc7cb6).
+/// The off-surface failure of `operation` (status `SM_ERR_NOT_WITHIN_TOLERANCE`): an
+/// analytic inversion's answer that the point is off the surface (tangency-labs/smlib dfc7cb6).
 pub(crate) fn not_within_tolerance(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
+    SolidError::surface(
         operation,
-        code: SM_ERR_NOT_WITHIN_TOLERANCE,
-        entity: None,
-    }
+        SurfaceFailure::OffSurface("the point is off the surface"),
+    )
 }
 
 /// The solution object of solves whose solutions name no object.
@@ -202,7 +193,7 @@ impl SurfOfRevolution {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_ADJUST))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_ADJUST, "the generator curve"))?;
         gen_adjust_step_interval(k, gen, &v_ivl)?;
         if k.fixes.ellipse_step_interval_checks {
             self.anal_uv_domain = *new_step_uv_domain;
@@ -309,11 +300,12 @@ impl SurfOfRevolution {
 
         // check input - new trim UV domain must be inside current natural UV domain
         if !new_nurb_uv_domain.is_contained_by(&current, EFF_ZERO_PARAM) {
-            return Err(SolidError::Upstream {
-                operation: OP_TRIM,
-                code: SM_ERR_OUTSIDE_OF_DOMAIN,
-                entity: None,
-            });
+            return Err(SolidError::surface(
+                OP_TRIM,
+                SurfaceFailure::OutsideDomain(
+                    "the trim domain is outside the surface's natural domain",
+                ),
+            ));
         }
 
         // no work - new and current domains are same size
@@ -357,12 +349,11 @@ impl SurfOfRevolution {
     /// the sweep angle (the larger of two on a seam when it is below the end of the
     /// sweep) gives the U parameter, the point's distance from the axis a pole, and
     /// the swung point is intersected with the generator for the V parameter. On a
-    /// seam, `uv_guess` picks the end nearer to it. With
-    /// [`UpstreamFixes::revolution_frame_from_profile_origin`](crate::kernel::UpstreamFixes::revolution_frame_from_profile_origin)
-    /// (WR-738) the point is swung onto both half planes of the generator's plane,
-    /// and the first on which it lies on the generator (+X, then -X at the angle 180
-    /// degrees on) gives both parameters, so a generator that crosses the axis inverts
-    /// on both sides of it.
+    /// seam, `uv_guess` picks the end nearer to it. The point is swung onto both half
+    /// planes of the generator's plane, and the first on which it lies on the
+    /// generator (+X, then -X at the angle 180 degrees on) gives both parameters, so a
+    /// generator that crosses the axis inverts on both sides of it (WR-738; upstream
+    /// swings it onto the +X half plane only).
     ///
     /// # Errors
     ///
@@ -394,13 +385,15 @@ impl SurfOfRevolution {
             Ok((r.uv, r.location))
         } else if k.fixes.analytic_inversion_answers_apart {
             // the fork (tangency-labs/smlib dfc7cb6): outside the sweep is an answer
-            Err(SolidError::Upstream {
-                operation: OP_STEP_INV,
-                code: SM_ERR_OUTSIDE_OF_DOMAIN,
-                entity: None,
-            })
+            Err(SolidError::surface(
+                OP_STEP_INV,
+                SurfaceFailure::OutsideDomain("the point is outside the sweep"),
+            ))
         } else {
-            Err(SolidError::sm_err(OP_STEP_INV))
+            Err(SolidError::surface_failed(
+                OP_STEP_INV,
+                "the point is outside the sweep",
+            ))
         }
     }
 
@@ -498,7 +491,7 @@ impl SurfOfRevolution {
         // (with WR-738 the first half plane of the start plane on which it lies on the
         // generator, see `start_plane_sides`)
         let mut on_generator = None;
-        for sp in self.start_plane_sides(k, point_on_surf, tol_3d)? {
+        for sp in self.start_plane_sides(point_on_surf, tol_3d)? {
             let solve =
                 self.solve_on_generator(k, self.is_out_of_bounds_enabled(), sp.point, tol_3d)?;
             if !solve.2.is_empty() {
@@ -511,7 +504,10 @@ impl SurfOfRevolution {
         // `is_off_generator`; the public inversion answers it, with the fork's fix, as
         // SM_ERR_NOT_WITHIN_TOLERANCE)
         let Some((sp, (gen, ivl, solutions))) = on_generator else {
-            return Err(SolidError::sm_err(OP_STEP_INV));
+            return Err(SolidError::surface_failed(
+                OP_STEP_INV,
+                "the rotated point is not on the generator",
+            ));
         };
         let num_angles = sp.angles_deg.len();
         let angle0 = sp.angles_deg.first().copied().unwrap_or(0.0);
@@ -556,9 +552,9 @@ impl SurfOfRevolution {
         }
 
         // set output V coordinate
-        let first = solutions
-            .first()
-            .ok_or_else(|| SolidError::sm_err(OP_STEP_INV))?;
+        let first = solutions.first().ok_or_else(|| {
+            SolidError::surface_failed(OP_STEP_INV, "the generator inversion found no solution")
+        })?;
         let mut v = first.start.param(0)?;
 
         // for points on closed genCurve seams - update point classification
@@ -635,8 +631,8 @@ impl SurfOfRevolution {
     /// the interval's period, the lower angle on a seam), and its generator parameter
     /// is the generator's closed-form inversion ([`Curve::step_inversion`]: lines,
     /// conics, parabolas, hyperbolas, without a domain) or, for any other generator,
-    /// its solve over the generator's maximum analytic domain; with WR-738's flag on
-    /// both half planes, as [`Self::step_inversion`]. A non-planar generator runs
+    /// its solve over the generator's maximum analytic domain; on both half planes
+    /// (WR-738), as [`Self::step_inversion`]. A non-planar generator runs
     /// [`Self::step_inversion`] over [`Self::max_analytic_domain`].
     ///
     /// # Errors
@@ -655,7 +651,7 @@ impl SurfOfRevolution {
             return self.step_inversion(k, &domain, point_on_surf, tol_3d, None);
         }
         let mut on_generator = None;
-        for sp in self.start_plane_sides(k, point_on_surf, tol_3d)? {
+        for sp in self.start_plane_sides(point_on_surf, tol_3d)? {
             if let Some(v) = self.generator_param_unbounded(k, sp.point, tol_3d)? {
                 on_generator = Some((sp, v));
                 break;
@@ -715,9 +711,8 @@ impl SurfOfRevolution {
 
     /// The point turned about the axis onto the start (X/Z) plane, as
     /// [`Self::transform_point_to_start_plane`] turns it onto the +X half plane, with
-    /// its angles in the sweep interval. With
-    /// [`UpstreamFixes::revolution_frame_from_profile_origin`](crate::kernel::UpstreamFixes::revolution_frame_from_profile_origin)
-    /// (WR-738) also onto the -X half plane, at the angles 180 degrees on: the point's
+    /// its angles in the sweep interval, and also onto the -X half plane (WR-738), at
+    /// the angles 180 degrees on: the point's
     /// circle about the axis meets the generator's plane in these two points, and a
     /// generator that crosses the axis reaches either (the surface's points on its
     /// other side are `Rz(u) λ(v)` with `λ(v)` on the -X half plane). The +X one comes
@@ -728,16 +723,8 @@ impl SurfOfRevolution {
     /// # Errors
     ///
     /// Those of [`Self::transform_point_to_start_plane`].
-    fn start_plane_sides(
-        &self,
-        k: &Kernel,
-        point: Point3,
-        tol_3d: f64,
-    ) -> Result<Vec<StartPlanePoint>> {
+    fn start_plane_sides(&self, point: Point3, tol_3d: f64) -> Result<Vec<StartPlanePoint>> {
         let near = self.transform_point_to_start_plane(point, tol_3d, false)?;
-        if !k.fixes.revolution_frame_from_profile_origin {
-            return Ok(vec![near]);
-        }
         // `p` turned by 180 degrees about the axis: mirrored through its foot on it
         let origin = self.position.origin();
         let z_axis = self.position.z_axis();
@@ -850,26 +837,19 @@ impl SurfOfRevolution {
         let bbox = boxes.and_then(|b| b.normal).unwrap_or_default();
         let height = bbox.max_dimension() * 1.5; // multiply max dimension by some factor to be sure
         let origin = self.position.origin();
-        // Not upstream (WR-343, tangency-labs/solidcore#973), opt-in
-        // `Kernel::fixes.revolution_offset_axis_both_sides`: the axis segment spans the offset
-        // curve's whole extent along the axis, on both sides of the frame's origin (it ran
-        // from the origin along +z only and missed an offset crossing the axis below it),
-        // and the part kept is the one on the generatrix's side (positive radius).
-        let both_sides = k.fixes.revolution_offset_axis_both_sides;
-        let (axis_start, axis_end) = if both_sides {
-            let (mut axial_min, mut axial_max) = (BIG_DOUBLE, -BIG_DOUBLE);
-            for corner in bbox.corners() {
-                let axial = (corner - origin).dot(z_axis);
-                axial_min = axial_min.min(axial);
-                axial_max = axial_max.max(axial);
-            }
-            (
-                origin + (axial_min - height) * z_axis,
-                origin + (axial_max + height) * z_axis,
-            )
-        } else {
-            (origin, origin + height * z_axis)
-        };
+        // Not upstream (WR-343, tangency-labs/solidcore#973): the axis segment spans the
+        // offset curve's whole extent along the axis, on both sides of the frame's origin
+        // (upstream's runs from the origin along +z only and misses an offset crossing the
+        // axis below it), and the part kept is the one on the generatrix's side (positive
+        // radius).
+        let (mut axial_min, mut axial_max) = (BIG_DOUBLE, -BIG_DOUBLE);
+        for corner in bbox.corners() {
+            let axial = (corner - origin).dot(z_axis);
+            axial_min = axial_min.min(axial);
+            axial_max = axial_max.max(axial);
+        }
+        let axis_start = origin + (axial_min - height) * z_axis;
+        let axis_end = origin + (axial_max + height) * z_axis;
         let axis_line = Curve::from(Line::create_line_segment(3, axis_start, axis_end, None)?);
         let axis_ivl = axis_line.natural_interval();
         let opts = CurveIntersectOptions {
@@ -891,24 +871,16 @@ impl SurfOfRevolution {
                     .as_slice()
                     .first()
                     .map_or(Ok(0.0), |s| s.start.param(0))?;
-                let trim = if both_sides {
-                    domain.min() != param && domain.max() != param
-                } else {
-                    domain.min() != param || domain.max() != param
-                };
-                if trim {
-                    let keep_high = if both_sides {
-                        // (WR-343) keep the part on the generatrix's side of the axis
-                        // (positive radius along the frame's x axis), not the longer part
-                        let low_mid = off_curve.evaluate_point(k, 0.5 * (domain.min() + param))?;
-                        let high_mid = off_curve.evaluate_point(k, 0.5 * (param + domain.max()))?;
-                        let x_axis = self.position.x_axis();
-                        (high_mid - origin).dot(x_axis) > (low_mid - origin).dot(x_axis)
-                    } else {
-                        // Take the largest portion for now
-                        // Eventually use a better algorithm
-                        param < domain.mid()
-                    };
+                // (WR-343: at neither end; upstream's `||` trims unless the interval is a
+                // point)
+                if domain.min() != param && domain.max() != param {
+                    // (WR-343) keep the part on the generatrix's side of the axis (positive
+                    // radius along the frame's x axis); upstream keeps the longer part
+                    let low_mid = off_curve.evaluate_point(k, 0.5 * (domain.min() + param))?;
+                    let high_mid = off_curve.evaluate_point(k, 0.5 * (param + domain.max()))?;
+                    let x_axis = self.position.x_axis();
+                    let keep_high =
+                        (high_mid - origin).dot(x_axis) > (low_mid - origin).dot(x_axis);
                     if keep_high {
                         let _ = domain.set_min(param);
                     } else {
@@ -1307,20 +1279,20 @@ mod tests {
     use crate::nurbs::crv_basic::Curve as NurbCurve;
     use crate::nurbs::math::{CPoint, NOW};
 
-    /// The generator's radius (along the frame's x axis) at both ends of the offset
-    /// surface's generator.
-    fn end_radii(k: &Kernel, offset: &SurfOfRevolution) -> [f64; 2] {
+    /// The end points of the offset surface's generator.
+    fn end_points(k: &Kernel, offset: &SurfOfRevolution) -> [Point3; 2] {
         let gen = offset.gen().unwrap();
         let ivl = gen.natural_interval();
-        [ivl.min(), ivl.max()].map(|t| gen.evaluate_point(k, t).unwrap().x)
+        [ivl.min(), ivl.max()].map(|t| gen.evaluate_point(k, t).unwrap())
     }
 
     /// tangency-labs/solidcore#973: a surface of revolution about +z through the origin
     /// whose generator (in the x-z plane, from the axis at z = -1 out to (4, 0, -5)) lies
     /// below the frame's origin. Offset to one side, the generator crosses the axis below
-    /// the origin too: the axis segment, which ran from the origin along +z only, missed
-    /// the crossing, and the offset generator was left reaching past the axis (a negative
-    /// radius). With the opt-in it is cut at the axis.
+    /// the origin too: upstream's axis segment, which runs from the origin along +z only,
+    /// misses the crossing, and the offset generator is left reaching past the axis (a
+    /// negative radius). The axis segment spans the offset on both sides of the origin, so
+    /// it is cut at the axis (WR-343).
     #[test]
     fn issue_973_offset_cut_at_axis_below_origin() {
         let gen = Curve::from(BSplineCurve::from_nurb(
@@ -1348,17 +1320,44 @@ mod tests {
         )
         .unwrap();
         surface.make_nurb(&k).unwrap();
-        let min_radius = |both_sides: bool| -> f64 {
-            let mut k = Kernel::default();
-            k.fixes.revolution_offset_axis_both_sides = both_sides;
-            [1.0, -1.0]
-                .into_iter()
-                .flat_map(|d| end_radii(&k, &surface.create_offset_surface(&k, d, 1e-6).unwrap()))
-                .fold(f64::INFINITY, f64::min)
-        };
-        // upstream: one of the two offsets keeps a stretch past the axis
-        assert!(min_radius(false) < -0.1);
-        // the opt-in cuts it at the axis
-        assert!(min_radius(true) > -1e-6);
+        // the generator (0, 0, -1)-(4, 0, -5) moved by 1 along (1, 0, 1)/sqrt(2) either
+        // way: the one moved towards -x crosses the axis at z = -1 - sqrt(2) and is cut
+        // there, its end on the axis (upstream keeps it reaching to x = -1/sqrt(2))
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        let ends: Vec<Point3> = [1.0, -1.0]
+            .into_iter()
+            .flat_map(|d| end_points(&k, &surface.create_offset_surface(&k, d, 1e-6).unwrap()))
+            .collect();
+        let want = [
+            Vec3::new(h, 0.0, -1.0 + h),
+            Vec3::new(4.0 + h, 0.0, -5.0 + h),
+            Vec3::new(0.0, 0.0, -1.0 - 2.0 * h),
+            Vec3::new(4.0 - h, 0.0, -5.0 - h),
+        ];
+        assert_eq!(ends.len(), 4);
+        for w in want {
+            assert!(
+                ends.iter().any(|e| e.distance(w) <= 1e-6),
+                "{w:?} is no end of {ends:?}"
+            );
+        }
+    }
+
+    /// #13790: a typed `SM_ERR` that replaced the inversion's off-generator `Upstream` is
+    /// the same answer (the cone's trim intervals and intersections read it too).
+    #[test]
+    fn off_generator_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        assert!(is_off_generator(&SolidError::sm_err(OP_STEP_INV)));
+        for typed in replaced_upstream(OP_STEP_INV, crate::error::SM_ERR, None) {
+            assert!(is_off_generator(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream(OP_STEP_INV, crate::error::SM_ERR_NOT_WITHIN_TOLERANCE, None)
+            .into_iter()
+            .chain(replaced_upstream(OP_ADJUST, crate::error::SM_ERR, None))
+            .chain(native_failures(OP_STEP_INV, crate::error::SM_ERR))
+        {
+            assert!(!is_off_generator(&other), "{other:?}");
+        }
     }
 }
