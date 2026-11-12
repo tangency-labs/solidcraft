@@ -1776,6 +1776,50 @@ mod tests {
         assert!(ex.reason().contains("no longer fits"), "{}", ex.reason());
     }
 
+    /// WR-212: blends put back whose stitched result leaves the solid open are refused as
+    /// not put back. The four vertical edges of a 14 x 6 x 10 post, blended again at r 3.5,
+    /// cross on each 6 mm face (tangency-labs/solidcore#1073), where the default kernel
+    /// builds an open body.
+    #[test]
+    fn a_put_back_that_leaves_the_solid_open_is_refused() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 14.0, 6.0, 10.0).unwrap();
+        // each vertical edge between an end face (support 0) and a side face (support 1)
+        let ends = [0.0, 14.0].map(|x| face_where(&b, |p| (p.x - x).abs() < 1e-6));
+        let sides = [0.0, 6.0].map(|y| face_where(&b, |p| (p.y - y).abs() < 1e-6));
+        for (faces, code) in [(ends, MARK_SUPPORT), (sides, MARK_SUPPORT + 1)] {
+            for f in faces {
+                FollowedBlendMark::add(&mut b, Some(EntityRef::Face(f)), code).unwrap();
+            }
+        }
+        for (x, y) in [(0.0, 0.0), (14.0, 0.0), (14.0, 6.0), (0.0, 6.0)] {
+            let e = edge_where(&b, |p| (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6);
+            FollowedBlendMark::add(&mut b, Some(EntityRef::Edge(e)), MARK_SHARP).unwrap();
+        }
+        let blends = [Followed {
+            blend: None,
+            rails: [None, None],
+            solver: FilletSolverType::ConstRadius,
+            size: 3.5,
+            face_attrs: Vec::new(),
+            rail_attrs: [Vec::new(), Vec::new()],
+            seam_attrs: Vec::new(),
+            end_attrs: Vec::new(),
+            end_across: Vec::new(),
+            taken_off: true,
+        }];
+        let mut ex = OffsetFacesExecutive::new();
+        let result = ex.reblend(&mut k, &mut b, &blends);
+        assert!(
+            result.is_err(),
+            "put back: {} faces, closed {:?}",
+            b.face_list().len(),
+            crate::topology::brep::p2::is_closed_manifold(&b)
+        );
+        assert_eq!(ex.refusal(), OffsetFacesRefusal::NotPutBack);
+        assert!(ex.reason().contains("no closed solid"), "{}", ex.reason());
+    }
+
     #[test]
     fn a_move_onto_the_offset_surface_lies_on_it() {
         let mut k = Kernel::default();

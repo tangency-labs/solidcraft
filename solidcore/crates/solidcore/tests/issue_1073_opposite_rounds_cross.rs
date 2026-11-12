@@ -8,15 +8,18 @@
 //! `fillet_refuse_crossing_rails`, which refused it with a bare 1001 after the fillet's
 //! B-rep was built, is retired: the band test is the one test of two bands on a face.)
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
-use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::blend::fillet_executive::api::{
+    fillet_edges, fillet_edges_per_edge, variable_radius_fillet,
+};
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
+use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::error::blend::BlendFailure;
 use solidcore::error::ErrorKind;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p2::is_manifold_solid;
-use solidcore::topology::{edge, vertex};
+use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel, Result, SolidError};
 
 /// SolidCraft's fix list (`tests/kernel_cases/fixes.json`), or the pinned SMLib's
@@ -40,6 +43,17 @@ fn kernel(fixed: bool) -> Kernel {
 
 /// Fillet the post's vertical edges with `r`; the post and whether it is a solid after.
 fn round(fixed: bool, r: f64) -> (Brep, Result<()>, bool) {
+    round_with(fixed, |k, b, vertical| {
+        fillet_edges(k, b, vertical, r, 1, 1, 1.0)
+    })
+}
+
+/// Round the post's vertical edges with `fillet`; the post, the result and whether the post
+/// is a solid after.
+fn round_with(
+    fixed: bool,
+    fillet: impl FnOnce(&mut Kernel, &mut Brep, &[EdgeId]) -> Result<()>,
+) -> (Brep, Result<()>, bool) {
     let mut k = kernel(fixed);
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 14.0, 6.0, 10.0).unwrap();
     let vertical: Vec<_> = b
@@ -56,7 +70,7 @@ fn round(fixed: bool, r: f64) -> (Brep, Result<()>, bool) {
         .collect();
     assert_eq!(vertical.len(), 4);
     let faces_before = b.face_list().len();
-    let result = fillet_edges(&mut k, &mut b, &vertical, r, 1, 1, 1.0);
+    let result = fillet(&mut k, &mut b, &vertical);
     if result.is_err() {
         assert_eq!(b.face_list().len(), faces_before, "post left edited");
     }
@@ -64,27 +78,53 @@ fn round(fixed: bool, r: f64) -> (Brep, Result<()>, bool) {
     (b, result, solid)
 }
 
+/// A round of the post's vertical edges by one of the public wrappers.
+type Round = Box<dyn FnOnce(&mut Kernel, &mut Brep, &[EdgeId]) -> Result<()>>;
+
 /// The default kernel (no band test) builds the r 3.5 rounds whose rails cross on each 6 mm
-/// face, which leaves no closed manifold solid: the result is refused as a failed blend
-/// naming no entity, and the post comes back a closed manifold solid with its six faces.
+/// face, which leaves no closed manifold solid: the result is refused by the public wrapper
+/// as a failed blend naming no entity, and the post comes back a closed manifold solid with
+/// its six faces. So it is for each wrapper that rounds a solid: one radius, a radius per
+/// edge, and a radius law.
 #[test]
 fn issue_1073_the_default_kernels_open_body_is_refused() {
-    let (b, result, _) = round(false, 3.5);
-    let Err(error) = result else {
-        let solid = is_manifold_solid(&b);
-        panic!(
-            "built: {} faces, manifold solid {solid:?}",
-            b.face_list().len()
+    let circular = [FilletSurfaceGeneratorType::Circular; 4];
+    let wrappers: [(&str, Round); 3] = [
+        (
+            "fillet_edges",
+            Box::new(|k, b, v| fillet_edges(k, b, v, 3.5, 1, 1, 1.0)),
+        ),
+        (
+            "fillet_edges_per_edge",
+            Box::new(move |k, b, v| fillet_edges_per_edge(k, b, v, &[3.5; 4], &circular, 1, 1.0)),
+        ),
+        (
+            "variable_radius_fillet",
+            Box::new(|k, b, v| variable_radius_fillet(k, b, v, 3.5, 3.5, 1, 1)),
+        ),
+    ];
+    for (name, fillet) in wrappers {
+        let (b, result, _) = round_with(false, fillet);
+        let Err(error) = result else {
+            let solid = is_manifold_solid(&b);
+            panic!(
+                "{name} built: {} faces, manifold solid {solid:?}",
+                b.face_list().len()
+            );
+        };
+        assert_eq!(error.kind(), ErrorKind::Failed, "{name}: {error:?}");
+        assert_eq!(
+            error.blend_failure(),
+            Some(&BlendFailure::Failed(
+                "the result is not a closed manifold solid"
+            )),
+            "{name}: {error:?}"
         );
-    };
-    assert_eq!(error.kind(), ErrorKind::Failed, "{error:?}");
-    assert!(
-        matches!(error.blend_failure(), Some(BlendFailure::Failed(_))),
-        "{error:?}"
-    );
-    assert_eq!(error.entity(), None, "{error:?}");
-    assert!(is_manifold_solid(&b).unwrap());
-    assert_eq!(b.face_list().len(), 6);
+        assert_eq!(error.operation(), "blend::fillet_executive::api", "{name}");
+        assert_eq!(error.entity(), None, "{name}: {error:?}");
+        assert!(is_manifold_solid(&b).unwrap(), "{name}");
+        assert_eq!(b.face_list().len(), 6, "{name}");
+    }
 }
 
 #[test]
