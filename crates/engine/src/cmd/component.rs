@@ -20,12 +20,15 @@ use crate::schema::component::{
     MoveSketchesToPartsParams, MoveSketchesToPartsResult, NamesOrCount, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams,
     OccurrencePropertiesResult, PasteNewParams, PasteNewResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams,
     RenameResult, ReparentItemsParams, ReparentItemsResult, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
+    CreateSkeletonParams, KindName, SetKindParams, SetKindResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const ACTIVATE_CONTRACT: TypedContract<ActivateParams> = TypedContract::new();
 const CREATE_CONTRACT: TypedContract<CreateParams> = TypedContract::new();
+const CREATE_SKELETON_CONTRACT: TypedContract<CreateSkeletonParams> = TypedContract::new();
+const SET_KIND_CONTRACT: TypedContract<SetKindParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
 const FROM_BODIES_CONTRACT: TypedContract<FromBodiesParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<ListParams> = TypedContract::new();
@@ -96,6 +99,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CREATE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
         .params("name?, parent?: component id or name (default: the active one); parent_path?: exact parent placement; activate?: bool (default true); grounded?: bool (default: true for the design's first part, false otherwise)"),
+    CommandSpec::new("component.create_skeleton", "New Skeleton Component", crate::checked!("component.create_skeleton", create_skeleton))
+        .at("SOLID", "ASSEMBLE")
+        .icon("construction")
+        .contract(&CREATE_SKELETON_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
+        .params("name?: default Skeleton1 (next free number); parent?, parent_path?, activate?, grounded?: as component.create. A skeleton is a reference component: sketches and construction geometry, no solid bodies"),
+    CommandSpec::new("component.set_kind", "Set Component Kind", crate::checked!("component.set_kind", set_kind))
+        .icon("construction")
+        .contract(&SET_KIND_CONTRACT)
+        .output(output_schema_for::<SetKindResult>)
+        .params("component, kind: \"normal\" | \"skeleton\" (a component with solid features cannot become a skeleton)"),
     CommandSpec::new("component.from_bodies", "Create Components from Bodies", crate::checked!("component.from_bodies", from_bodies))
         .icon("component")
         .contract(&FROM_BODIES_CONTRACT)
@@ -436,6 +450,48 @@ pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
         grounded: occ.is_some_and(|o| o.grounded),
         param_warnings: Vec::new(),
     })
+}
+
+/// A skeleton: a component with `kind` skeleton, named `Skeleton1`, `Skeleton2`… by default.
+fn create_skeleton(s: &mut Session, p: &Value) -> Result<Value> {
+    let mut p = p.clone();
+    if str_(&p, "name").is_none_or(|n| n.trim().is_empty())
+        && let Some(o) = p.as_object_mut()
+    {
+        let name = (1..=10_000u32).map(|n| format!("Skeleton{n}")).find(|n| !s.doc.components.iter().any(|c| &c.name == n));
+        o.insert("name".into(), json!(name.ok_or_else(|| bad("component.create_skeleton", "too many skeleton components"))?));
+    }
+    let out = new_component(s, &p).map_err(|e| match e {
+        crate::EngineError::BadParams { msg, .. } => bad("component.create_skeleton", msg),
+        e => e,
+    })?;
+    if let Some(id) = out.get("component").and_then(Value::as_u64)
+        && let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id)
+    {
+        c.kind = solidcraft_doc::ComponentKind::Skeleton;
+    }
+    Ok(out)
+}
+
+fn set_kind(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.set_kind";
+    let id = component(s, p, "component", cmd)?;
+    let kind = match str_(p, "kind") {
+        Some("normal") => solidcraft_doc::ComponentKind::Normal,
+        Some("skeleton") => solidcraft_doc::ComponentKind::Skeleton,
+        _ => return Err(bad(cmd, "`kind` must be \"normal\" or \"skeleton\"")),
+    };
+    if id == 0 {
+        return Err(bad(cmd, "the design itself cannot change kind"));
+    }
+    if kind == solidcraft_doc::ComponentKind::Skeleton && s.doc.features.iter().any(|f| f.component == id && !f.kind.is_reference()) {
+        return Err(bad(cmd, "not supported yet: a component with solid features cannot become a skeleton"));
+    }
+    if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id) {
+        c.kind = kind;
+    }
+    let kind = if kind == solidcraft_doc::ComponentKind::Skeleton { KindName::Skeleton } else { KindName::Normal };
+    reply(SetKindResult { component: id, kind, param_warnings: Vec::new() })
 }
 
 fn from_bodies(s: &mut Session, p: &Value) -> Result<Value> {

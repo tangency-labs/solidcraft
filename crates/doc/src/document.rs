@@ -2604,6 +2604,33 @@ pub struct Component {
     /// whose features only exist to rebuild the copy can carry this flag.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub history_hidden: bool,
+    /// Normal, or a skeleton: a reference component that holds no solid bodies.
+    #[serde(default, skip_serializing_if = "ComponentKind::is_normal")]
+    pub kind: ComponentKind,
+}
+
+/// What a component is for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComponentKind {
+    /// An ordinary part or assembly.
+    #[default]
+    Normal,
+    /// A reference component: sketches and construction geometry only, never solid bodies.
+    Skeleton,
+}
+
+impl ComponentKind {
+    pub fn is_normal(&self) -> bool {
+        *self == Self::Normal
+    }
+}
+
+impl Document {
+    /// Whether `id` is a skeleton component.
+    pub fn is_skeleton(&self, id: u64) -> bool {
+        self.components.iter().any(|c| c.id == id && c.kind == ComponentKind::Skeleton)
+    }
 }
 
 /// One loft section: profiles of a sketch.
@@ -2856,6 +2883,18 @@ mod opt_point_expr {
 }
 
 impl FeatureKind {
+    /// Whether this feature makes no solid body (sketches and construction geometry): the only
+    /// kind a skeleton component may hold.
+    pub fn is_reference(&self) -> bool {
+        matches!(
+            self,
+            FeatureKind::Sketch { .. }
+                | FeatureKind::ConstructionPlane { .. }
+                | FeatureKind::ConstructionAxis { .. }
+                | FeatureKind::ConstructionPoint { .. }
+        )
+    }
+
     /// A plastic part feature: a boss, lip, snap fit or rest (its result depends on the plastic
     /// rules).
     pub fn is_plastic(&self) -> bool {

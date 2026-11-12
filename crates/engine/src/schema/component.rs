@@ -592,6 +592,68 @@ pub struct CreateResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Make a skeleton component: a reference component that holds sketches and construction
+/// geometry (planes, axes, points) and never solid bodies. Solid features and moved bodies are
+/// refused in it. The other rules are `component.create`'s.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CreateSkeletonParams {
+    /// The new skeleton's name. Default: `Skeleton1`, or the next free number.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The component to put it in, by id or name. Default: the active one.
+    #[serde(default, deserialize_with = "parent", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub parent: Option<ComponentRef>,
+    /// The exact placement of the parent to place it by, as occurrence ids from the top of the
+    /// design (up to 63; none is the design itself). It must belong to the parent. Default: the
+    /// active placement when the parent is the active component, else the parent's first.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ParentPath")]
+    pub parent_path: Option<ParentPath>,
+    /// Make it the active component. Default: `true`.
+    #[serde(default)]
+    pub activate: Option<bool>,
+    /// Ground its placement. Default: `true` for the design's first part, `false` otherwise.
+    #[serde(default, deserialize_with = "grounded_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub grounded: Option<bool>,
+}
+
+/// What a component is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum KindName {
+    /// An ordinary part or assembly.
+    Normal,
+    /// A reference component: sketches and construction geometry only, never solid bodies.
+    Skeleton,
+}
+
+/// Turn a component into a skeleton (a reference component: sketches and construction geometry,
+/// no solid bodies) or back into a normal one. A component that has solid features cannot become
+/// a skeleton, and the design itself has no kind.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SetKindParams {
+    /// The component, by id or name.
+    pub component: IdOrName,
+    /// The kind to give it.
+    pub kind: KindName,
+}
+
+/// What `component.set_kind` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SetKindResult {
+    /// The component, by id.
+    pub component: u64,
+    /// Its kind now.
+    pub kind: KindName,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// `component.from_bodies`' `bodies`: a list of body names, each once, as `body_names` reads
 /// it. The handler also looks each name up in the design.
 #[derive(Clone, Debug, PartialEq, Eq)]
