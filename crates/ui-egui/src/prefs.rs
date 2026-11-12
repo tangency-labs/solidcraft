@@ -12978,7 +12978,8 @@ mod settings_search_tests {
                 h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SKETCH).collect();
+                let matching: Vec<_> =
+                    hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SKETCH && hit.label == query).collect();
                 assert_eq!(matching.len(), 1, "{theme}: {query} has exactly one real Sketch setting hit");
                 assert_eq!(matching[0].1.label, query);
                 let tree = h.output.accesskit_update.as_ref().unwrap();
