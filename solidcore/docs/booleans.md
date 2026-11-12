@@ -242,6 +242,16 @@ What the port does today:
   `is_outward_touching_solids` (§3).
 - **The sector test near tangency** steps off the edge and compares binormals until they separate
   (§4.2); where they never do within the face, it returns the coincident or zero-sector class.
+  Tangent faces part as the square of the step over their relative radius, so fixed steps and
+  angle thresholds read the faces of a large enough part as parallel. Two readings therefore step
+  on, three times further each round, until the faces are more than the tolerance apart: a sector
+  whose own two faces look parallel (a zero sector), and a classified face that looks coincident
+  with a face the definitions show to lie on another surface (`query/face/p1.rs`,
+  `faces_on_other_surfaces`: two different analytic kinds, or two quadrics of one kind that
+  `Surface::same_analytic_surface` tells apart). A tangent pair with no definitions to compare (a
+  B-spline on a plane) is still read as coincident once its relative radius passes about 1.7e7
+  times the sum of the two edges' tolerances, 330 mm at 1e-5 each (`query/edge.rs`, the 0.01°
+  rule over eight rounds).
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it

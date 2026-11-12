@@ -3,6 +3,12 @@
 //! moves until a value is typed or the triad is dragged. Switching the type keeps the move made
 //! so far, and the next type moves the bodies on from where it left them: one solid.move holds
 //! the whole chain.
+//!
+//! The triad lies along the world's axes, and each ring turns the bodies about the world axis it
+//! shows, on top of the turns already made. So the angles apply in the order they were dragged
+//! (`order`): a drag on a ring changes its own angle alone and the angle reads what was dragged.
+//! Where no sum of angles can make a turn, the turns so far go into the move made so far and the
+//! angle starts over (`bake_turn`).
 
 use crate::selection::SelectionExt as _;
 use crate::ui_kit::{choice_row, expr_row};
@@ -75,8 +81,9 @@ fn switch_type(app: &SolveApp, d: &mut Dialog, m: usize) {
     if let Some(i) = d.inputs.first_mut() {
         i.items = bodies;
     }
-    d.extra.remove("pivot");
-    d.extra.remove("origin");
+    for key in ["pivot", "origin", "order"] {
+        d.extra.remove(key);
+    }
     d.active = if bodies_empty(d) { 0 } else { 1.min(d.inputs.len() - 1) };
 }
 
@@ -360,6 +367,33 @@ fn mm(v: f64) -> String {
     format!("{} mm", if s == "-0" || s.is_empty() { "0" } else { s })
 }
 
+/// The three angles of a Free Move.
+fn angles(app: &SolveApp, d: &Dialog) -> Result<[f64; 3], String> {
+    let Kind::Move { rx, ry, rz, .. } = &d.kind else { return Err("not a move".into()) };
+    Ok([ang(app, rx)?, ang(app, ry)?, ang(app, rz)?])
+}
+
+/// The order the angles apply in (see [`gizmo::turn_of`]).
+fn order(d: &Dialog) -> [usize; 3] {
+    d.extra.get("order").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or(gizmo::ANGLE_ORDER)
+}
+
+/// Put the current turn into the move made so far (`chain`) and start the angles from zero; the
+/// distances stay. Nothing moves.
+fn bake_turn(app: &SolveApp, d: &mut Dialog) {
+    let (Some(m), Kind::Move { x, y, z, .. }) = (made(app, d), &d.kind) else { return };
+    let (Ok(tx), Ok(ty), Ok(tz)) = (len(app, x), len(app, y), len(app, z)) else { return };
+    let keep = mat_mul(&rigid(Vec3::new(-tx, -ty, -tz), Vec3::ZERO, Vec3::Z, 0.0), &m);
+    let total = chain(d).map_or(keep, |c| mat_mul(&keep, &c));
+    d.extra.insert("chain".into(), json!(total));
+    d.extra.remove("order");
+    if let Kind::Move { rx, ry, rz, .. } = &mut d.kind {
+        for a in [rx, ry, rz] {
+            *a = "0 deg".into();
+        }
+    }
+}
+
 fn deg(v: f64) -> String {
     let s = format!("{:.4}", v.to_degrees());
     let s = s.trim_end_matches('0').trim_end_matches('.');
@@ -457,7 +491,7 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
                 }
             } else {
                 let piv = pivot(app, d).ok_or("select bodies first")?;
-                let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
+                let r = gizmo::turn_of(a, order(d));
                 let (axis, th) = gizmo::axis_angle(&r);
                 p["origin"] = if items(d, 1).is_empty() { d.extra.get("origin").cloned().unwrap_or_else(|| num(piv)) } else { num(piv) };
                 p["translate"] = json!([x, y, z]);
@@ -592,11 +626,26 @@ pub fn show_handle_value(d: &mut Dialog, handle: crate::gizmo::Handle) {
 
 pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
     show_handle_value(d, g.handle);
-    let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { return };
-    if g.started || !d.extra.contains_key("drag0") {
+    let snapshot = |d: &mut Dialog| {
+        let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { return };
         let v = [len(app, x), len(app, y), len(app, z), ang(app, rx), ang(app, ry), ang(app, rz)].map(|r| r.unwrap_or(0.0));
         d.extra.insert("drag0".into(), json!(v));
+    };
+    if g.started || !d.extra.contains_key("drag0") {
+        snapshot(d);
+        d.extra.remove("ring_set");
     }
+    // Once a ring turns, not on the press: a click on a ring changes nothing.
+    if let Change::Rotate { axis, angle } = g.change
+        && angle != 0.0
+        && !d.extra.contains_key("ring_set")
+    {
+        settle_ring(app, d, axis);
+        d.extra.insert("ring_set".into(), json!(true));
+        snapshot(d);
+    }
+    // Once the ring has turned, a drag back to where it started is a real zero.
+    let turning = d.extra.contains_key("ring_set");
     let v0: [f64; 6] = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
     let Kind::Move { x, y, z, rx, ry, rz, .. } = &mut d.kind else { return };
     match g.change {
@@ -606,21 +655,34 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
             *z = crate::length_input::model(&app.session.doc, v0[2] + t.z);
         }
         Change::Rotate { axis, angle } => {
-            let slot = match axis {
-                0 => rx,
-                1 => ry,
-                _ => rz,
-            };
-            *slot = deg(v0.get(3 + axis.min(2)).copied().unwrap_or(0.0) + angle);
+            let i = axis.min(2);
+            if let Some(slot) = [rx, ry, rz].into_iter().nth(i)
+                && turning
+            {
+                *slot = deg(gizmo::within_turn(v0[3 + i] + angle));
+            }
         }
     }
     if g.done {
-        d.extra.remove("drag0");
+        for key in ["drag0", "ring_set"] {
+            d.extra.remove(key);
+        }
+    }
+}
+
+/// Before a ring's first turn: let its angle add, or start it over on the turns so far.
+fn settle_ring(app: &SolveApp, d: &mut Dialog, ring: usize) {
+    let Ok(a) = angles(app, d) else { return };
+    match gizmo::ring_order(a, order(d), ring) {
+        Some(o) => {
+            d.extra.insert("order".into(), json!(o));
+        }
+        None => bake_turn(app, d),
     }
 }
 
 /// The Free Move angles (X, Y, Z) that make the same turn as a turn of `angle` about `axis`,
-/// in the dialog's order (Z applied last, then Y, then X — the same composition `step` uses),
+/// in the dialog's default order (Z applied last, then Y, then X: [`gizmo::ANGLE_ORDER`]),
 /// so an edited move shows angles that re-make the turn the feature stored.
 pub(crate) fn euler_from_axis_angle(axis: Vec3, angle: f64) -> (f64, f64, f64) {
     let axis = axis.normalized().unwrap_or(Vec3::Z);

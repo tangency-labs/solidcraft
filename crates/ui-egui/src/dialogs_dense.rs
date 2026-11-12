@@ -100,6 +100,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_assembly::Asm::MotionLink { .. } => Some("joint.motion_link"),
             crate::dialogs_assembly::Asm::Coupling(f) => Some(f.command),
             crate::dialogs_assembly::Asm::Cam(_) => Some("joint.cam"),
+            crate::dialogs_assembly::Asm::Constrain(_) => Some("assembly.constraint.create"),
             crate::dialogs_assembly::Asm::Trace(_) => Some("motion.trace"),
             crate::dialogs_assembly::Asm::Drive { .. } => Some("joint.drive"),
             crate::dialogs_assembly::Asm::Interference { .. } => Some("inspect.interference"),
@@ -431,7 +432,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::Part(k) => enter |= crate::dialogs_parts::rows(app, ui, k, &d.inputs),
         Kind::PartSize(k) => enter |= crate::dialogs_part_size::rows(app, ui, k),
         Kind::SaveMesh(k) => enter |= crate::dialogs_save_mesh::rows(app, ui, k, &mut d.inputs),
-        Kind::ViewDxf { dashed, tolerance } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance),
+        Kind::ViewDxf { dashed, tolerance, zero_origin } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance, zero_origin),
         Kind::ViewNavigator(form) => crate::view_gizmo::rows(app, ui, form, &d.inputs),
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::Sketch => {
