@@ -3346,8 +3346,12 @@ impl SheetBody {
             let transverse = volume * (3.0 * radius2 + self.t * self.t) / 12.0;
             let own = [[transverse, 0.0, 0.0], [0.0, transverse, 0.0], [0.0, 0.0, volume * radius2 / 2.0]];
             for hole in holes {
-                let world = if self.flat || panels.len() == 1 {
+                // One panel on its own is placed by its own transform: an arc-first contour
+                // has a single flange panel and no base, and that panel is folded.
+                let world = if self.flat {
                     &flat
+                } else if let [(panel_world, _)] = panels.as_slice() {
+                    panel_world
                 } else {
                     &panels.iter().find(|(_, region)| region.contains(hole)).ok_or_else(invalid)?.0
                 };
