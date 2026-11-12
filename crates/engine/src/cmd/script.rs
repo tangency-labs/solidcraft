@@ -217,15 +217,15 @@ fn not_supported(what: &str) -> EngineError {
 
 /// The steps that rebuild `doc` on an empty design, and what they leave out.
 pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> {
-    if !doc.components.is_empty() || !doc.occurrences.is_empty() || !doc.parts.is_empty() || !doc.links.is_empty() {
-        return Err(not_supported("components"));
+    if !doc.parts.is_empty() || !doc.links.is_empty() {
+        return Err(not_supported("standard parts and linked designs"));
     }
-    if !doc.assembly.is_empty() {
-        return Err(not_supported("joints"));
+    if doc.components.iter().any(|c| c.parent != 0) {
+        return Err(not_supported("nested components"));
     }
     if !doc.body_components.is_empty()
         || !doc.body_offsets.is_empty()
-        || doc.features.iter().any(|f| f.component != 0 || matches!(f.kind, FeatureKind::BodyTransfer { .. }))
+        || doc.features.iter().any(|f| matches!(f.kind, FeatureKind::BodyTransfer { .. }))
     {
         return Err(not_supported("bodies moved between components"));
     }
@@ -298,6 +298,39 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
         out.push(step("material.create", p));
     }
 
+    // ---- assembly: components, occurrences and features, in id order ----
+    // One id counter numbers features, components, occurrences and joints, so
+    // replaying every allocation-bearing step at its original id position
+    // reproduces the design's ids exactly: features keep their own ids (and
+    // the persistent names that embed them) and their component references
+    // stay valid. Features whose timeline order differs from their id order
+    // break the interleaving and are refused explicitly; joint ids travel
+    // last and are referenced by name, so their position is free.
+    enum Event<'e> {
+        Create(&'e solidcraft_doc::Component),
+        Copy(&'e solidcraft_doc::Occurrence),
+        Feature(&'e Feature),
+    }
+    let mut events: Vec<(u64, Event<'_>)> = Vec::new();
+    let mut last_feature_id = 0u64;
+    for f in &doc.features {
+        if f.id < last_feature_id {
+            return Err(not_supported("a timeline reordered relative to creation order"));
+        }
+        last_feature_id = f.id;
+        events.push((f.id, Event::Feature(f)));
+    }
+    for c in &doc.components {
+        events.push((c.id, Event::Create(c)));
+    }
+    for o in &doc.occurrences {
+        if !doc.components.iter().any(|c| c.id == o.component && c.id.saturating_add(1) == o.id) {
+            events.push((o.id, Event::Copy(o)));
+        }
+    }
+    events.sort_by_key(|(id, _)| *id);
+    let mut sim_occ: Vec<(u64, String)> = Vec::new();
+
     // Each sketch brings the model parameters of its dimensions.
     let models: BTreeMap<&str, &Param> = doc.params.iter().filter(|p| p.model).map(|p| (p.name.as_str(), p)).collect();
     let mut owned: BTreeSet<&str> = BTreeSet::new();
@@ -337,26 +370,55 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
             known.insert(p.name.clone());
         }
     };
-    for f in &doc.features {
-        flush(&mut pending, &mut known, &mut out);
-        let feature = serde_json::to_value(f).map_err(|e| EngineError::Other(e.to_string()))?;
-        let mut params = json!({"feature": feature});
-        if let (Some(list), Some(o)) = (brings.get(&f.id), params.as_object_mut()) {
-            let list: Vec<Value> = list
-                .iter()
-                .map(|p| {
-                    let mut v = json!({"name": p.name, "expression": p.expr, "unit": p.unit});
-                    if let (false, Some(o)) = (p.comment.is_empty(), v.as_object_mut()) {
-                        o.insert("comment".into(), json!(p.comment));
+    for (_id, event) in &events {
+        match event {
+            Event::Feature(f) => {
+                flush(&mut pending, &mut known, &mut out);
+                let feature = serde_json::to_value(f).map_err(|e| EngineError::Other(e.to_string()))?;
+                let mut params = json!({"feature": feature});
+                if let (Some(list), Some(o)) = (brings.get(&f.id), params.as_object_mut()) {
+                    let list: Vec<Value> = list
+                        .iter()
+                        .map(|p| {
+                            let mut v = json!({"name": p.name, "expression": p.expr, "unit": p.unit});
+                            if let (false, Some(o)) = (p.comment.is_empty(), v.as_object_mut()) {
+                                o.insert("comment".into(), json!(p.comment));
+                            }
+                            v
+                        })
+                        .collect();
+                    o.insert("params".into(), Value::Array(list));
+                    known.extend(brings.get(&f.id).into_iter().flatten().map(|p| p.name.clone()));
+                }
+                known.extend(f.param_names.iter().filter(|n| !n.is_empty()).cloned());
+                out.push(step("timeline.add", params));
+            }
+            Event::Create(c) => {
+                let name = replay_occurrence_name(doc, &sim_occ, c.id);
+                sim_occ.push((c.id, name.clone()));
+                let mut params = json!({"name": c.name, "grounded": false, "activate": false});
+                if let Some(o) = params.as_object_mut() {
+                    if c.parent != 0 {
+                        let parent = doc.components.iter().find(|p| p.id == c.parent).map(|p| p.name.clone()).unwrap_or_default();
+                        o.insert("parent".into(), json!(parent));
                     }
-                    v
-                })
-                .collect();
-            o.insert("params".into(), Value::Array(list));
-            known.extend(brings.get(&f.id).into_iter().flatten().map(|p| p.name.clone()));
+                }
+                out.push(step("component.create", params));
+                place_occurrence(doc, c.id.saturating_add(1), &name, &mut out);
+            }
+            Event::Copy(o) => {
+                let name = replay_occurrence_name(doc, &sim_occ, o.component);
+                sim_occ.push((o.component, name.clone()));
+                let source = doc
+                    .occurrences
+                    .iter()
+                    .find(|s| s.component == o.component && s.id.saturating_add(0) < o.id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default();
+                out.push(step("occurrence.copy", json!({"occurrence": source})));
+                place_occurrence(doc, o.id, &name, &mut out);
+            }
         }
-        known.extend(f.param_names.iter().filter(|n| !n.is_empty()).cloned());
-        out.push(step("timeline.add", params));
     }
     flush(&mut pending, &mut known, &mut out);
     if let Some(p) = pending.first() {
@@ -364,6 +426,138 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
             "parameter `{}` refers to a parameter this design does not define (or to itself): fix it before exporting a script",
             p.name
         )));
+    }
+
+    // ---- assembly: named origins, joints, motion links ----
+    // Joints come after placements (a move after a joint can be re-solved) and
+    // after parameters (joint expressions evaluate at creation). Values are
+    // stored in radians and millimetres; commands read degrees and millimetres.
+    for origin in &doc.assembly.origins {
+        if let Some(arg) = joint_origin_arg(&origin.origin, doc)? {
+            let mut params = json!({"name": origin.name});
+            if let (Some(o), Some(k)) = (params.as_object_mut(), arg.as_object()) {
+                for (key, v) in k {
+                    o.insert(key.clone(), v.clone());
+                }
+            }
+            out.push(step("joint.origin", params));
+        } else {
+            omitted.push(format!("named joint origin `{}` (its snap is outside this export)", origin.name));
+        }
+    }
+    for j in &doc.assembly.joints {
+        let kind = match j.kind {
+            solidcraft_doc::joints::JointKind::Rigid => "rigid",
+            solidcraft_doc::joints::JointKind::Revolute => "revolute",
+            solidcraft_doc::joints::JointKind::Slider => "slider",
+            solidcraft_doc::joints::JointKind::Cylindrical => "cylindrical",
+            solidcraft_doc::joints::JointKind::PinSlot => "pin_slot",
+            solidcraft_doc::joints::JointKind::Planar => "planar",
+            solidcraft_doc::joints::JointKind::Ball => "ball",
+            solidcraft_doc::joints::JointKind::Parallel => "parallel",
+            solidcraft_doc::joints::JointKind::Perpendicular => "perpendicular",
+            solidcraft_doc::joints::JointKind::Angle => "angle",
+            solidcraft_doc::joints::JointKind::PointOnPlane => "point_on_plane",
+            solidcraft_doc::joints::JointKind::PointOnLine => "point_on_line",
+            solidcraft_doc::joints::JointKind::LineOnPlane => "line_on_plane",
+        };
+        let a = joint_origin_arg(&j.a, doc)?;
+        let b = joint_origin_arg(&j.b, doc)?;
+        let (a, b) = match (a, b) {
+            (Some(a), Some(b)) => (a, b),
+            _ => return Err(not_supported(&format!("joint `{}` uses a snap this export cannot express", j.name))),
+        };
+        let mut params = json!({"type": kind, "a": a, "b": b});
+        let o = params.as_object_mut().expect("object");
+        if !j.name.is_empty() {
+            o.insert("name".into(), json!(j.name));
+        }
+        if j.flip {
+            o.insert("flip".into(), json!(true));
+        }
+        match (&j.exprs.offset, j.offset) {
+            (Some(e), _) => {
+                o.insert("offset".into(), json!(e));
+            }
+            (None, v) if v != 0.0 => {
+                o.insert("offset".into(), json!(v));
+            }
+            _ => {}
+        }
+        match (&j.exprs.angle, j.angle) {
+            (Some(e), _) => {
+                o.insert("angle".into(), json!(e));
+            }
+            (None, v) if v != 0.0 => {
+                o.insert("angle".into(), json!(v.to_degrees()));
+            }
+            _ => {}
+        }
+        // Values: numeric values are the solved state, and a joint created
+        // where the parts are recaptures them exactly (explicit values would
+        // be re-applied on top of the already-solved placements). Value
+        // expressions are the parametric intent and travel verbatim.
+        if j.exprs.values.iter().any(|e| e.is_some()) {
+            let values: Vec<Value> = j
+                .values
+                .iter()
+                .enumerate()
+                .map(|(i, v)| match j.exprs.values.get(i).and_then(|e| e.as_ref()) {
+                    Some(e) => json!(e),
+                    None if j.kind.is_angle(i) => json!(v.to_degrees()),
+                    None => json!(v),
+                })
+                .collect();
+            o.insert("values".into(), Value::Array(values));
+        }
+        out.push(step("joint.create", params));
+        if j.limits.iter().any(|l| l.is_some()) {
+            for (i, l) in j.limits.iter().enumerate() {
+                if let Some((min, max)) = l {
+                    let (min, max) = if j.kind.is_angle(i) { (min.to_degrees(), max.to_degrees()) } else { (*min, *max) };
+                    out.push(step("joint.limits", json!({"joint": j.name, "index": i, "min": min, "max": max})));
+                }
+            }
+        }
+        if j.suppressed {
+            out.push(step("joint.edit", json!({"joint": j.name, "suppressed": true})));
+        }
+        if j.captured.is_some() {
+            omitted.push(format!("captured position of joint `{}`", j.name));
+        }
+    }
+    for link in &doc.assembly.links {
+        let a = doc.assembly.joints.iter().find(|j| j.id == link.a).map(|j| j.name.clone()).unwrap_or_default();
+        let b = doc.assembly.joints.iter().find(|j| j.id == link.b).map(|j| j.name.clone()).unwrap_or_default();
+        match &link.coupling {
+            None => {
+                let mut params = json!({"a": a, "b": b, "ratio": link.ratio});
+                let o = params.as_object_mut().expect("object");
+                if link.offset != 0.0 {
+                    o.insert("offset".into(), json!(link.offset.to_degrees()));
+                }
+                if link.ia != 0 {
+                    o.insert("ia".into(), json!(link.ia));
+                }
+                if link.ib != 0 {
+                    o.insert("ib".into(), json!(link.ib));
+                }
+                out.push(step("joint.motion_link", params));
+            }
+            Some(coupling) => return Err(not_supported(&format!("a {} coupling on joints `{a}` and `{b}`", coupling_kind(coupling),))),
+        }
+    }
+    if doc.assembly.contact_enabled || doc.assembly.contact_all || !doc.assembly.contact_sets.is_empty() {
+        omitted.push("contact sets".to_string());
+    }
+    if !doc.assembly.studies.is_empty() {
+        omitted.push("motion studies".to_string());
+    }
+    if !doc.assembly.traces.is_empty() {
+        omitted.push("motion traces".to_string());
+    }
+    if !doc.assembly.exploded.is_empty() {
+        omitted.push("exploded views".to_string());
     }
 
     // Comments and favourites of feature inputs and dimensions.
@@ -395,4 +589,132 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
         out.push(step("timeline.rollback", json!({"position": m})));
     }
     Ok((out, omitted))
+}
+
+/// Replay id allocation: a fresh design numbers items from 1.
+fn alloc_id(next: &mut u64) -> u64 {
+    let id = (*next).max(1);
+    *next = id.saturating_add(1);
+    id
+}
+
+/// The occurrence name the replay will generate: the component name, a colon,
+/// and the first number that is neither taken by a surviving occurrence of
+/// the component nor by any occurrence's name at all.
+fn replay_occurrence_name(doc: &Document, sim: &[(u64, String)], comp: u64) -> String {
+    let cname = doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
+    let next = sim.iter().filter(|(c, _)| *c == comp).count() + 1;
+    let taken = |k: usize| {
+        let name = format!("{cname}:{k}");
+        sim.iter().any(|(_, n)| *n == name)
+    };
+    let k = std::iter::once(next).chain(1..).find(|k| !taken(*k)).unwrap_or(next);
+    format!("{cname}:{k}")
+}
+
+/// A joint snap as the joint commands take it: world coordinates (flat
+/// assemblies make the occurrence transform the world placement), converted
+/// from the component-local snap. `None` when the snap is outside this export.
+fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document) -> Result<Option<Value>> {
+    use solidcraft_doc::joints::Snap;
+    let occ = doc.occurrences.iter().find(|o| o.id == origin.occurrence).map(|o| o.name.clone()).unwrap_or_default();
+    if occ.is_empty() {
+        return Ok(None);
+    }
+    let m = doc.occurrences.iter().find(|o| o.id == origin.occurrence).map(|o| o.transform).unwrap_or([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]);
+    let world = |p: solidcore_record::Vec3| -> [f64; 3] {
+        let p = [p.x, p.y, p.z];
+        [
+            m[0][0] * p[0] + m[1][0] * p[1] + m[2][0] * p[2] + m[3][0],
+            m[0][1] * p[0] + m[1][1] * p[1] + m[2][1] * p[2] + m[3][1],
+            m[0][2] * p[0] + m[1][2] * p[1] + m[2][2] * p[2] + m[3][2],
+        ]
+    };
+    let dir = |d: solidcore_record::Vec3| -> [f64; 3] {
+        let d = [d.x, d.y, d.z];
+        [
+            m[0][0] * d[0] + m[1][0] * d[1] + m[2][0] * d[2],
+            m[0][1] * d[0] + m[1][1] * d[1] + m[2][1] * d[2],
+            m[0][2] * d[0] + m[1][2] * d[1] + m[2][2] * d[2],
+        ]
+    };
+    let mut arg = Map::new();
+    arg.insert("occurrence".into(), json!(occ));
+    match &origin.snap {
+        Snap::Frame { origin: o, z, x } => {
+            let mut frame = Map::new();
+            frame.insert("origin".into(), json!(world(*o)));
+            frame.insert("z".into(), json!(dir(*z)));
+            if let Some(x) = x {
+                frame.insert("x".into(), json!(dir(*x)));
+            }
+            arg.insert("frame".into(), Value::Object(frame));
+        }
+        Snap::Point { point, z, x } => {
+            arg.insert("point".into(), json!(world(*point)));
+            if let Some(z) = z {
+                arg.insert("z".into(), json!(dir(*z)));
+            }
+            if let Some(x) = x {
+                arg.insert("x".into(), serde_json::to_value(x).map_err(|e| EngineError::Other(e.to_string()))?);
+            }
+        }
+        Snap::CircleCenter { pick, end, x, .. } => {
+            arg.insert("circle".into(), json!(world(*pick)));
+            if let Some(end) = end {
+                arg.insert("end".into(), serde_json::to_value(end).map_err(|e| EngineError::Other(e.to_string()))?);
+            }
+            if let Some(x) = x {
+                arg.insert("x".into(), serde_json::to_value(x).map_err(|e| EngineError::Other(e.to_string()))?);
+            }
+        }
+        Snap::FaceCenter { pick, x, .. } => {
+            arg.insert("face".into(), json!(world(*pick)));
+            if let Some(x) = x {
+                arg.insert("x".into(), serde_json::to_value(x).map_err(|e| EngineError::Other(e.to_string()))?);
+            }
+        }
+        Snap::Edge { pick, corner, .. } => {
+            arg.insert("edge".into(), json!(world(*pick)));
+            if let Some(corner) = corner {
+                arg.insert("corner".into(), serde_json::to_value(corner).map_err(|e| EngineError::Other(e.to_string()))?);
+            }
+        }
+        _ => return Ok(None),
+    }
+    Ok(Some(Value::Object(arg)))
+}
+
+/// The coupling kind name, for the refusal message.
+fn coupling_kind(coupling: &solidcraft_doc::joints::Coupling) -> &'static str {
+    use solidcraft_doc::joints::Coupling;
+    match coupling {
+        Coupling::Gear { .. } => "gear",
+        Coupling::RackPinion { .. } => "rack-and-pinion",
+        Coupling::Screw { .. } => "screw",
+        Coupling::Cam(_) => "cam",
+    }
+}
+
+/// A placed occurrence: the move to its stored transform, then its grounding.
+fn place_occurrence(doc: &Document, id: u64, name: &str, out: &mut Vec<Value>) {
+    let Some(o) = doc.occurrences.iter().find(|o| o.id == id) else {
+        return;
+    };
+    let m = o.transform;
+    let mut to_matrix: Vec<f64> = Vec::with_capacity(12);
+    for row in 0..3 {
+        for col in 0..4 {
+            to_matrix.push(m[col][row]);
+        }
+    }
+    out.push(step("occurrence.move", json!({"occurrence": name, "space": "local", "to_matrix": to_matrix})));
+    if o.grounded {
+        out.push(step("occurrence.ground", json!({"occurrence": name, "grounded": true})));
+    }
 }
