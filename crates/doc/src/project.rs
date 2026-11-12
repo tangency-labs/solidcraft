@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Mesh;
+use solidcraft_sketch::linalg::{Mat, solve};
 use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource, Sketch, WireCurve};
 
 use crate::eval::ModelState;
@@ -562,7 +563,10 @@ fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Vec<O
                 let samples: Option<Vec<Vec2>> = pieces.iter().map(piece_samples).collect::<Option<Vec<_>>>().map(|s| s.concat());
                 match samples.as_deref().and_then(circular) {
                     Some((g, _)) => Some(vec![g]),
-                    None => pieces.iter().map(link).collect(),
+                    None => match samples.as_deref().and_then(elliptical) {
+                        Some(gs) => Some(gs),
+                        None => pieces.iter().map(link).collect(),
+                    },
                 }
             }
             None if body.body.is_mesh() => None,
@@ -595,6 +599,15 @@ const CIRCLE_MIN_TURN: f64 = 0.1;
 /// a round's edge keeps to it within 3e-7, a curve that merely looks round (a letter's bowl of
 /// four cubic spans) only within 3e-4.
 const CIRCLE_TOL: f64 = 1e-5;
+/// How far (a fraction of its major semi-axis) a curve may stray from an ellipse and still be
+/// that ellipse. A drafted face's edge is a circle off-axis by the draft angle, so it keeps to
+/// the ellipse within 6e-7 of the major semi-axis, well inside this tolerance.
+const ELLIPSE_TOL: f64 = 1e-5;
+/// How far round (radians) an ellipse must turn before it is believable as one: a letter's
+/// nearly straight stroke lies near a large ellipse too.
+const ELLIPSE_MIN_TURN: f64 = 0.5;
+/// The widest an ellipse may be (its major over its minor axis).
+const ELLIPSE_MAX_RATIO: f64 = 1e3;
 
 /// The circle (closing points) or arc through `samples`, taken in order along a curve, with
 /// its radius: when they all lie on one within [`CIRCLE_TOL`]. The arc ends at the first and
@@ -628,6 +641,161 @@ fn circular(samples: &[Vec2]) -> Option<(LinkGeom, f64)> {
     // Counter-clockwise from `a` to `b`.
     let (a, b) = if sweep > 0.0 { (first, last) } else { (last, first) };
     Some((LinkGeom::Arc { c, a, b }, radius))
+}
+
+/// A least-squares ellipse through `samples`: its centre, its semi-major and semi-minor radii
+/// and the direction of its major axis. The samples are centred on their mean and scaled by
+/// their RMS radius, so the fit does not depend on the size of the model, and the conic is
+/// fitted with the trace normalised (`a + c = 1`), which leaves the ellipse's shape to the
+/// three remaining coefficients. `None` when the samples are not an ellipse: too few of them,
+/// a singular fit, a quadratic form that is not positive definite, a centre or axes that are
+/// not real, or an axis ratio no ellipse has.
+fn ls_ellipse(samples: &[Vec2]) -> Option<(Vec2, f64, f64, Vec2)> {
+    if samples.len() < 6 {
+        return None;
+    }
+    let n = samples.len() as f64;
+    let mean = samples.iter().fold(Vec2::ZERO, |a, p| a + *p) / n;
+    let rms = (samples.iter().map(|p| (*p - mean).len2()).sum::<f64>() / n).sqrt();
+    if !(rms > 0.0) || !rms.is_finite() {
+        return None;
+    }
+    // `a x^2 + b x y + c y^2 + d x + e y + f = 0`, with `a + c = 1` and the samples centred
+    // and scaled: `a (x^2 - y^2) + b x y + d x + e y + f = -y^2`.
+    let mut m = Mat::zeros(5, 5);
+    let mut rhs = [0.0f64; 5];
+    for p in samples {
+        let q = (*p - mean) / rms;
+        let row = [q.x * q.x - q.y * q.y, q.x * q.y, q.x, q.y, 1.0];
+        for i in 0..5 {
+            for j in 0..5 {
+                m.add(i, j, row[i] * row[j]);
+            }
+            rhs[i] += row[i] * -q.y * q.y;
+        }
+    }
+    let sol = solve(m, rhs.to_vec())?;
+    let (a, b, d, e, f) = (sol[0], sol[1], sol[2], sol[3], sol[4]);
+    let c = 1.0 - a;
+    let disc = a * c - (b / 2.0) * (b / 2.0);
+    if disc <= 0.0 {
+        return None;
+    }
+    let dm = 4.0 * disc;
+    if dm.abs() < 1e-300 {
+        return None;
+    }
+    let cx = (-d * 2.0 * c + b * e) / dm;
+    let cy = (b * d - 2.0 * a * e) / dm;
+    let fc = a * cx * cx + b * cx * cy + c * cy * cy + d * cx + e * cy + f;
+    if fc >= 0.0 {
+        return None;
+    }
+    let tr = a + c;
+    let disc2 = ((a - c) * (a - c) + b * b).max(0.0).sqrt();
+    let (l1, l2) = ((tr + disc2) / 2.0, (tr - disc2) / 2.0);
+    if l2 <= 0.0 {
+        return None;
+    }
+    let (vx, vy) = if b.abs() > 1e-18 {
+        (l1 - c, b / 2.0)
+    } else if a >= c {
+        (1.0, 0.0)
+    } else {
+        (0.0, 1.0)
+    };
+    let axis = Vec2::new(vx, vy).normalized()?;
+    let (mut r1, mut r2) = ((-fc / l1).sqrt(), (-fc / l2).sqrt());
+    let mut major = axis;
+    if r1 < r2 {
+        std::mem::swap(&mut r1, &mut r2);
+        major = axis.perp();
+    }
+    if !(r1.is_finite() && r2.is_finite() && r1 > 0.0 && r2 > 0.0) {
+        return None;
+    }
+    if r1 / r2 > ELLIPSE_MAX_RATIO {
+        return None;
+    }
+    Some((mean + Vec2::new(cx, cy) * rms, r1 * rms, r2 * rms, major))
+}
+
+/// How far `p` lies from the ellipse `(centre, a, b)` along its major axis `u`, in model units:
+/// the normalised algebraic distance `|F(p)| / |grad F(p)|`.
+fn ellipse_residual(p: Vec2, centre: Vec2, a: f64, b: f64, u: Vec2) -> f64 {
+    let w = u.perp();
+    let d = p - centre;
+    let up = d.dot(u);
+    let wp = d.dot(w);
+    let f = (up / a) * (up / a) + (wp / b) * (wp / b) - 1.0;
+    let gx = 2.0 * up * u.x / (a * a) + 2.0 * wp * w.x / (b * b);
+    let gy = 2.0 * up * u.y / (a * a) + 2.0 * wp * w.y / (b * b);
+    let g = (gx * gx + gy * gy).sqrt();
+    if g > 0.0 { f.abs() / g } else { f64::INFINITY }
+}
+
+/// The ellipse `(centre, a, b)` with its major axis `u`, the point at its parameter `t`.
+fn ellipse_point(centre: Vec2, a: f64, b: f64, u: Vec2, t: f64) -> Vec2 {
+    let w = u.perp();
+    centre + u * (a * t.cos()) + w * (b * t.sin())
+}
+
+/// The ellipse's own parameter of `p`: where it sits on the ellipse.
+fn ellipse_param(p: Vec2, centre: Vec2, a: f64, b: f64, u: Vec2) -> f64 {
+    let w = u.perp();
+    let d = p - centre;
+    ((d.dot(w)) / b).atan2((d.dot(u)) / a)
+}
+
+/// The ellipse through `samples` when they all lie on one: the whole of it when the samples
+/// close on themselves, or rational quadratic pieces of at most 90 degrees when they do not.
+/// A drafted face's edge is a circle seen at a slant, so it comes to the sketch as an ellipse
+/// and not as the point set a spline of its own would be; `None` leaves the caller with what it
+/// had.
+fn elliptical(samples: &[Vec2]) -> Option<Vec<LinkGeom>> {
+    let (centre, a, b, u) = ls_ellipse(samples)?;
+    let tol = a * ELLIPSE_TOL;
+    if samples.iter().any(|p| ellipse_residual(*p, centre, a, b, u) > tol) {
+        return None;
+    }
+    let mut ts: Vec<f64> = samples.iter().map(|p| ellipse_param(*p, centre, a, b, u)).collect();
+    for i in 1..ts.len() {
+        while ts[i] - ts[i - 1] > std::f64::consts::PI {
+            ts[i] -= std::f64::consts::TAU;
+        }
+        while ts[i] - ts[i - 1] < -std::f64::consts::PI {
+            ts[i] += std::f64::consts::TAU;
+        }
+    }
+    let sweep = ts[ts.len() - 1] - ts[0];
+    if sweep.abs() < ELLIPSE_MIN_TURN {
+        return None;
+    }
+    if samples[0].dist(samples[samples.len() - 1]) <= tol {
+        // The whole ellipse: its centre, the end of its major axis and its minor radius.
+        return Some(vec![LinkGeom::Ellipse { c: centre, major: centre + u * a, minor: b }]);
+    }
+    // An arc of it: rational quadratic pieces of at most 90 degrees, the weights the circle's
+    // own arcs use (`w = cos(sweep / 2)` of the half piece).
+    let k = ((sweep.abs() / (std::f64::consts::PI / 2.0)).ceil() as usize).clamp(1, 8);
+    let h = sweep / k as f64;
+    let mut out = Vec::new();
+    for i in 0..k {
+        let t0 = ts[0] + h * i as f64;
+        let t1 = ts[0] + h * (i + 1) as f64;
+        let mid = (t0 + t1) / 2.0;
+        let half = (t1 - t0) / 2.0;
+        let pa = ellipse_point(centre, a, b, u, t0);
+        let pb = ellipse_point(centre, a, b, u, t1);
+        let cd = half.cos();
+        if cd.abs() < 1e-12 {
+            return None;
+        }
+        let apex = ellipse_point(centre, a / cd, b / cd, u, mid);
+        let w = cd;
+        out.push(LinkGeom::Conic { a: pa, apex, b: pb, rho: w / (1.0 + w) });
+    }
+    Some(out)
 }
 
 /// [`CIRCLE_SAMPLES`] + 1 points along a piece of an edge, ends included; `None` for a spline
