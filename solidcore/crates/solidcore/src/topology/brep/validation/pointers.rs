@@ -1658,7 +1658,10 @@ mod issue_891_tests {
             );
 
             // With the fix no chord trim is made, and nothing present is removed.
-            assert_eq!(no_new.before, no_new.after, "the fix created or removed a UV trim");
+            assert_eq!(
+                no_new.before, no_new.after,
+                "the fix created or removed a UV trim"
+            );
             assert!(no_new.after.iter().all(|id| !chord.contains(id)));
 
             // The new flag leaves the existing arc trims as they are.
