@@ -37,6 +37,7 @@
 //! | `PieceRows`, `tighten_level` (private) | — (not the fork's: a level's Taylor models taken only where they can change its verdict, #14405) |
 //! | [`TightPiece`], [`PieceInputs`], `resolve_pending`, `tighten_feet`, `gate` (private) | — (not the fork's: the feet's Taylor models, [`super::feet_tm`], taken only where they can change a level's verdict, #14405) |
 //! | `gn_try!` (private)               | `SM_GN_TRY`                             |
+//! | [`EndContinuation`], [`ConeAxis`], [`nurbs_partials_over_box_ending`] | (not the fork's: #14284) |
 //!
 //! Deviations:
 //! - **Out-params.** Every function returns its results. `sm_GnEnclose`'s `rbProved` FALSE
@@ -49,7 +50,7 @@
 //!   bounds, `gn_certify_span` the bound it has so far. Only a truncation past the series'
 //!   fixed size (`n > SM_GN_MAXE`, which the fork leaves to its callers) is an `Err`.
 //! - **Bounds.** Every loop is the fork's, with its fixed counts (8 Krawczyk steps, 200
-//!   contraction steps, levels 0..=6); there is no recursion.
+//!   contraction steps, levels 0..=`SPAN_MAX_LEVEL` = 6); there is no recursion.
 //! - **Cancellation (#2136, #2371).** `gn_certify_span` polls the kernel's cancel token
 //!   once per level, per piece's end station and per piece's bound; a cancel passes through
 //!   `SM_GN_TRY` and the unsolved-piece fallback as `Cancelled` instead of proving
@@ -116,6 +117,25 @@
 //!   remainder over them, `floor_terms`) is over the target, where they could not bring
 //!   the level to it. The levels are steered by the fork's terms as above, so the
 //!   verdicts go only from reject to accept.
+//! - **Supports' ends (not the fork's, tangency-labs/solidcraft#14284).** The fork refuses
+//!   every feet's box past a face's knots, so a round ending flush with its support's end
+//!   (a foot on the net's domain edge) proves nothing on its last pieces. Here a support whose
+//!   kind is a line along one of its NURB directions continues that direction past the net:
+//!   a plane in both, a cone (a cylinder among them) or an extrusion along its line
+//!   ([`EndContinuation::of`]), where the net is of degree 1 in it; a cone's continuation
+//!   may not reach its apex, the cone's one point on its axis ([`ConeAxis`], from the cone's
+//!   definition): the part taken back to the end it lies past is proved off the axis, so a
+//!   part wholly past the apex, on the other nappe, is refused too.
+//!   The part of the box past the end takes the end span's polynomial, which for a degree-1
+//!   direction is the face's edge jet continued, `P(u, v_e) + (v - v_e) P_v(u, v_e)`: the
+//!   same polynomial on both sides of the end, so the feet's system is smooth to every order
+//!   across it, which `FEET_BOX_CONTINUITY = 2` (the face C^2 across a line a box crosses,
+//!   the system C^1 for Krawczyk's mean-value form) needs. That this continuation is the
+//!   support's definition (the plane's point, the cylinder's or extrusion's line at that
+//!   parameter) is the kind's, and the closed-form tests show it. Every other support, a
+//!   cone's part reaching its apex, and a direction of degree above 1 are refused past their end by name
+//!   ([`crate::error::Reason::FootPastDomainEnd`]), the one refusal `SM_GN_TRY` passes on;
+//!   any other failed evaluation still proves nothing.
 //! - **Indices.** Knots and nets are read by checked indices (a knot or a coordinate
 //!   outside reads NaN, which shows in the result); the fork's indices stay inside.
 
@@ -139,6 +159,9 @@ use crate::surface::surface::Surface;
 const OP: &str = "blend::fillet_section::certificate";
 /// The most Krawczyk steps that tighten a proved feet's box ([`gn_enclose_over`]).
 const TIGHTEN_STEPS: usize = 2;
+/// The finest level [`gn_certify_span`] cuts a span to: `2^SPAN_MAX_LEVEL` equal pieces
+/// (the fork's).
+pub(crate) const SPAN_MAX_LEVEL: u32 = 6;
 const OP_CERTIFY_SPAN: &str = "blend::fillet_section::certificate::gn_certify_span";
 
 /// `SM_GN_TRY(a)`: a failed evaluation proves nothing, the enclosing function returns
@@ -149,6 +172,8 @@ macro_rules! gn_try {
             Ok(v) => v,
             // a cancel (#2136) is never a failed evaluation: it ends the operation
             Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            // a foot past its face's domain end is refused by name (#14284)
+            Err(e) if is_foot_past_domain_end(&e) => return Err(e),
             Err(_) => return Ok($none),
         }
     };
@@ -187,7 +212,10 @@ impl NurbsCurve {
         }
         if p < 1 || u.len() != n + p + 1 {
             // "SmGnSectionFSG: the centre line's NURBS data do not agree"
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the centre line's NURBS data do not agree",
+            ));
         }
         let rational = ws.len() == cps.len();
         let mut pw = Vec::new();
@@ -199,7 +227,10 @@ impl NurbsCurve {
             };
             let positive = w > 0.0;
             if !positive {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the centre line's weights are not positive",
+                ));
             }
             pw.extend_from_slice(&[cp.x * w, cp.y * w, cp.z * w, w]);
         }
@@ -344,7 +375,10 @@ pub fn curve_derivs_over(
         first = false;
     }
     if first {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "no piece covers the parameter",
+        ));
     }
     Ok(rd)
 }
@@ -499,7 +533,10 @@ fn partials_over_piece(
     let positive = w00.lo > 0.0;
     if !positive {
         // "SmGnSectionFSG: a face's weights are not positive over a box"
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "a face's weights are not positive over a box",
+        ));
     }
     let mut out = Partials::default();
     for a in 0..=lk {
@@ -616,7 +653,7 @@ pub fn leader_series_piecewise(
             }
         });
     }
-    out.ok_or_else(|| SolidError::sm_err(OP))
+    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
 }
 
 /// `sm_GnLaw` (0d43b4c): a ball whose radius varies, its law r(s) over the leader's
@@ -666,7 +703,10 @@ pub fn law_series(
         derivs = derivs.min(law.curve.degree()?);
     }
     if derivs > MAX_S {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the radius law's order is past the most the series hold",
+        ));
     }
     let d = law.curve.evaluate(s, derivs, !before, false)?;
     let mut fact = 1.0_f64;
@@ -674,13 +714,18 @@ pub fn law_series(
         if i > 0 {
             fact *= i as f64;
         }
-        let di = d.get(i).ok_or_else(|| SolidError::sm_err(OP))?;
+        let di = d.get(i).ok_or_else(|| {
+            SolidError::blend_failed(OP, "the radius law has no derivative of this order")
+        })?;
         r.set(i, 0, di.x / fact);
     }
     let positive = r.at(0, 0) > 0.0;
     if !positive {
         // "SmGnSectionFSG: the radius law is not positive"
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the radius law is not positive",
+        ));
     }
     Ok(Some(r))
 }
@@ -703,7 +748,10 @@ pub fn law_series_over(law: &GnLaw<'_>, s: Ivl, order: usize) -> Result<Ser<Ivl>
         r.set(i, 0, at1(&d, i, VZ).x * (Ivl::from(1.0) / Ivl::from(fact)));
     }
     if !r.at(0, 0).is_positive() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the radius is not proved positive",
+        ));
     }
     Ok(r)
 }
@@ -907,7 +955,204 @@ pub fn nurbs_partials_over_box(
             });
         }
     }
-    out.ok_or_else(|| SolidError::sm_err(OP))
+    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
+}
+
+/// The refusal of a feet's box past a face's net in a direction its kind does not continue
+/// ([`nurbs_partials_over_box_ending`]), before [`gn_enclose_over`] names the support and the
+/// piece in [`crate::error::Reason::FootPastDomainEnd`].
+const FOOT_PAST_END: &str =
+    "a feet's box past the face's domain end, in a direction its kind does not continue";
+
+/// Which of a support's NURB directions continue past its net's ends for a feet's box
+/// (not the fork's, tangency-labs/solidcraft#14284), decided by the support's kind alone: a
+/// direction in which the kind is a line, so the net's degree-1 end span continued is the
+/// support there. See the module docs.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct EndContinuation {
+    /// The NURB's u continues.
+    pub u: bool,
+    /// The NURB's v continues.
+    pub v: bool,
+    /// A cone's axis (not a cylinder's), which a continuation may not meet: its lines meet
+    /// on it at the apex and run on onto the other nappe, not the face. `None` for a kind
+    /// with no apex.
+    pub apex: Option<ConeAxis>,
+}
+
+/// A cone's axis from its definition: the point `origin` on it and its unit direction
+/// `axis`. The cone meets its axis only at its apex.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConeAxis {
+    /// A point of the axis (the cone's origin).
+    pub origin: [f64; 3],
+    /// The axis' unit direction.
+    pub axis: [f64; 3],
+}
+
+impl EndContinuation {
+    /// The directions `surface`'s kind is a line in: a plane both; a cone (a cylinder among
+    /// them) its generator direction (the NURB's v, or u where its parameters are swapped),
+    /// with its apex where it has one; an extrusion its extrusion direction (likewise); none
+    /// for every other kind.
+    #[must_use]
+    pub fn of(surface: &Surface) -> Self {
+        use crate::surface::surface::p2::SurfaceKind;
+        let along = |swapped: bool| Self {
+            u: swapped,
+            v: !swapped,
+            apex: None,
+        };
+        match surface.kind() {
+            SurfaceKind::Plane(_) => Self {
+                u: true,
+                v: true,
+                apex: None,
+            },
+            SurfaceKind::Cone(c) => {
+                let canonical = c.canonical();
+                let mut e = along(canonical.swap_uv);
+                if !c.is_cylinder() {
+                    let (o, z) = (canonical.origin.origin(), canonical.origin.z_axis());
+                    e.apex = Some(ConeAxis {
+                        origin: [o.x, o.y, o.z],
+                        axis: [z.x, z.y, z.z],
+                    });
+                }
+                e
+            }
+            SurfaceKind::SurfOfExtrusion(e) => along(e.swap_uv()),
+            _ => Self::default(),
+        }
+    }
+}
+
+/// [`nurbs_partials_over_box`] for a feet's box that may run past the net's domain: in a
+/// direction `ends` continues and the net is of degree 1 in, the part past an end takes the
+/// end span's polynomial (the face's edge jet continued, the support there by its kind); the
+/// rest of the box is cut at the knot lines as [`nurbs_partials_over_box`] cuts it, and the
+/// enclosures' hull is taken. A box within the domain is exactly
+/// [`nurbs_partials_over_box`]'s.
+///
+/// # Errors
+///
+/// [`SolidError::Unsupported`] ([`FOOT_PAST_END`]) for a box past an end `ends` does not
+/// continue or of a direction of degree above 1; those of [`nurbs_partials_over_box`].
+#[allow(clippy::too_many_arguments)]
+pub fn nurbs_partials_over_box_ending(
+    cn: &Nurbs,
+    ends: EndContinuation,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+    continuity: usize,
+) -> Result<Partials<Ivl>> {
+    let (u0, u1) = (knot(&cn.u, cn.p as isize), knot(&cn.u, cn.nu as isize));
+    let (v0, v1) = (knot(&cn.v, cn.q as isize), knot(&cn.v, cn.nv as isize));
+    let past = |lo: f64, hi: f64, d0: f64, d1: f64| lo < d0 || hi > d1;
+    let (pu, pv) = (past(ua, ub, u0, u1), past(va, vb, v0, v1));
+    if !pu && !pv {
+        return nurbs_partials_over_box(cn, ua, ub, va, vb, lk, continuity);
+    }
+    let refused = || SolidError::Unsupported {
+        operation: OP,
+        reason: FOOT_PAST_END,
+    };
+    let ordered = ua <= ub && va <= vb;
+    if !ordered || (pu && !(ends.u && cn.p == 1)) || (pv && !(ends.v && cn.q == 1)) {
+        return Err(refused());
+    }
+    // each direction's parts: before its first knot (the first span continued), within (cut
+    // at the knot lines), past its last (the last span continued)
+    let parts = |knots: &[f64], p: usize, n: usize, lo: f64, hi: f64, d0: f64, d1: f64| {
+        let mut out = Vec::new();
+        if lo < d0 {
+            out.push((lo, hi.min(d0), span(knots, p, n, d0)));
+        }
+        let (a, b) = (lo.max(d0), hi.min(d1));
+        if a <= b {
+            out.extend(knot_cuts(knots, p, n, a, b, continuity)?);
+        }
+        if hi > d1 {
+            out.push((lo.max(d1), hi, span(knots, p, n, d1)));
+        }
+        Ok::<_, SolidError>(out)
+    };
+    let us = parts(&cn.u, cn.p, cn.nu, ua, ub, u0, u1)?;
+    let vs = parts(&cn.v, cn.q, cn.nv, va, vb, v0, v1)?;
+    let mut out: Option<Partials<Ivl>> = None;
+    for &(a0, a1, ku) in &us {
+        for &(b0, b1, kv) in &vs {
+            let p = nurbs_partials_over_piece(cn, ku, kv, a0, a1, b0, b1, lk)?;
+            // a part past an end of a cone may not reach its apex, the one point of the cone
+            // on its axis: the part taken back to the end (its range in each direction
+            // hulled with the domain's end it lies past) must be proved off the axis. That
+            // set is connected and holds points of the end, which are the face's, so off the
+            // axis it lies wholly on the face's nappe, the part with it. A part wholly past
+            // the apex (on the other nappe, off the axis itself) is refused so: the way back
+            // to the end crosses the axis
+            let past = a0 < u0 || a1 > u1 || b0 < v0 || b1 > v1;
+            if let (true, Some(cone)) = (past, ends.apex) {
+                let back = |lo: f64, hi: f64, d0: f64, d1: f64| (lo.min(d1), hi.max(d0));
+                let (c0, c1) = back(a0, a1, u0, u1);
+                let (e0, e1) = back(b0, b1, v0, v1);
+                let to_end = nurbs_partials_over_piece(cn, ku, kv, c0, c1, e0, e1, 0)?;
+                let x = to_end.at(0, 0);
+                let [ox, oy, oz] = cone.origin.map(Ivl::from);
+                let [zx, zy, zz] = cone.axis.map(Ivl::from);
+                let (dx, dy, dz) = (x.x - ox, x.y - oy, x.z - oz);
+                let h = dx * zx + dy * zy + dz * zz;
+                // the radial vector, off the axis: proved nonzero where one of its coordinates
+                // is bounded away from 0 over that set
+                let radial = [dx - h * zx, dy - h * zy, dz - h * zz];
+                if !radial.iter().any(|c| c.mig() > 0.0) {
+                    return Err(refused());
+                }
+            }
+            out = Some(match out {
+                None => p,
+                Some(h) => partials_hull(h, &p, lk),
+            });
+        }
+    }
+    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
+}
+
+/// Whether `e` is the refusal of a foot past its face's domain end, which `gn_try!` passes on
+/// (the one failed evaluation that is not "nothing proved", #14284).
+pub(crate) fn is_foot_past_domain_end(e: &SolidError) -> bool {
+    matches!(e, SolidError::Failed(f) if matches!(f.reason, crate::error::Reason::FootPastDomainEnd { .. }))
+}
+
+/// `e`, the refusal [`FOOT_PAST_END`] of support `support`'s box `uv` over the piece `s`,
+/// named ([`crate::error::Reason::FootPastDomainEnd`]); any other error unchanged.
+fn name_foot_past_end(
+    e: SolidError,
+    support: usize,
+    s: Ivl,
+    uv: [[f64; 2]; 2],
+    cn: &Nurbs,
+) -> SolidError {
+    match e {
+        SolidError::Unsupported { reason, .. } if reason == FOOT_PAST_END => {
+            let domain = [
+                [knot(&cn.u, cn.p as isize), knot(&cn.u, cn.nu as isize)],
+                [knot(&cn.v, cn.q as isize), knot(&cn.v, cn.nv as isize)],
+            ];
+            SolidError::Failed(Box::new(crate::error::Failure::new(
+                OP,
+                crate::error::Reason::FootPastDomainEnd {
+                    support,
+                    s: [s.lo, s.hi],
+                    uv,
+                    domain,
+                },
+            )))
+        }
+        e => e,
+    }
 }
 
 /// The hull of two enclosures of partials, `a + b <= lk`.
@@ -969,7 +1214,19 @@ pub fn gn_enclose(
     defs: Option<&mut GnDefs<'_>>,
 ) -> Result<Option<Enclosure>> {
     let at = span_at(faces_n, a, b);
-    gn_enclose_over(k, faces_n, leader_n, &at, r, side, n, order_s, law, defs)
+    gn_enclose_over(
+        k,
+        faces_n,
+        leader_n,
+        &at,
+        r,
+        side,
+        n,
+        order_s,
+        law,
+        defs,
+        [EndContinuation::default(); 2],
+    )
 }
 
 /// The span `[a.s, b.s]` as [`gn_enclose`] encloses the feet over it ([`SpanAt`]): the
@@ -1029,6 +1286,7 @@ pub fn gn_enclose_over(
     order_s: usize,
     law: Option<&GnLaw<'_>>,
     defs: Option<&mut GnDefs<'_>>,
+    ends: [EndContinuation; 2],
 ) -> Result<Option<Enclosure>> {
     crate::profile::profile_scope!(k, "blend::certificate::gn_enclose_over");
     let s = at.s;
@@ -1061,9 +1319,15 @@ pub fn gn_enclose_over(
             None => (None, None),
         };
         if at.piecewise && d0.is_none() && d1.is_none() {
+            let [e0, e1] = ends;
+            let one = |n: &Nurbs, e, f: usize, uv: [f64; 4]| {
+                let [ua, ub, va, vb] = uv;
+                nurbs_partials_over_box_ending(n, e, ua, ub, va, vb, lk, FEET_BOX_CONTINUITY)
+                    .map_err(|err| name_foot_past_end(err, f, s, [[ua, ub], [va, vb]], n))
+            };
             return Ok([
-                nurbs_partials_over_box(n0, l0, h0, l1, h1, lk, FEET_BOX_CONTINUITY)?,
-                nurbs_partials_over_box(n1, l2, h2, l3, h3, lk, FEET_BOX_CONTINUITY)?,
+                one(n0, e0, 0, [l0, h0, l1, h1])?,
+                one(n1, e1, 1, [l2, h2, l3, h3])?,
             ]);
         }
         Ok([
@@ -3486,7 +3750,10 @@ pub fn gn_certify_span_reusing(
     let l_jets = if arc { 0 } else { n }; // the jets graded on their own: the arc's rails only
     if let Some(v) = vary.as_deref() {
         if !(a.w.is_finite() && b.w.is_finite()) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the varying jets' thumbweights are not finite",
+            ));
         }
         bar = gn_form_normalized(v.n, Ivl::from(a.w));
         for (q, oq) in o.iter_mut().enumerate() {
@@ -3546,7 +3813,7 @@ pub fn gn_certify_span_reusing(
     // feet's Taylor models are taken only while it is at most the target (#14405)
     let mut lb = 0.0_f64;
     // a halved span's pieces over this half: its level one coarser than theirs
-    let mut start = reuse.start.min(6);
+    let mut start = reuse.start.min(SPAN_MAX_LEVEL);
     let inherit = reuse.inherit;
     if let Some(pieces) = inherit.and_then(|l| covering(l, a.s, b.s)) {
         start = inherit.map_or(1, |l| l.level.max(1));
@@ -3589,7 +3856,7 @@ pub fn gn_certify_span_reusing(
     }
     // the last level whose end stations were all solved, and those stations
     let mut solved_ends: Option<(u32, Vec<GnStation>)> = None;
-    for level in start..=6_u32 {
+    for level in start..=SPAN_MAX_LEVEL {
         k.check_cancelled(OP_CERTIFY_SPAN)?;
         let pieces = 1_usize << level;
         let coarser = match &solved_ends {
@@ -3656,7 +3923,7 @@ pub fn gn_certify_span_reusing(
             }
             k.check_cancelled(OP_CERTIFY_SPAN)?;
             let [ea, eb] = pair else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(OP, "the span has no pair of ends"));
             };
             // the piece's enclosures ([`gn_fourth_over_series`]'s); the middle's also where
             // the piece's is not proved, for its feet's Taylor models (#14405)
@@ -4664,6 +4931,269 @@ mod tests {
         assert!(2 * old_unproved > wedges, "{old_unproved} of {wedges}");
     }
 
+    /// Whether every coordinate of `p` lies in `e`'s, to a rounding slack.
+    fn holds(e: V3<Ivl>, p: Vec3) -> bool {
+        [(e.x, p.x), (e.y, p.y), (e.z, p.z)].iter().all(|&(i, c)| {
+            let slack = 1e-12 * (1.0 + c.abs());
+            i.lo - slack <= c && c <= i.hi + slack
+        })
+    }
+
+    /// #14284: a plane continues past its net's ends in both directions, and its feet's box
+    /// there holds the plane's own point `O + u X + v Y` and partials `X`, `Y`, 0; on the
+    /// domain the box is `nurbs_partials_over_box`'s.
+    #[test]
+    fn a_plane_s_box_past_its_ends_is_the_plane() {
+        let k = Kernel::default();
+        let o = Vec3::new(1.0, 2.0, 3.0);
+        let fp = plane(o, Vec3::X, Vec3::Y);
+        let ends = EndContinuation::of(&fp);
+        assert_eq!(
+            ends,
+            EndContinuation {
+                u: true,
+                v: true,
+                apex: None
+            }
+        );
+        let n = nurbs(&k, &fp);
+        // on the domain: the same enclosure
+        let inside =
+            nurbs_partials_over_box_ending(&n, ends, 1.0, 2.0, -3.0, -1.0, 2, FEET_BOX_CONTINUITY)
+                .unwrap();
+        let plain =
+            nurbs_partials_over_box(&n, 1.0, 2.0, -3.0, -1.0, 2, FEET_BOX_CONTINUITY).unwrap();
+        assert_eq!(inside, plain);
+        // past the u end and below the v start (the domain is [-10, 10] in both)
+        let (ua, ub, va, vb) = (9.5, 12.0, -11.0, -9.8);
+        let e = nurbs_partials_over_box_ending(&n, ends, ua, ub, va, vb, 2, FEET_BOX_CONTINUITY)
+            .unwrap();
+        for u in [ua, 10.0, 11.0, ub] {
+            for v in [va, -10.0, vb] {
+                let p = o + Vec3::X * u + Vec3::Y * v;
+                assert!(
+                    holds(e.at(0, 0), p),
+                    "({u}, {v}): {p:?} not in {:?}",
+                    e.at(0, 0)
+                );
+            }
+        }
+        assert!(holds(e.at(1, 0), Vec3::X) && holds(e.at(0, 1), Vec3::Y));
+        for (a, b) in [(2, 0), (1, 1), (0, 2)] {
+            assert!(
+                holds(e.at(a, b), Vec3::ZERO),
+                "P[{a}][{b}]: {:?}",
+                e.at(a, b)
+            );
+        }
+    }
+
+    /// #14284: a cylinder continues past its net's ends only along its axis, where its feet's
+    /// box holds the cylinder's own line `P(u, v_e) + (v - v_e) h Z` (its height `h` per unit
+    /// of v); past a u end it is refused by name, and so is any end of a support whose kind
+    /// is not a line (no continuation asked).
+    #[test]
+    fn a_cylinder_s_box_continues_along_its_axis_only() {
+        let k = Kernel::default();
+        let height = 10.0;
+        let mut cyl = Cone::new_cylinder_bounded(
+            Vec3::new(0.0, 0.0, -2.0),
+            Vec3::X,
+            Vec3::Y,
+            3.0,
+            0.0,
+            360.0,
+            height,
+            false,
+            false,
+            false,
+        );
+        cyl.make_nurb(&k).unwrap();
+        let fc = Surface::from(cyl);
+        let ends = EndContinuation::of(&fc);
+        assert_eq!(
+            ends,
+            EndContinuation {
+                u: false,
+                v: true,
+                apex: None
+            }
+        );
+        let n = nurbs(&k, &fc);
+        assert_eq!(n.q, 1, "the cylinder's net is of degree 1 along its axis");
+        let (u0, u1) = (knot(&n.u, n.p as isize), knot(&n.u, n.nu as isize));
+        let (v0, v1) = (knot(&n.v, n.q as isize), knot(&n.v, n.nv as isize));
+        let rate = height / (v1 - v0);
+        for u in [u0 + 0.3 * (u1 - u0), u0 + 0.7 * (u1 - u0)] {
+            let (va, vb) = (v1 - 0.5 * (v1 - v0), v1 + 0.2 * (v1 - v0));
+            let e = nurbs_partials_over_box_ending(&n, ends, u, u, va, vb, 1, FEET_BOX_CONTINUITY)
+                .unwrap();
+            let edge = fc.evaluate_point(&k, Vec2::new(u, v1)).unwrap();
+            for v in [va, v1, 0.5 * (v1 + vb), vb] {
+                // on the domain the face itself, past it the cylinder's line through its edge
+                let p = if v <= v1 {
+                    fc.evaluate_point(&k, Vec2::new(u, v)).unwrap()
+                } else {
+                    edge + Vec3::Z * ((v - v1) * rate)
+                };
+                assert!(
+                    holds(e.at(0, 0), p),
+                    "({u}, {v}): {p:?} not in {:?}",
+                    e.at(0, 0)
+                );
+            }
+            assert!(holds(e.at(0, 1), Vec3::Z * rate), "{:?}", e.at(0, 1));
+        }
+        // past a u end: no continuation there
+        let past_u = nurbs_partials_over_box_ending(
+            &n,
+            ends,
+            u1 - 0.1,
+            u1 + 0.1,
+            v0,
+            v1,
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(
+            matches!(past_u, Err(SolidError::Unsupported { reason, .. }) if reason == FOOT_PAST_END),
+            "{past_u:?}"
+        );
+        // a support whose kind continues nothing
+        let none = nurbs_partials_over_box_ending(
+            &n,
+            EndContinuation::default(),
+            u0,
+            u0,
+            v1,
+            v1 + 0.1,
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(
+            matches!(none, Err(SolidError::Unsupported { reason, .. }) if reason == FOOT_PAST_END),
+            "{none:?}"
+        );
+    }
+
+    /// #14284: of the failed evaluations inside the certificate, only a foot past its face's
+    /// domain end (named, with its piece and box) is passed on by `gn_try!`; any other still
+    /// proves nothing.
+    #[test]
+    fn only_a_foot_past_its_end_passes_gn_try() {
+        fn through(e: SolidError) -> Result<Option<()>> {
+            let () = gn_try!(Err::<(), SolidError>(e), None);
+            Ok(Some(()))
+        }
+        let k = Kernel::default();
+        let n = nurbs(&k, &plane(Vec3::ZERO, Vec3::X, Vec3::Y));
+        let raw = SolidError::Unsupported {
+            operation: OP,
+            reason: FOOT_PAST_END,
+        };
+        let named = name_foot_past_end(raw, 1, Ivl::new(2.0, 3.0), [[11.0, 12.0], [0.0, 1.0]], &n);
+        assert!(is_foot_past_domain_end(&named), "{named:?}");
+        let text = named.to_string();
+        assert!(
+            text.contains("a foot past its face's domain end") && text.contains("support 1"),
+            "{text}"
+        );
+        assert!(matches!(through(named), Err(e) if is_foot_past_domain_end(&e)));
+        let other = SolidError::Unsupported {
+            operation: OP,
+            reason: "a box crosses a knot line where the face or curve is not continuous enough",
+        };
+        assert!(matches!(through(other), Ok(None)));
+        assert!(matches!(through(SolidError::sm_err(OP)), Ok(None)));
+    }
+
+    /// #14284, the two planes of `two_plane_span_bound_is_zero` at a square corner, the ball
+    /// of radius r on their edge along y, enclosed over a span whose feet run past the planes'
+    /// domain end (y = 10, here L s for s in [0.8, 0.9] with L = 12): with both supports
+    /// planes, the feet are proved on the planes continued and hold their closed form
+    /// (`(r, L s)` and `(L s, r)`); with the second support a plain B-spline (the same net,
+    /// not a definition's form, which continues nothing) the span is refused by
+    /// `FootPastDomainEnd`, naming that support and the piece, and nothing is certified.
+    #[test]
+    fn a_foot_past_a_free_form_end_is_refused_and_a_plane_s_is_proved() {
+        let k = Kernel::default();
+        let f1 = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let f2 = plane(Vec3::ZERO, Vec3::Y, Vec3::Z);
+        let free = Surface::from(as_b_spline(&k, &f2).unwrap().unwrap().into_owned());
+        assert_eq!(EndContinuation::of(&free), EndContinuation::default());
+        let (r, len) = (2.0, 12.0);
+        let leader =
+            BSplineCurve::create_line_segment(3, Vec3::new(r, 0.0, r), Vec3::new(r, len, r))
+                .unwrap();
+        let ln = NurbsCurve::of(&leader).unwrap();
+        let (n1, n2) = (nurbs(&k, &f1), nurbs(&k, &f2));
+        let (rr, side) = ([r, r], [1.0, 1.0]);
+        let (sa, sb) = (0.8, 0.9);
+        let a = station(
+            &k,
+            [&f1, &f2],
+            &leader,
+            sa,
+            [r, len * sa, len * sa, r],
+            rr,
+            side,
+        );
+        let b = station(
+            &k,
+            [&f1, &f2],
+            &leader,
+            sb,
+            [r, len * sb, len * sb, r],
+            rr,
+            side,
+        );
+        let at = SpanAt {
+            s: Ivl::new(sa, sb),
+            xa: core::array::from_fn(|c| a.x[c].at(0, 0)),
+            xb: core::array::from_fn(|c| b.x[c].at(0, 0)),
+            ku: [0; 2],
+            kv: [0; 2],
+            leader: None,
+            piecewise: true,
+        };
+        let enclose =
+            |ends| gn_enclose_over(&k, [&n1, &n2], &ln, &at, rr, side, 0, 2, None, None, ends);
+        // two planes: proved past the end, the closed form held
+        let e = enclose([EndContinuation::of(&f1), EndContinuation::of(&f2)])
+            .unwrap()
+            .expect("proved");
+        for (q, exact) in [(0, r), (3, r)] {
+            assert!(contains(e.x[q].c[0][0], exact), "{q}: {:?}", e.x[q].c[0][0]);
+        }
+        for q in [1, 2] {
+            let x = e.x[q].c[0][0];
+            assert!(
+                x.lo <= len * sa && len * sb <= x.hi && x.hi > 10.0,
+                "{q} {x:?}"
+            );
+            assert!(contains(e.x[q].c[1][0], len), "{q}");
+        }
+        // the second support free-form: refused by name, nothing proved
+        let refused = enclose([EndContinuation::of(&f1), EndContinuation::of(&free)]);
+        let Err(SolidError::Failed(f)) = &refused else {
+            panic!("{refused:?}")
+        };
+        let crate::error::Reason::FootPastDomainEnd {
+            support, s, domain, ..
+        } = &f.reason
+        else {
+            panic!("{f:?}")
+        };
+        assert_eq!((*support, *s), (1, [sa, sb]));
+        assert_eq!(domain[0], [-10.0, 10.0]);
+        // and without the ends asked, as every caller but a definition's supports
+        let plain = enclose([EndContinuation::default(); 2]);
+        assert!(
+            matches!(&plain, Err(e) if is_foot_past_domain_end(e)),
+            "{plain:?}"
+        );
+    }
+
     /// A ball rolled outside a curved face standing on the plane through `o` (normal z):
     /// a cylinder of radius `big_r` about the vertical through `o`, or a sphere of radius
     /// `big_r` resting on the plane there. The ball's centre line is a circle about that
@@ -4953,5 +5483,302 @@ mod tests {
         assert!(old_failed >= 8, "{old_failed}");
         assert!(ratios.len() >= 4 * 4, "{}", ratios.len());
         assert!(median > 100.0, "{median}");
+    }
+
+    /// A cone of `bot` radius at z = 0 to `top` at z = `height` about the z axis, a whole
+    /// turn, its NURB made.
+    fn upright_cone(k: &Kernel, bot: f64, top: f64, height: f64) -> Surface {
+        let mut c = Cone::new_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            bot,
+            top,
+            0.0,
+            360.0,
+            height,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(k).unwrap();
+        Surface::from(c)
+    }
+
+    /// #14284's cone: a cone continues past its net's ends along its generator only, where
+    /// its feet's box holds the cone's own point `r(h) (cos t X + sin t Y) + h Z` past the
+    /// top (`r(h)` its radius at height `h`, `t` the edge point's angle), and `S_v` holds the
+    /// generator; past a u end it is refused, and so is a continued part that reaches the
+    /// apex (the cone's one point on its axis), and so is a box wholly past the apex, on the
+    /// other nappe.
+    #[test]
+    fn a_cone_s_box_continues_along_its_generator() {
+        let k = Kernel::default();
+        let (bot, top, height) = (5.0, 3.0, 4.0);
+        let fc = upright_cone(&k, bot, top, height);
+        let ends = EndContinuation::of(&fc);
+        assert!(!ends.u && ends.v && ends.apex.is_some(), "{ends:?}");
+        let n = nurbs(&k, &fc);
+        assert_eq!(n.q, 1, "the cone's net is of degree 1 along its generator");
+        let (u0, u1) = (knot(&n.u, n.p as isize), knot(&n.u, n.nu as isize));
+        let (v0, v1) = (knot(&n.v, n.q as isize), knot(&n.v, n.nv as isize));
+        // the cone's own point: height along v (an affine map of the net's v, read at its ends)
+        let at = |u: f64, v: f64| fc.evaluate_point(&k, Vec2::new(u, v)).unwrap();
+        for u in [u0 + 0.3 * (u1 - u0), u0 + 0.7 * (u1 - u0)] {
+            let (h0, h1) = (at(u, v0).z, at(u, v1).z);
+            let rate = (h1 - h0) / (v1 - v0);
+            let edge = at(u, v1);
+            let t = edge.y.atan2(edge.x);
+            let radius = |h: f64| bot + (top - bot) * h / height;
+            let cone = |h: f64| Vec3::new(radius(h) * t.cos(), radius(h) * t.sin(), h);
+            let (va, vb) = (v1 - 0.5 * (v1 - v0), v1 + 0.2 * (v1 - v0));
+            let e = nurbs_partials_over_box_ending(&n, ends, u, u, va, vb, 1, FEET_BOX_CONTINUITY)
+                .unwrap();
+            for v in [va, v1, 0.5 * (v1 + vb), vb] {
+                let p = cone(h1 + (v - v1) * rate);
+                assert!(
+                    holds(e.at(0, 0), p),
+                    "({u}, {v}): {p:?} not in {:?}",
+                    e.at(0, 0)
+                );
+            }
+            let generator = cone(h1 + rate) - cone(h1);
+            assert!(
+                holds(e.at(0, 1), generator),
+                "{:?} against {generator:?}",
+                e.at(0, 1)
+            );
+        }
+        // past a u end: no continuation there
+        let past_u = nurbs_partials_over_box_ending(
+            &n,
+            ends,
+            u1 - 0.1,
+            u1 + 0.1,
+            v0,
+            v1,
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(
+            matches!(past_u, Err(SolidError::Unsupported { reason, .. }) if reason == FOOT_PAST_END),
+            "{past_u:?}"
+        );
+        // a box wholly past the top: short of the apex it is the cone continued; wholly past
+        // the apex (heights 11 to 12, the apex at 10: on the other nappe, off the axis) it is
+        // refused, since the way back to the top crosses the axis
+        let mid_u = u0 + 0.3 * (u1 - u0);
+        let (h0, h1) = (at(mid_u, v0).z, at(mid_u, v1).z);
+        let v_at = |h: f64| v0 + (h - h0) * (v1 - v0) / (h1 - h0);
+        let apex = height * bot / (bot - top);
+        assert!((apex - 10.0).abs() < 1e-12);
+        let short_of = nurbs_partials_over_box_ending(
+            &n,
+            ends,
+            mid_u,
+            mid_u,
+            v_at(5.0),
+            v_at(6.0),
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(
+            short_of.is_ok(),
+            "past the top, short of the apex: {short_of:?}"
+        );
+        let beyond = nurbs_partials_over_box_ending(
+            &n,
+            ends,
+            mid_u,
+            mid_u,
+            v_at(11.0),
+            v_at(12.0),
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(
+            matches!(beyond, Err(SolidError::Unsupported { reason, .. }) if reason == FOOT_PAST_END),
+            "wholly past the apex: {beyond:?}"
+        );
+        // a cone whose apex lies just past its top: a continuation reaching it is refused
+        let pointed = upright_cone(&k, 5.0, 0.05, 4.0);
+        let pn = nurbs(&k, &pointed);
+        let pe = EndContinuation::of(&pointed);
+        let (w0, w1) = (knot(&pn.v, pn.q as isize), knot(&pn.v, pn.nv as isize));
+        let pu = knot(&pn.u, pn.p as isize)
+            + 0.3 * (knot(&pn.u, pn.nu as isize) - knot(&pn.u, pn.p as isize));
+        let short = nurbs_partials_over_box_ending(
+            &pn,
+            pe,
+            pu,
+            pu,
+            w1 - 0.1 * (w1 - w0),
+            w1 + 0.001 * (w1 - w0),
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(short.is_ok(), "short of the apex: {short:?}");
+        let through = nurbs_partials_over_box_ending(
+            &pn,
+            pe,
+            pu,
+            pu,
+            w1 - 0.1 * (w1 - w0),
+            w1 + 0.1 * (w1 - w0),
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(
+            matches!(through, Err(SolidError::Unsupported { reason, .. }) if reason == FOOT_PAST_END),
+            "{through:?}"
+        );
+    }
+
+    /// #14284's cone, a closed form: a ball of radius r between the plane z = 0 and an
+    /// upright cone of semi-angle a (radius `bot` at z = 0) about the z axis, rolled round
+    /// it. Its centre is the circle of radius `rho = bot + r (1 - sin a) / cos a` at height
+    /// r; its feet are `(rho, theta, 0)` on the plane and `(rho - r cos a, theta, r (1 -
+    /// sin a))` on the cone, at the height where the cone ends (its top), so the feet's box
+    /// crosses the cone net's v end. With the cone continued (its generator), the feet are
+    /// proved and hold the closed form; with the cone given as a plain B-spline (the same
+    /// net, continuing nothing), the span is refused `FootPastDomainEnd`, nothing certified.
+    /// (No procedural round of a cone ends where its cone ends: a cone standing on a plate
+    /// rounds its root round a closed circle, so this is the end's case at the certificate.)
+    #[test]
+    fn a_ball_between_a_plane_and_a_cone_is_proved_at_the_cone_s_end() {
+        let k = Kernel::default();
+        let (bot, r) = (5.0, 2.0);
+        let a = 30.0_f64.to_radians();
+        let foot_h = r * (1.0 - a.sin());
+        let top = bot - foot_h * a.tan();
+        let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let fc = upright_cone(&k, bot, top, foot_h);
+        let rho = bot + r * (1.0 - a.sin()) / a.cos();
+        let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
+        let leader = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            rho,
+            10.0,
+            80.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let ln = NurbsCurve::of(&leader).unwrap();
+        let (np, nc) = (nurbs(&k, &fp), nurbs(&k, &fc));
+        let faces = [&fp, &fc];
+        let lpt = |s: f64| leader.evaluate_point(s).unwrap();
+        let foot_c = |s: f64| {
+            let l = lpt(s);
+            let q = (rho - r * a.cos()) / rho;
+            Vec3::new(l.x * q, l.y * q, foot_h)
+        };
+        // the sides: the plane's normal is +z, towards the ball; the cone's by its net
+        let (cu, cv) = nearest_uv(&nc, foot_c(0.45));
+        let pc = nurbs_partials(
+            &nc,
+            span(&nc.u, nc.p, nc.nu, cu),
+            span(&nc.v, nc.q, nc.nv, cv),
+            cu,
+            cv,
+            1,
+        );
+        let nrm = vec3(pc.at(1, 0)).cross(vec3(pc.at(0, 1)));
+        let out = Vec3::new(foot_c(0.45).x, foot_c(0.45).y, 0.0);
+        let side_c = if nrm.dot(out) > 0.0 { 1.0 } else { -1.0 };
+        let (rr, side) = ([r, r], [1.0, side_c]);
+        let st = |s: f64| {
+            let l = lpt(s);
+            let (u, v) = nearest_uv(&nc, foot_c(s));
+            station(&k, faces, &leader, s, [l.x, l.y, u, v], rr, side)
+        };
+        // the span cut as `gn_certify_span` cuts it, `2^level` equal pieces, the level
+        // raised to `SPAN_MAX_LEVEL` until every piece is proved. At level 0 (0.02 long)
+        // Krawczyk's test fails (`gn_enclose` proves nothing) with the foot inside the cone
+        // (a cone twice as tall) as at its end: the span's length, not the end. Past the end
+        // the box is enclosed on the cone's own generator (`nurbs_partials_over_box_ending`,
+        // which `partials_on` takes for a definition's box too), the end span continued.
+        let (s0, s1) = (0.4, 0.42);
+        let piece = |lo: f64, hi: f64| {
+            let (sta, stb) = (st(lo), st(hi));
+            SpanAt {
+                s: Ivl::new(lo, hi),
+                xa: core::array::from_fn(|c| sta.x[c].at(0, 0)),
+                xb: core::array::from_fn(|c| stb.x[c].at(0, 0)),
+                ku: [0; 2],
+                kv: [0; 2],
+                leader: None,
+                piecewise: true,
+            }
+        };
+        let enclose = |at: &SpanAt, ends| {
+            gn_enclose_over(&k, [&np, &nc], &ln, at, rr, side, 0, 2, None, None, ends)
+        };
+        let continued = [EndContinuation::of(&fp), EndContinuation::of(&fc)];
+        let free = Surface::from(as_b_spline(&k, &fc).unwrap().unwrap().into_owned());
+        let plain = [EndContinuation::of(&fp), EndContinuation::of(&free)];
+        let mut proved = None;
+        for level in 0..=SPAN_MAX_LEVEL {
+            let pieces = 1_u32 << level;
+            let ends: Vec<f64> = (0..=pieces)
+                .map(|i| s0 + f64::from(i) / f64::from(pieces) * (s1 - s0))
+                .collect();
+            let es: Option<Vec<_>> = ends
+                .windows(2)
+                .map(|w| {
+                    let at = piece(w[0], w[1]);
+                    enclose(&at, continued).unwrap().map(|e| (at, e))
+                })
+                .collect();
+            if let Some(es) = es {
+                proved = Some((level, es));
+                break;
+            }
+        }
+        let (level, es) = proved.expect("proved by SPAN_MAX_LEVEL");
+        assert!(level >= 1, "the 0.02 span is proved at level 0");
+        for (at, e) in &es {
+            for s in [at.s.lo, at.s.hi] {
+                let (l, c) = (lpt(s), foot_c(s));
+                let fp_s = Vec3::new(l.x, l.y, 0.0);
+                for (f, want) in [(0, fp_s), (1, c)] {
+                    let x = &e.f[f];
+                    let got = V3 {
+                        x: x.a[0].c[0][0],
+                        y: x.a[1].c[0][0],
+                        z: x.a[2].c[0][0],
+                    };
+                    assert!(
+                        holds(got, want),
+                        "level {level}: foot {f} at s {s}: {want:?} not in {got:?}"
+                    );
+                }
+            }
+            // the same net continuing nothing: refused by name on every piece
+            let refused = enclose(at, plain);
+            let Err(SolidError::Failed(f)) = &refused else {
+                panic!("{refused:?}")
+            };
+            let crate::error::Reason::FootPastDomainEnd { support, .. } = &f.reason else {
+                panic!("{f:?}")
+            };
+            assert_eq!(*support, 1);
+        }
+    }
+
+    #[test]
+    fn a_curve_without_a_span_is_a_typed_failure() {
+        let cn = NurbsCurve {
+            p: 1,
+            n: 2,
+            u: vec![0.0; 4],
+            pw: vec![0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0],
+        };
+        let error = curve_derivs_over(&cn, Ivl::new(0.0, 0.0), 1, None).unwrap_err();
+        assert_eq!(
+            error,
+            SolidError::blend_failed(OP, "no piece covers the parameter")
+        );
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }
 }

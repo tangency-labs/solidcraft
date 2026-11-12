@@ -46,7 +46,8 @@
 //! - **Object model.** The face is a record of a [`Brep`]; the functions take the
 //!   B-rep and the face's id. Classification objects are [`EntityRef`]s (the face, edge
 //!   or vertex). `SmFace::PointClassify`'s status is the result: `Ok(())` for
-//!   `SM_SUCCESS`, [`SolidError::Upstream`] `SM_ERR` when no loop classifies the point
+//!   `SM_SUCCESS`, a [`QueryFailure`](crate::error::query::QueryFailure) at the face with
+//!   status `SM_ERR` when no loop classifies the point
 //!   (the classification is still updated, as upstream).
 //! - **Unused parameters.** `PointClassify`'s `sSrcZoneTol3d`,
 //!   `bDoBoundaryIntersections` and `bUVSpaceOkay` are `NotUsed` upstream; they are
@@ -144,7 +145,7 @@
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, EntityRef, Result, SolidError, SM_ERR};
+use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::point_set::PointContainment;
@@ -794,9 +795,9 @@ impl Default for PointClassifyOptions<'_> {
 ///
 /// # Errors
 ///
-/// [`SolidError::Upstream`] `SM_ERR` when the point is neither outside nor inside nor
-/// on the checked loops (a loop that cannot classify it, or only inner loops checked
-/// without the point being outside all of them); `SM_ERR_NULL_POINTER` for a face
+/// A query failure at the face with status `SM_ERR` when the point is neither outside
+/// nor inside nor on the checked loops (a loop that cannot classify it, or only inner
+/// loops checked without the point being outside all of them); `SM_ERR_NULL_POINTER` for a face
 /// without surface; those of the trimmed surface cache search, of [`face_vertices`]
 /// and `query::loop::contains_uv_point`; [`SolidError::InvalidInput`] for an
 /// on-boundary edge without curve.
@@ -1266,11 +1267,20 @@ fn point_classify_with_topology(
 
     // PointClassify() fails for BadDatabase loops that cross seam boundaries
     let _ = use_uv_classification;
-    Err(SolidError::Upstream {
-        operation: OP_CLASSIFY,
-        code: SM_ERR,
-        entity: Some(this),
-    })
+    Err(no_loop_classifies(this))
+}
+
+/// The failure of [`point_classify`] when no loop of the face `this` classifies the point
+/// (upstream `SM_ERR`, about the face).
+fn no_loop_classifies(this: EntityRef) -> SolidError {
+    crate::error::Failure::new(
+        OP_CLASSIFY,
+        crate::error::query::QueryFailure::Failed(
+            "the point is in no loop of the face (a loop crosses its seam)",
+        ),
+    )
+    .at(this)
+    .into_error()
 }
 
 /// The on-boundary exit of [`point_classify`]: the edge, its parameter, the gap from
@@ -2639,6 +2649,23 @@ pub(crate) mod tests {
         let mut pc = PointClassification::new(1e-6);
         let r = point_classify(&k, b, f, uv, &mut pc, PointClassifyOptions::default());
         (r, pc)
+    }
+
+    /// The seam failure stays the `SM_ERR` it replaced, about the face, with a typed
+    /// reason.
+    #[test]
+    fn no_loop_classifying_the_point_is_a_query_failure_at_the_face() {
+        let face = EntityRef::Face(FaceId::from_index(3));
+        let e = no_loop_classifies(face);
+        assert_eq!(e.operation(), OP_CLASSIFY);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.entity(), Some(face));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert!(matches!(
+            e.query_failure(),
+            Some(crate::error::query::QueryFailure::Failed(_))
+        ));
     }
 
     #[test]

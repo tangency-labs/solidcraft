@@ -435,7 +435,7 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
     let (glide, click) = (job.glide, job.click);
     ctx.request_repaint();
     let Some(&(to, _)) = job.stops.front() else {
-        if job.ahead.as_ref().is_none_or(crate::control_job::Ahead::finished) {
+        if ahead_is_in(app) {
             finish(app, ctx);
         }
         return;
@@ -456,7 +456,7 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
         job.from = to;
         job.started = now;
         job.clicked = false;
-        if job.stops.is_empty() && job.ahead.as_ref().is_none_or(crate::control_job::Ahead::finished) {
+        if job.stops.is_empty() && ahead_is_in(app) {
             finish(app, ctx);
         }
     }
@@ -468,6 +468,25 @@ fn command_label(job: &Job) -> String {
         Some(a) => a.label.clone(),
         None => job.params.get("command").or(job.params.get("id")).and_then(Value::as_str).unwrap_or(&job.method).chars().take(128).collect(),
     }
+}
+
+/// The held request's evaluation ahead is in, for the design as it is now. One a person's edit
+/// went past is computed again off the window thread (as for a [`crate::control_job::ControlJob`]),
+/// so the run for real finds everything computed.
+fn ahead_is_in(app: &mut SolveApp) -> bool {
+    let Some(job) = app.agent.job.as_ref() else { return false };
+    let Some(ahead) = job.ahead.as_ref() else { return true };
+    if !ahead.finished() {
+        return false;
+    }
+    if !ahead.stale(app) {
+        return true;
+    }
+    let Some(again) = ahead.restart(app, &job.params, &job.ticket) else { return true };
+    if let Some(job) = app.agent.job.as_mut() {
+        job.ahead = Some(again);
+    }
+    false
 }
 
 /// Run the held request now (as a call without animation) and send its reply.

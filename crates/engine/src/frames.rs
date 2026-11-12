@@ -52,6 +52,11 @@ use K::*;
 /// What `timeline.redefine` maps for a surface revolve, which no command is called.
 const SURFACE_REVOLVE_EDIT: &str = "surface.revolve (edit)";
 
+/// The construction planes made of picks alone (`cmd::picked_plane`): their references are
+/// parsed and mapped as a whole, saved forms included, rather than key by key (#12022).
+const PICKED_PLANES: [&str; 4] =
+    ["construct.plane.axis_point", "construct.plane.two_edges", "construct.plane.three_points", "construct.plane.perpendicular"];
+
 /// The parameters each command takes in world coordinates.
 fn table(id: &str) -> &'static [(&'static str, K)] {
     match id {
@@ -474,7 +479,7 @@ impl Nested {
         });
         if outer {
             let inner = if id == "timeline.redefine" { None } else { Some(id) };
-            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty() || i == "construct.plane.axis_point")));
+            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty())));
             OUTER_MOVE.with(|m| m.set(id == "solid.move"));
         }
         (Nested, outer)
@@ -660,18 +665,19 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
     {
         return None;
     }
-    if id == "construct.plane.axis_point" && placed(s) {
-        // Construction references include tagged saved forms as well as pick wrappers.
-        // Map the parsed definition once at the boundary, including a nested Edit Feature.
+    if PICKED_PLANES.contains(&id) && placed(s) {
+        // An Edit Feature (`timeline.redefine`) of such a plane: its references include tagged
+        // saved forms as well as pick wrappers, so the parsed definition is mapped once here.
         // The constructor can then name local model picks and retain their exact references.
-        let mut kind = crate::cmd::plane_axis_point_kind(s, params).ok()?;
+        // (Run directly, the plane goes into the active frame as a whole: `to_active_frame`.)
+        let plane = crate::cmd::picked_plane(s, id, params).ok()??;
+        let mut kind = solidcraft_doc::FeatureKind::ConstructionPlane { plane };
         kind.transform_geometry(&mat_inverse(&s.active_component_frame())?);
-        let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AxisPoint { axis, point } } = kind else {
-            return None;
-        };
+        let solidcraft_doc::FeatureKind::ConstructionPlane { plane } = &kind else { return None };
         let mut out = params.clone();
-        out["axis"] = serde_json::to_value(axis).ok()?;
-        out["point"] = serde_json::to_value(point).ok()?;
+        for (key, reference) in crate::cmd::picked_plane_refs(plane)?.1 {
+            out[key] = serde_json::to_value(reference).ok()?;
+        }
         return Some(out);
     }
     let keys = table(id);
@@ -788,7 +794,7 @@ fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'
     use solidcraft_doc::FeatureKind as Feature;
     let point = placement_point;
     match (kind, cmd) {
-        (Feature::Box { corner, .. }, "solid.box") => vec![("corner", point(corner))],
+        (Feature::Box { corner, centred, .. }, "solid.box") => vec![(if *centred { "center" } else { "corner" }, point(corner))],
         (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],
         (Feature::Cylinder { base, axis, .. }, "solid.cylinder") | (Feature::Coil { base, axis, .. }, "solid.coil") => {
             vec![("base", point(base)), ("axis", pt(axis.0))]

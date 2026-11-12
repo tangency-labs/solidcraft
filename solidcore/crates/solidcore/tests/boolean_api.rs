@@ -444,17 +444,14 @@ fn boolean_sources_name_no_smlib_symbol_in_a_string() {
 
 // ---- a body minus an exact copy of itself ----------------------------------------------
 
-/// SolidCraft's fix list (`kernel_cases/fixes.json`), with `flag` set to `on`.
-fn rig_kernel(flag: &str, on: bool) -> Kernel {
+/// SolidCraft's fix list (`kernel_cases/fixes.json`).
+fn rig_kernel() -> Kernel {
     let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
     let mut fixes = solidcore::kernel::UpstreamFixes::default();
     for name in &names {
         if let Some(f) = fixes.flag_mut(name) {
             *f = true;
         }
-    }
-    if let Some(f) = fixes.flag_mut(flag) {
-        *f = on;
     }
     Kernel {
         fixes,
@@ -485,13 +482,16 @@ fn faces_left_by_own_copy(k: &mut Kernel, b: Brep) -> usize {
 
 /// A disc with a hub, a bore and four pockets, every tolerance 0.01: the intersection
 /// tolerance is half that and upstream's capture distance 2000 times it, 10 mm, which
-/// captures vertices of the 30 mm part up to 10 mm apart into one proto vertex; the cut by
-/// its own copy then keeps faces. With `boolean_capture_keeps_operand_vertices_apart` the
-/// capture stays below half the nearest two vertices' distance and nothing is left.
+/// captured vertices of the 30 mm part up to 10 mm apart into one proto vertex, and the cut
+/// by its own copy kept faces. The capture stays below half the nearest two vertices'
+/// distance, and nothing is left: with SolidCraft's fix list and with the default kernel
+/// (every `UpstreamFixes` flag off), since the rule is no longer a flag.
 #[test]
 fn a_part_with_step_tolerances_minus_itself_is_empty() {
-    for on in [false, true] {
-        let mut k = rig_kernel("boolean_capture_keeps_operand_vertices_apart", on);
+    for (kernel, mut k) in [
+        ("SolidCraft's fixes", rig_kernel()),
+        ("the default kernel", Kernel::default()),
+    ] {
         let p = Point3::new;
         let disc = api::create_cylinder(&mut k, p(0.0, 0.0, 0.0), 15.0, 3.0).unwrap();
         let hub = api::create_cylinder(&mut k, p(0.0, 0.0, 0.0), 4.0, 8.0).unwrap();
@@ -503,40 +503,26 @@ fn a_part_with_step_tolerances_minus_itself_is_empty() {
             b = boolean_difference(&mut k, b, pocket).unwrap();
         }
         let b = with_step_tolerances(&k, b);
-        let left = faces_left_by_own_copy(&mut k, b);
-        if on {
-            assert_eq!(left, 0);
-        } else {
-            assert!(left > 0, "upstream's capture distance keeps faces");
-        }
+        assert_eq!(faces_left_by_own_copy(&mut k, b), 0, "{kernel}");
     }
 }
 
 /// A block with a boss and a bore through it, every tolerance 0.01: at the bore's rim the
-/// radial sector test steps off the edge until it leaves a face, and reads the coincident
-/// bore face's side against the edge's other face (the boss top) instead of the face the bore
-/// face lies on, so the bore and its copy are taken for opposite sides and the cut keeps the
-/// bore face. With
-/// `radial_sector_step_off_coincidence_by_own_face` the side is read against the face the
-/// bore face lies on, and nothing is left.
+/// radial sector test steps off the edge until it leaves a face. Upstream read the
+/// coincident bore face's side against the edge's other face (the boss top) instead of the
+/// face the bore face lies on, took the bore and its copy for opposite sides and kept the
+/// bore face. The side is read against the face the bore face lies on, and nothing is left.
 #[test]
 fn a_bore_minus_its_copy_is_empty_when_the_sector_steps_off() {
     for (r, h) in [(0.3, 0.2), (0.1, 0.05), (0.05, 0.02)] {
-        for on in [false, true] {
-            let mut k = rig_kernel("radial_sector_step_off_coincidence_by_own_face", on);
-            let p = Point3::new;
-            let block = api::create_box(&mut k, p(-2.0, -2.0, 0.0), 4.0, 4.0, 1.0).unwrap();
-            let boss = api::create_cylinder(&mut k, p(0.0, 0.0, 1.0), 3.0 * r, h).unwrap();
-            let mut b = boolean_union(&mut k, block, boss).unwrap();
-            let bore = api::create_cylinder(&mut k, p(0.0, 0.0, 0.5), r, 2.0).unwrap();
-            b = boolean_difference(&mut k, b, bore).unwrap();
-            let b = with_step_tolerances(&k, b);
-            let left = faces_left_by_own_copy(&mut k, b);
-            if on {
-                assert_eq!(left, 0, "r {r}");
-            } else {
-                assert!(left > 0, "r {r}: upstream keeps the bore face");
-            }
-        }
+        let mut k = rig_kernel();
+        let p = Point3::new;
+        let block = api::create_box(&mut k, p(-2.0, -2.0, 0.0), 4.0, 4.0, 1.0).unwrap();
+        let boss = api::create_cylinder(&mut k, p(0.0, 0.0, 1.0), 3.0 * r, h).unwrap();
+        let mut b = boolean_union(&mut k, block, boss).unwrap();
+        let bore = api::create_cylinder(&mut k, p(0.0, 0.0, 0.5), r, 2.0).unwrap();
+        b = boolean_difference(&mut k, b, bore).unwrap();
+        let b = with_step_tolerances(&k, b);
+        assert_eq!(faces_left_by_own_copy(&mut k, b), 0, "r {r}");
     }
 }

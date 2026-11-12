@@ -1152,6 +1152,11 @@ preference_settings! {
     /// Insert Design lists the designs open in other tabs, each inserted with one click, then
     /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
     insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
+    /// Dragging a part a ball joint holds to a part fixed in place turns it like a trackball: by
+    /// the smallest turn about the joint, on a sphere at least the part's size (`joint_drag`,
+    /// #13262). Off: the grabbed point goes to the pointer and the part may spin about it, as
+    /// before.
+    joint_drag_trackball: bool = true, PAGE_DESIGN => check_id("prefs.joint_drag_trackball");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Ask separately when closing several unsaved designs, as before grouped saving.
@@ -1244,6 +1249,10 @@ preference_settings! {
     /// The operations under way, with their progress and Cancel, in a panel in the view's
     /// bottom-right corner. Off: a "Computing" notice and the agent's chip, as before.
     operations_panel: bool = true, PAGE_LAYOUT;
+    /// While a file opens, is inserted or its links are read again, the design waits for it
+    /// behind a card with the file's progress and Cancel, as it always did. Off (the default): the
+    /// operation is a row of the operations panel and the design stays usable meanwhile.
+    file_operations_wait: bool = false, PAGE_LAYOUT;
     /// Toolbar tabs hidden by the person. An empty list keeps every existing tab visible.
     hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_LAYOUT;
     /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
@@ -1490,6 +1499,10 @@ preference_settings! {
     /// How strongly a print face stands out in the viewport (#8429): the share of the section
     /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
     print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
+    /// Print faces show in the view at all times and are saved in the design, as before #11512.
+    /// Off (the default): they show only while the Send to Slicer window is open, a save leaves
+    /// them out, and a design that has them opens without them.
+    keep_print_faces: bool = false, PAGE_GENERAL;
     /// The line about sending again replacing the slicer's file has been shown.
     slicer_resend_hint_seen: bool = false;
     /// The user has agreed to Open with EasyPrint uploading a model to Printables' servers.
@@ -2287,6 +2300,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_network(&app.preferences);
     // The features computed from now on are checked as the preference says.
     app.session.set_validation(app.preferences.validation);
+    crate::print_face_ui::sync(&mut app.session, &app.preferences);
     // The profiler records while the preference is on (switched when it changes; at start-up only
     // when on, so SOLIDCRAFT_PROFILE=1 is not undone by the default).
     let profile = app.preferences.profile_operations;
@@ -4892,6 +4906,57 @@ mod tests {
     }
 
     #[test]
+    fn layout_page_checkboxes_keep_their_labels_at_every_width() {
+        // "Origin and bodies on top" is greyed out unless History is on the left. Its disabled area once
+        // started at its row's end, so the label was squeezed away behind the (i) icon (#14564).
+        let checks = [
+            ("history_play_button", "prefs.layout_page.play_history"),
+            ("history_group_joints", "prefs.history_group_joints"),
+            ("history_bar_groups", "prefs.history_bar_groups"),
+            ("history_origin_bodies", "prefs.layout_page.origin_bodies"),
+            ("browser_components_open", "prefs.browser_components_open"),
+            ("browser_rows_start_closed", "prefs.browser_rows_start_closed"),
+            ("browser_eye_left", "prefs.browser_eye_left"),
+            ("browser_body_features", "prefs.browser_body_features"),
+        ];
+        for timeline_left in [false, true] {
+            for width in [1600, 1100, 960, 800, 640] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.preferences.language = "en".into();
+                h.app.home.open = false;
+                h.app.preferences.timeline_left = timeline_left;
+                h.call("ui.resize", json!({"width":width,"height":1100}));
+                h.call("ui.prefs", json!({"open":"Layout"}));
+                h.frames(20);
+                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                for (key, label) in checks {
+                    let label = solidcraft_ui_text::tr(label);
+                    let check = crate::scenario::rect_of(&format!("prefs:{key}")).unwrap();
+                    assert!(check.left() >= body.left() - 0.5 && check.right() <= body.right() + 0.5, "{key} at {width}: {check:?} outside {body:?}");
+                    let mut text_found = false;
+                    for shape in &h.shapes {
+                        crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                            if let egui::Shape::Text(text) = shape
+                                && text.galley.job.text == label
+                            {
+                                let bounds = text.galley.rect.translate(text.pos.to_vec2());
+                                if check.contains(bounds.center()) {
+                                    assert!(
+                                        !text.galley.elided && check.expand(0.5).contains_rect(bounds),
+                                        "{key} label cut at {width}: {bounds:?} in {check:?}"
+                                    );
+                                    text_found = true;
+                                }
+                            }
+                        });
+                    }
+                    assert!(text_found, "{key} shows its label \"{label}\" at {width} (History left: {timeline_left})");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn navigation_bar_appearance_segments_stay_inside_the_page_at_narrow_widths() {
         for width in [1600, 880, 640, 600, 480] {
             let mut h = crate::scenario::Harness::new();
@@ -6505,6 +6570,7 @@ mod tests {
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
             ("operations_panel", json!(false), PAGE_LAYOUT),
+            ("file_operations_wait", json!(true), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
             ("construct_menu_groups", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
@@ -6698,6 +6764,7 @@ mod tests {
             ("Fold items", PAGE_GRAPHICS),
             ("Allow network locations in designs", PAGE_GENERAL),
             ("Print face highlight", PAGE_GENERAL),
+            ("Keep print faces", PAGE_GENERAL),
         ];
         let mut found = vec![Vec::new(); cases.len()];
         let mut h = crate::scenario::Harness::new();
@@ -12640,6 +12707,7 @@ mod settings_search_tests {
             ("allow network locations", "Allow network locations in designs"),
             ("slicer that is already running", "Open files in a slicer that is already running"),
             ("print face highlight", "Print face highlight"),
+            ("keep print faces", "Keep print faces"),
             ("interface language", "Interface language"),
         ] {
             h.app.prefs_window.shell.filter = query.into();

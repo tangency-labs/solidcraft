@@ -172,8 +172,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.cone_parallel_line_domains = true;
-    k.fixes.cone_parallel_line_midpoint = true;
     k.fixes.corner_blend_coons_patch_tangent_to_sides = true;
     k.fixes.corner_blend_stays_inside_neighbours = true;
     k.fixes.cover_refuses_folded_continuation = true;
@@ -196,7 +194,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
-    k.fixes.fillet_cleanup_removes_input_slits = true;
     k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_corner_ball_center_from_axes = true;
     k.fixes.fillet_corner_ball_patch = true;

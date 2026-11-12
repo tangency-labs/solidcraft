@@ -55,6 +55,10 @@ pub struct DocSlot {
     work: DocWork,
     /// What it has computing off the window thread or waiting its turn.
     jobs: crate::deferred::DocJobs,
+    /// Which tab it is ([`next_tab`]): the same for as long as the tab is open.
+    pub(crate) tab: u64,
+    /// Opened behind the shown design: framed when it is first shown.
+    fit: bool,
 }
 
 /// What a design was doing when its tab was left, with the "Keep dialogs and tools open when
@@ -63,6 +67,8 @@ pub struct DocSlot {
 /// waits in the same slot, so showing the tab again picks up exactly where it was left.
 #[derive(Default)]
 struct DocWork {
+    /// Shared panel content belongs to the design, independently of its current placement.
+    bom: Option<crate::bom_panel::BomPanel>,
     dialog: Option<crate::dialogs::Dialog>,
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
@@ -75,12 +81,15 @@ struct DocWork {
 /// computing after OK can't wait (its result belongs to the window thread): that dialog is
 /// cancelled, as without the preference.
 fn take_work(app: &mut SolveApp) -> DocWork {
+    let keep_bom = crate::panel_runtime::production_active(app);
+    let bom = app.bom.take().filter(|_| keep_bom);
     if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
         crate::dialogs::cancel(app);
         app.tool = None;
-        return DocWork::default();
+        return DocWork { bom, ..DocWork::default() };
     }
     DocWork {
+        bom,
         dialog: app.dialog.take(),
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
@@ -93,6 +102,10 @@ fn take_work(app: &mut SolveApp) -> DocWork {
 /// design's history rolled back for an edit, and only the dialog's Cancel or OK puts it back.
 /// `before`: the session's revision before the switch moved it on to refresh the views.
 fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
+    if crate::panel_runtime::production_active(app) {
+        app.bom = work.bom;
+        crate::bom_panel::set_focus_pending(app, true);
+    }
     // That refresh is not a change to the design: the edit's Cancel must still see the design
     // it left (`Session::restore_editor` compares revisions), as `PendingFeatureEdit` does.
     if let Some(state) = &mut work.editing_state {
@@ -154,8 +167,16 @@ impl DocSlot {
             edit_in_place: None,
             work: DocWork::default(),
             jobs: Default::default(),
+            tab: next_tab(),
+            fit: false,
         }
     }
+}
+
+/// A new tab's number ([`DocSlot::tab`], [`Documents::active_tab`]).
+pub(crate) fn next_tab() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The open designs: one slot per tab; the active tab's slot is empty (its design is in the app).
@@ -182,6 +203,8 @@ pub struct Documents {
     /// the link (opened, adopted in place, the link just made).
     /// Coming back to its tab reads again those that differ (`linked_source::update_changed`).
     pub(crate) link_stamps: Vec<(u64, crate::linked_source::Stamp)>,
+    /// The shown tab's number ([`DocSlot::tab`]); 0 until it is first asked for ([`active_tab`]).
+    active_tab: u64,
 }
 
 struct SaveGroup {
@@ -299,6 +322,25 @@ impl Documents {
         self.slots.iter().filter_map(Option::as_ref).map(|slot| &slot.session)
     }
 
+    /// The shown tab's number: a file operation for its design waits for it to be shown again.
+    pub(crate) fn active_tab(&mut self) -> u64 {
+        if self.active_tab == 0 {
+            self.active_tab = next_tab();
+        }
+        self.active_tab
+    }
+
+    /// [`Self::active_tab`], without numbering a tab not asked for yet (0).
+    pub(crate) fn current_tab(&self) -> u64 {
+        self.active_tab
+    }
+
+    /// Whether the tab numbered `tab` is still open: the one shown, or one behind it. A file
+    /// operation bound to a tab that is gone has nothing left to land in.
+    pub(crate) fn tab_open(&self, tab: u64) -> bool {
+        self.active_tab == tab || self.slots.iter().flatten().any(|slot| slot.tab == tab)
+    }
+
     /// Number of open designs (at least the active one).
     pub fn count(&self) -> usize {
         self.slots.len().max(1)
@@ -375,7 +417,6 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     crate::dim_view::cancel();
     app.params = None;
     app.design_properties = None;
-    app.bom = None;
     app.cancel_view_animation();
     app.viewport.orbit_free = None;
     app.preview.reset();
@@ -404,6 +445,8 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         edit_in_place: std::mem::replace(&mut app.edit_in_place.active, slot.edit_in_place),
         work,
         jobs: app.swap_jobs(slot.jobs),
+        tab: std::mem::replace(&mut app.docs.active_tab, slot.tab),
+        fit: false,
     };
     crate::browser::restore_reveals(app, slot.reveals);
     // Only the displayed design owns the process-wide crash replay journal.
@@ -419,6 +462,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // So does the host's pre-command check: every tab is held to it.
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
+    crate::print_face_ui::sync(&mut app.session, &app.preferences);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     app.session.invalidate_view(out_rev);
@@ -470,7 +514,11 @@ pub fn switch(app: &mut SolveApp, i: usize) {
         return;
     };
     crate::linked_source::note_unread(app);
+    let fit = incoming.fit;
     let out = swap_in(app, incoming);
+    if fit {
+        app.fit_view();
+    }
     let a = app.docs.active;
     if let Some(s) = app.docs.slots.get_mut(a) {
         *s = Some(out);
@@ -589,6 +637,22 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
     false
 }
 
+/// Open `session` in a new tab after the active one, leaving the shown design as it is (a file
+/// opened while the person is busy in another design). Its view is framed when it is shown.
+pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<(), String> {
+    if app.docs.slots.is_empty() {
+        app.docs.slots.push(None);
+        app.docs.active = 0;
+    }
+    if app.docs.slots.len() >= MAX_OPEN {
+        return Err(format!("at most {MAX_OPEN} designs can be open"));
+    }
+    let mut slot = DocSlot::new(session);
+    slot.fit = true;
+    app.docs.slots.insert(app.docs.active + 1, Some(slot));
+    Ok(())
+}
+
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
 pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     if app.docs.group.is_some() {
@@ -624,10 +688,13 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::semantic_content::leave_document(app);
         crate::dialogs::cancel(app);
         app.tool = None;
+        app.bom = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
         reset_chat(app);
+        // Another design in the tab: what waits for the blank one's tab no longer does.
+        app.docs.active_tab = next_tab();
         // The blank design's record of its links goes with it; the new one's start now.
         app.docs.link_stamps.clear();
         crate::history_folds::load(app);
@@ -670,6 +737,11 @@ pub fn import(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     let mut doc = solidcraft_engine::io::read_design(text.as_bytes()).map_err(|e| e.to_string())?;
     if let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
         doc.name = name.to_string();
+    }
+    // Like a design opened from a file, it comes in without its print faces unless they are kept
+    // (#11512); dropped before the session starts, so it still opens saved with nothing to undo.
+    if !app.preferences.keep_print_faces {
+        doc.print_faces.clear();
     }
     let replaced = app.docs.active;
     open_tab(app, Session::opened(doc, None))?;
@@ -776,6 +848,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
         app.tool = None;
+        app.bom = None;
         app.session.replace_design(Session::default());
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);
@@ -1202,7 +1275,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         (None, Some(editing)) => app.menu.rename = Some(editing),
     }
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
-    let idle = !app.file_load.busy();
+    let idle = !app.file_load_holds();
     let (mut shut, mut pick, mut many, mut dropped) = (None, None, None, None);
     for action in actions {
         match action {
@@ -1258,6 +1331,7 @@ fn start_tab_rename(app: &mut SolveApp, name: &str, tab: Rect) {
         at: tab.left_bottom(),
         focused: false,
         inline: true,
+        inline_id: None,
     });
 }
 

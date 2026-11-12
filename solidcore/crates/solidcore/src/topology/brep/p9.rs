@@ -5,7 +5,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`find_infinite_region`] | `SmBrep::FindInfiniteRegion` |
-//! | [`orient_sheet_surfaces`] | `SmBrep::OrientSheetSurfaces` |
+//! | [`orient_sheet_surfaces`], [`OrientSheetNote`] | `SmBrep::OrientSheetSurfaces` |
 //! | [`make_shell_vertex`], [`make_shell_vertex_with_kernel_context`] | `SmBrep::MakeShellVertex` |
 //! | [`make_vertex_loop`] | `SmBrep::MakeVertexLoop` |
 //! | [`make_vertex_split_edge`], [`make_vertex_split_edge_with_kernel_context`] | `SmBrep::MakeVertexSplitEdge` |
@@ -32,8 +32,10 @@
 //! loop transfer errors must decrease the source list length, otherwise return an
 //! error instead of looping forever. Incomplete edgeuse pairs and native null
 //! dereferences return `InvalidInput`; nonfinite split parameters retain native
-//! refusal/output behavior. `OrientSheetSurfaces` preserves the native final TRUE
-//! status (1), distinct from its early `SM_SUCCESS` (0). Mutation success paths
+//! refusal/output behavior. `OrientSheetSurfaces` returns its native final TRUE
+//! status (1), distinct from its early `SM_SUCCESS` (0), as a note with its success
+//! ([`OrientSheetNote::Reoriented`]); callers that stop on it use
+//! [`OrientSheetNote::into_error`] (status 1). Mutation success paths
 //! remain uncertified while part 2 and face notification dependencies defer;
 //! passing refusal/projection comparisons do not certify those paths.
 //! Opt-in ([`UpstreamFixes::new_edge_vertex_tolerance_covers_gap`](crate::kernel::UpstreamFixes::new_edge_vertex_tolerance_covers_gap),
@@ -52,7 +54,8 @@
 //! (the fork's work count, tangency-labs/smlib@edf7414); it changes no result.
 
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, Result, SolidError, SM_ERR};
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignore_status, Failure, Result, SolidError, SM_ERR};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::object::NotifyOperation;
@@ -215,7 +218,10 @@ pub fn find_infinite_region(
                     let face = required(use_.face, "shell faceuse without face")?;
                     let edges = crate::topology::topology_traverser::face_edges(b, face)?;
                     if edges.is_empty() {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::topology_failed(
+                            OP,
+                            "a face of the shell has no edges to aim a ray at",
+                        ));
                     }
                     for edge_id in edges {
                         required(
@@ -269,7 +275,8 @@ pub fn find_infinite_region(
             let success = ray_success(&attempt.status)?;
             state = attempt.state;
             if !success {
-                let edge_id = best_edge.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let edge_id = best_edge
+                    .ok_or_else(|| SolidError::topology_missing(OP, "the shell's nearest edge"))?;
                 let record = b.edge(edge_id)?;
                 // (a copy: the ray fires may add UV trim curves to the B-rep)
                 let curve =
@@ -321,7 +328,10 @@ pub fn find_infinite_region(
         } else {
             let edges = brep_edges(b)?;
             if edges.is_empty() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::topology_failed(
+                    OP,
+                    "the B-rep has no edges to aim a ray at",
+                ));
             }
             let mut distance = crate::math::BIG_DOUBLE;
             for pass in 0..6 {
@@ -386,7 +396,10 @@ pub fn find_infinite_region(
                     let point = curve.evaluate_point(k, interval.evaluate(0.189))?;
                     let start = bounds.min() - (bounds.max() - bounds.min()) * 0.5;
                     if !fire(b, start, point - start)? {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::topology_failed(
+                            OP,
+                            "no ray toward the edge found the region",
+                        ));
                     }
                 }
             }
@@ -432,11 +445,9 @@ fn brep_ray_fire<O>(
 }
 
 fn ray_direction(direction: Vec3) -> Result<Vec3> {
-    direction.unitize().map_err(|_| SolidError::Upstream {
-        operation: OP,
-        code: 1007,
-        entity: None,
-    })
+    direction
+        .unitize()
+        .map_err(|_| SolidError::topology_invalid_value(OP, "the ray direction has zero length"))
 }
 
 /// Whether a `SmShell::RayFire` call succeeded. Upstream retries on any failed status;
@@ -460,8 +471,51 @@ fn is_intersector_approx(curve: &Curve) -> Result<bool> {
     }
 }
 
+/// A note [`orient_sheet_surfaces`] returns with its success. It is not a failure: the
+/// caller decides whether to stop on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OrientSheetNote {
+    /// The sheet was not oriented, so its faces were walked from the given face and
+    /// turned to agree with it. Upstream returns `TRUE` (status `1`) here, where an
+    /// already oriented sheet returns `SM_SUCCESS`.
+    Reoriented,
+}
+
+impl OrientSheetNote {
+    /// The error of a caller that stops on this note, as upstream's callers stop on the
+    /// status `1` (a status other than `SM_SUCCESS`): a failure of the orientation whose
+    /// comparison status ([`SolidError::sm_status`]) is `1`.
+    #[must_use]
+    pub fn into_error(self) -> SolidError {
+        match self {
+            Self::Reoriented => Failure::new(
+                OP,
+                TopologyFailure::Failed("the sheet's faces were turned to agree"),
+            )
+            .with_status(1)
+            .into_error(),
+        }
+    }
+
+    /// `result` as a caller that stops on the note takes it: `Ok` without a note, the
+    /// note's error ([`OrientSheetNote::into_error`]) with one.
+    ///
+    /// # Errors
+    ///
+    /// Those of `result`, and the note's error.
+    pub fn stop_on_note(result: Result<Option<Self>>) -> Result<()> {
+        match result? {
+            Some(note) => Err(note.into_error()),
+            None => Ok(()),
+        }
+    }
+}
+
 /// `OrientSheetSurfaces`. `same=true` is upstream's default orientation policy. The
 /// face UV swaps' edit notifications (each face's and its surface's) go through `env`.
+/// `Ok(None)` for a sheet that was already oriented (after its UV swap when `same` is
+/// false); [`OrientSheetNote::Reoriented`] when its faces were walked and turned.
 ///
 /// # Errors
 /// `SM_ERR` for a face not in the B-rep or a B-rep that is not a sheet; those of the
@@ -473,13 +527,16 @@ pub fn orient_sheet_surfaces(
     face: Option<FaceId>,
     same: bool,
     env: &mut edge::NotifyEnv<'_>,
-) -> Result<()> {
+) -> Result<Option<OrientSheetNote>> {
     let faces = brep_faces(b)?;
     let Some(face) = face.filter(|face| faces.contains(face)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the face is not in the B-rep",
+        ));
     };
     if !is_sheet(k, b)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(OP, "the B-rep is not a sheet"));
     }
     if is_oriented_sheet(k, b)? {
         if !same {
@@ -489,7 +546,7 @@ pub fn orient_sheet_surfaces(
                 k.fixes.brep_edit_statuses_pass_on,
             )?)?;
         }
-        return Ok(());
+        return Ok(None);
     }
     crate::geom::context::with_mark_lock(k, crate::geom::context::ALL_MARKS, |k, mark| {
         use crate::topology::topology_traverser::{Entity, Marks};
@@ -521,11 +578,7 @@ pub fn orient_sheet_surfaces(
             }
         }
         // Upstream's final return is TRUE (1), unlike the earlier SM_SUCCESS (0).
-        Err(SolidError::Upstream {
-            operation: OP,
-            code: 1,
-            entity: None,
-        })
+        Ok(Some(OrientSheetNote::Reoriented))
     })?
 }
 
@@ -720,11 +773,11 @@ pub fn make_vertex_loop(
     }
     ignore_status(set_vertex_point(b, vertex, point, env))?;
     let fu1 = crate::topology::face::p2::upward_faceuse(b, face)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::topology_missing(OP, "the face's upward face use"))?;
     let fu2 = b
         .faceuse(fu1)?
         .mate
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::topology_missing(OP, "the face use's mate"))?;
     b.loop_mut(loop_)?.loopuse = Some(lu1);
     for (lu, mate, fu, vu) in [(lu1, lu2, fu1, vu1), (lu2, lu1, fu2, vu2)] {
         *b.loopuse_mut(lu)? = Loopuse {
@@ -1478,25 +1531,41 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         face::{p1 as fp1, p2 as fp2},
         loopuse as lu,
     };
-    let face = input.face.ok_or_else(|| SolidError::null_pointer(OP))?;
-    let mut curve = input.curve.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let face = input
+        .face
+        .ok_or_else(|| SolidError::topology_missing(OP, "the face"))?;
+    let mut curve = input
+        .curve
+        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?;
     if !b.editing_enabled() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "editing is disabled on the B-rep",
+        ));
     }
     let [Some(start), Some(mut end)] = input.vertices else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "both vertex uses are needed",
+        ));
     };
     for vu in [start, end] {
         if !matches!(
             b.vertexuse(vu)?.owner,
             VertexuseOwner::Edgeuse(_) | VertexuseOwner::Loopuse(_)
         ) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "a vertex use is on neither an edge use nor a loop use",
+            ));
         }
     }
     let start_faceuse = vertexuse::faceuse(b, start)?;
     if start_faceuse != vertexuse::faceuse(b, end)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the vertex uses are on different face uses",
+        ));
     }
     let fu = required(start_faceuse, "VU pair has no faceuse")?;
     let actual_face = required(b.faceuse(fu)?.face, "VU faceuse has no face")?;
@@ -2101,11 +2170,17 @@ fn faceuse_remove_loopuse(
     lu: crate::topology::LoopuseId,
 ) -> Result<()> {
     if b.loopuse(lu)?.faceuse != Some(fu) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the loop use is not on the face use",
+        ));
     }
     let list = &mut b.faceuse_mut(fu)?.loopuses;
     let Some(at) = list.iter().position(|&x| x == lu) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the loop use is not in the face use's list",
+        ));
     };
     list.remove(at);
     b.loopuse_mut(lu)?.faceuse = None;
@@ -2743,6 +2818,62 @@ fn drop_curve(
 mod tests {
     use super::*;
 
+    /// The face-orientation repair's final status 1 (upstream `TRUE`) comes back as
+    /// [`OrientSheetNote::Reoriented`] on the success path, and a caller that stops on it
+    /// (the Boolean slice with its statuses passed on, the split by a sheet) gets the
+    /// status 1 it got before.
+    #[test]
+    fn issue_15020_reorienting_a_sheet_returns_its_note_with_the_result() {
+        let mut k = Kernel::default();
+        let lines = [
+            (Point3::ZERO, Point3::new(1.0, 0.0, 0.0)),
+            (Point3::new(1.0, 0.0, 0.0), Point3::new(1.0, 1.0, 0.0)),
+        ]
+        .map(|(a, b)| Curve::from(crate::curve::line::Line::from_points(a, b, 3)));
+        let mut b = crate::sweep::api_brep::create_linear_sweep(
+            &mut k,
+            &[Some(&lines[0]), Some(&lines[1])],
+            Vec3::Z,
+            1.0,
+            false,
+        )
+        .unwrap();
+        b.set_editing_enabled(true);
+        let faces = brep_faces(&b).unwrap();
+        assert_eq!(faces.len(), 2);
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = crate::geom::attribute::AttributeStore::default();
+        let mut env = edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+
+        // an oriented sheet: SM_SUCCESS, no note
+        assert!(is_oriented_sheet(&mut k, &b).unwrap());
+        let r = orient_sheet_surfaces(&mut k, &mut b, Some(faces[0]), true, &mut env);
+        assert_eq!(r, Ok(None));
+
+        // turn one face over: the repair walks the faces and returns its note
+        let mut marks = crate::topology::topology_traverser::Marks::default();
+        swap_face_uv(&k, &mut b, &mut marks, faces[1], &mut env).unwrap();
+        assert!(!is_oriented_sheet(&mut k, &b).unwrap());
+        let r = orient_sheet_surfaces(&mut k, &mut b, Some(faces[0]), true, &mut env);
+        assert_eq!(r, Ok(Some(OrientSheetNote::Reoriented)));
+        assert!(is_oriented_sheet(&mut k, &b).unwrap());
+
+        // a caller that stops on the note gets the status 1 the repair returned before
+        let e = OrientSheetNote::stop_on_note(r).unwrap_err();
+        assert_eq!(e.sm_status(), Some(1));
+        assert_eq!(e.upstream_status(), Some(1));
+        assert_eq!(e.operation(), OP);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert_eq!(e.entity(), None);
+        assert!(e.topology_failure().is_some());
+        assert_eq!(OrientSheetNote::stop_on_note(Ok(None)), Ok(()));
+    }
+
     mod notifications {
         use super::*;
         use crate::geom::attribute::{ids, Attribute, AttributeStore, Behavior, ObjectKey};
@@ -3294,10 +3425,10 @@ mod tests {
 
     #[test]
     fn zero_ray_direction_retains_the_defined_native_status() {
-        assert!(matches!(
-            ray_direction(Vec3::ZERO),
-            Err(SolidError::Upstream { code: 1007, .. })
-        ));
+        assert_eq!(
+            ray_direction(Vec3::ZERO).unwrap_err().upstream_status(),
+            Some(1007)
+        );
         assert_eq!(ray_direction(Vec3::Z).unwrap(), Vec3::Z);
     }
 

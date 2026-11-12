@@ -22,6 +22,7 @@
     "bend_up": "#000000",
     "body": "#ffffff",
     "body_edge": "#000000",
+    "isoparm": "#000000",
     "body_selected": "#000000",
     "border": "#000000",
     "box_crossing": "#000000",

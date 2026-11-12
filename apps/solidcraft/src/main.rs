@@ -20,6 +20,8 @@
 #[cfg(not(target_os = "macos"))]
 #[path = "../../../assets/icons/app/shared/source/app_icon.rs"]
 mod app_icon;
+#[cfg(test)]
+mod clipboard_tests;
 mod come_forward;
 mod control_server;
 #[cfg(target_os = "linux")]

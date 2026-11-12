@@ -36,11 +36,16 @@ pub mod cancel;
 pub mod check;
 pub mod contact;
 pub mod continuity;
+pub mod curve;
+pub mod curve_fit;
+pub mod curve_knots;
+pub mod curve_plane;
 pub mod error;
 pub mod extend;
 pub mod file;
 pub mod label;
 pub mod measure;
+pub mod network;
 pub mod offset;
 pub mod order;
 pub mod pcurve;
@@ -51,6 +56,8 @@ pub mod session;
 pub mod split;
 pub mod step_assembly;
 pub mod stitch;
+pub mod surface;
+pub mod surface_cvs;
 pub mod sweep;
 pub mod tangent;
 pub mod untrim;
@@ -58,13 +65,14 @@ pub mod untrim;
 pub use blend::{
     band_room, blend, blend_ordered, chamfer_sides, chamfer_sides_ordered, edge_faces_along,
     edge_faces_along_ordered, fillet_variable, fillet_variable_ordered, tangent_chain, BandRoom,
-    Blend, Blended, ChamferSecond, Corners, EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
+    Blend, BlendOptions, Blended, ChamferCorner, ChamferSecond, Corners, EndRoom, Hole, HoleEdge,
+    Room, SetBack, Turn,
 };
 pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body};
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
-pub use error::{Error, FitKind, Result, RoomReason, Unblendable};
+pub use error::{Error, FitKind, OffsetRefusal, Result, RoomReason, Unblendable};
 pub use measure::{
     point_distance, Distance, EdgePoint, FaceCentroid, GapSample, MassPropertiesEstimate, Normal,
     PointClass,

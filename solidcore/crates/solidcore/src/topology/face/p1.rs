@@ -3653,7 +3653,7 @@ mod swap_refused_tests {
         };
         let before = state(&b);
         let e = swap_uv(&k, &mut b, face).unwrap_err();
-        assert!(matches!(e, SolidError::Upstream { .. }), "{e:?}");
+        assert!(e.upstream_status().is_some(), "{e:?}");
         assert!(state(&b) == before, "the refused swap changed the face");
     }
 }

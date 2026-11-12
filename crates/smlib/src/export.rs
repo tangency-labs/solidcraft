@@ -601,10 +601,14 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
         let (Some(s0), Some(s1)) = (end(a, t0), end(z, t1)) else {
             return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]")));
         };
+        // A knot within the rounding of an end is that end, and so is one past the end on the
+        // side the trim runs over it, up to the trim's end; a knot inside the edge's interval
+        // farther than the rounding stays (moving it would change the curve).
+        let snaps = |x: f64, t: f64, end: f64, slack: f64| (x - t).abs() <= rounding || ((x - t) * (end - t) > 0.0 && (x - t).abs() <= slack);
         for x in &mut k {
-            if (*x - t0).abs() <= s0 {
+            if snaps(*x, t0, a, s0) {
                 *x = t0;
-            } else if (*x - t1).abs() <= s1 {
+            } else if snaps(*x, t1, z, s1) {
                 *x = t1;
             }
         }

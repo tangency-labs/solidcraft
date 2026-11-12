@@ -32,6 +32,8 @@
 //! | [`curve::CurveFailure`]     | none: why a curve query refuses, and the curve routines' failures |
 //! | [`query::QueryFailure`]     | none: the query routines' failures               |
 //! | [`topology::TopologyFailure`] | none: the topology routines' failures          |
+//! | [`surface::SurfaceFailure`] | none: the surface routines' failures             |
+//! | [`blend::BlendFailure`]     | none: the blend routines' failures               |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns a
@@ -78,6 +80,9 @@
 //! `sm_status` and the status numbers here move to a comparison-only module (or to
 //! difftest and the FFI), since nothing but the comparison needs them.
 
+#[cfg(test)]
+mod bare_scan;
+pub mod blend;
 pub mod boolean;
 pub mod curve;
 pub mod defeature;
@@ -89,6 +94,7 @@ pub mod nurbs;
 pub mod offset;
 pub mod primitive;
 pub mod query;
+pub mod surface;
 pub mod sweep;
 pub mod topology;
 
@@ -639,8 +645,12 @@ impl core::fmt::Display for Failure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}: {}", self.operation, self.reason)?;
         // a reason that names no entity of its own is followed by the failure's
-        if let (Reason::Failed(_) | Reason::Topology(_), Some(entity)) = (&self.reason, self.entity)
-        {
+        let names_none = match &self.reason {
+            Reason::Failed(_) | Reason::Topology(_) | Reason::Blend(_) => true,
+            Reason::Offset(o) => o.replaces_upstream_status(),
+            _ => false,
+        };
+        if let (true, Some(entity)) = (names_none, self.entity) {
             write!(f, " ({entity})")?;
         }
         if let Some(cause) = &self.cause {
@@ -686,6 +696,25 @@ pub enum Reason {
     Query(query::QueryFailure),
     /// A topology routine failed.
     Topology(topology::TopologyFailure),
+    /// A surface routine failed.
+    Surface(surface::SurfaceFailure),
+    /// A blend routine failed.
+    Blend(blend::BlendFailure),
+    /// A blend certificate's feet box runs past a support's net in a direction the
+    /// support's kind does not continue (not upstream, tangency-labs/solidcraft#14284):
+    /// support `support` (0 or 1) over the leader's piece `s`, the box `uv` against the net's
+    /// `domain` (each `[[u_lo, u_hi], [v_lo, v_hi]]`). Nothing past the net is the face
+    /// there, so the piece is refused, never assumed.
+    FootPastDomainEnd {
+        /// Which support.
+        support: usize,
+        /// The leader's piece the feet were enclosed over.
+        s: [f64; 2],
+        /// The feet's box on that support.
+        uv: [[f64; 2]; 2],
+        /// The support net's domain.
+        domain: [[f64; 2]; 2],
+    },
 }
 
 impl Reason {
@@ -704,7 +733,10 @@ impl Reason {
             | Self::Geom(_)
             | Self::Curve(_)
             | Self::Query(_)
-            | Self::Topology(_) => None,
+            | Self::Topology(_)
+            | Self::Surface(_)
+            | Self::Blend(_)
+            | Self::FootPastDomainEnd { .. } => None,
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -714,7 +746,7 @@ impl Reason {
     /// comparison detail).
     pub(crate) fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) => SM_ERR,
+            Self::Failed(_) | Self::FootPastDomainEnd { .. } => SM_ERR,
             Self::Offset(o) => o.comparison_status(),
             Self::Nurbs(n) => n.comparison_status(),
             Self::Boolean(b) => b.comparison_status(),
@@ -728,6 +760,8 @@ impl Reason {
             Self::Curve(c) => c.comparison_status(),
             Self::Query(q) => q.comparison_status(),
             Self::Topology(t) => t.comparison_status(),
+            Self::Surface(s) => s.comparison_status(),
+            Self::Blend(b) => b.comparison_status(),
         }
     }
 
@@ -736,6 +770,7 @@ impl Reason {
     pub(crate) fn kind_given(&self, status: i32) -> ErrorKind {
         match self {
             Self::Failed(_) => ErrorKind::of_status(status),
+            Self::FootPastDomainEnd { .. } => ErrorKind::OutsideDomain,
             Self::Offset(o) => o.kind(),
             Self::Nurbs(n) => n.kind(),
             Self::Boolean(b) => b.kind(),
@@ -749,6 +784,8 @@ impl Reason {
             Self::Curve(c) => c.kind(),
             Self::Query(q) => q.kind(),
             Self::Topology(t) => t.kind(),
+            Self::Surface(s) => s.kind(),
+            Self::Blend(b) => b.kind(),
         }
     }
 }
@@ -770,6 +807,18 @@ impl core::fmt::Display for Reason {
             Self::Curve(c) => c.fmt(f),
             Self::Query(q) => q.fmt(f),
             Self::Topology(t) => t.fmt(f),
+            Self::Surface(s) => s.fmt(f),
+            Self::Blend(b) => b.fmt(f),
+            Self::FootPastDomainEnd {
+                support,
+                s,
+                uv,
+                domain,
+            } => write!(
+                f,
+                "a foot past its face's domain end: support {support} over the piece s in [{}, {}], its box u [{}, {}] v [{}, {}] past the net's domain u [{}, {}] v [{}, {}], in a direction its kind does not continue",
+                s[0], s[1], uv[0][0], uv[0][1], uv[1][0], uv[1][1], domain[0][0], domain[0][1], domain[1][0], domain[1][1]
+            ),
         }
     }
 }
@@ -849,6 +898,18 @@ impl From<query::QueryFailure> for Reason {
 impl From<topology::TopologyFailure> for Reason {
     fn from(t: topology::TopologyFailure) -> Self {
         Self::Topology(t)
+    }
+}
+
+impl From<surface::SurfaceFailure> for Reason {
+    fn from(s: surface::SurfaceFailure) -> Self {
+        Self::Surface(s)
+    }
+}
+
+impl From<blend::BlendFailure> for Reason {
+    fn from(b: blend::BlendFailure) -> Self {
+        Self::Blend(b)
     }
 }
 
@@ -1015,7 +1076,7 @@ impl SolidError {
     /// `if (NL_YES == N_...) SER(SM_ERR)`), letting [`SolidError::Unported`] and
     /// [`SolidError::Cancelled`] through. Being replaced by
     /// [`SolidError::nurbs_routine`], which keeps the error as the cause.
-    /// Use as `.map_err(SolidError::nl_ser(OP))`.
+    /// Pass `nl_ser(OP)` to `map_err`.
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
@@ -1080,10 +1141,13 @@ impl SolidError {
     /// [`SolidError::Upstream`] does: its `code`, or the status of a failure that replaced
     /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
     /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
-    /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`], a
-    /// [`sweep::SweepFailure`] or [`curve::CurveFailure`] that replaced one
+    /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
+    /// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`], [`curve::CurveFailure`] or
+    /// [`offset::OffsetFailure`] or [`blend::BlendFailure`] that replaced one
     /// ([`sweep::SweepFailure::replaces_upstream_status`],
-    /// [`curve::CurveFailure::replaces_upstream_status`])). The callers that branch on an
+    /// [`curve::CurveFailure::replaces_upstream_status`],
+    /// [`offset::OffsetFailure::replaces_upstream_status`],
+    /// [`blend::BlendFailure::replaces_upstream_status`])). The callers that branch on an
     /// upstream status use it so that they treat both alike; it goes with `Upstream` in
     /// the last PR of the typed-errors work.
     #[must_use]
@@ -1098,9 +1162,12 @@ impl SolidError {
                 | Reason::Heal(_)
                 | Reason::Geom(_)
                 | Reason::Query(_)
-                | Reason::Topology(_) => Some(f.status),
+                | Reason::Topology(_)
+                | Reason::Surface(_) => Some(f.status),
                 Reason::Sweep(w) if w.replaces_upstream_status() => Some(f.status),
                 Reason::Curve(c) if c.replaces_upstream_status() => Some(f.status),
+                Reason::Offset(o) if o.replaces_upstream_status() => Some(f.status),
+                Reason::Blend(b) if b.replaces_upstream_status() => Some(f.status),
                 _ => None,
             },
             _ => None,
@@ -1321,10 +1388,13 @@ impl SolidError {
 /// `Upstream`'s code, or the status of a failure that replaced an `Upstream` site
 /// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
 /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
-/// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`], a
-/// [`sweep::SweepFailure`] or [`curve::CurveFailure`] that replaced one
+/// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
+/// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`], [`curve::CurveFailure`] or
+/// [`offset::OffsetFailure`] or [`blend::BlendFailure`] that replaced one
 /// ([`sweep::SweepFailure::replaces_upstream_status`],
-/// [`curve::CurveFailure::replaces_upstream_status`])).
+/// [`curve::CurveFailure::replaces_upstream_status`],
+/// [`offset::OffsetFailure::replaces_upstream_status`],
+/// [`blend::BlendFailure::replaces_upstream_status`])).
 ///
 /// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
 /// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the
@@ -2152,11 +2222,8 @@ mod tests {
             let text = std::fs::read_to_string(&path)
                 .expect("read")
                 .replace("\r\n", "\n");
-            // this test's own needles sit in the test tail
-            let library = match text.find("#[cfg(test)]\nmod tests") {
-                Some(at) => &text[..at],
-                None => &text[..],
-            };
+            // this test's own needles sit in its test module
+            let library = bare_scan::library_text(&text);
             for needle in [
                 "SolidError::Nlib",
                 "Self::Nlib",
@@ -2180,10 +2247,7 @@ mod tests {
             let text = std::fs::read_to_string(src.join(rel))
                 .expect("read")
                 .replace("\r\n", "\n");
-            match text.find("#[cfg(test)]\nmod tests") {
-                Some(at) => text[..at].to_owned(),
-                None => text,
-            }
+            bare_scan::library_code(&text)
         };
         for rel in [
             "nurbs/b_spline_curve_n_lib.rs",
@@ -2321,16 +2385,17 @@ mod tests {
 pub(crate) mod replaced_upstream_samples {
     use super::SolidError;
 
-    /// The typed failures of three areas that replaced an `Upstream` with `code` (#13790):
-    /// an intersection's, a geometry utility's and a topology routine's, at `entity` when one is given.
+    /// The typed failures of five areas that replaced an `Upstream` with `code` (#13790):
+    /// an intersection's, a geometry utility's, a topology routine's, an offset routine's and
+    /// a blend routine's, at `entity` when one is given.
     pub(crate) fn replaced_upstream(
         operation: &'static str,
         code: i32,
         entity: Option<crate::error::EntityRef>,
-    ) -> [SolidError; 3] {
+    ) -> [SolidError; 5] {
         use crate::error::{
-            geom::GeomFailure, intersect::IntersectFailure, topology::TopologyFailure, Failure,
-            Reason,
+            blend::BlendFailure, geom::GeomFailure, intersect::IntersectFailure,
+            offset::OffsetFailure, topology::TopologyFailure, Failure, Reason,
         };
         let typed = |reason: Reason| {
             let f = Failure::new(operation, reason).with_status(code);
@@ -2348,6 +2413,12 @@ pub(crate) mod replaced_upstream_samples {
                 "replaced an upstream status",
             ))),
             typed(Reason::Topology(TopologyFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Offset(OffsetFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Blend(BlendFailure::Failed(
                 "replaced an upstream status",
             ))),
         ]

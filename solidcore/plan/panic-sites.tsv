@@ -409,8 +409,8 @@ crates/solidcore/src/curve/composite_curve/p1.rs	trim_last_break	Vec::insert	1	p
 crates/solidcore/src/curve/composite_curve/p2.rs	CompositeCurve::create_offsets_of_many_curves	with_capacity	1	proven	Vec::with_capacity(curves.len())	n = curves.len(), an existing slice of references; bool is smaller
 crates/solidcore/src/curve/composite_curve/p2.rs	CompositeCurve::create_offsets_of_many_curves	with_capacity	2	proven	Vec::with_capacity(comp.segments.len())	n = comp.segments.len(), an existing Vec of segments, each holding a Curve
 crates/solidcore/src/curve/composite_curve/p2.rs	CompositeCurve::intersect_and_trim_offsets	windows	1	proven	windows(2)	constant non-zero size
-crates/solidcore/src/curve/composite_curve/p2.rs	CompositeCurve::make_composite_nurb	with_capacity	1	proven	Vec::with_capacity(self.segments.len())	n = self.segments.len(), segments each holding a Curve, which holds a BSplineCurve inline
-crates/solidcore/src/curve/composite_curve/p2.rs	CompositeCurve::make_composite_nurb	with_capacity	2	proven	Vec::with_capacity(self.segments.len())	n = self.segments.len(), an existing Vec of segments; bool is smaller
+crates/solidcore/src/curve/composite_curve/p2.rs	CompositeCurve::composite_nurb	with_capacity	1	proven	Vec::with_capacity(self.segments.len())	n = self.segments.len(), segments each holding a Curve, which holds a BSplineCurve inline
+crates/solidcore/src/curve/composite_curve/p2.rs	CompositeCurve::composite_nurb	with_capacity	2	proven	Vec::with_capacity(self.segments.len())	n = self.segments.len(), an existing Vec of segments; bool is smaller
 crates/solidcore/src/curve/crv_in_volume.rs	CrvInVolume::compute_breaks	Vec::insert	1	proven	insert(jj, class_bndry)	returns Err when jj > knots.len()
 crates/solidcore/src/curve/crv_in_volume.rs	CrvInVolume::compute_breaks	Vec::insert	2	proven	insert(jj.min(mults.len()), 2)	index is min(.., mults.len())
 crates/solidcore/src/curve/crv_on_surf.rs	CrvOnSurf::knots_with_status	Vec::insert	1	proven	insert(jj, class_bndry)	returns Err when jj > knots.len()
@@ -616,9 +616,9 @@ crates/solidcore/src/nurbs/b_spline_curve/p1.rs	BSplineCurve::control_polygon	wi
 crates/solidcore/src/nurbs/b_spline_curve/p1.rs	BSplineCurve::from_data	copy_from_slice	1	open	copy_from_slice(src_u)	
 crates/solidcore/src/nurbs/b_spline_curve/p1.rs	BSplineCurve::from_data	copy_from_slice	2	open	copy_from_slice(src_pw)	
 crates/solidcore/src/nurbs/b_spline_curve/p2.rs	BSplineCurve::calculate_bounding_box_onto	int-div	1	proven	num_points / smp_cnt	num_points >= 1 is checked; smp_cnt = num_points.min(7)
-crates/solidcore/src/nurbs/b_spline_curve/p2.rs	BSplineCurve::create_by_joining	Vec::insert	1	proven	insert(1, mid)	seg_pts.get(1) succeeds before insertion; inserting at 1 only grows it
-crates/solidcore/src/nurbs/b_spline_curve/p2.rs	BSplineCurve::create_by_joining	Vec::insert	2	proven	insert(1, mid1)	seg_pts.get(1) succeeds before insertion; inserting at 1 only grows it
-crates/solidcore/src/nurbs/b_spline_curve/p2.rs	BSplineCurve::create_by_joining	Vec::insert	3	proven	insert(2, mid2)	seg_pts.get(1) succeeds before insertion; inserting at 1 only grows it
+crates/solidcore/src/nurbs/b_spline_curve/p2.rs	BSplineCurve::join	Vec::insert	1	proven	insert(1, mid)	seg_pts.get(1) succeeds before insertion; inserting at 1 only grows it
+crates/solidcore/src/nurbs/b_spline_curve/p2.rs	BSplineCurve::join	Vec::insert	2	proven	insert(1, mid1)	seg_pts.get(1) succeeds before insertion; inserting at 1 only grows it
+crates/solidcore/src/nurbs/b_spline_curve/p2.rs	BSplineCurve::join	Vec::insert	3	proven	insert(2, mid2)	seg_pts.get(1) succeeds before insertion; inserting at 1 only grows it
 crates/solidcore/src/nurbs/b_spline_curve/p2.rs	BSplineCurve::read_from_db	int-div	1	proven	u64::MAX / (4 * 32)	constant non-zero divisor
 crates/solidcore/src/nurbs/b_spline_curve/p3.rs	BSplineCurve::assert_no_periodic_jump	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/nurbs/b_spline_curve/p3.rs	BSplineCurve::assert_valid_with	with_capacity	1	open	Vec::with_capacity(solutions.len())	

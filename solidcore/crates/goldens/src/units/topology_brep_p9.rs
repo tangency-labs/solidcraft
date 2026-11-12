@@ -596,7 +596,10 @@ fn rust_orient(i: &Inputs, mut b: Brep, k: &mut Kernel) -> Result<Output, Harnes
             context: Some(ctx),
             key_of: &p3::tracked_key_of,
         };
-        result = ordinary(port::orient_sheet_surfaces(k, b, face, i.same, &mut env));
+        // (the note is recorded as the status 1 upstream returns for it)
+        result = ordinary(solidcore::topology::brep::p9::OrientSheetNote::stop_on_note(
+            port::orient_sheet_surfaces(k, b, face, i.same, &mut env),
+        ));
         Ok(Vec::new())
     });
     let run = match run {

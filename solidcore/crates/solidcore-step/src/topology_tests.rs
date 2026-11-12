@@ -78,11 +78,16 @@ impl W {
     }
     /// The file: millimetres, radians, an uncertainty of 1e-7 mm, every item in one
     /// representation.
-    fn file(mut self, items: &[u64]) -> p21::Exchange {
+    fn file(self, items: &[u64]) -> p21::Exchange {
+        self.file_with_uncertainty(items, 1e-7)
+    }
+
+    /// [`W::file`] with the file's uncertainty `uncertainty` (mm).
+    fn file_with_uncertainty(mut self, items: &[u64], uncertainty: f64) -> p21::Exchange {
         let l = self.add("(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
         let a = self.add("(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))");
         let s = self.add("(NAMED_UNIT(*)SI_UNIT($,.STERADIAN.)SOLID_ANGLE_UNIT())");
-        let u = self.add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#{l},'distance_accuracy_value','')"));
+        let u = self.add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE({}),#{l},'distance_accuracy_value','')", real(uncertainty)));
         let c = self.add(format!(
             "(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{u}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{l},#{a},#{s}))REPRESENTATION_CONTEXT('',''))"
         ));
@@ -775,6 +780,36 @@ fn a_surface_model_of_open_shells_is_a_sheet() {
     let s = one_solid(&w.file(&[model]));
     assert!(!s.sheet);
     assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
+}
+
+/// A solid with a void read with a face of its outer shell left out ([`read_solid_without`],
+/// as the import does where that face cannot be made): the outer shell is a sheet and the void,
+/// still closed, bounds its cavity, a region of its own. Its one region with the sheet made the
+/// record refuse it ("a closed shell bounds two regions and encloses one"), and the whole solid
+/// was lost.
+#[test]
+fn a_solid_with_a_void_and_a_face_left_out_keeps_its_cavity() {
+    struct NoTrims;
+    impl Trims for NoTrims {
+        fn trims(&self, _: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+            Err("no trims".into())
+        }
+    }
+    let mut w = W::default();
+    let faces = box_faces(&mut w, [0.0; 3], [10.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    let outer = closed_shell(&mut w, &faces);
+    let inner = box_faces(&mut w, [4.0; 3], [6.0; 3], BoxStyle { flip_faces: true, ..Default::default() }, &mut |_, _| Vec::new());
+    let inner = closed_shell(&mut w, &inner);
+    let void = w.add(format!("ORIENTED_CLOSED_SHELL('',*,#{inner},.F.)"));
+    let solid = w.add(format!("BREP_WITH_VOIDS('',#{outer},(#{void}))"));
+    let ex = w.file(&[solid]);
+    let skip: HashSet<u64> = [faces[0]].into_iter().collect();
+    let s = read_solid_without(&ex, solid, units::Context::default(), &NoTrims, &skip).unwrap();
+    solidcore_ops::record_check::validate(&s.brep).unwrap();
+    assert!(s.sheet);
+    assert_eq!(counts(&s.brep)[..3], [2, 2, 11]);
+    assert_eq!(s.brep.regions[0], Region { shells: vec![0, 1], void: false });
+    assert_eq!(s.brep.regions[1], Region { shells: vec![1], void: true });
 }
 
 #[test]
@@ -1582,4 +1617,158 @@ fn a_spline_cone_closed_in_v_gets_a_seam_to_its_apex() {
         "no vertex at the apex"
     );
     faces_away(&s.brep, 0, |_| [0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn pcurves_past_a_quarter_line_the_form_ends_on_are_put_on_the_form() {
+    // A cylinder face from 2e-5 rad before the frame's x axis to 0.5 rad (its straight edge 0.2 um
+    // off the quarter line, under the 1e-3 mm tolerance): the form starts on the quarter line,
+    // and the edge's pcurve, on the angle the edge has, lies past the form's range.
+    let r = 10.0;
+    let label = BSurface::Cylinder { frame: Frame { origin: [1.0, 2.0, 3.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: r };
+    let (eps, tol) = (2e-5, 1e-3);
+    let domain = [[-eps, 0.5], [0.0, 5.0]];
+    let (f, d) = crate::kernel::form::surface_within(&label, domain, tol).unwrap();
+    assert_eq!(d[0][0], 0.0, "the form starts on the quarter line: {d:?}");
+    let past = crate::kernel::form::param(-eps);
+    assert!(past < 0.0 && past > -eps, "{past}");
+    let line = |u: f64| Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[u, 0.0], [u, 5.0]] };
+    // An arc along the bottom from the edge's end, as a rational segment (weights 1, 0.9, 1).
+    let w = 0.9;
+    let arc =
+        Curve2::RationalSpline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], homogeneous: vec![[past, 0.0, 1.0], [0.1 * w, 0.0, w], [0.3, 0.0, 1.0]] };
+    let far = crate::kernel::form::param(-0.01);
+    let mut pcs = vec![vec![line(past), arc], vec![line(far)]];
+    assert_eq!(onto_form(&f, &label, domain, tol, &mut pcs), 3, "the line's two ends and the arc's start");
+    assert_eq!(pcs[0][0], line(0.0));
+    match &pcs[0][1] {
+        Curve2::RationalSpline { homogeneous, .. } => assert_eq!(homogeneous[0], [0.0, 0.0, 1.0]),
+        c => panic!("{c:?}"),
+    }
+    // A point further out than the tolerance's angle is left for the check to refuse.
+    assert_eq!(pcs[1][0], line(far));
+    // The moved pcurve is on the form within the tolerance of where the edge is.
+    let (on_form, on_label) = (SurfaceEval::new(&f).unwrap(), SurfaceEval::new(&label).unwrap());
+    for v in [0.0, 2.5, 5.0] {
+        let gap = on_form.point([0.0, v]).unwrap().dist(on_label.point([-eps, v]).unwrap());
+        assert!(gap <= tol && (gap - r * eps).abs() < 1e-9, "{v}: {gap}");
+    }
+}
+
+/// A kernel making the missing pcurves as SMLib makes some: each a straight line in (u, v)
+/// between the true parameters of its edge's ends on the face's NURBS form, with no regard for
+/// the form's range (a cylinder face; the angle unwrapped to the turn the face's domain is on).
+struct Projected(std::sync::atomic::AtomicUsize);
+
+impl Trims for Projected {
+    fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        let BSurface::Cylinder { frame, .. } = face.surface else { return Err("not a cylinder".into()) };
+        let (o, x, y) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let z = x.cross(y);
+        let centre = 0.5 * (face.domain[0][0] + face.domain[0][1]);
+        let at = |p: Vec3| -> [f64; 2] {
+            let d = p - o;
+            // A turn is four quarters of form parameter.
+            let mut a = d.dot(y).atan2(d.dot(x));
+            while crate::kernel::form::param(a) < centre - 2.0 {
+                a += TAU;
+            }
+            while crate::kernel::form::param(a) > centre + 2.0 {
+                a -= TAU;
+            }
+            [crate::kernel::form::param(a), d.dot(z)]
+        };
+        let mut out = Vec::new();
+        for l in &face.loops {
+            let mut pcs = Vec::new();
+            for u in l {
+                if let Some(pc) = &u.pcurve {
+                    pcs.push(pc.clone());
+                    continue;
+                }
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let e = face.edges.get(u.edge as usize).ok_or("edge")?;
+                let eval = CurveEval::new(e.nurbs.unwrap_or(e.curve)).map_err(|m| m.to_string())?;
+                let [t0, t1] = e.interval;
+                let (a, b) = (eval.point(t0).ok_or("start")?, eval.point(t1).ok_or("end")?);
+                pcs.push(Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![at(a), at(b)] });
+            }
+            out.push(pcs);
+        }
+        Ok(out)
+    }
+}
+
+/// A quarter-cylinder wedge (radius 0.2 mm, height 5 mm, 0 to 100 degrees about +z) whose straight
+/// edge runs from 1.9 um before the x axis to 1.9 um past it, 0.6 um outside the cylinder, in a
+/// file of uncertainty 2e-3 mm: the face's extent ends within that of the x axis, so its form
+/// starts there, while the pcurve its kernel projects for the skewed edge starts before it.
+/// Every pcurve of the record lies in its face's domain, as SMLib's check asks
+/// (`SmBrep::ValidatePointers` tests 70 and 71, "Edge endpoints within face domain").
+#[test]
+fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_face_domain() {
+    let (r, h, q): (f64, f64, f64) = (0.2, 5.0, 100f64.to_radians());
+    // The edge 1.9 um either side of the x axis at the rim, and 0.6 um outside the cylinder: more
+    // than half the tolerance off any line on the form, so its pcurve is the kernel's.
+    let (eps, rl) = (1.9e-3 / r, r + 0.6e-3);
+    let mut w = W::default();
+    let v = |w: &mut W, p: V| (w.vertex(p), p);
+    let (p0, p1) = ([rl * eps.cos(), -rl * eps.sin(), 0.0], [rl * eps.cos(), rl * eps.sin(), h]);
+    let nq = [-q.sin(), q.cos(), 0.0];
+    // The axis edge: where the planes through the axis' foot, (p0, p1) and the 100 degree side
+    // meet, up to the top.
+    let np = Vec3::from(p0).cross(Vec3::from(p1));
+    let line = np.cross(Vec3::from(nq));
+    let a1 = [line.x * h / line.z, line.y * h / line.z, h];
+    let (qb, qt) = ([r * q.cos(), r * q.sin(), 0.0], [r * q.cos(), r * q.sin(), h]);
+    let (a0, a1, p0, p1, q0, q1) = (v(&mut w, [0.0; 3]), v(&mut w, a1), v(&mut w, p0), v(&mut w, p1), v(&mut w, qb), v(&mut w, qt));
+    let edge = |w: &mut W, a: (u64, V), b: (u64, V)| w.line_edge(a, b, true, len3(sub3(b.1, a.1)));
+    let (axis, e_p, e_q) = (edge(&mut w, a0, a1), edge(&mut w, p0, p1), edge(&mut w, q0, q1));
+    let (r_pb, r_qb, r_pt, r_qt) = (edge(&mut w, a0, p0), edge(&mut w, a0, q0), edge(&mut w, a1, p1), edge(&mut w, a1, q1));
+    let arc = |w: &mut W, a: (u64, V), b: (u64, V), z: f64| {
+        let c = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{},#{},#{c},.T.)", a.0, b.0))
+    };
+    let (arc_b, arc_t) = (arc(&mut w, p0, q0, 0.0), arc(&mut w, p1, q1, h));
+    let ax = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cyl = w.add(format!("CYLINDRICAL_SURFACE('',#{ax},{})", real(r)));
+    let face = |w: &mut W, uses: &[(u64, bool)], surface: u64, same_sense: bool| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, f)| w.oe(e, f)).collect();
+        let b = w.bound(&oes, true, true);
+        w.face(&[b], surface, same_sense)
+    };
+    let (bottom, top) = (w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), w.plane([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]));
+    let side_q = w.plane([0.0; 3], nq, [q.cos(), q.sin(), 0.0]);
+    let side_p = w.plane([0.0; 3], [np.x, np.y, np.z], p0.1);
+    let faces = [
+        face(&mut w, &[(e_q, true), (arc_t, false), (e_p, false), (arc_b, true)], cyl, true),
+        face(&mut w, &[(r_qb, true), (arc_b, false), (r_pb, false)], bottom, false),
+        face(&mut w, &[(r_pt, true), (arc_t, true), (r_qt, false)], top, true),
+        face(&mut w, &[(axis, true), (r_qt, true), (e_q, false), (r_qb, false)], side_q, true),
+        face(&mut w, &[(r_pb, true), (e_p, true), (r_pt, false), (axis, false)], side_p, true),
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('wedge',#{shell})"));
+    let kernel = Projected(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&w.file_with_uncertainty(&[solid], 2e-3), &kernel);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert!(kernel.0.load(std::sync::atomic::Ordering::Relaxed) > 0, "the skewed edge's pcurve is the kernel's");
+    let b = &read.solids[0].brep;
+    assert_eq!(counts(b), [2, 1, 5, 9, 6]);
+    for (i, f) in b.faces.iter().enumerate() {
+        let d = f.domain;
+        for l in &f.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let [t0, t1] = u.pcurve.interval().unwrap();
+                for t in [t0, t1] {
+                    let p = solidcore_ops::pcurve::eval(&u.pcurve, t).unwrap();
+                    let out = (d[0][0] - p[0]).max(p[0] - d[0][1]).max(d[1][0] - p[1]).max(p[1] - d[1][1]);
+                    assert!(out <= 1e-9, "face {i}, edge {}: {p:?} lies {out:e} outside the domain {d:?}", u.edge);
+                }
+            }
+        }
+    }
+    solidcore_ops::record_check::validate(b).unwrap();
+    solidcore_ops::record_check::agreement(b).unwrap();
 }

@@ -20,10 +20,9 @@
 //! wrong; the failure's `operation` path says which routine, and its entity is the one
 //! the site it replaces named (a vertex use for the vertex-use routines, none
 //! elsewhere). The failures that are checks of a caller's arguments stay
-//! [`crate::SolidError::InvalidInput`]. The files with open work elsewhere (`brep/p*`,
-//! `local_operation`, `validation/{pointers,assert_valid,soundness,coincidence}`,
-//! `face/p2`, `face/p3`, `edgeuse/p2`, `topology.rs`, `proto_topology`) do not use these
-//! yet.
+//! [`crate::SolidError::InvalidInput`].
+//! `brep/p9`'s face-orientation repair keeps its bare final status 1 (upstream `TRUE`),
+//! which no failure here stands for.
 
 use super::{
     EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_INVALID_INPUT,
@@ -226,51 +225,73 @@ mod tests {
         assert_eq!(SolidError::sm_err("topology::op").topology_failure(), None);
     }
 
-    /// The converted topology routines describe their failures: their library code
-    /// builds no bare `Upstream` status.
+    /// A sample of the second set of converted files (`brep/p1`, `p5` to `p10`,
+    /// `face/p2`): each keeps the operation, status, kind and entity of its `Upstream`.
+    #[test]
+    fn the_brep_edit_and_face_samples_keep_their_upstream_answers() {
+        let samples = [
+            (
+                "topology::brep::p1",
+                TopologyFailure::InvalidValue("no new infinite region was given"),
+                SM_ERR_INVALID_INPUT,
+            ),
+            (
+                "topology::brep::p5",
+                TopologyFailure::Failed("editing is not enabled"),
+                SM_ERR,
+            ),
+            (
+                crate::topology::brep::p5::NO_VERTEX_SECTOR_OP,
+                TopologyFailure::Missing("a vertex sector at the curve's start"),
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                "topology::brep::p6",
+                TopologyFailure::Missing("the face's upward face use"),
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                "topology::brep::p7::unstitch",
+                TopologyFailure::Failed("not every face could be copied"),
+                SM_ERR,
+            ),
+            (
+                "topology::brep::p8",
+                TopologyFailure::InvalidValue("the curve loops are not valid"),
+                SM_ERR_INVALID_INPUT,
+            ),
+            (
+                "topology::brep::p9",
+                TopologyFailure::Missing("the face use's mate"),
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                "topology::face::trim_curve_breaks",
+                TopologyFailure::Failed("the trim curve has fewer than two knots"),
+                SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::topology(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+        }
+    }
+
+    /// The topology routines describe their failures: their library code builds no bare
+    /// `Upstream` status, except the file listed (with the bare sites it may still hold).
     #[test]
     fn the_topology_routines_build_no_bare_statuses() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/topology");
-        for rel in [
-            "api_files.rs",
-            "api_projection.rs",
-            "brep/cutting.rs",
-            "brep/mirror.rs",
-            "brep/planar_section.rs",
-            "brep/validation/assert_valid/seams.rs",
-            "brep/vertex_fans.rs",
-            "brep_cache.rs",
-            "brep_constructor.rs",
-            "brep_data.rs",
-            "brep_data_write.rs",
-            "database_io.rs",
-            "edge.rs",
-            "edgeuse/p1.rs",
-            "edgeuse/p3.rs",
-            "face/p1.rs",
-            "geometry_write.rs",
-            "loopuse.rs",
-            "part_file.rs",
-            "shell.rs",
-            "topology_traverser.rs",
-            "trimming_tools.rs",
-            "trimming_tools/curve_loops.rs",
-            "vertex/corner.rs",
-            "vertexuse.rs",
-        ] {
-            let text = std::fs::read_to_string(src.join(rel))
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("\n#[cfg(test)]\nmod ")
-                .map_or(text.as_str(), |at| &text[..at]);
-            for needle in [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-            ] {
-                assert!(!library.contains(needle), "{needle} in {rel}");
-            }
-        }
+        super::super::bare_scan::assert_waiting("topology", 53, &[]);
     }
 }
