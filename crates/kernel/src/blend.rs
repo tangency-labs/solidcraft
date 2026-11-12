@@ -968,7 +968,7 @@ pub fn blend_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
 
 /// The picked edges' tangent chains, for a blend that is to run along them: `picks` (each the
 /// nearest edge of `body` to it), then a point on every other edge that continues one of them
-/// tangentially (within 0.5° at a shared vertex), until no more do. Each pick takes its edge as a
+/// tangentially (within 2°, [`solidcraft_geom::TANGENT_CHAIN`], at a shared vertex), until no more do. Each pick takes its edge as a
 /// blend does (a pick at a vertex where a seam meets a rim takes the rim). An edge only one face
 /// uses ends a chain, and so do a seam and a smooth edge (its two faces meet tangentially, within
 /// 0.5°, all along it): they have no corner to round. A chain does not run on into an edge of the
@@ -1010,10 +1010,10 @@ fn picked_chain(body: &Body, picks: &[Vec3]) -> Result<(Faces, Vec<usize>, usize
     Ok((rec, chain, picked.len()))
 }
 
-/// Edges meeting at an angle (radians) below this continue one another; faces meeting at an
-/// angle below it meet tangentially, a smooth edge with nothing to round. One value for smooth
-/// everywhere: the shaded view's ([`crate::smooth_edges::ANGLE`], half a degree), so an edge
-/// the view draws can be rounded and one it hides is smooth.
+/// Faces meeting at an angle (radians) below this meet tangentially, a smooth edge with nothing
+/// to round: the shaded view's ([`crate::smooth_edges::ANGLE`], half a degree), so an edge the
+/// view draws can be rounded and one it hides is smooth. Which edges a chain continues through
+/// is wider ([`solidcraft_geom::TANGENT_CHAIN`], 2°).
 const TANGENT: f64 = crate::smooth_edges::ANGLE;
 
 /// The point halfway along edge `e`.
@@ -1063,7 +1063,7 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>>
         }
         if a == v { rec.tangent(e, false) } else { rec.tangent(e, true).map(|t| t * -1.0) }
     };
-    let cos = TANGENT.cos();
+    let cos = solidcraft_geom::TANGENT_CHAIN.cos();
     let accept = normal_reach(rec);
     // Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the
     // body): the direction into its second face, square to it, points against its first face's
@@ -1667,6 +1667,33 @@ mod tests {
         // the boss's tangentially but has no corner to blend.
         let side = (top + Vec3::new(top.x, top.y, 21.0)) * 0.5;
         assert_eq!(tangent_chain(&rounded, &[side]).unwrap(), vec![side], "the chain ran into the round's seam");
+    }
+
+    /// A prism of the regular `n`-gon of circumradius 20, 5 high: its outline turns 360 / n degrees
+    /// at every vertex. The point halfway along its first top edge, and the number of top edges.
+    fn polygon_prism(n: usize) -> (Body, Vec3) {
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
+        let at = |k: usize| {
+            let a = std::f64::consts::TAU * k as f64 / n as f64;
+            Vec2::new(20.0 * a.cos(), 20.0 * a.sin())
+        };
+        let outer = Loop2::polygon(&(0..n).map(at).collect::<Vec<_>>());
+        let body = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0.0, 5.0).unwrap().pop().unwrap();
+        let (a, b) = (at(0), at(1));
+        (body, Vec3::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0, 5.0))
+    }
+
+    /// A tangent chain continues through an outline turning 2° or less at a vertex (the one angle
+    /// for a chain, [`solidcraft_geom::TANGENT_CHAIN`]): a 240-gon, 1.5° at every vertex, chains
+    /// whole from one pick, and so does one that blends; a 120-gon, 3° at every vertex, stops at
+    /// the pick's own edge.
+    #[test]
+    fn a_chain_runs_through_a_one_and_a_half_degree_kink_and_stops_at_three() {
+        let (near, pick) = polygon_prism(240);
+        assert_eq!(tangent_chain_edges(&near, &[pick]).unwrap().len(), 240, "the whole top outline");
+        assert_eq!(tangent_chain(&near, &[pick]).unwrap().len(), 240);
+        let (corner, pick) = polygon_prism(120);
+        assert_eq!(tangent_chain_edges(&corner, &[pick]).unwrap().len(), 1, "3° is a corner");
     }
 
     /// Smoothness is decided all along an edge. A bar 40 × 16 × 10 whose front face runs tangent
