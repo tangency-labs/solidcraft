@@ -103,6 +103,10 @@ impl<H: PluginHost> State<H> {
             return Err(self.fail(HostError::PermissionDenied { permission: format!("files.{}:{grant}", if write { "write" } else { "read" }) }));
         }
         if let Some(folder) = self.folders.get(grant) {
+            if let Err(error) = refuse_links(&folder.dir, Path::new(path)) {
+                let permission = format!("files.{}:{grant}: {error}", if write { "write" } else { "read" });
+                return Err(self.fail(HostError::PermissionDenied { permission }));
+            }
             self.host.authorize_file_path(&folder.path.join(path), write).map_err(|error| self.fail(error))?;
         }
         Ok(())
@@ -242,6 +246,28 @@ impl<H: PluginHost> files::Host for State<H> {
         }
         Ok(())
     }
+}
+
+/// Refuses `path` inside a granted folder when any part of it is a symbolic link (or, on Windows,
+/// a junction). Authorization looks at the path as spelled, so a link would let a visible name
+/// reach what the spelling hides: `public -> .hidden` made `public/secret.txt` readable and
+/// writable. Parts that do not exist yet (a new file) are fine. The guest cannot create links (it
+/// only writes new regular files), so the gap between this check and the open is reachable only
+/// by another program that can already write the granted folder.
+fn refuse_links(dir: &Dir, path: &Path) -> std::io::Result<()> {
+    let mut prefix = PathBuf::new();
+    for component in path.components() {
+        prefix.push(component);
+        match dir.symlink_metadata(&prefix) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::other(format!("{} is a link; links are not followed", prefix.display())));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 fn execution_error(failure: &wasmtime::Error, remaining: Option<u64>, limits: &Limits) -> HostError {

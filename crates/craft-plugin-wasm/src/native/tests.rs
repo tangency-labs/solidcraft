@@ -409,6 +409,38 @@ fn every_file_operation_refuses_hidden_names_inside_a_granted_folder() {
 }
 
 #[test]
+#[cfg(unix)]
+fn a_visible_link_to_a_hidden_folder_is_refused_for_reads_and_writes() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-link-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(root.join(".hidden")).unwrap();
+    std::fs::write(root.join(".hidden/secret.txt"), b"secret").unwrap();
+    std::fs::write(root.join("plain.txt"), b"plain").unwrap();
+    std::os::unix::fs::symlink(".hidden", root.join("public")).unwrap();
+    std::os::unix::fs::symlink(".hidden/secret.txt", root.join("note.txt")).unwrap();
+    let folder = || Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true };
+    for path in ["public/secret.txt", "public/new.txt", "note.txt"] {
+        for write in [false, true] {
+            let mut state = state(App::default());
+            state.folders.insert("data".into(), folder());
+            let result = if write {
+                state.write_file("data".into(), path.into(), b"changed".to_vec())
+            } else {
+                state.read_file("data".into(), path.into()).map(|_| ())
+            };
+            assert!(matches!(&result, Err(PluginError::PermissionDenied(_))), "{path} write={write}: {result:?}");
+        }
+    }
+    assert_eq!(std::fs::read(root.join(".hidden/secret.txt")).unwrap(), b"secret");
+    assert_eq!(std::fs::read_dir(root.join(".hidden")).unwrap().count(), 1, "nothing staged through the link");
+    // A plain file beside the links is still readable.
+    let mut state = state(App::default());
+    state.folders.insert("data".into(), folder());
+    assert_eq!(state.read_file("data".into(), "plain.txt".into()).unwrap(), b"plain");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn file_publication_failure_reports_possible_changes_and_cleans_staged_files() {
     let root = std::env::temp_dir().join(format!("craft-plugin-publication-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
     // The guest's target is a directory, so staging succeeds but publication fails.
