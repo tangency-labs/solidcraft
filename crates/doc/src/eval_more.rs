@@ -98,7 +98,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
             }
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, b, mb.feature);
+                *slot = mb.remade(b);
             }
             Ok(())
         }
@@ -2419,7 +2419,7 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 let edges = resolve_edges(&mb.body, &[position.0 + x * r0], &[], &mut warn)?;
                 let nb = mb.traced().then(kernel::fillet(&mb.body, &edges, rf)?);
                 if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                    *slot = mb.remade(nb);
                 }
             }
             if let Some(hd) = hole_diameter {

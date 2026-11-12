@@ -44,6 +44,7 @@ use crate::blend::fillet_geom::p1::{FilStatus, FilletCornerType, FilletEdgeType,
 use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::blend::fillet_solver::p5::RailsFit;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::c_general;
 use crate::geom::object::NotifyOperation;
@@ -65,12 +66,10 @@ fn smos_max(a: f64, b: f64) -> f64 {
     }
 }
 
+/// `FILEXEC_ERR` (`SM_ERR`): a step of the executive failed; the executive's error info
+/// says which.
 fn failure() -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code: 1001,
-        entity: None,
-    }
+    SolidError::blend_failed(OP, "a step of the fillet executive failed")
 }
 
 fn invalid(reason: &'static str) -> SolidError {
@@ -2749,10 +2748,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self.error.edge = Some(edge);
             self.error.comment =
                 "Fillet Merge Failure: Result Is Not A Closed Manifold Solid".into();
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: 1001,
-                entity: access.edge_entity(edge),
+            let failure =
+                BlendFailure::Failed("the fillet's result is not a closed manifold solid");
+            return Err(match access.edge_entity(edge) {
+                Some(at) => SolidError::blend_at(OP, failure, at),
+                None => SolidError::blend(OP, failure),
             });
         }
         Ok(())
@@ -3333,11 +3333,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         A: CornerAdjustmentAccess<O> + RailTrimAccess<O>,
     {
         // NER: upstream returns SM_ERR_NULL_POINTER, not invalid input.
-        self.target.ok_or(SolidError::Upstream {
-            operation: OP,
-            code: 1006,
-            entity: None,
-        })?;
+        self.target
+            .ok_or_else(|| SolidError::blend_missing(OP, "the target B-rep"))?;
         // Process corners by calculating the vertices first.
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
@@ -3369,7 +3366,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // bTrimRails: always
         self.trim_solver_rails(k, access)?;
         if self.solvers.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(OP, "the executive has no solvers"));
         }
         Ok(())
     }
@@ -3442,11 +3439,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access: &mut impl FaceConstructionAccess<O>,
     ) -> Result<O> {
         crate::profile::profile_scope!(k, "blend::executive::build_faces");
-        let target = self.target.ok_or(SolidError::Upstream {
-            operation: OP,
-            code: 1006,
-            entity: None,
-        })?;
+        let target = self
+            .target
+            .ok_or_else(|| SolidError::blend_missing(OP, "the target B-rep"))?;
         let fillet = access.faces_new_brep(k)?;
         self.fillet = Some(fillet);
         let tolerance = access.faces_tolerance(k, target)?;
@@ -3552,7 +3547,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         };
         let mut per_unit = 1.0;
         if kind == FitKind::Scale {
-            let [d0, d1] = fit.offsets.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let [d0, d1] = fit
+                .offsets
+                .ok_or_else(|| SolidError::blend_missing(OP, "the fit's offsets"))?;
             per_unit = smos_max(d0.abs(), d1.abs());
             if per_unit.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                 return Ok(());
@@ -3920,11 +3917,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::executive::create_fillet_brep");
         // NER: upstream returns SM_ERR_NULL_POINTER, not invalid input.
-        self.target.ok_or(SolidError::Upstream {
-            operation: OP,
-            code: 1006,
-            entity: None,
-        })?;
+        self.target
+            .ok_or_else(|| SolidError::blend_missing(OP, "the target B-rep"))?;
         ignore(access.creation_smooth(k, self))?;
 
         // Opt-in, not upstream (`fixes.fillet_trace_reaches_rails`, WR-609/WR-610; the

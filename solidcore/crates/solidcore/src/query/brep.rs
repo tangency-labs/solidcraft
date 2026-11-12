@@ -811,7 +811,9 @@ impl<'a> BrepQuery<'a> {
             // when the point is on a Brep Face
             if let Some(sol) = solutions.get(0) {
                 // Just grab the first one -- we asked for Single.
-                let object = sol.objects[0].ok_or(SolidError::null_pointer(OP_CLASSIFY))?;
+                let object = sol.objects[0].ok_or_else(|| {
+                    SolidError::query_missing(OP_CLASSIFY, "the object the ray solution hit")
+                })?;
                 pc.load_from_intersection(
                     point_zone_tol_3d,
                     bp2::cache_entity(object)?,
@@ -878,7 +880,9 @@ impl<'a> BrepQuery<'a> {
             }
         }
 
-        let region = region.ok_or(SolidError::sm_err(OP_CLASSIFY))?;
+        let region = region.ok_or_else(|| {
+            SolidError::query_failed(OP_CLASSIFY, "no ray fired from the point found its region")
+        })?;
 
         // load output
         pc.set_class_object(PointClassType::Region, Some(EntityRef::Region(region)));

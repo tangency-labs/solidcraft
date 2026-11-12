@@ -26,9 +26,12 @@ use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::Kernel;
 
-/// The allowance the recogniser adds, as a position: `4 gamma_K (1 + |corners| + 2 r)`,
-/// `K = 16 (2 + 2 + 2)` for a form of degrees (2, 2) (written out so that a change to the
-/// allowance fails). In degrees it is this over `r`, turned to degrees.
+/// The allowance the recogniser adds, as a position (#15039): `S 1.75 (γ_K + γ_33) |P| +
+/// 3.5 γ_4 |P| + γ_31 π r`, widened by `1e-3` and `γ_16`, `|P| = 1 + |corners| + 2 r`,
+/// `K = 16 (2 + 2 + 2)` for a form of degrees (2, 2), and `S = 6.02`, the end angle's
+/// conditioning for a half turn's fit (written out so that a change to the allowance fails;
+/// the recogniser reads `S` off each fit, 5.98 to 6.02 for these forms). In degrees it is
+/// this over `r`, turned to degrees.
 fn allowance_position(form: &BSplineSurface, r: f64) -> f64 {
     let d = form.natural_uv_domain();
     let corners = form
@@ -36,7 +39,9 @@ fn allowance_position(form: &BSplineSurface, r: f64) -> f64 {
         .unwrap()
         .max_dimension()
         .max(form.evaluate_point(d.max()).unwrap().max_dimension());
-    4.0 * gamma(16 * 6) * (1.0 + corners + 2.0 * r)
+    let size = 1.0 + corners + 2.0 * r;
+    let position = 6.02 * 1.75 * (gamma(16 * 6) + gamma(33)) * size + 3.5 * gamma(4) * size;
+    (position + gamma(31) * std::f64::consts::PI * r) * 1.001 * (1.0 + gamma(16))
 }
 
 /// The NURBS form of a sphere of radius `r` at `c`, turned by `turn` degrees about the axis

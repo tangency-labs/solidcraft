@@ -1313,9 +1313,66 @@ fn a_computing_batch_is_a_row_of_the_operations_panel_that_stops_it() {
     assert_eq!(row.steps.map(|(_, total)| total), Some(3), "{row:?}");
     assert!(row.cancellable());
     assert!(crate::scenario::rect_of("agent:chip").is_none(), "no chip besides the row");
+    let steps = h.app.agent_steps().expect("its steps");
     crate::operations::cancel(&mut h.app, "agent").unwrap();
+    assert!(steps.progress.is_cancelled(), "its computation stops, not left to compute unseen");
     let reply = reply_to(&mut h, &batch);
     assert_eq!((reply["ok"].clone(), reply["stopped"].clone()), (json!(false), json!(true)), "{reply}");
     h.frames(2);
     assert_eq!(h.app.session.doc.features.len(), features, "nothing applied");
+    let finished = crate::operations::control(&mut h.app, &json!({})).unwrap()["finished"].clone();
+    assert_eq!(finished[0]["key"], "agent");
+    assert_eq!(finished[0]["outcome"], "cancelled", "{finished}");
+    // One that computes to its end is listed as done, its reply passed on as ever.
+    let single = ask(&tx, "engine.execute", second_hole());
+    h.frames(1);
+    assert_eq!(reply_to(&mut h, &single)["ok"], true);
+    h.frames(1);
+    let finished = crate::operations::control(&mut h.app, &json!({})).unwrap()["finished"].clone();
+    if h.app.operations.rows(crate::now_ms()).any(|(r, _)| r.key == "agent") || finished[0]["key"] == "agent" {
+        assert_eq!(finished[0]["outcome"], "done", "{finished}");
+    }
+}
+
+/// A batch stopped by a failing step answers `ok` with the step in `failed`: the operation is
+/// listed as failed, saying why, not as done.
+#[test]
+fn a_batch_stopped_by_a_failing_step_ends_failed() {
+    let (mut h, tx) = agent_harness();
+    let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
+    let bad = json!({"command": "solid.fillet", "params": {"edges": ["no-such-edge"], "radius": 2}});
+    let batch = ask(&tx, "engine.batch", json!({"commands": [hole(50.0), hole(30.0), bad]}));
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some(), "the batch computes off the window thread");
+    let reply = reply_to(&mut h, &batch);
+    assert!(reply["result"]["failed"].is_object(), "{reply}");
+    h.frames(1);
+    let finished = crate::operations::control(&mut h.app, &json!({})).unwrap()["finished"].clone();
+    assert_eq!(finished[0]["key"], "agent", "{finished}");
+    assert_eq!(finished[0]["outcome"], "failed", "{finished}");
+    assert!(finished[0]["error"].as_str().is_some_and(|e| e.contains("Fillet") || e.contains("edge")), "{finished}");
+}
+
+/// With the agent cursor shown, a batch it acts out is computed off the window thread, also when
+/// a person's edit goes first meanwhile: the run for real finds every feature computed and
+/// computes none on the window thread.
+#[test]
+fn a_batch_the_cursor_acts_out_computes_nothing_on_the_window_thread() {
+    for edit in [false, true] {
+        let (mut h, tx) = agent_harness();
+        h.app.ui.agent_cursor = crate::agent_cursor::Settings { show: true, speed: crate::agent_cursor::Speed::Times(5.0), follow_camera: false };
+        let features = h.app.session.doc.features.len();
+        let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 2, "height": 20, "operation": "cut"}});
+        let batch = ask(&tx, "engine.batch", json!({"commands": [hole(50.0), hole(30.0)]}));
+        h.frames(1);
+        assert!(h.app.agent.busy(), "the pointer acts the batch out");
+        if edit {
+            h.app.run("solid.box", json!({"corner": [40, 5, 10], "length": 5, "width": 5, "height": 5, "operation": "join"})).unwrap();
+        }
+        let recomputed = h.app.session.model.recomputed;
+        let r = reply_to(&mut h, &batch);
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(h.app.session.doc.features.len(), features + 2 + usize::from(edit), "edit {edit}");
+        assert_eq!(h.app.session.model.recomputed, recomputed, "edit {edit}: nothing computed on the window thread");
+    }
 }

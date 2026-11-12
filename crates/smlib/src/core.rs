@@ -71,14 +71,12 @@ impl Body {
 pub(crate) fn fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_retry_radius_as_first = true;
-    f.fillet_rail_rim_on_face = true;
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
     f.fillet_vertex_error_diagnostics = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
-    f.fillet_torus_center_on_axis = true;
     f.offset_excess_faces_after_merge = true;
     f.offset_clip_right_side_out = true;
     f.revolution_offset_axis_both_sides = true;
@@ -116,13 +114,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_missing_surface_fails = true;
     f.fillet_nx1_end_rib_global_merge = true;
     f.uv_trim_corner_end_points_only = true;
-    f.split_edge_definition_owns_its_curves = true;
-    f.simple_coincidence_side_across_the_curve = true;
-    f.boolean_capture_keeps_operand_vertices_apart = true;
-    f.radial_sector_step_off_coincidence_by_own_face = true;
     f.bspline_trim_preserves_uv_spans = true;
-    f.cone_parallel_line_midpoint = true;
-    f.cone_parallel_line_domains = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
     f.slice_coincident_faces_sheet_side = true;
     f.boolean_outer_shell_first = true;
@@ -178,7 +170,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.local_operation_step_walls = true;
     f.edge_check_orders_tangent_faces = true;
     f.thicken_planar_side_walls = true;
-    f.fillet_torus_span_from_start_section = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
     f.fillet_chamfer_cone_stored_as_cone = true;
@@ -193,18 +184,14 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cylinder_plane_tangent_within_tolerance = true;
     f.boolean_wire_edge_keeps_faceuse_shell = true;
     f.fillet_nx1_tangent_corner_edge = true;
-    f.fillet_torus_rail_on_axis = true;
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
     f.cover_wraps_across_closed_seam = true;
-    f.fillet_trace_from_tangent_point_toward_next = true;
-    f.fillet_tangent_point_one_sided_step = true;
     f.fillet_rails_meet_at_one_end_point = true;
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
     f.ellipse_adjust_step_interval_keeps_turns = true;
-    f.fillet_cleanup_removes_input_slits = true;
     f.fillet_rail_end_on_continued_surface = true;
     f.glue_vertices_joins_every_region = true;
     f.fillet_removal_takes_ring_fillets = true;

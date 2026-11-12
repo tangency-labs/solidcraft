@@ -1420,6 +1420,14 @@ mod tests {
             }
         }
         assert!(started.elapsed() < Duration::from_secs(3), "before the token wait runs out");
-        assert!(TcpListener::bind(("127.0.0.1", port)).is_ok(), "the port is free again");
+        // The listener thread closes its socket when it notices the stop; on a loaded machine that can
+        // take a moment after `stop()` returns. Wait for the port to be free, not for one instant.
+        let freed = Instant::now();
+        let mut bound = TcpListener::bind(("127.0.0.1", port));
+        while bound.is_err() && freed.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(10));
+            bound = TcpListener::bind(("127.0.0.1", port));
+        }
+        assert!(bound.is_ok(), "the port is free again: {:?}", bound.err());
     }
 }
