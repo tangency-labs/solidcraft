@@ -4616,6 +4616,18 @@ fn apply_traced_with(
         return Ok(());
     }
     if matches!(op, Operation::Cut | Operation::Intersect) {
+        // #9867: a named surface body is no solid to cut or intersect; say how to get one.
+        if named {
+            for &i in &target_idx {
+                if let Some(b) = state.bodies.get(i).filter(|b| b.body.is_surface()) {
+                    let verb = if op == Operation::Cut { "cut" } else { "intersect" };
+                    return Err(DocError::Invalid(format!(
+                        "{} is a surface body, and a {verb} needs a solid: cut it with Surface › Trim, or Thicken it first",
+                        b.name
+                    )));
+                }
+            }
+        }
         // A cut that cannot reach a sheet leaves it as it is (#10226): a sheet whose box lies
         // clear of every tool's, in its own frame, needs no boolean to show it. An intersect
         // removes the sheets it misses, and checks each one as before.
