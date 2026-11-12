@@ -97,7 +97,7 @@ fn joint_delete_blocked(app: &SolveApp) -> Option<&'static str> {
         Some("Finish the active tool before deleting a joint")
     } else if app.computing_since().is_some() {
         Some("Wait for the design to finish computing before deleting a joint")
-    } else if app.file_load.busy() {
+    } else if app.file_load_holds() {
         Some("Wait for the file to finish loading before deleting a joint")
     } else {
         None
@@ -115,7 +115,7 @@ pub fn request(app: &mut SolveApp, params: Value) {
             && ["items", "occurrences", "components", "canvases"]
                 .iter()
                 .all(|k| params.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()));
-        if only_edited && app.applying.is_none() && app.tool.is_none() && app.computing_since().is_none() && !app.file_load.busy() {
+        if only_edited && app.applying.is_none() && app.tool.is_none() && app.computing_since().is_none() && !app.file_load_holds() {
             crate::dialogs::cancel(app);
         }
         if let Some(why) = joint_delete_blocked(app) {
@@ -185,14 +185,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let (deleted, fails) = (list("deleted"), list("would_fail"));
     let shared = shared_occurrences(app, &p.params);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_delete_confirm"), "delete", crate::i18n::tr_label("Delete"))
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_delete_confirm"), "delete", solidcraft_ui_text::tr_label("Delete"))
         .tone(ui_kit::Tone::Danger)
         .actions("Delete", "Cancel", None)
         .show(ctx, true, |ui| {
             if shared {
                 ui_kit::text(
                     ui,
-                    crate::i18n::tr_label("This child is shared. Deleting it removes it from every copy of its parent."),
+                    solidcraft_ui_text::tr_label("This child is shared. Deleting it removes it from every copy of its parent."),
                     ui_kit::Text::Report("shared", false),
                 );
             }
@@ -202,7 +202,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 if names.is_empty() {
                     continue;
                 }
-                ui_kit::text(ui, crate::i18n::tr_label(heading), ui_kit::Text::Report(key, error));
+                ui_kit::text(ui, solidcraft_ui_text::tr_label(heading), ui_kit::Text::Report(key, error));
                 for name in names.iter().take(MAX_LISTED) {
                     ui_kit::text(ui, &format!("  • {name}"), ui_kit::Text::Report(&format!("{key}:{name}"), error));
                 }
@@ -210,7 +210,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     let more = (names.len() - MAX_LISTED).to_string();
                     ui_kit::text(
                         ui,
-                        &crate::i18n::format("delete.and_more", &[("count", &more)]),
+                        &solidcraft_ui_text::format("delete.and_more", &[("count", &more)]),
                         ui_kit::Text::Report(&format!("{key}:more"), error),
                     );
                 }

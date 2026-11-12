@@ -14,12 +14,14 @@ mod design_metadata;
 mod dxf;
 mod dxf_out;
 pub mod formats;
+mod glb;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignPreview, FileKind, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
     read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
     write_design_container, write_design_container_with_cache, write_design_container_with_compression, write_design_container_with_preview,
     write_design_container_with_thumbnail, write_drawing_container,
 };
+pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod limits;
 #[cfg(test)]
@@ -39,12 +41,15 @@ mod threemf;
 pub mod urdf;
 pub mod vfs;
 
-pub use dxf::{read_dxf, write_dxf};
-pub use dxf_out::{DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_shapes, seg_shape, write_dxf_drawing};
+pub use dxf::{DxfWriteOptions, read_dxf, write_dxf, write_dxf_entities, write_dxf_opts};
+pub use dxf_out::{
+    DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_lwpolyline, loop_lwpolyline_scaled, loop_shapes, seg_shape, write_dxf_drawing,
+    write_dxf_drawing_units,
+};
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
-pub use svg::{decode_svg, read_svg, svg_nothing_to_import};
+pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
 mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod obj;
@@ -95,7 +100,7 @@ pub const MAX_DESIGN_BYTES: usize = 256 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
-    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, urdf or sc)")]
+    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, glb, urdf or sc)")]
     Format(String),
     #[error("nothing to export: the design has no bodies")]
     Empty,
@@ -357,12 +362,14 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
     // Check every mesh now, so the command fails rather than the timeline.
     let mut meshes = Vec::with_capacity(objects.len());
     for o in &objects {
-        solidcraft_kernel::mesh_body(&o.positions, &o.triangles).map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
+        solidcraft_kernel::mesh_body_with_normals(&o.positions, &o.triangles, &o.corner_normals)
+            .map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
         meshes.push(solidcraft_doc::MeshData {
             name: o.name.clone(),
             positions: o.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
             triangles: o.triangles.iter().flatten().copied().collect(),
             color: o.color,
+            corner_normals: o.corner_normals.iter().flatten().flat_map(|n| [n.x, n.y, n.z]).collect(),
         });
     }
     let name = match objects.as_slice() {
@@ -395,6 +402,9 @@ pub enum Format {
     /// A robot description of the assembly with its mesh files ([`urdf()`]); written by the
     /// engine, since it is several files.
     Urdf,
+    /// Binary glTF with the bodies' looks ([`export_glb`]); written from the document, which
+    /// holds the looks.
+    Glb,
 }
 
 impl Format {
@@ -410,6 +420,7 @@ impl Format {
             "3mf" => Format::ThreeMf,
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
+            "glb" => Format::Glb,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -773,12 +784,14 @@ pub fn export_with_quality(
     quality: MeshQuality,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "export_with_quality");
-    export_with_parts(state, bodies, &[], format, name, meta, quality)
+    export_with_parts(state, bodies, &[], format, name, meta, quality, None)
 }
 
 /// [`export_with_quality`], and in 3MF each of `parts` (a name and the names of its bodies)
 /// written as one object with those bodies as its parts ([`model_xml_parts`], #8139).
 /// Bodies of a part that are not exported are left out of it. Other formats have no parts.
+/// A 3MF carries `thumbnail` (a PNG) as its package thumbnail; other formats have no place for it.
+#[allow(clippy::too_many_arguments)]
 pub fn export_with_parts(
     state: &ModelState,
     bodies: &[String],
@@ -787,6 +800,7 @@ pub fn export_with_parts(
     name: &str,
     meta: &Metadata,
     quality: MeshQuality,
+    thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let sel = selected(state, bodies)?;
     Ok(match format {
@@ -820,10 +834,11 @@ pub fn export_with_parts(
             let objs: Vec<MeshObject> = per_body(&sel, |b| mesh_object(b, format == Format::ThreeMfTagged, quality))?;
             let index = |n: &String| sel.iter().position(|b| &b.name == n);
             let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
-            write_3mf_parts(&objs, &parts, &threemf_metadata(meta))?
+            write_3mf_parts(&objs, &parts, &threemf_metadata(meta), thumbnail)?
         }
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
+        Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
     })
 }
 
@@ -872,7 +887,18 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality
         (Vec::new(), 0)
     };
     let transparency = 1.0 - paint.map(|p| p.opacity).unwrap_or(1.0);
-    Ok(MeshObject { name: b.name.clone(), positions, triangles, color: b.body.color(), transparency, looks, tri_looks, tri_faces, faces })
+    Ok(MeshObject {
+        name: b.name.clone(),
+        positions,
+        triangles,
+        color: b.body.color(),
+        transparency,
+        looks,
+        tri_looks,
+        tri_faces,
+        faces,
+        corner_normals: Vec::new(),
+    })
 }
 
 /// STEP assembly of a design with components: a product per component holding its bodies in
@@ -1019,6 +1045,7 @@ mod tests {
                 width: "20".into(),
                 height: "30".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -1182,11 +1209,8 @@ mod tests {
     }
 
     /// OBJ shares the vertices faces meet at and keeps the body name as written, spaces included.
-    /// The 10 × 20 × 30 box meshes as the planner's grids, no side longer than a fifth of its
-    /// extent (the 37.4 mm diagonal): its edges in 2, 3 and 5 pieces, so its faces are grids of
-    /// 2 × 3, 2 × 5 and 3 × 5 cells, 2 · (6 + 10 + 15) · 2 = 124 triangles. Welded, their
-    /// corners are the 3 · 4 · 6 = 72 nodes of the box's lattice less the 1 · 2 · 4 inside it: 64
-    /// positions (unwelded, 372), and one normal per face.
+    /// The 10 × 20 × 30 box meshes as two triangles a face (a flat face needs no interior
+    /// nodes), 12 triangles on its 8 corners (unwelded, 36), and one normal per face.
     #[test]
     fn obj_export_is_welded_and_keeps_names() {
         let (_, m) = model();
@@ -1197,10 +1221,10 @@ mod tests {
         let o = String::from_utf8(export(&st, &[], Format::Obj, "t").unwrap()).unwrap();
         let count = |p: &str| o.lines().filter(|l| l.starts_with(p)).count();
         assert!(o.contains("\no Red Block\n"), "{o}");
-        assert_eq!((count("v "), count("vn "), count("f ")), (64, 6, 124), "{o}");
+        assert_eq!((count("v "), count("vn "), count("f ")), (8, 6, 12), "{o}");
         let ids: Vec<usize> =
             o.lines().filter(|l| l.starts_with("f ")).flat_map(|l| l.split([' ', '/']).skip(1)).filter_map(|x| x.parse().ok()).collect();
-        assert!(ids.iter().all(|i| (1..=64).contains(i)));
+        assert!(ids.iter().all(|i| (1..=8).contains(i)));
     }
 
     /// The OBJ export carries the colours of the bodies: the mesh file names the material
@@ -1410,6 +1434,7 @@ mod tests {
                 width: "30".into(),
                 height: "10".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -1533,6 +1558,7 @@ mod tests {
                 width: "30".into(),
                 height: "10".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )

@@ -1,12 +1,12 @@
-//! Every colour that carries a meaning comes from `theme::Tokens` (#778): the engine's sketch and
+//! Every colour that carries a meaning comes from `solidcraft_theme::Tokens` (#778): the engine's sketch and
 //! axis tags, the surface analysis colours and every colour an icon draws. These tests hold that
 //! the tokens equal what was drawn before, and that a new colour cannot skip them.
 
 use egui::Color32;
-use solidcraft_engine::render::Rgb;
 use solidcraft_engine::view::colors;
+use solidcraft_viewport::Rgb;
 
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 fn rgb(c: Rgb) -> Color32 {
     Color32::from_rgb(c.0, c.1, c.2)
@@ -69,12 +69,12 @@ fn stroke_colours(shapes: &[egui::epaint::ClippedShape]) -> std::collections::BT
 /// cube's triad, 3D sketch triads and joint origins draw them.
 #[test]
 fn every_axis_is_drawn_in_one_set_of_colours() {
-    use crate::theme::{ColorVision, set_dark, set_vision};
     use egui::{Pos2, Rect, vec2};
     use solidcore_record::Vec3;
+    use solidcraft_theme::{ColorVision, set_dark, set_vision};
     let ctx = crate::fonts::test_context();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
-    let cam = solidcraft_engine::render::Camera::default();
+    let cam = solidcraft_viewport::Camera::default();
     let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
     let triad = crate::gizmo::Triad { center: Vec3::ZERO, translate: true, rotate: true };
     for (dark, mode) in [false, true].into_iter().flat_map(|d| ColorVision::ALL.map(|m| (d, m))) {
@@ -96,8 +96,9 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
         let c = Pos2::new(100.0, 100.0);
         for (name, d, want) in [("x", Vec3::X, t.axis_x), ("y", Vec3::Y, t.axis_y), ("z", Vec3::Z, t.axis_z)] {
             let at = c + vec2(32.0, 0.0);
-            let mut out =
-                ctx.run_ui(egui::RawInput::default(), |ui| crate::icons::navigation::axis_tip(ui.painter(), c, name, &d, at, 0.5, false, t));
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                solidcraft_look::compass::axis_tip_scaled(ui.painter(), c, name, d.into(), at, 0.5, false, t, 1.0)
+            });
             out.textures_delta.clear();
             let end = out.shapes.iter().find_map(|s| match &s.shape {
                 egui::Shape::Circle(e) if e.center == at => Some(e.fill),
@@ -133,39 +134,41 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 }
 
 // Icons no longer take their colours from the caller or from `IconColors`: the SVG masters name
-// palette roles (`assets/icons/ui/design/palette.toml`, light and dark, plus accents) that
-// `icon_svg` resolves. `icon_svg`'s own tests hold that every master parses and that only the
-// palette's colours exist, including its colour-vision variants.
+// palette roles (`crates/look/icons/design/palette.toml`, light and dark, plus accents) that the
+// kit's renderer (`ui_kit::icons`) resolves in SolidCraft's set (`solidcraft_look::icons::SET`). The look crate's
+// own tests hold that every master parses and that only the palette's colours exist, including
+// its colour-vision variants.
 
 /// The most colour literals each UI file may hold, and why. None of them carries a meaning that a
 /// colour vision mode must change. A file with more fails here: make the new colour a token in
-/// `theme::Tokens` (and `assets/styles/ui/palettes.rs`) instead, or, if it carries no meaning,
+/// `solidcraft_theme::Tokens` (and `crates/theme/src/palettes.rs`) instead, or, if it carries no meaning,
 /// raise the file's count here and give the reason. Fewer is always fine. The icon sources may
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
-    ("navigation.rs", 1, "the navigation cube's face shading, made from a token"),
+    ("icons/navigation.rs", 1, "the navigation cube's face shading, made from a token"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
     (
         "body_gizmo.rs",
         3,
         "the custom view navigator's raster: the design's appearance and tokens, shaded, as pixels, drawn with the white image tint",
     ),
-    ("context_menu.rs", 1, "the radial menu's shadow"),
     ("dialogs_appearance.rs", 1, "a design appearance: the colour is the fact"),
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),
     ("dialogs_library.rs", 1, "a library appearance's swatch: the colour is the fact"),
     ("render_ui/scene.rs", 2, "Browser appearance swatches: the colours are document data"),
     ("render_workspace_library.rs", 1, "a catalog appearance preview: the colour is authored data"),
     ("render_workspace_materials.rs", 1, "an authored material swatch: the displayed colour is the material data"),
+    ("render_workspace_quality.rs", 1, "the denoise guide legend reproduces categorical mask pixels; colour is exported image data"),
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
-    ("icons.rs", 1, "the white tint that carries an icon image's opacity"),
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
-    ("toolbar.rs", 1, "the version text"),
+    ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
+    ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
+    ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
 ];
 
 const COLOUR_LITERALS: &[&str] = &[
@@ -202,7 +205,7 @@ const COLOUR_LITERALS: &[&str] = &[
 #[test]
 fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let dirs = [root.join("src"), root.join("../../assets/icons/ui/source")];
+    let dirs = [(root.join("src"), ""), (root.join("../look/src"), "look/")];
     let mut found = Vec::new();
     fn scan(dir: &std::path::Path, prefix: &str, found: &mut Vec<String>) {
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -213,32 +216,42 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
                 scan(&path, &format!("{relative}/"), found);
                 continue;
             }
-            if !name.ends_with(".rs") || name.ends_with("_tests.rs") || matches!(name, "theme.rs" | "gallery.rs" | "test_support.rs") {
-                continue;
-            }
-            let src = std::fs::read_to_string(&path).unwrap();
-            if src.trim_start().starts_with("#![cfg(test)]") {
-                continue;
-            }
-            let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
-            let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
-            let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
-            if n > allowed {
-                found.push(format!("{relative}: {n} colour literal(s), at most {allowed} allowed"));
-            }
+            check(&path, &relative, found);
         }
     }
-    for dir in &dirs {
-        scan(dir, "", &mut found);
+    fn check(path: &std::path::Path, relative: &str, found: &mut Vec<String>) {
+        let name = relative.rsplit('/').next().unwrap_or(relative);
+        if !name.ends_with(".rs") || name.ends_with("_tests.rs") || matches!(name, "theme.rs" | "test_support.rs") {
+            return;
+        }
+        let src = std::fs::read_to_string(path).unwrap();
+        if src.trim_start().starts_with("#![cfg(test)]") {
+            return;
+        }
+        // Code from the first test-only item on (test code and the kit's test fixtures) is not drawn.
+        let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
+        let code = code.split(r#"#[cfg(any(test, feature = "test-support"))]"#).next().unwrap_or(code);
+        let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
+        let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
+        if n > allowed {
+            found.push(format!("{relative}: {n} colour literal(s), at most {allowed} allowed"));
+        }
     }
-    assert!(found.is_empty(), "colour literals outside theme::Tokens: {found:?}");
+    for (dir, prefix) in &dirs {
+        scan(dir, prefix, &mut found);
+    }
+    // The UI kit and its components, under the names they had here.
+    for (path, name) in crate::test_support::kit_files() {
+        check(&path, &name, &mut found);
+    }
+    assert!(found.is_empty(), "colour literals outside solidcraft_theme::Tokens: {found:?}");
 }
 
 /// The analysis shader takes its colours from the uniform (and so from the tokens). Only the
 /// zebra and environment map neutrals and direction vectors stay as literals.
 #[test]
 fn analysis_shader_colours_come_from_the_uniform() {
-    let src = include_str!("../../../assets/shaders/viewport.wgsl");
+    let src = include_str!("../../viewport-gpu/shaders/viewport.wgsl");
     let start = src.find("fn analysis(").unwrap_or(0);
     let end = src.find("fn stripe(").unwrap_or(src.len());
     let body = &src[start..end];
@@ -265,7 +278,7 @@ fn analysis_shader_colours_come_from_the_uniform() {
             "vec3<f32>(0.35)",
             "vec3<f32>(1.0)",
         ],
-        "a new colour in the analysis shader must come from `ana_c` (theme::AnalysisColors)"
+        "a new colour in the analysis shader must come from `ana_c` (solidcraft_color::AnalysisColors)"
     );
     assert_eq!(body.matches("u.ana_c[").count(), 9, "every analysis colour reads `ana_c`");
 }
@@ -310,7 +323,7 @@ fn the_logo_can_take_the_themes_accent() {
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
-            crate::theme::set_logo_accent(false);
+            solidcraft_theme::set_logo_accent(false);
         }
     }
     let _reset = Reset;

@@ -1,0 +1,139 @@
+{
+  "area": "ladder/03-analytic-profiles",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "angle": 6.283185307179586,
+        "cap": true,
+        "direction": [
+          -0.0,
+          -0.0,
+          -1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "profile": [
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                20.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 1.5707963267948966,
+              "radius": 20.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "005-revolve-touching-axis-hemisphere",
+  "expected": {
+    "area_mm2": 3769.911184308,
+    "body_count": 1,
+    "faces": 2,
+    "method": "V = 2/3 pi r^3; A = 2 pi r^2 + pi r^2; the profile edge on the axis makes no face",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 16755.160819146,
+    "what": "a quarter disk r20 with an edge on the Z axis revolved 360 deg: a hemisphere"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 3769.9111843145665,
+      "body_count": 1,
+      "edges": 2,
+      "faces": 2,
+      "vertices": 2,
+      "volume_mm3": 16755.16081920299
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 2,
+      "faces": 2,
+      "vertices": 2
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3769.9111843145665,
+      "body_count": 1,
+      "edges": 2,
+      "faces": 2,
+      "vertices": 2,
+      "volume_mm3": 16755.16081920299
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "revolve"
+  ],
+  "ungraded": [],
+  "what": "a quarter disk r20 with an edge on the Z axis revolved 360 deg: a hemisphere",
+  "why_not": []
+}

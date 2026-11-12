@@ -1,0 +1,7 @@
+{
+  "unit": "nlib.crv_offset",
+  "cases": [
+    {"name": "fuzz00926_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nlib.crv_offset/fuzz00926.json (panic: rust: attempt to multiply with overflow at crates/solidcore/src/nurbs/crv_nurb.rs:1011)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"b": [0.0, 0.0, 1.0], "crv": {"cpts": [[16.8, 5.25, 1.7976931348623157e+308, 1.0]], "p": 9223372036854775807, "u": [1.0]}, "d": -0.526, "deg": 3, "par": "uniform", "tol": 1.0}},
+    {"name": "fuzz01299_curve_non_positive_weight", "origin": "fuzz-out/n2000/nlib.crv_offset/fuzz01299.json (timeout: rust: no result after 20 s)", "issue": "UB-234", "cpp": "harness: invalid argument: curve: non-positive weight", "rust": "ok", "inputs": {"b": [-0.0627, 0.532, -0.845], "crv": {"cpts": [[-6.36, 17.4, 11.0, 1.75], [-13.9, 12.1, 8.27, 1.35], [-25.8, 15.3, 11.1, 1.64], [-10.2, 5.15, 3.86, -1.0], [-20.7, 7.68, 6.18, 0.695], [-64.8, 21.6, 17.9, 1.9]], "p": 2, "u": [0.0, 0.0, 0.0, 0.735, 0.766, 0.811, 1.0, 1.0, 1.0]}, "d": -1.26, "deg": 3, "par": "inherited", "tol": 0.0341}}
+  ]
+}

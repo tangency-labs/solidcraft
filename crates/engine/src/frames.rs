@@ -52,6 +52,11 @@ use K::*;
 /// What `timeline.redefine` maps for a surface revolve, which no command is called.
 const SURFACE_REVOLVE_EDIT: &str = "surface.revolve (edit)";
 
+/// The construction planes made of picks alone (`cmd::picked_plane`): their references are
+/// parsed and mapped as a whole, saved forms included, rather than key by key (#12022).
+const PICKED_PLANES: [&str; 4] =
+    ["construct.plane.axis_point", "construct.plane.two_edges", "construct.plane.three_points", "construct.plane.perpendicular"];
+
 /// The parameters each command takes in world coordinates.
 fn table(id: &str) -> &'static [(&'static str, K)] {
     match id {
@@ -72,7 +77,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.thread" => &[("face", Pick), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
-        "solid.press_pull" => &[("face", Pick), ("edges", Picks)],
+        "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body)],
         "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
         // Align finds its picks where they are shown and takes both ends into the moved bodies'
         // frame itself: a pick mapped into the frame of the body under it would put the two ends
@@ -222,16 +227,17 @@ struct Mapper<'a> {
 
 impl Mapper<'_> {
     fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
-        let p = vec3(v)?;
+        // `[x, y, z]` or `{x, y, z}`: a direction given with it then turns with the picked body.
+        let p = crate::params::vec3(v)?;
         let under = if self.here { None } else { frame_at(self.s, self.world, &self.f, p, body) };
         let m = if self.here { self.f.sketch } else { under.as_ref().map(|(m, _)| *m).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
         let out = self.local_point(&m, p);
-        // The command sees the pick in the frame of the body under it. Remember the bodies
-        // whose faces meet there, so a face of that body is found and a body that only
-        // shares its place in the model does not make the pick ambiguous (#419).
-        if let Some((_, names)) = &under {
-            remember(out.as_ref().and_then(vec3).unwrap_or(p), names.clone());
+        // The command sees the pick in the frame of the body under it. Remember where it was
+        // picked and the bodies whose faces meet there, so a face of that body is found and a
+        // body that only shares its place in the model does not make the pick ambiguous (#419).
+        if !self.here {
+            remember(out.as_ref().and_then(vec3).unwrap_or(p), p, under.map(|(_, names)| names).unwrap_or_default());
         }
         out
     }
@@ -247,6 +253,9 @@ impl Mapper<'_> {
 
     fn make(&mut self, v: &Value) -> Option<Value> {
         let m = self.f.active;
+        // A point written `{x, y, z}` (as `point_param` reads it) maps like `[x, y, z]`.
+        let xyz = v.as_object().and_then(|o| Some(Value::Array(vec![o.get("x")?.clone(), o.get("y")?.clone(), o.get("z")?.clone()])));
+        let v = xyz.as_ref().unwrap_or(v);
         let Some(p) = vec3(v) else { return self.map_expr(&m, v, map_point_expr) };
         self.local_point(&m, p)
     }
@@ -270,7 +279,8 @@ impl Mapper<'_> {
     }
 
     fn dir(&mut self, v: &Value) -> Option<Value> {
-        let d = vec3(v)?;
+        // `[x, y, z]` or `{x, y, z}`, as commands read a direction.
+        let d = crate::params::vec3(v)?;
         let m = self.first.unwrap_or(self.f.active);
         if is_identity(&m) {
             return None;
@@ -288,6 +298,8 @@ impl Mapper<'_> {
                 let out: Vec<Value> = a.iter().map(|x| self.picks(x, body).unwrap_or_else(|| x.clone())).collect();
                 Some(Value::Array(out))
             }
+            // A point written `{x, y, z}` among the picks, as one written `[x, y, z]`.
+            Value::Object(o) if ["x", "y", "z"].iter().all(|k| o.contains_key(*k)) => self.pick(v, body),
             Value::Object(o) => {
                 let b = o.get("body").and_then(Value::as_str).map(str::to_string);
                 let mut m = o.clone();
@@ -317,6 +329,10 @@ impl Mapper<'_> {
         if v.is_array() {
             return self.pick(v, None);
         }
+        // A name, and among them a component origin key (`o:…/origin/XY`) in particular, passes
+        // through untouched: the command's resolver applies the one order - a feature of the same
+        // name first, then the datum - and saves the reference that follows what it names (#7313),
+        // instead of the plane being frozen where it was picked.
         let o = v.as_object()?;
         let mut m = o.clone();
         if let Some(x) = o.get("face").and_then(|x| self.pick(x, None)) {
@@ -361,9 +377,19 @@ thread_local! {
     /// The outermost command is `solid.move`, whose parameters stay in the world when its bodies
     /// lie in differently turned frames (`split_move`).
     static OUTER_MOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// The picks of the running command: the point it sees and the bodies whose faces meet
-    /// there (the first is the body under it; more than one means the pick is ambiguous).
-    static PICKS: std::cell::RefCell<Vec<(Vec3, Vec<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The picks of the running command.
+    static PICKS: std::cell::RefCell<Vec<Pick>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A pick of the running command.
+struct Pick {
+    /// The point the command sees.
+    local: Vec3,
+    /// Where it was picked.
+    world: Vec3,
+    /// The bodies whose faces meet there: the first is the body under it, more than one means
+    /// the pick is ambiguous, and none that no face is under it.
+    bodies: Vec<String>,
 }
 
 /// How many picks of one command are remembered (a command takes few).
@@ -371,21 +397,28 @@ const MAX_PICKS: usize = 4096;
 /// How many bodies may meet at one pick (an ambiguous pick names them).
 const MAX_PICK_BODIES: usize = 64;
 
-/// Remember the bodies whose faces meet at a pick, against the point the command sees.
-fn remember(point: Vec3, names: Vec<String>) {
-    let names: Vec<String> = names.into_iter().take(MAX_PICK_BODIES).collect();
+/// Remember where a pick was made and the bodies whose faces meet there, against the point the
+/// command sees.
+fn remember(local: Vec3, world: Vec3, names: Vec<String>) {
+    let bodies: Vec<String> = names.into_iter().take(MAX_PICK_BODIES).collect();
     PICKS.with(|picks| {
         let mut picks = picks.borrow_mut();
         if picks.len() < MAX_PICKS {
-            picks.push((point, names));
+            picks.push(Pick { local, world, bodies });
         }
     });
 }
 
-/// The bodies whose faces meet at `point`, when the running command picked it: the first is
-/// the body under the pick, and more than one means the pick is ambiguous.
+/// The bodies whose faces meet at `point`, when the running command picked it on a face: the
+/// first is the body under the pick, and more than one means the pick is ambiguous.
 pub(crate) fn picked(point: Vec3) -> Option<Vec<String>> {
-    PICKS.with(|picks| picks.borrow().iter().find(|(p, _)| *p == point).map(|(_, names)| names.clone()))
+    PICKS.with(|picks| picks.borrow().iter().find(|p| p.local == point && !p.bodies.is_empty()).map(|p| p.bodies.clone()))
+}
+
+/// Where the running command's `nth` pick seen at `point` was picked (counting from 0: two picks
+/// on parts placed apart can be the same point in their own frames).
+pub(crate) fn picked_world(point: Vec3, nth: usize) -> Option<Vec3> {
+    PICKS.with(|picks| picks.borrow().iter().filter(|p| p.local == point).nth(nth).map(|p| p.world))
 }
 
 /// Forget the picks of the last command: a new one starts with none.
@@ -413,6 +446,26 @@ impl Drop for LocalGeometry {
     }
 }
 
+thread_local! {
+    /// Whether an undoable command run inside the current outermost one changed the design.
+    static INNER_UNDOABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A new outermost command starts with no undoable inner change.
+pub fn reset_inner_undoable() {
+    INNER_UNDOABLE.with(|c| c.set(false));
+}
+
+/// An undoable command run inside another changed the design: the outer one saves the step.
+pub fn note_inner_undoable() {
+    INNER_UNDOABLE.with(|c| c.set(true));
+}
+
+/// Whether [`note_inner_undoable`] was called since the outermost command began.
+pub fn inner_undoable() -> bool {
+    INNER_UNDOABLE.with(std::cell::Cell::get)
+}
+
 /// A command running inside another (its parameters are already in component frames).
 pub struct Nested;
 
@@ -426,7 +479,7 @@ impl Nested {
         });
         if outer {
             let inner = if id == "timeline.redefine" { None } else { Some(id) };
-            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty() || i == "construct.plane.axis_point")));
+            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty())));
             OUTER_MOVE.with(|m| m.set(id == "solid.move"));
         }
         (Nested, outer)
@@ -612,18 +665,19 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
     {
         return None;
     }
-    if id == "construct.plane.axis_point" && placed(s) {
-        // Construction references include tagged saved forms as well as pick wrappers.
-        // Map the parsed definition once at the boundary, including a nested Edit Feature.
+    if PICKED_PLANES.contains(&id) && placed(s) {
+        // An Edit Feature (`timeline.redefine`) of such a plane: its references include tagged
+        // saved forms as well as pick wrappers, so the parsed definition is mapped once here.
         // The constructor can then name local model picks and retain their exact references.
-        let mut kind = crate::cmd::plane_axis_point_kind(s, params).ok()?;
+        // (Run directly, the plane goes into the active frame as a whole: `to_active_frame`.)
+        let plane = crate::cmd::picked_plane(s, id, params).ok()??;
+        let mut kind = solidcraft_doc::FeatureKind::ConstructionPlane { plane };
         kind.transform_geometry(&mat_inverse(&s.active_component_frame())?);
-        let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AxisPoint { axis, point } } = kind else {
-            return None;
-        };
+        let solidcraft_doc::FeatureKind::ConstructionPlane { plane } = &kind else { return None };
         let mut out = params.clone();
-        out["axis"] = serde_json::to_value(axis).ok()?;
-        out["point"] = serde_json::to_value(point).ok()?;
+        for (key, reference) in crate::cmd::picked_plane_refs(plane)?.1 {
+            out[key] = serde_json::to_value(reference).ok()?;
+        }
         return Some(out);
     }
     let keys = table(id);
@@ -677,12 +731,20 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
                     vec3(v).and_then(|p| m.local_point(&frame, p))
                 }
                 Axis => {
+                    // A name, and among them a component origin key (`o:…/origin/X`), passes
+                    // through untouched: the command's resolver applies the one order - a feature
+                    // of the same name first, then the datum - and saves the reference that
+                    // follows what it names (#7313), instead of the axis being frozen where it
+                    // was picked.
                     if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();
-                        if let Some(origin) = axis.get("origin").and_then(|o| m.make(o)) {
+                        // An `{origin, dir}` axis without its origin passes through the world's,
+                        // which the component may have moved.
+                        let origin = axis.get("origin").cloned().or_else(|| axis.contains_key("dir").then(|| pt(Vec3::ZERO)));
+                        if let Some(origin) = origin.and_then(|o| m.make(&o)) {
                             axis.insert("origin".into(), origin);
                         }
-                        if let Some(dir) = axis.get("dir").and_then(vec3)
+                        if let Some(dir) = axis.get("dir").and_then(crate::params::vec3)
                             && !is_identity(&m.f.active)
                             && let Some(inv) = mat_inverse(&m.f.active)
                         {
@@ -732,7 +794,7 @@ fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'
     use solidcraft_doc::FeatureKind as Feature;
     let point = placement_point;
     match (kind, cmd) {
-        (Feature::Box { corner, .. }, "solid.box") => vec![("corner", point(corner))],
+        (Feature::Box { corner, centred, .. }, "solid.box") => vec![(if *centred { "center" } else { "corner" }, point(corner))],
         (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],
         (Feature::Cylinder { base, axis, .. }, "solid.cylinder") | (Feature::Coil { base, axis, .. }, "solid.coil") => {
             vec![("base", point(base)), ("axis", pt(axis.0))]

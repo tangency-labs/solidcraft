@@ -330,3 +330,41 @@ fn the_arc_end_pick_snaps_to_a_point_under_the_value_box() {
         assert!(snapped, "{command}: the third pick snapped to the line's end: {:?}", sketch.constraints.iter().map(|c| &c.kind).collect::<Vec<_>>());
     }
 }
+
+/// A Center Point Arc is drawn with three clicks, its value boxes optional: the Radius box never
+/// sits under the cursor, so the second click places the start point instead of landing in the
+/// box and waiting for Enter (#12208, #12205). Small radii in every direction, where a box at the
+/// radius's middle covered the cursor.
+#[test]
+fn a_center_point_arc_takes_three_clicks_without_enter() {
+    for (radius, angle) in [(2.0f64, 0.0f64), (4.0, 0.0), (4.0, 90.0), (4.0, 180.0), (4.0, 270.0), (6.0, 45.0), (15.0, 0.0)] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 60.0;
+        h.app.cam.target = solidcore_record::Vec3::new(0.0, 0.0, 0.0);
+        h.settle();
+        h.step(&json!({"start":"sketch.arc.center_point"})).unwrap();
+        h.step(&json!({"click":{"world":[0, 0, 0]}})).unwrap();
+        let (s, c) = angle.to_radians().sin_cos();
+        let start = [radius * c, radius * s];
+        h.step(&json!({"move":{"world":[start[0], start[1], 0]}})).unwrap();
+        let cursor = h.at(&json!({"world":[start[0], start[1], 0]})).unwrap();
+        let cursor = egui::pos2(cursor[0] as f32, cursor[1] as f32);
+        let blocking = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).filter(|r| r.expand(2.0).contains(cursor));
+        assert!(blocking.is_none(), "radius {radius} at {angle} deg: the Radius box {blocking:?} sits under the cursor {cursor:?}");
+        h.step(&json!({"click":{"world":[start[0], start[1], 0]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 2, "radius {radius} at {angle} deg: the click placed the start point");
+        let (s, c) = (angle + 90.0).to_radians().sin_cos();
+        h.step(&json!({"move":{"world":[radius * c, radius * s, 0]}})).unwrap();
+        h.step(&json!({"click":{"world":[radius * c, radius * s, 0]}})).unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let arc = sketch.curves.iter().find_map(|curve| match curve.kind {
+            CurveKind::Arc { c, a, .. } => Some(sketch.points[a].pos.dist(sketch.points[c].pos)),
+            _ => None,
+        });
+        assert!(arc.is_some_and(|r| (r - radius).abs() < 0.5), "radius {radius} at {angle} deg: three clicks made the arc, got {arc:?}");
+        assert!(!sketch.constraints.iter().any(|c| c.kind.is_dimension()), "radius {radius} at {angle} deg: clicks alone add no typed dimension");
+    }
+}

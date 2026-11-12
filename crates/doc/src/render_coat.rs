@@ -5,7 +5,7 @@ use crate::{
     render_surface::{RenderBodyTarget, bounded_sequence},
 };
 use serde::{Deserialize, Serialize};
-use solidcraft_render::clear_coat::ClearCoat;
+use solidcraft_viewport::clear_coat::ClearCoat;
 use std::collections::BTreeSet;
 
 /// Matches the existing runtime clear-coat override bound for either executor.

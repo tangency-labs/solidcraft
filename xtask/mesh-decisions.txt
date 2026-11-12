@@ -20,7 +20,7 @@ crates/doc/src/eval.rs:feature_tools_with_constructor reaches a To Object extent
 crates/doc/src/eval.rs:height_at measures a point's height on a face by the display mesh
 crates/doc/src/eval.rs:hole_axis_size sizes a hole's tools by the bodies its axis meets on the display mesh
 crates/doc/src/eval.rs:hole_depth_to works out a hole's To Object depth on the display mesh
-crates/doc/src/eval.rs:hole_on_surface moves a hole back onto its face by the display mesh
+crates/doc/src/eval.rs:hole_on_surface_in moves a hole back onto its face by the display mesh
 crates/doc/src/eval.rs:hole_reaches decides whether a drill reaches material by the display mesh
 crates/doc/src/eval.rs:nearest_object_face picks an extrusion's To Object face by the display mesh
 crates/doc/src/eval.rs:off_the_ends moves an edge point off the edge's ends by the display mesh
@@ -134,7 +134,6 @@ crates/engine/src/cmd/join_pieces.rs:adds_nothing decides a join adds no materia
 crates/engine/src/cmd/join_pieces.rs:mesh_volume measures the volume a closed mesh encloses
 crates/engine/src/cmd/joints.rs:body_centre centres an occurrence by the display mesh's box
 crates/engine/src/cmd/joints.rs:cam_profile samples a cam's picked edges from the display mesh
-crates/engine/src/cmd/joints.rs:occurrence_at picks the occurrence nearest a point by the display mesh
 crates/engine/src/cmd/measure_sel.rs:closest measures closest points on mesh triangles
 crates/engine/src/cmd/measure_sel.rs:describe measures a selection on the display mesh
 crates/engine/src/cmd/measure_sel.rs:face_slot finds a slot from mesh triangles
@@ -176,7 +175,6 @@ crates/kernel/src/provenance.rs:revolve_origins traces revolution faces by meshe
 crates/kernel/src/provenance.rs:swept_origins traces swept faces by meshes
 crates/kernel/src/provenance.rs:trace traces a result's faces to its operands by meshes
 crates/kernel/src/shell_groups.rs:meshes_meet decides whether bodies meet by mesh triangles
-crates/kernel/src/smlib_sweeps.rs:imp::roles gives swept faces their roles by a mesh
 crates/kernel/src/surface_trim.rs:cut_by trims a surface by a tool through a mesh
 crates/kernel/src/surface_trim.rs:nearest_faces picks the face nearest each point by a mesh
 crates/kernel/src/surface_untrim.rs:face_point takes a point inside a face from its largest mesh triangle
