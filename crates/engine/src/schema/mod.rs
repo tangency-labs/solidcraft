@@ -67,6 +67,7 @@ pub mod config;
 pub mod construct;
 pub mod delete;
 pub mod diagnostics;
+pub mod dogbone;
 pub mod edit;
 pub mod end_cap;
 pub mod features;

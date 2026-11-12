@@ -225,6 +225,25 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### dogbone
+
+A round relief, of a router bit's diameter, cut into an inside corner so that a square part seats
+where the bit would leave a round.
+
+A dogbone runs the length of the corner edge. Its normal style is centred on the corner's
+bisector with its circle through the sharp corner; minimal stops a gap short of the corner.
+T-bone: the relief is centred on one wall's line, the longer or the shorter one. At a square
+corner it bites that wall only; at a sharper corner it also bites the other wall.
+
+- **In SolidCraft:** the `solid.dogbone` command; its `diameter`, `style` (`normal`, `minimal`,
+  `t_bone`), `gap`, `side` (`longer`, `shorter`), `max_angle` and `along` parameters; the
+  `dogbone` feature type in a design file.
+- **Don't use:** relief cut, corner relief (sheet metal's word for the cut where two flanges meet),
+  overcut.
+- **Elsewhere:** dog-bone fillet, T-bone, mortise relief.
+- **For translators:** not a fillet or a round (those add material or round an edge off); the
+  relief removes material beyond the corner.
+
 ### end cap
 
 A plate that closes the open end of a frame member, shaped like the member profile's outer outline

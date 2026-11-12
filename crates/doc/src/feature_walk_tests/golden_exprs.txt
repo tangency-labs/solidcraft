@@ -7,6 +7,12 @@ frame_end_cap
     Inset Ratio = cap.ratio (Unitless)
     Corner Chamfer = cap.chamfer (Length)
   expressions: cap1.angle, cap1.offset, cap.thickness, cap.ratio, cap.chamfer
+dogbone
+  inputs:
+    Bit Diameter = dogbone.diameter (Length)
+    Gap = dogbone.gap (Length)
+    Largest Angle = dogbone.max_angle (Angle)
+  expressions: dogbone.diameter, dogbone.gap, dogbone.max_angle
 body_transfer
 sketch
   inputs:
