@@ -225,7 +225,7 @@ fn framed(s: &Session, d: &Dialog, at: Vec3, edges: &[Option<Pick>; 2]) -> Optio
 
 /// What the command measures a reference input's pick from: the edge's point, or the line a
 /// plane or an axis makes (none when that plane or axis is gone).
-fn ref_input(st: &solidcraft_engine::doc::ModelState, p: &Pick) -> Option<RefInput> {
+fn ref_input(st: &solidcraft_engine::doc::ModelState, p: &Pick) -> Option<RefInput<'static>> {
     match p {
         Pick::Edge(p) => Some(RefInput::Edge(*p, None)),
         Pick::Plane(name) => datum_input(st, &HoleDatum::Plane(name.into())).ok(),
