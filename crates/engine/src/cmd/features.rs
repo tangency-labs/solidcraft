@@ -357,7 +357,12 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     // A profile's points are in the active component's frame; a body placed differently (in a
     // moved or turned component) is probed where it is shown. Face picks are in `st`'s frame.
     let frames: Vec<Option<solidcraft_doc::Mat>> = bodies.iter().map(|b| if grouped.is_some() { None } else { into_body_frame(s, b) }).collect();
-    let inside = |q: Vec3| bodies.iter().zip(&frames).any(|(b, m)| b.mesh().contains(m.as_ref().map_or(q, |m| solidcraft_doc::apply_point(m, q))));
+    let inside = |q: Vec3| {
+        bodies.iter().zip(&frames).any(|(b, m)| {
+            let pt = m.as_ref().map_or(q, |m| solidcraft_doc::apply_point(m, q));
+            matches!(b.body.classify_point(pt), Ok(solidcraft_kernel::PointClass::Inside))
+        })
+    };
     // A step into whatever is right in front of the profile, short of the far end.
     let near = |d: f64| d.signum() * (d.abs() * 0.5).min(START_PROBE_MM);
     let into = |d: f64| inside(base + n * near(d)) || inside(base + n * (d * 0.5));
