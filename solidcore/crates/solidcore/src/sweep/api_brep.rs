@@ -303,8 +303,8 @@ pub fn create_draft_sweep(
 /// # Errors
 ///
 /// `InvalidInput` for no path curve, a radius `<= 0` (a NaN radius passes, as
-/// upstream), or a radius that reaches the centre of a bend in the path
-/// ([`path_bends_within`]; not upstream, which builds that pipe with its wall folded
+/// upstream), or a radius found to reach the centre of a bend in the path
+/// ([`bend_found_within`]; not upstream, which builds that pipe with its wall folded
 /// through itself, WR-774); [`SolidError::Unported`] otherwise
 /// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_pipe_sweep(
@@ -322,7 +322,9 @@ pub fn create_pipe_sweep(
     }
 
     let path = bspline_of(path_curve, OP_PIPE)?;
-    if path_bends_within(&path, pipe_radius) {
+    // Refusal only: a bend found refuses the pipe; none found proves nothing, and the pipe
+    // is built unchecked, as upstream builds it (definitions-and-certificates.md §7.6).
+    if bend_found_within(&path, pipe_radius).is_some() {
         return Err(SolidError::invalid_input(
             OP_PIPE,
             "the pipe radius reaches the centre of a bend in the path, so the pipe's wall \
@@ -348,45 +350,46 @@ pub fn create_pipe_sweep(
     })
 }
 
-/// The samples per knot span, both span ends included, at which [`path_bends_within`]
-/// measures a pipe path's curvature. A span is one polynomial or rational piece, whose
+/// The samples per knot span, both span ends included, at which [`bend_found_within`]
+/// looks for a bend tighter than a pipe. A span is one polynomial or rational piece, whose
 /// curvature rises and falls only a few times, so 16 samples find a bend well inside the
 /// pipe at a cost that is small beside the sweep itself. A bend tighter than the pipe that
-/// lies between two samples is missed, and that pipe is built as before.
+/// lies between two samples is not found, and that pipe is built as before.
 const PIPE_BEND_SAMPLES_PER_SPAN: u32 = 16;
 
-/// Whether `path` bends somewhere with a radius of at most `radius`, that is, with
-/// curvature at least `1 / radius`. A pipe of that radius folds its wall through itself on
-/// the inside of such a bend: the circles of neighbouring sections cross there, so the
-/// swept surface is singular (Maekawa, Patrikalakis, Sakkalis and Yu, "Analysis and
-/// applications of pipe surfaces", CAGD 15(5), 1998).
+/// A parameter at which `path` bends with a radius of at most `radius`, that is, with
+/// curvature at least `1 / radius`, if one is found. A pipe of that radius folds its wall
+/// through itself on the inside of such a bend: the circles of neighbouring sections cross
+/// there, so the swept surface is singular (Maekawa, Patrikalakis, Sakkalis and Yu,
+/// "Analysis and applications of pipe surfaces", CAGD 15(5), 1998).
 ///
-/// Measured at [`PIPE_BEND_SAMPLES_PER_SPAN`] samples per knot span. A `true` is proved by
-/// the sample that found the bend; a `false` only says that no sample found one. A sample
-/// whose curvature cannot be computed (a zero-length tangent) proves nothing and is
-/// skipped. A pipe that crosses itself between distant parts of its path is not found
-/// here.
-fn path_bends_within(path: &BSplineCurve, radius: f64) -> bool {
-    let Some(nurb) = path.nurb.as_ref() else {
-        return false;
-    };
+/// **Refusal only.** The path's curvature is evaluated at [`PIPE_BEND_SAMPLES_PER_SPAN`]
+/// samples per knot span. A `Some` is proved by the sample that found the bend, so it may
+/// refuse a pipe. A `None` proves nothing: it is not a certificate that the path bends no
+/// tighter than `radius` anywhere (definitions-and-certificates.md §7.6, "a check at sample
+/// points proves nothing"), and no caller may accept a construction on it. A certified
+/// check, a lower bound on the radius of curvature over each knot span enclosed on the
+/// Bernstein form of the curvature's numerator and denominator, is open work (#15038).
+/// A sample whose curvature cannot be computed (a zero-length tangent) proves nothing and
+/// is skipped. A pipe that crosses itself between distant parts of its path is not looked
+/// for here.
+fn bend_found_within(path: &BSplineCurve, radius: f64) -> Option<f64> {
+    let nurb = path.nurb.as_ref()?;
     // A clamped curve's spans run between knots[degree] and knots[n + 1].
-    let Some(span_knots) = nurb.knots().get(nurb.degree()..=nurb.n() + 1) else {
-        return false;
-    };
+    let span_knots = nurb.knots().get(nurb.degree()..=nurb.n() + 1)?;
     let reaches = |u: f64, side: Side| {
         nurb.eval_curvature(u, side, false)
             .is_ok_and(|c| c.kappa * radius >= 1.0)
     };
-    span_knots.windows(2).any(|ends| {
+    span_knots.windows(2).find_map(|ends| {
         let &[start, end] = ends else {
-            return false;
+            return None;
         };
         // A repeated knot spans nothing.
         if end <= start {
-            return false;
+            return None;
         }
-        (0..=PIPE_BEND_SAMPLES_PER_SPAN).any(|i| {
+        (0..=PIPE_BEND_SAMPLES_PER_SPAN).find_map(|i| {
             let at = f64::from(i) / f64::from(PIPE_BEND_SAMPLES_PER_SPAN);
             // At its end knot a span is evaluated from its own side, not the next span's.
             let side = if i == PIPE_BEND_SAMPLES_PER_SPAN {
@@ -394,7 +397,8 @@ fn path_bends_within(path: &BSplineCurve, radius: f64) -> bool {
             } else {
                 Side::Left
             };
-            reaches(start + at * (end - start), side)
+            let u = start + at * (end - start);
+            reaches(u, side).then_some(u)
         })
     })
 }

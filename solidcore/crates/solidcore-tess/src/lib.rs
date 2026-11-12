@@ -23,6 +23,8 @@
 mod curve;
 #[cfg(test)]
 mod fixtures;
+mod hash;
+mod iso;
 mod mesh;
 // SolidCraft's mesher, moved here (RFC 0003, item 1.1) and kept in SolidCraft's formatting so it
 // reads the same as its history.
@@ -39,6 +41,7 @@ mod tolerance;
 mod vec;
 
 pub use curve::curve_points;
+pub use iso::{MAX_ISOPARMS, isoparms};
 pub use mesh::Mesh;
 pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
 pub use par::guarded;

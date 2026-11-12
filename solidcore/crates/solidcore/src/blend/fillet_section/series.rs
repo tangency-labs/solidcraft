@@ -354,7 +354,10 @@ impl<T: GnScalar> Ser<T> {
         let x0 = self.at(0, 0);
         if !x0.is_positive() {
             // SER_MSG(SM_ERR, "SmGnSectionFSG: a face's normal vanishes at a foot")
-            return Err(SolidError::sm_err("blend::fillet_section::Ser::inv_sqrt"));
+            return Err(SolidError::blend_failed(
+                "blend::fillet_section::Ser::inv_sqrt",
+                "a face's normal vanishes at a foot",
+            ));
         }
         let mut z = self.scale(T::of(1.0) / x0, tr);
         z.set(0, 0, T::of(0.0));
@@ -409,7 +412,10 @@ impl<T: GnScalar> InvSqrtSeries<T> {
     pub fn update(&mut self, x: &Ser<T>, tr: Trunc) -> Result<&Ser<T>> {
         let x0 = x.at(0, 0);
         if !x0.is_positive() {
-            return Err(SolidError::sm_err("blend::fillet_section::Ser::inv_sqrt"));
+            return Err(SolidError::blend_failed(
+                "blend::fillet_section::Ser::inv_sqrt",
+                "a face's normal vanishes at a foot",
+            ));
         }
         self.z.merge_computed(&x.scale(T::of(1.0) / x0, tr), tr);
         self.z.set(0, 0, T::of(0.0));
@@ -418,14 +424,20 @@ impl<T: GnScalar> InvSqrtSeries<T> {
         for m in 1..=(tr.s + tr.e) {
             binom *= (-0.5 - (m - 1) as f64) / m as f64;
             let Some(prev) = self.pow.get(m - 1) else {
-                return Err(SolidError::sm_err("blend::fillet_section::Ser::inv_sqrt"));
+                return Err(SolidError::blend_failed(
+                    "blend::fillet_section::Ser::inv_sqrt",
+                    "the series has no power of the previous order",
+                ));
             };
             let next = prev.mul_valued(&self.z, m - 1, 1, tr);
             if self.pow.len() <= m {
                 self.pow.push(Ser::constant(T::of(0.0)));
             }
             let Some(pm) = self.pow.get_mut(m) else {
-                return Err(SolidError::sm_err("blend::fillet_section::Ser::inv_sqrt"));
+                return Err(SolidError::blend_failed(
+                    "blend::fillet_section::Ser::inv_sqrt",
+                    "the series has no power of this order",
+                ));
             };
             pm.merge_computed(&next, tr);
             self.sum.add_scaled_from(pm, T::of(binom), m, tr);
@@ -767,5 +779,18 @@ mod tests {
         let p = e1.add(&e2, tr).times(&s, tr).sub(&e2, tr);
         assert_eq!(p.a[0].c[1][0], 2.0);
         assert_eq!(p.a[1].c[0][0], 0.0);
+    }
+
+    #[test]
+    fn a_vanishing_normal_is_a_typed_failure() {
+        let tr = Trunc::new(1, 0).unwrap();
+        let op = "blend::fillet_section::Ser::inv_sqrt";
+        let why = "a face's normal vanishes at a foot";
+        let error = Ser::constant(0.0).inv_sqrt(tr).unwrap_err();
+        assert_eq!(error, SolidError::blend_failed(op, why));
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        let mut pows = InvSqrtSeries::<f64>::default();
+        let error = pows.update(&Ser::constant(-1.0), tr).unwrap_err();
+        assert_eq!(error, SolidError::blend_failed(op, why));
     }
 }

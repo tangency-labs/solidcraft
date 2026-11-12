@@ -172,8 +172,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.cone_parallel_line_domains = true;
-    k.fixes.cone_parallel_line_midpoint = true;
     k.fixes.corner_blend_coons_patch_tangent_to_sides = true;
     k.fixes.corner_blend_stays_inside_neighbours = true;
     k.fixes.cover_refuses_folded_continuation = true;
@@ -196,11 +194,9 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
-    k.fixes.fillet_cleanup_removes_input_slits = true;
     k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_corner_ball_center_from_axes = true;
     k.fixes.fillet_corner_ball_patch = true;
-    k.fixes.fillet_corner_sphere_from_four_arcs = true;
     k.fixes.fillet_half_degree_crease = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
@@ -212,7 +208,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_rail_rim_on_face = true;
     k.fixes.fillet_rails_meet_at_one_end_point = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_non_manifold_result = true;
@@ -222,11 +217,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_retry_radius_as_first = true;
     k.fixes.fillet_run_on_past_far_end_only = true;
     k.fixes.fillet_split_edge_keeps_near_half = true;
-    k.fixes.fillet_tangent_point_one_sided_step = true;
-    k.fixes.fillet_torus_center_on_axis = true;
-    k.fixes.fillet_torus_rail_on_axis = true;
-    k.fixes.fillet_torus_span_from_start_section = true;
-    k.fixes.fillet_trace_from_tangent_point_toward_next = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_trim_status = true;
@@ -279,7 +269,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_splits_curves_on_axis = true;
-    k.fixes.sheet_sweep_joins_profile_wires = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
@@ -291,7 +280,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.stitch_solid_nests_cavities = true;
-    k.fixes.sweep_frame_on_planar_path_normal = true;
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.topology_failed_evaluations_propagate = true;

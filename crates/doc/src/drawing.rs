@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile};
 
-use crate::format::DRAWING;
+use crate::format::{CheckNumbers as _, DRAWING};
 use crate::ids::{self, IdSource};
 use crate::{DocError, Metadata, Result, expr};
 

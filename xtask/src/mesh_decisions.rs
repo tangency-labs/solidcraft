@@ -69,6 +69,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
         "crates/doc/src/document.rs:MeshData::generate_crease_normals",
         "mesh bodies: explicit shading metadata; positions, triangles and model decisions are unchanged",
     ),
+    ("crates/doc/src/construct.rs:lies_on_mesh", "mesh bodies: whether a face pick landed on a mesh body, which has no faces"),
     ("crates/doc/src/eval.rs:ImportDigests::of", "mesh-body imports: retained content identities, not tessellated-solid decisions"),
     ("crates/doc/src/eval.rs:MeshDigest::matches", "mesh-body imports: compares retained source-array identities"),
     ("crates/doc/src/eval.rs:ModelBody::display_plan", "the display plan"),

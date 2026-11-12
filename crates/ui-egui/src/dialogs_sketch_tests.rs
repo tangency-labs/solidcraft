@@ -870,10 +870,19 @@ fn intersect_says_what_it_added_and_that_projected_geometries_hides_it() {
 /// Sketch 1 on XY holds a two-line chain (0,0)-(20,0)-(20,20) and a lone line far from it; a
 /// second sketch above it is being edited with the Project dialog open, seen from above.
 fn project_chain_fixture() -> (Harness, u64, Vec<String>, String) {
+    project_chain_fixture_in(false)
+}
+
+/// The same scene, with a box body beside the chain when `body` is set: its edges are model
+/// geometry a marquee in Project takes.
+fn project_chain_fixture_in(body: bool) -> (Harness, u64, Vec<String>, String) {
     let mut h = Harness::new();
     h.app.set_origin_shown(false);
     h.app.ui.show_browser = false;
     h.app.ui.show_timeline = false;
+    if body {
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"})).unwrap();
+    }
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.line", json!({"points":[[0,0],[20,0],[20,20]],"infer":false})).unwrap();
     h.app.run("sketch.line", json!({"points":[[60,40],[80,40]],"infer":false,"connect":false})).unwrap();
@@ -890,7 +899,10 @@ fn project_chain_fixture() -> (Harness, u64, Vec<String>, String) {
     h.step(&json!({"call": "ui.camera", "params": {"target": [40, 20, 0], "distance": 160}})).unwrap();
     h.app.start("sketch.project");
     h.settle();
-    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { bodies: false, .. }));
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { .. }));
+    if !body {
+        assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { bodies: false, .. }));
+    }
     (h, first, chain, lone)
 }
 
@@ -994,4 +1006,24 @@ fn project_box_does_not_duplicate_a_curve_a_click_already_took_14927() {
     h.step(&json!({"drag": [{"world": [-5, -5, 0]}, {"world": [25, 25, 0]}], "shift": true})).unwrap();
     assert_eq!(project_picked_curves(&h, first), chain, "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+}
+
+/// A marquee over model edges and the curves of another sketch takes what it took before curves
+/// joined it: the edges alone (#14927). Project's default marquee does not change.
+#[test]
+fn project_box_over_edges_and_curves_still_takes_only_the_edges_14927() {
+    let (mut h, first, chain, _) = project_chain_fixture_in(true);
+    h.step(&json!({"drag": [{"world": [30, 10, 0]}, {"world": [10, -5, 0]}]})).unwrap();
+    let items = &h.app.dialog.as_ref().unwrap().inputs[0].items;
+    assert!(items.iter().any(|s| matches!(s, Sel::Edge { .. })), "the box touches an edge of the body: {items:?}");
+    assert!(external_curves(&h, first).is_empty(), "no curve of {chain:?} joins the edges: {items:?}");
+}
+
+/// With a body in the design, a marquee that reaches no model geometry still takes the curves of
+/// the other sketches.
+#[test]
+fn project_box_beside_the_model_still_takes_curves_of_other_sketches_14927() {
+    let (mut h, first, _, lone) = project_chain_fixture_in(true);
+    h.step(&json!({"drag": [{"world": [55, 35, 0]}, {"world": [85, 45, 0]}]})).unwrap();
+    assert_eq!(external_curves(&h, first), vec![lone], "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
 }

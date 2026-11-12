@@ -102,80 +102,9 @@ pub enum Error {
     Cancelled(&'static str),
 }
 
-/// Why a blend has no room, as solidcore names its refusal (`NoRoomReason`): the reasons a
-/// refusal with a size gives ([`Error::TooLarge`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RoomReason {
-    /// The rolling ball does not fit a face it rolls on.
-    BallDoesNotFit,
-    /// A contact line leaves the face it rolls on.
-    RailLeavesFace,
-    /// The blends take the whole of a face they roll on.
-    FaceConsumed,
-    /// One blend's contact line runs inside the band another takes off a face they share.
-    BandsOverlap,
-    /// The balls fold over one another along the edge.
-    BallsFold,
-    /// A face curves tighter than a chamfer's offset along it.
-    OffsetFolds,
-    /// The blend would take all of the part between its contact lines and cut it in pieces.
-    CutsThePart,
-    /// The blend's section would break through a wall into the hollow behind it.
-    BreaksThrough,
-    /// The ball is as wide as a face it rolls on (a cylinder or sphere of its radius), so its
-    /// centre stays put and no round ends at an end of the edge.
-    OffsetCollapses,
-    /// The blend's corners take the whole of its edge.
-    CornersTakeWholeEdge,
-    /// A blend past its faces runs off a face into the material.
-    RunsIntoMaterial,
-}
-
-impl RoomReason {
-    /// The reason in words, as a fillet's message gives it.
-    pub fn words(self) -> &'static str {
-        match self {
-            RoomReason::BallDoesNotFit => "the rolling ball does not fit a face it rolls on",
-            RoomReason::RailLeavesFace => "a contact line leaves the face it rolls on",
-            RoomReason::FaceConsumed => "the blends take the whole of a face they roll on",
-            RoomReason::BandsOverlap => "one blend runs inside the band another takes off a face they share",
-            RoomReason::BallsFold => "the rolling ball folds over itself along the edge",
-            RoomReason::OffsetFolds => "a face curves tighter than the offset along it",
-            RoomReason::CutsThePart => "the blend would cut the part in pieces",
-            RoomReason::BreaksThrough => "the blend would break through a wall into the hollow behind it",
-            RoomReason::OffsetCollapses => {
-                "the ball is as wide as a face it rolls on, so its centre stays put and the round cannot end at the edge's end"
-            }
-            RoomReason::CornersTakeWholeEdge => "its corners take the whole of the edge",
-            RoomReason::RunsIntoMaterial => "the blend runs off a face into the material",
-        }
-    }
-}
-
-/// What the largest size that builds a refused blend ([`Error::TooLarge`]) sizes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FitKind {
-    /// A round's radius.
-    Radius,
-    /// An equal chamfer's distance.
-    Distance,
-    /// A factor on a chamfer's two distances.
-    Scale,
-    /// A chord round's width.
-    Chord,
-}
-
-impl FitKind {
-    /// The size's name, as a fillet's message names it ("the largest radius that fits").
-    pub fn word(self) -> &'static str {
-        match self {
-            FitKind::Radius => "radius",
-            FitKind::Distance => "distance",
-            FitKind::Scale => "scale",
-            FitKind::Chord => "chord width",
-        }
-    }
-}
+/// Why a blend has no room, and what the largest size that builds a refused blend sizes
+/// ([`Error::TooLarge`]): ops' own, as its refusal gives them.
+pub use solidcore_ops::{FitKind, RoomReason};
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

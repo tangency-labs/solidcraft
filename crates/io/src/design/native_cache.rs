@@ -4,6 +4,7 @@
 //! cache to the exact document, and to the source, platform and geometry kernel that computed it
 //! (docs/design-container.md).
 use super::*;
+use sha2::{Digest, Sha256};
 use solidcraft_doc::{ModelState, SavedModel};
 
 const FORMAT: &str = "solidcraft-model-cache/10";

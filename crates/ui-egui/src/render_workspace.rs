@@ -46,10 +46,10 @@ mod environment;
 #[path = "render_workspace_output.rs"]
 mod inspector;
 #[path = "render_ui/inspector.rs"]
-mod inspector_panel;
+pub(crate) mod inspector_panel;
 
 #[path = "render_workspace_library.rs"]
-mod library;
+pub(crate) mod library;
 
 #[path = "render_ui/assign.rs"]
 pub(crate) mod assign;
@@ -390,7 +390,7 @@ pub enum RenderSelection {
 /// Focus a Render editor without changing the shared modelling selection.
 pub(crate) fn selection_editor(app: &mut SolveApp, selection: &RenderSelection) {
     app.render_workspace.view.selection = selection.clone();
-    app.render_workspace.view.inspector.hidden = false;
+    reveal_inspector(app);
 }
 
 pub(crate) fn object_selection(app: &SolveApp) -> RenderSelection {
@@ -443,6 +443,8 @@ pub struct ViewState {
     studio: studio::View,
     materials: materials::View,
     library: library::View,
+    pub(crate) library_focus_pending: bool,
+    pub(crate) inspector_visibility_request: Option<bool>,
     inspector: inspector::View,
     environment_ring: environment::RingView,
 
@@ -535,6 +537,8 @@ impl Default for ViewState {
             studio: studio::View::default(),
             materials: materials::View::default(),
             library: library::View::default(),
+            library_focus_pending: false,
+            inspector_visibility_request: None,
             inspector: inspector::View::default(),
             environment_ring: environment::RingView::default(),
 
@@ -957,19 +961,39 @@ pub fn invalidate_scene(app: &mut SolveApp) {
     }
 }
 
+/// Inspect tools that only pick what an analysis shows. They edit nothing, so ending one loses
+/// no work, and a running one does not hold the Render workspace closed (#14993).
+const LOOK_ONLY_TOOLS: &[&str] =
+    &["inspect.center_of_mass", "inspect.continuity", "inspect.curvature_comb", "inspect.isocurve", "inspect.minimum_radius"];
+
+/// Whether the Render workspace can be entered now: no sketch, dialog or file load is open and
+/// no tool is running, except a look-only Inspect tool, which [`enter`] ends as Esc does.
+pub(crate) fn entry_open(app: &SolveApp) -> bool {
+    let tool_holds = app.tool.as_ref().is_some_and(|tool| !LOOK_ONLY_TOOLS.contains(&tool.cmd));
+    app.session.active_sketch.is_none() && !tool_holds && app.dialog.is_none() && !app.file_load_holds()
+}
+
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
     if render {
-        if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load_holds() {
+        if !entry_open(app) {
             return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
         }
         app.run("render.scene", json!({}))?;
+        // A look-only Inspect tool ends as Esc ends it; Isocurve's curves stay on (#14993).
+        if app.tool.is_some() {
+            crate::tools::finish(app);
+            if app.tool.is_some() {
+                return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
+            }
+        }
         let entering = !active(app);
         if entering {
             app.render_workspace.displayed.clear();
             app.render_workspace.design_camera = Some((app.cam, app.ui.perspective));
             app.ui.tab = "RENDER".into();
-            select_stage(app, app.render_workspace.view.stage.key());
-            if app.render_workspace.view.selection == RenderSelection::Nothing {
+            let reveal = !crate::panel_runtime::production_active(app);
+            apply_stage(app, app.render_workspace.view.stage.key(), reveal);
+            if reveal && app.render_workspace.view.selection == RenderSelection::Nothing {
                 selection_editor(app, &RenderSelection::Nothing);
             }
         }
@@ -1107,6 +1131,10 @@ pub(crate) fn settle_entry_fit(app: &mut SolveApp, source: Camera, bounds: solid
 
 /// Stage navigation is transient per-document state. It never applies a resource or starts a job.
 pub(crate) fn select_stage(app: &mut SolveApp, key: &str) {
+    apply_stage(app, key, true);
+}
+
+fn apply_stage(app: &mut SolveApp, key: &str, reveal: bool) {
     let stage = match key {
         "look" => Stage::Look,
         "light" => Stage::Light,
@@ -1115,7 +1143,9 @@ pub(crate) fn select_stage(app: &mut SolveApp, key: &str) {
         _ => return,
     };
     app.render_workspace.view.stage = stage;
-    app.render_workspace.view.inspector.hidden = false;
+    if reveal {
+        reveal_inspector(app);
+    }
     let sections: &[&str] = match stage {
         Stage::Look => &["objects"],
         Stage::Light => &["lights", "environment"],
@@ -1182,6 +1212,21 @@ pub(crate) fn job_ready(app: &SolveApp, id: &str) -> Result<(), String> {
     ribbon::action_ready(app, id)
 }
 
+pub(crate) fn reveal_inspector(app: &mut SolveApp) {
+    request_inspector_visibility(app, true);
+}
+
+pub(crate) fn request_inspector_visibility(app: &mut SolveApp, visible: bool) {
+    set_inspector_visible(app, visible);
+    if crate::panel_runtime::production_active(app) {
+        app.render_workspace.view.inspector_visibility_request = Some(visible);
+    }
+}
+
+pub(crate) fn inspector_visible(app: &SolveApp) -> bool {
+    !app.render_workspace.view.inspector.hidden
+}
+
 pub(crate) fn set_inspector_visible(app: &mut SolveApp, visible: bool) {
     app.render_workspace.view.inspector.hidden = !visible;
 }
@@ -1223,9 +1268,10 @@ pub(crate) fn browser_mode(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if app.render_workspace.view.search_objects {
         let mut query = app.render_workspace.view.object_query.clone();
         crate::ui_kit::scope(ui, |ui| {
-            if crate::ui_kit::search_field(ui, ui.scope_id().with("render:tree:query"), &mut query, solidcraft_ui_text::tr("render.tree_search"))
-                .changed()
-            {
+            let response =
+                crate::ui_kit::search_field(ui, ui.scope_id().with("render:tree:query"), &mut query, solidcraft_ui_text::tr("render.tree_search"));
+            crate::panel_runtime::register_content_focus(ui.ctx(), &response);
+            if response.changed() {
                 let _ = app.run("view.render_browser", json!({"query":query}));
             }
         });
@@ -3616,9 +3662,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !environment::ring_input(app, ui, rect, &response) {
         let input = crate::navigation::handle(app, ui, input_rect, &response, crate::navigation::NavCaps::RENDER);
         let image_inside = input.inside && input.hover.is_some_and(|point| rect.contains(point));
-        let navigating = input.scroll != 0.0
-            || input.pinch != 1.0
-            || input.pan != egui::Vec2::ZERO
+        // The wheel, the trackpad and the pinch move the view under a pointer that stays
+        // where it is: the face under it keeps its highlight while the view moves (#2130).
+        // A mouse drag, the spin and an animated view own the pointer instead, and their
+        // hover goes off as before.
+        let view_moving = crate::navigation::view_moving(app, input.scroll, input.pinch, input.pan);
+        // The face under a still pointer keeps its highlight while the view moves under it
+        // (#2130); a mouse drag owns the pointer instead, and its hover goes off.
+        let hover_frozen = crate::navigation::hover_is_frozen(&input, app);
+        let navigating = view_moving
             || input.middle
             || input.secondary_down
             || (input.primary_nav.is_some() && input.primary_down)
@@ -3632,7 +3684,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .map(|p| crate::viewport::pick_cached(app, &crate::viewport::projection(app, rect), p))
             .unwrap_or_default();
         let candidate = assign::candidate(app, &hits, input.mods);
-        app.viewport.hover = candidate.as_ref().map(|(hit, _)| hit.clone());
+        // The view moved under a still pointer: the highlight under it stays on the face
+        // it was on instead of going off (#2130). It is picked again when the gesture ends.
+        if !(hover_frozen && image_inside) {
+            app.viewport.hover = candidate.as_ref().map(|(hit, _)| hit.clone());
+        }
         let assigning = assign::input(app, ui, &response, candidate.as_ref(), image_inside && !navigating && geometry_current);
         if !assigning && image_inside && !navigating {
             assign::hover_tooltip(app, &response, candidate.as_ref());

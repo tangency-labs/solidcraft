@@ -4,11 +4,12 @@
 //! r 52..64 over 90..270) overlap over a quarter turn and share the planes z = 0 and
 //! z = 60, and are joined.
 //!
-//! With the sweep's frame as upstream builds it (`sweep_frame_on_planar_path_normal`
-//! off), wall A's flat top is a B-spline 2.8e-5 off its plane, so it is not planar and
-//! its search domain reaches past the fold of its continuation. Upstream's
-//! `CoverCoincidentSurface` merges wall B's top onto that folded continuation and the
-//! join loses 5573 mm3. With `cover_refuses_folded_continuation` the cover across the
+//! With the sweep's frame as upstream built it, wall A's flat top was a B-spline 2.8e-5
+//! off its plane, so it was not planar and its search domain reached past the fold of its
+//! continuation; upstream's `CoverCoincidentSurface` merged wall B's top onto that folded
+//! continuation and the join lost 5573 mm3. WR-407's frame on the path plane's normal is
+//! the default now, and without `cover_refuses_folded_continuation` the join still loses
+//! more than 1000 mm3. With `cover_refuses_folded_continuation` the cover across the
 //! fold is refused and the join has the closed-form volume
 //! `V_A + V_B - overlap = 60 (pi/2)(56^2 - 44^2) + 60 (pi/2)(64^2 - 52^2) - 60 (pi/4)(56^2 - 52^2)`.
 //! The walls' radial faces are the sweep's approximation of the arcs, so the volume is
@@ -80,7 +81,7 @@ fn wall(k: &mut Kernel, turn: (Vec3, f64), radius: f64, start: f64, end: f64) ->
         .brep
 }
 
-/// The two walls joined, with WR-407's fix `fixed`.
+/// The two walls joined, with `cover_refuses_folded_continuation` (WR-407's cover half) `fixed`.
 fn joined(fixed: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
     k.fixes.cover_refuses_folded_continuation = fixed;
@@ -119,7 +120,8 @@ fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
     );
 }
 
-/// Upstream merges onto the folded continuation: the join is short by 5573 mm3.
+/// Without the fold rule the cover merges onto the folded continuation: the join is short
+/// by more than 1000 mm3 (5573 mm3 with upstream's sweep frame).
 #[test]
 fn wr_407_default_join_loses_the_folded_cover() {
     let (k, mut b) = joined(false);
