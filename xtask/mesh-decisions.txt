@@ -18,7 +18,6 @@ crates/doc/src/eval.rs:face_samples takes a point on each face from its mesh tri
 crates/doc/src/eval.rs:faces_near finds the faces near a point by the display mesh
 crates/doc/src/eval.rs:feature_tools_with_constructor reaches a To Object extent by the display mesh
 crates/doc/src/eval.rs:height_at measures a point's height on a face by the display mesh
-crates/doc/src/eval.rs:hole_axis_size sizes a hole's tools by the bodies its axis meets on the display mesh
 crates/doc/src/eval.rs:hole_depth_to works out a hole's To Object depth on the display mesh
 crates/doc/src/eval.rs:hole_on_surface_in moves a hole back onto its face by the display mesh
 crates/doc/src/eval.rs:hole_reaches decides whether a drill reaches material by the display mesh
