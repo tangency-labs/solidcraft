@@ -105,7 +105,8 @@ pub struct Tool {
     /// A construction line tool's line type (#10258, #15066), numbered as the Sketch Palette's
     /// Line Type icons: 0 normal, 1 construction, 2 centerline, 3 infinite. Infinite draws an
     /// infinite construction line in one click, or a construction segment once a length is
-    /// typed; the others always draw a segment. Each start of a tool begins at Infinite.
+    /// typed; the others always draw a segment. A tool starts at the type last chosen, so
+    /// switching between the construction line methods keeps it.
     pub line_type: u8,
     /// A construction line tool works as before #15066 (`construction_line_classic`): the
     /// Construction/Normal switch under the Length box sets `line_type`, and only a typed length
