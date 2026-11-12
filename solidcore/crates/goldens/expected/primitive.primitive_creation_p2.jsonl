@@ -44,7 +44,7 @@
 {"case":"gen0038","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0039","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"gen0040","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen0041","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
+{"case":"gen0041","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"gen0042","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0043","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0044","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0]}}
@@ -160,7 +160,7 @@
 {"case":"gen0155","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0156","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0]}}
 {"case":"gen0157","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen0158","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
+{"case":"gen0158","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"gen0159","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0160","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1001.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0161","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}

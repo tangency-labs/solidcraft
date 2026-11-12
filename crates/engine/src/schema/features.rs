@@ -37,7 +37,8 @@ pub struct BoxParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub corner: Option<PointExpr3>,
-    /// The box's centre, instead of `corner`.
+    /// The box's centre, instead of `corner`. The box stays centred there when its length, width
+    /// or height changes later.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub center: Option<PointExpr3>,

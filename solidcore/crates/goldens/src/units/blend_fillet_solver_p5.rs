@@ -459,8 +459,10 @@ fn run(i: &Inputs) -> Result<Output, HarnessError> {
     }
     let status = match outcome {
         Ok(()) => 0,
-        Err(SolidError::Upstream { code, .. }) => code,
-        Err(e) => return Err(harness(e)),
+        Err(e) => match crate::output::blend_status(&e) {
+            Some(code) => code,
+            None => return Err(harness(e)),
+        },
     };
     let mut state = vec![
         f64::from(status),

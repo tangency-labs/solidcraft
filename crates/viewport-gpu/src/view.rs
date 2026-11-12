@@ -474,6 +474,9 @@ pub enum InstanceLook {
     Faded,
     /// With the see-through bodies ([`GpuScene::glass`]): far sides, then near sides.
     Glass,
+    /// An opaque PBR surface (the product preview's), its placement's palette entry naming its
+    /// material ([`Palette::materials`]). Smooth meshes only.
+    Pbr,
 }
 
 /// Triangles drawn at several places: a part placed by many occurrences keeps one copy of its
@@ -622,6 +625,8 @@ impl GpuScene {
         let mut out = GpuScene { glass: std::mem::take(&mut self.glass), palette: palette.clone(), ..Default::default() };
         for block in std::mem::take(&mut self.blocks) {
             append_runs(&block.bytes.vertices, &block.bytes.opaque, &mut out.tris);
+            // PBR built triangles are opaque too (their materials are in the palette).
+            append_runs(&block.bytes.vertices, &block.bytes.pbr, &mut out.tris);
             append_runs(&block.bytes.vertices, &block.bytes.glass, &mut out.glass);
             append_runs(&block.bytes.vertices, &block.bytes.faded, &mut out.trans);
             out.lines.extend_from_slice(&block.bytes.lines);
@@ -629,7 +634,7 @@ impl GpuScene {
         }
         for m in std::mem::take(&mut self.instanced) {
             match m.look {
-                InstanceLook::Opaque => m.expand_into(&mut out.tris),
+                InstanceLook::Opaque | InstanceLook::Pbr => m.expand_into(&mut out.tris),
                 InstanceLook::Faded => m.expand_into(&mut out.trans),
                 InstanceLook::Glass => m.expand_into(&mut out.glass),
             }
@@ -1076,6 +1081,10 @@ pub struct Frame {
     pub preview_bounds: Option<solidcraft_viewport::vec::Bounds>,
     /// Column-major view-projection.
     pub view_proj: [[f32; 4]; 4],
+    /// Each column's depth turned round (w - z) for a reversed depth buffer, worked out in f64
+    /// (`Mat4::turned_depth_f32`). None: taken from `view_proj`, which is exact enough while the
+    /// near plane is not tiny beside the scene.
+    pub turned_depth: Option<[f32; 4]>,
     /// Direction toward the eye (for lighting).
     pub back: [f32; 3],
     /// Viewport size in physical pixels.
@@ -2327,6 +2336,8 @@ pub struct Renderer {
     /// `pbr` for built triangles whose palette entries name their materials (the product
     /// preview's blocks, [`TriClass::Pbr`]).
     pbr_palette: wgpu::RenderPipeline,
+    /// `pbr_palette` for placements of a shared smooth mesh ([`InstanceLook::Pbr`]).
+    pbr_instanced: wgpu::RenderPipeline,
     trans: wgpu::RenderPipeline,
     /// Glass: far sides (front faces culled), then near sides (back faces culled).
     glass_far: wgpu::RenderPipeline,
@@ -2720,10 +2731,20 @@ pub fn far_depth(reversed: bool) -> f32 {
 /// The view-projection the GPU draws with: `vp` (depth 0 near, 1 far, as the CPU uses it), with
 /// depth turned round (z' = w - z) for reversed depth. Columns, as `Mat4::to_f32` gives them.
 pub fn gpu_view_proj(vp: [[f32; 4]; 4], reversed: bool) -> [[f32; 4]; 4] {
+    gpu_view_proj_turned(vp, None, reversed)
+}
+
+/// [`gpu_view_proj`] with the turned depth of each column given where the caller worked it out
+/// in f64 ([`Frame::turned_depth`]).
+pub fn gpu_view_proj_turned(vp: [[f32; 4]; 4], turned: Option<[f32; 4]>, reversed: bool) -> [[f32; 4]; 4] {
     if !reversed {
         return vp;
     }
-    vp.map(|c| [c[0], c[1], c[3] - c[2], c[3]])
+    let mut out = vp.map(|c| [c[0], c[1], c[3] - c[2], c[3]]);
+    if let Some(t) = turned {
+        out.iter_mut().zip(t).for_each(|(c, z)| c[2] = z);
+    }
+    out
 }
 
 impl Renderer {
@@ -3223,6 +3244,27 @@ impl Renderer {
             (
                 pipeline("sc_pbr", "vs_pbr", "fs_pbr", pbr_layout(), opaque(), None),
                 pipeline("sc_pbr_palette", "vs_pbr_palette", "fs_pbr", tri_layout(), opaque(), None),
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("sc_pbr_instanced"),
+                    layout: Some(&layout),
+                    vertex: wgpu::VertexState {
+                        module: &module,
+                        entry_point: Some("vs_pbr_inst"),
+                        buffers: &[Some(shared_layout()), Some(instance_layout())],
+                        compilation_options: Default::default(),
+                    },
+                    primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+                    depth_stencil: opaque(),
+                    multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some("fs_pbr"),
+                        targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                        compilation_options: Default::default(),
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                }),
             )
         };
         let lines = || {
@@ -3273,7 +3315,7 @@ impl Renderer {
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
-            let (pbr, pbr_palette) = pbr.join();
+            let (pbr, pbr_palette, pbr_instanced) = pbr.join();
             let oit = oit.join();
             Renderer {
                 product_depth: None,
@@ -3337,6 +3379,7 @@ impl Renderer {
                 tri_hl_instanced_flat,
                 pbr,
                 pbr_palette,
+                pbr_instanced,
                 trans,
                 glass_far,
                 glass_near,
@@ -3655,6 +3698,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
     cb.pv_key.hash(&mut h);
     cb.pv_hide.hash(&mut h);
     cb.view_proj.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
+    cb.turned_depth.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
     cb.back.map(f32::to_bits).hash(&mut h);
     cb.eye.map(f32::to_bits).hash(&mut h);
     cb.size_px.map(f32::to_bits).hash(&mut h);
@@ -4139,6 +4183,9 @@ impl Renderer {
         }
         in_moving(pass, &|pass, mv| tris(pass, &res.pbr, &mv.pbr));
         block_class(pass, &res.pbr_palette, TriClass::Pbr);
+        for d in m.instanced.iter().filter(|d| d.look == InstanceLook::Pbr) {
+            d.draw(pass, &res.pbr_instanced, &res.pbr_instanced, tally);
+        }
         // Whole-body tints first, so a face or an edge highlighted over the body (in `h.tris`
         // and `h.lines`) keeps its own colour, as it did when the body's triangles were built
         // into the same list before them.
@@ -4628,7 +4675,7 @@ fn local_direction(model: &[[f32; 4]; 4], d: [f32; 3]) -> [f32; 3] {
 }
 
 fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool, model: [[f32; 4]; 4]) -> Vec<u8> {
-    let mut v: Vec<f32> = gpu_view_proj(cb.view_proj, reversed).iter().flatten().copied().collect();
+    let mut v: Vec<f32> = gpu_view_proj_turned(cb.view_proj, cb.turned_depth, reversed).iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
     v.extend([w.max(1.0), h.max(1.0), 0.0, if cb.outline { 1.0 } else { 0.0 }]);
     v.extend(cb.clip);
@@ -4931,6 +4978,7 @@ mod tests {
             pv_hide: false,
             preview_bounds: None,
             view_proj: [[0.0; 4]; 4],
+            turned_depth: None,
             back: [0.0; 3],
             size_px: [800.0, 600.0],
             clip: [0.0; 4],
@@ -5470,6 +5518,7 @@ mod glass_tests {
             pv_hide: false,
             preview_bounds: None,
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
+            turned_depth: None,
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
             clip,
@@ -5669,6 +5718,7 @@ mod glass_tests {
             pv_hide: false,
             preview_bounds: None,
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
+            turned_depth: None,
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
             clip: [0.0; 4],
@@ -6261,5 +6311,33 @@ mod glass_tests {
         // Seen from below, the order flips.
         let sorted = sort_back_to_front(&sc.glass, [0.0, 0.0, -1.0]);
         assert_eq!(f32::from_le_bytes(sorted[8..12].try_into().unwrap()), 5.0);
+    }
+
+    /// `GpuScene::merged` keeps every triangle the scene holds: the blocks' PBR runs as well as
+    /// their opaque ones, and the PBR placements' triangles.
+    #[test]
+    fn merged_keeps_block_pbr_runs_and_pbr_placements() {
+        let mut b = BlockBuilder::default();
+        b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Opaque);
+        b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Pbr);
+        let mesh = Arc::new(solidcore_tess::Mesh {
+            positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y],
+            normals: vec![Vec3::Z; 3],
+            triangles: vec![[0, 1, 2]],
+            ..Default::default()
+        });
+        let mut instanced = InstancedMesh {
+            key: 7,
+            tris: Arc::new(SharedTris::new(&mesh)),
+            instances: Vec::new(),
+            look: InstanceLook::Pbr,
+            levels: Vec::new(),
+            closed: true,
+        };
+        instanced.place([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], PaletteIndex(1));
+        let scene = GpuScene { blocks: vec![SceneBlock { key: 3, bytes: b.freeze() }], instanced: vec![instanced], ..GpuScene::default() };
+        let merged = scene.merged();
+        // The opaque and PBR block triangles, then the PBR placement's one triangle.
+        assert_eq!(merged.tris.len(), 2 * 3 * TRI_SIZE + 3 * TRI_SIZE, "merged drops no triangle the scene holds");
     }
 }

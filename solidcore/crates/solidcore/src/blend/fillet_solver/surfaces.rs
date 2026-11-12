@@ -37,7 +37,12 @@ impl ConstantRadiusOps for GeometrySolver<'_> {
     fn offset_surface(&self, rail: usize) -> Result<&OffsetSurface> {
         self.geometry
             .offset_surface(rail, Some(&self.actual.solver))?
-            .ok_or_else(|| SolidError::null_pointer("blend::fillet_solver::surfaces"))
+            .ok_or_else(|| {
+                SolidError::blend_missing(
+                    "blend::fillet_solver::surfaces",
+                    "the rail's offset surface",
+                )
+            })
     }
 
     fn offset_surface_mut(&mut self, rail: usize) -> Result<&mut OffsetSurface> {
@@ -281,7 +286,7 @@ impl FilletSolver {
         match guesses.rails.get(rail).copied().flatten() {
             Some(guess) => Ok(guess),
             // pFG->GetRail(lRailIndex) is NULL: upstream dereferences it
-            None => Err(SolidError::null_pointer(OP)),
+            None => Err(SolidError::blend_missing(OP, "the fillet geometry's rail")),
         }
     }
 }

@@ -133,7 +133,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             angle: String = "5 deg".into() => shown_expr(angle, ValueKind::Angle),
         } => json!({"angle": angle});
         // A point picked as well puts the plane through it instead of at the distance.
-        OffsetPlane("construct.plane.offset", "OFFSET PLANE", [("Plane", PLANES | PLANAR_FACES, false), ("Through point", selection::VERTICES | selection::POINTS, false)],
+        OffsetPlane("construct.plane.offset", "OFFSET PLANE", [("Plane", PLANES | PLANAR_FACES, false), ("Through point", selection::VERTICES | selection::POINTS | selection::SNAP_POINTS, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { distance, .. } }) {
             offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
@@ -608,7 +608,7 @@ struct DialogComputation {
 
 impl DialogComputation {
     fn new(app: &SolveApp, d: &Dialog) -> Result<Self, String> {
-        if app.file_load.busy() || app.file_picker_busy() {
+        if app.file_load_holds() || app.file_picker_busy() {
             return Err("a file operation is in progress".into());
         }
         let cmds = apply_commands(app, d)?;
@@ -641,7 +641,7 @@ impl DialogComputation {
 }
 
 fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommands, d: &Dialog) -> Result<(), String> {
-    if app.file_load.busy() || app.file_picker_busy() {
+    if app.file_load_holds() || app.file_picker_busy() {
         return Err("a file operation is in progress".into());
     }
     let replies = app.session.accept_commands(prepared).map_err(|e| e.to_string())?;
@@ -973,7 +973,8 @@ impl Dialog {
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
                 // Bodies also take sketch points and circles: a frame the bodies follow (#6257).
-                let picks = if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN } else { ALIGN_PICKS };
+                let picks =
+                    if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN } else { ALIGN_PICKS } | selection::SNAP_POINTS;
                 Dialog::new(
                     Kind::Align { flip: false, components, axes: [true; 3], angle: String::new() },
                     vec![
@@ -1038,7 +1039,8 @@ impl Dialog {
                         | PLANES
                         | AXES
                         | selection::CONSTRUCTION_POINTS
-                        | selection::ORIGIN,
+                        | selection::ORIGIN
+                        | selection::SNAP_POINTS,
                     true,
                 )],
             ),
@@ -2103,15 +2105,17 @@ impl Dialog {
 }
 
 /// The edges a Fillet or Chamfer pick stands for: its tangent chain when `chain` is on, else
-/// the picked edge (both halves of a split circular rim).
+/// the picked edge (both halves of a split circular rim). The chain is the kernel's exact one,
+/// the edges the feature rounds: it ends where a concave edge runs on as a convex one, which
+/// the display mesh cannot tell.
 fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
     let mut picked = crate::viewport::picked_selection(s, sel);
     if chain
-        && let Sel::Edge { body, index, .. } = sel
+        && let Sel::Edge { body, index, point } = sel
         && let Some(b) = crate::open_meshing::session_world(s).body(body)
     {
         let m = b.mesh();
-        for i in m.tangent_chain(*index, 2f64.to_radians()) {
+        for i in b.blend_chain(*index, *point) {
             if !picked.iter().any(|x| matches!(x, Sel::Edge { index: j, .. } if *j == i))
                 && let Some(e) = m.edges.get(i)
             {
@@ -3091,17 +3095,25 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
             format!("{body} · circle centre")
         }
         Sel::Edge { body, index, .. } => format!("{body} · edge {index}"),
-        // A point of the model: a vertex, or the centre a round edge stands for.
-        Sel::Vertex { body, .. } if !body.is_empty() => format!("{body} · point"),
+        // A point of the model: a vertex, a snapped centre or middle, or the centre a round edge
+        // stands for. Where it is tells two picks on one body apart.
+        Sel::Vertex { body, point } if !body.is_empty() => format!("{body} · {}", crate::snap_wake::label(*point)),
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
         Sel::Occurrence { path } if path.is_empty() => s.doc.name.clone(),
         Sel::Occurrence { path } => s.occurrence_placement(path).map(|p| p.name).unwrap_or_else(|_| "Component".into()),
-        Sel::Vertex { body, point } if body.is_empty() => {
+        Sel::Vertex { point, .. } => {
             let state = crate::open_meshing::session_world(s);
-            let p = s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)).unwrap_or_default();
-            format!("({:.2}, {:.2}) mm", p.x, p.y)
+            match s.active_sketch.and_then(|id| state.sketch(id)) {
+                // A point on the sketch's plane: where it is in the sketch.
+                Some(sk) if (sk.plane.to_world(sk.plane.to_local(*point)) - *point).len() < 1e-6 => {
+                    let p = sk.plane.to_local(*point);
+                    format!("({:.2}, {:.2}) mm", p.x, p.y)
+                }
+                // A snap point (a centre, a middle) off the sketch's plane or outside a sketch:
+                // where it is in the model.
+                _ => crate::snap_wake::label(*point),
+            }
         }
-        Sel::Vertex { body, .. } => format!("{body} · vertex"),
     }
 }
 
@@ -3113,7 +3125,12 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
-    if let Kind::Construct { command: "construct.plane.axis_point", keys, .. } = &d.kind {
+    if let Kind::Construct {
+        command: "construct.plane.axis_point" | "construct.plane.two_edges" | "construct.plane.three_points" | "construct.plane.perpendicular",
+        keys,
+        ..
+    } = &d.kind
+    {
         return keys.get(index).copied();
     }
     if matches!(d.kind, Kind::Section { .. }) && index == 0 {
@@ -3962,14 +3979,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Physical materials: the library's, then the design's own (material.create).
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
-    // The Sketch Palette owns the right edge for as long as a sketch is being edited. A dialog
-    // started there docks at the left instead, so neither panel hides the other.
+    // In Classic, a dialog starts on the left when the Sketch Palette occupies the right.
+    // Shared-panel workspaces keep the existing editor card floating at the right.
     let column = crate::dialog_column::place(app, ctx, &d);
-    let side = if column.is_some() || (crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx)) {
-        crate::frame::Side::Left
-    } else {
-        crate::frame::Side::Right
-    };
+    let side = crate::shell::floating_editor_side(
+        app,
+        column.is_some() || (crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx)),
+    );
     let top = crate::shell::panel_top(app, vp, vp.bottom(), side);
     // Empty/hostile viewport geometry cannot provide a safe window rectangle.
     if !vp.is_finite() || !vp.is_positive() {
@@ -4326,6 +4342,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 Err(error) => d.refuse(app, error),
             }
         }
+        // Not computing again: the computation ended, applied or refused (saying why).
+        if app.applying.is_none() {
+            let outcome = match &d.error {
+                Some(why) if !applied => crate::operations::Outcome::Failed(why.clone()),
+                _ => crate::operations::Outcome::Done,
+            };
+            crate::operations::ended(app, "apply", outcome);
+        }
     }
     if applied && apply_again {
         for input in &mut d.inputs {
@@ -4340,9 +4364,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if applied && d.editing.is_none() {
         remember(app, &d);
     }
-    // Cancel while computing: the result goes (its worker runs on to its end).
-    if cancel && !applied {
-        app.applying = None;
+    // Cancel while computing: the result goes (its worker stops at its next feature).
+    if cancel && !applied && app.applying.take().is_some() {
+        crate::operations::ended(app, "apply", crate::operations::Outcome::Cancelled);
     }
     if !keep || cancel {
         app.session.feature_edit_sketch = None;
@@ -4624,7 +4648,9 @@ pub fn cancel(app: &mut SolveApp) {
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();
     }
-    app.applying = None;
+    if app.applying.take().is_some() {
+        crate::operations::ended(app, "apply", crate::operations::Outcome::Cancelled);
+    }
     if let Some(mut d) = app.dialog.take() {
         crate::dialogs_motion::closed(app, &mut d, false);
         if let Kind::Text(k) = &mut d.kind {
@@ -5822,8 +5848,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let base = plane_arg(app, sels(d, 0).first())?;
             match offset_through_point(d) {
                 // A null `offset` keeps the descriptor's distance out: the plane goes through the point.
-                Some(point) => ("construct.plane.offset", json!({"base": base, "through": construct_ref(app, point)?, "offset": null})),
-                None => ("construct.plane.offset", json!({"base": base})),
+                Some(point) => {
+                    // A snap point saved before, picked again where it was: kept as saved.
+                    let through = match (point, d.extra.get("through")) {
+                        (Sel::Vertex { point, .. }, Some(saved)) if saved.get("at").and_then(vec3_of) == Some(*point) => saved.clone(),
+                        _ => construct_ref(app, point)?,
+                    };
+                    ("construct.plane.offset", json!({"base": base, "through": through, "offset": null}))
+                }
+                // A null `through` keeps a saved snap point (`extra`) out: the plane is at the distance.
+                None => ("construct.plane.offset", json!({"base": base, "through": null})),
             }
         }
         Kind::MeshConvert { tolerance } => {
@@ -5988,8 +6022,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     }
                     (Some(Sel::Face { point, .. }), _) => p[format!("{key}_face")] = pt(*point),
                     (Some(Sel::Edge { point, .. }), _) => p[key] = json!({"snap": "edge_mid", "at": pt(*point)}),
-                    // The origin point (a vertex of no body) stays the origin.
-                    (Some(Sel::Vertex { body, .. }), _) if body.is_empty() => p[key] = json!("origin"),
+                    // The origin point (a vertex of no body at the origin) stays the origin; a snap
+                    // point of no body elsewhere (a sketch line's middle) is where it is.
+                    (Some(Sel::Vertex { body, point }), _) if body.is_empty() && [point.x, point.y, point.z].iter().all(|v| v.abs() < 1e-9) => {
+                        p[key] = json!("origin")
+                    }
                     (Some(Sel::Vertex { point, .. }), _) => p[key] = pt(*point),
                     // A plane stays a plane, so the bodies follow it when it moves.
                     (Some(Sel::Plane { name }), _) => p[format!("{key}_plane")] = json!(name),
@@ -6848,7 +6885,7 @@ fn emboss_face_sel(s: &Session, component: u64, face: &solidcraft_engine::doc::E
 /// Plane At Angle have dialogs of their own.
 fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&'static str, Accept, &'static str)])> {
     const PLANE: Accept = PLANES | PLANAR_FACES;
-    const POINT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
+    const POINT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS | selection::SNAP_POINTS;
     const LINE: Accept = EDGES | AXES;
     const CURVE: Accept = EDGES | CURVES;
     Some(match id {
@@ -6901,7 +6938,10 @@ fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
     Ok(match sel {
         Sel::Face { point, .. } => json!({"face": pt(*point)}),
         Sel::Edge { point, .. } => json!({"edge": pt(*point)}),
-        Sel::Vertex { point, .. } => json!({"vertex": pt(*point)}),
+        Sel::Vertex { point, .. } => match crate::snap_wake::snapped(app, *point) {
+            Some((item, snap)) => snap_ref(app, item, snap)?,
+            None => json!({"vertex": pt(*point)}),
+        },
         Sel::Plane { name } => json!({"plane": name}),
         Sel::Axis { name } => json!({"axis": name}),
         Sel::ConstructionPoint { name } => json!({"construct_point": name}),
@@ -6926,6 +6966,47 @@ fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
         }
         _ => return Err("this pick can't be used here".into()),
     })
+}
+
+/// A snap point picked for a construction (#11228), as a reference that follows the model: a
+/// centre or middle as `{type: snap}` on the edge, face or sketch curve that offered it, an end
+/// as the vertex or sketch point there.
+fn snap_ref(app: &SolveApp, item: &Sel, snap: &solidcraft_engine::snap::SnapPoint) -> Result<Value, String> {
+    use solidcraft_engine::snap::SnapKind;
+    let kind = match snap.kind {
+        SnapKind::Centre => "centre",
+        SnapKind::Middle => "middle",
+        // No exact centre of a face's area yet: kept where it was picked.
+        SnapKind::FaceCentre => return Ok(json!({"point": pt(snap.at)})),
+        SnapKind::End | SnapKind::Vertex => {
+            return match item {
+                Sel::ExternalSketchCurve { sketch, .. } => sketch_point_at(app, *sketch, snap.at)
+                    .map(|point| json!({"sketch": sketch, "point": point}))
+                    .ok_or_else(|| "pick the sketch point itself".to_string()),
+                _ => Ok(json!({"vertex": pt(snap.at)})),
+            };
+        }
+    };
+    let of = match item {
+        Sel::Edge { point, .. } => json!({"type": "edge", "at": pt(*point)}),
+        Sel::Face { point, .. } => json!({"type": "face", "at": pt(*point)}),
+        Sel::ExternalSketchCurve { sketch, id } => json!({"type": "sketch_curve", "sketch": sketch, "curve": id}),
+        _ => return Err("this pick can't be used here".into()),
+    };
+    Ok(json!({"type": "snap", "of": of, "kind": kind, "at": pt(snap.at)}))
+}
+
+/// The id of the point of sketch `sketch` at world point `at`.
+fn sketch_point_at(app: &SolveApp, sketch: u64, at: Vec3) -> Option<String> {
+    let st = app.session.world_state().ok()?;
+    let ss = st.sketch(sketch)?;
+    let tol = 1e-6 * (1.0 + at.len());
+    ss.sketch
+        .points
+        .iter()
+        .enumerate()
+        .find(|(i, _)| ss.sketch.point(*i).is_some_and(|q| ss.plane.to_world(q).dist(at) <= tol))
+        .map(|(_, p)| p.id.clone())
 }
 
 /// A picked plane or planar face as `construct.plane.*` takes it.
@@ -6962,6 +7043,8 @@ fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Opti
             _ => None,
         },
         GeoRef::SketchPoint { sketch, point } => Some(Sel::SketchPoint { id: format!("{sketch}:{point}") }),
+        // Shown where it was picked; the dialog keeps the saved reference (`extra.through`).
+        GeoRef::Snap { at, .. } => Some(Sel::Vertex { body: String::new(), point: *at }),
         GeoRef::ConstructPoint { name } => Some(Sel::ConstructionPoint { name: name.to_string() }),
         GeoRef::Origin => Some(Sel::Vertex { body: String::new(), point: Vec3::ZERO }),
         GeoRef::Point { p } => Some(Sel::Vertex { body: String::new(), point: *p }),
@@ -6979,6 +7062,25 @@ pub(crate) fn model_axis_sel(s: &Session, g: &solidcraft_engine::doc::construct:
         GeoRef::Face { .. } => face_sel(s, at),
         _ => None,
     }
+}
+
+/// A saved construction reference shown as the pick it stands for. Edit Feature keeps the
+/// reference itself until a new pick replaces it, so a fixed point or the origin has a pick too.
+fn saved_pick(s: &Session, reference: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
+    use solidcraft_engine::doc::construct::GeoRef;
+    Some(match reference {
+        GeoRef::World { axis } => Sel::Axis { name: axis.clone() },
+        GeoRef::Axis { name } => Sel::Axis { name: name.to_string() },
+        GeoRef::ConstructPoint { name } => Sel::ConstructionPoint { name: name.to_string() },
+        GeoRef::SketchPoint { sketch, point } => Sel::SketchPoint { id: format!("{sketch}:{point}") },
+        GeoRef::SketchCurve { sketch, curve } => Sel::SketchCurve { id: curve.clone(), sketch: Some(*sketch) },
+        GeoRef::Vertex { at, .. } => Sel::Vertex { body: String::new(), point: *at },
+        GeoRef::Point { p } => Sel::Vertex { body: String::new(), point: *p },
+        GeoRef::Origin => Sel::Vertex { body: String::new(), point: Vec3::ZERO },
+        GeoRef::Snap { at, .. } => Sel::Vertex { body: String::new(), point: *at },
+        GeoRef::Plane { plane } => plane_sel(s, plane)?,
+        other => model_axis_sel(s, other)?,
+    })
 }
 
 /// A stored construction reference back into a dialog pick.
@@ -7295,6 +7397,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             ease_out,
             to,
             references,
+            old_surface_start: _,
         } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults(s);
@@ -7413,7 +7516,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Box { corner, length, width, height, operation } => {
+        FeatureKind::Box { corner, length, width, height, operation, centred } => {
             let mut d = start("solid.box")?;
             d.kind = Kind::Primitive {
                 cmd: "solid.box",
@@ -7422,7 +7525,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 at: None,
                 refs: Default::default(),
             };
-            d.extra.insert("corner".into(), pt_expr(corner));
+            // A box placed by its centre is edited by that centre, so it stays centred (#14487).
+            d.extra.insert(if *centred { "center" } else { "corner" }.into(), pt_expr(corner));
             d
         }
         FeatureKind::Cylinder { base, axis, radius, height, operation, references } => {
@@ -7796,6 +7900,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = point_sel(s, point).into_iter().collect();
             }
+            if matches!(point.as_ref(), solidcraft_engine::doc::construct::GeoRef::Snap { .. }) {
+                d.extra.insert("through".into(), serde_json::to_value(point).ok()?);
+            }
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::AlongPath { path, t } } => {
@@ -7817,30 +7924,27 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { .. } } => {
+        FeatureKind::ConstructionPlane {
+            plane: PlaneRef::AxisPoint { .. } | PlaneRef::TwoEdges { .. } | PlaneRef::ThreePoints { .. } | PlaneRef::Perpendicular { .. },
+        } => {
             let mut world = f.kind.clone();
             world.transform_geometry(&feature_frame(s, f.component));
-            let FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { axis, point } } = world else { return None };
-            let mut d = start("construct.plane.axis_point")?;
-            for (input, reference) in d.inputs.iter_mut().zip([&axis, &point]) {
-                // Keep the exact saved references when no new pick has replaced them.
-                // Fixed points also need a visible pick to keep the shared form complete.
-                input.items = vec![match reference.as_ref() {
-                    solidcraft_engine::doc::construct::GeoRef::World { axis } => Sel::Axis { name: axis.clone() },
-                    solidcraft_engine::doc::construct::GeoRef::Axis { name } => Sel::Axis { name: name.to_string() },
-                    solidcraft_engine::doc::construct::GeoRef::ConstructPoint { name } => Sel::ConstructionPoint { name: name.to_string() },
-                    solidcraft_engine::doc::construct::GeoRef::SketchPoint { sketch, point } => Sel::SketchPoint { id: format!("{sketch}:{point}") },
-                    solidcraft_engine::doc::construct::GeoRef::SketchCurve { sketch, curve } => {
-                        Sel::SketchCurve { id: curve.clone(), sketch: Some(*sketch) }
-                    }
-                    solidcraft_engine::doc::construct::GeoRef::Vertex { at, .. } => Sel::Vertex { body: String::new(), point: *at },
-                    solidcraft_engine::doc::construct::GeoRef::Point { p } => Sel::Vertex { body: String::new(), point: *p },
-                    solidcraft_engine::doc::construct::GeoRef::Origin => Sel::Vertex { body: String::new(), point: Vec3::ZERO },
-                    other => model_axis_sel(s, other)?,
-                }];
+            let FeatureKind::ConstructionPlane { plane } = &world else { return None };
+            let (command, refs) = solidcraft_engine::cmd::picked_plane_refs(plane)?;
+            let mut d = start(command)?;
+            let keys = match &d.kind {
+                Kind::Construct { keys, .. } => keys.clone(),
+                _ => return None,
+            };
+            for (key, reference) in refs {
+                // Keep the exact saved references when no new pick has replaced them. Fixed
+                // points also need a visible pick to keep the shared form complete; a reference
+                // that cannot be shown now leaves its row empty to pick again.
+                let Some(input) = keys.iter().position(|k| *k == key).and_then(|i| d.inputs.get_mut(i)) else { continue };
+                let (Some(pick), Ok(saved)) = (saved_pick(s, reference), serde_json::to_value(reference)) else { continue };
+                input.items = vec![pick];
+                d.extra.insert(key.into(), saved);
             }
-            d.extra.insert("axis".into(), serde_json::to_value(axis).ok()?);
-            d.extra.insert("point".into(), serde_json::to_value(point).ok()?);
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { face, reference, .. } } => {

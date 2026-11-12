@@ -75,6 +75,11 @@ pub struct EdgeCircle {
     pub angle: f64,
 }
 
+/// The record edges that bound face `face` of `b` (none for a face out of range).
+pub fn face_edge_indices(b: &Body, face: usize) -> Vec<usize> {
+    crate::offset::face_edges(b.record(), face).into_iter().map(|e| e as usize).collect()
+}
+
 /// The circle edge `edge` (in the order of [`Body::edges`] and the tessellated mesh's edges)
 /// lies on, if its curve is a circle or an arc of one: exactly from a circle record, and for any
 /// other curve when its points all lie on one circle (a circle held as a rational spline). `None`
