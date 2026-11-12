@@ -5796,10 +5796,8 @@ fn fillet_of_lines_that_already_meet_needs_no_end_to_move() {
         let arcs: Vec<_> = sk.curves.iter().filter(|c| matches!(c.kind, CurveKind::Arc { .. })).collect();
         assert_eq!(arcs.len(), 1, "{hold}: {r}");
         // The arc's tangent points: 5 mm from the corner (40, 0) along each line.
-        let ends: Vec<Vec2> = match arcs[0].kind {
-            CurveKind::Arc { a, b, .. } => vec![sk.point(a).unwrap(), sk.point(b).unwrap()],
-            _ => unreachable!(),
-        };
+        let CurveKind::Arc { a, b, .. } = arcs[0].kind else { panic!("an arc") };
+        let ends: Vec<Vec2> = vec![sk.point(a).unwrap(), sk.point(b).unwrap()];
         for want in [Vec2::new(35.0, 0.0), Vec2::new(40.0, 5.0)] {
             assert!(ends.iter().any(|e| e.dist(want) < 1e-6), "{hold}: {ends:?}");
         }
