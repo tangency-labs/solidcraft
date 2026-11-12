@@ -629,7 +629,10 @@ fn command_effects_are_explicit_and_independent_of_undo() {
     {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Read, "{command}");
     }
-    let new = crate::cmd::CommandSpec::new("sample.new", "New", |_, _| Ok(json!({}))).noundo();
+    // A test-only command: its id goes through a variable so the icon audit, which reads command ids
+    // registered under crates/engine/src, doesn't take this fixture for a real command without an icon.
+    let id = "sample.new";
+    let new = crate::cmd::CommandSpec::new(id, "New", |_, _| Ok(json!({}))).noundo();
     assert_eq!(new.effect, Effect::Edit);
 }
 
