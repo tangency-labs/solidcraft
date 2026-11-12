@@ -10,8 +10,8 @@
 //!
 //! Deviations: local spatial indices and endpoint/outer-loop membership indices
 //! prune impossible candidates; accepted pairs keep native order. No recursion.
-//! The native exhaustive-search boolean is always true (`bCheck` starts false);
-//! it is preserved, independently of whether any pairs were found.
+//! The native exhaustive-search boolean is corrected: upstream's `bCheck` starts
+//! false so its `!bCheck` is always true; `found` reports whether a pair was found.
 //! The opt-in profiler counts supplied candidates and query invocations; its
 //! counters are observational and compile out without the `profile` feature.
 //! A vertex/face drop or an edge/face coincidence solve is skipped when the certified
@@ -54,7 +54,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Coincidence flag and native-order topology pairs.
 #[derive(Debug, Clone)]
 pub struct CoincidenceResult {
-    /// Native boolean (also true after an exhaustive search with no pairs).
+    /// Whether any coincident pair was found (upstream's boolean is always true).
     pub found: bool,
     /// Pairs in vertex/vertex, edge/edge, face/face, vertex/edge,
     /// vertex/face and edge/face order.
@@ -220,7 +220,7 @@ fn ignored<T>(value: Result<T>) -> Result<Option<T>> {
 /// Negative or zero tolerance selects the B-rep tolerance. `find_all=false`
 /// stops at the first pair; otherwise every pair is returned. `level` selects the
 /// native report level (0 through 4), without suppressing the geometric search.
-/// The native all-pairs boolean quirk is preserved: inspect `pairs` for emptiness.
+/// `found` reports whether any pair was found; inspect `pairs` for which.
 pub fn contains_coincident_topology(
     k: &Kernel,
     b: &mut Brep,
@@ -263,7 +263,7 @@ fn search(
         level,
     };
     let mut result = CoincidenceResult {
-        found: true,
+        found: false,
         pairs: Vec::new(),
     };
     let vertices = p1::vertices(b, None)?;
@@ -303,6 +303,7 @@ fn search(
                     point.distance(p),
                 )?;
                 if coincident {
+                    result.found = true;
                     result
                         .pairs
                         .push((EntityRef::Vertex(v), EntityRef::Vertex(other)));
@@ -374,6 +375,7 @@ fn search(
                     tol,
                     found.max_deviation,
                 )?;
+                result.found = true;
                 result
                     .pairs
                     .push((EntityRef::Edge(e), EntityRef::Edge(other)));
@@ -473,6 +475,7 @@ fn search(
                     tol,
                     gap,
                 )?;
+                result.found = true;
                 result
                     .pairs
                     .push((EntityRef::Face(f), EntityRef::Face(other)));
@@ -561,6 +564,7 @@ fn search(
                         tol,
                         drop.distance,
                     )?;
+                    result.found = true;
                     result
                         .pairs
                         .push((EntityRef::Vertex(v), EntityRef::Edge(e)));
@@ -656,6 +660,7 @@ fn search(
                     tol,
                     drop.gap,
                 )?;
+                result.found = true;
                 result
                     .pairs
                     .push((EntityRef::Vertex(v), EntityRef::Face(f)));
@@ -738,6 +743,7 @@ fn search(
                         tol,
                         UNDEF_DOUBLE,
                     )?;
+                    result.found = true;
                     result.pairs.push((EntityRef::Edge(e), EntityRef::Face(f)));
                     if !find_all {
                         return Ok(result);
@@ -919,6 +925,42 @@ pub(super) mod tests {
         for (factor, hit) in outcomes {
             assert_eq!(hit, factor <= 1.0, "gap = {factor} tol");
         }
+    }
+
+    /// The corrected native boolean (WR-773): `found` is false when the search finds no
+    /// coincident pair and true once a pair is found. Upstream's `bCheck = FALSE` made
+    /// its `!bCheck` always true, so the old port held `found` true unconditionally.
+    #[test]
+    fn found_reports_a_coincident_pair_and_only_then() {
+        let mut k = Kernel::default();
+        let mut body = panels(&mut k, 2, 40.0, 10.0, 3.0);
+        let identities = body.clone_standing_for_self().unwrap();
+        let keys = |e| identities.owner_identity(e);
+
+        // Two well-separated panels: no coincident pair, so `found` is false.
+        let clean = contains_coincident_topology(
+            &k,
+            &mut body.clone_standing_for_self().unwrap(),
+            -1.0,
+            true,
+            None,
+            0,
+            &keys,
+        )
+        .unwrap();
+        assert!(!clean.found);
+        assert!(clean.pairs.is_empty());
+
+        // Move one panel corner onto another: a coincident vertex pair, so `found` is
+        // true and the pair is reported.
+        let vertices = brep1::vertices(&body, None).unwrap();
+        assert!(vertices.len() >= 2);
+        let target = body.vertex(vertices[0]).unwrap().point;
+        body.vertex_mut(vertices[1]).unwrap().point = target;
+        let dirty =
+            contains_coincident_topology(&k, &mut body, -1.0, true, None, 0, &keys).unwrap();
+        assert!(dirty.found);
+        assert!(!dirty.pairs.is_empty());
     }
 }
 

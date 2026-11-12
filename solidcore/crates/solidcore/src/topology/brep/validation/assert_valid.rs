@@ -750,4 +750,38 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert!(lines[0].starts_with("SmBrep::Test #22 "), "{lines:?}");
     }
+
+    /// Two coincident vertices fail `AssertValid` at level 2, naming coincident topology
+    /// (test 15). Before WR-773 the check's boolean was always true and its consumer
+    /// inverted, so the coincident search was a no-op that never fired.
+    #[test]
+    fn coincident_vertices_fail_with_the_test_15_report() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::ZERO,
+            1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        let vertices: Vec<crate::topology::VertexId> = b.vertices().ids().collect();
+        let target = b.vertex(vertices[0]).unwrap().point;
+        b.vertex_mut(vertices[1]).unwrap().point = target;
+
+        let identities = b.clone_standing_for_self().unwrap();
+        let keys = |e| identities.owner_identity(e);
+        let mut reports = AssertArray::new();
+        let ok = assert_valid(&mut k, &mut b, Some(&mut reports), 2, true, &keys).unwrap();
+        assert!(!ok, "a body with coincident vertices must be invalid");
+        assert!(
+            reports.reports().iter().any(|r| r.test_index == 15),
+            "the failure must name coincident topology (test 15), got indices {:?}",
+            reports
+                .reports()
+                .iter()
+                .map(|r| r.test_index)
+                .collect::<Vec<_>>()
+        );
+    }
 }

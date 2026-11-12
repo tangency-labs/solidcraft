@@ -185,10 +185,19 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
     let ok = !cx.rep.need(0) || common == num_regions;
     rtn &= cx.rep.this_bool(b, C, this, 19, ok)?;
 
-    // See about running coincident-topology checks (its default level 0, first pair).
-    rtn &=
-        contains_coincident_topology(k, b, -1.0, false, cx.rep.array.as_deref_mut(), 0, cx.keys)?
-            .found;
+    // See about running coincident-topology checks (test 15, level 2; first pair).
+    let ok = !cx.rep.need(2)
+        || !contains_coincident_topology(
+            k,
+            b,
+            -1.0,
+            false,
+            cx.rep.array.as_deref_mut(),
+            0,
+            cx.keys,
+        )?
+        .found;
+    rtn &= cx.rep.this_bool(b, C, this, 15, ok)?;
 
     // Shell context checks (intrinsic).
     for _ in &shells {
