@@ -4,8 +4,9 @@
 
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_doc::{EmbossFace, apply_point, mat_inverse, mat_mul};
+use solidcraft_doc::{EmbossFace, ModelBody, apply_point, mat_inverse, mat_mul};
 use solidcraft_geom::Mesh;
+use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::prelude::*;
 
 use crate::params::{bad, str_, vec3};
@@ -27,16 +28,14 @@ pub(super) fn face_normal(s: &Session, p: Vec3) -> Option<Vec3> {
 
 /// The outward normal of the planar face at `p` of `body` (any body when `None`).
 pub(super) fn face_normal_in(s: &Session, p: Vec3, body: Option<&str>) -> Option<Vec3> {
-    let (m, f, d, _) = face_at_in(s, p, body).ok().flatten()?;
-    if !near_face(&m, d) {
+    let (_, f, d, name) = face_at_in(s, p, body).ok().flatten()?;
+    let st = s.model.state();
+    let b = st.body(&name)?;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    if d > tol * 10.0 {
         return None;
     }
-    m.triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, tf)| **tf == f)
-        .filter_map(|(t, _)| m.tri(t))
-        .find_map(|[a, b, c]| (b - a).cross(c - a).normalized())
+    b.body.planar_face(f as usize).map(|plane| plane.normal())
 }
 
 /// Is a face `d` from a point near enough to hold it: within a thousandth of the body's
@@ -56,34 +55,54 @@ pub(super) fn on_a_face(s: &Session, p: Vec3) -> bool {
         Ok(None) => false,
         Err(tied) => tied.first().is_some_and(|b| matches!(face_at_in(s, p, Some(b)), Ok(Some((m, _, d, _))) if near_face(&m, d))),
     };
-    on_one || s.model.state().bodies.iter().any(|b| in_a_planar_face_outline(&b.mesh(), p))
+    on_one || s.model.state().bodies.iter().any(|b| in_a_planar_face_outline(b, p))
 }
 
-/// Does `p` lie in the plane of a planar face of `m`, inside the hull of that face's corners
+/// Does `p` lie in the plane of a planar face of `b`, inside the hull of that face's boundary
 /// (so over its openings, not past its edge)?
-fn in_a_planar_face_outline(m: &Mesh, p: Vec3) -> bool {
-    let mut faces: std::collections::BTreeMap<u32, Vec<[Vec3; 3]>> = std::collections::BTreeMap::new();
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        if let Some(tri) = m.tri(t) {
-            faces.entry(*f).or_default().push(tri);
-        }
+fn in_a_planar_face_outline(b: &ModelBody, p: Vec3) -> bool {
+    if b.body.is_mesh() {
+        return false;
     }
-    faces.values().any(|tris| {
-        let Some([a, b, c]) = tris.first().copied() else { return false };
-        let Some(n) = (b - a).cross(c - a).normalized() else { return false };
-        let planar = tris.iter().all(|[a, b, c]| (*b - *a).cross(*c - *a).normalized().is_some_and(|k| k.dot(n) > 1.0 - 1e-6));
-        if !planar || !near_face(m, (p - a).dot(n).abs()) {
-            return false;
+    let tol = (b.body.size() * 1e-3).max(1e-3) * 10.0;
+    let rec = b.body.record();
+    for (i, face) in rec.faces.iter().enumerate() {
+        let Some(plane) = b.body.planar_face(i) else { continue };
+        if plane.height(p).abs() > tol {
+            continue;
         }
-        let reference = if n.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
-        let Some(u) = n.cross(reference).normalized() else { return false };
-        let v = n.cross(u);
-        let flat = |q: Vec3| (q.dot(u), q.dot(v));
-        let mut corners: Vec<(f64, f64)> = tris.iter().flatten().map(|q| flat(*q)).collect();
+        let local = plane.to_local(p);
+        let mut corners = Vec::new();
+        for lp in &face.loops {
+            let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+            for u in edges {
+                let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                let Ok(eval) = CurveEval::new(edge.parameters()) else { continue };
+                let [t0, t1] = edge.interval;
+                let n_samples = match &eval {
+                    CurveEval::Line { .. } => 1,
+                    _ => 8,
+                };
+                for k in 0..=n_samples {
+                    let frac = k as f64 / n_samples as f64;
+                    let t = if u.forward { t0 + (t1 - t0) * frac } else { t1 - (t1 - t0) * frac };
+                    if let Some(pt) = eval.point(t) {
+                        let l = plane.to_local(pt);
+                        corners.push((l.x, l.y));
+                    }
+                }
+            }
+        }
+        if corners.is_empty() {
+            continue;
+        }
         corners.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
         corners.dedup();
-        inside_hull(&corners, flat(p))
-    })
+        if inside_hull(&corners, (local.x, local.y)) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Is `q` inside (or on) the convex hull of `sorted` points (sorted by x, then y)?
@@ -111,35 +130,26 @@ fn inside_hull(sorted: &[(f64, f64)], q: (f64, f64)) -> bool {
 /// The outward normal of the planar face at the world point `p`: on the model as the view
 /// places it (moved components where they are shown).
 pub(super) fn face_normal_world(s: &Session, p: Vec3) -> Option<Vec3> {
-    let (m, f, d, _) = face_at_state(&*s.world_state().ok()?, p, None).ok().flatten()?;
-    let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
+    let ws = s.world_state().ok()?;
+    let (_, f, d, name) = face_at_state(&ws, p, None).ok().flatten()?;
+    let b = ws.body(&name)?;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
     if d > tol * 10.0 {
         return None;
     }
-    m.triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, tf)| **tf == f)
-        .filter_map(|(t, _)| m.tri(t))
-        .find_map(|[a, b, c]| (b - a).cross(c - a).normalized())
+    b.body.planar_face(f as usize).map(|plane| plane.normal())
 }
 
 /// Is the body face at `p` planar (`None`: no face there)?
 pub(super) fn face_is_planar(s: &Session, p: Vec3) -> Option<bool> {
-    let (m, f, d, _) = face_at(s, p)?;
-    if !near_face(&m, d) {
+    let (_, f, d, name) = face_at(s, p)?;
+    let st = s.model.state();
+    let b = st.body(&name)?;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    if d > tol * 10.0 {
         return None;
     }
-    let ns: Vec<Vec3> = m
-        .triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, tf)| **tf == f)
-        .filter_map(|(t, _)| m.tri(t))
-        .filter_map(|[a, b, c]| (b - a).cross(c - a).normalized())
-        .collect();
-    let n0 = *ns.first()?;
-    Some(ns.iter().all(|n| n.dot(n0) > 1.0 - 1e-6))
+    Some(b.body.planar_face(f as usize).is_some())
 }
 
 /// A face given to a command: a point `[x, y, z]` on it (or `{point}`), or its name as
