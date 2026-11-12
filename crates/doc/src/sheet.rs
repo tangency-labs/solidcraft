@@ -2892,7 +2892,9 @@ impl SheetBody {
             cuts.push(region);
         }
         cuts.extend(self.through_pocket_regions(&mut work)?);
-        let cuts = material_union(cuts, &mut work)?;
+        // One cut of them all: the planar boolean unites its operand's regions itself (in
+        // balanced rounds, as SMLib sheets), so uniting them first as regions only multiplied the
+        // booleans and their round trips (#13493).
         let regions = if cuts.is_empty() { regions } else { material_boolean(&regions, &cuts, kernel::BoolOp::Cut, &mut work)? };
         Ok(regions)
     }
