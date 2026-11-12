@@ -1,14 +1,15 @@
 //! What the sheet scene's provider keeps of a drawing once it closes: each view's last lines, how the
 //! view drew them and what they showed, and each dimension's last reading, so the drawing opened
-//! again starts from them, and each note's of a view, which rides with them. No world state is held,
-//! so a closed drawing keeps no model. Only in memory, never saved.
+//! again starts from them, each note's of a view, which rides with them, and, for the drawing closed
+//! last, each view's pictures' last pixels, shown stale until drawn again. No world state is held, so a
+//! closed drawing keeps no model. Only in memory, never saved.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use solidcraft_doc::drawing::view::ResolvedView;
 
-use super::{Annotation, Drawn, DrawnDimension, Lettering, SourceKey};
+use super::{Annotation, Drawn, DrawnDimension, Lettering, Pixels, SourceKey};
 
 /// Each closed drawing's last lines, by drawing.
 #[derive(Default)]
@@ -27,6 +28,7 @@ pub(super) struct KeptView {
     pub(super) view: ResolvedView,
     pub(super) drawn: Drawn,
     pub(super) shows: Option<Arc<SourceKey>>,
+    pub(super) pixels: BTreeMap<u64, Pixels>,
 }
 
 /// A dimension's last reading, or a note's: of `record`, on its view's drawing `view_serial`, with
@@ -41,8 +43,12 @@ pub(super) struct KeptDimension {
 
 impl KeptLines {
     /// Keeps `kept` as drawing `drawing`'s. It has none kept already: they were taken back when it
-    /// opened.
+    /// opened. Only the drawing closed last keeps its pictures' pixels (a picture can be 64 MB), so
+    /// what is kept stays within one drawing's pictures.
     pub(super) fn keep(&mut self, drawing: u64, kept: Kept) {
+        for other in self.0.values_mut() {
+            other.views.values_mut().for_each(|view| view.pixels.clear());
+        }
         self.0.insert(drawing, kept);
     }
 
