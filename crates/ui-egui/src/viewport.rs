@@ -11926,7 +11926,9 @@ mod tests {
         let item = hit_sel(app.viewport.hover.as_ref().unwrap()).unwrap();
         select(&mut app, Some(item.clone()), false, false);
         assert_eq!(app.session.selection, std::slice::from_ref(&item));
-        assert_eq!(build_highlight(&app).merged().lines.len(), 2 * line_count * crate::gpu::LINE_SIZE);
+        // Picked with the pointer still on it: the picked pass lights the whole rim, and the
+        // hover pass redraws it one step thicker, so the rim is drawn twice over.
+        assert_eq!(build_highlight(&app).merged().lines.len(), 4 * line_count * crate::gpu::LINE_SIZE);
         // Ctrl/Shift clicking the rim deselects it.
         select(&mut app, Some(item.clone()), true, true);
         assert!(app.session.selection.is_empty());
