@@ -183,7 +183,10 @@ with exact predicates [11, 12] or with interval enclosures of the sector test is
 A coincident pair on opposite sides of a union, or the same side of a difference, is deleted: those
 are the faces a regularized operation removes. The result's regions take their solid or void flag
 from the source regions they came from (`result_solid`): union solid if either was, intersection if
-both were, difference if A's was and B's was not.
+both were, difference if A's was and B's was not. A region with no record of its sources (no face of
+B was copied into it, because B's faces all lie on its boundary, as when a union fills a void
+exactly) that a deleted face joins to another such region takes the class a deleted face has on both
+sides: solid for a union, void for an intersection or a difference (`deleted_face_sides`).
 
 ## 5. Coincident and near-coincident faces
 
@@ -319,7 +322,7 @@ A reviewer can check each of these on a change to the boolean.
    pair; nothing is kept or dropped for any other reason.
 4. Faces connected without crossing a common edge have one class.
 5. The keep rules are the regularized operations of §4.4, and a region's solid flag follows
-   `result_solid`.
+   `result_solid`, or `deleted_face_sides` for a region joined with no record of its sources.
 6. A trimmed or copied face keeps its surface's definition (§7); a change that drops one is a bug.
 7. Two bodies' imprinted edges are mated pairwise; unpaired common objects are `InvalidInput`
    (`pairs`, `merge/p4.rs`).
