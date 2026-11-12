@@ -1993,6 +1993,13 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is [`Surface::copy`]).
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Self> {
+        // A retained screw wall answers by its definition S, and its neighbours' edges lie
+        // on S. An analytic form recognised from its net would be the net's, up to the
+        // certified bound off S (the axial wall of a radial law is its net's spiral
+        // extruded), and drop S: the copy stays the net with its definition.
+        if self.retained_screw().is_some() {
+            return self.copy(k);
+        }
         self.copy_and_add_analytics_of_kind(k)
             .map(|c| self.carry_definition(c))
     }

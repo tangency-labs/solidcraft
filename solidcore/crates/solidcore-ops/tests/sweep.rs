@@ -982,3 +982,42 @@ fn the_grooves_of_a_thread_cut_both_ways_unite() {
         "{vu} + {vi} vs {vr} + {vl}"
     );
 }
+
+/// An M10 groove with a runout (its law moves the profile out 0.887 mm over the last two of four
+/// turns), cut from a 5 mm cylinder, at the tolerance SolidCraft sweeps a 1.5 mm pitch to. The
+/// law makes the groove's axial wall the extrusion of a spiral, and its net the extrusion of the
+/// net's spiral, about 1e-5 off it: the boolean copies that wall as its net with its definition,
+/// not as the surface of extrusion recognised from the net, so the flanks' edges on it, on the
+/// definition, stay within the body's tolerance of it, and the result passes the check.
+#[test]
+fn a_runout_groove_cut_from_a_cylinder_keeps_its_axial_wall_exact() {
+    use solidcore_ops::boolean::{boolean, BooleanOp};
+    use solidcore_record::brep::Surface;
+    let p = |y: f64, z: f64| [0.0, y, z];
+    let groove = polygon(&[
+        p(4.188101183952089, -1.6875),
+        p(5.075, -2.199551270189222),
+        p(5.075, -0.800448729810778),
+        p(4.188101183952089, -1.3125),
+    ]);
+    let turns = 4.0;
+    let law = [(turns - 2.0, 0.0), (turns, 0.887)];
+    let cut = screw_sweep(&groove, [0.0, 0.0, -1.5], Z, 1.5, turns, Some(&law), 1.5e-4).unwrap();
+    let rod = solidcore_ops::make_cylinder([0.0; 3], 5.0, 1.5 * turns - 3.0).unwrap();
+    let threaded = boolean(rod, cut, BooleanOp::Subtract).unwrap().unwrap();
+    let report = threaded.check(solidcore_ops::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let (record, _) = threaded.to_record().unwrap();
+    // The rod's side, ends and the groove's walls: each wall still its definition.
+    let lost = record
+        .faces
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.surface,
+                Surface::Spline { .. } | Surface::RationalSpline { .. }
+            )
+        })
+        .count();
+    assert_eq!(lost, 0, "a swept wall lost its definition");
+}
