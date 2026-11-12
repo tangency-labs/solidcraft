@@ -2459,3 +2459,99 @@ fn an_expressed_move_is_a_parameter_user_and_absolute_poses_take_numbers_only() 
     assert!(e.contains("not both"), "{e}");
     assert_eq!(s.doc, doc);
 }
+
+/// A grounded occurrence doesn't follow a parameter, but its moves keep up with it: ungrounded
+/// later, it stays and then follows by the next change only.
+#[test]
+fn a_grounded_occurrence_with_an_expressed_move_stays_and_follows_after_ungrounding() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["0 mm", "dy", 0]}));
+    at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
+    at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "30 mm"}));
+    at(centre(&mut s, occ), [1.0, 15.5, 0.5]);
+}
+
+/// A parameter change moves the pending placement and its exploded entry together, so the
+/// exploded view still shows as display only.
+#[test]
+fn an_expressed_move_follows_its_parameter_in_an_exploded_view() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["0 mm", "dy", 0]}));
+    run(&mut s, "component.create", json!({"name": "B", "parent": 0, "activate": false}));
+    let view = run(&mut s, "explode.create", json!({"moves": [{"occurrence": occ, "translate": [0, 0, 60]}]}))["view"].as_u64().unwrap();
+    run(&mut s, "explode.show", json!({"view": view}));
+    assert_eq!(s.pending_moves.get(&occ), s.exploded.get(&occ));
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
+    assert!(s.uncaptured_moves().is_empty(), "the exploded placement is still display only: {:?}", s.uncaptured_moves());
+    assert_eq!(s.pending_moves.get(&occ), s.exploded.get(&occ));
+    let shown = s.pending_moves.get(&occ).unwrap()[3];
+    assert!((shown[1] - 25.0).abs() < 1e-9 && (shown[2] - 60.0).abs() < 1e-9, "{shown:?}");
+    run(&mut s, "explode.show", json!({}));
+    at(centre(&mut s, occ), [1.0, 25.5, 0.5]);
+}
+
+/// A world-axes move keeps following along world axes after it is reparented under a turned parent.
+#[test]
+fn an_expressed_world_move_follows_along_world_axes_after_reparenting() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dx", "expression": "10 mm"}));
+    let (parent_component, parent) = created(&mut s, "Parent");
+    run(&mut s, "occurrence.ground", json!({"occurrence": parent, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": parent, "axis": [0, 0, 1], "angle": "90 deg"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let (_, child) = created(&mut s, "Child");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": child, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "space": "world", "translate": ["dx", 0, 0]}));
+    run(&mut s, "occurrence.reparent", json!({"occurrence": child, "parent": parent_component}));
+    let path = json!([parent, child]);
+    let props = |s: &mut Session| {
+        let r = run(s, "occurrence.properties", json!({"occurrence": child, "path": path}));
+        [r["total"]["center_of_mass"][0].as_f64().unwrap(), r["total"]["center_of_mass"][1].as_f64().unwrap()]
+    };
+    let before = props(&mut s);
+    run(&mut s, "parameters.change", json!({"name": "dx", "expression": "30 mm"}));
+    let after = props(&mut s);
+    assert!((after[0] - before[0] - 20.0).abs() < 1e-6 && (after[1] - before[1]).abs() < 1e-6, "{before:?} -> {after:?}");
+}
+
+/// A joint that holds an occurrence still wins over its expressed move after a parameter changes.
+#[test]
+fn a_joint_wins_over_an_expressed_move_when_a_parameter_changes() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let mut ids = Vec::new();
+    for name in ["Base", "Block"] {
+        run(&mut s, "component.activate", json!({"component": 0}));
+        ids.push(created(&mut s, name).1);
+        run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2}));
+    }
+    let (base, block) = (ids[0], ids[1]);
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": block, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": ["0 mm", "dy", 0]}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": base, "point": [0,0,0]}, "b": {"occurrence": block, "point": [0,0,0]}, "name": "Held"}),
+    );
+    let held = centre(&mut s, block);
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
+    at(centre(&mut s, block), held);
+}

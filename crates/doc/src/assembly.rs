@@ -218,6 +218,10 @@ pub struct ExpressedMove {
     /// world axes (`space: world`).
     #[serde(default = "identity", skip_serializing_if = "is_identity")]
     pub frame: Mat,
+    /// Typed in world axes (`space: world`): `frame` is worked out again when the occurrence
+    /// moves to another parent. Older designs read as local.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub world: bool,
 }
 
 impl ExpressedMove {
@@ -539,6 +543,14 @@ impl Document {
                 let d = Vec3::new(now[0] - m.at[0], now[1] - m.at[1], now[2] - m.at[2]);
                 shift += apply_vector(&m.frame, d);
                 at.push(now);
+            }
+            if o.grounded {
+                // A grounded occurrence stays put, but its moves keep up with the parameters so
+                // that ungrounding it later doesn't jump by everything that changed meanwhile.
+                if o.expressed_moves.iter().zip(&at).any(|(m, now)| m.at != *now) {
+                    out.push(ExpressedShift { occurrence: o.id, shift: Vec3::ZERO, at });
+                }
+                continue;
             }
             let moved = Vec3::new(o.transform[3][0], o.transform[3][1], o.transform[3][2]) + shift;
             if shift == Vec3::ZERO || !moved.is_finite() || [moved.x, moved.y, moved.z].iter().any(|x| x.abs() > 1e9) {

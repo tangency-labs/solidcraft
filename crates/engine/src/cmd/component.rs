@@ -363,13 +363,17 @@ pub(crate) fn follow_expressed_moves(s: &mut Session) -> bool {
     if shifts.is_empty() {
         return false;
     }
-    for shift in &shifts {
+    for shift in shifts.iter().filter(|x| x.shift != Vec3::ZERO) {
         if let Some(m) = s.pending_moves.get_mut(&shift.occurrence) {
+            *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
+        }
+        // The exploded view's entry is what makes a pending move display only: it moves with it.
+        if let Some(m) = s.exploded.get_mut(&shift.occurrence) {
             *m = solidcraft_doc::mat_mul(&translation(shift.shift), m);
         }
     }
     s.doc_mut().apply_expressed_shifts(&shifts);
-    true
+    shifts.iter().any(|x| x.shift != Vec3::ZERO)
 }
 
 pub(super) fn valid_position(m: &Mat) -> bool {
@@ -919,7 +923,7 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         s.uncaptured_moves().get(&id).copied().unwrap_or(o.transform)
     };
     let next = solidcraft_doc::mat_mul(&delta, &cur);
-    let kept = expressed.map(|(translate, at)| solidcraft_doc::ExpressedMove { translate, at, frame });
+    let kept = expressed.map(|(translate, at)| solidcraft_doc::ExpressedMove { translate, at, frame, world: space == "world" });
     place_occurrence(s, p, id, next, kept, cmd)
 }
 

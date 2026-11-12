@@ -1339,10 +1339,7 @@ impl Session {
         // read where a part is placed are evaluated again for where it now is.
         if cmd::follow_expressed_moves(self) {
             self.model.evaluate(&self.doc);
-            #[cfg(test)]
-            {
-                self.evaluations += 1;
-            }
+            self.evaluations = self.evaluations.saturating_add(1);
         }
         // Joints follow the geometry their origins snap to.
         if !self.doc.assembly.joints.is_empty() {
