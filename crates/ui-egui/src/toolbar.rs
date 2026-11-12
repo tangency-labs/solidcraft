@@ -4113,9 +4113,7 @@ mod dropdown_toggle_tests {
             let folded = rect_of("ribbon:folded").unwrap();
             assert!(folded.height() <= super::TAB_ROW_HEIGHT + 1.0, "{layout}: only the tab row is left: {folded:?}");
             assert!(rect_of("panel:MODEL:CREATE").is_none(), "{layout}: no panels while folded");
-            if layout == "compact" {
-                assert!(h.app.viewport.rect.unwrap().top() < whole_view.top() - 50.0, "{layout}: the view takes the panels' room");
-            }
+            assert_eq!(h.app.viewport.rect.unwrap(), whole_view, "{layout}: folding preserves the canvas domain");
 
             // A tab's click opens its panels over the view, as tall as the whole ribbon.
             let tab = rect_of("toolbar_tab:SURFACE").unwrap().center();
@@ -4126,10 +4124,7 @@ mod dropdown_toggle_tests {
             let open = rect_of("ribbon:open").unwrap();
             assert!((open.height() - whole.height()).abs() <= 2.0 * crate::ui_kit::SHELL_GAP + 1.0, "{layout}: {open:?} vs {whole:?}");
             assert!(rect_of("panel:SURFACE:CREATE").is_some(), "{layout}: the panels are drawn");
-            if layout == "compact" {
-                let top = h.app.viewport.rect.unwrap().top();
-                assert!((top - folded.bottom()).abs() <= 2.0, "{layout}: over the view, not pushing it down: {top} {folded:?}");
-            }
+            assert_eq!(h.app.viewport.rect.unwrap(), whole_view, "{layout}: the open ribbon overlays the canvas");
 
             // The pointer leaving the panels closes them.
             let away = h.app.viewport.rect.unwrap().center() + egui::vec2(0.0, 150.0);

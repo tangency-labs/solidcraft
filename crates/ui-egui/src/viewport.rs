@@ -13132,7 +13132,11 @@ mod tests {
         h.call("ui.click", json!({"x":p.x,"y":p.y}));
         h.frames(2);
         assert!(h.app.cam.back().dist(-Vec3::Y) < 1e-6);
-        assert!(h.app.cam.target.dist(Vec3::new(110.0, 10.0, 10.0)) < 1e-6, "looks at the middle of the model, {:?}", h.app.cam.target);
+        let layout = h.app.viewport.layout.as_ref().unwrap();
+        let bounds = crate::viewport::view_bounds(&h.app);
+        let expected = crate::viewport_layout::framing_centre(h.app.cam, &bounds, layout).unwrap();
+        let projected = crate::viewport::projection(&h.app, layout.viewport).to_screen(bounds.center()).unwrap();
+        assert!(projected.distance(expected) < 1.5, "frames the model at {expected:?}, got {projected:?}");
         assert!(h.app.cam.distance < from.distance / 2.0, "{} vs {}", h.app.cam.distance, from.distance);
         // Home, then an axis: the zoom and the centre stay.
         let home = crate::scenario::rect_of("axis_view:home").unwrap().center();

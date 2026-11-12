@@ -1824,12 +1824,7 @@ mod tests {
 
             let at = |name: &str| crate::scenario::handle_at(name).unwrap();
             let (back, play, forward) = (at("history:back"), at("history:play"), at("history:forward"));
-            let across = dock == "bottom" || width > 56.0;
-            if across {
-                assert!(back.x < play.x && play.x < forward.x, "Play sits between Previous and Next; {dock} {width}");
-            } else {
-                assert!(back.y < play.y && play.y < forward.y, "Play sits between Previous and Next; {dock} {width}");
-            }
+            assert!(back.x < play.x && play.x < forward.x, "Play sits between Previous and Next; {dock} {width}");
 
             h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
             h.frames(2);

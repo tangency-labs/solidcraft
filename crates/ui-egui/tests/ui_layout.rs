@@ -122,7 +122,7 @@ fn docked_ribbon_geometry_and_search() {
             assert_eq!(search.width(), (hint_width + key_width + t.space_16 + t.space_4 * 5.0 + t.space_2).ceil());
             assert!(ribbon.contains_rect(search));
             assert!(search.left() > workspace.right());
-            assert!(h.app.viewport.rect.unwrap().top() >= toolbar::APP_BAR_HEIGHT + toolbar::RIBBON_HEIGHT);
+            assert!(h.app.viewport.rect.unwrap().top() < ribbon.bottom(), "the ribbon overlays the viewport");
             h.step(&json!({"click":{"handle":"ribbon:search"}})).unwrap();
             assert!(h.app.ui.palette_open);
             h.frames(10);
