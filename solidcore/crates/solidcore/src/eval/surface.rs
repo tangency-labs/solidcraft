@@ -473,8 +473,9 @@ impl SurfaceEval {
     /// Which directions are collapsed at `uv`, exactly (to rounding), or within `reach` mm
     /// ([`super::collapse`]): a spline or revolution by its iso-lines, an analytic form by the
     /// radius of its circle along the angle in closed form (a cone's apex, a sphere's pole, a
-    /// torus's ring or tube of radius zero). Refused with a typed error where that cannot be
-    /// decided.
+    /// torus's ring or tube of radius zero), within the reach only where its circles are
+    /// somewhere wider than the reach ([`Self::pole_within`]). Refused with a typed error where
+    /// that cannot be decided.
     pub fn collapse(&self, uv: [f64; 2], reach: f64) -> Result<Collapse, EvalError> {
         super::collapse::check(uv, reach)?;
         let v = uv[1];
@@ -545,6 +546,14 @@ impl SurfaceEval {
     /// [`Self::pole`], or within `reach` mm of one: moving along a direction across its whole
     /// range moves the point no more than `reach`, certified (a boundary point that lies at a
     /// pole to within a tolerance, where its periodic parameter is free).
+    ///
+    /// On an analytic form a direction is collapsed within the reach only where the surface
+    /// narrows to a pole: where its circles along that direction are somewhere wider than the
+    /// reach (a cone's apex; a sphere's poles when its diameter exceeds the reach; a torus's ring
+    /// when it does). A form whose circles are nowhere wider (a cylinder, a sphere's meridian, a
+    /// torus's tube, or any of them no more than the reach across) is thin, not collapsed: only
+    /// an exact pole is one there. A cylinder never is. Splines and revolutions do not follow
+    /// that rule yet: their iso-lines are decided within the reach ([`super::collapse`]).
     ///
     /// A spline's parameters off its knot range (a pcurve's end fitted a little past it) are
     /// asked at the nearest point of the range with the reach less a certified bound on the
