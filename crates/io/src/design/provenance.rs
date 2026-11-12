@@ -167,6 +167,25 @@ pub enum ProvenanceSigner {
     OpenPgp { fingerprint: String, user_id: Option<String> },
 }
 
+impl ProvenanceSigner {
+    /// The name to show for this signer: the OpenPGP user id where there is one, else its
+    /// fingerprint, or the first eight bytes of an Ed25519 key id in hex.
+    pub fn label(&self) -> String {
+        match self {
+            Self::OpenPgp { fingerprint, user_id } => user_id.clone().unwrap_or_else(|| fingerprint.clone()),
+            Self::Ed25519 { key_id, .. } => {
+                use std::fmt::Write as _;
+                let mut hex = String::with_capacity(16);
+                for byte in &key_id[..8] {
+                    // Writing to a `String` cannot fail.
+                    let _ = write!(&mut hex, "{byte:02x}");
+                }
+                hex
+            }
+        }
+    }
+}
+
 /// One verified record's statement, as the file carries it. The strings are untrusted input.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProvenanceRecord {
@@ -205,6 +224,24 @@ impl ProvenanceReport {
     pub fn newest(&self) -> Option<&ProvenanceRecord> {
         self.records.last()
     }
+}
+
+/// What a design's provenance says before any signature is checked: how many records are there,
+/// and the newest signer's display name (when its record can be read). Enough for a file-picking
+/// list to say "signed by …" without reading the payloads; verification still happens on open.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProvenanceSummary {
+    pub records: usize,
+    pub signer: Option<String>,
+}
+
+/// The summary of an entry already read, without verifying it.
+pub(super) fn summarize_chain(chain: &ProvenanceChain) -> Option<ProvenanceSummary> {
+    if chain.records.is_empty() {
+        return None;
+    }
+    let signer = parse_chain(&chain.records).ok().and_then(|parsed| parsed.last().map(|(record, _)| record.signer.label()));
+    Some(ProvenanceSummary { records: chain.records.len(), signer })
 }
 
 /// The entries a signature binds: the design itself, its payloads and anything a newer build kept
@@ -1034,6 +1071,16 @@ mod tests {
             other => panic!("expected an OpenPGP signer, got {other:?}"),
         }
         assert_eq!(read_design(&bytes).unwrap().name, "Plate");
+    }
+
+    #[test]
+    fn a_summary_names_the_newest_signer_without_verifying_the_payloads() {
+        let bytes = signed_pgp(&Document::new("Plate"), &TestPgpSigner::new(11), &ProvenanceChain::default());
+        let mut reader = crate::DesignContainerReader::new(Cursor::new(bytes)).unwrap();
+        let chain = reader.provenance_chain().unwrap();
+        let summary = summarize_chain(&chain).unwrap();
+        assert_eq!(summary.records, 1);
+        assert!(summary.signer.as_deref().is_some_and(|signer| signer.contains("SolidCraft Test")), "{:?}", summary.signer);
     }
 
     #[test]

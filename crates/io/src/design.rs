@@ -19,7 +19,7 @@ pub use import_cache::ImportCache;
 pub use native_cache::read_design_geometry;
 pub use provenance::{
     OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
-    SignatureSource, Signer,
+    ProvenanceSummary, SignatureSource, Signer,
 };
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
@@ -628,6 +628,17 @@ pub fn read_design_provenance_file(path: &str) -> Option<ProvenanceReport> {
         return None;
     }
     DesignContainerReader::new(source).ok()?.provenance()
+}
+
+/// What a design file's provenance says without verifying it, for a list that shows a design
+/// before it is opened. Reads the entry only.
+pub fn read_design_provenance_summary_file(path: &str) -> Option<ProvenanceSummary> {
+    let mut source = open_regular_file(path).ok()?;
+    if !is_container_source(&mut source).ok()? {
+        return None;
+    }
+    let chain = DesignContainerReader::new(source).ok()?.provenance_chain()?;
+    provenance::summarize_chain(&chain)
 }
 
 /// [`read_design_provenance_chain`] for a file on disk (or the browser's storage).

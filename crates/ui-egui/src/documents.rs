@@ -1150,6 +1150,26 @@ fn tab_security(app: &SolveApp) -> Vec<Option<String>> {
         .collect()
 }
 
+/// The shield each design tab shows, from the same last check as its tooltip.
+fn tab_badges(app: &SolveApp) -> Vec<Option<crate::app_bar::TabBadge>> {
+    use crate::app_bar::TabBadge;
+    open_sessions(app)
+        .into_iter()
+        .map(|session| {
+            if let Some(report) = &session.provenance {
+                return Some(match &report.status {
+                    solidcraft_engine::io::ProvenanceStatus::Valid => TabBadge::Verified,
+                    solidcraft_engine::io::ProvenanceStatus::NotCovered => TabBadge::NotCovered,
+                    solidcraft_engine::io::ProvenanceStatus::Invalid(_) => TabBadge::Invalid,
+                    solidcraft_engine::io::ProvenanceStatus::Unsupported(_) => TabBadge::Unsupported,
+                });
+            }
+            let signed = session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+            signed.then_some(TabBadge::Signed)
+        })
+        .collect()
+}
+
 /// A verification report as one line for a tab tooltip.
 pub(crate) fn signature_line(report: &solidcraft_engine::io::ProvenanceReport) -> String {
     match &report.status {
@@ -1332,6 +1352,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     let names: Vec<String> = info.iter().map(|(name, _)| locale.given_name(name)).collect();
     let security = tab_security(app);
+    let badges = tab_badges(app);
     let places: Vec<String> = info
         .iter()
         .zip(&paths)
@@ -1348,7 +1369,14 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .iter()
                 .zip(&names)
                 .zip(&places)
-                .map(|(((list_name, dirty), name), place)| crate::app_bar::DocTab { name, list_name, dirty: *dirty, place })
+                .zip(&badges)
+                .map(|((((list_name, dirty), name), place), security)| crate::app_bar::DocTab {
+                    name,
+                    list_name,
+                    dirty: *dirty,
+                    place,
+                    security: *security,
+                })
                 .collect(),
             selected,
             shown_selected: (!app.home.open).then_some(selected),
@@ -1749,6 +1777,21 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn tab_badges_show_the_last_check_or_that_the_file_is_signed() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session.provenance = Some(solidcraft_engine::io::ProvenanceReport {
+            chain: Default::default(),
+            records: Vec::new(),
+            status: solidcraft_engine::io::ProvenanceStatus::Valid,
+        });
+        assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Verified)]);
+        h.app.session.provenance = None;
+        h.app.session.provenance_chain = Some(solidcraft_engine::io::ProvenanceChain { records: vec![vec![1]], truncated: false });
+        assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Signed)]);
     }
 
     #[test]

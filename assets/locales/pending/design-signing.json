@@ -2,6 +2,9 @@
   "en": {
     "cmd.file.gpg_keys": "Signing Keys",
     "cmd.file.verify": "Verify Signature",
+    "home.signed": "signed",
+    "home.signed_by": "Signed by {key} (not checked)",
+    "home.signed_unchecked": "Signed (not checked)",
     "prefs.security": "Security",
     "prefs.security.choose_key": "Choose…",
     "prefs.security.encryption": "Encryption",
@@ -22,6 +25,8 @@
     "prefs.security_note": "Signing and checking the designs you save. Off by default.",
     "ui.design_saved_earlier_signature": "Saved {path}; the earlier signature does not cover this save",
     "ui.design_saved_signed": "Saved {path}, signed with {key}",
+    "ui.insert_signed": "Inserted {name}; its file is signed by {key} (not checked)",
+    "ui.insert_signed_unknown": "Inserted {name}; its file is signed (not checked)",
     "ui.open_signature_invalid": "Signature check failed: {reason}",
     "ui.open_signature_not_covered": "Signed earlier, then saved without a key",
     "ui.open_signature_unsupported": "This signature needs a newer SolidCraft",

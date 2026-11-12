@@ -1153,6 +1153,7 @@ pub const ELEMENTS: &[Element] = &[
                         workspace: "Design",
                         thumbnail: None,
                         thumbnail_failed: false,
+                        security: None,
                     },
                 );
             }
@@ -1169,6 +1170,7 @@ pub const ELEMENTS: &[Element] = &[
                 workspace: "Design",
                 thumbnail: None,
                 thumbnail_failed: false,
+                security: None,
             },
         );
     }),

@@ -523,6 +523,11 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 let r = solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params));
                 if r.is_ok() {
                     app.fit_view();
+                    if request.note.is_none()
+                        && let Some(note) = linked_signing_note(&request.path)
+                    {
+                        app.set_status(note, false);
+                    }
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);
                     }
@@ -692,6 +697,18 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     };
     let _ = begin_request(app, request);
     None
+}
+
+/// What to say once a linked design is inserted: whether its file carries a signature, without
+/// reading every payload to check it. `None` for an unsigned file (nothing to add to the usual
+/// "Inserted …" message).
+fn linked_signing_note(path: &str) -> Option<String> {
+    let summary = solidcraft_engine::io::read_design_provenance_summary_file(path)?;
+    let name = std::path::Path::new(path).file_name().map_or_else(|| path.to_string(), |name| name.to_string_lossy().into_owned());
+    Some(match &summary.signer {
+        Some(signer) => solidcraft_ui_text::format("ui.insert_signed", &[("name", &name), ("key", signer)]),
+        None => solidcraft_ui_text::format("ui.insert_signed_unknown", &[("name", &name)]),
+    })
 }
 
 /// An autosave that failed to load goes back in the recovery list, so it can be discarded (or
@@ -1684,6 +1701,10 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     if !request.insert() {
                         app.say_newer_file();
                         app.say_signature(&made.result);
+                    } else if request.note.is_none()
+                        && let Some(note) = linked_signing_note(&request.path)
+                    {
+                        app.set_status(note, false);
                     }
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);

@@ -64,7 +64,10 @@ pub struct HomeState {
     #[cfg(not(target_arch = "wasm32"))]
     present_asked: std::collections::HashSet<String>,
     #[cfg(not(target_arch = "wasm32"))]
-    present_rx: Vec<std::sync::mpsc::Receiver<(String, bool)>>,
+    present_rx: Vec<std::sync::mpsc::Receiver<(String, bool, Option<solidcraft_engine::io::ProvenanceSummary>)>>,
+    /// What each recent design's provenance says (read without verifying): absent means not read
+    /// yet, `Some(None)` unsigned, `Some(Some(summary))` signed.
+    signed: HashMap<String, Option<solidcraft_engine::io::ProvenanceSummary>>,
 }
 
 impl HomeState {
@@ -74,8 +77,9 @@ impl HomeState {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while self.recent.iter().any(|p| !self.present.contains_key(p)) && std::time::Instant::now() < deadline {
             for rx in &self.present_rx {
-                while let Ok((p, there)) = rx.try_recv() {
-                    self.present.insert(p, there);
+                while let Ok((p, there, summary)) = rx.try_recv() {
+                    self.present.insert(p.clone(), there);
+                    self.signed.insert(p, summary);
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -110,6 +114,10 @@ impl HomeState {
         self.opened_at.insert(path.to_string(), web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
         self.opened_at.retain(|p, _| self.recent.contains(p));
         self.thumbs.remove(path);
+        // A save can change what it says and whether it is there: ask again.
+        self.signed.remove(path);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.present_asked.remove(path);
         // Opening or saving a design undoes an earlier removal from the list.
         self.forgotten.remove(path);
         // A fresh open or save earns another attempt at the picture.
@@ -122,6 +130,7 @@ impl HomeState {
         self.recent.retain(|p| p != path);
         self.opened_at.remove(path);
         self.thumbs.remove(path);
+        self.signed.remove(path);
         self.forgotten.insert(path.to_string());
     }
 }
@@ -607,7 +616,9 @@ fn ask_present(h: &mut HomeState, ctx: &egui::Context, recent: &[String]) {
             let spawned = std::thread::Builder::new().name("recent-files".into()).spawn(move || {
                 for p in new {
                     let there = solidcraft_engine::io::vfs::exists(&p);
-                    if tx.send((p, there)).is_err() {
+                    // The entry only, not the payloads: enough for "signed by …" before opening.
+                    let summary = there.then(|| solidcraft_engine::io::read_design_provenance_summary_file(&p)).flatten();
+                    if tx.send((p, there, summary)).is_err() {
                         return;
                     }
                     ctx.request_repaint();
@@ -618,8 +629,9 @@ fn ask_present(h: &mut HomeState, ctx: &egui::Context, recent: &[String]) {
             }
         }
         for rx in &h.present_rx {
-            while let Ok((p, there)) = rx.try_recv() {
-                h.present.insert(p, there);
+            while let Ok((p, there, summary)) = rx.try_recv() {
+                h.present.insert(p.clone(), there);
+                h.signed.insert(p, summary);
             }
         }
     }
@@ -628,7 +640,13 @@ fn ask_present(h: &mut HomeState, ctx: &egui::Context, recent: &[String]) {
     {
         let _ = ctx;
         for p in recent {
-            h.present.insert(p.clone(), solidcraft_engine::io::vfs::exists(p));
+            if h.signed.contains_key(p) {
+                continue;
+            }
+            let there = solidcraft_engine::io::vfs::exists(p);
+            h.present.insert(p.clone(), there);
+            let summary = there.then(|| solidcraft_engine::io::read_design_provenance_summary_file(p)).flatten();
+            h.signed.insert(p.clone(), summary);
         }
     }
 }
@@ -898,11 +916,21 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
             chosen: FileAction::ShowInFolder(index),
         });
     }
+    let mut kind = recent_kind(app, path);
+    let mut security = None;
+    if let Some(Some(summary)) = app.home.signed.get(path) {
+        kind = format!("{kind} · {}", app.tr("home.signed"));
+        security = Some(match &summary.signer {
+            Some(signer) => app.tr("home.signed_by").replace("{key}", signer),
+            None => app.tr("home.signed_unchecked").to_string(),
+        });
+    }
     start_page::Recent {
         title,
         path: shown_path,
         when: when.into(),
-        kind: recent_kind(app, path).into(),
+        kind: kind.into(),
+        security: security.map(Into::into),
         thumbnail: texture(app.home.thumbs.get(path).and_then(Option::as_ref)),
         // A design whose picture could not be made shows a dimmed placeholder, distinct from the
         // one shown while a picture is still loading (#4655).
@@ -1130,6 +1158,19 @@ mod tests {
         assert_eq!(abbreviated_path("/Users/sample", home), "~");
         assert_eq!(abbreviated_path("/Users/sample-other/plate.solidcraft", home), "/Users/sample-other/plate.solidcraft");
         assert_eq!(abbreviated_path("/disk/design.solidcraft", None), "/disk/design.solidcraft");
+    }
+
+    #[test]
+    fn a_recent_design_says_who_signed_it_without_opening_it() {
+        let mut app = crate::test_support::sample_app();
+        let index = app.home.recent.len();
+        app.home.recent.push("/disk/Plate.sc".into());
+        app.home
+            .signed
+            .insert("/disk/Plate.sc".into(), Some(solidcraft_engine::io::ProvenanceSummary { records: 1, signer: Some("Ada Lovelace".into()) }));
+        let entry = recent_entry(&app, index, "/disk/Plate.sc");
+        assert!(entry.kind.contains("signed"), "{}", entry.kind);
+        assert!(entry.security.as_deref().is_some_and(|security| security.contains("Ada Lovelace")), "{:?}", entry.security);
     }
 
     #[test]

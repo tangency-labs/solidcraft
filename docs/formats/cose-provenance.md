@@ -208,8 +208,17 @@ and small parts are hashed while writing.
   it found in the status line; it is disabled for a design that has no file yet. `file.verify`
   reports the same through the control channel, and `file.gpg_keys` lists the secret keys GnuPG can
   sign with (marking those on a smartcard).
+- **Before opening**: a design tab shows a shield for the file's provenance (grey: signed but not
+  checked; green: verified; amber: an earlier signature no longer covers the file; red: a check
+  failed). Home's recent list adds *signed* to a design that carries records and, on hover, who
+  signed it (not checked); it reads only the provenance entry, never the payloads. The native Open
+  dialog lists file names only and cannot show this.
 - **Commands**: `file.save`/`file.save_as` take `sign: true` and `signing_key` (a fingerprint or
   user id, empty for GnuPG's default).
+- **Insert and export**: inserting a design as a linked component says when that linked file is
+  signed (not checked). Exports (STEP, mesh, DXF, JSON) are new files and carry no provenance; only
+  a saved `.sc` container has the entry. A host design's record covers its own contents, not the
+  linked files it references.
 - **YubiKey / OpenPGP smartcard**: put the signing key in GnuPG's signing slot (the usual
   `gpg --card-status` setup) and leave the signing key empty or name its fingerprint. GnuPG, not
   SolidCraft, talks to the card and asks for the PIN through its pinentry; the save runs on a
