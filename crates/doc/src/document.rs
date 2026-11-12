@@ -3435,6 +3435,10 @@ pub struct Document {
     /// it saves.
     #[serde(default, skip_serializing_if = "Visibility::is_empty")]
     pub visibility: Visibility,
+    /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
+    /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty", deserialize_with = "crate::plugin_data::deserialize")]
+    pub plugin_data: std::collections::BTreeMap<String, String>,
 }
 
 /// The browser's view of a design: items and folders hidden or shown, sketch profiles and
@@ -3730,6 +3734,7 @@ impl Document {
             named_views: Vec::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
+            plugin_data: Default::default(),
         }
     }
 

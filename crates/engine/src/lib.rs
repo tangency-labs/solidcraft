@@ -2593,8 +2593,10 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         notes,
         visibility,
         next_component_color_index,
+        plugin_data,
     } = a;
-    *render == b.render
+    *plugin_data == b.plugin_data
+        && *render == b.render
         && *format == b.format
         && *format_pending == b.format_pending
         && *name == b.name
