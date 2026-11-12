@@ -579,7 +579,14 @@ fn a_move_that_lets_go_of_the_origin_says_so_and_offers_undo() {
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
-        d.kind = Kind::SketchModify(Mod::Move { x: "15 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false });
+        d.kind = Kind::SketchModify(Mod::Move {
+            x: "15 mm".into(),
+            y: "0 mm".into(),
+            angle: "0 deg".into(),
+            copy: false,
+            z: "0 mm".into(),
+            three_d: false,
+        });
     }
     h.frames(2);
     h.step(&json!({"key": "Enter"})).unwrap();

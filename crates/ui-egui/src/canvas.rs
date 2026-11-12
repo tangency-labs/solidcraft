@@ -449,7 +449,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         };
         crate::gizmo::give_way(unpicked);
         if let Some(t) = sketch_move_triad(app, &d, pivot)
-            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::new("sc_sketch_move_triad"), &t, snap_step(app.cam.half_height()))
+            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::unique("sc_sketch_move_triad"), &t, snap_step(app.cam.half_height()))
         {
             sketch_move_drag(app, &mut d, &t, g);
             dragging = true;
