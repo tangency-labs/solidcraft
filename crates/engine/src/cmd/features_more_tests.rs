@@ -1183,6 +1183,7 @@ fn a_loft_mixes_a_face_with_a_sketch_and_refuses_bad_face_sections() {
     let before = s.doc.features.len();
     for bad in [
         json!({"sections": [{"face": [10, 5, 5], "sketch": "Mid"}, {"face": [30, 5, 5]}]}),
+        json!({"sections": [{"face": [10, 5, 5], "weight": 500}, {"face": [30, 5, 5]}]}),
         json!({"sections": [{"face": "here"}, {"face": [30, 5, 5]}]}),
         json!({"sections": [{"face": [20, 5, 5]}, {"face": [30, 5, 5]}]}),
         json!({"sections": [{"face": [10, 5, 5]}, {"face": [30, 5, 5], "body": "A"}]}),

@@ -1883,7 +1883,10 @@ impl Dialog {
         let measure = matches!(self.kind, Kind::Measure { .. });
         // The chat's picks stay what was clicked: a rim is one edge there, not its pieces. So do
         // print faces: a click on one takes it out, not the other pieces of its surface in.
-        let one = measure || matches!(self.kind, Kind::ChatContext | Kind::SaveMesh(_));
+        // A Loft section is the face clicked: the other pieces of its surface would each become
+        // a section of their own.
+        let loft_face = self.active == 0 && matches!(self.kind, Kind::Loft { .. }) && matches!(sel, Sel::Face { .. });
+        let one = measure || loft_face || matches!(self.kind, Kind::ChatContext | Kind::SaveMesh(_));
         let sel = if measure { crate::viewport::measurement_selection(s, &sel) } else { sel };
         let chain = matches!(self.kind, Kind::Fillet { chain: true, .. });
         let single =
@@ -5391,13 +5394,13 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
             {
                 let world = crate::open_meshing::session_world(&app.session);
                 for (sec, out) in sections.iter().zip(edited.iter_mut()) {
-                    // A face section keeps its sketch, so editing does not start a new one.
-                    if let (Some(body), Some(at)) = (&sec.body, &sec.face)
+                    // A curved face section on the same body keeps its sketch, so editing does
+                    // not start a new one. The sketch is only a stand-in (the loft reads the face
+                    // itself), so it stays right even when the face is picked again elsewhere,
+                    // or the body is placed and the dialog hands back a world point.
+                    if let Some(body) = &sec.body
+                        && out.get("face").is_some()
                         && out.get("body").and_then(Value::as_str) == Some(body.0.as_str())
-                        && out
-                            .get("face")
-                            .and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok())
-                            .is_some_and(|q| (Vec3::new(q[0], q[1], q[2]) - **at).len() <= 1e-9)
                     {
                         out["sketch"] = json!(sec.sketch.0);
                         continue;
@@ -5851,9 +5854,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             // The end weights ride on the first and last sections; 1 is the default and stays unsaid.
             for (i, w) in weights.iter().enumerate() {
-                let w: f64 = w.trim().parse().map_err(|_| "a weight must be a number from 0 to 10".to_string())?;
-                if !(0.0..=10.0).contains(&w) {
-                    return Err("a weight must be a number from 0 to 10".into());
+                let w: f64 = w.trim().parse().map_err(|_| "a weight must be a number from 0 to 100".to_string())?;
+                if !(0.0..=100.0).contains(&w) {
+                    return Err("a weight must be a number from 0 to 100".into());
                 }
                 let n = sections.len();
                 let sec = if i == 0 { sections.first_mut() } else { sections.get_mut(n.saturating_sub(1)) };

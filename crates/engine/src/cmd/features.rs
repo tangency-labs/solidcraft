@@ -65,7 +65,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SWEEP_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
-    CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex) | {face: [x,y,z], body?, square?: bool (default true: the loft leaves the face square, so faces at an angle bridge in a smooth bend), weight?: 0..10 (how far a square end reaches out along its normal before bending; default 1), flip?: bool (a square end leaves into its face instead of out of it, which picks the way the loft swings round)} (a body face as the profile: a flat face's boundary is projected into a sketch on it and followed as the model changes; a curved face lofts from its rim, to one other face; body names whose face, where faces of several bodies meet)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them; a Join from face sections defaults to every body whose face is a section), name?, body_name?"),
+    CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex) | {face: [x,y,z], body?, square?: bool (default true: the loft leaves the face square, so faces at an angle bridge in a smooth bend), weight?: 0..100 (how far a square end reaches out along its normal before bending; default 1), flip?: bool (a square end leaves into its face instead of out of it, which picks the way the loft swings round)} (a body face as the profile: a flat face's boundary is projected into a sketch on it and followed as the model changes; a curved face lofts from its rim, to one other face; body names whose face, where faces of several bodies meet)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them; a Join from face sections defaults to every body whose face is a section), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box))
         .at("SOLID", "CREATE")
         .icon("box")
@@ -3843,13 +3843,13 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
     if list.len() < 2 || list.len() > 50 {
         return Err(bad(cmd, "a loft needs 2…50 sections"));
     }
-    // A square end's reach along its normal, a factor of the default: 0…10.
+    // A square end's reach along its normal, a factor of the default: 0…100.
     let weight = |sec: &Value, cmd: &str| -> Result<Option<f64>> {
         match sec.get("weight") {
             None | Some(Value::Null) => Ok(None),
             Some(w) => match w.as_f64() {
-                Some(w) if (0.0..=10.0).contains(&w) => Ok(Some(w)),
-                _ => Err(bad(cmd, "`sections[].weight` must be a number from 0 to 10")),
+                Some(w) if (0.0..=100.0).contains(&w) => Ok(Some(w)),
+                _ => Err(bad(cmd, "`sections[].weight` must be a number from 0 to 100")),
             },
         }
     };
@@ -3927,7 +3927,7 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, "a face section takes no `sketch`, `profiles` or `point`"));
             }
             let fp = vec3(face).ok_or_else(|| bad(cmd, "`sections[].face` must be a point [x, y, z] on a planar face"))?;
-            let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(sec, "body"))?;
+            let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(sec, "body"), false)?;
             s.active_sketch = None;
             if !face_bodies.contains(&body) {
                 face_bodies.push(body);
@@ -3978,6 +3978,10 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
         });
     }
     let (rails, rail_fit) = guide_rails(s, p, cmd, "loft", None)?;
+    // Guide rails shape the whole loft, so an end's weight or flip would have no effect.
+    if !rails.is_empty() && sections.iter().any(|sec| sec.weight.is_some() || sec.flip) {
+        return Err(bad(cmd, "a loft with guide rails takes no section `weight` or `flip`"));
+    }
     let operation = operation(p, cmd)?;
     let sketches: Vec<u64> = sections.iter().map(|sec| sec.sketch.0).collect();
     let mut targets = face_join_targets(s, p, operation, &sketches, cmd)?;

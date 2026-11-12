@@ -7365,7 +7365,7 @@ fn feature_tools_with_constructor(
             let body = if rails.is_empty() {
                 {
                     // A square end's reach: its weight (default 1), 0 for an end that is not square.
-                    let reach = |s: Option<&crate::LoftSection>| s.filter(|s| s.square).map_or(0.0, |s| s.weight.unwrap_or(1.0).clamp(0.0, 10.0));
+                    let reach = |s: Option<&crate::LoftSection>| s.filter(|s| s.square).map_or(0.0, |s| s.weight.unwrap_or(1.0).clamp(0.0, 100.0));
                     let flip = |s: Option<&crate::LoftSection>| s.is_some_and(|s| s.flip);
                     kernel::loft_regions(&squared_ends(
                         &secs,
@@ -11565,7 +11565,7 @@ fn squared_ends(secs: &[(Plane, Region2)], first: f64, last: f64, flips: [bool; 
     if secs.len() > 2 {
         let helper = |end: &(Plane, Region2), next: &(Plane, Region2), w: f64, flip: bool| {
             let len = (centre(next) - centre(end)).len();
-            leave(end, centre(next), flip).map(|dir| (Plane { origin: end.0.origin + dir * (0.25 * len * w.min(3.0)), ..end.0 }, end.1.clone()))
+            leave(end, centre(next), flip).map(|dir| (Plane { origin: end.0.origin + dir * (0.25 * len * w), ..end.0 }, end.1.clone()))
         };
         if last > 0.0
             && let Some(prev) = secs.get(secs.len() - 2)
@@ -11803,10 +11803,11 @@ fn face_rim_loft(st: &ModelState, sections: &[crate::LoftSection], weights: [f64
             }
             loops.push(lp);
         }
-        let pieces = loops
-            .into_iter()
-            .max_by(|x, y| length(&flat(x)).total_cmp(&length(&flat(y))))
-            .ok_or_else(|| DocError::Invalid("Loft: the face has no rim".into()))?;
+        // One rim only: the wall would skip a hole's rim and the loft would fill the hole.
+        if loops.len() > 1 {
+            return Err(DocError::Invalid("not supported yet: a loft from a curved face with a hole or more than one rim".into()));
+        }
+        let pieces = loops.into_iter().next().ok_or_else(|| DocError::Invalid("Loft: the face has no rim".into()))?;
         let all = flat(&pieces);
         if all.len() < 3 || all.first().zip(all.last()).is_none_or(|(h, e)| (*h - *e).len() > size * 1e-3) {
             return Err(DocError::Invalid("Loft: the face's rim does not close".into()));
@@ -11867,7 +11868,10 @@ fn face_rim_loft(st: &ModelState, sections: &[crate::LoftSection], weights: [f64
         }
     }
     let size = ring_a.iter().chain(&ring_b).map(|p| (*p - ra.centre).len()).fold(0.0, f64::max).max(1e-6);
-    let crown = weights.map(|w| (w - 1.0).clamp(-0.9, 3.0));
+    // The blend's crown runs from -0.9 (flat) to 3 (full); every weight gets its own: 0 to 1
+    // flattens towards -0.9, and above 1 it fills towards 3 without reaching it (2 gives 1.5,
+    // 10 gives 2.7).
+    let crown = weights.map(|w| if w <= 1.0 { 0.9 * (w.max(0.0) - 1.0) } else { 3.0 * (1.0 - 1.0 / w) });
     let frames = |pts: &[Vec3], leave: Vec3| -> Vec<kernel::Frame> {
         pts.iter().map(|p| kernel::Frame { p: *p, leave, bend: Vec3::ZERO, bend_change: Vec3::ZERO }).collect()
     };
