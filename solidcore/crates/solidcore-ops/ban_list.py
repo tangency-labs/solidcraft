@@ -17,7 +17,7 @@ FLOATS = ["sqrt", "cbrt", "hypot", "sin", "cos", "tan", "sin_cos", "asin", "acos
 # nothing on another. Kept: constructors from given values, field reads and writes, and the
 # kernel's certified queries on a transform (`is_regular`, `row_lengths`, `of_placement`), and the
 # kernel's maps built from an application's numbers and their composition (`rotation`,
-# `uniform_scaling`, `reflection`, `concat`), which ops calls rather than computes.
+# `uniform_scaling`, `reflection`, `concat`, `inverse`), which ops calls rather than computes.
 TYPES = [
     ("geom/vector3d.rs", "Vec3", "solidcore::Vec3",
      {"new", "from_array", "to_array", "set_uninitialized", "is_initialized", "is_undef",
@@ -27,7 +27,8 @@ TYPES = [
       "component", "component_mut"}),
     ("math.rs", "Transform", "solidcore::Transform",
      {"translation", "x_axis", "y_axis", "z_axis", "translation_part", "is_regular", "row_lengths",
-      "of_placement", "rotation", "uniform_scaling", "reflection", "concat"}),
+      "of_placement", "rotation", "uniform_scaling", "reflection", "concat",
+      "inverse"}),
     ("geom/transform.rs", "Transform", "solidcore::geom::transform::Transform",
      {"new", "matrix", "type_code", "type_string", "class_string", "is_kind_of", "read_from_db"}),
     ("geom/matrix.rs", "Matrix", "solidcore::geom::matrix::Matrix",
