@@ -1,7 +1,8 @@
 //! Picks (a child of `cmd/cam.rs`): an operation's geometry stored as persistent face, edge and
 //! sketch names (`schema/cam_picks.rs`), found again each time the job is planned and read as the
 //! keys the planners take (a pocket's or contour's `feature`, or its `sketch` and `profiles`);
-//! heights that follow a face, read as numbers; and each feature of `cam.features` as picks.
+//! heights that follow a face, read as numbers; each feature of `cam.features` as picks; and
+//! `cam.picks.resolve`, which says what picks are and which operations suit them.
 //!
 //! A pick is found by its name first (`naming::locate_face_named`, `locate_edge_named`), else by
 //! the exact face or edge its stored point lies on (the B-rep's surfaces and exact extents, never
@@ -19,11 +20,27 @@ use solidcraft_geom::prelude::*;
 use solidcraft_kernel::FaceSurface;
 
 use super::features::{BodyFaces, FeatureSet, Lazy};
-use super::num;
+use super::{CommandSpec, num, parse};
 use crate::params::bad;
 use crate::schema::cam::CamJob;
-use crate::schema::cam_picks::{HeightRef, HeightSource, OpRef, Pick, PickResolved};
-use crate::{Result, Session};
+use crate::schema::cam_picks::{CamPicksResolveParams, CamPicksResolveReply, HeightRef, HeightSource, OpRef, Pick, PickRead, PickResolved, Suit};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::{EngineError, Result, Session};
+
+const RESOLVE: TypedContract<CamPicksResolveParams> = TypedContract::new();
+
+pub(crate) static COMMANDS: &[CommandSpec] =
+    &[CommandSpec::new("cam.picks.resolve", "Read Machining Picks", crate::checked!("cam.picks.resolve", resolve_cmd))
+        .noundo()
+        .icon("cam")
+        .contract(&RESOLVE)
+        .output(output_schema_for::<CamPicksResolveReply>)
+        .params(
+            "picks?: [{body, face | edge, at: [x,y,z]} | {sketch, profile?}] | from_selection?: the design's selected faces, edges, \
+             sketches and profiles; for?: pocket | contour → picks: [{pick, by: name | point | lost, face?, edge?, kind, feature?, \
+             reads, note?}], suits: [{type, label, why, set}] (the operations the picks resolve for, with the keys they give each), \
+             left_out?: ['<label>: <why>'] (those they do not resolve for)",
+        )];
 
 /// Most picks one operation holds.
 pub(crate) const MAX_PICKS: usize = 1000;
@@ -703,6 +720,237 @@ pub(crate) fn feature_picks(set: &FeatureSet, st: &ModelState, id: &str) -> Vec<
     };
     let Some(b) = st.bodies.iter().position(|mb| mb.name == body) else { return Vec::new() };
     faces.into_iter().take(MAX_PICKS).filter_map(|f| pick_of(st, b, Some(f), None, None)).collect()
+}
+
+/// The operation types picks are offered for, with their labels as the Manufacture workspace
+/// shows them.
+const OP_TYPES: &[(&str, &str)] = &[("pocket", "Clear Pocket"), ("contour", "Follow Outline")];
+
+/// The design's selection as picks: faces and edges of bodies (by their persistent names, with the
+/// point clicked when it is on the face or edge), and sketches' profiles.
+fn cam_picks_from_selection(s: &Session) -> Vec<Pick> {
+    let Ok(st) = s.world_state() else { return Vec::new() };
+    let on_face = |b: usize, f: usize, p: Vec3| {
+        st.bodies.get(b).is_some_and(|mb| !mb.body.is_mesh() && BodyFaces::new(&mb.name, &mb.body).faces_at(p, point_tol(&st, b, 0.01)).contains(&f))
+    };
+    let on_edge = |b: usize, e: usize, p: Vec3| {
+        st.bodies.get(b).is_some_and(|mb| matches!(mb.body.nearest_edge(p, point_tol(&st, b, 0.01)), Ok(Some((x, _))) if x == e))
+    };
+    let finite = |p: &Vec3| finite3(&[p.x, p.y, p.z]);
+    // A sketch by its name (the id when two sketches share it).
+    let sketch_name = |id: u64| -> Option<String> {
+        let f = s.doc.feature(id)?;
+        if !matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. }) {
+            return None;
+        }
+        let shared = s.doc.features.iter().filter(|g| g.name == f.name).count() > 1;
+        Some(if shared || f.name.trim().is_empty() { id.to_string() } else { f.name.clone() })
+    };
+    let sketch_pick = |id: u64| Pick { sketch: sketch_name(id), ..Pick::default() };
+    s.selection
+        .iter()
+        .filter_map(|sel| match sel {
+            // A sketch's closed profile (picked in the view or the browser), or the sketch itself
+            // (every drawn profile).
+            crate::Sel::Profile { sketch, index } => Some(Pick { profile: Some(*index), ..sketch_pick(*sketch) }).filter(|p| p.sketch.is_some()),
+            crate::Sel::Feature { id } => Some(sketch_pick(*id)).filter(|p| p.sketch.is_some()),
+            crate::Sel::Face { body, index, point } => st.bodies.iter().position(|b| &b.name == body).and_then(|b| {
+                let at = Some(*point).filter(|p| finite(p) && on_face(b, *index, *p));
+                pick_of(&st, b, Some(*index), None, at)
+            }),
+            crate::Sel::Edge { body, index, point } => st.bodies.iter().position(|b| &b.name == body).and_then(|b| {
+                let at = Some(*point).filter(|p| finite(p) && on_edge(b, *index, *p));
+                pick_of(&st, b, None, Some(*index), at)
+            }),
+            _ => None,
+        })
+        .take(MAX_PICKS)
+        .collect()
+}
+
+/// The picks of a call: given, or the design's selection.
+fn picks_param(cmd: &str, s: &Session, picks: Option<&Vec<Pick>>, from_selection: bool) -> Result<Vec<Pick>> {
+    let picks = match (picks, from_selection) {
+        (Some(_), true) => return Err(bad(cmd, "give `picks` or `from_selection`, not both")),
+        (Some(p), false) => p.clone(),
+        (None, true) => cam_picks_from_selection(s),
+        (None, false) => return Err(bad(cmd, "give `picks`, or `from_selection: true`")),
+    };
+    if picks.is_empty() {
+        return Err(bad(cmd, "nothing is picked: select faces or edges of the part, or a sketch or one of its profiles"));
+    }
+    if picks.len() > MAX_PICKS {
+        return Err(bad(cmd, format!("at most {MAX_PICKS} picks")));
+    }
+    for (k, p) in picks.iter().enumerate() {
+        check_pick(p).map_err(|e| bad(cmd, format!("`picks[{k}]`: {e}")))?;
+    }
+    Ok(picks)
+}
+
+/// A feature in words.
+fn reads(set: &FeatureSet, id: &str) -> String {
+    let r = &set.reply;
+    let side = |a: Option<f64>| a.filter(|a| a.abs() > 1e-9).map_or(String::new(), |a| format!(", on the A{} side", num(a)));
+    if let Some(p) = r.pockets.iter().find(|p| p.id == id) {
+        let size = format!("{} x {}", num(p.bounds[1][0] - p.bounds[0][0]), num(p.bounds[1][1] - p.bounds[0][1]));
+        let corners = if p.min_corner_radius > 0.0 { format!(", corners R{}", num(p.min_corner_radius)) } else { ", sharp corners".into() };
+        let islands = match p.islands.len() {
+            0 => String::new(),
+            1 => ", 1 island".into(),
+            n => format!(", {n} islands"),
+        };
+        return format!("pocket {size} mm, {} deep{corners}{islands}{}", num(p.depth), side(p.a_deg));
+    }
+    if let Some(h) = r.holes.iter().find(|h| h.id == id) {
+        let group = r.hole_groups.iter().find(|g| g.ids.iter().any(|x| x == id)).map_or(1, |g| g.count);
+        let depth = if h.through { format!("through {}", num(h.depth)) } else { format!("{} deep", num(h.depth)) };
+        let more = if group > 1 { format!(" (one of {group} alike)") } else { String::new() };
+        return format!("hole {} mm, {depth}{more}{}", num(h.diameter), side(h.a_deg));
+    }
+    if let Some(w) = r.wrapped.iter().find(|w| w.id == id) {
+        return format!(
+            "pocket wrapped round the bar, X {} to {}, A {} to {} degrees, {} deep to radius {}",
+            num(w.x_min),
+            num(w.x_max),
+            num(w.a_min_deg),
+            num(w.a_max_deg),
+            num(w.depth),
+            num(w.floor_radius)
+        );
+    }
+    if let Some(f) = r.faces.iter().find(|f| f.id == id) {
+        let size = format!("{} x {}", num(f.bounds[1][0] - f.bounds[0][0]), num(f.bounds[1][1] - f.bounds[0][1]));
+        let role = match f.role.as_str() {
+            "top" => "top face",
+            "step" => "step",
+            "plateau" => "raised face",
+            "pocket_floor" => "pocket floor",
+            "hole_floor" => "hole floor",
+            "island_top" => "island top",
+            "wrapped_wall" => "wall of a wrapped pocket",
+            _ => "flat face",
+        };
+        return format!("{role} {size} mm at Z {}{}", num(f.z), side(f.a_deg));
+    }
+    if let Some(p) = r.profiles.iter().find(|p| p.id == id) {
+        let size = format!("{} x {}", num(p.bounds[1][0] - p.bounds[0][0]), num(p.bounds[1][1] - p.bounds[0][1]));
+        return format!("outline {size} mm, Z {} to {}{}", num(p.top_z), num(p.bottom_z), side(p.a_deg));
+    }
+    if let Some(x) = r.fillets.iter().find(|x| x.id == id) {
+        return format!("round{}{}", x.radius.map_or(String::new(), |r| format!(" R{}", num(r))), side(x.a_deg));
+    }
+    if let Some(x) = r.chamfers.iter().find(|x| x.id == id) {
+        return format!("chamfer {} mm deep{}", num(x.top_z - x.bottom_z), side(x.a_deg));
+    }
+    if let Some(x) = r.surfaces.iter().find(|x| x.id == id) {
+        return format!("curved area ({}), Z {} to {}{}", x.kinds.join(", "), num(x.bottom_z), num(x.top_z), side(x.a_deg));
+    }
+    if let Some(x) = r.turned.iter().find(|x| x.id == id) {
+        return format!("turned diameter {} mm, X {} to {}", num(x.diameter), num(x.x_min), num(x.x_max));
+    }
+    id.to_string()
+}
+
+/// Why operation type `ty` suits a pick that reads as a feature of kind `kind` (or a sketch).
+fn why_suits(ty: &str, kind: &str) -> &'static str {
+    match (ty, kind) {
+        ("pocket", "pocket") => "clears the pocket round its islands",
+        ("pocket", "face") => "clears down to this face",
+        ("pocket", "hole") => "clears the round hole",
+        ("pocket", _) => "clears the sketch's profile",
+        ("contour", "profile") => "cuts round the outline",
+        ("contour", "pocket") => "finishes its walls",
+        ("contour", "hole") => "cuts round the hole's wall",
+        ("contour", "face") => "cuts round the face's edges",
+        _ => "cuts round the sketch's profile",
+    }
+}
+
+/// `cam.picks.resolve`: what the picks are, and which operations suit them.
+fn resolve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "cam.picks.resolve";
+    let params: CamPicksResolveParams = parse(cmd, p, "")?;
+    let picks = picks_param(cmd, s, params.picks.as_ref(), params.from_selection.unwrap_or(false))?;
+    let ty = params.for_type.clone().unwrap_or_default();
+    if !ty.is_empty() && !OP_TYPES.iter().any(|(t, _)| *t == ty) {
+        return Err(bad(
+            cmd,
+            format!("`for` is an operation type that takes picks (pocket, contour), not `{}`", ty.chars().take(40).collect::<String>()),
+        ));
+    }
+    let job: CamJob = parse(cmd, &json!({"operations": []}), "")?;
+    let m = Model::new(cmd, s, &job, &Machine::three_axis())?;
+    let found = find_all(&m, None, &picks, if ty.is_empty() { "pocket" } else { &ty });
+    let set = m.set();
+    let mut out: Vec<PickRead> = Vec::new();
+    let mut hits = found.hits.iter();
+    for (k, p) in picks.iter().enumerate() {
+        if p.sketch.is_some() {
+            out.push(PickRead {
+                pick: p.clone(),
+                by: "name".into(),
+                kind: "sketch".into(),
+                reads: format!("sketch {}", p.sketch.as_deref().unwrap_or_default()),
+                ..PickRead::default()
+            });
+            continue;
+        }
+        let Some(rep) = found.report.iter().find(|r| r.pick == k) else { continue };
+        if rep.by == "lost" {
+            out.push(PickRead { pick: p.clone(), by: "lost".into(), reads: "not found".into(), note: rep.note.clone(), ..PickRead::default() });
+            continue;
+        }
+        let Some((_, h, feature)) = hits.next() else { continue };
+        let kind = match (h.face, h.edge) {
+            (Some(f), _) => m.st.bodies.get(h.body).map_or("other", |mb| BodyFaces::new(&mb.name, &mb.body).kind(f)),
+            (None, Some(e)) => {
+                if m.st.bodies.get(h.body).and_then(|mb| BodyFaces::new(&mb.name, &mb.body).edge_circle(e)).is_some() {
+                    "circle"
+                } else {
+                    "edge"
+                }
+            }
+            _ => "other",
+        };
+        let words = feature.as_deref().and_then(|id| set.map(|set| reads(set, id))).unwrap_or_else(|| format!("a {kind} face"));
+        out.push(PickRead {
+            pick: p.clone(),
+            by: rep.by.clone(),
+            face: h.face,
+            edge: h.edge,
+            kind: kind.to_string(),
+            feature: feature.clone(),
+            reads: words,
+            note: rep.note.clone(),
+        });
+    }
+    // Each operation type, planned with the picks as its geometry: offered with the keys they
+    // give it, else left out with why. An outline is followed before it is cleared round.
+    let mut types: Vec<&(&str, &str)> = OP_TYPES.iter().filter(|(t, _)| ty.is_empty() || *t == ty).collect();
+    let outline = found.hits.iter().any(|(_, _, f)| f.as_deref().is_some_and(|id| kind_of(id) == "profile"));
+    if outline {
+        types.reverse();
+    }
+    let mut suits = Vec::new();
+    let mut left_out = Vec::new();
+    for (t, label) in types {
+        let found = find_all(&m, None, &picks, t);
+        if let Some((_, why)) = found.lost.first() {
+            left_out.push(format!("{label}: {why}"));
+            continue;
+        }
+        let mut op = Map::new();
+        match apply(&m, t, &mut op, &found) {
+            Ok(()) => {
+                let kind = op.get("feature").and_then(Value::as_str).map_or("sketch", kind_of);
+                suits.push(Suit { kind: t.to_string(), label: label.to_string(), why: why_suits(t, kind).to_string(), set: op });
+            }
+            Err(e) => left_out.push(format!("{label}: {e}")),
+        }
+    }
+    let reply = CamPicksResolveReply { picks: out, suits, left_out };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 #[cfg(test)]

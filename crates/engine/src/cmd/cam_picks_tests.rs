@@ -322,3 +322,104 @@ fn a_sketch_profile_picked_is_machined() {
     let e = refused(&mut s, "cam.job", json!({"job": job(lone), "dry_run": true}));
     assert!(e.contains("goes with its `sketch`"), "{e}");
 }
+
+#[test]
+fn resolving_picks_says_what_they_are_and_which_operations_suit_them() {
+    let mut s = block();
+    let floor = floor_pick(&mut s, 15.0);
+    let r = run(&mut s, "cam.picks.resolve", json!({"picks": [floor]}));
+    let read = &r["picks"][0];
+    assert_eq!((read["by"].as_str(), read["kind"].as_str(), read["feature"].as_str()), (Some("name"), Some("planar"), Some("pocket:0")), "{r}");
+    assert_eq!(read["reads"], "pocket 16 x 10 mm, 5 deep, sharp corners", "{r}");
+    let suits = r["suits"].as_array().unwrap();
+    let kinds: Vec<&str> = suits.iter().filter_map(|x| x["type"].as_str()).collect();
+    assert_eq!(kinds, ["pocket", "contour"], "{r}");
+    assert_eq!(suits[0]["label"], "Clear Pocket");
+    assert_eq!(suits[0]["set"], json!({"feature": "pocket:0"}), "{r}");
+    assert!(suits[1]["why"].as_str().unwrap().contains("walls"), "{r}");
+    // `for` keeps one type; an outline picked is followed before it is cleared round.
+    let r = run(&mut s, "cam.picks.resolve", json!({"picks": [floor], "for": "contour"}));
+    assert_eq!(r["suits"].as_array().unwrap().len(), 1, "{r}");
+    let side = json!({"body": "Block", "at": [0, -15, 10]});
+    let r = run(&mut s, "cam.picks.resolve", json!({"picks": [side]}));
+    assert_eq!(r["picks"][0]["by"], "point", "{r}");
+    assert_eq!(r["suits"][0]["type"], "contour", "{r}");
+    assert_eq!(r["suits"][0]["set"], json!({"feature": "profile:0"}), "{r}");
+    // The hole's rim edge is a circle, read as the hole.
+    let edges = run(&mut s, "model.edges", json!({"body": "Block"}));
+    let rim = edges["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| (f(&e["mid"][2]) - 20.0).abs() < 1e-6 && (f(&e["length"]) - 5.0 * std::f64::consts::PI).abs() < 0.5 && f(&e["mid"][0]) > 10.0);
+    let rim = rim.unwrap_or_else(|| panic!("no rim: {edges}"));
+    let r = run(&mut s, "cam.picks.resolve", json!({"picks": [{"body": "Block", "edge": rim["name"], "at": rim["mid"]}]}));
+    assert_eq!(r["picks"][0]["kind"], "circle", "{r}");
+    assert_eq!(r["picks"][0]["feature"], "hole:0", "{r}");
+    // A lost pick says so, and no operation is offered on it.
+    let r = run(&mut s, "cam.picks.resolve", json!({"picks": [{"body": "Block", "at": [500, 500, 500]}]}));
+    assert_eq!(r["picks"][0]["by"], "lost", "{r}");
+    assert!(r["suits"].as_array().unwrap().is_empty(), "{r}");
+    assert!(r["left_out"].as_array().unwrap().iter().all(|x| x.as_str().unwrap().contains("no face is at")), "{r}");
+}
+
+#[test]
+fn the_selection_is_read_as_picks() {
+    let mut s = block();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 20, "name": "Clear"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-25, 3], "p1": [25, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let id = s.doc.features.iter().find(|f| f.name == "Clear").unwrap().id;
+    s.selection = vec![crate::Sel::Profile { sketch: id, index: 0 }];
+    let r = run(&mut s, "cam.picks.resolve", json!({"from_selection": true}));
+    assert_eq!(r["picks"][0]["pick"], json!({"sketch": "Clear", "profile": 0}), "{r}");
+    assert_eq!(r["picks"][0]["kind"], "sketch", "{r}");
+    let kinds: Vec<&str> = r["suits"].as_array().unwrap().iter().filter_map(|x| x["type"].as_str()).collect();
+    assert_eq!(kinds, ["pocket", "contour"], "{r}");
+    assert_eq!(r["suits"][0]["set"], json!({"sketch": "Clear", "profiles": [0]}), "{r}");
+    // The sketch itself (its browser row).
+    s.selection = vec![crate::Sel::Feature { id }];
+    let r = run(&mut s, "cam.picks.resolve", json!({"from_selection": true}));
+    assert_eq!(r["picks"][0]["pick"], json!({"sketch": "Clear"}), "{r}");
+    // A face clicked: its name, and the point when it is on the face.
+    let feats = run(&mut s, "cam.features", json!({}));
+    let floor = feats["pockets"][0]["floor_face"].as_u64().unwrap() as usize;
+    s.selection = vec![crate::Sel::Face { body: "Block".into(), index: floor, point: solidcore_record::Vec3::new(0.0, 0.0, 15.0) }];
+    let r = run(&mut s, "cam.picks.resolve", json!({"from_selection": true}));
+    assert_eq!(r["picks"][0]["pick"]["at"], json!([0.0, 0.0, 15.0]), "{r}");
+    assert_eq!(r["picks"][0]["feature"], "pocket:0", "{r}");
+    // A point off the face is not kept: the pick takes a point on the face instead.
+    s.selection = vec![crate::Sel::Face { body: "Block".into(), index: floor, point: solidcore_record::Vec3::new(0.0, 0.0, 18.0) }];
+    let r = run(&mut s, "cam.picks.resolve", json!({"from_selection": true}));
+    assert!((f(&r["picks"][0]["pick"]["at"][2]) - 15.0).abs() < 1e-6, "{r}");
+    // A body's feature is no sketch: nothing is picked.
+    let body = s.doc.features.iter().find(|f| f.name != "Clear").unwrap().id;
+    s.selection = vec![crate::Sel::Feature { id: body }];
+    let e = refused(&mut s, "cam.picks.resolve", json!({"from_selection": true}));
+    assert!(e.contains("nothing is picked"), "{e}");
+}
+
+#[test]
+fn hostile_resolve_calls_are_refused() {
+    let mut s = block();
+    let e = refused(&mut s, "cam.picks.resolve", json!({}));
+    assert!(e.contains("picks"), "{e}");
+    let e = refused(&mut s, "cam.picks.resolve", json!({"picks": [], "from_selection": true}));
+    assert!(e.contains("not both"), "{e}");
+    let e = refused(&mut s, "cam.picks.resolve", json!({"picks": []}));
+    assert!(e.contains("nothing is picked"), "{e}");
+    let e = refused(&mut s, "cam.picks.resolve", json!({"picks": [{"body": "Block", "at": [0, 0, 15]}], "for": "nonsense"}));
+    assert!(e.contains("`for`"), "{e}");
+    let e = refused(&mut s, "cam.picks.resolve", json!({"picks": [{"body": "Block", "at": [0, 0, 15]}], "for": "é".repeat(5000)}));
+    assert!(e.contains("`for`") && e.len() < 400, "{e}");
+    let many: Vec<Value> = (0..1001).map(|i| json!({"body": "Block", "at": [i, 0, 0]})).collect();
+    let e = refused(&mut s, "cam.picks.resolve", json!({"picks": many}));
+    assert!(e.contains("1000"), "{e}");
+    let e = refused(&mut s, "cam.picks.resolve", json!({"picks": [{"body": "Block", "at": [f64::MAX, 0, 0]}]}));
+    assert!(e.contains("finite"), "{e}");
+    assert!(s.execute("cam.picks.resolve", &json!({"picks": "x"})).is_err());
+    assert!(s.execute("cam.picks.resolve", &json!({"pick": []})).is_err());
+    s.selection = Vec::new();
+    let e = refused(&mut s, "cam.picks.resolve", json!({"from_selection": true}));
+    assert!(e.contains("nothing is picked"), "{e}");
+}

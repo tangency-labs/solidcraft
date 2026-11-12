@@ -1,0 +1,10 @@
+{
+  "en": { "cmd.cam.picks.resolve": "Read Machining Picks" },
+  "ar": { "cmd.cam.picks.resolve": "قراءة اختيارات التشغيل" },
+  "de": { "cmd.cam.picks.resolve": "Bearbeitungsauswahl lesen" },
+  "he": { "cmd.cam.picks.resolve": "קריאת בחירות עיבוד" },
+  "ja": { "cmd.cam.picks.resolve": "加工の選択を読む" },
+  "ko": { "cmd.cam.picks.resolve": "가공 선택 읽기" },
+  "vi": { "cmd.cam.picks.resolve": "Đọc vùng chọn gia công" },
+  "zh": { "cmd.cam.picks.resolve": "读取加工拾取" }
+}

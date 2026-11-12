@@ -13,6 +13,7 @@ commands work with jobs, from scripts, the CLI and MCP alike:
 | `cam.simulate` | Runs a written program through a model of the stock and holds what it leaves against the part: gouges, rapids through material, material left |
 | `cam.view.*` | The simulation view: a job's program played move by move on the simulated stock (see [Simulation view](#simulation-view)) |
 | `cam.view` | A PNG of the part with the job's toolpaths drawn over it, for an agent to look at (see [Pictures and extents for agents](#pictures-and-extents-for-agents)) |
+| `cam.picks.resolve` | Says what picked faces, edges and sketch profiles are, and which operations suit them |
 | `cam.features` | Lists the part's machinable features (holes, pockets, faces, profiles, rounds, chamfers, curved areas, and on a 4th axis turned diameters) with stable ids and their exact geometry, for an operation to name |
 
 Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`, …).
@@ -1398,3 +1399,20 @@ one that has moved, gives a note as a pick does.
 pocket's floor, a face, the face of an outline, the faces of a round, chamfer, curved area or
 turned diameter), so an operation can store them in place of the feature's id and follow the
 model.
+
+#### `cam.picks.resolve`
+
+```json
+{"picks": [{"body": "Block", "face": "F12:floor:c3", "at": [0, 0, 15]}], "for": "pocket"}
+```
+
+Finds `picks` (or, with `from_selection: true`, the faces, edges, sketches and sketch profiles
+selected in the design: a face or edge by its name, with the point clicked when it lies on it by
+exact geometry) as a job would, and says what each is: `by` (`name`, `point` or `lost`), its
+`face` or `edge`, its `kind` (`planar`, `cylinder`, `cone`, `sphere`, `torus`, `other`, `edge`,
+`circle` or `sketch`), the `feature` it belongs to, what it `reads` as in words ("pocket 16 x 10
+mm, 5 deep, sharp corners") and a `note` to check. `suits` lists the operations the picks
+resolve for, best first (an outline is followed before it is cleared round), each with its
+`type`, `label`, `why` and the keys the picks give it (`set`: its `feature`, or its `sketch` and
+`profiles`); `left_out` says why the others are not offered. `for` keeps one operation type. The
+part's features are found along Z, with every visible body.

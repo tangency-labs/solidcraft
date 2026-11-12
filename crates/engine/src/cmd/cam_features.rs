@@ -3229,6 +3229,18 @@ impl<'a> BodyFaces<'a> {
         self.topo.surface(f).copied()
     }
 
+    /// `planar`, `cylinder`, `cone`, `sphere`, `torus` or `other`.
+    pub fn kind(&self, f: usize) -> &'static str {
+        match self.topo.surface(f) {
+            Some(FaceSurface::Plane { .. }) => "planar",
+            Some(FaceSurface::Cylinder { .. }) => "cylinder",
+            Some(FaceSurface::Cone { .. }) => "cone",
+            Some(FaceSurface::Sphere { .. }) => "sphere",
+            Some(FaceSurface::Torus { .. }) => "torus",
+            None => "other",
+        }
+    }
+
     /// Face `f`'s exact extent along the axes of `frame` (work coordinates `origin` away from the
     /// design's), in the frame's coordinates: [[low x, low y, low z], [high x, high y, high z]].
     pub fn extent(&self, f: usize, origin: Vec3, frame: &Frame) -> Option<[[f64; 3]; 2]> {
@@ -3283,6 +3295,14 @@ impl<'a> BodyFaces<'a> {
     /// The faces edge `e` bounds.
     pub fn edge_faces(&self, e: usize) -> Vec<usize> {
         self.topo.edge_faces.get(e).cloned().unwrap_or_default()
+    }
+
+    /// Edge `e`'s circle, when it is one (design coordinates).
+    pub fn edge_circle(&self, e: usize) -> Option<EdgeCircle> {
+        match self.topo.shapes.get(e)? {
+            EdgeShape::Circle(c) => Some(*c),
+            EdgeShape::Hull(_) | EdgeShape::Sampled(_) => None,
+        }
     }
 }
 

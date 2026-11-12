@@ -1,9 +1,10 @@
 //! Picks: the pieces of the design a machining operation works on, stored by their persistent
-//! names (`cmd/cam_picks.rs` finds them again each time the job is planned), and heights that
-//! follow a face. docs/cam-jobs.md, "Picks", describes them.
+//! names (`cmd/cam_picks.rs` finds them again each time the job is planned), heights that follow
+//! a face, and the reply of `cam.picks.resolve`. docs/cam-jobs.md, "Picks", describes them.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 /// A piece of the design, found again by its persistent name: a face or an edge of a body (with
 /// a point on it, the fallback when the name no longer finds it), or a sketch's profile.
@@ -93,4 +94,68 @@ pub struct PickResolved {
     /// found.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+}
+
+/// Find picks again and say what they are and which operations suit them.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CamPicksResolveParams {
+    /// The picks. Give these or `from_selection`.
+    #[serde(default)]
+    pub picks: Option<Vec<Pick>>,
+    /// Take the faces, edges, sketches and profiles selected in the design instead. Default:
+    /// false.
+    #[serde(default)]
+    pub from_selection: Option<bool>,
+    /// Say how this operation type reads them (`pocket` or `contour`). Default: every type.
+    #[serde(default, rename = "for")]
+    pub for_type: Option<String>,
+}
+
+/// One pick as `cam.picks.resolve` read it.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct PickRead {
+    /// The pick (as an operation stores it).
+    pub pick: Pick,
+    /// `name`, `point` or `lost`.
+    pub by: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub face: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge: Option<usize>,
+    /// `planar`, `cylinder`, `cone`, `sphere`, `torus`, `other`, `edge`, `circle`, `sketch`.
+    pub kind: String,
+    /// The `cam.features` id it belongs to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature: Option<String>,
+    /// What it is, in words: "pocket 16 x 10 mm, 5 deep".
+    pub reads: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// An operation that suits the picks.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct Suit {
+    /// The operation's `type`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Its label, as the Manufacture workspace shows it.
+    pub label: String,
+    /// Why it suits.
+    pub why: String,
+    /// The keys the picks give the operation (its `feature`, or its `sketch` and `profiles`).
+    #[serde(skip_serializing_if = "Map::is_empty")]
+    pub set: Map<String, Value>,
+}
+
+/// What `cam.picks.resolve` returns.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct CamPicksResolveReply {
+    pub picks: Vec<PickRead>,
+    /// The operations the picks resolve for, best first.
+    pub suits: Vec<Suit>,
+    /// Those the picks do not resolve for, each `<label>: <why>`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<String>,
 }
