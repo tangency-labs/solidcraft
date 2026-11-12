@@ -1534,9 +1534,9 @@ preference_settings! {
     /// The Assistant button in the application bar (the shortcut and View menu entry stay).
     ai_toolbar_button: bool = true, PAGE_ASSISTANT;
     /// An agent's slow commands over the control channel (MCP) compute off the window thread,
-    /// so the window stays live while they run (#1989, [`crate::control_job`]). Off: they run on
-    /// the window thread, and the window waits for each, as before (the default).
-    agent_off_thread: bool = false, PAGE_ASSISTANT;
+    /// so the window stays live while they run (#1989, [`crate::control_job`]), the default. Off:
+    /// they run on the window thread, and the window waits for each.
+    agent_off_thread: bool = true, PAGE_ASSISTANT;
     /// Let AI agents connect: the localhost control channel (MCP) listens on
     /// `agent_control_port`, unless `--control`/`SOLIDCRAFT_CONTROL_PORT` name one for the run.
     /// Turning it on or off, or changing the port, takes effect at once ([`crate::control_switch`]).
@@ -10541,6 +10541,20 @@ mod tests {
         assert!(h.app.preferences.orbit_cursor_wrap);
         h.call("ui.prefs", json!({"orbit_cursor_wrap":false,"button":"apply"}));
         assert!(!h.app.preferences.orbit_cursor_wrap);
+    }
+
+    /// An agent's slow commands compute off the window thread unless a person turned that off:
+    /// a settings file without the setting follows the default, one that has it keeps its value.
+    #[test]
+    fn agent_commands_compute_off_the_window_thread_by_default() {
+        assert!(Prefs::default().agent_off_thread);
+        let old: Prefs = serde_json::from_value(json!({"nav": "solidworks"})).unwrap();
+        assert!(old.agent_off_thread, "a file from before the setting follows the default");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.agent_off_thread = false;
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.agent_off_thread, "a saved off stays off");
     }
 
     #[test]

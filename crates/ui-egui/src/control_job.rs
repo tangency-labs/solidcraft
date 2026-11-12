@@ -22,8 +22,8 @@
 //!
 //! Done within the app's wait ([`crate::dialogs::APPLY_AT_ONCE`]), a request just runs, as
 //! before. Headless use, tests and the web build ([`SolveApp::apply_off_thread`] unset) run
-//! everything at once, and so does the app unless the preference is on (Preferences > AI,
-//! `agent_off_thread`, off by default).
+//! everything at once, and so does the app with the preference off (Preferences > AI,
+//! `agent_off_thread`, on by default).
 //!
 //! The client that sent a request can cancel it (`control.cancel`, through its [`Ticket`]): one
 //! still waiting its turn is answered as cancelled without running, and one computing off the
