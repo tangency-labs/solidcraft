@@ -642,6 +642,13 @@ pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
         if let Some(path) = path
             && {
                 let mut params = provenance_params(app);
+                // A JSON design has no container to sign; asking would make this save fail.
+                if std::path::Path::new(&path).extension().is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+                    && let Some(params) = params.as_object_mut()
+                {
+                    params.remove("sign");
+                    params.remove("signing_key");
+                }
                 params["path"] = json!(path);
                 crate::save_job::start(app, "file.save_as", params)
             }

@@ -9,9 +9,9 @@ recipient can check that the document and every payload it refers to are exactly
 a key signed, and which key signed which earlier version.
 
 The entry is additive. A design without it is an ordinary unsigned design. A build that does not
-know it ignores it (as it ignores any entry it does not use), and a design that was edited and
-saved by such a build has a valid signature over an earlier version, which the reader reports
-instead of calling the signature wrong.
+know it ignores it (as it ignores any entry it does not use); when that build saves the design it
+drops `provenance/log.cbor`, so the saved file reads as unsigned and the earlier signing history
+is gone. The next build to sign it starts a new log.
 
 ## Files and versions
 
@@ -102,7 +102,9 @@ openpgp-record = {
 - The key's fingerprint and user id are derived from the embedded key when the record is read;
   Neither the fingerprint nor the user id is stored in the record: both are read from the key.
 
-Manifest, CBOR map, no unknown keys:
+Manifest, CBOR map, no unknown keys. A COSE record's manifest requires `public_key`, the Ed25519
+key; an OpenPGP record's manifest omits it, because the record wrapper carries the transferable
+public key:
 
 ```cddl
 manifest = {
@@ -119,7 +121,7 @@ manifest = {
   "author": text / absent,      ; a display name; the key, not this text, is proven
   "tool": text / absent,        ; desktop, cli, mcp, ...
   "note": text / absent,
-  "public_key": bstr .size 32,  ; the Ed25519 public key
+  ? "public_key": bstr .size 32, ; COSE only, where it is required; an OpenPGP manifest omits it
 }
 
 part = {
@@ -192,6 +194,10 @@ and small parts are hashed while writing.
 - **Completeness of a truncated log.** A bounded log drops its oldest records. The drop is
   signed and the report says the chain is truncated, but the records that are gone cannot be
   recovered from this file.
+- **Removal of the newest records.** `oldest` catches removal at the start of the log, but a
+  deleted tail leaves no trace in the file: no later record links to the newest one. A `valid`
+  report means the chain that is there is unbroken and covers the content; it does not mean the
+  file holds every signing event.
 - **Immutability.** Anyone can edit the design, sign it with their own key, or remove the entry
   (the result is then unsigned, never "valid"). A signature is evidence a key holder signed
   something, not a lock.

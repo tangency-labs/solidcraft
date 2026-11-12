@@ -623,11 +623,18 @@ pub fn read_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
 
 /// [`read_design_provenance`] for a file on disk (or the browser's storage).
 pub fn read_design_provenance_file(path: &str) -> Option<ProvenanceReport> {
-    let mut source = open_regular_file(path).ok()?;
-    if !is_container_source(&mut source).ok()? {
-        return None;
+    read_design_provenance_file_checked(path).ok().flatten()
+}
+
+/// [`read_design_provenance_file`], but a file that cannot be read is an error: a caller that
+/// asks for a check must not report a missing or unreadable file as an unsigned one.
+pub fn read_design_provenance_file_checked(path: &str) -> Result<Option<ProvenanceReport>> {
+    let mut source = open_regular_file(path)?;
+    if !is_container_source(&mut source)? {
+        return Ok(None);
     }
-    DesignContainerReader::new(source).ok()?.provenance()
+    let mut reader = DesignContainerReader::new(source)?;
+    Ok(reader.provenance())
 }
 
 /// What a design file's provenance says without verifying it, for a list that shows a design
@@ -1301,6 +1308,22 @@ fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut 
 mod tests {
     use super::*;
     use solidcore_record::Vec2;
+
+    #[test]
+    fn a_missing_design_file_is_a_check_error_not_an_unsigned_design() {
+        let path = std::env::temp_dir().join(format!("solidcraft-check-missing-{}.sc", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        assert!(read_design_provenance_file_checked(&path.to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn a_readable_unsigned_design_has_no_report_and_no_error() {
+        let doc = Document::new("Unsigned");
+        let path = std::env::temp_dir().join(format!("solidcraft-check-unsigned-{}.sc", std::process::id()));
+        std::fs::write(&path, write_design_container(&doc).unwrap()).unwrap();
+        assert!(read_design_provenance_file_checked(&path.to_string_lossy()).unwrap().is_none());
+        let _ = std::fs::remove_file(&path);
+    }
 
     /// Building a design file under a watch that asks to stop (a cancelled save) stops with
     /// "save cancelled", before the next part; unwatched, it is built as ever.

@@ -64,10 +64,13 @@ pub struct HomeState {
     #[cfg(not(target_arch = "wasm32"))]
     present_asked: std::collections::HashSet<String>,
     #[cfg(not(target_arch = "wasm32"))]
-    present_rx: Vec<std::sync::mpsc::Receiver<(String, bool, Option<solidcraft_engine::io::ProvenanceSummary>)>>,
+    present_rx: Vec<std::sync::mpsc::Receiver<(String, u64, bool, Option<solidcraft_engine::io::ProvenanceSummary>)>>,
     /// What each recent design's provenance says (read without verifying): absent means not read
     /// yet, `Some(None)` unsigned, `Some(Some(summary))` signed.
     signed: HashMap<String, Option<solidcraft_engine::io::ProvenanceSummary>>,
+    /// Bumped when a path's recent entry changes: an answer from an older presence/provenance
+    /// request for the same path must not overwrite the newer one after a save.
+    generation: HashMap<String, u64>,
 }
 
 impl HomeState {
@@ -77,7 +80,10 @@ impl HomeState {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while self.recent.iter().any(|p| !self.present.contains_key(p)) && std::time::Instant::now() < deadline {
             for rx in &self.present_rx {
-                while let Ok((p, there, summary)) = rx.try_recv() {
+                while let Ok((p, generation, there, summary)) = rx.try_recv() {
+                    if self.generation.get(&p).copied().unwrap_or(0) != generation {
+                        continue;
+                    }
                     self.present.insert(p.clone(), there);
                     self.signed.insert(p, summary);
                 }
@@ -116,6 +122,7 @@ impl HomeState {
         self.thumbs.remove(path);
         // A save can change what it says and whether it is there: ask again.
         self.signed.remove(path);
+        *self.generation.entry(path.to_string()).or_default() += 1;
         #[cfg(not(target_arch = "wasm32"))]
         self.present_asked.remove(path);
         // Opening or saving a design undoes an earlier removal from the list.
@@ -131,6 +138,7 @@ impl HomeState {
         self.opened_at.remove(path);
         self.thumbs.remove(path);
         self.signed.remove(path);
+        *self.generation.entry(path.to_string()).or_default() += 1;
         self.forgotten.insert(path.to_string());
     }
 }
@@ -609,16 +617,17 @@ pub fn open_recent(app: &mut SolveApp, path: &str) {
 fn ask_present(h: &mut HomeState, ctx: &egui::Context, recent: &[String]) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let new: Vec<String> = recent.iter().filter(|p| h.present_asked.insert((*p).clone())).cloned().collect();
+        let new: Vec<(String, u64)> =
+            recent.iter().filter(|p| h.present_asked.insert((*p).clone())).map(|p| (p.clone(), h.generation.get(p).copied().unwrap_or(0))).collect();
         if !new.is_empty() {
             let (tx, rx) = std::sync::mpsc::channel();
             let ctx = ctx.clone();
             let spawned = std::thread::Builder::new().name("recent-files".into()).spawn(move || {
-                for p in new {
+                for (p, generation) in new {
                     let there = solidcraft_engine::io::vfs::exists(&p);
                     // The entry only, not the payloads: enough for "signed by …" before opening.
                     let summary = there.then(|| solidcraft_engine::io::read_design_provenance_summary_file(&p)).flatten();
-                    if tx.send((p, there, summary)).is_err() {
+                    if tx.send((p, generation, there, summary)).is_err() {
                         return;
                     }
                     ctx.request_repaint();
@@ -629,7 +638,10 @@ fn ask_present(h: &mut HomeState, ctx: &egui::Context, recent: &[String]) {
             }
         }
         for rx in &h.present_rx {
-            while let Ok((p, there, summary)) = rx.try_recv() {
+            while let Ok((p, generation, there, summary)) = rx.try_recv() {
+                if h.generation.get(&p).copied().unwrap_or(0) != generation {
+                    continue;
+                }
                 h.present.insert(p.clone(), there);
                 h.signed.insert(p, summary);
             }

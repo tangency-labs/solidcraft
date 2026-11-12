@@ -888,7 +888,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let disk = solidcraft_io::design_lock::stamp(path);
     let (doc, saved) = read_design(s, path)?;
     let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
-    opened_design(s, opened, path, read_only, disk, verify)
+    opened_design(s, opened, path, read_only, disk, verify, None)
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
@@ -909,12 +909,17 @@ fn opened_design(
     read_only: bool,
     disk: Option<solidcraft_io::design_lock::FileStamp>,
     verify: bool,
+    checked: Option<Option<solidcraft_io::ProvenanceReport>>,
 ) -> Result<Value> {
     s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
     s.provenance_chain = solidcraft_io::read_design_provenance_chain_file(path);
-    s.provenance = verify.then(|| solidcraft_io::read_design_provenance_file(path)).flatten();
+    // A staged open checks on its worker before it lands; the report is then just taken here.
+    s.provenance = match checked {
+        Some(report) => report,
+        None => verify.then(|| solidcraft_io::read_design_provenance_file(path)).flatten(),
+    };
     // A design saved with print faces (by an older version, or with them kept) opens without
     // them when they are not kept (#11512). The rest of it opens as saved, and dropping them is
     // neither an unsaved change nor a step to undo.
@@ -1204,7 +1209,6 @@ fn write_bytes(
         // A save without a key keeps the history it opened with, so the newest record is reported
         // as covering an earlier version instead of the chain being destroyed.
         if format != "container" {
-            s.provenance_chain = None;
             match format {
                 "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
                 _ => return Err(bad("file.save", "format must be container or json")),
@@ -1306,8 +1310,12 @@ fn verify(s: &mut Session, p: &Value) -> Result<Value> {
         Some(path) if !path.trim().is_empty() => path.to_owned(),
         _ => s.path.clone().ok_or_else(|| bad("file.verify", "the design has no file yet: give a `path`"))?,
     };
-    let report = solidcraft_io::read_design_provenance_file(&path);
-    s.provenance = report.clone();
+    let report = solidcraft_io::read_design_provenance_file_checked(&path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // An explicit file that is not the design in front is checked without replacing the active
+    // design's report: a tab must not show another file's verification as its own.
+    if s.path.as_deref().is_some_and(|own| super::design_link::same_file(std::path::Path::new(own), std::path::Path::new(&path))) {
+        s.provenance = report.clone();
+    }
     let signature = match &report {
         Some(report) => signature_report(report),
         None => SignatureReport { status: "unsigned".to_owned(), reason: None, truncated: false, records: Vec::new() },

@@ -30,6 +30,10 @@ pub struct OpenSteps {
     stop: usize,
     /// The model came from the file and needs no evaluation.
     adopted: bool,
+    /// Whether a signature check was asked for, and (when it was) its result, made on the worker
+    /// so landing the design does not hash its payloads on the window thread.
+    verify: bool,
+    checked: Option<Option<solidcraft_io::ProvenanceReport>>,
 }
 
 impl OpenSteps {
@@ -47,9 +51,11 @@ impl OpenSteps {
             return Ok(None);
         }
         let read_only = bool_(p, "read_only").unwrap_or(false);
+        let verify = bool_(p, "verify").unwrap_or(false);
         // Stamped before it is read, as `doc.open` does.
         let disk = solidcraft_io::design_lock::stamp(path);
         let (mut doc, saved) = read_design(&mut Session::default(), path)?;
+        let checked = verify.then(|| solidcraft_io::read_design_provenance_file(path));
         super::super::component_link::resolve_design_links(&mut doc, Some(path));
         // What `Session::opened` does before it evaluates.
         solidcraft_io::vfs::install_checks();
@@ -70,6 +76,8 @@ impl OpenSteps {
             stop,
             adopted: adopted.is_some(),
             model: adopted.unwrap_or_else(|| under(validation)),
+            verify,
+            checked,
         };
         Ok(Some(steps))
     }
@@ -126,7 +134,7 @@ impl OpenSteps {
             self.model.evaluate_shared(&self.doc);
         }
         let opened = Session::with_model(self.doc, self.visibility, self.model).located(Some(&self.path));
-        opened_design(s, opened, &self.path, self.read_only, self.disk, false)
+        opened_design(s, opened, &self.path, self.read_only, self.disk, self.verify, self.checked)
     }
 }
 

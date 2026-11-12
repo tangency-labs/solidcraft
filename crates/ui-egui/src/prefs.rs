@@ -1886,7 +1886,10 @@ pub struct PrefsWindow {
     /// Where the theme Import tile was drawn last frame: a file dropped there is a theme (#8226).
     import_tile: Option<egui::Rect>,
     /// The GnuPG keys listed for the signing-key field, once the user asks for them.
-    pub(crate) signing_keys: Option<Result<Vec<SigningKey>, String>>,
+    pub(crate) signing_keys: SigningKeys,
+    /// The worker listing GnuPG keys, while one runs.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) signing_keys_rx: Option<std::sync::mpsc::Receiver<Result<Vec<SigningKey>, SigningKeysError>>>,
 }
 
 /// A GnuPG secret key offered for the signing-key preference.
@@ -1895,6 +1898,24 @@ pub(crate) struct SigningKey {
     pub fingerprint: String,
     pub user_id: String,
     pub on_card: bool,
+}
+
+/// The signing-key list's state: asking GnuPG runs a subprocess, so it happens on a worker.
+#[derive(Clone, Default)]
+pub(crate) enum SigningKeys {
+    #[default]
+    Idle,
+    Loading,
+    Ready(Result<Vec<SigningKey>, SigningKeysError>),
+}
+
+/// Why listing GnuPG keys failed. The page turns these into sentences in the user's language.
+#[derive(Clone, Debug)]
+pub(crate) enum SigningKeysError {
+    /// GnuPG is not installed here.
+    Missing,
+    /// GnuPG was found but could not list its keys.
+    Message(String),
 }
 
 /// Following a theme file needs the file system: the desktop app only (#7573).

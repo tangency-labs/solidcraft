@@ -8,7 +8,8 @@
 //! - the SHA-256 of the exact `document.json` bytes and of the exact `container.json` bytes;
 //! - the name, length and SHA-256 of every other authoritative entry;
 //! - the SHA-256 of the previous record's exact bytes, so removing, reordering or rewriting a
-//!   record breaks the chain;
+//!   record that has a successor breaks the chain. Removing the newest record does not: no later
+//!   record links to it;
 //! - the identity of the oldest record in the file when this record was written, so removing the
 //!   start of the log is caught even though the log is bounded;
 //! - who signed, when (the signer's clock, not authenticated), and with which key.
@@ -32,7 +33,8 @@
 //! and signing it again. An entry removed from the file leaves an unsigned design; the report for
 //! a missing entry is `None`, never "valid".
 //!
-//! The records are an append-only, bounded log. When the entry would exceed its budget the oldest
+//! The records are a bounded log. Each signed save appends a record, but a removed newest record
+//! leaves no trace in the file. When the entry would exceed its budget the oldest
 //! records are dropped; the newest record then names the new first record, and the first record
 //! names a predecessor that is gone, so the report says the chain is truncated. A save without a
 //! signer keeps the records it was given, so the newest record then covers an earlier version and
@@ -586,8 +588,10 @@ fn validate_chain(raw: &[Vec<u8>]) -> std::result::Result<(), String> {
     parse_chain(raw).map(|_| ())
 }
 
-/// The records an entry carries, without verifying them: a save appends to this. Unreadable or
-/// newer entries yield `None` (nothing to append to), never an error.
+/// The records an entry carries, with their links and manifests checked but their signatures not
+/// verified: a save appends to this. An unreadable, newer, or structurally invalid entry yields
+/// `None`, so the next save starts a new log instead of trying to append to a chain that cannot
+/// validate.
 pub(super) fn read_chain<R: Read + Seek>(reader: &mut PackageReader<R>) -> Option<ProvenanceChain> {
     if !reader.has_part(ENTRY) {
         return None;
@@ -600,7 +604,11 @@ pub(super) fn read_chain<R: Read + Seek>(reader: &mut PackageReader<R>) -> Optio
     if envelope.kind != KIND {
         return None;
     }
-    Some(ProvenanceChain { records: envelope.records.iter().map(|record| record.to_vec()).collect(), truncated: false })
+    let records: Vec<Vec<u8>> = envelope.records.iter().map(|record| record.to_vec()).collect();
+    // A chain whose links or manifests do not validate cannot be appended to; dropping it here
+    // means opening the file still works and the next container save starts a new log.
+    validate_chain(&records).ok()?;
+    Some(ProvenanceChain { records, truncated: false })
 }
 
 /// Verify the entry against the file it is in. `None` means the file has no provenance entry; an
@@ -1081,6 +1089,27 @@ mod tests {
         let summary = summarize_chain(&chain).unwrap();
         assert_eq!(summary.records, 1);
         assert!(summary.signer.as_deref().is_some_and(|signer| signer.contains("SolidCraft Test")), "{:?}", summary.signer);
+    }
+
+    #[test]
+    fn a_chain_whose_start_was_removed_is_not_kept_for_the_next_save() {
+        let signer = TestSigner::new(7);
+        let first = signed(&Document::new("Plate"), &signer, &ProvenanceChain::default());
+        let chain = report(&first).unwrap().chain;
+        let second = crate::write_design_container_with_provenance(
+            &Document::new("Plate v2"),
+            crate::DesignCompression::Fast,
+            None,
+            None,
+            None,
+            &save(Some(SignatureSource::Cose(&TestSigner::new(9))), &chain, None, None),
+        )
+        .unwrap();
+        let entries = read_entries(&second);
+        let env = envelope(entries.get(ENTRY).unwrap());
+        let broken = replace_entry(&second, ENTRY, &raw_envelope(vec![env.records[1].to_vec()], VERSION));
+        let mut reader = crate::DesignContainerReader::new(Cursor::new(broken)).unwrap();
+        assert!(reader.provenance_chain().is_none(), "a chain that cannot validate must not be appended to");
     }
 
     #[test]
