@@ -1373,3 +1373,898 @@ fn a_shank_as_wide_as_the_cutter_passes_the_hole_it_cuts() {
     let r = run(&mut s, "cam.job", json!({"job": pocket_job(), "dry_run": true}));
     assert!(r["holder_collisions"].is_null(), "{r}");
 }
+
+fn drill_tool(number: u32, diameter: f64) -> Value {
+    json!({
+        "number": number, "kind": "drill", "diameter": diameter, "flute_length": 30, "point_angle_deg": 118,
+        "spindle_rpm": 6000, "feed": 300, "plunge_feed": 250
+    })
+}
+
+/// The motion blocks of the program at `path`.
+fn blocks(path: &str) -> Vec<JointWords> {
+    parse5(&std::fs::read_to_string(path).unwrap(), &[]).unwrap()
+}
+
+/// The Z words of a program, in order.
+fn z_words(text: &str) -> Vec<f64> {
+    text.lines().flat_map(|l| l.split_whitespace().filter_map(|w| w.strip_prefix('Z')?.parse::<f64>().ok())).collect()
+}
+
+fn count_z(text: &str, z: f64) -> usize {
+    z_words(text).into_iter().filter(|w| (w - z).abs() < 1e-6).count()
+}
+
+/// A 60 × 40 × 20 plate, its top at Z 0, with four 6 mm holes `depth` deep at (-15, 0),
+/// (15, 0), (0, 10) and (0, -10), and a sketch `Holes` on its top: 6 mm circles at the first
+/// three, a 30 mm circle round the middle (no hole), and a point at the fourth.
+fn drilled_plate(depth: f64) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 20, "corner": [-30, -20, -20], "body_name": "Plate"}));
+    for [x, y] in [[-15, 0], [15, 0], [0, 10], [0, -10]] {
+        run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": depth + 1.0, "base": [x, y, -depth], "operation": "cut"}));
+    }
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Holes"}));
+    for [x, y] in [[-15, 0], [15, 0], [0, 10]] {
+        run(&mut s, "sketch.circle.center", json!({"center": [x, y], "diameter": 6}));
+    }
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "diameter": 30}));
+    run(&mut s, "sketch.point", json!({"point": [0, -10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+fn drill_job(op: Value) -> Value {
+    json!({"machine": "3axis", "post": "linuxcnc_4axis", "tools": [drill_tool(3, 6.0)], "operations": [op]})
+}
+
+fn peck_op() -> Value {
+    json!({
+        "name": "holes", "type": "drill", "tool": 3, "sketch": "Holes", "diameter_range": [5, 7],
+        "heights": {"clearance": 15, "retract": 2, "top": 0, "bottom": -10}, "cycle": "peck", "peck": 3
+    })
+}
+
+#[test]
+fn drilling_takes_the_holes_from_a_sketch_pecks_exactly_and_reads_back() {
+    let mut s = drilled_plate(10.0);
+    let dir = Dir::new("drill");
+    let out = dir.file("holes.ngc");
+    let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+        run(&mut s, "cam.job", json!({"job": drill_job(peck_op()), "output": out}))
+    });
+    assert_clean(&r);
+    let op = &r["operations"][0];
+    assert_eq!(op["kind"], "drill", "{r}");
+    // Four holes (three circles in the range and the point; not the 30 mm circle), each:
+    // over it, down to R, four pecks to -3, -6, -9 and -10 with a full retract and a return to
+    // 0.5 mm above the depth after the first three, out to R and up to clearance.
+    assert_eq!(op["moves"], 4 * 14, "{r}");
+    assert!((op["cut_length"].as_f64().unwrap() - 4.0 * (12.0 + 1.5)).abs() < 1e-9, "{r}");
+    let text = std::fs::read_to_string(&out).unwrap();
+    for (z, n) in [(-3.0, 4), (-6.0, 4), (-9.0, 4), (-10.0, 4), (-2.5, 4), (-5.5, 4), (-8.5, 4)] {
+        assert_eq!(count_z(&text, z), n, "Z{z}: {text}");
+    }
+    assert!(z_words(&text).iter().all(|z| *z >= -10.0 - 1e-9), "never below the bottom: {text}");
+    for canned in ["G73", "G81", "G82", "G83"] {
+        assert!(!text.contains(canned), "expanded moves, no {canned}: {text}");
+    }
+    let c = run(&mut s, "cam.gcode.check", json!({"path": out}));
+    assert!(c["errors"].as_array().is_some_and(Vec::is_empty), "{c}");
+    assert_eq!(c["bounds"], json!([[-15.0, -10.0, -10.0], [15.0, 10.0, 15.0]]), "{c}");
+    // The drill feeds at its plunge feed.
+    assert!(text.lines().any(|l| l.contains("F250")), "{text}");
+}
+
+#[test]
+fn a_drills_point_is_gouge_checked_and_full_diameter_depth_goes_deeper_by_it() {
+    let full = |bottom: f64| {
+        let mut op = peck_op();
+        op["to_full_diameter"] = json!(true);
+        op["heights"]["bottom"] = json!(bottom);
+        drill_job(op)
+    };
+    // The holes are modelled flat-bottomed 10 mm deep: to full diameter at -10 the point is
+    // 1.8 mm into their floors.
+    let r = run(&mut drilled_plate(10.0), "cam.job", json!({"job": full(-10.0), "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["gouge"]["worst"].as_f64().is_some_and(|w| w > 1.5 && w < 2.1), "{r}");
+    // Modelled 12 deep, the point (to -11.8) clears the floor.
+    let r = run(&mut drilled_plate(12.0), "cam.job", json!({"job": full(-10.0), "dry_run": true}));
+    assert_clean(&r);
+    // No holes in the model: the drill cuts where the part shows material.
+    let mut solid = Session::default();
+    run(&mut solid, "solid.box", json!({"length": 60, "width": 40, "height": 20, "corner": [-30, -20, -20]}));
+    run(&mut solid, "sketch.create", json!({"plane": "XY", "name": "Holes"}));
+    run(&mut solid, "sketch.circle.center", json!({"center": [0, 0], "diameter": 6}));
+    run(&mut solid, "sketch.finish", json!({}));
+    let r = run(&mut solid, "cam.job", json!({"job": drill_job(peck_op()), "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["gouge"]["worst"].as_f64().is_some_and(|w| w > 9.0), "{r}");
+    // A flat end mill may plunge the holes; a ball end mill may not drill, and a drill not mill.
+    let mut job = drill_job(peck_op());
+    job["tools"] = json!([flat(3, 6.0)]);
+    assert_clean(&run(&mut drilled_plate(10.0), "cam.job", json!({"job": job, "dry_run": true})));
+    job["tools"] = json!([ball(3, 6.0)]);
+    let e = drilled_plate(10.0).execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("a drill, a flat end mill to plunge with, or a chamfer mill"), "{e}");
+    let job = drill_job(json!({
+        "name": "c", "type": "contour", "tool": 3, "polygon": [[-10, -10], [10, -10], [10, 10], [-10, 10]],
+        "heights": {"clearance": 15, "retract": 2, "top": 0, "bottom": -1}
+    }));
+    let e = drilled_plate(10.0).execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("tool 3 is a drill: a contour cuts with"), "{e}");
+}
+
+#[test]
+fn a_drill_indexed_at_90_degrees_drills_the_blocks_side() {
+    // A block 40 × 30 × 30 about the X axis with two 5 mm holes 8 deep into its +Y face, and a
+    // sketch on that face (its y running down work Z) with circles at them.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 30, "corner": [-20, -15, -15], "body_name": "Block"}));
+    for [x, z] in [[-8, 0], [8, 4]] {
+        run(&mut s, "solid.cylinder", json!({"diameter": 5, "height": 9, "base": [x, 7, z], "axis": "Y", "operation": "cut"}));
+    }
+    let side = json!({"plane": {"origin": [0, 15, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}, "name": "Side holes"});
+    run(&mut s, "sketch.create", side.clone());
+    for [x, y] in [[-8, 0], [8, -4]] {
+        run(&mut s, "sketch.circle.center", json!({"center": [x, y], "diameter": 5}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    let job = |sketch: &str| {
+        json!({
+            "machine": "4axis_a", "post": "linuxcnc_4axis", "tools": [drill_tool(4, 5.0)],
+            "operations": [{"type": "indexed", "a_deg": 90, "operation": {
+                "name": "side holes", "type": "drill", "tool": 4, "sketch": sketch,
+                "heights": {"clearance": 40, "retract": 18, "top": 15, "bottom": 7},
+                "cycle": "chip_break", "peck": 2.5, "back_off": 0.3
+            }}]
+        })
+    };
+    let r = run(&mut s, "cam.job", json!({"job": job("Side holes"), "dry_run": true}));
+    assert_clean(&r);
+    let op = &r["operations"][0];
+    assert_eq!(op["kind"], "indexed drill", "{r}");
+    assert_eq!(op["a_deg"].as_f64(), Some(90.0), "{r}");
+    assert!((op["max_tilt_deg"].as_f64().unwrap() - 90.0).abs() < 1e-6, "the drill comes in along work +Y: {r}");
+    // Two holes, each: over it, to R, four pecks (to 12.5, 10, 7.5 and 7) with three
+    // back-offs, out to R, up to clearance.
+    assert_eq!(op["moves"], 2 * 11, "{r}");
+    // The holes are where the sketch says only if the frame maps them right: drilled into the
+    // solid side, the same job gouges.
+    let mut solid = Session::default();
+    run(&mut solid, "solid.box", json!({"length": 40, "width": 30, "height": 30, "corner": [-20, -15, -15]}));
+    run(&mut solid, "sketch.create", side);
+    run(&mut solid, "sketch.circle.center", json!({"center": [-8, 0], "diameter": 5}));
+    run(&mut solid, "sketch.finish", json!({}));
+    let r = run(&mut solid, "cam.job", json!({"job": job("Side holes"), "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    // A sketch on the top is not square to the indexed tool axis.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Top"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "diameter": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("cam.job", &json!({"job": job("Top"), "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("not on a plane square"), "{e}");
+}
+
+#[test]
+fn drilling_refuses_an_r_height_below_the_part_round_a_hole() {
+    // A plate, its top at Z 0, with a 20 × 20 boss 10 high round (15, 0), and 6 mm holes 12 deep
+    // into the plate at (-15, 0) and through the boss into the plate at (15, 0).
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 20, "corner": [-30, -20, -20], "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [5, -10, 0], "operation": "join"}));
+    for [x, y] in [[-15, 0], [15, 0]] {
+        run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 25, "base": [x, y, -12], "operation": "cut"}));
+    }
+    let job = |points: Value, top: f64, retract: f64| {
+        let op = json!({
+            "name": "holes", "type": "drill", "tool": 3, "points": points,
+            "heights": {"clearance": 25, "retract": retract, "top": top, "bottom": -10}
+        });
+        json!({"job": drill_job(op), "dry_run": true})
+    };
+    // Both holes with the plate's heights: the drill would rapid from clearance down to R 2
+    // through 8 mm of the boss. The gouge check cannot see it (the finished part has the hole).
+    let e = s.execute("cam.job", &job(json!([[-15, 0], [15, 0]]), 0.0, 2.0)).unwrap_err();
+    assert!(e.to_string().contains("(15, 0)") && e.to_string().contains("retract"), "{e}");
+    // The plate's hole alone, and the boss's from the boss's top, are clean.
+    assert_clean(&run(&mut s, "cam.job", job(json!([[-15, 0]]), 0.0, 2.0)));
+    assert_clean(&run(&mut s, "cam.job", job(json!([[15, 0]]), 10.0, 12.0)));
+}
+
+#[test]
+fn hostile_drilling_jobs_are_refused_without_panics() {
+    let mut s = drilled_plate(10.0);
+    let with = |f: &dyn Fn(&mut Value)| {
+        let mut op = peck_op();
+        f(&mut op);
+        json!({"job": drill_job(op), "dry_run": true})
+    };
+    let points_op = |extra: Value| {
+        let mut op = json!({"name": "p", "type": "drill", "tool": 3, "heights": {"clearance": 15, "retract": 2, "top": 0, "bottom": -10}});
+        if let (Some(o), Value::Object(e)) = (op.as_object_mut(), extra) {
+            o.extend(e);
+        }
+        json!({"job": drill_job(op), "dry_run": true})
+    };
+    let cases = [
+        (with(&|o| o["sketch"] = json!("Nope")), "Nope"),
+        (with(&|o| o["points"] = json!([[0, 0]])), "not both"),
+        (points_op(json!({})), "give a `sketch`"),
+        (points_op(json!({"points": []})), "no holes"),
+        (points_op(json!({"points": [[1e308, 0]]})), "finite"),
+        (points_op(json!({"points": [[0, 0]], "circles": true})), "go with `sketch`"),
+        (with(&|o| o["diameter_range"] = json!([7, 5])), "smallest first"),
+        (with(&|o| o["diameter_range"] = json!([-1, 5])), "smallest first"),
+        (with(&|o| o["diameter_range"] = json!([0, 1e308])), "finite"),
+        (
+            with(&|o| {
+                o["diameter_range"] = json!([50, 60]);
+                o["sketch_points"] = json!(false);
+            }),
+            "no circles in `diameter_range`",
+        ),
+        (
+            with(&|o| {
+                o["circles"] = json!(false);
+                o["sketch_points"] = json!(false);
+            }),
+            "no holes",
+        ),
+        (with(&|o| o["cycle"] = json!("simple")), "`peck` goes with"),
+        (with(&|o| o["dwell_seconds"] = json!(1)), "`dwell_seconds` goes with"),
+        (with(&|o| o["back_off"] = json!(1)), "`back_off` goes with"),
+        (with(&|o| o["peck"] = json!(1e-9)), "pecks"),
+        (with(&|o| o["peck"] = json!(-1)), "peck"),
+        (with(&|o| o["peck_clearance"] = json!(0)), "clearance"),
+        (with(&|o| o["cycle"] = json!("pecking")), "pecking"),
+        (with(&|o| o["pek"] = json!(1)), "pek"),
+        (with(&|o| o["feature"] = json!("hole:0")), "feature"),
+        (with(&|o| o["heights"]["bottom"] = json!(-40)), "flutes"),
+        (with(&|o| o["heights"]["bottom"] = json!(5)), "ordered"),
+        (with(&|o| o["heights"]["bottom"] = json!(0)), "no depth"),
+        (with(&|o| o["feeds"] = json!({"cut": 100, "plunge": -1})), "feed"),
+    ];
+    for (p, word) in &cases {
+        match s.execute("cam.job", p) {
+            Err(EngineError::Internal(_, msg)) => panic!("{p}: panicked: {msg}"),
+            Err(e) => assert!(e.to_string().contains(word), "{p}: {e}"),
+            Ok(v) => panic!("{p}: accepted: {v}"),
+        }
+    }
+    let mut job = drill_job(peck_op());
+    job["tools"][0]["point_angle_deg"] = json!(0);
+    assert!(s.execute("cam.job", &json!({"job": job, "dry_run": true})).is_err());
+}
+
+/// A plate 40 × 30 × 10, its top at Z 0, with a ⌀10 hole 6 deep at (-10, 0) and a ⌀5 hole
+/// through at (10, 0) (an M6 tap drill), and a sketch `Holes` of both circles on its top.
+fn holed_plate() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [-20, -15, -10], "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 7, "base": [-10, 0, -6], "operation": "cut", "targets": ["Plate"]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 2.5, "height": 12, "base": [10, 0, -11], "operation": "cut", "targets": ["Plate"]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Holes"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [-10, 0], "radius": 5}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 2.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+fn thread_mill_tool(number: u32, diameter: f64) -> Value {
+    json!({"number": number, "kind": "thread_mill", "diameter": diameter, "flute_length": 12, "spindle_rpm": 12000, "feed": 300, "plunge_feed": 100})
+}
+
+fn bore_job(op: Value) -> Value {
+    let mut op = op;
+    for (k, v) in [("name", json!("bore")), ("type", json!("bore")), ("tool", json!(1))] {
+        op[k] = v;
+    }
+    op["heights"] = json!({"clearance": 20, "retract": 5, "top": 0, "bottom": -6});
+    json!({"machine": "3axis", "post": "linuxcnc_4axis", "tools": [flat(1, 6.0)], "operations": [op]})
+}
+
+fn m6_job() -> Value {
+    json!({
+        "machine": "4axis_a",
+        "post": "linuxcnc_4axis",
+        "tools": [thread_mill_tool(2, 4.5)],
+        "operations": [{
+            "name": "M6 thread", "type": "thread_mill", "tool": 2, "centers": [[10, 0]],
+            "heights": {"clearance": 20, "retract": 5, "top": 0, "bottom": -8},
+            "pitch": 1.0, "thread_diameter": 6.0
+        }]
+    })
+}
+
+/// The Z of every helical arc of `text` (a G2/G3 block with Z), with its motion code: the
+/// motion is modal, so a block without G2/G3 continues the last one.
+fn helix_z(text: &str) -> Vec<(f64, u8)> {
+    let mut out = Vec::new();
+    let mut motion = 0u8;
+    for line in text.lines().filter(|l| !l.starts_with('(')) {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        for w in &words {
+            match *w {
+                "G0" | "G00" => motion = 0,
+                "G1" | "G01" => motion = 1,
+                "G2" | "G02" => motion = 2,
+                "G3" | "G03" => motion = 3,
+                _ => {}
+            }
+        }
+        let z = words.iter().find_map(|w| w.strip_prefix('Z')).and_then(|v| v.parse::<f64>().ok());
+        if let (Some(z), true, true) = (z, words.iter().any(|w| w.starts_with('I')), motion >= 2) {
+            out.push((z, motion));
+        }
+    }
+    out
+}
+
+#[test]
+fn a_bore_reads_back_with_its_helical_arcs_and_clears_the_hole_it_is_checked_against() {
+    let mut s = holed_plate();
+    let dir = Dir::new("bore");
+    let out = dir.file("bore.ngc");
+    let job = bore_job(json!({"holes": [{"center": [-10, 0], "diameter": 10}], "pitch": 0.5}));
+    let r = run(&mut s, "cam.job", json!({"job": job, "output": out}));
+    assert_clean(&r);
+    let op = &r["operations"][0];
+    assert_eq!(op["kind"], "bore", "{r}");
+    assert!(op["warnings"].as_array().is_some_and(Vec::is_empty), "{r}");
+    let text = std::fs::read_to_string(&out).unwrap();
+    // Down a quarter of a millimetre each half turn, exactly, counter-clockwise (climb), to the floor.
+    let z = helix_z(&text);
+    assert_eq!(z.len(), 24, "{text}");
+    assert!(z.iter().all(|(_, g)| *g == 3), "{z:?}");
+    for (k, (zk, _)) in z.iter().enumerate() {
+        assert!((zk - (-0.25 * (k + 1) as f64)).abs() < 1e-9, "{z:?}");
+    }
+    let c = run(&mut s, "cam.gcode.check", json!({"path": out}));
+    assert!(c["errors"].as_array().is_some_and(Vec::is_empty) && c["arcs"].as_u64().is_some_and(|n| n >= 28), "{c}");
+    assert!((c["bounds"][0][2].as_f64().unwrap() + 6.0).abs() < 1e-9, "{c}");
+    // A bore wider than the hole in the model cuts into the part: the gouge check says so.
+    let wide = bore_job(json!({"holes": [{"center": [-10, 0], "diameter": 12}], "pitch": 0.5}));
+    let r = run(&mut s, "cam.job", json!({"job": wide, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["gouge"]["worst"].as_f64().is_some_and(|w| w > 0.5), "{r}");
+    // The circles of a sketch in a diameter range: the ⌀5 one is smaller than the ⌀6 tool, refused
+    // with the hole named; out of range, no circles.
+    let job = bore_job(json!({"sketch": "Holes", "diameter_range": [8, 12], "ramp_angle_deg": 2, "finish_passes": 1}));
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    assert!(r["operations"][0]["moves"].as_u64().is_some_and(|m| m > 30), "{r}");
+    let e = s.execute("cam.job", &json!({"job": bore_job(json!({"sketch": "Holes", "diameter_range": [20, 30]})), "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("no circles"), "{e}");
+    let e = s.execute("cam.job", &json!({"job": bore_job(json!({"sketch": "Holes"})), "dry_run": true})).unwrap_err();
+    assert!(matches!(e, EngineError::BadParams { .. }) && e.to_string().contains("hole 2 at (10, 0)"), "{e}");
+}
+
+#[test]
+fn an_m6x1_internal_thread_is_written_one_pitch_a_turn_and_passes_the_checks() {
+    let mut s = holed_plate();
+    let dir = Dir::new("thread");
+    let out = dir.file("m6.ngc");
+    let r = run(&mut s, "cam.job", json!({"job": m6_job(), "output": out}));
+    assert_clean(&r);
+    assert_eq!(r["operations"][0]["kind"], "thread_mill", "{r}");
+    let text = std::fs::read_to_string(&out).unwrap();
+    let z = helix_z(&text);
+    // Up from -8 to 0, counter-clockwise: the lead-in and lead-out each rise a quarter pitch
+    // (a quarter turn about the axis) and every half turn of the helix exactly half a pitch.
+    assert_eq!(z.len(), 17, "{text}");
+    assert!(z.iter().all(|(_, g)| *g == 3), "{z:?}");
+    let mut last = -8.0;
+    for (k, (zk, _)) in z.iter().enumerate() {
+        let rise = if k == 0 || k == z.len() - 1 { 0.25 } else { 0.5 };
+        assert!((zk - last - rise).abs() < 1e-9, "{z:?}");
+        last = *zk;
+    }
+    assert!((last - 0.0).abs() < 1e-9, "{z:?}");
+    // The program names the thread mill itself; only the checks take its core.
+    assert!(text.contains("T2 D4.5 thread mill"), "{text}");
+    // A thread mill too big for the minor diameter, or an end mill, is refused.
+    let mut big = m6_job();
+    big["tools"][0]["diameter"] = json!(5.2);
+    let e = s.execute("cam.job", &json!({"job": big, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("minor diameter"), "{e}");
+    let mut end_mill = m6_job();
+    end_mill["tools"] = json!([flat(2, 4.0)]);
+    let e = s.execute("cam.job", &json!({"job": end_mill, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("thread mill"), "{e}");
+    // A thread mill in a pocket is refused: only its core would be checked.
+    let mut pocket = m6_job();
+    pocket["operations"][0] = json!({"name": "p", "type": "pocket", "tool": 2, "polygon": [[0, -5], [5, -5], [5, 5], [0, 5]], "heights": {"clearance": 20, "retract": 5, "top": 0, "bottom": -1}});
+    assert!(s.execute("cam.job", &json!({"job": pocket, "dry_run": true})).unwrap_err().to_string().contains("thread mill"));
+}
+
+#[test]
+fn hostile_bores_and_threads_are_refused_without_panics() {
+    let mut s = holed_plate();
+    let bore = |f: &dyn Fn(&mut Value)| {
+        let mut j = bore_job(json!({"holes": [{"center": [-10, 0], "diameter": 10}], "pitch": 0.5}));
+        f(&mut j["operations"][0]);
+        json!({"job": j, "dry_run": true})
+    };
+    let thread = |f: &dyn Fn(&mut Value)| {
+        let mut j = m6_job();
+        f(&mut j);
+        json!({"job": j, "dry_run": true})
+    };
+    let unset = |o: &mut Value, k: &str| {
+        if let Some(m) = o.as_object_mut() {
+            m.remove(k);
+        }
+    };
+    let cases = vec![
+        bore(&|o| o["holes"] = json!([])),
+        bore(&|o| o["holes"] = json!([{"center": [1e308, 0], "diameter": 10}])),
+        bore(&|o| o["holes"] = json!([{"center": [0, 0], "diameter": -10}])),
+        bore(&|o| o["holes"] = json!([{"center": [0, 0], "diameter": 1e308}])),
+        bore(&|o| o["holes"] = json!([{"center": [0, 0]}])),
+        bore(&|o| o["holes"] = json!([{"center": [0, 0], "diameter": 10, "depth": 3}])),
+        bore(&|o| o["pich"] = json!(1)),
+        bore(&|o| o["pitch"] = json!(-1)),
+        bore(&|o| o["pitch"] = json!(0)),
+        bore(&|o| o["pitch"] = json!(1e308)),
+        bore(&|o| o["pitch"] = json!(1e-9)),
+        bore(&|o| o["ramp_angle_deg"] = json!(2)),
+        bore(&|o| o["stepdown"] = json!(1)),
+        bore(&|o| o["sketch"] = json!("Holes")),
+        bore(&|o| o["diameter_range"] = json!([1, 2])),
+        bore(&|o| {
+            unset(o, "pitch");
+            o["ramp_angle_deg"] = json!(90);
+        }),
+        bore(&|o| {
+            unset(o, "holes");
+            o["sketch"] = json!("Holes");
+            o["diameter_range"] = json!([12, 8]);
+        }),
+        bore(&|o| {
+            unset(o, "holes");
+            o["sketch"] = json!("Nope");
+        }),
+        bore(&|o| o["stepover"] = json!(0)),
+        bore(&|o| o["stepover"] = json!(100)),
+        bore(&|o| o["stock_to_leave"] = json!(-1)),
+        bore(&|o| o["stock_to_leave"] = json!(4)),
+        bore(&|o| o["finish_passes"] = json!(1000)),
+        bore(&|o| o["finish_passes"] = json!(-1)),
+        bore(&|o| o["heights"]["bottom"] = json!(-1e9)),
+        bore(&|o| o["heights"]["bottom"] = json!(0)),
+        bore(&|o| o["tool"] = json!(9)),
+        bore(&|o| o["feature"] = json!("hole:0")),
+        thread(&|j| j["operations"][0]["pitch"] = json!(0)),
+        thread(&|j| j["operations"][0]["pitch"] = json!(1e308)),
+        thread(&|j| j["operations"][0]["thread_diameter"] = json!(-6)),
+        thread(&|j| j["operations"][0]["thread_diameter"] = json!(1e308)),
+        thread(&|j| j["operations"][0]["thread_depth"] = json!(0)),
+        thread(&|j| j["operations"][0]["thread_depth"] = json!(5)),
+        thread(&|j| j["operations"][0]["radial_passes"] = json!(0)),
+        thread(&|j| j["operations"][0]["radial_passes"] = json!(1000)),
+        thread(&|j| j["operations"][0]["centers"] = json!([])),
+        thread(&|j| j["operations"][0]["centers"] = json!([[1e308, 0]])),
+        thread(&|j| j["operations"][0]["center"] = json!([0, 0])),
+        thread(&|j| j["operations"][0]["internal"] = json!("yes")),
+    ];
+    for p in &cases {
+        match s.execute("cam.job", p) {
+            Err(EngineError::Internal(_, msg)) => panic!("{p}: panicked: {msg}"),
+            Err(_) => {}
+            Ok(v) => panic!("{p}: accepted: {v}"),
+        }
+    }
+}
+
+fn plate(chamfered: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 10, "corner": [-15, -10, -10], "body_name": "Plate"}));
+    if chamfered {
+        run(&mut s, "solid.chamfer", json!({"edges": [[0, -10, 0], [15, 0, 0], [0, 10, 0], [-15, 0, 0]], "distance": 1, "tangent_chain": false}));
+    }
+    s
+}
+
+fn chamfer_mill(number: u32) -> Value {
+    json!({"number": number, "kind": "chamfer", "diameter": 6, "tip_diameter": 0, "angle_deg": 90, "flute_length": 10, "flutes": 3,
+           "spindle_rpm": 20000, "feed": 1600, "plunge_feed": 100})
+}
+
+fn face_mill(number: u32) -> Value {
+    json!({"number": number, "kind": "face_mill", "diameter": 10, "corner_radius": 0.2, "flute_length": 6, "flutes": 1,
+           "spindle_rpm": 18000, "feed": 1600, "plunge_feed": 50})
+}
+
+/// Faces the plate's top with a face mill, then chamfers its top edges `width` wide.
+fn chamfer_job(width: f64) -> Value {
+    json!({
+        "machine": "3axis",
+        "post": "linuxcnc_4axis",
+        "tools": [face_mill(1), chamfer_mill(7)],
+        "operations": [
+            {"name": "face", "type": "pocket", "tool": 1, "polygon": [[-14, -9], [14, -9], [14, 9], [-14, 9]],
+             "heights": {"clearance": 10, "retract": 2, "top": 0.5, "bottom": 0}, "stepover": 7, "ramp_angle_deg": 2},
+            {"name": "deburr", "type": "chamfer", "tool": 7, "polygon": [[-15, -10], [15, -10], [15, 10], [-15, 10]],
+             "heights": {"clearance": 10, "retract": 2, "top": 0}, "width": width}
+        ]
+    })
+}
+
+#[test]
+fn a_chamfer_mill_cuts_the_modelled_chamfer_as_wide_as_asked() {
+    let mut s = plate(true);
+    let dir = Dir::new("chamfer");
+    let out = dir.file("plate.ngc");
+    let r = run(&mut s, "cam.job", json!({"job": chamfer_job(1.0), "output": out}));
+    assert_clean(&r);
+    assert_eq!(r["operations"][1]["kind"], "chamfer", "{r}");
+    // The width as the program cuts it: along the +X side, the 90° cone's radius at the top,
+    // 1.2 above its tip, less the axis's distance from the wall.
+    let cuts: Vec<Vec3> = blocks(&out)
+        .iter()
+        .filter_map(|b| match b {
+            JointWords::Feed { linear, .. } => Some(*linear),
+            _ => None,
+        })
+        .collect();
+    let bottom = cuts.iter().map(|p| p.z).fold(f64::INFINITY, f64::min);
+    assert!((bottom + 1.2).abs() < 1e-6, "{bottom}");
+    let side: Vec<f64> =
+        cuts.iter().filter(|p| (p.z - bottom).abs() < 1e-6 && p.x > 7.5 && p.y.abs() <= 10.0 + 1e-6).map(|p| 1.2 - (p.x - 15.0)).collect();
+    assert!(!side.is_empty(), "{cuts:?}");
+    for w in side {
+        assert!((w - 1.0).abs() <= 1e-3, "the chamfer is {w} mm wide, not 1");
+    }
+    // A chamfer wider than modelled is the operation's own band: allowed.
+    assert_clean(&run(&mut s, "cam.job", json!({"job": chamfer_job(1.2), "dry_run": true})));
+}
+
+#[test]
+fn a_chamfer_the_model_does_not_show_is_allowed_and_a_cut_past_it_is_not() {
+    // A deburr on a sharp edge: the cone cuts the edge as deep as the chamfer band it is told
+    // to cut, which the gouge check allows.
+    let mut s = plate(false);
+    let r = run(&mut s, "cam.job", json!({"job": chamfer_job(1.0), "dry_run": true}));
+    assert_clean(&r);
+    assert_eq!(r["operations"][1]["gouge"].as_f64(), Some(0.0), "{r}");
+    assert_eq!(r["gouge"]["skipped"], json!([]), "the chamfer is checked, not skipped: {r}");
+    // A profile 2 mm inside the edge cuts the top face beyond the band: a gouge.
+    let mut job = chamfer_job(1.0);
+    job["operations"][1]["polygon"] = json!([[-13, -8], [13, -8], [13, 8], [-13, 8]]);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["operations"][1]["gouge"].as_f64().is_some_and(|g| g > 0.1), "{r}");
+    // `gouge_check: false` still skips it.
+    let mut job = chamfer_job(1.0);
+    job["operations"][1]["gouge_check"] = json!(false);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    assert_eq!(r["gouge"]["skipped"], json!(["deburr"]), "{r}");
+}
+
+#[test]
+fn a_chamfer_mill_engraves_a_line_and_spots_holes() {
+    // V-engraving: a contour `side: on` with a chamfer mill traces the line to its depth, the
+    // groove allowed as its own; spot drilling with it cuts the cone a drill starts in.
+    let mut s = plate(false);
+    let mut job = chamfer_job(1.0);
+    job["operations"] = json!([
+        {"name": "engrave", "type": "contour", "tool": 7, "side": "on", "polygon": [[-10, -5], [10, -5], [10, 5], [-10, 5]],
+         "heights": {"clearance": 10, "retract": 2, "top": 0, "bottom": -0.3}},
+        {"name": "spot", "type": "drill", "tool": 7, "points": [[-8, 0], [8, 0]],
+         "heights": {"clearance": 10, "retract": 2, "top": 0, "bottom": -1}}
+    ]);
+    let dir = Dir::new("engrave");
+    let out = dir.file("e.ngc");
+    let r = run(&mut s, "cam.job", json!({"job": job, "output": out}));
+    assert_clean(&r);
+    let cuts: Vec<Vec3> = blocks(&out)
+        .iter()
+        .filter_map(|b| match b {
+            JointWords::Feed { linear, .. } => Some(*linear),
+            _ => None,
+        })
+        .collect();
+    assert!(cuts.iter().any(|p| (p.z + 0.3).abs() < 1e-6 && (p.x - 10.0).abs() < 1e-6), "the trace runs on the line at its depth");
+    assert!(cuts.iter().any(|p| (p.z + 1.0).abs() < 1e-6 && (p.x - 8.0).abs() < 1e-6), "the spot goes to its depth");
+    // Deeper than the band it is told to cut, by a trace below the face it names: a gouge.
+    let mut deep = job.clone();
+    deep["operations"][0]["heights"] = json!({"clearance": 10, "retract": 2, "top": -1, "bottom": -1.3});
+    let r = run(&mut s, "cam.job", json!({"job": deep, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    // Beside the line a chamfer mill is refused.
+    let mut beside = job.clone();
+    beside["operations"][0]["side"] = json!("outside");
+    let e = s.execute("cam.job", &json!({"job": beside, "dry_run": true})).unwrap_err().to_string();
+    assert!(e.contains("tapered"), "{e}");
+}
+
+#[test]
+fn a_chamfer_band_is_the_parts_alone_never_a_fixtures() {
+    // A vise jaw along the plate's +X side, its top 0.5 mm below the plate's: the deburr's point
+    // runs 1.2 mm down just outside the edge, into the jaw. The band the chamfer mill is told to
+    // cut is cut into the part, so the jaw is held against the whole tool.
+    let jawed = |top: f64| {
+        let mut s = plate(false);
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 10, "width": 30, "height": 20.0 + top, "corner": [15.1, -15, -20], "operation": "new", "body_name": "Jaw"}),
+        );
+        s
+    };
+    let mut s = jawed(-0.5);
+    let mut job = chamfer_job(1.0);
+    job["bodies"] = json!(["Plate"]);
+    job["fixtures"] = json!(["Jaw"]);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["operations"][1]["gouge"].as_f64().is_some_and(|g| g > 0.3), "{r}");
+    // Clear of the jaw (its top 1.5 mm down), the deburr passes.
+    let mut s = jawed(-1.5);
+    assert_clean(&run(&mut s, "cam.job", json!({"job": job, "dry_run": true})));
+}
+
+#[test]
+fn hostile_chamfers_and_chamfer_mills_are_refused() {
+    let mut s = plate(true);
+    let refused = |s: &mut Session, job: Value, needle: &str| {
+        let e = s.execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+        assert!(matches!(e, EngineError::BadParams { .. }) && e.to_string().contains(needle), "{needle}: {e}");
+    };
+    // Wider than the cone reaches: it ends 3 out, the axis runs 0.2 out with the default tip offset.
+    refused(&mut s, chamfer_job(2.9), "widest chamfer is 2.8");
+    let mut job = chamfer_job(1.0);
+    job["operations"][1]["side"] = json!("on");
+    refused(&mut s, job, "not `on`");
+    let mut job = chamfer_job(1.0);
+    job["operations"][1]["tool"] = json!(1);
+    refused(&mut s, job, "a chamfer cuts with a chamfer mill");
+    let mut job = chamfer_job(1.0);
+    job["operations"][1]["depth"] = json!(1);
+    refused(&mut s, job, "depth");
+    let mut job = chamfer_job(1.0);
+    job["operations"][1]["heights"]["bottom"] = json!(-1);
+    refused(&mut s, job, "bottom");
+    let mut job = chamfer_job(1.0);
+    job["operations"][0]["tool"] = json!(7);
+    refused(&mut s, job, "a pocket cuts with");
+    for (k, v) in [("angle_deg", json!(180)), ("angle_deg", json!(null)), ("tip_diameter", json!(6)), ("tip_diameter", json!(-1))] {
+        let mut job = chamfer_job(1.0);
+        job["tools"][1][k] = v;
+        refused(&mut s, job, "chamfer mill");
+    }
+    for (w, t) in [(json!(-1), json!(0.2)), (json!(0), json!(0.2)), (json!(1e300), json!(0.2)), (json!(1), json!(-0.5)), (json!(1), json!(1e300))] {
+        let mut job = chamfer_job(1.0);
+        job["operations"][1]["width"] = w;
+        job["operations"][1]["tip_offset"] = t;
+        assert!(s.execute("cam.job", &json!({"job": job, "dry_run": true})).is_err());
+    }
+    // Indexed, the chamfer runs in the frame the A angle brings under the tool.
+    let mut job = chamfer_job(1.0);
+    job["machine"] = json!("4axis_a");
+    let mut inner = job["operations"][1].take();
+    // Clear of the plate's corners as A turns (14.1 mm from the axis): the 4th-axis setup check.
+    inner["heights"]["clearance"] = json!(20);
+    job["operations"] = json!([{"type": "indexed", "a_deg": 0, "operation": inner}]);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    assert_eq!(r["operations"][0]["kind"], "indexed chamfer", "{r}");
+}
+
+fn leads_plate() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 6, "corner": [-20, -15, -6], "body_name": "Plate"}));
+    s
+}
+
+fn profile_job(extra: Value) -> Value {
+    let mut op = json!({
+        "name": "profile", "type": "contour", "tool": 1,
+        "polygon": [[-20, -15], [20, -15], [20, 15], [-20, 15]],
+        "heights": {"clearance": 20, "retract": 5, "top": 0, "bottom": -6}, "stepdown": 2
+    });
+    for (k, v) in extra.as_object().unwrap() {
+        op[k] = v.clone();
+    }
+    json!({"machine": "3axis", "post": "linuxcnc_4axis", "tools": [flat(1, 6.0)], "operations": [op]})
+}
+
+#[test]
+fn a_contour_with_leads_tabs_and_finishing_passes_reads_back_and_misses_the_part() {
+    let mut s = leads_plate();
+    let dir = Dir::new("profile");
+    let out = dir.file("profile.ngc");
+    let job = profile_job(json!({
+        "lead": {"radius": 2, "line": 1},
+        "entry": {"type": "ramp", "angle_deg": 3},
+        "tabs": {"count": 4, "width": 4, "height": 1.5},
+        "finish_passes": 1, "finish_stepover": 0.25, "spring_pass": true,
+        "linking": "stay_down"
+    }));
+    let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+        run(&mut s, "cam.job", json!({"job": job, "output": out}))
+    });
+    assert_clean(&r);
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(text.lines().any(|l| l.contains("G2") || l.contains("G3")), "the leads are written as arcs");
+    let pts = tips(&out);
+    // The tabs: the tool climbs to 1.5 above the bottom four times on each pass at the bottom
+    // (the last depth pass, the finishing pass and the spring pass).
+    let mut climbs = 0;
+    for w in pts.windows(2) {
+        if !w[1].1 && w[0].0.z < -4.5 - 1e-3 && (w[1].0.z + 4.5).abs() < 1e-3 {
+            climbs += 1;
+        }
+    }
+    assert_eq!(climbs, 3 * 4, "{text}");
+    // Never inside the tool's radius of the plate below its top; the passes between levels and
+    // the finishing passes go across at the retract height, above the part.
+    let outside = |p: Vec3| (p.x.clamp(-20.0, 20.0) - p.x).hypot(p.y.clamp(-15.0, 15.0) - p.y);
+    assert!(pts.iter().filter(|(p, _)| p.z < 0.0).all(|(p, _)| outside(*p) >= 3.0 - 2e-3), "{text}");
+    let hops = pts.windows(2).filter(|w| w[1].1 && (w[1].0.x - w[0].0.x).hypot(w[1].0.y - w[0].0.y) > 1e-6 && (w[1].0.z - 5.0).abs() < 1e-6).count();
+    assert!(hops >= 3, "{text}");
+    let c = run(&mut s, "cam.gcode.check", json!({"path": out}));
+    assert!(c["errors"].as_array().is_some_and(Vec::is_empty), "{c}");
+    assert!(c["arcs"].as_u64().is_some_and(|n| n >= 8), "{c}");
+}
+
+#[test]
+fn a_pocket_with_a_helix_entry_never_plunges_into_uncut_material() {
+    let mut s = top_pocket();
+    let dir = Dir::new("helix");
+    let out = dir.file("pocket.ngc");
+    let mut job = pocket_job();
+    job["operations"][0]["entry"] = json!({"type": "helix"});
+    let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+        run(&mut s, "cam.job", json!({"job": job, "output": out}))
+    });
+    assert_clean(&r);
+    let pts = tips(&out);
+    // Helical arcs: cuts that go down while going round.
+    let mut last: Option<Vec3> = None;
+    let mut helical = 0;
+    for b in &blocks(&out) {
+        if let (JointWords::Arc { linear, .. }, Some(p)) = (b, last)
+            && linear.z < p.z - 1e-6
+        {
+            helical += 1;
+        }
+        last = match b {
+            JointWords::Rapid { linear, .. }
+            | JointWords::Feed { linear, .. }
+            | JointWords::Arc { linear, .. }
+            | JointWords::PlaneArc { linear, .. } => Some(*linear),
+            JointWords::Dwell { .. } => last,
+        };
+    }
+    assert!(helical >= 4, "{helical}");
+    // Every straight-down cut below the top ends no lower than what was already cut there.
+    let mut deepest: Vec<(f64, f64, f64)> = Vec::new();
+    for w in pts.windows(2) {
+        let (a, b) = (w[0].0, w[1].0);
+        let here = |x: f64, y: f64| deepest.iter().filter(|d| (d.0 - x).hypot(d.1 - y) < 1e-3).map(|d| d.2).fold(f64::INFINITY, f64::min);
+        if !w[1].1 && (b.x - a.x).hypot(b.y - a.y) < 1e-9 && b.z < a.z && b.z < -1e-6 {
+            assert!(b.z >= here(b.x, b.y) - 1e-3, "a plunge into uncut material at {b:?}");
+        }
+        if !w[1].1 {
+            deepest.push((b.x, b.y, b.z));
+        }
+    }
+}
+
+/// A block with a U-shaped pocket 4 mm deep (two arms joined at the bottom) and, between the
+/// arms, a pillar standing 10 mm above the top when `pillar`, half a millimetre off the pocket's wall.
+fn u_pocket(pillar: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 32, "height": 10, "corner": [-20, -18, -10], "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 24, "height": 4, "corner": [-15, -14, -4], "operation": "cut"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 24, "height": 4, "corner": [5, -14, -4], "operation": "cut"}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 6, "height": 4, "corner": [-15, -14, -4], "operation": "cut"}));
+    if pillar {
+        run(&mut s, "solid.box", json!({"length": 6, "width": 15.5, "height": 10, "corner": [-3, -7.5, 0], "operation": "join"}));
+    }
+    s
+}
+
+#[test]
+fn stay_down_links_go_over_the_part_at_the_retract_height_only_where_it_is_clear() {
+    let job = json!({
+        "machine": "3axis", "post": "linuxcnc_4axis", "tools": [flat(1, 4.0)],
+        "operations": [{"name": "u", "type": "pocket", "tool": 1,
+                        "polygon": [[-15, -14], [15, -14], [15, 10], [5, 10], [5, -8], [-5, -8], [-5, 10], [-15, 10]],
+                        "heights": {"clearance": 20, "retract": 3, "top": 0, "bottom": -4}, "stepdown": 2, "stepover": 1.5,
+                        "linking": "stay_down"}]
+    });
+    let dir = Dir::new("u");
+    let sideways = |pts: &[(Vec3, bool)]| -> Vec<(Vec3, Vec3)> {
+        pts.windows(2).filter(|w| w[1].1 && (w[1].0.x - w[0].0.x).hypot(w[1].0.y - w[0].0.y) > 1e-6).map(|w| (w[0].0, w[1].0)).collect()
+    };
+    for pillar in [false, true] {
+        let mut s = u_pocket(pillar);
+        let out = dir.file(if pillar { "pillar.ngc" } else { "open.ngc" });
+        let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+            run(&mut s, "cam.job", json!({"job": job, "output": out}))
+        });
+        assert_clean(&r);
+        let moves = sideways(&tips(&out));
+        // From one arm to the other at the retract height when nothing stands in between.
+        let low = moves.iter().filter(|(_, b)| (b.z - 3.0).abs() < 1e-6).count();
+        // Over the pillar (with the tool's radius round it) only above its top.
+        let over = |(a, b): &(Vec3, Vec3)| {
+            (0..=100).any(|i| {
+                let t = i as f64 / 100.0;
+                let (x, y) = (a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+                (x.clamp(-3.0, 3.0) - x).hypot(y.clamp(-7.5, 8.0) - y) < 2.0
+            })
+        };
+        if pillar {
+            assert!(moves.iter().filter(|m| over(m)).all(|(_, b)| b.z >= 10.0), "{moves:?}");
+            assert!(moves.iter().any(over), "the arms are linked over the pillar: {moves:?}");
+        } else {
+            assert!(low >= 2, "{moves:?}");
+        }
+    }
+}
+
+#[test]
+fn hostile_leads_tabs_and_entries_are_refused_without_panics() {
+    let mut s = leads_plate();
+    let pocket = |extra: Value| {
+        let mut op = json!({"name": "p", "type": "pocket", "tool": 1, "polygon": [[-8, -6], [8, -6], [8, 6], [-8, 6]],
+                            "heights": {"clearance": 20, "retract": 3, "top": 0, "bottom": -4}});
+        for (k, v) in extra.as_object().unwrap() {
+            op[k] = v.clone();
+        }
+        json!({"job": {"machine": "3axis", "post": "linuxcnc_4axis", "tools": [flat(1, 6.0)], "operations": [op]}, "dry_run": true})
+    };
+    let contour = |extra: Value| json!({"job": profile_job(extra), "dry_run": true});
+    let cases = [
+        (contour(json!({"lead": {"radius": 2, "radus": 1}})), "radus"),
+        (contour(json!({"entry": {"type": "spiral"}})), "spiral"),
+        (contour(json!({"linking": "hover"})), "hover"),
+        (contour(json!({"tabs": {"count": 4, "spacing": 10, "width": 4, "height": 1}})), "not both"),
+        (contour(json!({"tabs": {"width": 4, "height": 1}})), "tabs.count"),
+        (contour(json!({"tabs": {"count": 4, "width": 4, "height": 1}, "side": "inside"})), "outside"),
+        (contour(json!({"tabs": {"count": 4, "width": 4, "height": 6}})), "tab height"),
+        (contour(json!({"tabs": {"count": 100, "width": 4, "height": 1}})), "no room"),
+        (contour(json!({"entry": {"type": "plunge"}, "ramp_angle_deg": 3})), "not both"),
+        (contour(json!({"entry": {"type": "helix", "radius": 10}})), "core"),
+        (contour(json!({"finish_passes": 2, "finish_stepover": 2})), "finishing stepover"),
+        (contour(json!({"finish_passes": 1000})), "finishing passes"),
+        (contour(json!({"lead": {"radius": 2, "sweep_deg": 0}})), "sweep"),
+        (contour(json!({"lead": {"radius": 1e308}})), "lead radius"),
+        // Inside a 40 × 30 opening a lead of radius 14 reaches the far wall.
+        (contour(json!({"lead": {"radius": 14, "sweep_deg": 180}, "side": "inside"})), "lead would cut into the part"),
+        (pocket(json!({"entry": {"type": "helix", "angle_deg": 90}})), "helix angle"),
+        (pocket(json!({"entry": {"type": "ramp", "angle_deg": -1}})), "ramp angle"),
+        (pocket(json!({"lead": {"radius": 2}})), "lead"),
+        (pocket(json!({"tabs": {"count": 2, "width": 1, "height": 1}})), "tabs"),
+    ];
+    for (p, word) in cases {
+        match s.execute("cam.job", &p) {
+            Err(EngineError::Internal(_, msg)) => panic!("{p}: panicked: {msg}"),
+            Err(e) => assert!(e.to_string().contains(word), "{p}: {e}"),
+            Ok(v) => panic!("{p}: accepted: {v}"),
+        }
+    }
+    // Values at the limits plan or are refused, never panic.
+    for v in [json!(0), json!(-1), json!(1e-300), json!(1e308), json!(-1e308), json!(4294967295u64)] {
+        for extra in [
+            json!({"lead": {"radius": v, "line": v}}),
+            json!({"entry": {"type": "helix", "radius": v, "angle_deg": v}}),
+            json!({"tabs": {"spacing": v, "width": v, "height": v, "ramp_angle_deg": v}}),
+            json!({"tabs": {"count": v, "width": 4, "height": 1}}),
+            json!({"finish_passes": v, "finish_stepover": v, "spring_pass": true}),
+        ] {
+            if let Err(EngineError::Internal(_, msg)) = s.execute("cam.job", &contour(extra.clone())) {
+                panic!("{extra}: panicked: {msg}");
+            }
+        }
+        if let Err(EngineError::Internal(_, msg)) = s.execute("cam.job", &pocket(json!({"entry": {"type": "helix", "radius": v}}))) {
+            panic!("{v}: panicked: {msg}");
+        }
+    }
+}

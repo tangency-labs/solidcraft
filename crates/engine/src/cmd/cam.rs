@@ -30,7 +30,7 @@ use solidcraft_cam::readback5::readback_program;
 use solidcraft_cam::surface_ops::{Boundary, ParallelParams, RoughingParams, WaterlineParams, parallel, roughing, waterline};
 use solidcraft_cam::{
     CamError, Compaction, ContourParams, Cut, DEFAULT_DESCENT_LIMIT, Feeds, Frame, Heights, HolderSection, LineNumbers, PocketParams, SafeRetract,
-    Side, Surface, Tool, ToolKind, Toolpath, Toolpath5, compact, contour, limit_descents, pocket,
+    Side, Surface, Tool, ToolKind, Toolpath, Toolpath5, band_gouges, compact, contour_with, limit_descents, pocket_with,
 };
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
@@ -45,8 +45,16 @@ use crate::schema::cam::{
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+#[path = "cam_chamfer.rs"]
+mod chamfer;
+#[path = "cam_drill.rs"]
+mod drill;
 #[path = "cam_finish3d.rs"]
 mod finish3d;
+#[path = "cam_helical.rs"]
+mod helical;
+#[path = "cam_leads.rs"]
+mod leads;
 #[path = "cam_xrotary.rs"]
 mod xrotary;
 
@@ -68,7 +76,12 @@ pub static COMMANDS: &[CommandSpec] = &[
              cut is checked for gouges against, drawn in the preview; default every visible body), fixtures?: [names] (checked \
              against, never cut), tolerance?: mm (default 0.01; 3D operations plan on the bodies tessellated within a \
              quarter of it), tools: [Tool JSON] | tool_library_path, operations: [{name, type: contour | pocket (sketch + profiles? | \
-             polygon: [[x,y],…], stepdown?, side? (contour: outside | inside | on), stepover? (pocket), ramp_angle_deg?) | parallel | \
+             polygon: [[x,y],…], stepdown?, side? (contour: outside | inside | on), stepover? (pocket), ramp_angle_deg?, entry?, \
+             linking?, contour: lead?, vertical_lead?, tabs?, finish_passes?, finish_stepover?, spring_pass?) | drill {sketch + \
+             circles?, diameter_range?, sketch_points? | points, cycle?: simple | dwell | peck | chip_break, peck?, …} | chamfer \
+             {sketch | polygon | holes, heights: {clearance, retract, top}, width, tip_offset?, side?} | bore {sketch + diameter_range? \
+             | holes, pitch? | ramp_angle_deg?, stepover?, finish_passes?} | thread_mill {sketch | centers, pitch, thread_diameter, \
+             internal?, right_hand?, thread_depth?, radial_passes?, spring_pass?} | parallel | \
              roughing | waterline | scallop | steep_shallow | pencil | rest_finish (boundary?: {rect?, polygon?, holes?}, stepover?, \
              step?, …) | indexed {a_deg, operation, name?} | indexed_pattern {a_deg: [..] | count, start_deg?, operation, name?} | \
              rotary_finish | rotary_roughing (pattern: lines | helix | rings, clearance, retract, stock_radius?) | wrap | wrap_pocket | \
@@ -651,6 +664,14 @@ struct Ctx<'a> {
     chord: f64,
     /// How closely arcs are followed into the poses the checks run along (mm).
     pose_tol: f64,
+    /// The part and the fixtures, for what the tool must clear coming down (a drill's R height).
+    all: Option<&'a Surface>,
+    /// The `type` of the operation being planned (an indexed one's inner operation's): which
+    /// tools it cuts with.
+    op_type: std::cell::Cell<&'static str>,
+    /// The band a chamfer mill is told to cut into what the model shows (a chamfer, a V-trace,
+    /// a spotted hole), handed from its planning to [`Planned::band`].
+    band: std::cell::Cell<Option<f64>>,
 }
 
 impl<'a> Ctx<'a> {
@@ -665,15 +686,9 @@ impl<'a> Ctx<'a> {
             let numbers: Vec<String> = self.tools.iter().map(|t| t.number.to_string()).collect();
             return Err(self.bad(op, format!("no tool number {} (the job's tools: {})", c.tool, numbers.join(", "))));
         };
-        if !matches!(tool.kind, ToolKind::FlatEndmill | ToolKind::BallEndmill | ToolKind::BullNose | ToolKind::FaceMill) {
-            return Err(self.bad(
-                op,
-                format!(
-                    "tool {} is a {}: a contour, a pocket or a 3D operation cuts with a flat end mill, a ball end mill, a bull nose or a face mill",
-                    tool.number,
-                    tool.kind.label()
-                ),
-            ));
+        let ty = self.op_type.get();
+        if let Some(takes) = takes_kind(ty, tool.kind) {
+            return Err(self.bad(op, format!("tool {} is a {}: a {} cuts with {takes}", tool.number, tool.kind.label(), ty.replace('_', " "))));
         }
         let rpm = match c.spindle_rpm.or(tool.spindle_rpm) {
             Some(r) if r > 0.0 && r <= 1.0e6 => r,
@@ -721,6 +736,15 @@ impl<'a> Ctx<'a> {
             return Ok(std::borrow::Cow::Borrowed(part));
         }
         part.in_frame(frame).map(std::borrow::Cow::Owned).map_err(|e| self.bad(op, e))
+    }
+
+    /// The part and the fixtures in `frame`'s coordinates.
+    fn all_in(&self, op: &str, frame: &Frame) -> Result<std::borrow::Cow<'a, Surface>> {
+        let Some(all) = self.all else { return Err(self.bad(op, "the operation needs the part's bodies")) };
+        if *frame == Frame::IDENTITY {
+            return Ok(std::borrow::Cow::Borrowed(all));
+        }
+        all.in_frame(frame).map(std::borrow::Cow::Owned).map_err(|e| self.bad(op, e))
     }
 
     /// Where a 3D operation's cutter centre may go.
@@ -772,6 +796,65 @@ impl<'a> Ctx<'a> {
             }),
             (None, Some(p)) => polygon_region(self.cmd, &format!("operation `{op}`: `polygon`"), p).map(|r| vec![r]),
         }
+    }
+}
+
+/// Which tools an operation of type `ty` cuts with, said, when `kind` is not one of them.
+fn takes_kind(ty: &str, kind: ToolKind) -> Option<&'static str> {
+    use ToolKind::*;
+    let (ok, takes) = match ty {
+        // A chamfer mill spots holes (to the depth of its cone).
+        "drill" => (matches!(kind, Drill | FlatEndmill | Chamfer), "a drill, a flat end mill to plunge with, or a chamfer mill to spot"),
+        "chamfer" => (matches!(kind, Chamfer), "a chamfer mill"),
+        "thread_mill" => (matches!(kind, ThreadMill), "a thread mill"),
+        // A chamfer mill traces a line to a depth (`side: on`).
+        "contour" => (matches!(kind, FlatEndmill | BullNose | BallEndmill | FaceMill | Chamfer), "an end mill, a face mill or a chamfer mill"),
+        "roughing" | "rotary_roughing" => (matches!(kind, FlatEndmill | BullNose | BallEndmill), "a flat end mill, a ball end mill or a bull nose"),
+        _ => (matches!(kind, FlatEndmill | BullNose | BallEndmill | FaceMill), "a flat end mill, a ball end mill, a bull nose or a face mill"),
+    };
+    (!ok).then_some(takes)
+}
+
+/// The `type` of `spec` (an indexed one's inner operation's).
+fn type_of(spec: &OperationSpec) -> &'static str {
+    match spec {
+        OperationSpec::Contour(_) => "contour",
+        OperationSpec::Pocket(_) => "pocket",
+        OperationSpec::Parallel(_) => "parallel",
+        OperationSpec::Roughing(_) => "roughing",
+        OperationSpec::Waterline(_) => "waterline",
+        OperationSpec::Scallop(_) => "scallop",
+        OperationSpec::SteepShallow(_) => "steep_shallow",
+        OperationSpec::Pencil(_) => "pencil",
+        OperationSpec::RestFinish(_) => "rest_finish",
+        OperationSpec::Drill(_) => "drill",
+        OperationSpec::Chamfer(_) => "chamfer",
+        OperationSpec::Bore(_) => "bore",
+        OperationSpec::ThreadMill(_) => "thread_mill",
+        OperationSpec::RotaryFinish(_) => "rotary_finish",
+        OperationSpec::RotaryRoughing(_) => "rotary_roughing",
+        OperationSpec::Wrap(_) => "wrap",
+        OperationSpec::WrapPocket(_) => "wrap_pocket",
+        OperationSpec::WrapContour(_) => "wrap_contour",
+        OperationSpec::Indexed(o) => type_of3(&o.operation),
+        OperationSpec::IndexedPattern(o) => type_of3(&o.operation),
+    }
+}
+
+/// The `type` of the 3-axis operation `op`.
+fn type_of3(op: &Op3Spec) -> &'static str {
+    match op {
+        Op3Spec::Contour(_) => "contour",
+        Op3Spec::Pocket(_) => "pocket",
+        Op3Spec::Parallel(_) => "parallel",
+        Op3Spec::Roughing(_) => "roughing",
+        Op3Spec::Waterline(_) => "waterline",
+        Op3Spec::Scallop(_) => "scallop",
+        Op3Spec::SteepShallow(_) => "steep_shallow",
+        Op3Spec::Pencil(_) => "pencil",
+        Op3Spec::RestFinish(_) => "rest_finish",
+        Op3Spec::Drill(_) => "drill",
+        Op3Spec::Chamfer(_) => "chamfer",
     }
 }
 
@@ -844,7 +927,20 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<Planned3> {
                 tolerance: tol,
                 ramp_angle: ctx.degrees(c.name, o.ramp_angle_deg.unwrap_or(0.0), "`ramp_angle_deg`")?,
             };
-            let path = contour(&regions, &r.tool, &params, &cut).map_err(|e| ctx.bad(c.name, e))?;
+            if r.tool.kind == ToolKind::Chamfer {
+                if side != Side::On {
+                    return Err(ctx.bad(
+                        c.name,
+                        "a chamfer mill is tapered: it traces a line to a depth (`side: on`) or breaks an edge (`type: chamfer`), it does                          not cut a wall beside a profile",
+                    ));
+                }
+                // A V-trace: the groove down to its depth is its own.
+                ctx.band.set(Some(o.heights.top - o.heights.bottom));
+            }
+            let opts = leads::contour_options(ctx, c.name, o, &r.tool)?;
+            let surface = ctx.surface_in(c.name, frame)?;
+            let above = leads::clear_above(&surface, &r.tool);
+            let path = contour_with(&regions, &r.tool, &params, &opts, &cut, &above).map_err(|e| ctx.bad(c.name, e))?;
             Ok((path, r, "contour", None))
         }
         Op3Spec::Pocket(o) => {
@@ -860,8 +956,19 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<Planned3> {
                 tolerance: tol,
                 ramp_angle: ctx.degrees(c.name, o.ramp_angle_deg.unwrap_or(0.0), "`ramp_angle_deg`")?,
             };
-            let path = pocket(&regions, &r.tool, &params, &cut).map_err(|e| ctx.bad(c.name, e))?;
+            let opts = leads::pocket_options(ctx, c.name, o, &r.tool)?;
+            let surface = ctx.surface_in(c.name, frame)?;
+            let above = leads::clear_above(&surface, &r.tool);
+            let path = pocket_with(&regions, &r.tool, &params, &opts, &cut, &above).map_err(|e| ctx.bad(c.name, e))?;
             Ok((path, r, "pocket", None))
+        }
+        Op3Spec::Drill(o) => {
+            let (path, r) = drill::plan(ctx, o, frame)?;
+            Ok((path, r, "drill", None))
+        }
+        Op3Spec::Chamfer(o) => {
+            let (path, r) = chamfer::plan(ctx, o, frame)?;
+            Ok((path, r, "chamfer", None))
         }
         Op3Spec::Parallel(o) => {
             let c = o.common();
@@ -953,6 +1060,10 @@ struct Planned {
     sources: Vec<usize>,
     /// Whether it is checked for gouges into the part (always against the fixtures).
     gouge_check: bool,
+    /// How far up its axis a chamfer mill's cut is its own (mm): the chamfer, the V-trace or the
+    /// spotted hole it is told to cut, which the model need not show. Its gouge check holds the
+    /// cone against the part less that band ([`band_gouges`]).
+    band: Option<f64>,
     tool: Tool,
     report: OperationReport,
     axes: String,
@@ -964,7 +1075,10 @@ struct Planned {
 fn plan_indexed(ctx: &Ctx<'_>, op: &Op3Spec, rotary: Vec<f64>, a_deg: Option<f64>) -> Result<Planned> {
     let c = op.common();
     let frame = frame_for_index(ctx.machine, &rotary).map_err(|e| ctx.bad(c.name, e))?;
+    ctx.op_type.set(type_of3(op));
+    ctx.band.set(None);
     let (path, r, kind) = plan_path(ctx, op, &frame)?;
+    let band = ctx.band.take();
     let stats = path.stats();
     let io = IndexedOperation { name: c.name.into(), tool: r.tool.clone(), spindle_rpm: r.rpm, coolant: c.coolant, rotary, path };
     let (poses, sources) = io.poses_mapped(ctx.machine, ctx.pose_tol).map_err(|e| ctx.bad(c.name, e))?;
@@ -983,7 +1097,7 @@ fn plan_indexed(ctx: &Ctx<'_>, op: &Op3Spec, rotary: Vec<f64>, a_deg: Option<f64
         Some(a) => format!("3+1 A{}°", num(a)),
         None => "3-axis".into(),
     };
-    Ok(Planned { op: MachineOperation::Indexed(io), poses, sources, gouge_check: c.gouge_check, tool: r.tool, report, axes })
+    Ok(Planned { op: MachineOperation::Indexed(io), poses, sources, gouge_check: c.gouge_check, band, tool: r.tool, report, axes })
 }
 
 /// One operation planned: a 3-axis one with every rotary at zero (on a 3-axis machine and a 4th
@@ -994,6 +1108,7 @@ fn plan(ctx: &Ctx<'_>, spec: &OperationSpec) -> Result<Planned> {
         return Err(bad(ctx.cmd, "every operation needs a `name` (an `indexed` one may carry it on itself or on its inner `operation`)"));
     }
     let zero = || vec![0.0; ctx.machine.rotaries.len()];
+    ctx.op_type.set(type_of(spec));
     match spec {
         OperationSpec::Contour(o) => plan_indexed(ctx, &Op3Spec::Contour(o.clone()), zero(), None),
         OperationSpec::Pocket(o) => plan_indexed(ctx, &Op3Spec::Pocket(o.clone()), zero(), None),
@@ -1004,6 +1119,10 @@ fn plan(ctx: &Ctx<'_>, spec: &OperationSpec) -> Result<Planned> {
         OperationSpec::SteepShallow(o) => plan_indexed(ctx, &Op3Spec::SteepShallow(o.clone()), zero(), None),
         OperationSpec::Pencil(o) => plan_indexed(ctx, &Op3Spec::Pencil(o.clone()), zero(), None),
         OperationSpec::RestFinish(o) => plan_indexed(ctx, &Op3Spec::RestFinish(o.clone()), zero(), None),
+        OperationSpec::Drill(o) => plan_indexed(ctx, &Op3Spec::Drill(o.clone()), zero(), None),
+        OperationSpec::Chamfer(o) => plan_indexed(ctx, &Op3Spec::Chamfer(o.clone()), zero(), None),
+        OperationSpec::Bore(o) => helical::bore_op(ctx, o),
+        OperationSpec::ThreadMill(o) => helical::thread_mill_op(ctx, o),
         OperationSpec::Indexed(o) => {
             // The inner operation's name, else the wrapper's.
             let name = spec_name(spec).to_string();
@@ -1125,7 +1244,21 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
 
     // Every operation planned, in order, then the program written in memory.
     let span = solidcraft_profile::span("cam", "job.plan");
-    let ctx = Ctx { cmd, s, machine: &machine, tools: &tools, origin, tol, post: &post, part: Some(&surfaces.part), chord, pose_tol };
+    let ctx = Ctx {
+        cmd,
+        s,
+        machine: &machine,
+        tools: &tools,
+        origin,
+        tol,
+        post: &post,
+        part: Some(&surfaces.part),
+        chord,
+        pose_tol,
+        all: Some(&surfaces.all),
+        op_type: std::cell::Cell::new(""),
+        band: std::cell::Cell::new(None),
+    };
     let mut planned: Vec<Planned> = Vec::with_capacity(job.operations.len());
     for spec in job.operations.iter().filter(|o| op_enabled(o)) {
         let ops = xrotary::plan_op(&ctx, spec, planned.len())?;
@@ -1182,8 +1315,13 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
             (surfaces.fixtures.as_ref(), "a fixture")
         };
         if let Some(against) = against {
-            let hits =
-                tool_gouges(against, &p.tool, &p.poses, allowed, step).map_err(|e| cam_err(cmd, &format!("operation `{op}`: gouge check"), e))?;
+            let hits = match p.band {
+                // A chamfer mill: the band it is told to cut is its own, in the part only; a
+                // fixture is held against the whole tool.
+                Some(band) if p.gouge_check => op_band_gouges(p, &surfaces, band, allowed, step),
+                _ => tool_gouges(against, &p.tool, &p.poses, allowed, step),
+            }
+            .map_err(|e| cam_err(cmd, &format!("operation `{op}`: gouge check"), e))?;
             let moves = moves_of(&hits);
             if let Some(worst) = hits.iter().max_by(|a, b| a.distance.total_cmp(&b.distance)) {
                 let move_index = p.sources.get(worst.index).copied().unwrap_or(worst.index);
@@ -1357,6 +1495,25 @@ fn file_key(path: &str) -> String {
 /// Whether two paths name the same file ([`file_key`]).
 fn same_file(a: &str, b: &str) -> bool {
     file_key(a) == file_key(b)
+}
+
+/// The gouges along the moves of `p`, a chamfer mill told to cut `band` up its axis: into the part
+/// less that band (its tip beside the wall, as it runs for a chamfer, is its own too), and into
+/// the fixtures with the whole tool; the deeper of the two on each move.
+fn op_band_gouges(p: &Planned, surfaces: &Surfaces, band: f64, allowed: f64, step: f64) -> std::result::Result<Vec<Hit>, CamError> {
+    let tip_clear = p.report.kind.ends_with("chamfer");
+    let mut hits = band_gouges(&surfaces.part, &p.tool, &p.poses, band, tip_clear, allowed, step)?;
+    if let Some(fixtures) = &surfaces.fixtures {
+        for h in tool_gouges(fixtures, &p.tool, &p.poses, allowed, step)? {
+            match hits.iter_mut().find(|k| k.index == h.index) {
+                Some(k) if h.distance > k.distance => *k = h,
+                Some(_) => {}
+                None => hits.push(h),
+            }
+        }
+        hits.sort_by_key(|h| h.index);
+    }
+    Ok(hits)
 }
 
 /// For each operation whose toolpath `paths` gives in the program's own coordinates, the line

@@ -121,6 +121,8 @@ pub(super) fn name3_mut(op: &mut Op3Spec) -> &mut String {
         Op3Spec::SteepShallow(o) => &mut o.name,
         Op3Spec::Pencil(o) => &mut o.name,
         Op3Spec::RestFinish(o) => &mut o.name,
+        Op3Spec::Drill(o) => &mut o.name,
+        Op3Spec::Chamfer(o) => &mut o.name,
     }
 }
 
@@ -136,6 +138,8 @@ fn op3_clearance(op: &Op3Spec) -> f64 {
         Op3Spec::SteepShallow(o) => o.heights.clearance,
         Op3Spec::Pencil(o) => o.heights.clearance,
         Op3Spec::RestFinish(o) => o.heights.clearance,
+        Op3Spec::Drill(o) => o.heights.clearance,
+        Op3Spec::Chamfer(o) => o.heights.clearance,
     }
 }
 
@@ -185,7 +189,16 @@ fn continuous(c: Common<'_>, r: Resolved, kind: &str, path: Toolpath5) -> Planne
         plunge_feed: Some(r.feeds.plunge),
     };
     let sources = (0..path.moves.len()).collect();
-    Planned { op: MachineOperation::Continuous(op), poses: path, sources, gouge_check: c.gouge_check, tool: r.tool, report, axes: "4-axis".into() }
+    Planned {
+        op: MachineOperation::Continuous(op),
+        poses: path,
+        sources,
+        gouge_check: c.gouge_check,
+        band: None,
+        tool: r.tool,
+        report,
+        axes: "4-axis".into(),
+    }
 }
 
 pub(super) fn plan_rotary_finish(ctx: &Ctx<'_>, o: &RotaryFinishOp) -> Result<Planned> {

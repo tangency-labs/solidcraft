@@ -15,6 +15,10 @@ use serde_json::{Map, Value};
 
 use super::types::SketchRef;
 
+#[path = "cam_leads.rs"]
+mod leads;
+pub use leads::{ENTRY_DEG, EntrySpec, LeadSpec, LinkingSpec, MAX_ANGLE_DEG, MAX_TABS, MIN_ARC_RADIUS, TabsSpec};
+
 /// Plan and check a CAM job and write its G-code: toolpaths for every operation, the program
 /// written through the job's post for its machine, then read back and compared with the
 /// toolpaths. Refuses, writing nothing, when the check fails, unless `allow_unsafe`. The job is
@@ -298,6 +302,37 @@ operation! {
         /// Chord error on curved profiles, mm. Default: the job's tolerance.
         #[serde(default)]
         pub tolerance: Option<f64>,
+        /// A tangent arc into and out of each pass. Default: none.
+        #[serde(default)]
+        pub lead: Option<LeadSpec>,
+        /// The radius of a vertical lead, mm: each pass is entered down a quarter arc in the
+        /// vertical plane of its start's direction from this far above and behind its start (its
+        /// `lead`'s, with one), and left up one beyond its end (`G18`/`G19` arcs where that
+        /// direction runs along X or Y). It takes the place of `entry` (none, or a plunge).
+        /// Default: none.
+        #[serde(default)]
+        pub vertical_lead: Option<f64>,
+        /// How the tool goes down into each pass (instead of `ramp_angle_deg`). Default: the ramp
+        /// angle's (0: plunge).
+        #[serde(default)]
+        pub entry: Option<EntrySpec>,
+        /// Where the tool goes between passes it cannot link in the cut. Default: `clearance`.
+        #[serde(default)]
+        pub linking: Option<LinkingSpec>,
+        /// Holding tabs (outside contours only). Default: none.
+        #[serde(default)]
+        pub tabs: Option<TabsSpec>,
+        /// Passes round the final wall at full depth after the depth passes, which leave
+        /// `finish_passes` × `finish_stepover` for them. Default: 0.
+        #[serde(default)]
+        pub finish_passes: Option<u32>,
+        /// Distance between finishing passes, mm, at most half the tool's radius. Default: 5% of
+        /// the tool's diameter.
+        #[serde(default)]
+        pub finish_stepover: Option<f64>,
+        /// Go round the last pass once more. Default: false.
+        #[serde(default)]
+        pub spring_pass: Option<bool>,
     }
 }
 
@@ -335,8 +370,25 @@ operation! {
         /// Chord error on curved profiles, mm. Default: the job's tolerance.
         #[serde(default)]
         pub tolerance: Option<f64>,
+        /// How the tool goes down into uncut material (instead of `ramp_angle_deg`): a ramp
+        /// round the ring, or a helix. Default: the ramp angle's (0: plunge).
+        #[serde(default)]
+        pub entry: Option<EntrySpec>,
+        /// Where the tool goes between rings it cannot link in the cut. Default: `clearance`.
+        #[serde(default)]
+        pub linking: Option<LinkingSpec>,
     }
 }
+
+#[path = "cam_helical.rs"]
+mod helical;
+pub use helical::{BoreOp, HoleSpec, ThreadMillOp};
+#[path = "cam_chamfer.rs"]
+mod chamfer;
+pub use chamfer::{ChamferHeightsSpec, ChamferOp};
+#[path = "cam_drill.rs"]
+mod drill;
+pub use drill::{DrillCycleSpec, DrillOp};
 
 operation! {
     /// 3D raster finishing: passes side by side following the part's surface.
@@ -559,6 +611,8 @@ pub enum Op3Spec {
     SteepShallow(SteepShallowOp),
     Pencil(PencilOp),
     RestFinish(RestFinishOp),
+    Drill(DrillOp),
+    Chamfer(ChamferOp),
 }
 
 impl Op3Spec {
@@ -574,6 +628,8 @@ impl Op3Spec {
             Op3Spec::SteepShallow(o) => o.common(),
             Op3Spec::Pencil(o) => o.common(),
             Op3Spec::RestFinish(o) => o.common(),
+            Op3Spec::Drill(o) => o.common(),
+            Op3Spec::Chamfer(o) => o.common(),
         }
     }
 
@@ -605,7 +661,7 @@ pub struct IndexedOp {
     /// The A angle, degrees.
     pub a_deg: f64,
     /// The 3-axis operation (`contour`, `pocket`, `parallel`, `roughing`, `waterline`,
-    /// `scallop`, `steep_shallow`, `pencil` or `rest_finish`).
+    /// `scallop`, `steep_shallow`, `pencil`, `rest_finish`, `drill` or `chamfer`).
     pub operation: Box<Op3Spec>,
 }
 
@@ -629,6 +685,10 @@ pub enum OperationSpec {
     WrapPocket(WrapPocketOp),
     WrapContour(WrapContourOp),
     IndexedPattern(IndexedPatternOp),
+    Drill(DrillOp),
+    Chamfer(ChamferOp),
+    Bore(BoreOp),
+    ThreadMill(ThreadMillOp),
 }
 
 impl OperationSpec {
@@ -652,6 +712,10 @@ impl OperationSpec {
             OperationSpec::WrapPocket(o) => o.common(),
             OperationSpec::WrapContour(o) => o.common(),
             OperationSpec::IndexedPattern(o) => o.operation.inner_common(o.name.as_ref(), o.enabled),
+            OperationSpec::Drill(o) => o.common(),
+            OperationSpec::Chamfer(o) => o.common(),
+            OperationSpec::Bore(o) => o.common(),
+            OperationSpec::ThreadMill(o) => o.common(),
         }
     }
 }

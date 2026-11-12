@@ -53,7 +53,11 @@ The command never writes a program that fails one of these unless `allow_unsafe`
   its toolpath, the G-code line that ends that move (when it is found) and the work coordinates
   of the tool tip there, and says how deep that can be in the exact part. An operation that cuts
   what the model does not show (an engraving) sets `gouge_check: false`; the reply lists it
-  under `gouge.skipped`, and it is still checked against the fixtures.
+  under `gouge.skipped`, and it is still checked against the fixtures. A chamfer mill's own band
+  is allowed: the chamfer a `chamfer` operation is told to cut, the groove of a V-trace
+  (`contour` `side: on`) and the cone of a spotted hole (`drill`) need not be in the model (see
+  [Chamfers](#chamfers)). A drill is checked as its own shape, point and all, and a thread mill
+  as the core inside its teeth.
 - **Holder.** For tools with holder data (`stickout` above the flutes, `shank_diameter`,
   `holder`), the shank and holder must not touch the part or a fixture along a cutting move. A
   shank or holder section no wider than the cutter is inside the cutter's endless cylinder, so
@@ -160,8 +164,12 @@ face mill's inserts), `tip_diameter` and `angle_deg` (chamfer mill), `shank_diam
 and for a thread mill `thread_pitch` and `tooth_height`. An operation without `spindle_rpm` or
 `feeds` takes the tool's; its stepdown and stepover default to the tool's too.
 
-A `contour`, a `pocket` or a 3D operation cuts with a flat end mill, a ball end mill, a bull
-nose or a face mill; any other tool is refused, with the operation named.
+Each operation cuts with the tools it can use; any other is refused, with the operation and
+the tools it takes named. A `contour`, a `pocket`, a `bore` and the 3D finishes cut with a flat
+end mill, a ball end mill, a bull nose or a face mill (a `contour` also with a chamfer mill,
+tracing a line with `side: on`); `roughing` and `rotary_roughing` with an end mill or a bull
+nose; a `drill` with a drill, a flat end mill (plunging) or a chamfer mill (spotting); a
+`chamfer` with a chamfer mill; a `thread_mill` with a thread mill.
 
 ### Operations
 
@@ -173,8 +181,12 @@ bottom}` in work coordinates.
 
 | `type` | Keys (defaults) |
 | --- | --- |
-| `contour` | `sketch` (id or name) + `profiles?` (indices; default every drawn profile) or `polygon: [[x, y], …]`; `heights`; `stepdown` (tool's, else half its diameter); `side`: `outside` \| `inside` \| `on` (outside); `climb` (true); `stock_to_leave` (0); `ramp_angle_deg` (0: plunge); `tolerance` (the job's) |
-| `pocket` | `sketch` + `profiles?` or `polygon`; `heights`; `stepdown`; `stepover` (tool's, else 40% of its diameter); `climb`; `stock_to_leave`; `ramp_angle_deg`; `tolerance` |
+| `contour` | `sketch` (id or name) + `profiles?` (indices; default every drawn profile) or `polygon: [[x, y], …]`; `heights`; `stepdown` (tool's, else half its diameter); `side`: `outside` \| `inside` \| `on` (outside); `climb` (true); `stock_to_leave` (0); `ramp_angle_deg` (0: plunge); `tolerance` (the job's); `lead`, `entry`, `linking`, `tabs`, `finish_passes`, `finish_stepover`, `spring_pass`, `vertical_lead` (see [Leads, entries, linking and tabs](#leads-entries-linking-and-tabs)) |
+| `pocket` | `sketch` + `profiles?` or `polygon`; `heights`; `stepdown`; `stepover` (tool's, else 40% of its diameter); `climb`; `stock_to_leave`; `ramp_angle_deg`; `tolerance`; `entry`; `linking` |
+| `drill` | `sketch` (circle centres, `circles` (true), filtered by `diameter_range: [min, max]`, and lone points, `sketch_points` (true)) or `points: [[x, y], …]`; `heights` (`retract` is the R height, `top` the hole's top, `bottom` its depth); `cycle`: `simple` \| `dwell` \| `peck` \| `chip_break` (simple); `peck` (tool's stepdown, else its diameter); `peck_clearance` (0.5); `back_off` (0.5); `dwell_seconds` (0.5); `to_full_diameter` (false). See [Drilling](#drilling). |
+| `chamfer` | `sketch` + `profiles?`, `polygon` or `holes: [{center, diameter}]` (each rim inside its hole); `heights: {clearance, retract, top}` (no `bottom`: the depth follows from the width); `width` (across the top); `tip_offset` (0.2); `side`: `outside` \| `inside` (outside); `climb` (true); `tolerance`. A chamfer mill only; see [Chamfers](#chamfers) |
+| `bore` | `sketch` (its circles) + `diameter_range?: [min, max]` or `holes: [{center: [x, y], diameter}]`; `heights` (`top` the hole's top, `bottom` its floor); `pitch` or `ramp_angle_deg` (2, the pitch at most `stepdown`: the tool's, else 10% of its diameter); `stepover` (between rings; the tool's, else 40% of its diameter); `climb` (true); `finish_passes` (0); `stock_to_leave` (0.1 with finishing passes, else 0) |
+| `thread_mill` | `sketch` (its circles' centres) + `diameter_range?` or `centers: [[x, y], …]`; `heights` (the thread from `top` down to `bottom`); `pitch`; `thread_diameter` (the major, nominal diameter); `internal` (true); `right_hand` (true); `climb` (true); `thread_depth` (ISO metric: 0.5413 × pitch inside, 0.6134 × pitch outside); `radial_passes` (1); `spring_pass` (false) |
 | `parallel` | `heights` (`bottom` is the floor); `stepover` (tool's, else 10% of its diameter); `angle_deg` (0); `boundary?: {rect?: [[x, y], [x, y]], polygon?, holes?}` (the part's extent); `stock_to_leave` (0); `step` (a quarter of the diameter); `tolerance`; `zigzag` (true); `descent_limit_deg` (70: see Feeds); `feeds.descent` (the cut feed: see Feeds) |
 | `roughing` | `heights` (`top` is the stock's top); `stepdown`; `stepover`; `angle_deg`; `boundary`; `stock_to_leave` (0.25); `step`; `tolerance`; `zigzag` |
 | `waterline` | `heights` (levels from `top` to `bottom`); `stepdown` (tool's, else a quarter of its diameter); `boundary`; `stock_to_leave` (0); `step`; `tolerance`; `climb` (true) |
@@ -182,7 +194,7 @@ bottom}` in work coordinates.
 | `steep_shallow` | As `scallop`, with `threshold_deg` (40), `overlap` (a tenth of the diameter), `stepdown` (the spacing × sin threshold), `shallow`: `scallop` \| `parallel` (scallop), `angle_deg` (with `parallel`; 0) |
 | `pencil` | `heights`; `min_angle_deg` (30); `passes` (0: the crease alone); `stepover` (tool's, else 10% of its diameter); `min_length` (the tool's radius); `boundary`; `stock_to_leave` (0); `step`; `tolerance`; `climb` |
 | `rest_finish` | `heights`; `previous_tool` (a tool number of the job); `threshold` (twice the tolerance); `scallop_height` or `stepover`; `overlap` (a quarter of the diameter); `boundary`; `stock_to_leave` (0); `step`; `tolerance`; `climb` |
-| `indexed` | `a_deg` and `operation`: any of the 3-axis operations above, run with A held at `a_deg` (3+1); optionally `name`, used when the inner operation has none. The inner operation carries the tool and feeds. See [4th-axis jobs](#4th-axis-jobs-indexed-rotary-and-wrapped-operations). |
+| `indexed` | `a_deg` and `operation`: any of the 3-axis operations above (`contour` to `rest_finish`, `drill`, `chamfer`), run with A held at `a_deg` (3+1); optionally `name`, used when the inner operation has none. The inner operation carries the tool and feeds. See [4th-axis jobs](#4th-axis-jobs-indexed-rotary-and-wrapped-operations). |
 | `indexed_pattern` | `a_deg: [angles]` or `count` (evenly over a turn, from `start_deg`, 0), and `operation`: any 3-axis operation, run as an `indexed` operation at each angle, named `<name> A<angle>` |
 | `rotary_finish` | `pattern`: `{type: "lines", angle_step_deg, zigzag?}`, `{type: "helix", pitch}` or `{type: "rings", stepover, zigzag?}`; `clearance` and `retract` (radii from the A axis); `floor` (0); `range: [min x, max x]` (the part's extent); `step`; `tolerance`; `stock_to_leave` (0); `max_angle_step_deg` (2) |
 | `rotary_roughing` | As `rotary_finish`, with `stock_radius` (required), `stepdown` (in radius) and `stock_to_leave` (0.25) |
@@ -230,6 +242,219 @@ plunge feed (the descents of a 3D finish: no faster than its descent feed):
 These feeds are worked out again from the coordinates as the post writes them, and rounded
 down to its feed digits, so the program as written never goes down faster than the plunge feed
 either.
+
+## Drilling
+
+A `drill` operation feeds a drill (or a flat end mill, plunging, or a chamfer mill or spot drill,
+spotting) straight down the tool axis at each hole, at the operation's plunge feed. Any other tool
+is refused. With a chamfer mill `bottom` is where its point goes: a spot `d` across at the top is
+`d / 2 / tan(angle_deg / 2)` deep (a 90° tool: half the spot's diameter); the cone it cuts is the
+operation's own and is not held against the model (see [Chamfers](#chamfers)). It is a 3-axis operation,
+so it also runs inside `indexed`: its points and heights are then in the frame the angle brings
+under the tool.
+
+```json
+{"name": "holes", "type": "drill", "tool": 3, "sketch": "Holes", "diameter_range": [4, 5],
+ "heights": {"clearance": 15, "retract": 2, "top": 0, "bottom": -12}, "cycle": "peck", "peck": 4}
+```
+
+**Holes.** With `sketch`: the centres of its circles (not construction ones; with
+`diameter_range`, only circles of a diameter in it) and its points that are not part of a curve.
+The sketch must lie on a plane square to the tool axis (either way up). With `points`: the
+holes in the operation's XY. Repeated positions are drilled once. Holes are drilled in a greedy
+nearest-neighbour order from the one lowest in X (then Y), the same order every time.
+
+**Cycles.** Every cycle is written as plain `G0`/`G1` moves and a `G4` dwell, which every
+controller reads and the read-back follows; no canned cycle (`G81`, `G82`, `G83`, `G73`) is
+written.
+
+| `cycle` | Each hole |
+| --- | --- |
+| `simple` | Feed from the R height to the bottom, rapid out to R. |
+| `dwell` | The same, with a pause of `dwell_seconds` at the bottom. |
+| `peck` | Feed `peck` deeper at a time, counted from `top` (the last peck ends at the bottom; a last peck shorter than a tenth of `peck` is merged into the one before); after each peck rapid right out to R, then rapid back down to `peck_clearance` above the depth reached. |
+| `chip_break` | Feed `peck` deeper at a time; after each peck rapid back `back_off` (staying in the hole) to break the chip, then feed on. |
+
+**Depth.** `bottom` is where the tip goes. With `to_full_diameter: true` it is where the drill
+reaches its full diameter, and the tip goes deeper by the point's length, radius / tan(point
+angle / 2): 1.80 mm for a 6 mm drill with a 118° point. A hole deeper than the tool's flutes is
+refused. Between holes the tool rises to the clearance height.
+
+**Checks.** The gouge check holds a drill against the part as its real shape: the full diameter
+from the point's length up, and the point as stepped cylinders inscribed in its cone (within the
+job's tolerance along the axis, at most 64 steps). Model the holes as cut bodies; drilled into a
+part that shows no hole, the operation gouges and the job is refused.
+
+The tool comes down from the clearance height to the R height at rapid over every hole, and the
+gouge check cannot see material there (the finished part already has the hole). So the operation
+is refused when the part or a fixture within the tool's radius and a tenth more of a hole's axis
+(the rim of a hole of the tool's size) is above the R height by more than the tolerance: a hole in
+a boss drilled with the heights of the plate under it, say. Drill holes whose tops are at
+different heights in separate operations, each with its own `top` and `retract`.
+
+## Helical bores and thread milling
+
+`bore` and `thread_mill` follow a helix round each hole's axis (+Z of work coordinates, every
+rotary at zero) and are written with helical arcs (`G2`/`G3` with Z, half a turn each) where the
+post has `helical_arcs`. Their holes are a sketch's circles (exact centres and diameters, on a
+plane facing +Z; construction circles are left out), optionally only those whose diameter is in
+`diameter_range`, or a list. Both are read back and gouge-checked like every operation, so the
+model should show the holes (and, for a thread, at least its minor diameter).
+
+```json
+{"name": "bores", "type": "bore", "tool": 1, "sketch": "Holes", "diameter_range": [8, 20],
+ "heights": {"clearance": 20, "retract": 5, "top": 0, "bottom": -12}, "ramp_angle_deg": 2, "finish_passes": 1}
+```
+
+A **bore** goes to each hole's centre, feeds down to `top`, and runs a half-circle lead-in
+inside the hole onto its helix, so the tool reaches the wall along it and never head-on. The
+helix goes down `pitch` per turn (or slopes at `ramp_angle_deg` at the tool centre, its pitch
+then at most `stepdown`), climb milling counter-clockwise by default, and never goes down faster
+than the plunge feed: a steep helix close round the axis, nearly a plunge, is slowed to keep its
+Z at the plunge feed. A full flat circle cleans
+the floor, a half-circle lead-out goes back to the centre, and the tool rises inside the hole.
+A hole more than two tool diameters across is opened in several helical rings, the first within
+the tool's radius of the centre (so no core is left) and each further one at most `stepover`
+out. With `finish_passes`, roughing leaves `stock_to_leave` on the wall and the finishing passes
+go round at the full diameter (after the first they are spring passes). A hole that is not at
+least 0.1 mm wider than the tool is refused, the hole named (`hole 2 at (10, 0), ⌀5 mm`); one
+narrower than 1.2 tool diameters is cut with a warning, as it leaves little room for chips.
+
+A **thread mill** is a tool of `kind: "thread_mill"`: `diameter` across the tips of its teeth,
+`thread_pitch` for a multi-form tool (rows of teeth that far apart over its `flute_length`;
+left out, a single-point tool that cuts any pitch) and optionally `tooth_height` (how far its
+teeth stand out of its core). Z is the tool's tip; a single-point tool's tooth is taken there.
+A **thread_mill** operation cuts `thread_diameter` (the major diameter) at exactly `pitch` per
+turn: inside a hole (`internal`, the default) the tool reaches the major diameter, round a boss
+the minor one. The depth is split into `radial_passes` from the minor (inside) or major (outside)
+diameter, then `spring_pass` repeats the last. Climb milling goes counter-clockwise inside a hole
+and clockwise round a boss, so a right-hand thread is cut from the bottom up inside and from the
+top down outside; `right_hand: false` or `climb: false` turns that round. Inside, each pass
+starts at the hole's centre with a half-circle lead-in and ends with a lead-out back to it.
+These leads turn the tool a quarter turn about the axis, so they rise (or fall) a quarter pitch
+with the helix and the teeth stay on the thread: the tip runs from `bottom` to `top`, the full
+depth from a quarter pitch above the one to a quarter pitch below the other, and an internal
+thread must be at least half a pitch long. Outside, the lead-in comes from just clear of the
+thread and the leads stay level (they turn the tool only a few degrees about the axis). A
+multi-form tool makes one turn per span of its teeth from the bottom up; its last turn starts as
+low as still reaches the top, a whole number of pitches above the others, so its teeth cut at
+most a pitch of thread beyond the top (a tool whose teeth are longer than the thread is warned
+of). A thread mill that does not fit the minor diameter is refused, and so is a multi-form tool
+of another pitch.
+
+The gouge check cannot see a thread the model does not show, so for a thread_mill operation it
+takes the thread mill as a flat end mill at the roots of its teeth, the thread's depth inside its
+tip radius, under the thread mill's own shank and holder: that core must stay clear of the part,
+while the teeth beyond it cut the thread. The program still names the thread mill. Thread mills
+are refused by every other milling operation, and anywhere else a thread mill is checked whole,
+its teeth and all.
+
+## Chamfers
+
+A face mill (`kind: "face_mill"`) is a flat end, its inserts' corners rounded by
+`corner_radius` when given; its tool-list name is `FACE MILL`. A chamfer mill (`kind:
+"chamfer"`) has `diameter` (the widest the cone cuts), `tip_diameter` (0 for a pointed tip,
+default 0) and `angle_deg`, the included angle (90 for 45° chamfers, 1 to 179, required); its
+tool-list name is `CHAMFER MILL`. A spot drill is a chamfer mill with no tip (`angle_deg` its
+point angle). Pockets, the 3D operations and a contour beside a line refuse a chamfer mill; a contour
+`side: on` takes one to trace the line to a depth (V-engraving), and `drill` takes one to spot
+holes. `roughing` and `rotary_roughing` refuse a face mill, whose inserts do not cut at its
+centre.
+
+The `chamfer` operation cuts a chamfer along the top edges of closed profiles in one pass:
+
+```json
+{"name": "deburr", "type": "chamfer", "tool": 7, "sketch": "Outline",
+ "heights": {"clearance": 10, "retract": 2, "top": 0}, "width": 0.5, "side": "outside"}
+```
+
+`width` is the chamfer's leg across the top face; its leg down the wall is `width / tan(angle_deg
+/ 2)` (the same for a 90° tool). The tip runs `tip_offset` below the chamfer so the cone's side,
+not its tip, cuts all of it: `width / tan(angle_deg / 2) + tip_offset` below `top`, its axis
+`tip_diameter / 2 + tip_offset · tan(angle_deg / 2)` out from the edge. A chamfer the cone cannot
+reach, wider than `diameter / 2 − tip_diameter / 2 − tip_offset · tan(angle_deg / 2)`, or deeper
+than the flutes, is refused with the widest it can cut, never cut narrower. `outside` chamfers a
+part's outline, `inside` an opening's; corners of an outside chamfer are rounded by the cone.
+
+Round holes' rims are given as `holes: [{center, diameter}, …]` (as `bore` takes them), each
+chamfered inside its hole (`side` is `inside`, and only that). Give a `sketch`, a `polygon` or
+`holes`, one of them.
+
+The gouge check holds the cone to the part less the chamfer it is told to cut: as if the tool ran
+the chamfer's height (`width / tan(angle_deg / 2)`) higher, where its cone just meets a sharp
+edge, with its tip also held where it really runs. So a chamfer the model shows passes, and so
+does a deburr of a sharp edge the model does not chamfer; a cut past the band fails, such as a
+profile off the part's edge, a wrong `side`, or a tip that runs into a face below. The band is
+the part's only: a fixture (a vise jaw just below the edge) is held against the whole tool.
+Inside `indexed` a chamfer runs in the frame the A angle brings under the tool.
+
+A contour `side: on` with a chamfer mill traces the line with the point down to `bottom`: a
+V-engraving as wide at the top as the cone is there (a 60° tool 0.3 mm deep: 0.35 mm). Its groove
+is its band (`top − bottom`), so the model need not show the engraving; a trace whose `top` is
+below the face it engraves cuts past its band and fails. Give the face as `top`: one above it
+makes the band deeper than the groove, and what stands on the face within it is not held. A
+trace deeper than the cone (from `top` to where the tool is full width, `(diameter −
+tip_diameter) / 2 / tan(angle_deg / 2)`) is refused: below it the tool cuts with its straight
+side. A `drill` with a chamfer mill spots holes the same way, its band the spot's depth, which is
+held to the cone too:
+
+```json
+{"name": "engrave", "type": "contour", "tool": 30, "side": "on", "sketch": "Text",
+ "heights": {"clearance": 10, "retract": 2, "top": 0, "bottom": -0.3}}
+```
+
+```json
+{"name": "spot", "type": "drill", "tool": 30, "sketch": "Holes",
+ "heights": {"clearance": 10, "retract": 2, "top": 0, "bottom": -1.5}}
+```
+
+## Leads, entries, linking and tabs
+
+The 2D operations (`contour` and `pocket`, on their own or inside `indexed`) take these keys.
+Without them a contour and a pocket cut as before: each plunges, or ramps at `ramp_angle_deg`.
+
+```json
+{"name": "outline", "type": "contour", "tool": 1, "polygon": [[-20, -15], [20, -15], [20, 15], [-20, 15]],
+ "heights": {"clearance": 20, "retract": 5, "top": 0, "bottom": -6}, "stepdown": 2,
+ "lead": {"radius": 2, "line": 1}, "entry": {"type": "ramp", "angle_deg": 3},
+ "tabs": {"count": 4, "width": 4, "height": 1.5}, "finish_passes": 1, "finish_stepover": 0.25,
+ "spring_pass": true, "linking": "stay_down"}
+```
+
+| Key | Operations | Meaning |
+| --- | --- | --- |
+| `lead` | contour | `{radius, sweep_deg?, line?}`: a tangent arc into each pass and out of it, `sweep_deg` (90) round, with a straight `line` (0) before the lead-in and after the lead-out. It lies in the plane of the cut (`G2`/`G3`), on the side of the pass away from the part, and the pass starts in the middle of its longest straight piece. A lead that would cut into the part (the far wall of an opening, a second profile) is refused, and so is any lead with `side: on`, where both sides of the line are the part. |
+| `entry` | both | How the tool goes down into each depth pass: `{"type": "plunge"}` (at the plunge feed), `{"type": "ramp", "angle_deg"?}` (2°: a contour along its lead, back and forth, or before its first tab, else round the loop; a pocket round its ring) or `{"type": "helix", "radius"?, "angle_deg"?}` (90% of the tool's radius, at most all of it, so that no core is left standing; 2°), then once round at the depth. A helix that does not fit is made smaller, then replaced by the ramp, then by the plunge; a contour with `side: on` takes no helix. Give `entry` or `ramp_angle_deg`, not both. Default: the operation plunges (or ramps at `ramp_angle_deg`). |
+| `linking` | both | `clearance` (the default) or `stay_down`. Within a level the tool always stays down where the straight link runs where the passes cut so far, or the one it leads to, have taken the material away (tracked by each pass's distance from the boundary); elsewhere it goes up to the clearance height, or with `stay_down` only to the retract height where the cutter, dropped onto the part all along the link, stays 1 mm below it. With `stay_down` a pocket also goes from one level to the next through the level it has cleared. |
+| `tabs` | contour, outside | `{count \| spacing, width, height, ramp_angle_deg?}`: material left `height` above the bottom to hold a part cut out of the stock, each `width` long along the wall, placed evenly on the profile's straight stretches (away from its corners and the start); the tool rises over each on ramps of `ramp_angle_deg` (30°). Refused when they do not fit or are as high as the cut. |
+| `finish_passes` | contour | Passes round the final wall at full depth after the depth passes (0), `finish_stepover` (5% of the tool's diameter, at most half its radius) apart, the last on the wall; the depth passes leave `finish_passes × finish_stepover` for them. Each is linked in the cut, or by its lead. Not with `side: on`. Refused where a finishing pass would reach into a notch, a neck or a gap between parts that the pass before it did not fit in (it would cut a full slot at full depth). On a wall deeper than the tool's `flute_length` each finishing pass goes down in steps no deeper than the flutes, evenly from `top`, the last at `bottom` (a tool whose shank is wider than its cutter is refused there); the spring pass stays at the bottom. |
+| `spring_pass` | contour | Go round the last pass once more (false). |
+| `vertical_lead` | contour | The radius of a quarter arc in the vertical plane of the pass's start down into each pass and up out of it, mm ([Vertical leads](#vertical-leads)). Default: none. |
+
+No cut of a contour or a pocket goes down faster than the plunge feed: a ramp, a helix and the
+way down off a tab are slowed to the feed that takes the tool down at the plunge feed (a 30° tab
+ramp at 2880 mm/min would otherwise go down at 1440 mm/min).
+
+Ring by ring a pocket is cut from the inside out: a ring only after the rings next inside it, and
+otherwise the nearest ring first, so that the rooms of a pocket are cleared one after the other.
+
+### Vertical leads
+
+`vertical_lead` (a contour's radius, mm) enters a cut down a quarter arc in the vertical plane of the cut's direction,
+from the radius above and behind its start, and out of its end up a quarter arc beyond it. The
+post writes each as a `G18` (passes along X) or `G19` (along Y) arc, the plane word on the arc's
+own block before its motion code (`G19 G2 Y174.148 Z-0.15 J-0.3 K0. F1600.`) with both centre
+offsets of the plane (`I K` or `J K`), `G17` again on the next arc in XY and after the
+operation, so a canned cycle that follows is in the plane the header set. Where the cut's
+direction runs along neither axis the arc goes out as lines within 0.001 mm of it; a post with
+`arcs: false` writes lines within its arc tolerance. The program reader, the read-back,
+and `cam.gcode.check` follow `G17`, `G18` and `G19`. On a
+contour a vertical lead comes down into the start of its `lead` (or the pass) and takes the
+place of the entry (no ramp or helix with it); it is refused where the ground behind the start
+or beyond the end is the part. Like every way down, the arc into the cut is slowed so it goes
+down no faster than the plunge feed where it is steepest (a quarter arc into a cut starts
+straight down). A finishing pass whose vertical lead would start where the depth passes did not
+cut is refused, as a plunge there is, unless the arc starts above `top`.
 
 ## 3D finishing strategies
 
