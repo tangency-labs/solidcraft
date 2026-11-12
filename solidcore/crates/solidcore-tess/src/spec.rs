@@ -67,7 +67,7 @@ impl MeshSpec {
 ///
 /// What the plan's stats name: [`PlanStats::unshaped`], each face left short of its shape (a
 /// triangle sharper than `spec.min_angle`, or a bound that stopped the shaping: its points, the
-/// rounds of splitting sides, a side on no edge kept whole, a pole), with its smallest angle in
+/// rounds of splitting sides, a side on no edge kept whole), with its smallest angle in
 /// 3D; [`PlanStats::over_tolerance`], each face whose sag refinement stopped at its bound, with
 /// whether its triangles are still within `spec.chord` (`within`), as on the display path; and
 /// [`PlanStats::edges_capped`], each edge a bound of its sampling stopped. Faces are planned in

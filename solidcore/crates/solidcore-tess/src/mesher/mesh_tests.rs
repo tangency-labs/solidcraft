@@ -68,7 +68,7 @@ fn worst_anywhere(m: &Mesh) -> (f64, u32) {
 
 /// A body on the mesh path at a side of 2 mm and a chord of 0.01 mm: every triangle keeps 20
 /// degrees in 3D, nothing folds and it is closed.
-fn shaped_in_3d(b: &brep::Brep, size: f64, what: &str) {
+fn shaped_in_3d(b: &brep::Brep, size: f64, what: &str) -> PlanStats {
     let spec = MeshSpec { chord: 0.01, size: Some(2.0), min_angle: 25.0 };
     let (plan, stats) = meshed(b, &spec, size, None);
     let (m, refused) = plan.evaluate();
@@ -80,6 +80,7 @@ fn shaped_in_3d(b: &brep::Brep, size: f64, what: &str) {
     let (w, refused) = plan.welded();
     assert!(refused.is_empty(), "{what}: {refused:?}");
     assert_closed(&w, what);
+    stats
 }
 
 /// A sphere of radius 10, its poles included: 20 degrees in 3D (FieldCraft's trial at
@@ -88,7 +89,9 @@ fn shaped_in_3d(b: &brep::Brep, size: f64, what: &str) {
 #[test]
 fn a_sphere_on_the_mesh_path_keeps_its_angle_at_its_poles() {
     let b = record(&make_sphere([0.0; 3], 10.0).expect("sphere"));
-    shaped_in_3d(&b, 20.0 * 3f64.sqrt(), "sphere");
+    let stats = shaped_in_3d(&b, 20.0 * 3f64.sqrt(), "sphere");
+    // Each pole is its cap's fan: nothing left short there.
+    assert!(stats.unshaped.is_empty(), "{:?}", stats.unshaped);
 }
 
 /// A torus 20 / 5: its speed round the tube varies by 3 / 5 to 5 / 3 of the mean between its
@@ -97,7 +100,7 @@ fn a_sphere_on_the_mesh_path_keeps_its_angle_at_its_poles() {
 #[test]
 fn a_torus_on_the_mesh_path_keeps_its_angle() {
     let b = record(&make_torus([0.0; 3], 20.0, 5.0).expect("torus"));
-    shaped_in_3d(&b, (50f64.powi(2) * 2.0 + 10f64.powi(2)).sqrt(), "torus");
+    let _ = shaped_in_3d(&b, (50f64.powi(2) * 2.0 + 10f64.powi(2)).sqrt(), "torus");
 }
 
 /// A box with its top edges rounded: the fillets are strips a few sides wide, curved across
@@ -105,7 +108,7 @@ fn a_torus_on_the_mesh_path_keeps_its_angle() {
 #[test]
 fn rounded_edges_on_the_mesh_path_keep_their_angle() {
     let name = "box_with_filleted_top";
-    shaped_in_3d(&crate::fixtures::fixture(name), crate::fixtures::size_of(name), name);
+    let _ = shaped_in_3d(&crate::fixtures::fixture(name), crate::fixtures::size_of(name), name);
 }
 
 /// Two faces of one edge split the same side in a round: each gives its fraction in its own
@@ -197,6 +200,9 @@ fn a_plate_a_ball_sinks_into_has_no_needles_on_the_mesh_path() {
     // the pole, shaped in (u, v) scaled by the mean speeds).
     let (worst, face) = worst_anywhere(&m);
     assert!(worst >= 20.0, "smallest angle {worst} degrees, on face {face}; unshaped: {:?}", stats.unshaped);
+    // The ball's pole is its cap's fan: the ball's face is not left short.
+    let ball: Vec<usize> = (0..plan.surfaces.len()).filter(|&f| !matches!(plan.surfaces[f], EvalSurface::Plane { .. })).collect();
+    assert!(stats.unshaped.iter().all(|u| !ball.contains(&u.face)), "the ball's faces {ball:?}; unshaped: {:?}", stats.unshaped);
     assert_nothing_folds(&m, "sunk ball");
     let (w, refused) = plan.welded();
     assert!(refused.is_empty(), "{refused:?}");

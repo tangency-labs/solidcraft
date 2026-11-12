@@ -77,9 +77,6 @@ pub enum ShapeLimit {
     /// A point it would add encroaches on a boundary side on no edge (a pole's collapsed side,
     /// the line a seamless face is cut along), which no node can be put on: kept whole.
     SidesOnNoEdge,
-    /// A point it would add lies within half a side of a pole of the surface, where the
-    /// parameters collapse: not added, so the refinement does not crowd towards the pole.
-    Pole,
     /// A triangle smaller than refinement splits (the spec's chord over a thousand, squared) is
     /// still too sharp.
     Floor,

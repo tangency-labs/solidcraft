@@ -15,8 +15,9 @@
 //!   of, or past it) is not added: the side is split instead, which the face cannot do alone,
 //!   since the side is an edge's segment its neighbour shares. The sides are returned, to be put
 //!   on their edges ([`super::plan_at`]), or, where the face may not split them, kept whole.
-//! - A point within half a side of a pole of the surface is not added: towards a pole the
-//!   parameters collapse, and refinement would crowd there without end.
+//! - The surface's poles are no concern of it: the planner fans each pole's cap on its own
+//!   ([`super::pole_caps`]), so the triangles here meet a pole only as the fan's corner, one
+//!   point.
 
 use std::collections::VecDeque;
 
@@ -32,8 +33,6 @@ use super::size::{SizeAt, local};
 const LONG: f64 = 1.5;
 /// Flips per triangle a pass of Lawson flips may make.
 const FLIPS_PER_TRIANGLE: usize = 8;
-/// A point this many sides asked from a pole is too near it ([`ShapeLimit::Pole`]).
-const POLE_GUARD: f64 = 0.5;
 /// Steps of the walk to a new point, per triangle.
 const WALK: usize = 4;
 
@@ -52,8 +51,6 @@ pub(crate) struct Rules<'a> {
     /// `None`: a boundary side a point would encroach on is returned to be split. Otherwise the
     /// sides are kept whole, and this is why, where it leaves a triangle short.
     pub whole: Option<ShapeLimit>,
-    /// The surface's poles on the face (their 3D points).
-    pub poles: &'a [Vec3],
 }
 
 /// How the shaping ended.
@@ -440,10 +437,6 @@ pub(crate) fn shape(
             give_up(&mut m, ti, None, &mut limits);
             continue;
         };
-        if rules.poles.iter().any(|pole| p.dist(*pole) < POLE_GUARD * h_at(p)) {
-            give_up(&mut m, ti, Some(ShapeLimit::Pole), &mut limits);
-            continue;
-        }
         let Some((made, facing)) = m.insert(located, q, p) else {
             give_up(&mut m, ti, None, &mut limits);
             continue;
