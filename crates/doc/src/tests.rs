@@ -285,6 +285,7 @@ fn set_back_restores_everything_when_states_share_bodies() {
                 width: "10".into(),
                 height: height.into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -393,6 +394,7 @@ fn rolling_a_large_unchanged_timeline_forward_reuses_its_geometry() {
                 width: "10".into(),
                 height: "10".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -944,6 +946,7 @@ fn errors_are_reported_not_fatal() {
             width: "1".into(),
             height: "1".into(),
             operation: Operation::NewBody,
+            centred: false,
         },
         None,
     )
@@ -1026,6 +1029,7 @@ fn primitives_and_combine() {
             width: "10".into(),
             height: "10".into(),
             operation: Operation::NewBody,
+            centred: false,
         },
         None,
     )
@@ -1441,6 +1445,7 @@ fn empty_boolean_targets_without_overlap_keep_plain_message() {
                     width: "1".into(),
                     height: "1".into(),
                     operation,
+                    centred: false,
                 },
                 None,
             )
@@ -1455,7 +1460,7 @@ fn empty_boolean_targets_without_overlap_keep_plain_message() {
 /// A box of `size` at `corner`, made with `operation`.
 fn cube(doc: &mut Document, corner: Vec3, size: [f64; 3], operation: Operation) -> u64 {
     let [length, width, height] = size.map(|x| Expr::new(x.to_string()));
-    doc.add_feature(FeatureKind::Box { corner: point_expr(corner), length, width, height, operation }, None).unwrap()
+    doc.add_feature(FeatureKind::Box { corner: point_expr(corner), length, width, height, operation, centred: false }, None).unwrap()
 }
 
 /// The bodies of `doc` evaluated, by name with their volumes and pieces, and how feature

@@ -23,6 +23,7 @@ mod pending;
 mod render_assets;
 mod shared;
 mod skills;
+mod solidcore_paths;
 mod test;
 mod test_nextest;
 mod ui_containers;
@@ -39,6 +40,8 @@ usage: cargo xtask <command>
 commands:
   ui-containers   enforce the universal container for all UI hosts and the kit's tooltips
   layers          enforce the crate dependency layering (plan/architecture.md §3)
+                  and the per-crate count of paths into solidcore internals (xtask/solidcore-paths.txt);
+                  `layers --paths [crate]` lists those paths
   shared          check that each shared crate (layers' Shared class) has workspace lints, a licence,
                   a README and no includes from outside its directory, then build and test it in a
                   scratch workspace holding only it and the shared crates it uses
@@ -82,7 +85,7 @@ commands:
                   kernel operations, operand records, fix set and expected values in
                   DIR/<area>/<case>.json and DIR/manifest.json, every case not expressible as
                   kernel input listed with its reasons; with --ladder too
-  known-failing --junit PATH... [--list FILE]
+  known-failing --junit PATH... [--list FILE] [--quarantine FILE]
                   grade a nextest run's junit report (a file, or every .xml under a directory)
                   against the tests known to fail today on the default kernel,
                   tests/KNOWN_FAILING_TESTS (or FILE): fails
@@ -145,7 +148,10 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
     let result = match args.first().map(String::as_str) {
-        Some("layers") => cmd_layers(),
+        Some("layers") => match rest.first() {
+            Some(&"--paths") => cmd_solidcore_paths(rest.get(1).copied()),
+            _ => cmd_layers(),
+        },
         Some("shared") => shared::run(&root()),
         Some("ui-containers") => ui_containers::run(&root()),
         Some("assets") => assets::run(&root()),
@@ -292,6 +298,17 @@ fn cmd_layers() -> Result<(), String> {
     let allow = std::fs::read_to_string(root().join(layers::SEAM_LIST)).map_err(|e| format!("{}: {e}", layers::SEAM_LIST))?;
     violations.extend(layers::seam_check(&crates, &allow, &layers::read_public(&root())?));
     violations.extend(layers::standalone_check(&layers::read_solidcore_manifests(&root())?));
+    let paths = solidcore_paths::counts(&solidcore_paths::scan(
+        &root(),
+        &solidcore_paths::solidcore_idents(&layers::read_solidcore_manifests(&root())?),
+        &layers::parse_public(&layers::read_public(&root())?),
+    )?);
+    let baseline = std::fs::read_to_string(root().join(solidcore_paths::BASELINE)).map_err(|e| format!("{}: {e}", solidcore_paths::BASELINE))?;
+    println!("\nPaths into solidcore internals, by crate ({}):", solidcore_paths::BASELINE);
+    for (c, n) in &paths {
+        println!("  {c:<26} {n}");
+    }
+    violations.extend(solidcore_paths::check(&paths, &baseline));
     println!();
     if violations.is_empty() {
         println!("OK: {} crates, no layering or solidcore seam violations.", crates.len());
@@ -303,6 +320,26 @@ fn cmd_layers() -> Result<(), String> {
         }
         Err(format!("{} layering violation(s)", violations.len()))
     }
+}
+
+/// `cargo xtask layers --paths [crate path]`: every path into solidcore internals the layers check
+/// counts, `file:line path`, for one crate or all.
+fn cmd_solidcore_paths(only: Option<&str>) -> Result<(), String> {
+    let sites = solidcore_paths::scan(
+        &root(),
+        &solidcore_paths::solidcore_idents(&layers::read_solidcore_manifests(&root())?),
+        &layers::parse_public(&layers::read_public(&root())?),
+    )?;
+    for (c, list) in &sites {
+        if only.is_some_and(|o| o.trim_end_matches('/') != c) {
+            continue;
+        }
+        println!("{c}: {}", list.len());
+        for s in list {
+            println!("  {}:{} {}", s.file, s.line, s.path);
+        }
+    }
+    Ok(())
 }
 
 /// Features with no reference case yet, and the tests that check them against hand-computed

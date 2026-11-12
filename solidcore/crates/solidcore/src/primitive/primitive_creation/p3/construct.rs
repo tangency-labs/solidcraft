@@ -26,6 +26,10 @@
 //! Not upstream (the SolidCraft fork's tangency-labs/smlib 5d3939e, WR-523, #1450):
 //! [`PrimitiveCreation::create_curve_sweep_with_placements`] reports the rigid motions
 //! carrying the profile onto the first, middle and last sections.
+//! Not upstream: [`PrimitiveCreation::create_skin_from_faces`] skins sections on
+//! parallel planes at their planes' distances (`SectionPlanes`) where the chord-length
+//! skin's control points leave the slab between the first and last planes, so the skin
+//! stays between them; every other skin keeps the chord-length parameters.
 //! **Statuses pass on** (opt-in `Kernel::fixes.sweep_statuses_pass_on`, WR-662;
 //! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
 //! are returned instead (`SER`).
@@ -56,6 +60,8 @@ use crate::surface::surface::{
 use crate::sweep::topology_sweep::access::{FaceRef, RegionRef};
 use crate::topology::{BrepId, EdgeuseId, FaceId};
 
+use super::skin_sources::{layer_sources, LoopSpans, NotTraced, SkinSources, SkinTrace};
+
 const OP: &str = "primitive::primitive_creation::p3";
 
 pub(super) fn target(primitive: &PrimitiveCreation, brep: BrepId) -> Result<RegionRef> {
@@ -69,6 +75,117 @@ pub(super) fn target(primitive: &PrimitiveCreation, brep: BrepId) -> Result<Regi
 fn face_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
     crate::topology::face::p2::surface(a.brep(face.0)?, face.1)?
         .ok_or_else(|| SolidError::primitive_missing(OP, "the face's surface"))
+}
+
+/// Not upstream: section faces that are planes, three or more, all parallel to the first
+/// (within `EFF_ZERO_DEG`) and strictly in order along its normal.
+///
+/// A skin through them is meant to stay in the slab between the first and last planes.
+/// Upstream's chord-length parameters come from the control points' whole motion: where
+/// sections move far sideways for a small step along the normal (a carved top's first
+/// steps), the height's interpolant overshoots, the skin dips behind its first section's
+/// plane and crosses its own cap face, and a union with a body whose face is coplanar
+/// with that cap fails. [`SectionPlanes::leaves`] finds that on the chord-length skin's
+/// control points; only then is the skin built again at [`SectionPlanes::params`].
+struct SectionPlanes {
+    origin: crate::math::Point3,
+    unit: Vec3,
+    /// The last plane's height above the first along `unit` (non-zero).
+    last: f64,
+    /// Each plane's height over `last`: 0 at the first section, 1 at the last.
+    params: Vec<f64>,
+}
+
+impl SectionPlanes {
+    /// `None` for sections that are not all on parallel planes in order.
+    fn of(a: &impl PrimitiveAccess, faces: &[FaceRef]) -> Result<Option<Self>> {
+        use crate::math::EFF_ZERO_DEG;
+        use crate::surface::surface::SurfaceKind;
+        if faces.len() < 3 {
+            return Ok(None);
+        }
+        let mut planes = Vec::new();
+        for &face in faces {
+            let k = a.kernel(face.0)?;
+            match face_surface(a, face)?.kind_with_nurb(k)? {
+                SurfaceKind::Plane(p) => {
+                    let (point, normal, _) = p.is_planar();
+                    planes.push((point, normal));
+                }
+                _ => return Ok(None),
+            }
+        }
+        let Some(&(origin, normal)) = planes.first() else {
+            return Ok(None);
+        };
+        let Ok(unit) = normal.unitize() else {
+            return Ok(None);
+        };
+        let mut heights = Vec::new();
+        for &(point, n) in &planes {
+            if !unit.is_parallel_to(n, EFF_ZERO_DEG) {
+                return Ok(None);
+            }
+            heights.push(unit.dot(point - origin));
+        }
+        let Some(&last) = heights.last() else {
+            return Ok(None);
+        };
+        // Strictly in order along the normal, either way (NaN fails every comparison).
+        let increasing = heights
+            .iter()
+            .zip(heights.iter().skip(1))
+            .all(|(p, q)| q > p);
+        let decreasing = heights
+            .iter()
+            .zip(heights.iter().skip(1))
+            .all(|(p, q)| q < p);
+        if !(increasing || decreasing) || !last.is_finite() || last == 0.0 {
+            return Ok(None);
+        }
+        let mut params: Vec<f64> = heights.iter().map(|h| h / last).collect();
+        // The ends exactly 0 and 1, as the interpolation's knot vector needs.
+        if let Some(f) = params.first_mut() {
+            *f = 0.0;
+        }
+        if let Some(l) = params.last_mut() {
+            *l = 1.0;
+        }
+        if !params.iter().all(|t| t.is_finite()) {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            origin,
+            unit,
+            last,
+            params,
+        }))
+    }
+
+    /// Whether a control point of `surface` lies farther than `tol` outside the slab
+    /// between the first and last planes. A non-rational skin lies in its control points'
+    /// convex hull, so with none outside it stays in the slab (within `tol`); a rational
+    /// one (positive weights) likewise, read on its Euclidean points.
+    fn leaves(&self, surface: &BSplineSurface, tol: f64) -> Result<bool> {
+        let (low, high) = if self.last > 0.0 {
+            (-tol, self.last + tol)
+        } else {
+            (self.last - tol, tol)
+        };
+        let (_, _, points) = surface.control_points()?;
+        Ok(points.into_iter().any(|p| {
+            let h = self.unit.dot(p.to_euclid() - self.origin);
+            // NaN counts as leaving.
+            !(h >= low && h <= high)
+        }))
+    }
+
+    /// Plane-distance parameters (each section's height is then one linear function of
+    /// its parameter, which the interpolation reproduces exactly: the control rows lie
+    /// on the planes at their Greville abscissae's heights and the skin in the slab).
+    fn params(&self) -> &[f64] {
+        &self.params
+    }
 }
 
 /// Parameters for `CreateBlendPrimitive`.
@@ -221,12 +338,40 @@ impl PrimitiveCreation {
         degree: usize,
         new_faces: &mut Vec<FaceId>,
     ) -> Result<()> {
+        self.create_skin_from_faces_traced(
+            a, brep, faces, profiles, approx_tol, degree, new_faces, None,
+        )
+    }
+
+    /// [`PrimitiveCreation::create_skin_from_faces`], also tracing which profile curves
+    /// each new face was swept from into `trace` when given (not upstream:
+    /// [`super::skin_sources`], tangency-labs/solidcore#3139). The faces and surfaces are
+    /// those `create_skin_from_faces` makes; the trace adds no failure.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`PrimitiveCreation::create_skin_from_faces`].
+    #[allow(clippy::too_many_arguments)] // upstream's arguments and the trace
+    pub fn create_skin_from_faces_traced(
+        &mut self,
+        a: &mut impl PrimitiveAccess,
+        brep: BrepId,
+        faces: &[FaceRef],
+        profiles: &[BSplineCurve],
+        approx_tol: f64,
+        degree: usize,
+        new_faces: &mut Vec<FaceId>,
+        trace: Option<&mut SkinTrace>,
+    ) -> Result<()> {
         self.init_entity_maps();
         new_faces.clear();
         let _ = target(self, brep)?;
         let mut skin_curves = Vec::new();
         let mut layers = Vec::new();
         let mut layer_count = 0;
+        // (the trace: each section loop's spans, by layer, and the first reason it fails)
+        let mut loop_spans: Vec<(usize, LoopSpans)> = Vec::new();
+        let mut untraced: Option<NotTraced> = None;
         for (i, &face) in faces.iter().enumerate() {
             let domain = crate::topology::face::p2::uv_domain(a.brep(face.0)?, face.1)?;
             face_surface(a, face)?.evaluate_normal(
@@ -235,7 +380,7 @@ impl PrimitiveCreation {
                 Side::Left,
                 Side::Left,
             )?;
-            let composites = a.face_composites(face)?;
+            let composites = a.face_composites_with_edges(face)?;
             if i == 0 {
                 layer_count = composites.len();
             } else if layer_count != composites.len() {
@@ -244,8 +389,15 @@ impl PrimitiveCreation {
                     "the faces have different numbers of layers",
                 ));
             }
-            for (j, mut composite) in composites.into_iter().enumerate() {
-                skin_curves.push(composite.make_composite_nurb()?);
+            for (j, (mut composite, edges)) in composites.into_iter().enumerate() {
+                let (joined, breaks) = composite.make_composite_nurb_with_breaks()?;
+                if trace.is_some() && untraced.is_none() {
+                    match LoopSpans::of(&joined, breaks, edges) {
+                        Ok(spans) => loop_spans.push((j, spans)),
+                        Err(_) => untraced = Some(NotTraced::JoinedCurveUnreadable),
+                    }
+                }
+                skin_curves.push(joined);
                 layers.push(j);
             }
         }
@@ -253,25 +405,57 @@ impl PrimitiveCreation {
             skin_curves.extend_from_slice(profiles);
             layer_count = 1;
             layers.resize(skin_curves.len(), 0);
+            untraced = Some(NotTraced::OpenProfiles);
         }
-        let mut made = Vec::new();
+        // Each layer's skin at chord-length parameters, as upstream.
+        let skin = |k: &crate::kernel::Kernel, curves: &[BSplineCurve], params: Option<&[f64]>| {
+            BSplineSurface::create_skinned_surface(
+                k,
+                curves,
+                SkinnedSurfaceOptions {
+                    approx_tol,
+                    degree,
+                    deriv_surfs: Some([None, None]),
+                    section_params: params,
+                    ..Default::default()
+                },
+            )
+        };
+        let mut layer_curves = Vec::new();
+        let mut surfaces = Vec::new();
         for layer in 0..layer_count {
-            let curves: Vec<_> = skin_curves
+            let curves: Vec<BSplineCurve> = skin_curves
                 .iter()
                 .zip(&layers)
                 .filter(|(_, l)| **l == layer)
                 .map(|(c, _)| c.clone())
                 .collect();
-            let surface = BSplineSurface::create_skinned_surface(
-                a.kernel(brep)?,
-                &curves,
-                SkinnedSurfaceOptions {
-                    approx_tol,
-                    degree,
-                    deriv_surfs: Some([None, None]),
-                    ..Default::default()
-                },
-            )?;
+            surfaces.push(skin(a.kernel(brep)?, &curves, None)?);
+            layer_curves.push(curves);
+        }
+        // Not upstream: sections on parallel planes whose chord-length skin leaves the slab
+        // between the first and last planes are skinned at their planes' distances, every
+        // layer alike (`SectionPlanes`).
+        if let Some(planes) = SectionPlanes::of(&*a, faces)? {
+            let tol = a.brep(brep)?.tolerance();
+            let mut leaves = false;
+            for s in &surfaces {
+                leaves = leaves || planes.leaves(s, tol)?;
+            }
+            if leaves {
+                surfaces.clear();
+                for curves in &layer_curves {
+                    surfaces.push(skin(a.kernel(brep)?, curves, Some(planes.params()))?);
+                }
+            }
+        }
+        let mut traced: Vec<(FaceId, Vec<usize>)> = Vec::new();
+        let mut made = Vec::new();
+        for (layer, surface) in surfaces.into_iter().enumerate() {
+            // (the trace: the surface's knots across the sections, V)
+            let surface_knots = trace
+                .is_some()
+                .then(|| surface.knots(SurfParamType::V, None).map(|(k, _)| k));
             let surface = Surface::from(surface);
             // (a B-spline surface just made: never lazy)
             let domain = surface.natural_uv_domain_if_built();
@@ -282,6 +466,34 @@ impl PrimitiveCreation {
                 p,
             )?)?;
             new_faces.extend_from_slice(&made);
+            if trace.is_some() && untraced.is_none() {
+                let sections: Vec<&LoopSpans> = loop_spans
+                    .iter()
+                    .filter(|(l, _)| *l == layer)
+                    .map(|(_, s)| s)
+                    .collect();
+                let found = match (surface_knots, face_v_intervals(&*a, brep, &made)) {
+                    (Some(Ok(knots)), Some(intervals)) => {
+                        let edge_curves = trace
+                            .as_deref()
+                            .map_or(&[][..], |t| t.edge_curves.as_slice());
+                        layer_sources(edge_curves, &sections, &knots, &intervals)
+                    }
+                    (Some(Err(_)) | None, _) => Err(NotTraced::SurfaceKnotsUnreadable),
+                    (_, None) => Err(NotTraced::FaceDomainUnreadable),
+                };
+                match found {
+                    Ok(mut layer_faces) => traced.append(&mut layer_faces),
+                    Err(why) => untraced = Some(why),
+                }
+            }
+        }
+        if let Some(t) = trace {
+            let why = untraced.or_else(|| t.open_profiles.then_some(NotTraced::OpenProfiles));
+            t.sources = Some(match why {
+                Some(why) => SkinSources::NotTraced { why },
+                None => SkinSources::Traced(traced),
+            });
         }
         Ok(())
     }
@@ -732,6 +944,24 @@ fn sweep_ends_coincide(
         }
     }
     Ok(true)
+}
+
+/// Each of `faces`' V interval: its surface's natural domain across the sections
+/// (`None` when one cannot be read; the trace then reports it, the skin is unchanged).
+fn face_v_intervals(
+    a: &impl PrimitiveAccess,
+    brep: BrepId,
+    faces: &[FaceId],
+) -> Option<Vec<(FaceId, f64, f64)>> {
+    let k = a.kernel(brep).ok()?;
+    let b = a.brep(brep).ok()?;
+    let mut out = Vec::new();
+    for &f in faces {
+        let surface = crate::topology::face::p2::surface(b, f).ok()??;
+        let domain = surface.natural_uv_domain_with_nurb(k).ok()?;
+        out.push((f, domain.min().y, domain.max().y));
+    }
+    Some(out)
 }
 
 #[cfg(test)]

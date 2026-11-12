@@ -37,17 +37,28 @@
 //!
 //! **Rounding.** The points are taken in difference form, `w_s (P_s - P_0)` on a span (to
 //! `2u` relative by Kahan's products), so that their rounding scales with the span's size,
-//! not with its distance from the origin. A level of the blossom is `(1 - a) x + a y` with
-//! `a` formed from the knots: it moves a coordinate by at most `gamma_3 (1 + 6 K / S) 2 M`
-//! (`K` the largest knot, `S` the knot span's length, `M` the span's largest point or
-//! weight), and `p` levels by `p` times that, a weight's too in a polynomial span (weights
-//! 1), as its points are divided by the weights as computed. A blossomed weight is then at
-//! least `w_min`, the span's least less that rounding, and a Euclidean end is known to
-//! `(e + |X| e_w) / w_min` plus `gamma_2` of it; a chord to twice that times `sqrt3` plus
-//! `gamma_4` of itself, and its direction to the `asin` of that over its length. A
-//! coefficient of the cone is a combination of weight 1 of products of the points'
-//! differences and weights: its inputs' rounding carries in through the products, its own
-//! arithmetic to
+//! not with its distance from the origin. A level of the blossom is `z = (1 - a) x + a y`,
+//! `a = (u - l) / (h - l)` with `u` a piece's end and `l <= u <= h` knots (#14434): a piece
+//! lies within its knot span `[t_j, t_(j+1)]` (refused, named, if not), and every level's
+//! knots `l <= t_j`, `h >= t_(j+1)`, so `a` lies in `[0, 1]`. `u`, `l` and `h` are doubles,
+//! exact, so each of the two differences and the quotient rounds once relative to its own
+//! result: the computed `a` is within `gamma_3 a` of `a`, and `1 - a`, rounded once more,
+//! within `gamma_3 a (1 + u) + u (1 - a)` of `1 - a` (`u` here the unit roundoff). The two
+//! products and the sum add `gamma_2` of `|x| (1 - a) + |y| a`, so with `M` at least `|x|`
+//! and `|y|` a level with exact inputs is within `M (2 gamma_3 + u gamma_3) + gamma_2 M (1 +
+//! gamma_7) <= gamma_9 M` of `z` (`gamma_a + gamma_b + gamma_a gamma_b <= gamma_(a+b)`). Its
+//! inputs' errors `E` carry through the combination, whose coefficients are at most 1 and sum
+//! to 1, unamplified: `E_r <= (1 + gamma_9) E_(r-1) + gamma_9 M`, and `M` stays the span's
+//! largest point or weight (every level is a convex combination of the last). From the
+//! difference form's `E_0 = gamma_3 M`, the `p` levels give `E_p <= gamma_(9p+3) M` for a
+//! point, and from exact weights `gamma_(9p) w_max` for a weight, a polynomial span's
+//! (weights 1) too, as its points are divided by the weights as computed. (No term in the
+//! knots' size: no difference of them is formed from a rounded value.) A blossomed weight is
+//! then at least `w_min`, the span's least less that rounding, and a Euclidean end is known
+//! to `(e + |X| e_w) / w_min` plus `gamma_2` of it; a chord to twice that times `sqrt3` plus `gamma_4` of
+//! itself, and its direction to the `asin` of that over its length. A coefficient of the
+//! cone is a combination of weight 1 of products of the points' differences and weights:
+//! its inputs' rounding carries in through the products, its own arithmetic to
 //! `gamma_(4p + 8)` of its terms, and its direction to the `asin` of that over its length.
 //! The arc's ends are the curve's evaluation, known to `gamma_(16 (p + 2)) |P|` (a few ulps
 //! for each of the rational evaluation's operations), and `asin` and the
@@ -238,6 +249,9 @@ struct Span {
     p: usize,
     /// The knots `t_(j-p+1) ..= t_(j+p)`.
     knots: Vec<f64>,
+    /// The knot span `[t_j, t_(j+1)]`: a piece within it is blossomed to the rounding bound.
+    start: f64,
+    end: f64,
     points: Vec<H>,
     /// The rounding of a homogeneous difference point read off the span (module docs).
     rounding: f64,
@@ -306,23 +320,20 @@ impl Span {
         let (w_min, w_max) = points.iter().fold((f64::INFINITY, 0.0_f64), |(lo, hi), h| {
             (lo.min(h.w), hi.max(h.w))
         });
-        let kmax = local.iter().fold(0.0_f64, |m, t| m.max(t.abs()));
-        // every level's knot difference spans the knot span [t_j, t_(j+1)]
-        let smin = match (local.get(p.wrapping_sub(1)), local.get(p)) {
-            (Some(x), Some(y)) => y - x,
-            _ => f64::NAN,
+        // the knot span [t_j, t_(j+1)]: every level's knots l <= t_j and h >= t_(j+1)
+        let (Some(&start), Some(&end)) = (local.get(p.wrapping_sub(1)), local.get(p)) else {
+            return Err(bad());
         };
-        if !(smin.is_finite() && smin > 0.0) {
+        if !(start.is_finite() && end.is_finite() && end > start) {
             return Err(bad());
         }
-        let levels = f64::from(u32::try_from(p).map_err(|_| bad())?);
-        // one level moves a coordinate by gamma_3 (1 + 6 K / S) 2 M; the difference form
-        // itself is within 3u of the size
-        let level = |m: f64| gamma(3) * (1.0 + 6.0 * kmax / smin) * 2.0 * m;
-        let rounding = levels * level(size) + gamma(3) * size;
+        // a level moves a coordinate by at most gamma_9 of the span's largest, p levels
+        // gamma_(9p), from the difference form's gamma_3 (module docs, #14434)
+        let levels = p.checked_mul(9).ok_or_else(bad)?;
+        let rounding = gamma(levels.checked_add(3).ok_or_else(bad)?) * size;
         // (a polynomial span's weights are 1, but blossomed to the same bound: its points
         // are divided by them as computed)
-        let rounding_w = levels * level(w_max);
+        let rounding_w = gamma(levels) * w_max;
         if !(rounding.is_finite() && rounding_w.is_finite()) {
             return Err(bad());
         }
@@ -333,6 +344,8 @@ impl Span {
         Ok(Self {
             p,
             knots: local,
+            start,
+            end,
             points,
             rounding,
             rounding_w,
@@ -383,8 +396,21 @@ impl Span {
     }
 
     /// The bracket of the piece `[a, b]` (module docs): its chord `c`, and `c / cos phi`,
-    /// `phi` the widest angle between the chord and the hodograph's cone.
-    fn piece(&self, a: f64, b: f64) -> Piece {
+    /// `phi` the widest angle between the chord and the hodograph's cone. A piece outside
+    /// this span is refused, named: the rounding bound holds within it (module docs).
+    fn piece(&self, a: f64, b: f64) -> Result<Piece> {
+        if !(self.start <= a && a < b && b <= self.end) {
+            return Err(Failure::new(
+                OP,
+                CurveFailure::PieceOutsideSpan {
+                    a,
+                    b,
+                    span_start: self.start,
+                    span_end: self.end,
+                },
+            )
+            .into_error());
+        }
         let open = |lower: f64| Piece {
             a,
             b,
@@ -394,7 +420,7 @@ impl Span {
         };
         let pts = self.bezier(a, b);
         let (Some(&h0), Some(&h1)) = (pts.first(), pts.last()) else {
-            return open(0.0);
+            return Ok(open(0.0));
         };
         // the ends, Euclidean (from P_0), and their rounding
         let (e, ew, wl) = (self.rounding, self.rounding_w, self.w_min);
@@ -406,7 +432,7 @@ impl Span {
         let slack = 2.0 * 3.0_f64.sqrt() * e_point + gamma(4) * c;
         let lower = (c - slack).max(0.0);
         if c <= slack {
-            return open(lower);
+            return Ok(open(lower));
         }
         let unit = chord * (1.0 / c);
         // the chord's own direction to its rounding
@@ -475,31 +501,31 @@ impl Span {
             let len = v.length();
             let err = input + gamma(4 * p + 8) * terms;
             if len <= err {
-                return open(lower);
+                return Ok(open(lower));
             }
             let along = unit.dot(v);
             if along <= 0.0 {
-                return open(lower);
+                return Ok(open(lower));
             }
             // the angle to the chord as atan2 of its sine and cosine parts (an acos near 1
             // knows a small angle only to sqrt(eps)), widened by the coefficient's and the
             // chord's rounding
             let phi = unit.cross(v).length().atan2(along) + (err / len).min(1.0).asin() + du;
             if phi >= 0.5 * PI {
-                return open(lower);
+                return Ok(open(lower));
             }
             cos_phi = cos_phi.min(phi.cos());
         }
         if !(cos_phi.is_finite() && cos_phi > 0.0) {
-            return open(lower);
+            return Ok(open(lower));
         }
-        Piece {
+        Ok(Piece {
             a,
             b,
             lower,
             upper: (c + slack) / cos_phi * (1.0 + gamma(8)),
             geometric: c / cos_phi - c,
-        }
+        })
     }
 }
 
@@ -550,7 +576,7 @@ fn spline_bound(c: &BSplineCurve, a: f64, b: f64, width: f64) -> Result<Bracket>
             continue;
         }
         let span = Span::of(c, 0.5 * (lo + hi))?;
-        queue.push(Queued(spans.len(), span.piece(*lo, *hi)));
+        queue.push(Queued(spans.len(), span.piece(*lo, *hi)?));
         spans.push(span);
     }
     let mut done: Vec<Piece> = Vec::new();
@@ -587,8 +613,8 @@ fn spline_bound(c: &BSplineCurve, a: f64, b: f64, width: f64) -> Result<Bracket>
             done.push(piece);
             continue;
         }
-        queue.push(Queued(s, span.piece(piece.a, m)));
-        queue.push(Queued(s, span.piece(m, piece.b)));
+        queue.push(Queued(s, span.piece(piece.a, m)?));
+        queue.push(Queued(s, span.piece(m, piece.b)?));
         pieces += 1;
         halvings += 1;
     }

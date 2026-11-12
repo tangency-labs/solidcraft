@@ -3859,6 +3859,153 @@ fn a_hole_on_a_flange_panel_unfolds_with_the_flange() {
     assert!(!contains(&flat_first, [30.0, 1.25, 12.0]) && contains(&flat_first, [33.0, 1.25, 12.0]));
 }
 
+/// A hat bent from one contour (#11728), 40 deep, of 1.5 mm sheet (R 1.5, K 0.44): feet from x ±21.55
+/// out to ±29 at z 0…1.5, walls 56 high, the top at z 56…57.5. The flat lays the five panels and four
+/// bends end to end: the feet 4.45 long, the walls 51.5, the top 40.1, each bend (π/2)(R + K·T).
+fn hat(s: &mut Session) {
+    run(s, "sheet.manage_rules", json!({"name": "Al 1.5", "thickness": "1.5 mm", "bend_radius": "1.5 mm", "k_factor": "0.44", "active": true}));
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 20, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Profile"}));
+    run(s, "sketch.line", json!({"points": [[-29, 0], [-21.55, 0], [-21.55, 56], [21.55, 56], [21.55, 0], [29, 0]]}));
+    run(s, "sketch.finish", json!({}));
+    run(
+        s,
+        "sheet.flange",
+        json!({"type": "contour", "sketch": "Profile", "curves": ["l1", "l2", "l3", "l4", "l5"], "distance": "40 mm", "flip": true, "body_name": "Hat"}),
+    );
+}
+
+/// The hat's holes: a Ø22.4 bore and four M3 clearance holes (Ø3.4) in the top, and one M3 hole in
+/// each foot at x ±`foot`, y 5.
+fn hat_holes(s: &mut Session, foot: f64) {
+    run(s, "solid.hole", json!({"position": [0, 0, 57.5], "diameter": 22.4, "targets": ["Hat"]}));
+    for (x, y, z) in [(15.5, 15.5, 57.5), (-15.5, 15.5, 57.5), (15.5, -15.5, 57.5), (-15.5, -15.5, 57.5), (foot, 5.0, 1.5), (-foot, 5.0, 1.5)] {
+        run(s, "solid.hole", json!({"position": [x, y, z], "clearance": "M3", "fit": "normal", "targets": ["Hat"]}));
+    }
+}
+
+/// Holes in the end panels of a contour flange (#11728) land in its flat pattern like the holes in
+/// the panels between. Inside a foot, an M3 clearance hole is a cut-out and a DXF CIRCLE. At x ±27.5
+/// it is 1.5 from the foot's free edge at ±29, and its radius is 1.7: it breaks out 0.2 past the
+/// edge, so the flat has it as a notch in its outline (DXF ARCs), not as a cut-out. Places are read
+/// from the flat's corner: u along the unrolled profile from the left foot's end, v = y + 20 across.
+#[test]
+fn holes_in_a_contour_flanges_end_panels_are_cut_outs_or_notches_of_its_flat_pattern() {
+    let (t, k, r) = (1.5, 0.44, 1.7);
+    let ba = FRAC_PI_2 * (1.5 + k * t);
+    let length = 2.0 * 4.45 + 2.0 * 51.5 + 40.1 + 4.0 * ba;
+    // Where x = 0 of the top lies: past a foot, a wall and two bends, and the top's 20.05 to its middle.
+    let mid = 4.45 + 51.5 + 2.0 * ba + 20.05;
+    // What the flat's corner is, and a place (u, v) from it.
+    let corner = |f: &Value| {
+        let points = f["outline"].as_array().into_iter().flatten().flat_map(|l| l.as_array().into_iter().flatten());
+        points.fold([f64::MAX, f64::MAX], |m, p| [m[0].min(p[0].as_f64().unwrap_or(f64::MAX)), m[1].min(p[1].as_f64().unwrap_or(f64::MAX))])
+    };
+    let at = |c: [f64; 2], u: f64, v: f64| [c[0] + u, c[1] + v];
+    let top_holes = |c: [f64; 2]| {
+        let mut holes = vec![(at(c, mid, 20.0), 11.2)];
+        holes.extend([(15.5, 15.5), (-15.5, 15.5), (15.5, -15.5), (-15.5, -15.5)].map(|(x, y)| (at(c, mid + x, 20.0 + y), r)));
+        holes
+    };
+    let circles = |s: &mut Session| -> Vec<(solidcore_record::Vec2, f64)> {
+        let dxf = run(s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+        let geoms = solidcraft_io::read_dxf(&dxf).unwrap_or_default();
+        geoms.into_iter().filter_map(|g| if let solidcraft_io::Geom2::Circle(c, radius) = g { Some((c, radius)) } else { None }).collect()
+    };
+
+    // The part alone: the flat's area times the thickness, plus (π/2)·T²·(½ − K) for each 40 of bend.
+    let mut s = Session::default();
+    hat(&mut s);
+    let v0 = volume(&mut s);
+    let want = t * length * 40.0 + 4.0 * FRAC_PI_2 * t * t * (0.5 - k) * 40.0;
+    assert!(rel(v0, want) < 1e-9, "{v0} vs {want}");
+
+    // Inside the feet (x ±26.8: 0.55 from the bends, 0.5 from the edges): seven cut-outs, seven circles.
+    let mut inside = Session::default();
+    hat(&mut inside);
+    hat_holes(&mut inside, 26.8);
+    let removed = t * PI * (11.2 * 11.2 + 6.0 * r * r);
+    assert!((v0 - volume(&mut inside) - removed).abs() < 0.05, "{}", v0 - volume(&mut inside));
+    let f = flat(&mut inside);
+    let c = corner(&f);
+    assert_eq!(f["cutouts"].as_array().map(Vec::len), Some(7), "{}", f["cutouts"]);
+    let mut holes = top_holes(c);
+    holes.extend([(at(c, 2.2, 25.0), r), (at(c, length - 2.2, 25.0), r)]);
+    let drawn = circles(&mut inside);
+    assert_eq!(drawn.len(), 7, "{drawn:?}");
+    for (centre, radius) in holes {
+        assert!(has_round_cutout(&f, centre, radius), "{centre:?}: {}", f["cutouts"]);
+        assert!(
+            drawn.iter().any(|(p, rr)| p.dist(solidcore_record::Vec2::new(centre[0], centre[1])) < 1e-5 && (rr - radius).abs() < 1e-5),
+            "{centre:?}"
+        );
+    }
+
+    // The issue's feet holes, at x ±27.5: each cuts all of its circle but the segment past the edge.
+    hat_holes(&mut s, 27.5);
+    let past = r * r * (1.5 / r).acos() - 1.5 * (r * r - 1.5 * 1.5).sqrt();
+    let removed = t * (PI * 11.2 * 11.2 + 4.0 * PI * r * r + 2.0 * (PI * r * r - past));
+    let v1 = volume(&mut s);
+    assert!((v0 - v1 - removed).abs() < 0.05, "{} vs {removed}", v0 - v1);
+    let f = flat(&mut s);
+    let size = &f["flat_size_mm"];
+    assert!((size[0].as_f64().unwrap_or(f64::NAN) - length).abs() < 1e-6 && (size[1].as_f64().unwrap_or(f64::NAN) - 40.0).abs() < 1e-6, "{size}");
+    let c = corner(&f);
+    // Five cut-outs and five circles: the top's.
+    assert_eq!(f["cutouts"].as_array().map(Vec::len), Some(5), "{}", f["cutouts"]);
+    let drawn = circles(&mut s);
+    assert_eq!(drawn.len(), 5, "{drawn:?}");
+    for (centre, radius) in top_holes(c) {
+        assert!(has_round_cutout(&f, centre, radius), "{centre:?}: {}", f["cutouts"]);
+        assert!(
+            drawn.iter().any(|(p, rr)| p.dist(solidcore_record::Vec2::new(centre[0], centre[1])) < 1e-5 && (rr - radius).abs() < 1e-5),
+            "{centre:?}"
+        );
+    }
+    // The feet holes are notches: the outline runs round their circles, and the DXF draws them as
+    // arcs ending on the end edge, ±0.8 (√(1.7² − 1.5²)) either side of v 25.
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    let arcs: Vec<_> = solidcraft_io::read_dxf(&dxf)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|g| if let solidcraft_io::Geom2::Arc { c, a, b } = g { Some((c, a, b)) } else { None })
+        .collect();
+    let outline: Vec<[f64; 2]> = f["outline"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|l| l.as_array().into_iter().flatten())
+        .map(|p| [p[0].as_f64().unwrap_or(f64::NAN), p[1].as_f64().unwrap_or(f64::NAN)])
+        .collect();
+    for (u, edge) in [(1.5, 0.0), (length - 1.5, length)] {
+        let centre = at(c, u, 25.0);
+        let centre = solidcore_record::Vec2::new(centre[0], centre[1]);
+        let on_circle = outline.iter().filter(|p| (solidcore_record::Vec2::new(p[0], p[1]).dist(centre) - r).abs() < 1e-3).count();
+        assert!(on_circle >= 3, "the outline does not run round the notch at u {u}: {on_circle} points");
+        let notch: Vec<_> = arcs.iter().filter(|(ac, a, _)| ac.dist(centre) < 1e-5 && (a.dist(centre) - r).abs() < 1e-5).collect();
+        let ends: Vec<solidcore_record::Vec2> = notch.iter().flat_map(|(_, a, b)| [*a, *b]).collect();
+        for v in [25.0 - 0.8, 25.0 + 0.8] {
+            let p = at(c, edge, v);
+            assert!(ends.iter().any(|e| e.dist(solidcore_record::Vec2::new(p[0], p[1])) < 1e-5), "no notch arc ends at {p:?}: {notch:?}");
+        }
+    }
+
+    // Unfolded, the sheet is its flat less the holes and the notches; refolded, the part again.
+    run(&mut s, "sheet.unfold", json!({}));
+    let unfolded = t * (length * 40.0 - PI * 11.2 * 11.2 - 4.0 * PI * r * r - 2.0 * (PI * r * r - past));
+    assert!((volume(&mut s) - unfolded).abs() < 0.05, "{} vs {unfolded}", volume(&mut s));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!((volume(&mut s) - v1).abs() < 0.05, "{} vs {v1}", volume(&mut s));
+
+    // A cut that reaches a foot's bend (x 23.3…26.7, the bend ending at 24.55) is refused.
+    let mut bend = Session::default();
+    hat(&mut bend);
+    run(&mut bend, "sketch.create", json!({"plane": "XY", "name": "Bend"}));
+    run(&mut bend, "sketch.circle.center", json!({"center": [25, 5], "radius": r}));
+    run(&mut bend, "sketch.finish", json!({}));
+    let error = bend.execute("solid.extrude", &json!({"sketch": "Bend", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+    assert!(error.as_ref().is_err_and(|e| e.to_string().contains("bend")), "{error:?}");
+}
+
 /// On a folded sheet a counterbore is the same pocket around the same hole, on the base and on a
 /// flange, and stays through unfold and refold.
 #[test]

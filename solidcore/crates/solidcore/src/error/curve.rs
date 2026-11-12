@@ -4,7 +4,9 @@
 //! is a bracket whose width cannot fall below the rounding of the pieces it is summed over:
 //! asked for a narrower one, it refuses and names the narrowest it proves. Asked for one
 //! the curve would need more than the cap of pieces for, it refuses and names the width
-//! reached at the cap. The other failures describe the curve routines (`crate::curve`: the
+//! reached at the cap. A piece found outside the knot span it is blossomed in (which the
+//! halving never makes, and the rounding bound assumes) is refused, named (#14434). The other
+//! failures describe the curve routines (`crate::curve`: the
 //! curve kinds' evaluation, editing, reading and conversion, their caches, solvers and
 //! property functions), each recording, for difftest only, the status the C++ reports for it
 //! (crate-private `comparison_status`, read through [`crate::SolidError::sm_status`]).
@@ -13,6 +15,7 @@
 //! |--------------------------------------|--------------------------|
 //! | [`CurveFailure::LengthBelowFloor`]   | `SM_ERR`                 |
 //! | [`CurveFailure::LengthPastPieceCap`] | `SM_ERR`                 |
+//! | [`CurveFailure::PieceOutsideSpan`]   | `SM_ERR`                 |
 //! | [`CurveFailure::Failed`]             | `SM_ERR`                 |
 //! | [`CurveFailure::Missing`]            | `SM_ERR_NULL_POINTER`    |
 //! | [`CurveFailure::ZeroDirection`]      | `SM_ERR_INVALID_INPUT`   |
@@ -58,6 +61,19 @@ pub enum CurveFailure {
     /// A direction a curve routine needs is the zero vector, as the phrase says (for example
     /// "the projected curve's auxiliary direction").
     ZeroDirection(&'static str),
+    /// A piece `[a, b]` of a length bracket lies outside the knot span
+    /// `[span_start, span_end]` it is blossomed in: the bracket's rounding bound holds only
+    /// for a piece within its span (a port invariant: the halving keeps every piece within).
+    PieceOutsideSpan {
+        /// The piece's start.
+        a: f64,
+        /// The piece's end.
+        b: f64,
+        /// The knot span's start.
+        span_start: f64,
+        /// The knot span's end.
+        span_end: f64,
+    },
 }
 
 impl CurveFailure {
@@ -66,9 +82,10 @@ impl CurveFailure {
     /// [`CurveFailure::ZeroDirection`].
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::LengthBelowFloor { .. } | Self::LengthPastPieceCap { .. } | Self::Failed(_) => {
-                SM_ERR
-            }
+            Self::LengthBelowFloor { .. }
+            | Self::LengthPastPieceCap { .. }
+            | Self::Failed(_)
+            | Self::PieceOutsideSpan { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::ZeroDirection(_) => SM_ERR_INVALID_INPUT,
         }
@@ -77,13 +94,15 @@ impl CurveFailure {
     /// Its stable [`ErrorKind`]: [`ErrorKind::NotWithinTolerance`] for a length bracket's
     /// refusal (the accuracy asked is finer than the computation resolves); for a routine's
     /// failure, the kind of the status it replaced ([`ErrorKind::Failed`],
-    /// [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`]).
+    /// [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`]); [`ErrorKind::PortInvariant`] for a
+    /// piece outside its span, a port invariant broken.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::LengthBelowFloor { .. } | Self::LengthPastPieceCap { .. } => {
                 ErrorKind::NotWithinTolerance
             }
+            Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
             Self::Failed(_) | Self::Missing(_) | Self::ZeroDirection(_) => {
                 ErrorKind::of_status(self.comparison_status())
             }
@@ -93,12 +112,14 @@ impl CurveFailure {
     /// True for a failure that replaced a C++ status the routine returns
     /// ([`CurveFailure::Failed`], [`CurveFailure::Missing`], [`CurveFailure::ZeroDirection`]):
     /// it answers with that status the way the `Upstream` it replaced did
-    /// ([`crate::error::upstream_status`]). A length bracket's refusal is solidcore's own and
-    /// replaced none.
+    /// ([`crate::error::upstream_status`]). A length bracket's refusal, and a piece outside its
+    /// span, are solidcore's own and replaced none.
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
         match self {
-            Self::LengthBelowFloor { .. } | Self::LengthPastPieceCap { .. } => false,
+            Self::LengthBelowFloor { .. }
+            | Self::LengthPastPieceCap { .. }
+            | Self::PieceOutsideSpan { .. } => false,
             Self::Failed(_) | Self::Missing(_) | Self::ZeroDirection(_) => true,
         }
     }
@@ -122,6 +143,15 @@ impl core::fmt::Display for CurveFailure {
             } => write!(
                 f,
                 "a length bracket {asked:e} wide was asked; at its cap of {pieces} pieces it is {reached:e} wide"
+            ),
+            Self::PieceOutsideSpan {
+                a,
+                b,
+                span_start,
+                span_end,
+            } => write!(
+                f,
+                "a piece [{a:e}, {b:e}] of a length bracket lies outside its knot span [{span_start:e}, {span_end:e}]"
             ),
             Self::Failed(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
@@ -260,52 +290,14 @@ mod tests {
     /// whose conversion waits on other open work.
     #[test]
     fn the_curve_routines_build_no_bare_statuses() {
-        const WAITING: [(&str, usize); 3] = [
-            ("curve/curve/p3.rs", 10),
-            ("curve/curve/p7.rs", 3),
-            ("curve/ellipse/p1.rs", 6),
-        ];
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![root.join("curve.rs")];
-        let mut dirs = vec![root.join("curve")];
-        while let Some(dir) = dirs.pop() {
-            for entry in std::fs::read_dir(dir).expect("read dir") {
-                let path = entry.expect("entry").path();
-                if path.is_dir() {
-                    dirs.push(path);
-                } else if path.extension().is_some_and(|x| x == "rs") {
-                    files.push(path);
-                }
-            }
-        }
-        files.sort();
-        assert!(files.len() > 30, "{files:?}");
-        for path in files {
-            let text = std::fs::read_to_string(&path)
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("\n#[cfg(test)]\nmod ")
-                .map_or(text.as_str(), |at| &text[..at]);
-            let bare: usize = [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-                "SolidError::nl_ser(",
-            ]
-            .iter()
-            .map(|needle| library.matches(needle).count())
-            .sum();
-            let relative = path
-                .strip_prefix(&root)
-                .expect("under src")
-                .to_string_lossy()
-                .replace('\\', "/");
-            let allowed = WAITING
-                .iter()
-                .find(|(file, _)| *file == relative)
-                .map_or(0, |(_, n)| *n);
-            assert_eq!(bare, allowed, "bare statuses in {relative}");
-        }
+        super::super::bare_scan::assert_waiting(
+            "curve",
+            31,
+            &[
+                ("curve/curve/p3.rs", 9),
+                ("curve/curve/p7.rs", 3),
+                ("curve/ellipse/p1.rs", 6),
+            ],
+        );
     }
 }

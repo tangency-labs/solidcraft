@@ -91,7 +91,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
     match &f.kind {
         // A cylinder placed by reference edges follows the body it stands on.
         FeatureKind::Cylinder { references, .. } if !references.is_empty() => false,
-        FeatureKind::Box { corner: _, length: _, width: _, height: _, operation: Operation::NewBody }
+        FeatureKind::Box { corner: _, length: _, width: _, height: _, operation: Operation::NewBody, centred: _ }
         | FeatureKind::Cylinder { base: _, axis: _, radius: _, height: _, operation: Operation::NewBody, references: _ }
         | FeatureKind::Sphere { center: _, radius: _, operation: Operation::NewBody }
         | FeatureKind::Torus { center: _, major: _, minor: _, operation: Operation::NewBody }

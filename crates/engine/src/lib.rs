@@ -538,6 +538,12 @@ pub struct Session {
     /// How the host uploads a model to EasyPrint (`file.open_in_easyprint`); `None`: it can't. It
     /// belongs to the session like `param_check`, so it survives opening and starting designs.
     pub easyprint_upload: Option<EasyPrintUpload>,
+    /// Whether print faces (`body.print_face`) are saved with the design and kept when one is
+    /// opened (#11512). On by default, so scripts and the command line keep them; the app sets it
+    /// from its "Keep print faces" preference, which is off unless the user turns it on. Off: a
+    /// save leaves them out of the file and an opened design starts without them. The user's,
+    /// like `param_check`, so it survives opening and starting designs.
+    pub keep_print_faces: bool,
     /// After a live frame: its sketch, the document it left and the revision. Its links were
     /// brought up to date by that frame, so the gesture's next frame needn't project them again
     /// while nothing else has run (#3222).
@@ -795,14 +801,21 @@ impl Session {
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
-        let doc = Arc::new(doc);
+        let mut doc = Arc::new(doc);
         // A model saved under another check mode holds that mode's results: evaluated again.
-        let model = Self::saved_model(&doc, saved).filter(|model| model.validation() == validation).unwrap_or_else(|| {
-            let mut model = Model::new();
-            model.set_validation(validation);
-            model.evaluate_shared(&doc);
-            model
-        });
+        let model = match Self::saved_model(&doc, saved).filter(|model| model.validation() == validation) {
+            Some(model) => model,
+            None => {
+                // Stored body names follow the numbering of the STEP reader that inserted each
+                // file; this version's reader may number the bodies otherwise (#13382). The
+                // reads are held so the evaluation doesn't read the files again.
+                let _reads = cmd::realign_imports(Arc::make_mut(&mut doc));
+                let mut model = Model::new();
+                model.set_validation(validation);
+                model.evaluate_shared(&doc);
+                model
+            }
+        };
         Self::with_model(doc, visibility, model)
     }
 
@@ -843,6 +856,7 @@ impl Session {
             project_construction: false,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
+            keep_print_faces: true,
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
@@ -909,6 +923,7 @@ impl Session {
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
+        let keep_print_faces = self.keep_print_faces;
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
@@ -929,6 +944,7 @@ impl Session {
         self.set_single_surface_analysis(single_surface_analysis);
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
+        self.keep_print_faces = keep_print_faces;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
         self.checkpoints = checkpoints;
@@ -1994,6 +2010,7 @@ impl Session {
             project_construction: self.project_construction,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
+            keep_print_faces: self.keep_print_faces,
             live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),

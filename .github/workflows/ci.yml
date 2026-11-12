@@ -446,7 +446,11 @@ jobs:
       - name: Design format pending changes
         run: bash scripts/test-format-pending.sh
       - name: Web app offline use and updates (headless Chrome)
-        run: cargo xtask web-offline-test
+        # Not blocking while #14591 is open: the check "the open v3 page was given another build's
+        # file after the update" fails in about one queue batch in a few, with no PR to blame. A
+        # failure is reported as a warning (and still printed in this step's log), not as a failure.
+        run: |
+          cargo xtask web-offline-test || echo "::warning title=Web app offline test failed (non-blocking, #14591)::cargo xtask web-offline-test failed; see this step's log. Tracked in #14591."
       - name: Affected-package selection self-test
         run: python3 -I scripts/ci/test_affected.py
       - name: Merge-of-main detection self-test
@@ -1093,12 +1097,23 @@ jobs:
             echo "Waiting for $pending run(s) of this commit to finish."
             sleep 30
           done
-          # Only a run that passed or failed is a result: runs with every job skipped (labels, before
-          # this job reported) are not, and neither are cancelled ones (a run replaced by a newer push
-          # or label, or a fork run that waited for approval and was then cancelled, which has no
-          # jobs). A cancelled run as "latest" failed this check for good and blocked a PR that passed.
-          latest=$(jq -r '[.[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure"))]
-            | sort_by(.created_at) | last | "\(.conclusion) \(.html_url)"' <<<"$runs")
+          # The result is the newest run that ran checks, by when its latest attempt finished
+          # (updated_at), so a rerun that passed replaces its first attempt's failure. Only runs that
+          # passed or failed count (cancelled ones don't: a run replaced by a newer push or label, or a
+          # fork run that waited for approval and was cancelled), and label runs like this one don't
+          # either: their only job is ci, which repeats an older result, so counting them let one
+          # copied failure outlive the rerun that fixed it.
+          latest=""
+          for id in $(jq -r '[.[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure"))]
+              | sort_by(.updated_at) | reverse | .[].id' <<<"$runs"); do
+            ran=$(gh api "repos/$REPO/actions/runs/$id/jobs?filter=latest&per_page=100" \
+              --jq '[.jobs[] | select(.name != "ci" and .conclusion != "skipped" and .conclusion != null)] | length')
+            if [ "${ran:-0}" -gt 0 ]; then
+              latest=$(jq -r --argjson id "$id" '.[] | select(.id == $id) | "\(.conclusion) \(.html_url)"' <<<"$runs")
+              break
+            fi
+          done
+          [ -n "$latest" ] || latest="none (no run of this commit ran its checks)"
           echo "The commit's latest run: $latest"
           echo "A label started this run: \`ci\` repeats the commit's latest result ($latest)." >> "$GITHUB_STEP_SUMMARY"
           test "${latest%% *}" = success

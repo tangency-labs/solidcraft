@@ -752,6 +752,28 @@ fn editing_a_box_or_cylinder_shows_its_placement_and_keeps_it() {
     assert_eq!(stored(&h, cylinder_id), base);
 }
 
+/// A box placed by its centre opens for editing with Center chosen and its centre in the fields,
+/// and a new length grows it on both sides (#14487).
+#[test]
+fn editing_a_box_placed_by_its_centre_keeps_it_centred() {
+    let mut h = design("mm");
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 10, "center": [50, 0, 0]})).unwrap();
+    h.frames(2);
+    let id = h.app.session.doc.features[0].id;
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert_shown(&h, &[("X", "50".into()), ("Y", "0".into()), ("Z", "0".into())]);
+    type_into(&mut h, "length", "30");
+    h.frames(2);
+    let sent = sent(&h);
+    let p = sent.get("params").unwrap_or(&sent);
+    assert!(p.get("center").is_some() && p.get("corner").is_none(), "{sent}");
+    ok(&mut h);
+    let made = bounds(&mut h.app.session);
+    assert_near(made[0].0, [35.0, -5.0, -5.0]);
+    assert_near(made[0].1, [65.0, 5.0, 5.0]);
+}
+
 #[test]
 fn the_cylinder_dialog_takes_its_base_point() {
     let mut h = design("mm");

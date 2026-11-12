@@ -118,7 +118,7 @@ pub fn boundary_crossings(k: &Kernel, b: &Brep, f: FaceId) -> Result<Vec<Point3>
         for &e2 in edges.iter().skip(i + 1) {
             let (a, c) = (b.edge(e1)?, b.edge(e2)?);
             let (Some(c1), Some(c2)) = (a.curve.as_ref(), c.curve.as_ref()) else {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(OP, "an edge's curve"));
             };
             let tol = a.tolerance.max(c.tolerance);
             let found = c1.global_curve_intersect::<CurveHandle>(

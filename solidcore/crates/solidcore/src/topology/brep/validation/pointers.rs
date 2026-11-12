@@ -417,13 +417,32 @@ pub fn validate_pointers(
         }
     }
     let faces = p1::faces(b, None)?;
+    // (not upstream) A face without UV trim curves is checked like any other (#15040):
+    // `check_face` makes its trims, here on a copy standing for this B-rep (made once, for
+    // the first such face), so the check's answer does not depend on whether an earlier
+    // operation made them, and checking does not change the body it checks.
+    let mut standing: Option<Brep> = None;
     for &f in &faces {
         // (not upstream) cooperative cancellation once per face: checking a face's trim
         // evaluates its curves and surface (solidcore#3247)
         k.check_cancelled("topology::brep::validation::pointers::validate_pointers")?;
         let tol = b.face(f)?.tolerance;
-        let checked =
-            crate::topology::trimming_tools::check_face(k, b, f, tol, r.array.as_deref_mut(), walk);
+        let on = if crate::topology::trimming_tools::face_uv_curves_present(b, f)? {
+            &mut *b
+        } else {
+            match &mut standing {
+                Some(copy) => copy,
+                none => none.insert(b.clone_standing_for_self()?),
+            }
+        };
+        let checked = crate::topology::trimming_tools::check_face(
+            k,
+            on,
+            f,
+            tol,
+            r.array.as_deref_mut(),
+            walk,
+        );
         if let Err(e) = checked {
             if e.is_unported_or_cancelled() {
                 return Err(e);
