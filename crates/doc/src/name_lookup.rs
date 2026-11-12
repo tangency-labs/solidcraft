@@ -7,9 +7,11 @@
 //! face, when only a face of the same stem is left, when the name is on several bodies, or when
 //! the name was saved before format 14 ([`LEGACY_MARK`]), the name finds nothing and the feature
 //! that uses it fails, asking for the reference to be picked again
-//! ([`crate::DocError::Reselect`]). An edge name has one more way: when no edge's faces answer
+//! ([`crate::DocError::Reselect`]). An edge name has two more ways: when no edge's faces answer
 //! to it, and one of its faces is gone from a feature still on the body, the reference's point
-//! decides (see [`renamed_edge`]). A face whose name was worked out from geometry, found where
+//! decides (see [`renamed_edge`]); so it does when a face of it is named after neighbours it no
+//! longer has, or answers to several faces, and the point lies on one edge between them (see
+//! [`resuffixed_edge`]). A face whose name was worked out from geometry, found where
 //! the reference's point no longer lies, is reported: only geometry decided.
 //! Saved numbered Project links also have a compatibility check for a whole face that
 //! contains the saved pick and comes directly from its original construction feature.
@@ -57,6 +59,9 @@ pub struct EdgeHit {
 /// between them is it only where the reference's point still lies on it. A name whose faces no
 /// edge's faces answer to at all, one of them gone from a feature that is still there, is the edge
 /// of the other face the reference's point lies on, clear of its ends (see [`renamed_edge`]).
+/// A name with a face named after neighbours it no longer has, or answering to several faces, is
+/// the one edge between faces answering to it that the reference's point lies on (see
+/// [`resuffixed_edge`]).
 /// `Err` explains when there is none: no such edge, the named edge split into several, one of
 /// several edges whose faces now bound one edge elsewhere, or a name saved before format 14.
 pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
@@ -91,11 +96,10 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
             loose = true;
         }
     }
+    let at_pick = |i: usize| EdgeHit { edge: i, point: near, verified: false, on_point: true };
     let Some((_, cands)) = best else {
-        let picked = if loose { None } else { renamed_edge(b, &m, &faces, wanted, near) };
-        return picked
-            .map(|i| EdgeHit { edge: i, point: near, verified: false, on_point: true })
-            .ok_or_else(|| format!("edge `{name}` no longer exists"));
+        let picked = if loose { resuffixed_edge(b, &m, &faces, wanted, near) } else { renamed_edge(b, &m, &faces, wanted, near) };
+        return picked.map(at_pick).ok_or_else(|| format!("edge `{name}` no longer exists"));
     };
     // When the faces of several numbered edges bound one edge now, every one of their names
     // finds the faces of that edge: taking it for each would put them all on one edge (#13332).
@@ -105,7 +109,7 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
             Err(format!("edge `{name}` was one of several between its faces, and the one left is elsewhere"))
         }
         [i] => exact(*i),
-        _ => Err(format!("edge `{name}` is no longer one edge")),
+        _ => resuffixed_edge(b, &m, &faces, wanted, near).map(at_pick).ok_or_else(|| format!("edge `{name}` is no longer one edge")),
     }
 }
 
@@ -233,6 +237,68 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
     let bounds_face = uses.iter().any(|u| u.face as usize == face);
     let replaced = uses.iter().any(|u| u.face as usize != face && made_by(u.face as usize) == Some(lost_by));
     (bounds_face && !replaced).then_some(edge)
+}
+
+/// The edge a stored edge name `wanted` (without its number) meant when one of its faces is named
+/// with the faces around it (`F44:top#[F43:side:l7]`) and those are now others: the face is still
+/// there under its stem, but its qualifier changed, or several faces answer to it (a join over
+/// another extrude's footprint names the walls it joins differently, and can leave two faces of
+/// that stem). The candidates are the edges between faces answering to the name's two faces: each
+/// exactly (see [`exactly`]) or, for a face named with its qualifier, by its stem where that face
+/// too is named with a qualifier (another one: a face whole again is not it), at least one
+/// side of them by a qualifier that is not that face's own (a piece of the named face split since
+/// is not a renamed face: the edge split with it and the name asks again). Of those, the one edge
+/// whose exact curve the reference's point `near` lies on (within the pick reach, as
+/// [`solidcraft_kernel::edge_distance`] measures it) is taken; none or several, and the name finds
+/// nothing. The point must be the reference's own pick, as for [`renamed_edge`].
+fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    // How face `f` answers to face name `x`: `Some(true)` by a qualifier that is not its own.
+    let side = |f: usize, x: &str| -> Option<bool> {
+        let level = crate::history_names::matches(faces, f, x)?;
+        if exactly(level) {
+            let resuffixed = level == Match::Piece && qualified(x) && faces.faces.get(f).is_some_and(|n| !crate::history_names::descends(n, x));
+            return Some(resuffixed);
+        }
+        // By its stem only where the face is still named after its neighbours, others than the name's:
+        // a face whole again is not one the name told apart by a face it never touches (#11731).
+        (level == Match::Stem && qualified(x) && faces.faces.get(f).is_some_and(|n| qualified(n))).then_some(true)
+    };
+    let mut cands: Vec<usize> = Vec::new();
+    for (i, fs) in m.edge_faces.iter().enumerate() {
+        let [fa, fb] = fs.as_slice() else { continue };
+        let answers = wanted.match_indices('|').any(|(k, _)| {
+            let (Some(x), Some(y)) = (wanted.get(..k), wanted.get(k + 1..)) else { return false };
+            [(*fa, *fb), (*fb, *fa)].into_iter().any(|(p, q)| side(p as usize, x).zip(side(q as usize, y)).is_some_and(|(sx, sy)| sx || sy))
+        });
+        if answers {
+            cands.push(i);
+        }
+    }
+    let reach = pick_reach(b);
+    let record = b.body.record();
+    let sorted = |mut fs: Vec<u32>| {
+        fs.sort_unstable();
+        fs.dedup();
+        fs
+    };
+    let mut on = cands.into_iter().filter(|i| {
+        // The mesh's edges are the B-rep's, in its order: the edge's faces say it is the same edge.
+        let same = record
+            .edges
+            .get(*i)
+            .zip(m.edge_faces.get(*i))
+            .is_some_and(|(e, fs)| sorted(e.uses.iter().map(|u| u.face).collect()) == sorted(fs.clone()));
+        same && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    on.next().filter(|_| on.next().is_none())
+}
+
+/// Whether face name `x` names its face with the faces around it (`F2:top#[F4:side:l1]`).
+fn qualified(x: &str) -> bool {
+    crate::piece_names::piece_parts(x).is_some_and(|(_, around)| !around.is_empty())
 }
 
 /// The point of face `face` of a mesh nearest `p`, and how far it is.
