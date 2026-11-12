@@ -165,6 +165,7 @@ pub struct WorkCounters {
     proto_edge_intersections: Cell<u64>,
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
+    certify_spans: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -228,11 +229,25 @@ impl WorkCounters {
         self.proto_edge_intersections.set(0);
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
+        self.certify_spans.set(0);
+    }
+
+    /// Spans the G^n section certificate certified (`gn_certify_span` calls), summed over
+    /// its rounds (#13515). Not the fork's.
+    #[must_use]
+    pub fn certify_spans(&self) -> u64 {
+        self.certify_spans.get()
     }
 
     /// Counts one face pair examined for intersection.
     pub(crate) fn add_face_pair(&self) {
         self.face_pairs.set(self.face_pairs.get().saturating_add(1));
+    }
+
+    /// Counts one span certified by the G^n section certificate.
+    pub(crate) fn add_certify_span(&self) {
+        self.certify_spans
+            .set(self.certify_spans.get().saturating_add(1));
     }
 
     /// Counts one inner loop classified against a new face.
@@ -1474,6 +1489,10 @@ pub struct Kernel {
     /// (the kernel stays `Send`). Difftest runners seed it with the value the C++
     /// process has latched; see [`Kernel::latch_fillet_point_step`].
     pub fillet_point_step: Cell<Option<f64>>,
+    /// The most span certifications (`gn_certify_span` calls) one G^n section's certificate
+    /// may make before the round is built as its approximation instead of its definition
+    /// (#13515); `None` certifies until the 4096-station cap, as before.
+    pub fillet_certify_budget: Cell<Option<u32>>,
     /// The upstream undefined-behaviour conditions (their `plan/upstream-issues.md`
     /// ids, e.g. `"UB-175"`) that operations on this kernel met and went past with the
     /// port's defined semantics, each listed once in the order first met. Upstream's
@@ -1577,6 +1596,7 @@ impl Kernel {
             caches: Caches::default(),
             context: Context::default(),
             fillet_point_step: Cell::new(None),
+            fillet_certify_budget: Cell::new(None),
             upstream_ub_passed: Vec::new(),
             memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
             fixes: UpstreamFixes::default(),

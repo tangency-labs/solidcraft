@@ -1520,9 +1520,14 @@ impl GnSectionFsg {
         }
 
         // the certificate
-        let (mut stations, bound, spans) = self.certify(
-            k, faces, leader, stations, r, side, tr, tol, equal_area, gn_law,
-        )?;
+        // over the kernel's certify budget (#13515, only where the caller takes `None`): the
+        // round is built as its approximation, nothing built and the rails unchanged
+        let Some((mut stations, bound, spans)) = self.certify(
+            k, faces, leader, stations, r, side, tr, tol, equal_area, gn_law, feet_check,
+        )?
+        else {
+            return Ok(None);
+        };
         self.certified_bound = bound;
         self.certified_spans = spans;
         let ss: Vec<f64> = stations.iter().map(|st| st.s).collect();
@@ -1714,7 +1719,9 @@ impl GnSectionFsg {
     /// The certificate block of `Build`: a station wherever a foot crosses a knot line of
     /// its face, then each span's bound (`sm_GnCertifySpan`) at most a tenth of the
     /// tolerance, a span over it halved (a station solved at its middle) until none is.
-    /// Returns the stations, the largest bound and the number of spans.
+    /// Returns the stations, the largest bound and the number of spans; `None` when the
+    /// kernel's certify budget (#13515) is spent before every span is certified (only with
+    /// `may_defer`).
     #[allow(clippy::too_many_arguments)]
     fn certify(
         &self,
@@ -1728,7 +1735,16 @@ impl GnSectionFsg {
         tol: f64,
         equal_area: bool,
         law: Option<&GnLaw<'_>>,
-    ) -> Result<(Vec<GnStation>, f64, usize)> {
+        may_defer: bool,
+    ) -> Result<Option<(Vec<GnStation>, f64, usize)>> {
+        // the spans this certificate may certify before it gives up (#13515); a caller that
+        // cannot take `None` (`may_defer` false) certifies without a budget
+        let budget = if may_defer {
+            k.fillet_certify_budget.get()
+        } else {
+            None
+        };
+        let mut calls: u32 = 0;
         let ([n0, n1], mut defs) = certificate_faces(k, faces, self.order, law.is_some())?;
         let any_defs = defs.faces.iter().any(Option::is_some);
         let face_n = [&n0, &n1];
@@ -1918,6 +1934,12 @@ impl GnSectionFsg {
                         start: hint,
                         ..SpanReuse::default()
                     };
+                    // one more span: over the budget, the certificate gives up (#13515)
+                    if budget.is_some_and(|b| calls >= b) {
+                        return Ok(None);
+                    }
+                    calls = calls.saturating_add(1);
+                    k.work_counters.add_certify_span();
                     *bj = gn_certify_span_reusing(
                         k,
                         face_n,
@@ -2016,7 +2038,7 @@ impl GnSectionFsg {
         }
         // (the fork's SM_ERR_MESSAGE report of the spans and the bound is not logged)
         let spans = bounds.len();
-        Ok((stations, bound, spans))
+        Ok(Some((stations, bound, spans)))
     }
 
     /// `ContactOrderAt`: the order of contact k of this section with face `rail` (0 or 1)
