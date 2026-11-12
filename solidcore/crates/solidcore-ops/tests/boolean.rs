@@ -306,3 +306,85 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
         "returned {took:?} after Cancel"
     );
 }
+
+/// #13295: a bar of L section (100 long; its step's top edge along x at y 12.527, z 19.567)
+/// cut by a circle of radius 4.717 sketched on the plane at 45 degrees through that edge and
+/// extruded into the bar. The sketch puts the circle's centre 7.9e-6 off the edge, so the cut
+/// wall's corner on the edge, where its seam edge ends, lies that far across the wall's
+/// seam: inside the vertex's 1e-5 tolerance, with no sliver beside the seam. The check
+/// refused it (face test 36) for centres 1e-7 to 1e-5 off. Every offset now gives one valid
+/// solid, its volume moving with the offset by no more than the wall's swept area allows.
+#[test]
+fn a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid() {
+    all_fixes();
+    let (y0, z1, yc, z2) = (
+        16.423877938511588,
+        13.06859205815335,
+        12.527075811882755,
+        19.566787029154483,
+    );
+    let p = [
+        [0.0, 0.0, 0.0],
+        [0.0, y0, 0.0],
+        [0.0, y0, z1],
+        [0.0, yc, z1],
+        [0.0, yc, z2],
+        [0.0, 0.0, z2],
+    ];
+    let profile: Vec<Curve> = (0..6)
+        .map(|i| Curve::Line {
+            start: p[i],
+            end: p[(i + 1) % 6],
+        })
+        .collect();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let radius = 4.716_990_566_008_734;
+    let cut = |d: f64| {
+        let bar = extrude(
+            &profile,
+            [1.0, 0.0, 0.0],
+            100.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        // the circle's centre `d` off the edge, in the sketch plane (normal (0, 1, 1) / sqrt 2)
+        let centre = [20.4216146277246, yc + d * s, z2 - d * s];
+        let circle = [Curve::Arc {
+            center: centre,
+            axis: [0.0, s, s],
+            reference: [1.0, 0.0, 0.0],
+            radius,
+            start: 0.0,
+            end: TAU,
+        }];
+        let tool = extrude(
+            &circle,
+            [0.0, -s, -s],
+            60.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        boolean(bar, tool, BooleanOp::Subtract)
+            .unwrap_or_else(|e| panic!("d {d}: {e:?}"))
+            .unwrap()
+    };
+    let exact = volume(&cut(0.0));
+    // (1e-6 off, the cut is no solid, before this change too: #14840)
+    for d in [1e-9, 1e-7, 3e-7, 2e-6, 7.868_858_162e-6, 1e-5, 3e-5, 1e-4] {
+        let r = cut(d);
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "d {d}");
+        // the wall moves by d: the volume by at most its perimeter times its length times d
+        let bound = TAU * radius * 60.0 * d + 1e-7 * exact;
+        assert!(
+            (volume(&r) - exact).abs() <= bound,
+            "d {d}: {} vs {exact}",
+            volume(&r)
+        );
+    }
+}

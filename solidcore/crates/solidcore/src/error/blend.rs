@@ -308,12 +308,7 @@ mod tests {
             ("blend/fillet_corner/topology/nx1_end.rs", 1),
             ("blend/fillet_corner/topology/swept_turn.rs", 3),
             ("blend/fillet_executive/session/finish.rs", 2),
-            ("blend/fillet_geom/p3.rs", 27),
-            ("blend/fillet_geom/p6.rs", 53),
-            ("blend/fillet_geom/surface_plane_curve.rs", 3),
-            ("blend/fillet_geom/tangent_end_rib.rs", 6),
             ("blend/fillet_section/recertify.rs", 14),
-            ("blend/fillet_standard_solver/p2.rs", 28),
         ];
         let found = super::super::query::tests::bare_statuses_in("blend", 100);
         let waiting: Vec<(String, usize)> = WAITING

@@ -194,7 +194,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
-    k.fixes.fillet_cleanup_removes_input_slits = true;
     k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_corner_ball_center_from_axes = true;
     k.fixes.fillet_corner_ball_patch = true;

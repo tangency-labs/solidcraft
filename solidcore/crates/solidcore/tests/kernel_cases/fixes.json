@@ -176,7 +176,6 @@
   "offset_extension_as_itself",
   "corner_blend_stays_inside_neighbours",
   "fillet_cleanup_keeps_target_faces",
-  "fillet_cleanup_removes_input_slits",
   "fillet_nx1_tangent_side_edge",
   "fillet_nx1_opposite_continuation_side_edge",
   "fillet_rails_meet_at_one_end_point",
