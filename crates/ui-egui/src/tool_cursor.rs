@@ -64,6 +64,23 @@ fn badge_rect(at: Pos2, bounds: Rect, readout_height: f32) -> Rect {
     Rect::from_min_size(min, vec2(BADGE, BADGE))
 }
 
+/// Where a snap hint (`label`, as the sketch tools place it) goes so it does not sit under the
+/// badge: right of the badge when the two overlap, left of it near the right edge of `bounds`
+/// (#15391). `label` itself when no badge is drawn, or they do not overlap.
+pub(crate) fn clear_of_badge(app: &SolveApp, painter: &egui::Painter, label: Rect) -> Rect {
+    let bounds = painter.clip_rect();
+    let at = painter.ctx().pointer_hover_pos().filter(|p| bounds.contains(*p));
+    let (Some(at), Some(_)) = (at, icon(app)) else { return label };
+    let t = Tokens::get();
+    let readout = painter.layout_no_wrap("0".into(), egui::FontId::proportional(t.font_small), t.text_dim).size().y;
+    let badge = badge_rect(at, bounds, readout);
+    if !badge.intersects(label) {
+        return label;
+    }
+    let right = label.translate(vec2(badge.right() + FLIPPED_GAP - label.left(), 0.0));
+    if bounds.contains_rect(right) { right } else { label.translate(vec2(badge.left() - FLIPPED_GAP - label.right(), 0.0)) }
+}
+
 /// Draw the badge for a pointer at `at` (None: the pointer is not over the model).
 pub(crate) fn show(app: &SolveApp, painter: &egui::Painter, at: Option<Pos2>) {
     let (Some(at), Some(icon)) = (at, icon(app)) else { return };
@@ -270,6 +287,30 @@ mod tests {
             assert!(!readout.intersects(arrow), "at {at:?}: the readout {readout:?} is under the arrow {arrow:?}");
             assert!(readout.top() > at.y, "at {at:?}: the readout {readout:?} is not below the hot spot");
         }
+        h.step(&json!({"key": "Escape"})).unwrap();
+    }
+
+    /// With the badge on, the snap hint ("On", "Mid", ...) of a sketch tool is drawn beside it,
+    /// not under it (#15391).
+    #[test]
+    fn the_snap_hint_is_not_hidden_under_the_badge() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.tool_cursor = true;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 20})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        h.step(&json!({"move": {"sketch": [14.14, 14.14]}})).unwrap();
+        h.frames(3);
+        let hint = rect_of("viewport:snap_hint").expect("the line start snaps onto the circle and shows a hint");
+        let badge = rect_of("viewport:tool_cursor").expect("the badge is drawn");
+        assert!(!hint.intersects(badge), "the snap hint {hint:?} is under the badge {badge:?}");
+        h.app.ui.tool_cursor = false;
+        h.frames(3);
+        let alone = rect_of("viewport:snap_hint").expect("the hint is drawn without the badge");
+        assert!(alone.left() < hint.left(), "without the badge the hint stays where it was: {alone:?} vs {hint:?}");
         h.step(&json!({"key": "Escape"})).unwrap();
     }
 

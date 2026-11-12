@@ -2151,7 +2151,9 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         painter.add(egui::Shape::dashed_line(&[from, sp], Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
     }
     crate::scenario::publish_count("sketch_align_guides", guides.len() as f64);
-    let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
+    // The tool badge beside the pointer would hide it (#15391).
+    let r = crate::tool_cursor::clear_of_badge(app, painter, egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0)));
+    crate::scenario::publish_rect("viewport:snap_hint", r);
     painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
     painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro), tk.text);
 }
