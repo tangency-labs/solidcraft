@@ -3157,13 +3157,8 @@ fn shared_menu_icon(action: &HostSharedAction, collapsed: bool, direction: Direc
     match action {
         HostSharedAction::Focus => "fit",
         HostSharedAction::Close => "close",
-        HostSharedAction::Collapse if collapsed => "chevron",
-        HostSharedAction::Collapse => {
-            return ui_kit::Icon::Paint(&|painter, rect, opacity| {
-                let ink = solidcraft_theme::Tokens::get().form_ink.gamma_multiply(opacity);
-                ui_kit::icons::paint_ink_flipped(painter, rect, "chevron", ink);
-            });
-        }
+        HostSharedAction::Collapse if collapsed => return ui_kit::Icon::Paint(&ui_kit::panel_expand_menu_icon),
+        HostSharedAction::Collapse => return ui_kit::Icon::Paint(&ui_kit::panel_collapse_menu_icon),
         HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) if matches!(direction.edge(*zone), Ok(PhysicalEdge::Left)) => "panel_dock_left",
         HostSharedAction::Move(Zone::Left | Zone::Right) => "panel_dock_right",
         HostSharedAction::Move(Zone::Bottom) => "panel_dock_bottom",
