@@ -529,7 +529,7 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
                     out.push(json!({"command": "construct.plane.offset", "params": {"base": {"origin": o, "normal": n}, "offset": 0, "name": name}}));
                 }
             },
-            Some("split_body") => out.push(json!({"command": "solid.split_body", "params": {"body": f.get("body"), "plane": f.get("tool"), "name": name}})),
+            Some("split_body") => out.push(json!({"command": "solid.cut_body", "params": {"body": f.get("body"), "plane": f.get("tool"), "name": name}})),
             Some("mirror") => {
                 let pl = f.get("plane").cloned().unwrap_or(Value::Null);
                 let plane = match pl.get("ref").and_then(Value::as_str) {

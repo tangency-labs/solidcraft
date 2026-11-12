@@ -199,6 +199,8 @@ impl Harness {
             cam_mark: None,
         };
         WIDTHS.with(|m| m.borrow_mut().clear());
+        // And whatever a previous test on this thread left the held keys saying.
+        crate::tool_modifiers::forget_held_state();
         h.install();
         h.ctx.enable_accesskit();
         h.frames(3);
@@ -298,9 +300,16 @@ impl Harness {
             self.frame();
         }
         // A file opening, recovering or saving in the background, or a window checking what its
-        // material does: wait for it (as a person would).
+        // material does: wait for it (as a person would). So is the live preview, which is
+        // worked out off the UI thread: without waiting for it, a test that drags something and
+        // then asks what the preview shows is asking before the answer exists. It passes alone,
+        // where the worker has the machine to itself, and fails in a full parallel run.
         let began = std::time::Instant::now();
-        while (!self.app.file_load.idle() || self.app.saving.is_some() || crate::open_meshing::active(&self.app) || self.app.op_check.busy())
+        while (!self.app.file_load.idle()
+            || self.app.saving.is_some()
+            || crate::open_meshing::active(&self.app)
+            || self.app.op_check.busy()
+            || self.app.preview.busy)
             && began.elapsed() < std::time::Duration::from_secs(120)
         {
             self.frame();

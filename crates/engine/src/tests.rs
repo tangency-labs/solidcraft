@@ -1166,6 +1166,21 @@ fn registry_is_consistent() {
     assert!(!find_command("sketch.line").unwrap().info(&s).enabled);
 }
 
+/// A renamed command answers to the name it used to have, so scripts, recipes and designs
+/// written against the old id go on running. Only the new id is registered and listed.
+#[test]
+fn renamed_commands_still_answer_to_their_old_ids() {
+    for (was, now) in crate::cmd::RENAMED {
+        assert_eq!(find_command(was).map(|c| c.id), Some(*now), "{was} must resolve to {now}");
+        assert!(command_specs().iter().all(|c| c.id != *was), "{was} must not be registered as well");
+    }
+    let mut s = Session::default();
+    s.execute("solid.box", &serde_json::json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    s.execute("solid.split_body", &serde_json::json!({"body": "Body1", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}))
+        .expect("the old id cuts the body");
+    assert_eq!(s.world_state().unwrap().bodies.len(), 2, "the old id ran the command it was renamed to");
+}
+
 /// Only SolidCraft's own dotted ids name commands; other ids are unknown commands.
 #[test]
 fn only_own_ids_name_commands() {
@@ -2638,14 +2653,14 @@ fn split_body_by_a_face() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"}));
     run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 40, "base": [5, 10, -5], "body_name": "Tool"}));
-    run(&mut s, "solid.split_body", json!({"body": "Block", "tool": {"body": "Tool", "point": [9, 10, 10]}}));
+    run(&mut s, "solid.cut_body", json!({"body": "Block", "tool": {"body": "Tool", "point": [9, 10, 10]}}));
     let st = s.world_state().unwrap();
     let mut v: Vec<f64> =
         st.bodies.iter().filter(|b| b.name.starts_with("Block")).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
     v.sort_by(f64::total_cmp);
     let core = PI * 16.0 * 30.0;
     assert!(v.len() == 2 && rel(v[0], core) < 1e-3 && rel(v[1], 6000.0 - core) < 1e-3, "{v:?}");
-    assert!(s.execute("solid.split_body", &json!({"body": "Block", "tool": {"body": "Tool", "point": [100, 0, 0]}})).is_err());
+    assert!(s.execute("solid.cut_body", &json!({"body": "Block", "tool": {"body": "Tool", "point": [100, 0, 0]}})).is_err());
 }
 
 /// Split Body by a face follows the face when a parameter moves it (#11674): the tool face is
@@ -2657,7 +2672,7 @@ fn split_body_by_a_face_follows_the_face() {
         run(&mut s, "parameters.add", json!({"name": "h", "expression": h}));
         run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 200, "center": [0, 0, 100], "body_name": "Post"}));
         run(&mut s, "solid.cylinder", json!({"diameter": 42, "height": 300, "base": [-150, 0, "h"], "axis": "X", "body_name": "Rail"}));
-        run(&mut s, "solid.split_body", json!({"body": "Post", "tool": {"body": "Rail", "point": [0, 0, z]}}));
+        run(&mut s, "solid.cut_body", json!({"body": "Post", "tool": {"body": "Rail", "point": [0, 0, z]}}));
         s
     };
     let volumes = |s: &Session| {
@@ -2699,9 +2714,9 @@ fn split_body_by_a_sketch_line() {
         json!({"body": "Block", "sketch": sk}),
         json!({"body": "Block", "sketch": 999, "line": "cut"}),
     ] {
-        assert!(s.execute("solid.split_body", &bad).is_err(), "{bad}");
+        assert!(s.execute("solid.cut_body", &bad).is_err(), "{bad}");
     }
-    run(&mut s, "solid.split_body", json!({"body": "Block", "sketch": sk, "line": "cut"}));
+    run(&mut s, "solid.cut_body", json!({"body": "Block", "sketch": sk, "line": "cut"}));
     let v = volumes(&s);
     assert!(v.len() == 2 && rel(v[0], 2400.0) < 1e-6 && rel(v[1], 3600.0) < 1e-6, "{v:?}");
     // The split follows the line.

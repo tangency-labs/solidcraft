@@ -105,7 +105,7 @@ pub fn tool_definitions() -> Vec<Value> {
 /// Every tool, with its JSON schema, for these [`Options`] (`compact` changes `inspect_design`'s
 /// arguments).
 pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
-    vec![
+    let mut all = vec![
         tool(
             "list_commands",
             "List commands",
@@ -464,7 +464,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             ),
             Effect::ReadOnly,
         ),
-    ]
+    ];
+    if opts.freecad {
+        all.extend(crate::freecad::tools());
+    }
+    all
 }
 
 /// `inspect_design`'s definition: as it always was, or with compact output its sketch summaries,
@@ -615,6 +619,7 @@ pub fn call_tool_with(b: &mut dyn Backend, name: &str, args: &Value, opts: Optio
         "check_parameters" => return check_parameters(b, a, opts),
         "execute" => return execute(b, a, opts),
         "inspect_design" if opts.compact => inspect_design_compact(b, a),
+        _ if opts.freecad && crate::freecad::is_tool(name) => crate::freecad::run(b, name, args),
         _ => dispatch(b, name, a),
     };
     match r {

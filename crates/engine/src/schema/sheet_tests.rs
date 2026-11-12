@@ -16,7 +16,7 @@ const STEEL: &str = "Steel (mm)";
 /// A command's own keys and `FeatureCommon`'s, sorted.
 fn keys(own: &[&'static str]) -> Vec<&'static str> {
     let mut k = own.to_vec();
-    k.extend(["body_name", "body_names", "name", "participants"]);
+    k.extend(["body_name", "body_names", "keep_tools", "name", "participants"]);
     k.sort_unstable();
     k
 }

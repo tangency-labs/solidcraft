@@ -11,7 +11,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<RepairParams>(), &["body", "body_name", "body_names", "gap", "name", "participants", "patch_holes"]);
+    assert_keys(input_schema_for::<RepairParams>(), &["body", "body_name", "body_names", "gap", "keep_tools", "name", "participants", "patch_holes"]);
 }
 
 #[test]

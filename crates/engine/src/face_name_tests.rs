@@ -262,7 +262,7 @@ fn a_face_name_on_two_bodies_is_no_split_face() {
     assert!((volume(&mut s, "Body2") - 1000.0).abs() < 1e-6);
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
-    run(&mut s, "solid.split_body", json!({"body": "Body1", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    run(&mut s, "solid.cut_body", json!({"body": "Body1", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
     run(&mut s, "solid.hole", json!({"position": [30, 10, 10], "diameter": 5, "name": "Hole1", "targets": ["Body1"]}));
     assert_eq!(said(&s, "Hole1"), "");
 }

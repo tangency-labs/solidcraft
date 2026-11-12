@@ -570,7 +570,7 @@ form_case!(axis_two_planes, "construct.axis.two_planes", []);
 form_case!(point_along_path, "construct.point.along_path", ["Position (0 to 1)"]);
 form_case!(angle_plane, "construct.plane.at_angle", ["Angle"]);
 form_case!(path_plane, "construct.plane.along_path", ["Position (0 to 1)"]);
-form_case!(split, "solid.split_body", []);
+form_case!(split, "solid.cut_body", []);
 form_case!(scale, "solid.scale", ["Type", "Scale factor"]);
 
 /// Scale per axis (#10782): the dialog's X, Y and Z rows build `factors`; a Scale made with
@@ -797,6 +797,16 @@ fn new_cards_settle_before_the_first_click_in_both_layouts() {
             h.call("ui.resize", json!({"width":1400,"height":950}));
             h.app.dialog = Some(representative(&h, command));
             h.frames(2);
+            // A card's first preview is computed off the window thread, and its result can add a
+            // row: a refused preview reports its error above the footer (Revolve around an axis
+            // outside the profile's plane). The person's first click lands after that result, so
+            // wait for it rather than guess how many frames the worker takes.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while h.app.preview.busy {
+                assert!(std::time::Instant::now() < deadline, "{command} {mode:?}: the preview did not finish");
+                h.frames(1);
+            }
+            h.frames(1);
             let first = scenario::rect_of("dialog:footer").unwrap();
             h.frames(1);
             let settled = scenario::rect_of("dialog:footer").unwrap();
@@ -1688,4 +1698,33 @@ fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
     }
     let missing = Sel::Profile { sketch: 999, index: 0 };
     assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &missing), "Sketch999 · profile 1");
+}
+
+/// The array cards offer both readings of their number, as Plasticity's do: a rectangular
+/// pattern's Spacing or Extent, a circular one's Total or Spacing. A pattern saved either way
+/// comes back on the card the way it was made, and goes out again the same.
+#[test]
+fn the_pattern_cards_send_a_span_or_a_step_as_their_mode_says() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 4, "width": 4, "height": 4, "body_name": "Peg"})).unwrap();
+    h.app.run("solid.pattern.rectangular", json!({"bodies": ["Peg"], "dir1": [1, 0, 0], "count1": 4, "distance1": 90})).unwrap();
+    h.app.run("solid.pattern.circular", json!({"bodies": ["Peg"], "axis": "Z", "count": 6, "step": "30 deg"})).unwrap();
+    h.frames(2);
+    let params = |h: &Harness, name: &str| {
+        let id = h.app.session.doc.find_feature(name).unwrap_or_else(|| panic!("{name}")).id;
+        let d = super::for_feature(&h.app, id, None).unwrap_or_else(|| panic!("{name} reopens"));
+        // Editing a feature goes out as a redefine, with the command's own parameters inside.
+        let out = apply_commands(&h.app, &d).unwrap().into_iter().next().unwrap().1;
+        let p = out.get("params").cloned().unwrap_or(out);
+        (d.extra.clone(), p)
+    };
+    let names: Vec<String> = h.app.session.doc.features.iter().map(|f| f.name.clone()).collect();
+    let rect = names.iter().find(|n| n.starts_with("Rect")).cloned().unwrap_or_else(|| panic!("{names:?}"));
+    let (extra, p) = params(&h, &rect);
+    assert_eq!(extra.get("extent1"), Some(&json!(true)), "the span comes back as the span");
+    assert!(p.get("spacing1").is_none() && p["distance1"] == json!("90"), "{p}");
+    let circ = names.iter().find(|n| n.starts_with("Circ")).cloned().unwrap_or_else(|| panic!("{names:?}"));
+    let (extra, p) = params(&h, &circ);
+    assert_eq!(extra.get("step"), Some(&json!(true)), "the step comes back as the step");
+    assert!(p.get("angle").is_none() && p["step"] == json!("30 deg"), "{p}");
 }

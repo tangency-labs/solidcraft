@@ -293,6 +293,8 @@ mod tests {
     fn partial_models_go_only_to_a_watcher_that_wants_them() {
         let mut doc = crate::Document::new("partial");
         let block = crate::FeatureKind::Box {
+            axis: crate::z_axis(),
+            x_axis: crate::x_axis(),
             corner: crate::point_expr(solidcore_record::Vec3::ZERO),
             length: "2 mm".into(),
             width: "3 mm".into(),

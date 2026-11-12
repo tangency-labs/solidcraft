@@ -35,7 +35,7 @@ sphere
 torus
 cone
 combine
-  remap_bodies: target, tools[0]
+  remap_bodies: targets[0], tools[0]
 pattern_rectangular
   remap_refs: features[0]
   remap_bodies: bodies[0]

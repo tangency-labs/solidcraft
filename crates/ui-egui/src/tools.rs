@@ -92,6 +92,8 @@ pub struct Tool {
     /// Locked inputs from earlier stages of this shape (arc radius, slot length).
     pub dim_history: Vec<crate::sketch_dims::DimBox>,
     pub dims_stage: usize,
+    /// Draw this rectangle square: the shorter side is taken out to the longer one.
+    pub square: bool,
     pub dims_focus: bool,
     /// How far (radians, signed) the cursor has gone round a centre-point arc's centre since its
     /// start was placed: its sign is the way the arc runs (#6645).
@@ -149,6 +151,7 @@ impl Tool {
             kind,
             pts: Vec::new(),
             hover: None,
+            square: false,
             picks: Vec::new(),
             point_picks: Vec::new(),
             dims: Vec::new(),
@@ -233,7 +236,7 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     };
     let follow = app.preferences.center_arc_follows_cursor;
     if let Some(t) = app.tool.as_mut() {
-        t.hover = h;
+        t.hover = h.map(|p| squared(t, p));
         if follow {
             follow_arc_turn(t);
         } else {
@@ -272,6 +275,78 @@ pub(crate) fn center_arc_sweep(t: &Tool, end: Vec2) -> f64 {
     if t.arc_turn < 0.0 && ccw > 0.0 { ccw - std::f64::consts::TAU } else { ccw }
 }
 
+/// The rectangles that can be drawn square or about their centre.
+const CORNER_RECT: &str = "sketch.rectangle.two_point";
+const CENTRE_RECT: &str = "sketch.rectangle.center";
+
+/// Whether this tool draws a rectangle that the square and centre keys apply to.
+fn plain_rect(cmd: &str) -> bool {
+    cmd == CORNER_RECT || cmd == CENTRE_RECT
+}
+
+/// A point taken square to the first one, when the tool is drawing a square: the shorter side
+/// goes out to the longer, keeping the way it was drawn. Moving the point lets go of whatever it
+/// had snapped to, which is no longer where it is.
+fn squared(tool: &Tool, p: (Vec2, Option<String>)) -> (Vec2, Option<String>) {
+    let Some((first, _)) = tool.pts.first() else { return p };
+    if !tool.square || !plain_rect(tool.cmd) {
+        return p;
+    }
+    let (dx, dy) = (p.0.x - first.x, p.0.y - first.y);
+    let side = dx.abs().max(dy.abs());
+    let at = Vec2::new(first.x + side * if dx < 0.0 { -1.0 } else { 1.0 }, first.y + side * if dy < 0.0 { -1.0 } else { 1.0 });
+    if at == p.0 { p } else { (at, None) }
+}
+
+/// The keys a sketch tool answers to while it is drawing. Says whether the key was taken.
+///
+/// They are the letters of other commands the rest of the time, so only a tool actually in hand
+/// may take them.
+pub fn handle_key(app: &mut SolveApp, key: &str) -> bool {
+    let Some(tool) = app.tool.as_ref() else { return false };
+    let (cmd, square) = (tool.cmd, tool.square);
+    match key {
+        // Take the last point back rather than the whole shape.
+        "Backspace" | "Ctrl+Z" => {
+            let Some(tool) = app.tool.as_mut().filter(|t| !t.pts.is_empty()) else { return false };
+            tool.pts.pop();
+            tool.dims.clear();
+            tool.dim_history.clear();
+            tool.dims_stage = 0;
+            true
+        }
+        "Alt+S" if plain_rect(cmd) => {
+            if let Some(tool) = app.tool.as_mut() {
+                tool.square = !square;
+            }
+            true
+        }
+        // Swap which corner the rectangle is measured from, keeping the point already put down.
+        "Alt+C" if plain_rect(cmd) => {
+            if let Some(tool) = app.tool.as_mut() {
+                tool.cmd = if cmd == CORNER_RECT { CENTRE_RECT } else { CORNER_RECT };
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// What to do now and the keys a sketch tool answers to, for the strip ([`crate::key_hints`]).
+pub fn key_hints(app: &SolveApp) -> Option<(String, Vec<crate::key_hints::Hint>)> {
+    let tool = app.tool.as_ref()?;
+    let mut keys = Vec::new();
+    if plain_rect(tool.cmd) {
+        keys.push(crate::key_hints::Hint::set("Alt+S", "Square", tool.square));
+        keys.push(crate::key_hints::Hint::set("Alt+C", "From the centre", tool.cmd == CENTRE_RECT));
+    }
+    if !tool.pts.is_empty() {
+        keys.push(crate::key_hints::Hint::new("Backspace", "Back"));
+    }
+    keys.push(crate::key_hints::Hint::new("Esc", "Finish"));
+    Some((hint(tool.cmd), keys))
+}
+
 pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     // A click away dismisses the inline editor; it must not also pick the first entity of
     // the next dimension before that cancellation has been processed. The type-first value
@@ -289,7 +364,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         Kind::Draw(n) => {
             if let Some(p) = sketch_point_at(app, proj, pos) {
                 // Typed values win over the cursor; lines snap to horizontal/vertical.
-                let p = crate::sketch_dims::placed(app, &tool, &p);
+                let p = squared(&tool, crate::sketch_dims::placed(app, &tool, &p));
                 // A repeated initial point supplies no extent. Keep waiting rather than
                 // attempting a degenerate shape; explicit typed values still validate.
                 if n != 1 && tool.pts.len() == 1 && tool.pts.first().is_some_and(|first| first.0 == p.0) && !tool.dims.iter().any(|b| b.locked) {

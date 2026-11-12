@@ -1610,7 +1610,7 @@ fn sketches_after_split_body_and_intersect() {
         None,
         json!([
             {"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 40, "width": 20, "height": 10, "body_name": "Block"}},
-            {"command": "solid.split_body", "params": {"body": "Block", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}},
+            {"command": "solid.cut_body", "params": {"body": "Block", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}},
             {"command": "sketch.create", "params": {"plane": {"face": [10, 10, 10]}}},
             {"command": "sketch.finish", "params": {}}
         ]),

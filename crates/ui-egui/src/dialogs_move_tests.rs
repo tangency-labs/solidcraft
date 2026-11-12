@@ -6,6 +6,7 @@ use solidcraft_engine::Session;
 use super::*;
 use crate::Services;
 use crate::dialogs::Dialog;
+use crate::gizmo::Handle;
 
 fn move_dialog(mode: usize) -> Dialog {
     let mut s = Session::default();
@@ -237,17 +238,17 @@ fn the_box_shows_the_dragged_axis() {
     let app = SolveApp::new(s, Services::default());
     let mut d = move_dialog(FREE);
     let g = |handle, change| crate::gizmo::Drag { handle, change, started: true, done: true };
-    drag(&app, &mut d, g(crate::gizmo::Handle::Axis(1), Change::Translate(Vec3::new(0.0, 5.0, 0.0))));
+    drag(&app, &mut d, g(crate::gizmo::Handle::Axis(1), Change::Translate(Vec3::new(0.0, 5.0, 0.0))), None);
     let (label, kind, value) = d.primary().unwrap();
     assert_eq!((label, kind, value.as_str()), ("Y", ValueKind::Length, "5 mm"));
     *value = "7 mm".into();
     let Kind::Move { x, y, .. } = &d.kind else { panic!("not a move") };
     assert_eq!((x.as_str(), y.as_str()), ("0 mm", "7 mm"), "typing edits Y");
-    drag(&app, &mut d, g(crate::gizmo::Handle::Ring(2), Change::Rotate { axis: 2, angle: 0.5 }));
+    drag(&app, &mut d, g(crate::gizmo::Handle::Ring(2), Change::Rotate { axis: 2, angle: 0.5 }), None);
     assert_eq!(d.primary().map(|p| (p.0, p.1)), Some(("Z Angle", ValueKind::Angle)));
     // Translate has no rings: a ring index past its values leaves the box on a distance.
     let mut t = move_dialog(TRANSLATE);
-    drag(&app, &mut t, g(crate::gizmo::Handle::Axis(2), Change::Translate(Vec3::new(0.0, 0.0, 3.0))));
+    drag(&app, &mut t, g(crate::gizmo::Handle::Axis(2), Change::Translate(Vec3::new(0.0, 0.0, 3.0))), None);
     assert_eq!(t.primary().map(|p| p.0), Some("Z"));
 }
 
@@ -748,4 +749,109 @@ fn selected_components_are_copied_when_create_copy_is_ticked_after_them() {
     h.app.dialog.as_mut().unwrap().extra.insert("copy".into(), json!(true));
     let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(p["occurrences"], json!([[first], [second]]));
+}
+
+/// A Move dialog and the app it belongs to, for the drag tests below.
+fn move_app(mode: usize) -> (SolveApp, Dialog) {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    app.start("solid.move");
+    let mut d = app.dialog.clone().unwrap();
+    d.kind = kind(mode, &app.session.doc);
+    d.inputs = inputs(mode);
+    if let Some(inp) = d.inputs.first_mut() {
+        inp.items = vec![Sel::Body { name: "Body1".into() }];
+    }
+    (app, d)
+}
+
+fn distances(d: &Dialog) -> [String; 3] {
+    let Kind::Move { x, y, z, .. } = &d.kind else { panic!("not a move") };
+    [x.clone(), y.clone(), z.clone()]
+}
+
+/// Holding the snap chord while the triad is dragged puts the pivot on the place under the
+/// cursor, whatever distance the drag itself came to -- Plasticity's Ctrl. The handle decides
+/// which distances the place is allowed to set: an arrow owns one, a square two, the ball all
+/// three.
+#[test]
+fn a_snapped_triad_drag_puts_the_pivot_on_the_place() {
+    let (app, d) = move_app(TRANSLATE);
+    let to = pivot(&app, &d).expect("a pivot") + Vec3::new(37.0, -12.0, 5.5);
+    let dragged = |handle: Handle, snap: Option<Vec3>| {
+        let mut d = d.clone();
+        let g = Drag { handle, change: Change::Translate(Vec3::new(1.0, 1.0, 1.0)), started: true, done: false };
+        drag(&app, &mut d, g, snap);
+        distances(&d)
+    };
+    assert_eq!(dragged(Handle::Ball, None), ["1 mm", "1 mm", "1 mm"], "without the chord the drag's own distance stands");
+    assert_eq!(dragged(Handle::Ball, Some(to)), ["37 mm", "-12 mm", "5.5 mm"], "the ball moves every way, so it takes the whole place");
+    assert_eq!(dragged(Handle::Axis(1), Some(to)), ["1 mm", "-12 mm", "1 mm"], "the Y arrow takes Y alone");
+    assert_eq!(dragged(Handle::Plane(2), Some(to)), ["37 mm", "-12 mm", "1 mm"], "the XY square takes X and Y, not Z");
+}
+
+/// A turn of the triad has no place to land on, so the chord leaves it alone.
+#[test]
+fn the_snap_chord_does_not_touch_a_rotation() {
+    let (app, mut d) = move_app(FREE);
+    let to = pivot(&app, &d).expect("a pivot") + Vec3::new(37.0, -12.0, 5.5);
+    let g = Drag { handle: Handle::Ring(2), change: Change::Rotate { axis: 2, angle: 0.5 }, started: true, done: false };
+    drag(&app, &mut d, g, Some(to));
+    assert_eq!(distances(&d), ["0 mm", "0 mm", "0 mm"], "a turn moves nothing");
+    let Kind::Move { rz, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!(rz, &deg(0.5), "the angle is the one the ring turned through");
+}
+
+/// The bodies on the move are the ones a snap has to keep out of its candidates: they follow
+/// the cursor, so a drag that could snap to them would snap to itself and never move.
+#[test]
+fn the_bodies_on_the_move_are_named_for_the_snap_to_skip() {
+    let (mut app, d) = move_app(TRANSLATE);
+    app.dialog = Some(d);
+    assert_eq!(moving_bodies(&app), vec!["Body1".to_string()]);
+    // Move types without a triad have no drag to snap, so they name nobody.
+    let (mut app, d) = move_app(POINT_TO_POINT);
+    app.dialog = Some(d);
+    assert!(moving_bodies(&app).is_empty(), "Point to Point picks its places, it does not drag");
+    let app = SolveApp::new(Session::default(), Services::default());
+    assert!(moving_bodies(&app).is_empty(), "no dialog, nobody moving");
+}
+
+/// End to end in the viewport: the chord is held, the triad is dragged over a corner of another
+/// body, and the moved body lands on it. Primary also suppresses the sketch snap, which used to
+/// take the model snap down with it -- the whole point of holding it on a manipulator is the snap.
+#[test]
+fn dragging_with_the_chord_held_lands_a_body_on_another_bodys_corner() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    h.app.run("solid.move", json!({"bodies": ["Body2"], "translate": ["90 mm", "0 mm", "0 mm"]})).unwrap();
+    h.app.cam.distance = 400.0;
+    h.settle();
+    let corner = h.app.session.model.state().body("Body2").unwrap().mesh().bounds().max;
+    h.app.start("solid.move");
+    {
+        let doc = h.app.session.doc.clone();
+        let d = h.app.dialog.as_mut().unwrap();
+        d.kind = kind(TRANSLATE, &doc);
+        d.inputs = inputs(TRANSLATE);
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    }
+    h.settle();
+    let base = pivot(&h.app, h.app.dialog.as_ref().unwrap()).expect("a pivot");
+    let from = h.at(&json!({ "world": [base.x, base.y, base.z] })).expect("the triad on screen");
+    let to = h.at(&json!({ "world": [corner.x, corner.y, corner.z] })).expect("the corner on screen");
+    h.call("ui.drag", json!({"x0": from[0], "y0": from[1], "x1": to[0], "y1": to[1], "steps": 6, "ctrl": true, "hold_end": 3}));
+    h.settle();
+    let d = h.app.dialog.clone().expect("the move is still open");
+    let got = params(&h.app, &d).expect("a move");
+    let want = corner - base;
+    let text = |v: f64| crate::length_input::model(&h.app.session.doc, v);
+    assert_eq!(
+        got["translate"],
+        json!([text(want.x), text(want.y), text(want.z)]),
+        "the pivot lands on the corner, not on a round step"
+    );
 }

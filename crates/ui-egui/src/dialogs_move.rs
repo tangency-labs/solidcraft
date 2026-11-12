@@ -503,6 +503,22 @@ pub fn triad(app: &SolveApp, d: &Dialog) -> Option<gizmo::Triad> {
     Some(gizmo::Triad { center: pivot(app, d)? + t, translate: true, rotate: *mode == FREE })
 }
 
+/// The bodies an open Move with a triad is moving: the ones a snap must keep out of its
+/// candidates, since they follow the cursor and would snap to themselves.
+pub fn moving_bodies(app: &SolveApp) -> Vec<String> {
+    let Some(d) = app.dialog.as_ref() else { return Vec::new() };
+    let Kind::Move { mode, .. } = &d.kind else { return Vec::new() };
+    if !matches!(*mode, FREE | TRANSLATE) {
+        return Vec::new();
+    }
+    items(d, 0).body_names()
+}
+
+/// Where the pivot was before this move, and the place the snap chord has it land on.
+fn to_place(app: &SolveApp, d: &Dialog, at: Vec3) -> Option<(Vec3, Vec3)> {
+    pivot(app, d).map(|base| (base, at))
+}
+
 /// Rotate's ring lies on the selected axis, level with the picked bodies' centre.
 pub(crate) fn rotation_axis(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
     if !matches!(d.kind, Kind::Move { mode: ROTATE, .. }) {
@@ -541,7 +557,9 @@ pub fn step_value_field(d: &mut Dialog, step: i64) {
     d.extra.insert("value_field".into(), json!(next));
 }
 
-pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
+/// `snap` is the place on the model under the cursor while the snap chord is held: the handle
+/// that is being dragged keeps the distances it does not own, and the rest land the pivot there.
+pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag, snap: Option<Vec3>) {
     // The box shows the value the handle drives: the distance along a dragged arrow, the angle
     // of a dragged ring (#4776). A plane square or the ball moves along two or three axes and
     // leaves it as it is.
@@ -561,12 +579,20 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
         d.extra.insert("drag0".into(), json!(v));
     }
     let v0: [f64; 6] = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+    // A snapped drag sets whole distances rather than adding to them, so work out where the
+    // place under the cursor is before the dialog is borrowed for writing.
+    let place = snap.and_then(|at| to_place(app, d, at)).filter(|_| matches!(g.change, Change::Translate(_)));
     let Kind::Move { x, y, z, rx, ry, rz, .. } = &mut d.kind else { return };
     match g.change {
         Change::Translate(t) => {
-            *x = crate::length_input::model(&app.session.doc, v0[0] + t.x);
-            *y = crate::length_input::model(&app.session.doc, v0[1] + t.y);
-            *z = crate::length_input::model(&app.session.doc, v0[2] + t.z);
+            let free = Vec3::new(v0[0] + t.x, v0[1] + t.y, v0[2] + t.z);
+            let v = match place {
+                Some((pivot, at)) => gizmo::snapped(g.handle, free, pivot, at),
+                None => free,
+            };
+            *x = crate::length_input::model(&app.session.doc, v.x);
+            *y = crate::length_input::model(&app.session.doc, v.y);
+            *z = crate::length_input::model(&app.session.doc, v.z);
         }
         Change::Rotate { axis, angle } => {
             let slot = match axis {

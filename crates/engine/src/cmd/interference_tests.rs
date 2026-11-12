@@ -177,3 +177,33 @@ fn a_body_name_that_is_no_body_is_refused() {
         "nothing is near `Typo`"
     );
 }
+
+/// A pair the exact boolean finds nothing to intersect in, although the mesh pass did not clear
+/// it, is reported as a clash with its volume estimated from the meshes -- but only where the
+/// meshes really pass through each other. Bodies that merely touch overlap by their facets' own
+/// sag, which is no clash, and a real overlap is still measured exactly rather than estimated.
+#[test]
+fn bodies_that_only_touch_stay_clear_and_a_real_overlap_is_measured_not_estimated() {
+    // Face to face, sharing a plane: the meshes are not apart, and there is nothing inside both.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [10, 0, 0], "operation": "new_body", "body_name": "B"}));
+    let i = run(&mut s, "inspect.interference", json!({}));
+    assert_eq!(i["count"], 0, "{i}");
+    // Curved and tangent, which is where a boolean is likeliest to find nothing: a ball resting
+    // in a cylindrical seat of its own radius.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [0, 0, 0], "axis": "X", "body_name": "Seat"}));
+    run(&mut s, "solid.sphere", json!({"radius": 5, "center": [10, 0, 10], "operation": "new", "body_name": "Ball"}));
+    let i = run(&mut s, "inspect.interference", json!({}));
+    assert_eq!(i["count"], 0, "a ball tangent to its seat is clear: {i}");
+    // 2 mm into it: measured exactly, so no estimate.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [8, 0, 0], "operation": "new_body", "body_name": "B"}));
+    let i = run(&mut s, "inspect.interference", json!({}));
+    assert_eq!(i["count"], 1, "{i}");
+    let hit = &i["interferences"][0];
+    assert!((f(&hit["volume_mm3"]) - 200.0).abs() < 1e-6, "{hit}");
+    assert!(hit.get("estimated").is_none(), "an exact intersection is not an estimate: {hit}");
+}

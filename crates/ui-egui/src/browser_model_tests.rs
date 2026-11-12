@@ -497,8 +497,9 @@ fn browser_shift_click_adds_the_bodies_in_between_to_move_copy() {
     assert!(names.contains(&"Left".into()) && names.contains(&"Right".into()) && names.contains(&"Far".into()), "{names:?}");
 }
 
-/// #4452: Combine's active input takes the body, then the next one does. A browser click is the
-/// same pick as a click in the view, so the first body is the target and the next is a tool.
+/// #4452: Combine's active input takes the body. A browser click is the same pick as a click in
+/// the view, and Target Bodies takes a whole selection (one tool cuts a row of parts), so both
+/// clicks land there until the tool input is asked for.
 #[test]
 fn combine_takes_bodies_clicked_in_the_browser() {
     let mut h = crate::scenario::Harness::new();
@@ -509,6 +510,7 @@ fn combine_takes_bodies_clicked_in_the_browser() {
     h.frames(2);
     h.step(&json!({"click": {"browser": "Block"}})).unwrap();
     h.frames(1);
+    h.call("ui.dialogInput", json!({"index": 1}));
     h.step(&json!({"click": {"browser": "Cutter"}})).unwrap();
     h.frames(1);
     let d = h.app.dialog.as_ref().expect("Combine stays open");

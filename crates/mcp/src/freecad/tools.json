@@ -1,0 +1,3194 @@
+[
+ {
+  "name": "align_center",
+  "category": "transform",
+  "description": "Move an object so its center sits on the origin. 'reference' picks the bounding-box center or the center of mass. 'z' = 'center' centers on Z too, 'floor' puts the bottom on Z=0 (print-bed style), 'keep' leaves Z alone.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "reference": {
+     "type": "string",
+     "enum": [
+      "bbox",
+      "mass"
+     ],
+     "default": "bbox"
+    },
+    "z": {
+     "type": "string",
+     "enum": [
+      "center",
+      "floor",
+      "keep"
+     ],
+     "default": "center"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "align_lay_on_face",
+  "category": "transform",
+  "description": "Rotate an object so the given face points straight down (-Z), then drop it so its lowest point sits on Z=0, like a slicer's 'lay on face'. Accepts a Part face ('Face3', or 'Pad.Face3' under a Body) or a mesh facet ('Facet123'); for meshes the flat region around the facet is used.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "face": {
+     "type": "string",
+     "description": "Face3 / Pad.Face3 / Facet123"
+    },
+    "angle_tolerance": {
+     "type": "number",
+     "default": 5.0,
+     "description": "Mesh only: degrees for growing the flat region"
+    },
+    "drop_to_floor": {
+     "type": "boolean",
+     "default": true
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object",
+    "face"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "assembly_add_part",
+  "category": "assembly",
+  "description": "Add a part (any solid object) as a child to an assembly. Best-effort: actually adds via the assembly's group property.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "assembly": {
+     "type": "string"
+    },
+    "part": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "assembly",
+    "part"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "assembly_create",
+  "category": "assembly",
+  "description": "Create a new Assembly container in the active document.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "bool_common",
+  "category": "boolean",
+  "description": "Boolean intersection of two or more objects.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "objects": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "minItems": 2
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "objects"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "bool_cut",
+  "category": "boolean",
+  "description": "Boolean cut: subtract second object from first. Use bool_cut_many for chains.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "base": {
+     "type": "string"
+    },
+    "tool": {
+     "type": "string"
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "base",
+    "tool"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "bool_fuse",
+  "category": "boolean",
+  "description": "Boolean union (fuse) of two or more objects. Returns the new feature.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "objects": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "minItems": 2
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "objects"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "console_clear",
+  "category": "console",
+  "description": "Clear the captured console buffer.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "console_print",
+  "category": "console",
+  "description": "Print a message to the FreeCAD console.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "message": {
+     "type": "string"
+    },
+    "level": {
+     "type": "string",
+     "enum": [
+      "message",
+      "warning",
+      "error",
+      "log"
+     ],
+     "default": "message"
+    }
+   },
+   "required": [
+    "message"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "console_tail",
+  "category": "console",
+  "description": "Return the most recent FreeCAD console messages (log/message/warning/error).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "limit": {
+     "type": "integer",
+     "default": 100,
+     "minimum": 1,
+     "maximum": 2000
+    },
+    "level": {
+     "type": "string",
+     "enum": [
+      "all",
+      "message",
+      "warning",
+      "error",
+      "log"
+     ],
+     "default": "all"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "direct_chamfer",
+  "category": "direct_edit",
+  "description": "Bevel edges of a solid with the given size (direct edit).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "edges": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "size": {
+     "type": "number",
+     "exclusiveMinimum": 0
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object",
+    "edges",
+    "size"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "direct_fillet",
+  "category": "direct_edit",
+  "description": "Round edges of a solid with the given radius (direct edit).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "edges": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "e.g. ['Edge5']"
+    },
+    "radius": {
+     "type": "number",
+     "exclusiveMinimum": 0
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object",
+    "edges",
+    "radius"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "direct_push_pull",
+  "category": "direct_edit",
+  "description": "Push or pull faces of a solid along their normals (Plasticity-style direct edit). distance > 0 adds material, < 0 removes it. Curved faces work too: pushing a hole wall out by 1 grows the hole radius by 1.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "faces": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "e.g. ['Face3']"
+    },
+    "distance": {
+     "type": "number"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object",
+    "faces",
+    "distance"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "display_refine",
+  "category": "view",
+  "description": "Switch the 3D view to a refined, Plasticity-like look: MSAA anti-aliasing, finer tessellation of curved faces, thin crisp dark edges, softer satin shading with a key and fill light, a dark gradient background and smooth-shaded meshes. Updates open objects too. Previous settings are backed up for display_restore. Anti-aliasing applies to 3D views opened afterwards.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "msaa": {
+     "type": "integer",
+     "enum": [
+      2,
+      4,
+      6,
+      8
+     ],
+     "default": 8,
+     "description": "Anti-aliasing samples"
+    },
+    "effects": {
+     "type": "boolean",
+     "default": true,
+     "description": "Plasticity-style matcap shading, silhouette outlines and hidden seams"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "display_restore",
+  "category": "view",
+  "description": "Undo display_refine: remove the viewport effects and restore every display preference it changed.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_close",
+  "category": "document",
+  "description": "Close a document. Pass save=True to save before closing.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "save": {
+     "type": "boolean",
+     "default": false
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_get_properties",
+  "category": "document",
+  "description": "Get document-level properties (Label, Comment, Company, etc.).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_list",
+  "category": "document",
+  "description": "List all open FreeCAD documents.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_new",
+  "category": "document",
+  "description": "Create a new empty FreeCAD document and make it active.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Optional internal name"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_open",
+  "category": "document",
+  "description": "Open a FreeCAD document file (.FCStd or any supported import format).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_recompute",
+  "category": "document",
+  "description": "Force recompute of the named (or active) document.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "force": {
+     "type": "boolean",
+     "default": false
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_redo",
+  "category": "document",
+  "description": "Redo the previously undone operation in the active document.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_save",
+  "category": "document",
+  "description": "Save the named (or active) document. Use doc_save_as for a new path.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_save_as",
+  "category": "document",
+  "description": "Save the named (or active) document to the given path.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_set_active",
+  "category": "document",
+  "description": "Make a named document the active document.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "doc_undo",
+  "category": "document",
+  "description": "Undo the last operation in the active document.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "draft_circle",
+  "category": "draft",
+  "description": "Draft: create a circle.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "center": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      },
+      "z": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "x",
+      "y"
+     ]
+    },
+    "radius": {
+     "type": "number"
+    },
+    "face": {
+     "type": "boolean",
+     "default": false
+    }
+   },
+   "required": [
+    "center",
+    "radius"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "draft_line",
+  "category": "draft",
+  "description": "Draft: create a 2-point line.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "p1": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      },
+      "z": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "x",
+      "y"
+     ]
+    },
+    "p2": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      },
+      "z": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "x",
+      "y"
+     ]
+    }
+   },
+   "required": [
+    "p1",
+    "p2"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "draft_text",
+  "category": "draft",
+  "description": "Draft: create a text annotation.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "text": {
+     "type": "string"
+    },
+    "position": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      },
+      "z": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "x",
+      "y"
+     ]
+    },
+    "size": {
+     "type": "number",
+     "default": 5.0
+    }
+   },
+   "required": [
+    "text",
+    "position"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "draft_wire",
+  "category": "draft",
+  "description": "Draft: create a polyline / wire from a list of points.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "points": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "x": {
+        "type": "number"
+       },
+       "y": {
+        "type": "number"
+       },
+       "z": {
+        "type": "number"
+       }
+      },
+      "required": [
+       "x",
+       "y"
+      ]
+     },
+     "minItems": 2
+    },
+    "closed": {
+     "type": "boolean",
+     "default": false
+    },
+    "face": {
+     "type": "boolean",
+     "default": false,
+     "description": "Make a face if closed"
+    }
+   },
+   "required": [
+    "points"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "freecad_python_eval",
+  "category": "python",
+  "description": "Evaluate a Python expression in FreeCAD and return its value. For multi-statement code use freecad_python_exec instead.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "expression": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "expression"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "freecad_python_exec",
+  "category": "python",
+  "description": "Execute arbitrary Python code inside FreeCAD's interpreter. Variables persist between calls. Pre-imported: App (FreeCAD), Gui (FreeCADGui), Part, Draft, Sketcher, PartDesign. Returns captured stdout/stderr.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "code": {
+     "type": "string",
+     "description": "Python source to execute"
+    },
+    "reset_namespace": {
+     "type": "boolean",
+     "description": "Clear persistent vars before running",
+     "default": false
+    }
+   },
+   "required": [
+    "code"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "gui_command_info",
+  "category": "gui",
+  "description": "Return the menu text, tooltip, and pixmap of a GUI command.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "gui_list_commands",
+  "category": "gui",
+  "description": "List every registered FreeCAD GUI command name. Each name can be passed to gui_run_command. Optionally filter by substring.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "filter": {
+     "type": "string",
+     "description": "Case-insensitive substring filter"
+    },
+    "with_info": {
+     "type": "boolean",
+     "description": "Include menu text + tooltip for each command",
+     "default": false
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "gui_run_command",
+  "category": "gui",
+  "description": "Run a FreeCAD GUI command by name (e.g. 'Std_New', 'Part_Box', 'PartDesign_Pad'). Equivalent to clicking the menu/toolbar item. Use gui_list_commands to discover available names.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "item": {
+     "type": "integer",
+     "description": "Sub-item index for grouped commands (default 0)",
+     "default": 0
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "io_export",
+  "category": "io",
+  "description": "Export objects to a CAD file. Format detected from extension (.step, .iges, .brep, .stl, .obj, .dxf, .svg, ...).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string"
+    },
+    "objects": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Object names; if empty, export all visible Part shapes"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "io_import",
+  "category": "io",
+  "description": "Import a CAD file (.step/.iges/.brep/.stl/.obj/.dxf/.svg/...) into a FreeCAD document. Auto-detects format from extension. Creates a document if none exists.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string",
+     "description": "Target document name (created if missing)"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "measure_bounding_box",
+  "category": "measure",
+  "description": "Get the axis-aligned bounding box of an object's shape.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "measure_distance",
+  "category": "measure",
+  "description": "Measure shortest distance between two sub-elements. Each ref is 'ObjectName' or 'ObjectName.Face1' / '.Edge2' / '.Vertex3'.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "a": {
+     "type": "string"
+    },
+    "b": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "a",
+    "b"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "measure_mass_properties",
+  "category": "measure",
+  "description": "Volume, surface area and centre-of-mass of an object's shape.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "mesh_export",
+  "category": "mesh",
+  "description": "Export selected (or named) objects to a mesh file (.stl/.obj/...).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string"
+    },
+    "objects": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "If empty, export all visible Part shapes"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "mesh_import",
+  "category": "mesh",
+  "description": "Import a mesh file (.stl/.obj/.ply/...) into the active document.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "mesh_import_file",
+  "category": "reverse_engineering",
+  "description": "Import a mesh file (.ply/.stl/.obj/...) into the active document and return the imported object's name(s). Equivalent to File -> Import in the GUI.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "mesh_loft_solid",
+  "category": "reverse_engineering",
+  "description": "Reverse-engineer a mesh into a boolean-able solid by slicing the mesh perpendicular to a chosen axis, extracting the outer silhouette at each slice, fitting B-splines, and lofting. Use this when the built-in 'shape from mesh' produces a non-manifold solid that fails boolean operations. All inputs are validated and resampled to safe sizes so OCC's loft algorithm cannot hang.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "mesh_object": {
+     "type": "string",
+     "description": "Name of the Mesh::Feature object to convert"
+    },
+    "doc": {
+     "type": "string",
+     "description": "Document name (default: active)"
+    },
+    "axis": {
+     "type": "string",
+     "enum": [
+      "x",
+      "y",
+      "z"
+     ],
+     "default": "z",
+     "description": "Axis perpendicular to slicing planes"
+    },
+    "n_slices": {
+     "type": "integer",
+     "default": 16,
+     "minimum": 3,
+     "maximum": 200,
+     "description": "Number of cross-sections to extract (ignored if resolution_mm is set)"
+    },
+    "resolution_mm": {
+     "type": "number",
+     "minimum": 0.1,
+     "description": "Spacing between cross-sections in mm. If given, overrides n_slices."
+    },
+    "points_per_slice": {
+     "type": "integer",
+     "default": 40,
+     "minimum": 12,
+     "maximum": 200,
+     "description": "Points to resample each slice to before lofting"
+    },
+    "margin": {
+     "type": "number",
+     "default": 1.5,
+     "description": "Skip this many mm from each tip of the mesh's axis range (degenerate slices)"
+    },
+    "result_label": {
+     "type": "string",
+     "default": "BodyFromMesh",
+     "description": "Name for the resulting solid object"
+    },
+    "keep_intermediate": {
+     "type": "boolean",
+     "default": false,
+     "description": "Keep the intermediate B-spline wires in the document for inspection"
+    },
+    "hide_mesh_after": {
+     "type": "boolean",
+     "default": true,
+     "description": "Hide the source mesh after the solid is built"
+    },
+    "loft_max_degree": {
+     "type": "integer",
+     "default": 3,
+     "minimum": 2,
+     "maximum": 5,
+     "description": "Maximum B-spline degree for the loft surface. Lower = less overshoot, more facetted."
+    },
+    "loft_ruled": {
+     "type": "boolean",
+     "default": false,
+     "description": "If true, build flat ruled panels between consecutive wires (no smoothing)."
+    }
+   },
+   "required": [
+    "mesh_object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "mesh_rebuild_cad",
+  "category": "reverse_engineering",
+  "description": "Rebuild a scanned mesh (or a faceted solid converted from one) as a clean CAD solid with minimal faces, as if modelled from scratch. Best for 2.5D parts (plates, brackets, housings): finds the main axis and height levels, fits each layer's outline with lines, arcs and circles, squares near-axis edges, equalises matching dimensions, averages mirrored features when the part is symmetric, rounds sizes to `grid`, then extrudes and fuses.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string",
+     "description": "Mesh::Feature or Part object"
+    },
+    "tolerance": {
+     "type": "number",
+     "default": 0.25,
+     "description": "Scan noise / fit tolerance (mm)"
+    },
+    "grid": {
+     "type": "number",
+     "default": 0.1,
+     "description": "Round dimensions to this step (mm); 0 = off"
+    },
+    "symmetry": {
+     "type": "string",
+     "enum": [
+      "auto",
+      "u",
+      "v",
+      "off"
+     ],
+     "default": "auto"
+    },
+    "snap_angle": {
+     "type": "number",
+     "default": 15.0,
+     "description": "Snap edge angles to multiples of this (deg)"
+    },
+    "min_thickness": {
+     "type": "number",
+     "default": 0.6,
+     "description": "Thinnest layer kept (mm)"
+    },
+    "placement": {
+     "type": "string",
+     "enum": [
+      "overlay",
+      "origin"
+     ],
+     "default": "overlay",
+     "description": "overlay = on top of the scan; origin = axis-aligned at the origin"
+    },
+    "hide_source": {
+     "type": "boolean",
+     "default": false
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "mesh_to_shape",
+  "category": "mesh",
+  "description": "Convert a Mesh::Feature into a Part (CAD) object. Facets are sewn into a shell, promoted to a solid when closed, and coplanar facets are merged (refine). Exact faceted conversion - for smooth B-spline approximations of organic meshes use mesh_loft_solid instead.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string",
+     "description": "Name of the mesh object"
+    },
+    "tolerance": {
+     "type": "number",
+     "default": 0.1,
+     "description": "Sewing tolerance (mm)"
+    },
+    "make_solid": {
+     "type": "boolean",
+     "default": true
+    },
+    "refine": {
+     "type": "boolean",
+     "default": true,
+     "description": "Merge coplanar facets into single faces"
+    },
+    "repair": {
+     "type": "boolean",
+     "default": true,
+     "description": "Fix duplicates, degenerate facets and normals first"
+    },
+    "decimate_to": {
+     "type": "integer",
+     "minimum": 4,
+     "description": "Optionally reduce the mesh to about this many facets first"
+    },
+    "max_facets": {
+     "type": "integer",
+     "default": 200000
+    },
+    "hide_mesh": {
+     "type": "boolean",
+     "default": true
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "mesh_to_solid_multi_axis",
+  "category": "reverse_engineering",
+  "description": "Reverse-engineer a mesh into a boolean-able solid using one or more slicing axes. With a single axis, produces the same result as mesh_loft_solid. With two or three axes, builds a per-axis loft and INTERSECTS them (Boolean common) — concavities that would be lost in any single direction's convex-hull silhouette are caught by another axis. Resolution is the spacing between slices in mm.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "mesh_object": {
+     "type": "string",
+     "description": "Name of the Mesh::Feature to convert"
+    },
+    "doc": {
+     "type": "string"
+    },
+    "axes": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "x",
+       "y",
+       "z"
+      ]
+     },
+     "minItems": 1,
+     "maxItems": 3,
+     "default": [
+      "z"
+     ],
+     "description": "Slicing axes. Multiple axes are intersected."
+    },
+    "resolution_mm": {
+     "type": "number",
+     "default": 5.0,
+     "minimum": 0.1,
+     "description": "Distance between consecutive cross-sections in mm"
+    },
+    "points_per_slice": {
+     "type": "integer",
+     "default": 60,
+     "minimum": 12,
+     "maximum": 200
+    },
+    "loft_ruled": {
+     "type": "boolean",
+     "default": true,
+     "description": "Ruled loft (faceted, robust). Set false for smooth (may overshoot)."
+    },
+    "loft_max_degree": {
+     "type": "integer",
+     "default": 3,
+     "minimum": 2,
+     "maximum": 5
+    },
+    "margin": {
+     "type": "number",
+     "default": 1.5
+    },
+    "result_label": {
+     "type": "string",
+     "default": "BodyMulti"
+    },
+    "keep_per_axis_lofts": {
+     "type": "boolean",
+     "default": false,
+     "description": "If true, keep the per-axis loft solids in the document for inspection"
+    },
+    "hide_mesh_after": {
+     "type": "boolean",
+     "default": true
+    }
+   },
+   "required": [
+    "mesh_object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "obj_delete",
+  "category": "object",
+  "description": "Delete an object from its document.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "obj_get",
+  "category": "object",
+  "description": "Get all properties of an object by name.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "obj_list",
+  "category": "object",
+  "description": "List all objects in a document. Returns Name, Label, TypeId for each.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "doc": {
+     "type": "string"
+    },
+    "type_filter": {
+     "type": "string",
+     "description": "Substring TypeId filter"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "obj_rename",
+  "category": "object",
+  "description": "Change an object's user-visible Label.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "name",
+    "label"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "obj_set_property",
+  "category": "object",
+  "description": "Set a property on an object. Value should be a JSON-compatible value. Vectors can be passed as {x,y,z}; placements as {Base:{x,y,z}, Rotation:{Axis:{x,y,z}, Angle: rad}}.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "property": {
+     "type": "string"
+    },
+    "value": {},
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "name",
+    "property",
+    "value"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "obj_set_visibility",
+  "category": "object",
+  "description": "Show or hide an object in the 3D view.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "visible": {
+     "type": "boolean"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "name",
+    "visible"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "obj_shape_info",
+  "category": "object",
+  "description": "Inspect the geometric shape of an object: bounding box, volume, area, vertex/edge/face counts. Only meaningful for Part-based objects.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "part_box",
+  "category": "part",
+  "description": "Create a Part::Box primitive.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "length": {
+     "type": "number",
+     "default": 10.0
+    },
+    "width": {
+     "type": "number",
+     "default": 10.0
+    },
+    "height": {
+     "type": "number",
+     "default": 10.0
+    },
+    "label": {
+     "type": "string"
+    },
+    "placement": {
+     "type": "object",
+     "properties": {
+      "Base": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "number"
+        },
+        "y": {
+         "type": "number"
+        },
+        "z": {
+         "type": "number"
+        }
+       },
+       "required": [
+        "x",
+        "y",
+        "z"
+       ]
+      },
+      "Rotation": {
+       "type": "object",
+       "properties": {
+        "Axis": {
+         "type": "object",
+         "properties": {
+          "x": {
+           "type": "number"
+          },
+          "y": {
+           "type": "number"
+          },
+          "z": {
+           "type": "number"
+          }
+         }
+        },
+        "Angle": {
+         "type": "number",
+         "description": "Angle in radians"
+        }
+       }
+      }
+     }
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "part_compound",
+  "category": "boolean",
+  "description": "Combine objects into a Part::Compound (no boolean op, just grouping).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "objects": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "minItems": 1
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "objects"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "part_cone",
+  "category": "part",
+  "description": "Create a Part::Cone primitive.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "radius1": {
+     "type": "number",
+     "default": 5.0
+    },
+    "radius2": {
+     "type": "number",
+     "default": 0.0
+    },
+    "height": {
+     "type": "number",
+     "default": 10.0
+    },
+    "angle": {
+     "type": "number",
+     "default": 360.0
+    },
+    "label": {
+     "type": "string"
+    },
+    "placement": {
+     "type": "object",
+     "properties": {
+      "Base": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "number"
+        },
+        "y": {
+         "type": "number"
+        },
+        "z": {
+         "type": "number"
+        }
+       },
+       "required": [
+        "x",
+        "y",
+        "z"
+       ]
+      },
+      "Rotation": {
+       "type": "object",
+       "properties": {
+        "Axis": {
+         "type": "object",
+         "properties": {
+          "x": {
+           "type": "number"
+          },
+          "y": {
+           "type": "number"
+          },
+          "z": {
+           "type": "number"
+          }
+         }
+        },
+        "Angle": {
+         "type": "number",
+         "description": "Angle in radians"
+        }
+       }
+      }
+     }
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "part_create",
+  "category": "part",
+  "description": "Generic Part primitive creator. Pass a TypeId (e.g. 'Part::Wedge', 'Part::Ellipsoid', 'Part::Prism') and a dict of properties to set.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "type_id": {
+     "type": "string"
+    },
+    "label": {
+     "type": "string"
+    },
+    "properties": {
+     "type": "object",
+     "description": "Property name -> value"
+    },
+    "placement": {
+     "type": "object",
+     "properties": {
+      "Base": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "number"
+        },
+        "y": {
+         "type": "number"
+        },
+        "z": {
+         "type": "number"
+        }
+       },
+       "required": [
+        "x",
+        "y",
+        "z"
+       ]
+      },
+      "Rotation": {
+       "type": "object",
+       "properties": {
+        "Axis": {
+         "type": "object",
+         "properties": {
+          "x": {
+           "type": "number"
+          },
+          "y": {
+           "type": "number"
+          },
+          "z": {
+           "type": "number"
+          }
+         }
+        },
+        "Angle": {
+         "type": "number",
+         "description": "Angle in radians"
+        }
+       }
+      }
+     }
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "type_id"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "part_cylinder",
+  "category": "part",
+  "description": "Create a Part::Cylinder primitive.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "radius": {
+     "type": "number",
+     "default": 5.0
+    },
+    "height": {
+     "type": "number",
+     "default": 10.0
+    },
+    "angle": {
+     "type": "number",
+     "default": 360.0,
+     "description": "Sweep angle in degrees"
+    },
+    "label": {
+     "type": "string"
+    },
+    "placement": {
+     "type": "object",
+     "properties": {
+      "Base": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "number"
+        },
+        "y": {
+         "type": "number"
+        },
+        "z": {
+         "type": "number"
+        }
+       },
+       "required": [
+        "x",
+        "y",
+        "z"
+       ]
+      },
+      "Rotation": {
+       "type": "object",
+       "properties": {
+        "Axis": {
+         "type": "object",
+         "properties": {
+          "x": {
+           "type": "number"
+          },
+          "y": {
+           "type": "number"
+          },
+          "z": {
+           "type": "number"
+          }
+         }
+        },
+        "Angle": {
+         "type": "number",
+         "description": "Angle in radians"
+        }
+       }
+      }
+     }
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "part_plane",
+  "category": "part",
+  "description": "Create a Part::Plane primitive.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "length": {
+     "type": "number",
+     "default": 100.0
+    },
+    "width": {
+     "type": "number",
+     "default": 100.0
+    },
+    "label": {
+     "type": "string"
+    },
+    "placement": {
+     "type": "object",
+     "properties": {
+      "Base": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "number"
+        },
+        "y": {
+         "type": "number"
+        },
+        "z": {
+         "type": "number"
+        }
+       },
+       "required": [
+        "x",
+        "y",
+        "z"
+       ]
+      },
+      "Rotation": {
+       "type": "object",
+       "properties": {
+        "Axis": {
+         "type": "object",
+         "properties": {
+          "x": {
+           "type": "number"
+          },
+          "y": {
+           "type": "number"
+          },
+          "z": {
+           "type": "number"
+          }
+         }
+        },
+        "Angle": {
+         "type": "number",
+         "description": "Angle in radians"
+        }
+       }
+      }
+     }
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "part_sphere",
+  "category": "part",
+  "description": "Create a Part::Sphere primitive.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "radius": {
+     "type": "number",
+     "default": 5.0
+    },
+    "label": {
+     "type": "string"
+    },
+    "placement": {
+     "type": "object",
+     "properties": {
+      "Base": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "number"
+        },
+        "y": {
+         "type": "number"
+        },
+        "z": {
+         "type": "number"
+        }
+       },
+       "required": [
+        "x",
+        "y",
+        "z"
+       ]
+      },
+      "Rotation": {
+       "type": "object",
+       "properties": {
+        "Axis": {
+         "type": "object",
+         "properties": {
+          "x": {
+           "type": "number"
+          },
+          "y": {
+           "type": "number"
+          },
+          "z": {
+           "type": "number"
+          }
+         }
+        },
+        "Angle": {
+         "type": "number",
+         "description": "Angle in radians"
+        }
+       }
+      }
+     }
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "part_torus",
+  "category": "part",
+  "description": "Create a Part::Torus primitive.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "radius1": {
+     "type": "number",
+     "default": 10.0,
+     "description": "Major radius"
+    },
+    "radius2": {
+     "type": "number",
+     "default": 2.0,
+     "description": "Minor radius"
+    },
+    "label": {
+     "type": "string"
+    },
+    "placement": {
+     "type": "object",
+     "properties": {
+      "Base": {
+       "type": "object",
+       "properties": {
+        "x": {
+         "type": "number"
+        },
+        "y": {
+         "type": "number"
+        },
+        "z": {
+         "type": "number"
+        }
+       },
+       "required": [
+        "x",
+        "y",
+        "z"
+       ]
+      },
+      "Rotation": {
+       "type": "object",
+       "properties": {
+        "Axis": {
+         "type": "object",
+         "properties": {
+          "x": {
+           "type": "number"
+          },
+          "y": {
+           "type": "number"
+          },
+          "z": {
+           "type": "number"
+          }
+         }
+        },
+        "Angle": {
+         "type": "number",
+         "description": "Angle in radians"
+        }
+       }
+      }
+     }
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pd_active_body",
+  "category": "partdesign",
+  "description": "Return the currently active PartDesign Body, or null.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pd_chamfer",
+  "category": "partdesign",
+  "description": "Chamfer edges of a body.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "base_feature": {
+     "type": "string"
+    },
+    "edges": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "minItems": 1
+    },
+    "size": {
+     "type": "number",
+     "default": 1.0
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "base_feature",
+    "edges"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pd_create_body",
+  "category": "partdesign",
+  "description": "Create a new PartDesign Body. The Body becomes the active body.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pd_create_sketch",
+  "category": "partdesign",
+  "description": "Create a Sketcher::SketchObject on a plane. plane can be 'XY','XZ','YZ', the name of a planar face like 'Body.Face1', or another existing reference.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "plane": {
+     "type": "string",
+     "default": "XY"
+    },
+    "body": {
+     "type": "string",
+     "description": "Body name (defaults to active)"
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pd_fillet",
+  "category": "partdesign",
+  "description": "Add a fillet (rounded edge) to a body. edges should be a list like ['Edge1','Edge3'] of the previous feature.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "base_feature": {
+     "type": "string",
+     "description": "Feature whose edges to fillet"
+    },
+    "edges": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "minItems": 1
+    },
+    "radius": {
+     "type": "number",
+     "default": 1.0
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "base_feature",
+    "edges"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pd_pad",
+  "category": "partdesign",
+  "description": "Pad (extrude) a sketch into a solid in the active or named body.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sketch": {
+     "type": "string"
+    },
+    "length": {
+     "type": "number",
+     "default": 10.0
+    },
+    "reversed": {
+     "type": "boolean",
+     "default": false
+    },
+    "midplane": {
+     "type": "boolean",
+     "default": false
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sketch"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pd_pocket",
+  "category": "partdesign",
+  "description": "Cut a pocket in the active body using a sketch.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sketch": {
+     "type": "string"
+    },
+    "length": {
+     "type": "number",
+     "default": 10.0
+    },
+    "reversed": {
+     "type": "boolean",
+     "default": false
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sketch"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pd_revolution",
+  "category": "partdesign",
+  "description": "Revolve a sketch around an axis to make a solid.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sketch": {
+     "type": "string"
+    },
+    "angle_deg": {
+     "type": "number",
+     "default": 360.0
+    },
+    "axis": {
+     "type": "string",
+     "default": "V_Axis",
+     "description": "Sketch axis name (V_Axis, H_Axis, N_Axis)"
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sketch"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pref_get",
+  "category": "preferences",
+  "description": "Get a preference value. group is a path like 'User parameter:BaseApp/Preferences/View'. type must be one of: bool, int, uint, float, string.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "group": {
+     "type": "string"
+    },
+    "key": {
+     "type": "string"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "bool",
+      "int",
+      "uint",
+      "float",
+      "string"
+     ]
+    },
+    "default": {}
+   },
+   "required": [
+    "group",
+    "key",
+    "type"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pref_list",
+  "category": "preferences",
+  "description": "List preference subgroups under a group.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "group": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "group"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "pref_set",
+  "category": "preferences",
+  "description": "Set a preference value (see pref_get for group/type meaning).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "group": {
+     "type": "string"
+    },
+    "key": {
+     "type": "string"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "bool",
+      "int",
+      "uint",
+      "float",
+      "string"
+     ]
+    },
+    "value": {}
+   },
+   "required": [
+    "group",
+    "key",
+    "type",
+    "value"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "selection_add",
+  "category": "selection",
+  "description": "Add an object (and optionally a sub-element like 'Face1') to the selection.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "sub": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "selection_clear",
+  "category": "selection",
+  "description": "Clear the current 3D-view selection.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "selection_get",
+  "category": "selection",
+  "description": "Get the current 3D-view selection (objects + sub-elements).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "selection_remove",
+  "category": "selection",
+  "description": "Remove an object from the selection.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "server_ping",
+  "category": "server",
+  "description": "Liveness check that does NOT touch FreeCAD state. Survives even when the main thread is locked in a long OCC operation.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "shape_to_mesh",
+  "category": "mesh",
+  "description": "Convert a Part shape into a Mesh::Feature using the standard mesher.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "linear_deflection": {
+     "type": "number",
+     "default": 0.1
+    },
+    "angular_deflection": {
+     "type": "number",
+     "default": 0.5
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "sketch_add_arc",
+  "category": "sketch",
+  "description": "Add an arc by center, radius, start angle (deg), end angle (deg).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sketch": {
+     "type": "string"
+    },
+    "cx": {
+     "type": "number"
+    },
+    "cy": {
+     "type": "number"
+    },
+    "r": {
+     "type": "number"
+    },
+    "start_deg": {
+     "type": "number"
+    },
+    "end_deg": {
+     "type": "number"
+    },
+    "construction": {
+     "type": "boolean",
+     "default": false
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sketch",
+    "cx",
+    "cy",
+    "r",
+    "start_deg",
+    "end_deg"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "sketch_add_circle",
+  "category": "sketch",
+  "description": "Add a circle to a sketch (centered at cx,cy with radius r).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sketch": {
+     "type": "string"
+    },
+    "cx": {
+     "type": "number"
+    },
+    "cy": {
+     "type": "number"
+    },
+    "r": {
+     "type": "number"
+    },
+    "construction": {
+     "type": "boolean",
+     "default": false
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sketch",
+    "cx",
+    "cy",
+    "r"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "sketch_add_constraint",
+  "category": "sketch",
+  "description": "Add a constraint to a sketch. type: Horizontal/Vertical/Coincident/Parallel/Perpendicular/Tangent/Equal/Symmetric/Distance/DistanceX/DistanceY/Radius/Diameter/Angle. args: list of (geom_index, point_pos) pairs OR plain integers depending on the constraint. value: numeric value for dimensional constraints (in mm or rad as appropriate).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sketch": {
+     "type": "string"
+    },
+    "type": {
+     "type": "string"
+    },
+    "args": {
+     "type": "array",
+     "items": {}
+    },
+    "value": {
+     "type": "number"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sketch",
+    "type",
+    "args"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "sketch_add_line",
+  "category": "sketch",
+  "description": "Add a line segment to a sketch. Coordinates are in the sketch plane (X,Y).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sketch": {
+     "type": "string"
+    },
+    "x1": {
+     "type": "number"
+    },
+    "y1": {
+     "type": "number"
+    },
+    "x2": {
+     "type": "number"
+    },
+    "y2": {
+     "type": "number"
+    },
+    "construction": {
+     "type": "boolean",
+     "default": false
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sketch",
+    "x1",
+    "y1",
+    "x2",
+    "y2"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "sketch_add_rectangle",
+  "category": "sketch",
+  "description": "Add a rectangle as 4 connected line segments. Returns the 4 geometry indices.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sketch": {
+     "type": "string"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    },
+    "width": {
+     "type": "number"
+    },
+    "height": {
+     "type": "number"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sketch",
+    "x",
+    "y",
+    "width",
+    "height"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "sketch_delete_geometry",
+  "category": "sketch",
+  "description": "Delete geometry elements by index from a sketch.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sketch": {
+     "type": "string"
+    },
+    "indices": {
+     "type": "array",
+     "items": {
+      "type": "integer"
+     },
+     "minItems": 1
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sketch",
+    "indices"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "sketch_get_geometry",
+  "category": "sketch",
+  "description": "List all geometry elements in a sketch.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sketch": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sketch"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "ss_create",
+  "category": "spreadsheet",
+  "description": "Create a new Spreadsheet.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "ss_get",
+  "category": "spreadsheet",
+  "description": "Get a cell's contents (raw expression) and computed value.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sheet": {
+     "type": "string"
+    },
+    "cell": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sheet",
+    "cell"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "ss_set",
+  "category": "spreadsheet",
+  "description": "Set a cell value (e.g. cell='A1', value='=2*3' or 42 or 'hello').",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sheet": {
+     "type": "string"
+    },
+    "cell": {
+     "type": "string"
+    },
+    "value": {},
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sheet",
+    "cell",
+    "value"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "ss_set_alias",
+  "category": "spreadsheet",
+  "description": "Assign an alias to a cell so it can be referenced by name in expressions.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sheet": {
+     "type": "string"
+    },
+    "cell": {
+     "type": "string"
+    },
+    "alias": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "sheet",
+    "cell",
+    "alias"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "transform_copy",
+  "category": "transform",
+  "description": "Make a Part::Copy of an object (independent copy of the shape).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "transform_mirror",
+  "category": "transform",
+  "description": "Create a Part::Mirroring of an object across a plane (defined by base+normal).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "base": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      },
+      "z": {
+       "type": "number"
+      }
+     },
+     "default": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    },
+    "normal": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      },
+      "z": {
+       "type": "number"
+      }
+     },
+     "default": {
+      "x": 1,
+      "y": 0,
+      "z": 0
+     }
+    },
+    "label": {
+     "type": "string"
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "transform_rotate",
+  "category": "transform",
+  "description": "Rotate an object around an axis through a center point by an angle (degrees).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "axis": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      },
+      "z": {
+       "type": "number"
+      }
+     },
+     "default": {
+      "x": 0,
+      "y": 0,
+      "z": 1
+     }
+    },
+    "angle_deg": {
+     "type": "number"
+    },
+    "center": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      },
+      "z": {
+       "type": "number"
+      }
+     },
+     "default": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object",
+    "angle_deg"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "transform_set_placement",
+  "category": "transform",
+  "description": "Set an object's absolute placement.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "base": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      },
+      "z": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "x",
+      "y",
+      "z"
+     ]
+    },
+    "axis": {
+     "type": "object",
+     "properties": {
+      "x": {
+       "type": "number"
+      },
+      "y": {
+       "type": "number"
+      },
+      "z": {
+       "type": "number"
+      }
+     },
+     "default": {
+      "x": 0,
+      "y": 0,
+      "z": 1
+     }
+    },
+    "angle_deg": {
+     "type": "number",
+     "default": 0.0
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object",
+    "base"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "transform_translate",
+  "category": "transform",
+  "description": "Translate an object by (dx, dy, dz). Modifies its Placement.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "dx": {
+     "type": "number",
+     "default": 0.0
+    },
+    "dy": {
+     "type": "number",
+     "default": 0.0
+    },
+    "dz": {
+     "type": "number",
+     "default": 0.0
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "tree_expand",
+  "category": "tree",
+  "description": "Expand or collapse a node in the model tree.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "object": {
+     "type": "string"
+    },
+    "expanded": {
+     "type": "boolean",
+     "default": true
+    },
+    "doc": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "object"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "tree_get",
+  "category": "tree",
+  "description": "Return the document's object hierarchy (as shown in the tree view).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "doc": {
+     "type": "string"
+    },
+    "max_depth": {
+     "type": "integer",
+     "default": 8
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "view_fit_all",
+  "category": "view",
+  "description": "Zoom and pan so that everything fits in the 3D view.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "view_fit_selection",
+  "category": "view",
+  "description": "Frame the current selection in the 3D view.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "view_get_camera",
+  "category": "view",
+  "description": "Get the active camera as a string (Inventor format).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "view_redraw",
+  "category": "view",
+  "description": "Force the 3D view to redraw immediately.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "view_screenshot",
+  "category": "view",
+  "description": "Render the active 3D view to an image. Returns the image as base64 and, if path is given, also writes it to disk. Format: PNG by default.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "Optional file path to write to"
+    },
+    "width": {
+     "type": "integer",
+     "default": 1024
+    },
+    "height": {
+     "type": "integer",
+     "default": 768
+    },
+    "format": {
+     "type": "string",
+     "default": "PNG",
+     "enum": [
+      "PNG",
+      "JPG",
+      "BMP"
+     ]
+    },
+    "background": {
+     "type": "string",
+     "default": "Current",
+     "enum": [
+      "Current",
+      "White",
+      "Black",
+      "Transparent"
+     ]
+    },
+    "return_base64": {
+     "type": "boolean",
+     "default": true
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "view_set_camera",
+  "category": "view",
+  "description": "Set the active camera from an Inventor-format string (as returned by view_get_camera).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "camera": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "camera"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "view_set_orientation",
+  "category": "view",
+  "description": "Set the 3D view to a named orientation.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "orientation": {
+     "type": "string",
+     "enum": [
+      "front",
+      "back",
+      "left",
+      "right",
+      "top",
+      "bottom",
+      "iso",
+      "isometric",
+      "axo",
+      "axonometric",
+      "dimetric",
+      "trimetric",
+      "default"
+     ]
+    }
+   },
+   "required": [
+    "orientation"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "workbench_activate",
+  "category": "workbench",
+  "description": "Switch to a named workbench (e.g. 'PartDesignWorkbench', 'SketcherWorkbench').",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "workbench_active",
+  "category": "workbench",
+  "description": "Return the name of the currently active workbench.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "workbench_list",
+  "category": "workbench",
+  "description": "List all available workbenches by internal name.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ }
+]

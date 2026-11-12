@@ -119,6 +119,28 @@ pub(super) struct ContactGeometry {
     /// Body indices, and the set members (occurrence id, name) they are under.
     pairs: Vec<(usize, usize, Member, Member)>,
     step: f64,
+    /// Each tested pair's last answer (body indices -> where both meshes were, and the depth
+    /// found or none). A pair neither of whose bodies moved since -- a docked part against its
+    /// dock, sample after sample, or two parts carried together -- answers the same without the
+    /// work, so a long study is no longer cut short by the budget for poses it has already
+    /// measured.
+    memo: std::cell::RefCell<HashMap<(usize, usize), (Placed, Option<f64>)>>,
+}
+
+/// Where two placed meshes are relative to each other: four vertices spread over each, taken
+/// from the second mesh's first vertex. Equal keys mean the same relative placement up to a
+/// translation of both; any turn of either changes them.
+type Placed = [Vec3; 8];
+
+fn placed_key(a: &Mesh, b: &Mesh) -> Option<Placed> {
+    let spread = |m: &Mesh| -> Option<[Vec3; 4]> {
+        let n = m.positions.len();
+        let at = |i: usize| m.positions.get(i.min(n.checked_sub(1)?)).copied();
+        Some([at(0)?, at(n / 3)?, at(2 * n / 3)?, at(n.checked_sub(1)?)?])
+    };
+    let (pa, pb) = (spread(a)?, spread(b)?);
+    let o = pb[0];
+    Some([pa[0] - o, pa[1] - o, pa[2] - o, pa[3] - o, pb[1] - o, pb[2] - o, pb[3] - o, Vec3::ZERO])
 }
 
 impl ContactGeometry {
@@ -135,7 +157,7 @@ impl ContactGeometry {
     /// The geometry of the bodies under `sets` (occurrence ids), paired as contact sets pair
     /// them: bodies under different members of one set.
     pub(super) fn of_sets(s: &Session, sets: &[Vec<u64>]) -> Result<Self> {
-        let mut out = Self { bodies: Vec::new(), pairs: Vec::new(), step: f64::INFINITY };
+        let mut out = Self { bodies: Vec::new(), pairs: Vec::new(), step: f64::INFINITY, memo: Default::default() };
         if sets.is_empty() {
             return Ok(out);
         }
@@ -230,7 +252,7 @@ impl ContactGeometry {
     pub(super) fn take_pairs(&mut self, take: impl Fn(u64, u64) -> bool) -> ContactGeometry {
         let (taken, kept) = std::mem::take(&mut self.pairs).into_iter().partition(|(_, _, a, b)| take(a.0, b.0));
         self.pairs = kept;
-        ContactGeometry { bodies: self.bodies.clone(), pairs: taken, step: self.step }
+        ContactGeometry { bodies: self.bodies.clone(), pairs: taken, step: self.step, memo: Default::default() }
     }
 
     /// The diagonal of the box the bodies fill in `s`: past it, a part moving in a straight
@@ -491,7 +513,12 @@ impl ContactGeometry {
 
     /// Pair `i` alone (with the same bodies).
     pub(super) fn only(&self, i: usize) -> ContactGeometry {
-        ContactGeometry { bodies: self.bodies.clone(), pairs: self.pairs.get(i).cloned().into_iter().collect(), step: self.step }
+ContactGeometry {
+            bodies: self.bodies.clone(),
+            pairs: self.pairs.get(i).cloned().into_iter().collect(),
+            step: self.step,
+            memo: Default::default(),
+        }
     }
 
     /// How deep the bodies of pair `i` (placed as `meshes`, in `boxes`) pass into each other,
@@ -516,6 +543,14 @@ impl ContactGeometry {
         {
             return Ok(None);
         }
+        // Neither body moved since this pair was last tested: the same answer, and no work to
+        // charge for it.
+        let key = placed_key(ma, mb);
+        if let Some(k) = key
+            && let Some((_, depth)) = self.memo.borrow().get(&(*a, *b)).filter(|(at, _)| *at == k)
+        {
+            return Ok(*depth);
+        }
         let cost = ma
             .positions
             .len()
@@ -527,7 +562,11 @@ impl ContactGeometry {
         if *work > budget {
             return Err(limit("motion exceeds contact sweep collision budget; simplify the contact set or use smaller increments"));
         }
-        Ok(super::mesh_overlap(ma, mb, tol))
+        let overlap = super::mesh_overlap(ma, mb, tol);
+        if let Some(k) = key {
+            self.memo.borrow_mut().insert((*a, *b), (k, overlap));
+        }
+        Ok(overlap)
     }
 }
 

@@ -1659,6 +1659,12 @@ fn a_huge_extrude_distance_draws_its_handles_at_once() {
     h.settle();
     h.step(&json!({"start": "solid.extrude"})).unwrap();
     h.step(&json!({"click": {"world": [20, 15, 20]}})).unwrap();
+    // The taper handle comes out only once the taper is in play, so the lesson of this test --
+    // that it draws at once however large the extrude -- needs a taper to look at.
+    if let Some(crate::dialogs::Kind::Extrude { taper, taper_present, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *taper = "5 deg".into();
+        *taper_present = true;
+    }
     let started = std::time::Instant::now();
     h.step(&json!({"text": "1e9"})).unwrap();
     h.frames(4);
@@ -1682,6 +1688,12 @@ fn an_open_extrude_keeps_its_taper_limits_while_the_profiles_stay() {
     h.settle();
     h.step(&json!({"start":"solid.extrude"})).unwrap();
     h.step(&json!({"click":{"world":[15,15,0]}})).unwrap();
+    h.frames(2);
+    // A taper, so the handle whose limits this test is about is drawn at all.
+    if let Some(crate::dialogs::Kind::Extrude { taper, taper_present, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *taper = "5 deg".into();
+        *taper_present = true;
+    }
     h.frames(2);
     assert!(crate::scenario::handle_at("taper").is_some(), "the taper handle is drawn");
     let once = crate::canvas::taper_radii_worked_out();

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use solidcore_record::Vec3;
 pub use solidcraft_engine::doc::display_units::{format_length, length_number, length_precision, unit_scale};
+use solidcraft_engine::geom::snap;
 use solidcraft_engine::render::Camera;
 
 /// The key the apps keep the preferences under in eframe's storage.
@@ -270,6 +271,22 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
+    },
+    NavPreset {
+        id: crate::plasticity::NAV,
+        label: "Plasticity",
+        help: "Middle drag orbits, Shift+middle pans, Ctrl+middle zooms; right drag orbits, Shift+right pans",
+        reverse_zoom: false,
+        reverse_drag_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
+        bindings: &[
+            bind(Middle, NavKeys::SHIFT, Pan),
+            bind(Middle, NavKeys::CTRL, Zoom),
+            bind(Middle, NavKeys::NONE, Orbit),
+            bind(Right, NavKeys::SHIFT, Pan),
+            bind(Right, NavKeys::NONE, Orbit),
+        ],
     },
 ];
 
@@ -1056,6 +1073,9 @@ preference_settings! {
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
+    /// Keyboard and selection scheme: `solidcraft` (the commands' own keys) or `plasticity`
+    /// (Plasticity's keys, selection modes and habits; [`crate::plasticity`]).
+    control_scheme: String = crate::plasticity::SCHEME_SOLIDCRAFT.into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = false, PAGE_NAVIGATION;
@@ -1167,9 +1187,11 @@ preference_settings! {
     /// A section hatches each cut body its own way (the default), or every one alike, in the cap
     /// colour at 45 degrees, as before.
     section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;
-    /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
-    /// grid stays on the ground plane (XY) whatever the view.
-    grid_follows_view: bool = false => check_id("ui.grid_follows_view");
+    /// The grid turns to the upright origin plane facing a side view (#1470). On by default: a
+    /// front or side view sees the ground edge-on, where a grid lying on it collapses to a line
+    /// and the view has no grid at all. Off keeps the grid on the ground plane (XY) whatever the
+    /// view, as it was before.
+    grid_follows_view: bool = true => check_id("ui.grid_follows_view");
     /// Draw reference geometry such as inactive sketches and datum planes through shaded bodies.
     /// Off by default to preserve the depth-tested viewport behaviour.
     reference_geometry_through_bodies: bool = false, PAGE_GRAPHICS => check_id("prefs.graphics_page.reference_geometry_through_bodies");
@@ -1554,6 +1576,10 @@ preference_settings! {
     save_mesh_quality: String = "standard".into();
     /// The programs the user added to the slicer list, newest first.
     custom_slicers: Vec<String> = Vec::new();
+    /// Speak tutorial-mode narration aloud (`crate::narration`): each tool's explanation, cues
+    /// for the acted-out demo, and the result, through the system voice. On by default; toggled
+    /// in the Tutorial window. Native only -- wasm has no speech synthesizer and stays silent.
+    tutorial_narration: bool = true;
     /// AI features (docs/agent-chat.md): the master switch. Off: no AI button, shortcut, menu
     /// entry or panel, and nothing is looked for or started.
     ai_features: bool = true, PAGE_ASSISTANT;
@@ -1609,7 +1635,9 @@ preference_settings! {
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.
-    /// Default: Alt/Option. Set to Ctrl/Cmd for the alternate mapping.
+    /// Default: Alt/Option. Set to Ctrl/Cmd for the alternate mapping. Under Plasticity's
+    /// controls snapping is asked for instead, by the snap chord, and this does not apply
+    /// (`snapping_on`).
     suppress_sketch_snap: ModifierCombo = ModifierCombo::CTRL_ALT, PAGE_SKETCH;
     /// Temporary horizontal/vertical guides from hovered centres and edge midpoints.
     sketch_tracking_guides: bool = true, PAGE_SKETCH;
@@ -1694,6 +1722,16 @@ preference_settings! {
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
+    /// Snap kinds turned off (Preferences > Sketch and selection > Snap), by
+    /// [`solidcraft_engine::geom::snap::SnapKind::id`]. A kind whose id is absent is on, so one
+    /// added in a later release starts on. The page offers the exact places; the control
+    /// channel can turn off `on_edge` and `on_face` too, which leaves a pick where the cursor is.
+    snap_kinds_off: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_SKETCH;
+    /// A point clicked out while drawing a primitive goes to the grid the view draws. On by
+    /// default: the grid is there to be built on, and a place on the model still wins where there
+    /// is one, so this only decides where a point with nothing to hold on to lands. The
+    /// suppress-snap chord turns it round, so one chord swaps the grid for free placing.
+    draw_grid_snap: bool = true, PAGE_SKETCH;
     /// Prefer movable sketch points on exact selection ties; off keeps point insertion order.
     prefer_free_sketch_points: bool = true, PAGE_SKETCH;
     /// While the open sketch's constraints conflict, the curves and points a failing constraint
@@ -1718,6 +1756,28 @@ preference_settings! {
     move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+}
+
+/// The exact snap places the Snap section offers, in the order it lists them, each with the
+/// message its row is labelled by (the viewport's own labels are the short ones beside the
+/// cursor).
+pub(crate) const SNAP_KIND_SETTINGS: [(snap::SnapKind, &str); 5] = [
+    (snap::SnapKind::Vertex, "prefs.snap.vertex"),
+    (snap::SnapKind::Center, "prefs.snap.center"),
+    (snap::SnapKind::Midpoint, "prefs.snap.midpoint"),
+    (snap::SnapKind::Quadrant, "prefs.snap.quadrant"),
+    (snap::SnapKind::FaceCenter, "prefs.snap.face_center"),
+];
+
+/// The snap kinds the preferences leave on.
+pub fn snap_kinds(p: &Prefs) -> snap::SnapKinds {
+    let off = snap::EVERY.iter().filter(|k| p.snap_kinds_off.contains(k.id())).fold(0, |a, k| a | k.bit());
+    snap::ALL & !off
+}
+
+/// Whether a kind is on (the page's check boxes).
+pub(crate) fn snap_kind_on(p: &Prefs, kind: snap::SnapKind) -> bool {
+    !p.snap_kinds_off.contains(kind.id())
 }
 
 /// What a middle-button double-click in the view does.
@@ -2485,6 +2545,31 @@ pub fn manipulator_free_held(app: &SolveApp, m: Modifiers) -> bool {
     held.primary || (app.preferences.manipulator_free_alt && held.alt)
 }
 
+/// Whether the chord that snaps a manipulator drag onto the model is held.
+///
+/// Primary by default. It is the free-drag chord as well, which is the point: off a place on the
+/// model the drag is free, and over one it lands on it.
+pub fn manipulator_snap_held(m: Modifiers) -> bool {
+    use crate::tool_modifiers::{ModAction, Scope, Trigger};
+    let held = crate::tool_modifiers::Held::from_modifiers(m);
+    crate::tool_modifiers::resolve(&[Scope::Manipulator], None, held, Trigger::Live).contains(ModAction::SnapManipulatorDrag)
+}
+
+/// Whether snapping is on this frame: the places on the model, a sketch's own snaps, a hole's
+/// place, the tracking guides and the grid a drawn point goes to, all of which read it through
+/// [`crate::drag_snap::suppressed`].
+///
+/// Under Plasticity's controls a snap is asked for rather than suppressed: it happens while the
+/// snap chord is held (Primary, as it already does on a manipulator) and not otherwise, so a drag
+/// goes where it is taken until the key is down. Under SolidCraft's own controls snapping is on
+/// unless the suppress chord is held, as it always was.
+pub fn snapping_on(app: &SolveApp, m: Modifiers) -> bool {
+    if crate::plasticity::active(app) {
+        return manipulator_snap_held(m);
+    }
+    !suppress_sketch_snap_held(app, m)
+}
+
 /// +1, or −1 when the wheel zooms the other way.
 pub fn zoom_sign(app: &SolveApp) -> f64 {
     if app.preferences.zoom_reverse { -1.0 } else { 1.0 }
@@ -2936,6 +3021,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
                     app.tr("prefs.shortcuts_intro"),
                     Some(crate::settings_profiles::tag),
                 );
+                crate::plasticity::keys_section(app, ui);
                 crate::keymap::page(app, ui);
             };
             if read_only {
@@ -10472,6 +10558,25 @@ mod tests {
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
         assert!(h.app.session.undo.is_empty());
+    }
+
+    /// Under Plasticity's controls a snap is asked for rather than suppressed: the chord that
+    /// takes snapping away under SolidCraft's own controls is what turns it on, and nothing
+    /// snaps without it. Alt stays the free drag either way.
+    #[test]
+    fn plasticitys_controls_snap_while_the_chord_is_held_and_not_otherwise() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let none = Modifiers::default();
+        let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
+        let alt = Modifiers { alt: true, ..Default::default() };
+        crate::plasticity::apply(&mut app, crate::plasticity::SCHEME_SOLIDCRAFT);
+        assert!(snapping_on(&app, none), "SolidCraft's controls snap unless the chord is held");
+        assert!(!snapping_on(&app, ctrl));
+        assert!(!snapping_on(&app, alt));
+        crate::plasticity::apply(&mut app, crate::plasticity::SCHEME_PLASTICITY);
+        assert!(!snapping_on(&app, none), "nothing snaps until the chord is held");
+        assert!(snapping_on(&app, ctrl), "the snap chord turns it on");
+        assert!(!snapping_on(&app, alt), "Alt is the free drag, not the snap");
     }
 
     #[test]

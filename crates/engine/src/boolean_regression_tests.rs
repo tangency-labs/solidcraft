@@ -72,6 +72,67 @@ fn intersection_never_keeps_material_outside_the_trimming_cylinder() {
     }
 }
 
+/// #1717: a sphere cut overlapping an earlier sphere cut. On truck the second cut's intersection
+/// curves ended 1.65e-6 mm from the first cut's, merged into its vertex on one side and split
+/// beside it on the other, so a loop on the ball never closed: "boolean Cut: no result". The part
+/// is the box less a quarter of the two balls' union between z = +/-5 (closed form, as in the
+/// issue).
+#[test]
+fn a_sphere_cut_overlapping_an_earlier_one_builds() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.box", json!({"length": 30, "width": 20, "height": 5, "body_name": "Box"})),
+        ("solid.sphere", json!({"center": [12, 20, 0], "operation": "cut", "radius": 10})),
+        ("solid.sphere", json!({"center": [17, 20, 0], "operation": "cut", "radius": 10})),
+    ] {
+        s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+    }
+    let v = volume(&s, "Box");
+    assert!((v - 2043.655).abs() < 0.2, "volume {v}, expected 2043.655");
+    let bad = s.model.state().body("Box").unwrap().body.validity();
+    assert!(bad.is_empty(), "{bad:?}");
+}
+
+/// #1107, at the level a user sees it: a join of two shapes that cross must fuse them into one
+/// body, and a join of two that only touch along a line must leave them two pieces of one body
+/// rather than overlapping shells. On truck the numerical intersection could find no curves and
+/// hand both operands back side by side, which the join then kept.
+#[test]
+fn a_join_fuses_what_crosses_and_leaves_what_only_touches_in_pieces() {
+    // Crossing: a rod driven 5 mm into a plate's top face.
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 10, "body_name": "Plate"})),
+        ("solid.cylinder", json!({"base": [0, 0, 5], "radius": 5, "height": 20, "operation": "join", "targets": ["Plate"]})),
+    ] {
+        s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+    }
+    let plate = 40.0 * 40.0 * 10.0;
+    let rod_above = std::f64::consts::PI * 25.0 * 15.0;
+    let v = volume(&s, "Plate");
+    assert!((v - (plate + rod_above)).abs() < 0.5, "the rod is fused into the plate: {v}");
+    let bad = s.model.state().body("Plate").unwrap().body.validity();
+    assert!(bad.is_empty(), "{bad:?}");
+
+    // Touching along a line: a tab laid against a rod's side, sharing one tangent line only.
+    let mut s = Session::default();
+    for (command, params) in [
+        ("solid.cylinder", json!({"base": [0, 0, -27.5], "radius": 25, "height": 27.5, "body_name": "Rod"})),
+        ("solid.box", json!({"corner": [25, -22.5, -27.5], "length": 25, "width": 22.5, "height": 2.5, "body_name": "Tab"})),
+    ] {
+        s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+    }
+    s.execute("solid.combine", &json!({"targets": ["Rod"], "tools": ["Tab"], "operation": "join"})).unwrap();
+    let rod = std::f64::consts::PI * 625.0 * 27.5;
+    let tab = 25.0 * 22.5 * 2.5;
+    let v: f64 = s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).map(|m| m.volume).unwrap_or(0.0)).sum();
+    assert!((v - (rod + tab)).abs() < 0.5, "nothing is counted twice and nothing is lost: {v}");
+    for b in &s.model.state().bodies {
+        let bad = b.body.validity();
+        assert!(bad.is_empty(), "{}: {bad:?}", b.name);
+    }
+}
+
 fn replay(script: &str) -> Session {
     let mut s = Session::default();
     let script: Value = serde_json::from_str(script).unwrap();
@@ -333,7 +394,7 @@ fn oblique_cut_through_a_small_arc_matches_a_split() {
     let steps = script.get("commands").and_then(Value::as_array).unwrap();
     split.run_script(&Value::Array(steps[..5].to_vec())).unwrap();
     let whole = volume(&split, "Tool");
-    split.execute("solid.split_body", &json!({"body": "Tool", "plane": {"origin": [0, -472, 853.91], "normal": [0, 15.44, 40]}})).unwrap();
+    split.execute("solid.cut_body", &json!({"body": "Tool", "plane": {"origin": [0, -472, 853.91], "normal": [0, 15.44, 40]}})).unwrap();
     let above = volume(&split, "Tool");
     assert!(above < whole - 10.0, "{above} of {whole}");
     for script in scripts {
@@ -1551,4 +1612,115 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "center": [30, 0, 5], "operation": "new", "body_name": "B"})).unwrap();
     let combine = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": "join"})).unwrap();
     assert!(combine["warning"].is_null(), "{combine}");
+}
+
+
+/// Slice: the tool divides the target and both halves stay. Plasticity's Boolean offers it
+/// beside union, difference and intersect (`Shift+Q` on its card), and SolidCraft had nothing
+/// for it: a cut threw the inside away and an intersect threw the outside away.
+///
+/// A 40 × 20 × 20 block sliced by a 10 mm slab across its middle leaves the two ends under the
+/// block's name and the middle as a body of its own, and no material is lost.
+#[test]
+fn slice_divides_the_target_and_keeps_both_halves() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 20, "body_name": "Base"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 20, "corner": [15, 0, 0], "body_name": "Tool"})).unwrap();
+    s.execute("solid.combine", &json!({"target": "Base", "tools": ["Tool"], "operation": "slice"})).unwrap();
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 3, "{names:?}");
+    assert!(!names.contains(&"Tool".to_string()), "the tool is used up: {names:?}");
+    let total: f64 = names.iter().map(|n| volume(&s, n)).sum();
+    assert!((total - 16000.0).abs() < 0.05, "{total} of 16000 mm³ left in {names:?}");
+    // The middle slab is one of the three, and the two ends make up the rest.
+    let mut sizes: Vec<f64> = names.iter().map(|n| volume(&s, n)).collect();
+    sizes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    for (got, want) in sizes.iter().zip([4000.0, 6000.0, 6000.0]) {
+        assert!((got - want).abs() < 0.05, "{sizes:?} expected [4000, 6000, 6000]");
+    }
+    for b in &s.model.state().bodies {
+        assert!(b.body.validity().is_empty(), "{}: {:?}", b.name, b.body.validity());
+    }
+}
+
+/// Slice keeps the tool when it is asked to, the way Plasticity's `T` (Keep tools) does.
+#[test]
+fn slice_can_keep_its_tool() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 20, "body_name": "Base"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 20, "corner": [15, 0, 0], "body_name": "Tool"})).unwrap();
+    s.execute("solid.combine", &json!({"target": "Base", "tools": ["Tool"], "operation": "slice", "keep_tools": true})).unwrap();
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert!(names.contains(&"Tool".to_string()), "{names:?}");
+    assert_eq!(names.len(), 4, "{names:?}");
+}
+
+/// A slice with nothing to slice says so instead of making the tool a body of its own.
+#[test]
+fn slice_without_a_target_is_refused() {
+    let mut s = Session::default();
+    let e = s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "operation": "slice"})).unwrap_err();
+    assert!(format!("{e}").contains("slice"), "{e}");
+}
+
+/// Keep tools: the shape a feature is built from stays a body of its own as well as doing what
+/// it does to the solid it meets. Plasticity offers it as `T` on a primitive's card, and a box
+/// pulled into a slab with it on leaves the pocket and the box both.
+#[test]
+fn a_primitive_that_keeps_its_tool_leaves_the_shape_as_a_body_too() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 20, "body_name": "Base"})).unwrap();
+    s.execute(
+        "solid.box",
+        &json!({"length": 10, "width": 20, "height": 5, "corner": [15, 0, 15], "operation": "cut", "targets": ["Base"], "keep_tools": true}),
+    )
+    .unwrap();
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!((volume(&s, "Base") - (16000.0 - 1000.0)).abs() < 0.05, "{} of 15000 mm³", volume(&s, "Base"));
+    let kept = names.iter().find(|n| *n != "Base").cloned().unwrap_or_default();
+    assert!((volume(&s, &kept) - 1000.0).abs() < 0.05, "the box is kept whole: {} of 1000 mm³", volume(&s, &kept));
+}
+
+/// Without it the shape is used up, as it always was, and a New Body shape is a body anyway so
+/// keeping its tool makes no second copy.
+#[test]
+fn keeping_the_tool_changes_nothing_for_a_cut_without_it_or_a_new_body() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 20, "body_name": "Base"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 5, "corner": [15, 0, 15], "operation": "cut", "targets": ["Base"]})).unwrap();
+    assert_eq!(s.model.state().bodies.len(), 1);
+    s.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4, "corner": [100, 0, 0], "keep_tools": true})).unwrap();
+    assert_eq!(s.model.state().bodies.len(), 2, "a new body is not kept twice");
+}
+
+/// One tool, a whole row of parts: Plasticity's Boolean card asks for "target bodies" and takes a
+/// selection, so a bar laid across three blocks cuts all three in one command. Combine took a
+/// single `target` and had to be run once per block.
+#[test]
+fn a_combine_cuts_every_target_it_is_given() {
+    let mut s = Session::default();
+    for (k, x) in [(1, 0.0), (2, 30.0), (3, 60.0)] {
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "corner": [x, 0, 0], "body_name": format!("Block{k}")})).unwrap();
+    }
+    // A bar across all three, 5 mm into their tops.
+    s.execute("solid.box", &json!({"length": 80, "width": 6, "height": 5, "corner": [0, 7, 15], "body_name": "Bar"})).unwrap();
+    s.execute("solid.combine", &json!({"targets": ["Block1", "Block2", "Block3"], "tools": ["Bar"], "operation": "cut"})).unwrap();
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names, ["Block1", "Block2", "Block3"], "the bar is used up and nothing is split");
+    for n in &names {
+        assert!((volume(&s, n) - (8000.0 - 20.0 * 6.0 * 5.0)).abs() < 0.05, "{n} keeps 7400 mm³, not {}", volume(&s, n));
+    }
+}
+
+/// `target`, the one body Combine used to take, still names it.
+#[test]
+fn a_combine_still_answers_to_a_single_target() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 20, "body_name": "Base"})).unwrap();
+    s.execute("solid.box", &json!({"corner": [15, 0, 0], "length": 10, "width": 20, "height": 20, "body_name": "Tool"})).unwrap();
+    s.execute("solid.combine", &json!({"target": "Base", "tools": ["Tool"], "operation": "cut"})).unwrap();
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 2, "the cut splits the base in two: {names:?}");
+    assert!((names.iter().map(|n| volume(&s, n)).sum::<f64>() - 12000.0).abs() < 0.05);
 }

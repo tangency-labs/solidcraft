@@ -1,0 +1,82 @@
+{
+  "en": {
+    "prefs.snap.heading": "Snap",
+    "prefs.snap.note": "Which places a pick locks onto where the cursor is near them on the model.",
+    "prefs.snap.all_off": "With all of them off the cursor still slides along the edge or over the face it is on.",
+    "prefs.snap.vertex": "Edge ends and corners",
+    "prefs.snap.center": "Centres of circles and holes",
+    "prefs.snap.midpoint": "Middles of edges",
+    "prefs.snap.quadrant": "Quarter turns round a circle",
+    "prefs.snap.face_center": "Centres of flat faces"
+  },
+  "ar": {
+    "prefs.snap.heading": "الالتقاط",
+    "prefs.snap.note": "الأماكن التي يلتقط إليها التحديد عندما يقترب المؤشر منها على المجسم.",
+    "prefs.snap.all_off": "حتى بإيقافها كلها يبقى المؤشر منزلقًا على الحافة أو السطح الذي هو عليه.",
+    "prefs.snap.vertex": "أطراف الحواف والزوايا",
+    "prefs.snap.center": "مراكز الدوائر والثقوب",
+    "prefs.snap.midpoint": "منتصفات الحواف",
+    "prefs.snap.quadrant": "أرباع الدائرة",
+    "prefs.snap.face_center": "مراكز الأسطح المستوية"
+  },
+  "de": {
+    "prefs.snap.heading": "Einrasten",
+    "prefs.snap.note": "An welche Stellen ein Pick einrastet, wenn der Zeiger ihnen am Modell nahe kommt.",
+    "prefs.snap.all_off": "Auch wenn alle aus sind, gleitet der Zeiger weiter entlang der Kante oder über die Fläche, auf der er liegt.",
+    "prefs.snap.vertex": "Kantenenden und Ecken",
+    "prefs.snap.center": "Mittelpunkte von Kreisen und Bohrungen",
+    "prefs.snap.midpoint": "Kantenmitten",
+    "prefs.snap.quadrant": "Viertelpunkte eines Kreises",
+    "prefs.snap.face_center": "Mittelpunkte ebener Flächen"
+  },
+  "he": {
+    "prefs.snap.heading": "הצמדה",
+    "prefs.snap.note": "לאילו מקומות הבחירה נצמדת כאשר הסמן קרוב אליהם על המודל.",
+    "prefs.snap.all_off": "גם כשכולם כבויים הסמן ממשיך להחליק לאורך הקצה או על הפאה שעליה הוא נמצא.",
+    "prefs.snap.vertex": "קצות קצוות ופינות",
+    "prefs.snap.center": "מרכזי מעגלים וחורים",
+    "prefs.snap.midpoint": "אמצעי קצוות",
+    "prefs.snap.quadrant": "רבעי מעגל",
+    "prefs.snap.face_center": "מרכזי פאות שטוחות"
+  },
+  "ja": {
+    "prefs.snap.heading": "スナップ",
+    "prefs.snap.note": "モデル上でカーソルが近づいたとき、ピックがどの位置に吸着するかを選びます。",
+    "prefs.snap.all_off": "すべてを切っても、カーソルは乗っているエッジや面の上を滑り続けます。",
+    "prefs.snap.vertex": "エッジの端と角",
+    "prefs.snap.center": "円と穴の中心",
+    "prefs.snap.midpoint": "エッジの中点",
+    "prefs.snap.quadrant": "円の四分点",
+    "prefs.snap.face_center": "平面の中心"
+  },
+  "ko": {
+    "prefs.snap.heading": "스냅",
+    "prefs.snap.note": "모델에서 커서가 가까워졌을 때 선택이 달라붙는 위치입니다.",
+    "prefs.snap.all_off": "모두 꺼도 커서는 놓인 모서리나 면 위를 계속 따라 움직입니다.",
+    "prefs.snap.vertex": "모서리 끝과 꼭지점",
+    "prefs.snap.center": "원과 구멍의 중심",
+    "prefs.snap.midpoint": "모서리의 중점",
+    "prefs.snap.quadrant": "원의 사분점",
+    "prefs.snap.face_center": "평면의 중심"
+  },
+  "vi": {
+    "prefs.snap.heading": "Bắt điểm",
+    "prefs.snap.note": "Những vị trí mà con trỏ sẽ bắt vào khi ở gần chúng trên mô hình.",
+    "prefs.snap.all_off": "Dù tắt hết, con trỏ vẫn trượt dọc theo cạnh hoặc trên mặt mà nó đang ở.",
+    "prefs.snap.vertex": "Đầu cạnh và góc",
+    "prefs.snap.center": "Tâm của đường tròn và lỗ",
+    "prefs.snap.midpoint": "Trung điểm của cạnh",
+    "prefs.snap.quadrant": "Các điểm một phần tư trên đường tròn",
+    "prefs.snap.face_center": "Tâm của mặt phẳng"
+  },
+  "zh": {
+    "prefs.snap.heading": "捕捉",
+    "prefs.snap.note": "当光标靠近模型上的这些位置时，拾取会吸附到它们。",
+    "prefs.snap.all_off": "即使全部关闭，光标仍会沿所处的边或面滑动。",
+    "prefs.snap.vertex": "边的端点和角点",
+    "prefs.snap.center": "圆和孔的中心",
+    "prefs.snap.midpoint": "边的中点",
+    "prefs.snap.quadrant": "圆的四分点",
+    "prefs.snap.face_center": "平面的中心"
+  }
+}

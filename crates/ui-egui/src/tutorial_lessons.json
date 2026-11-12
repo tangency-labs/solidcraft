@@ -1,0 +1,8249 @@
+{
+ "samples": {
+  "empty": [],
+  "sketch": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ]
+  ],
+  "sketch_rect": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.rectangle.two_point",
+    {
+     "p0": [
+      0,
+      0
+     ],
+     "p1": [
+      40,
+      25
+     ]
+    }
+   ]
+  ],
+  "sketch_line": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       30,
+       0
+      ]
+     ]
+    }
+   ]
+  ],
+  "sketch_slanted": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       40,
+       0.4
+      ]
+     ]
+    }
+   ]
+  ],
+  "sketch_two_lines": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       40,
+       0
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       5,
+       12
+      ],
+      [
+       40,
+       20
+      ]
+     ]
+    }
+   ]
+  ],
+  "sketch_gap": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       20,
+       0
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       24,
+       3
+      ],
+      [
+       34,
+       18
+      ]
+     ]
+    }
+   ]
+  ],
+  "sketch_apart": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       15,
+       0
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       28,
+       12
+      ],
+      [
+       45,
+       12
+      ]
+     ]
+    }
+   ]
+  ],
+  "sketch_corner": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       40,
+       0
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       0,
+       30
+      ]
+     ]
+    }
+   ]
+  ],
+  "sketch_triangle": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       40,
+       0
+      ],
+      [
+       20,
+       32
+      ]
+     ],
+     "closed": true
+    }
+   ]
+  ],
+  "sketch_quad": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       30,
+       -3
+      ],
+      [
+       34,
+       25
+      ],
+      [
+       -4,
+       28
+      ]
+     ],
+     "closed": true
+    }
+   ]
+  ],
+  "sketch_cross": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       40,
+       0
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       20,
+       -15
+      ],
+      [
+       20,
+       15
+      ]
+     ]
+    }
+   ]
+  ],
+  "sketch_reach": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       15,
+       0
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       30,
+       -12
+      ],
+      [
+       30,
+       12
+      ]
+     ]
+    }
+   ]
+  ],
+  "sketch_two_circles": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      0,
+      0
+     ],
+     "radius": 10
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      40,
+      0
+     ],
+     "radius": 6
+    }
+   ]
+  ],
+  "sketch_line_circle": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       -15,
+       -14
+      ],
+      [
+       40,
+       -14
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      12,
+      0
+     ],
+     "radius": 8
+    }
+   ]
+  ],
+  "sketch_mirror": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       -20
+      ],
+      [
+       0,
+       20
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      15,
+      5
+     ],
+     "radius": 5
+    }
+   ]
+  ],
+  "sketch_small_circle": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      20,
+      0
+     ],
+     "radius": 4
+    }
+   ]
+  ],
+  "sketch_line_spline": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       20,
+       0
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.spline.control_point",
+    {
+     "points": [
+      "l1.end",
+      [
+       25,
+       2
+      ],
+      [
+       30,
+       6
+      ],
+      [
+       35,
+       15
+      ]
+     ]
+    }
+   ]
+  ],
+  "sketch_loop": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       40,
+       0
+      ],
+      [
+       40,
+       30
+      ],
+      [
+       0,
+       30
+      ]
+     ],
+     "closed": true
+    }
+   ]
+  ],
+  "profile": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Profile"
+    }
+   ],
+   [
+    "sketch.rectangle.two_point",
+    {
+     "p0": [
+      0,
+      0
+     ],
+     "p1": [
+      40,
+      20
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "turn_profile": [
+   [
+    "sketch.create",
+    {
+     "plane": "XZ",
+     "name": "Profile"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       10,
+       0
+      ],
+      [
+       25,
+       0
+      ],
+      [
+       25,
+       6
+      ],
+      [
+       15,
+       12
+      ],
+      [
+       15,
+       30
+      ],
+      [
+       10,
+       30
+      ]
+     ],
+     "closed": true
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "loft_sections": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Base"
+    }
+   ],
+   [
+    "sketch.rectangle.two_point",
+    {
+     "p0": [
+      -15,
+      -15
+     ],
+     "p1": [
+      15,
+      15
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": {
+      "origin": [
+       0,
+       0,
+       30
+      ],
+      "x_dir": [
+       1,
+       0,
+       0
+      ],
+      "y_dir": [
+       0,
+       1,
+       0
+      ]
+     },
+     "name": "Top"
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      0,
+      0
+     ],
+     "radius": 8
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "sweep_path": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Profile"
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      0,
+      0
+     ],
+     "radius": 3
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": "XZ",
+     "name": "Path"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       0,
+       30
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.arc.center_point",
+    {
+     "center": [
+      15,
+      30
+     ],
+     "start": [
+      0,
+      30
+     ],
+     "sweep": -90
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "loft_skin": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Base"
+    }
+   ],
+   [
+    "sketch.rectangle.two_point",
+    {
+     "p0": [
+      -15,
+      -15
+     ],
+     "p1": [
+      15,
+      15
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": {
+      "origin": [
+       0,
+       0,
+       30
+      ],
+      "x_dir": [
+       1,
+       0,
+       0
+      ],
+      "y_dir": [
+       0,
+       1,
+       0
+      ]
+     },
+     "name": "Top"
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      0,
+      0
+     ],
+     "radius": 8
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "surface.loft",
+    {
+     "sections": [
+      {
+       "sketch": "Base"
+      },
+      {
+       "sketch": "Top"
+      }
+     ],
+     "body_name": "Skin"
+    }
+   ]
+  ],
+  "ball_shell": [
+   [
+    "solid.sphere",
+    {
+     "radius": 20,
+     "name": "Ball",
+     "body_name": "Ball"
+    }
+   ],
+   [
+    "surface.offset",
+    {
+     "faces": [
+      [
+       0,
+       0,
+       20
+      ]
+     ],
+     "body": "Ball",
+     "distance": 2,
+     "body_name": "Shell"
+    }
+   ],
+   [
+    "browser.visibility",
+    {
+     "visible": false,
+     "items": [
+      "Ball"
+     ]
+    }
+   ]
+  ],
+  "curve_sketch": [
+   [
+    "sketch.create",
+    {
+     "plane": "XZ",
+     "name": "Curve"
+    }
+   ],
+   [
+    "sketch.arc.three_point",
+    {
+     "start": [
+      0,
+      0
+     ],
+     "end": [
+      40,
+      0
+     ],
+     "through": [
+      20,
+      10
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "plate": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ]
+  ],
+  "plate_fillet": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ],
+   [
+    "solid.fillet",
+    {
+     "edges": [
+      [
+       30,
+       0,
+       10
+      ],
+      [
+       60,
+       20,
+       10
+      ]
+     ],
+     "radius": 4,
+     "name": "Round"
+    }
+   ]
+  ],
+  "plate_hole": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ],
+   [
+    "solid.hole",
+    {
+     "position": [
+      30,
+      20,
+      10
+     ],
+     "direction": [
+      0,
+      0,
+      -1
+     ],
+     "diameter": 10,
+     "to": [
+      30,
+      20,
+      -1
+     ],
+     "name": "Bore"
+    }
+   ]
+  ],
+  "plate_and_pin": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ],
+   [
+    "solid.cylinder",
+    {
+     "radius": 8,
+     "height": 30,
+     "base": [
+      30,
+      20,
+      -10
+     ],
+     "name": "Pin",
+     "body_name": "Pin"
+    }
+   ]
+  ],
+  "plate_sketch": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ]
+  ],
+  "pin_sketch": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ],
+   [
+    "solid.cylinder",
+    {
+     "radius": 8,
+     "height": 30,
+     "base": [
+      30,
+      20,
+      -10
+     ],
+     "name": "Pin",
+     "body_name": "Pin"
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ]
+  ],
+  "plate_projection": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": {
+      "origin": [
+       0,
+       0,
+       30
+      ],
+      "x_dir": [
+       1,
+       0,
+       0
+      ],
+      "y_dir": [
+       0,
+       1,
+       0
+      ]
+     },
+     "name": "Source"
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      30,
+      20
+     ],
+     "radius": 8
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": {
+      "origin": [
+       0,
+       0,
+       30
+      ],
+      "x_dir": [
+       1,
+       0,
+       0
+      ],
+      "y_dir": [
+       0,
+       1,
+       0
+      ]
+     },
+     "name": "Sketch"
+    }
+   ]
+  ],
+  "badge": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": {
+      "origin": [
+       0,
+       0,
+       10
+      ],
+      "x_dir": [
+       1,
+       0,
+       0
+      ],
+      "y_dir": [
+       0,
+       1,
+       0
+      ]
+     },
+     "name": "Badge"
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      30,
+      20
+     ],
+     "radius": 8
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "peg": [
+   [
+    "solid.box",
+    {
+     "length": 6,
+     "width": 6,
+     "height": 6,
+     "corner": [
+      20,
+      -3,
+      0
+     ],
+     "name": "Peg",
+     "body_name": "Peg"
+    }
+   ]
+  ],
+  "peg_path": [
+   [
+    "solid.box",
+    {
+     "length": 6,
+     "width": 6,
+     "height": 6,
+     "corner": [
+      20,
+      -3,
+      0
+     ],
+     "name": "Peg",
+     "body_name": "Peg"
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Path"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       23,
+       0
+      ],
+      [
+       90,
+       30
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "rod": [
+   [
+    "solid.cylinder",
+    {
+     "radius": 4,
+     "height": 20,
+     "name": "Rod",
+     "body_name": "Rod"
+    }
+   ]
+  ],
+  "rod_sketch": [
+   [
+    "solid.cylinder",
+    {
+     "radius": 8,
+     "height": 30,
+     "name": "Rod",
+     "body_name": "Rod"
+    }
+   ],
+   [
+    "solid.chamfer",
+    {
+     "edges": [
+      [
+       8,
+       0,
+       30
+      ]
+     ],
+     "distance": 3
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": "XZ",
+     "name": "Sketch"
+    }
+   ]
+  ],
+  "two_blocks": [
+   [
+    "solid.box",
+    {
+     "length": 10,
+     "width": 10,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "A",
+     "body_name": "A"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": 10,
+     "width": 10,
+     "height": 10,
+     "corner": [
+      40,
+      0,
+      0
+     ],
+     "name": "B",
+     "body_name": "B"
+    }
+   ]
+  ],
+  "overlap": [
+   [
+    "solid.box",
+    {
+     "length": 20,
+     "width": 20,
+     "height": 20,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "A",
+     "body_name": "A"
+    }
+   ],
+   [
+    "solid.sphere",
+    {
+     "radius": 12,
+     "center": [
+      20,
+      10,
+      10
+     ],
+     "name": "B",
+     "body_name": "B"
+    }
+   ]
+  ],
+  "tray": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 20,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Tray",
+     "body_name": "Tray"
+    }
+   ],
+   [
+    "solid.shell",
+    {
+     "faces": [
+      [
+       30,
+       20,
+       20
+      ]
+     ],
+     "thickness": 2
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": {
+      "origin": [
+       0,
+       20,
+       0
+      ],
+      "x_dir": [
+       1,
+       0,
+       0
+      ],
+      "y_dir": [
+       0,
+       0,
+       1
+      ]
+     },
+     "name": "RibSketch"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       2,
+       14
+      ],
+      [
+       58,
+       14
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "case": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 25,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Case",
+     "body_name": "Case"
+    }
+   ],
+   [
+    "solid.shell",
+    {
+     "faces": [
+      [
+       30,
+       20,
+       25
+      ]
+     ],
+     "thickness": 2
+    }
+   ]
+  ],
+  "case_rule": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 25,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Case",
+     "body_name": "Case"
+    }
+   ],
+   [
+    "solid.shell",
+    {
+     "faces": [
+      [
+       30,
+       20,
+       25
+      ]
+     ],
+     "thickness": 2
+    }
+   ],
+   [
+    "plastic.manage_rules",
+    {
+     "name": "Thick ABS",
+     "thickness": 3,
+     "draft": "1.5 deg"
+    }
+   ]
+  ],
+  "params": [
+   [
+    "parameters.change",
+    {
+     "name": "width",
+     "expression": "40 mm"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": "width",
+     "width": 30,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Block",
+     "body_name": "Block"
+    }
+   ]
+  ],
+  "configured": [
+   [
+    "parameters.change",
+    {
+     "name": "width",
+     "expression": "40 mm"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": "width",
+     "width": 30,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Block",
+     "body_name": "Block"
+    }
+   ],
+   [
+    "config.configure",
+    {
+     "params": [
+      "width"
+     ]
+    }
+   ]
+  ],
+  "sheet": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Base"
+    }
+   ],
+   [
+    "sketch.rectangle.two_point",
+    {
+     "p0": [
+      0,
+      0
+     ],
+     "p1": [
+      60,
+      40
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "sheet.flange",
+    {
+     "sketch": "Base",
+     "body_name": "Sheet"
+    }
+   ]
+  ],
+  "sheet_flanged": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Base"
+    }
+   ],
+   [
+    "sketch.rectangle.two_point",
+    {
+     "p0": [
+      0,
+      0
+     ],
+     "p1": [
+      60,
+      40
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "sheet.flange",
+    {
+     "sketch": "Base",
+     "body_name": "Sheet"
+    }
+   ],
+   [
+    "sheet.flange",
+    {
+     "edges": [
+      [
+       30,
+       0,
+       2.5
+      ]
+     ],
+     "height": 20
+    }
+   ]
+  ],
+  "sheet_unfolded": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Base"
+    }
+   ],
+   [
+    "sketch.rectangle.two_point",
+    {
+     "p0": [
+      0,
+      0
+     ],
+     "p1": [
+      60,
+      40
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "sheet.flange",
+    {
+     "sketch": "Base",
+     "body_name": "Sheet"
+    }
+   ],
+   [
+    "sheet.flange",
+    {
+     "edges": [
+      [
+       30,
+       0,
+       2.5
+      ]
+     ],
+     "height": 20
+    }
+   ],
+   [
+    "sheet.unfold",
+    {}
+   ]
+  ],
+  "surface_sheet": [
+   [
+    "sketch.create",
+    {
+     "plane": "XZ",
+     "name": "Curve"
+    }
+   ],
+   [
+    "sketch.arc.three_point",
+    {
+     "start": [
+      0,
+      0
+     ],
+     "end": [
+      40,
+      0
+     ],
+     "through": [
+      20,
+      10
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "surface.extrude",
+    {
+     "sketch": "Curve",
+     "curves": [
+      "a1"
+     ],
+     "distance": 30,
+     "direction": "symmetric",
+     "body_name": "Sheet"
+    }
+   ]
+  ],
+  "two_strips": [
+   [
+    "sketch.create",
+    {
+     "plane": "XZ",
+     "name": "Left edge"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       20,
+       0
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "surface.extrude",
+    {
+     "sketch": "Left edge",
+     "curves": [
+      "l1"
+     ],
+     "distance": 30,
+     "direction": "symmetric",
+     "body_name": "Left"
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": "XZ",
+     "name": "Right edge"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       40,
+       12
+      ],
+      [
+       60,
+       12
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "surface.extrude",
+    {
+     "sketch": "Right edge",
+     "curves": [
+      "l1"
+     ],
+     "distance": 30,
+     "direction": "symmetric",
+     "body_name": "Right"
+    }
+   ]
+  ],
+  "touching_strips": [
+   [
+    "sketch.create",
+    {
+     "plane": "XZ",
+     "name": "Edges"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       20,
+       0
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       20,
+       0
+      ],
+      [
+       20,
+       15
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "surface.extrude",
+    {
+     "sketch": "Edges",
+     "curves": [
+      "l1"
+     ],
+     "distance": 30,
+     "direction": "symmetric",
+     "body_name": "Floor"
+    }
+   ],
+   [
+    "surface.extrude",
+    {
+     "sketch": "Edges",
+     "curves": [
+      "l2"
+     ],
+     "distance": 30,
+     "direction": "symmetric",
+     "body_name": "Wall"
+    }
+   ]
+  ],
+  "assembly": [
+   [
+    "component.create",
+    {
+     "name": "A"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": 10,
+     "width": 10,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ]
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "component.create",
+    {
+     "name": "B"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": 10,
+     "width": 10,
+     "height": 10,
+     "corner": [
+      20,
+      0,
+      0
+     ]
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "occurrence.ground",
+    {
+     "occurrence": "A:1",
+     "grounded": true
+    }
+   ]
+  ],
+  "assembly_slider": [
+   [
+    "component.create",
+    {
+     "name": "A"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": 10,
+     "width": 10,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ]
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "component.create",
+    {
+     "name": "B"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": 10,
+     "width": 10,
+     "height": 10,
+     "corner": [
+      20,
+      0,
+      0
+     ]
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "occurrence.ground",
+    {
+     "occurrence": "A:1",
+     "grounded": true
+    }
+   ],
+   [
+    "joint.create",
+    {
+     "type": "slider",
+     "a": {
+      "face": [
+       10,
+       5,
+       5
+      ]
+     },
+     "b": {
+      "face": [
+       20,
+       5,
+       5
+      ]
+     },
+     "name": "Rail"
+    }
+   ]
+  ],
+  "gears": [
+   [
+    "component.create",
+    {
+     "name": "Base"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": 2,
+     "width": 2,
+     "height": 2,
+     "corner": [
+      -1,
+      -1,
+      -8
+     ]
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "occurrence.ground",
+    {
+     "occurrence": "Base:1",
+     "grounded": true
+    }
+   ],
+   [
+    "component.create",
+    {
+     "name": "G1"
+    }
+   ],
+   [
+    "solid.cylinder",
+    {
+     "base": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 10,
+     "height": 5
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "joint.create",
+    {
+     "type": "revolute",
+     "a": {
+      "occurrence": "Base",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "z": [
+       0,
+       0,
+       1
+      ]
+     },
+     "b": {
+      "occurrence": "G1",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "z": [
+       0,
+       0,
+       1
+      ]
+     },
+     "flip": true,
+     "name": "G1"
+    }
+   ],
+   [
+    "component.create",
+    {
+     "name": "G2"
+    }
+   ],
+   [
+    "solid.cylinder",
+    {
+     "base": [
+      30,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 20,
+     "height": 5
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "joint.create",
+    {
+     "type": "revolute",
+     "a": {
+      "occurrence": "Base",
+      "point": [
+       30,
+       0,
+       0
+      ],
+      "z": [
+       0,
+       0,
+       1
+      ]
+     },
+     "b": {
+      "occurrence": "G2",
+      "point": [
+       30,
+       0,
+       0
+      ],
+      "z": [
+       0,
+       0,
+       1
+      ]
+     },
+     "flip": true,
+     "name": "G2"
+    }
+   ]
+  ],
+  "rack": [
+   [
+    "component.create",
+    {
+     "name": "Base"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": 2,
+     "width": 2,
+     "height": 2,
+     "corner": [
+      -1,
+      -1,
+      -8
+     ]
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "occurrence.ground",
+    {
+     "occurrence": "Base:1",
+     "grounded": true
+    }
+   ],
+   [
+    "component.create",
+    {
+     "name": "Pinion"
+    }
+   ],
+   [
+    "solid.cylinder",
+    {
+     "base": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 8,
+     "height": 4
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "joint.create",
+    {
+     "type": "revolute",
+     "a": {
+      "occurrence": "Base",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "z": [
+       0,
+       0,
+       1
+      ]
+     },
+     "b": {
+      "occurrence": "Pinion",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "z": [
+       0,
+       0,
+       1
+      ]
+     },
+     "flip": true,
+     "name": "Pinion"
+    }
+   ],
+   [
+    "component.create",
+    {
+     "name": "Rack"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 4,
+     "height": 4,
+     "corner": [
+      -30,
+      -12,
+      0
+     ]
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "joint.create",
+    {
+     "type": "slider",
+     "a": {
+      "occurrence": "Base",
+      "point": [
+       0,
+       -10,
+       0
+      ],
+      "z": [
+       1,
+       0,
+       0
+      ]
+     },
+     "b": {
+      "occurrence": "Rack",
+      "point": [
+       0,
+       -10,
+       0
+      ],
+      "z": [
+       1,
+       0,
+       0
+      ]
+     },
+     "flip": true,
+     "name": "Rail"
+    }
+   ]
+  ],
+  "nut": [
+   [
+    "component.create",
+    {
+     "name": "Base"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": 2,
+     "width": 2,
+     "height": 2,
+     "corner": [
+      -1,
+      -1,
+      -8
+     ]
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "occurrence.ground",
+    {
+     "occurrence": "Base:1",
+     "grounded": true
+    }
+   ],
+   [
+    "component.create",
+    {
+     "name": "Nut"
+    }
+   ],
+   [
+    "solid.cylinder",
+    {
+     "base": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 8,
+     "height": 6
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "joint.create",
+    {
+     "type": "cylindrical",
+     "a": {
+      "occurrence": "Base",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "z": [
+       0,
+       0,
+       1
+      ]
+     },
+     "b": {
+      "occurrence": "Nut",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "z": [
+       0,
+       0,
+       1
+      ]
+     },
+     "flip": true,
+     "name": "Thread"
+    }
+   ]
+  ],
+  "mesh": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Outline"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       50,
+       0
+      ],
+      [
+       50,
+       10
+      ],
+      [
+       10,
+       10
+      ],
+      [
+       10,
+       30
+      ],
+      [
+       0,
+       30
+      ]
+     ],
+     "closed": true
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "solid.extrude",
+    {
+     "sketch": "Outline",
+     "distance": 20,
+     "name": "Bracket",
+     "body_name": "Bracket"
+    }
+   ],
+   [
+    "file.save_mesh",
+    {
+     "path": "{TMP}/Scan.stl",
+     "bodies": [
+      "Bracket"
+     ]
+    }
+   ],
+   [
+    "timeline.delete",
+    {
+     "features": [
+      "Bracket",
+      "Outline"
+     ]
+    }
+   ],
+   [
+    "file.insert_mesh",
+    {
+     "path": "{TMP}/Scan.stl",
+     "name": "Scan"
+    }
+   ]
+  ],
+  "mesh_sketch": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Outline"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       50,
+       0
+      ],
+      [
+       50,
+       10
+      ],
+      [
+       10,
+       10
+      ],
+      [
+       10,
+       30
+      ],
+      [
+       0,
+       30
+      ]
+     ],
+     "closed": true
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "solid.extrude",
+    {
+     "sketch": "Outline",
+     "distance": 20,
+     "name": "Bracket",
+     "body_name": "Bracket"
+    }
+   ],
+   [
+    "file.save_mesh",
+    {
+     "path": "{TMP}/Scan.stl",
+     "bodies": [
+      "Bracket"
+     ]
+    }
+   ],
+   [
+    "timeline.delete",
+    {
+     "features": [
+      "Bracket",
+      "Outline"
+     ]
+    }
+   ],
+   [
+    "file.insert_mesh",
+    {
+     "path": "{TMP}/Scan.stl",
+     "name": "Scan"
+    }
+   ],
+   [
+    "component.activate",
+    {
+     "component": "root"
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": {
+      "origin": [
+       0,
+       0,
+       10
+      ],
+      "x_dir": [
+       1,
+       0,
+       0
+      ],
+      "y_dir": [
+       0,
+       1,
+       0
+      ]
+     },
+     "name": "Section"
+    }
+   ]
+  ],
+  "files": [
+   [
+    "tutorial.file",
+    {
+     "name": "Block.step"
+    }
+   ],
+   [
+    "tutorial.file",
+    {
+     "name": "Block.stl"
+    }
+   ],
+   [
+    "tutorial.file",
+    {
+     "name": "Block.solidcraft"
+    }
+   ]
+  ],
+  "canvas": [
+   [
+    "canvas.insert",
+    {
+     "data": "{PNG}",
+     "plane": "XY",
+     "width": 60,
+     "name": "Canvas1"
+    }
+   ]
+  ],
+  "frame_sketch": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Frame"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       0
+      ],
+      [
+       80,
+       0
+      ],
+      [
+       80,
+       50
+      ],
+      [
+       0,
+       50
+      ]
+     ],
+     "closed": true
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "sheet_path": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Base"
+    }
+   ],
+   [
+    "sketch.rectangle.two_point",
+    {
+     "p0": [
+      0,
+      0
+     ],
+     "p1": [
+      60,
+      40
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ],
+   [
+    "sheet.flange",
+    {
+     "sketch": "Base",
+     "body_name": "Sheet"
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": "XZ",
+     "name": "Path"
+    }
+   ],
+   [
+    "sketch.line",
+    {
+     "points": [
+      [
+       0,
+       2.5
+      ],
+      [
+       0,
+       14
+      ],
+      [
+       10,
+       22
+      ]
+     ]
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "sketch_3d": [
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.options",
+    {
+     "sketch_3d": true
+    }
+   ]
+  ],
+  "plate_finished_sketch": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ],
+   [
+    "sketch.create",
+    {
+     "plane": "XY",
+     "name": "Sketch"
+    }
+   ],
+   [
+    "sketch.circle.center",
+    {
+     "center": [
+      30,
+      20
+     ],
+     "radius": 8
+    }
+   ],
+   [
+    "sketch.finish",
+    {}
+   ]
+  ],
+  "two_plates": [
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 10,
+     "corner": [
+      0,
+      0,
+      0
+     ],
+     "name": "Plate",
+     "body_name": "Plate"
+    }
+   ],
+   [
+    "solid.box",
+    {
+     "length": 60,
+     "width": 40,
+     "height": 12,
+     "corner": [
+      0,
+      60,
+      0
+     ],
+     "name": "Thicker",
+     "body_name": "Thicker"
+    }
+   ]
+  ]
+ },
+ "lessons": [
+  {
+   "command": "sketch.create",
+   "setup": "empty",
+   "about": "Starts a sketch on a plane or a flat face; here the XZ plane.",
+   "demo": [
+    [
+     "sketch.create",
+     {
+      "plane": "XZ"
+     }
+    ],
+    [
+     "sketch.rectangle.two_point",
+     {
+      "p0": [
+       0,
+       0
+      ],
+      "p1": [
+       30,
+       20
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "solid.extrude",
+   "setup": "profile",
+   "about": "Pulls a sketch profile into a solid.",
+   "demo": [
+    [
+     "solid.extrude",
+     {
+      "sketch": "Profile",
+      "distance": 15
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.revolve",
+   "setup": "turn_profile",
+   "about": "Turns a profile around an axis.",
+   "demo": [
+    [
+     "solid.revolve",
+     {
+      "sketch": "Profile",
+      "axis": "Z",
+      "angle": "360 deg"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.sweep",
+   "setup": "sweep_path",
+   "about": "Moves a profile along a path.",
+   "demo": [
+    [
+     "solid.sweep",
+     {
+      "sketch": "Profile",
+      "path_sketch": "Path",
+      "path": [
+       "l1",
+       "a1"
+      ],
+      "operation": "new"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.loft",
+   "setup": "loft_sections",
+   "about": "Blends between sections: here a square into a circle.",
+   "demo": [
+    [
+     "solid.loft",
+     {
+      "sections": [
+       {
+        "sketch": "Base"
+       },
+       {
+        "sketch": "Top"
+       }
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.box",
+   "setup": "empty",
+   "about": "A box from its length, width and height.",
+   "demo": [
+    [
+     "solid.box",
+     {
+      "length": 40,
+      "width": 30,
+      "height": 20
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.cylinder",
+   "setup": "empty",
+   "about": "A cylinder from its radius and height.",
+   "demo": [
+    [
+     "solid.cylinder",
+     {
+      "radius": 12,
+      "height": 30
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.sphere",
+   "setup": "empty",
+   "about": "A sphere from its radius.",
+   "demo": [
+    [
+     "solid.sphere",
+     {
+      "radius": 15
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.torus",
+   "setup": "empty",
+   "about": "A ring from its two radii.",
+   "demo": [
+    [
+     "solid.torus",
+     {
+      "major": 20,
+      "minor": 5
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "setup": "peg",
+   "about": "Copies in rows and columns.",
+   "demo": [
+    [
+     "solid.pattern.rectangular",
+     {
+      "bodies": [
+       "Peg"
+      ],
+      "dir1": [
+       1,
+       0,
+       0
+      ],
+      "count1": 4,
+      "spacing1": 12,
+      "dir2": [
+       0,
+       1,
+       0
+      ],
+      "count2": 3,
+      "spacing2": 12
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.pattern.circular",
+   "setup": "peg",
+   "about": "Copies around an axis.",
+   "demo": [
+    [
+     "solid.pattern.circular",
+     {
+      "bodies": [
+       "Peg"
+      ],
+      "axis": "Z",
+      "count": 8
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.pattern.path",
+   "setup": "peg_path",
+   "about": "Copies along a sketch path.",
+   "demo": [
+    [
+     "solid.pattern.path",
+     {
+      "bodies": [
+       "Peg"
+      ],
+      "path_sketch": "Path",
+      "path": [
+       "l1"
+      ],
+      "count": 5,
+      "spacing": 15
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.mirror",
+   "setup": "peg",
+   "about": "Mirrors bodies across a plane (here YZ).",
+   "demo": [
+    [
+     "solid.mirror",
+     {
+      "bodies": [
+       "Peg"
+      ],
+      "plane": "YZ"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.hole",
+   "setup": "plate",
+   "about": "Drills a hole into a face.",
+   "demo": [
+    [
+     "solid.hole",
+     {
+      "position": [
+       30,
+       20,
+       10
+      ],
+      "direction": [
+       0,
+       0,
+       -1
+      ],
+      "diameter": 10,
+      "to": [
+       30,
+       20,
+       -1
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.pipe",
+   "setup": "sweep_path",
+   "about": "A round tube along a path, optionally hollow.",
+   "demo": [
+    [
+     "solid.pipe",
+     {
+      "path_sketch": "Path",
+      "path": [
+       "l1",
+       "a1"
+      ],
+      "diameter": 8,
+      "wall": 1
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.bounding_solid",
+   "setup": "plate_and_pin",
+   "about": "A box around bodies, with a margin.",
+   "demo": [
+    [
+     "solid.bounding_solid",
+     {
+      "bodies": [
+       "Plate",
+       "Pin"
+      ],
+      "margin": 2
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.thread",
+   "setup": "rod",
+   "about": "Adds a metric thread to a round face (a cosmetic thread).",
+   "demo": [
+    [
+     "solid.thread",
+     {
+      "face": [
+       4,
+       0,
+       10
+      ],
+      "designation": "M8"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.boundary_fill",
+   "setup": "overlap",
+   "about": "Fills the cells that bodies enclose: here where the box and ball overlap.",
+   "demo": [
+    [
+     "solid.boundary_fill",
+     {
+      "tools": [
+       "A",
+       "B"
+      ],
+      "cells": [
+       [
+        16,
+        10,
+        10
+       ]
+      ],
+      "remove_tools": true
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.coil",
+   "setup": "empty",
+   "about": "A spring-like coil from its diameter, turns and pitch.",
+   "demo": [
+    [
+     "solid.coil",
+     {
+      "diameter": 40,
+      "revolutions": 3,
+      "pitch": 8,
+      "section_size": 4
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.rib",
+   "setup": "tray",
+   "about": "A thin wall grown from an open sketch line to the faces around it.",
+   "demo": [
+    [
+     "solid.rib",
+     {
+      "sketch": "RibSketch",
+      "curves": [
+       "l1"
+      ],
+      "thickness": 3
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.web",
+   "setup": "tray",
+   "about": "Walls from open sketch lines, one each.",
+   "demo": [
+    [
+     "solid.web",
+     {
+      "sketch": "RibSketch",
+      "curves": [
+       "l1"
+      ],
+      "thickness": 3
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.emboss",
+   "setup": "badge",
+   "about": "Raises (or sinks) a sketch on a face.",
+   "demo": [
+    [
+     "solid.emboss",
+     {
+      "sketch": "Badge",
+      "depth": 2,
+      "face": [
+       30,
+       20,
+       10
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "joint.origin",
+   "setup": "assembly",
+   "about": "Marks a place on a part where joints attach.",
+   "demo": [
+    [
+     "joint.origin",
+     {
+      "name": "Top",
+      "occurrence": "B",
+      "face": [
+       25,
+       5,
+       10
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sketch.finish",
+   "setup": "sketch_rect",
+   "about": "Closes the sketch; its closed shapes become profiles.",
+   "demo": [
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.finish_auto_constrain",
+   "setup": "sketch_rect",
+   "about": "Adds the constraints and dimensions the sketch needs, then finishes it.",
+   "demo": [
+    [
+     "sketch.finish_auto_constrain",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.line",
+   "setup": "sketch",
+   "about": "Draws connected straight lines; click point after point, Esc to stop.",
+   "demo": [
+    [
+     "sketch.line",
+     {
+      "points": [
+       [
+        0,
+        0
+       ],
+       [
+        40,
+        0
+       ],
+       [
+        40,
+        20
+       ],
+       [
+        10,
+        30
+       ]
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "setup": "sketch",
+   "about": "A rectangle from two opposite corners.",
+   "demo": [
+    [
+     "sketch.rectangle.two_point",
+     {
+      "p0": [
+       0,
+       0
+      ],
+      "p1": [
+       40,
+       25
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.rectangle.three_point",
+   "setup": "sketch",
+   "about": "A rectangle at any angle: one edge, then its width.",
+   "demo": [
+    [
+     "sketch.rectangle.three_point",
+     {
+      "p0": [
+       0,
+       0
+      ],
+      "p1": [
+       36,
+       12
+      ],
+      "p2": [
+       30,
+       34
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "setup": "sketch",
+   "about": "A rectangle with rounded corners.",
+   "demo": [
+    [
+     "sketch.rectangle.rounded",
+     {
+      "p0": [
+       0,
+       0
+      ],
+      "p1": [
+       40,
+       25
+      ],
+      "radius": 5
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "setup": "sketch",
+   "about": "A rectangle from its centre and a corner.",
+   "demo": [
+    [
+     "sketch.rectangle.center",
+     {
+      "center": [
+       0,
+       0
+      ],
+      "corner": [
+       20,
+       12
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.circle.center",
+   "setup": "sketch",
+   "about": "A circle from its centre and radius.",
+   "demo": [
+    [
+     "sketch.circle.center",
+     {
+      "center": [
+       20,
+       20
+      ],
+      "radius": 12
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.circle.two_point",
+   "setup": "sketch",
+   "about": "A circle from the two ends of a diameter.",
+   "demo": [
+    [
+     "sketch.circle.two_point",
+     {
+      "p0": [
+       0,
+       0
+      ],
+      "p1": [
+       30,
+       0
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.circle.three_point",
+   "setup": "sketch",
+   "about": "A circle through three points.",
+   "demo": [
+    [
+     "sketch.circle.three_point",
+     {
+      "p0": [
+       0,
+       0
+      ],
+      "p1": [
+       30,
+       0
+      ],
+      "p2": [
+       15,
+       18
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "setup": "sketch",
+   "about": "An arc from its ends and a point it passes through.",
+   "demo": [
+    [
+     "sketch.arc.three_point",
+     {
+      "start": [
+       0,
+       0
+      ],
+      "end": [
+       30,
+       0
+      ],
+      "through": [
+       15,
+       10
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "setup": "sketch",
+   "about": "An arc from its centre, start point and sweep angle.",
+   "demo": [
+    [
+     "sketch.arc.center_point",
+     {
+      "center": [
+       0,
+       0
+      ],
+      "start": [
+       20,
+       0
+      ],
+      "sweep": 135
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.polygon.inscribed",
+   "setup": "sketch",
+   "about": "A regular polygon inside a circle.",
+   "demo": [
+    [
+     "sketch.polygon.inscribed",
+     {
+      "center": [
+       0,
+       0
+      ],
+      "radius": 15,
+      "sides": 6
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.polygon.circumscribed",
+   "setup": "sketch",
+   "about": "A regular polygon around a circle (radius to the edge middles).",
+   "demo": [
+    [
+     "sketch.polygon.circumscribed",
+     {
+      "center": [
+       0,
+       0
+      ],
+      "radius": 15,
+      "sides": 6
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.polygon.edge",
+   "setup": "sketch",
+   "about": "A regular polygon from one of its edges.",
+   "demo": [
+    [
+     "sketch.polygon.edge",
+     {
+      "p0": [
+       0,
+       0
+      ],
+      "p1": [
+       20,
+       0
+      ],
+      "sides": 5
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.slot.center_to_center",
+   "setup": "sketch",
+   "about": "A slot from the centres of its round ends and its width.",
+   "demo": [
+    [
+     "sketch.slot.center_to_center",
+     {
+      "p0": [
+       -20,
+       0
+      ],
+      "p1": [
+       20,
+       0
+      ],
+      "width": 12
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.slot.overall",
+   "setup": "sketch",
+   "about": "A slot from its overall ends and its width.",
+   "demo": [
+    [
+     "sketch.slot.overall",
+     {
+      "p0": [
+       -25,
+       0
+      ],
+      "p1": [
+       25,
+       0
+      ],
+      "width": 12
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.point",
+   "setup": "sketch_rect",
+   "about": "A sketch point (for holes, references and constraints).",
+   "demo": [
+    [
+     "sketch.point",
+     {
+      "point": [
+       20,
+       12
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.dimension",
+   "setup": "sketch_rect",
+   "about": "Drives a size: the rectangle's bottom edge becomes 60 mm.",
+   "demo": [
+    [
+     "sketch.dimension",
+     {
+      "entities": [
+       "l1"
+      ],
+      "value": 60
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction",
+   "setup": "sketch_rect",
+   "about": "Turns curves into construction geometry (references, not profiles).",
+   "demo": [
+    [
+     "sketch.construction",
+     {
+      "curves": [
+       "l1",
+       "l3"
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.line.midpoint",
+   "setup": "sketch",
+   "about": "A line from its middle and one end.",
+   "demo": [
+    [
+     "sketch.line.midpoint",
+     {
+      "mid": [
+       0,
+       0
+      ],
+      "end": [
+       20,
+       10
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.arc.tangent",
+   "setup": "sketch_line",
+   "about": "An arc that leaves the end of a line smoothly.",
+   "demo": [
+    [
+     "sketch.arc.tangent",
+     {
+      "start": "l1.end",
+      "end": [
+       45,
+       15
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.circle.two_tangent",
+   "setup": "sketch_corner",
+   "about": "A circle of a given radius touching two curves.",
+   "demo": [
+    [
+     "sketch.circle.two_tangent",
+     {
+      "curves": [
+       "l1",
+       "l2"
+      ],
+      "radius": 8,
+      "near": [
+       10,
+       10
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.circle.three_tangent",
+   "setup": "sketch_triangle",
+   "about": "A circle touching three curves: here the triangle's inscribed circle.",
+   "demo": [
+    [
+     "sketch.circle.three_tangent",
+     {
+      "curves": [
+       "l1",
+       "l2",
+       "l3"
+      ],
+      "near": [
+       20,
+       10
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.slot.center_point",
+   "setup": "sketch",
+   "about": "A slot from its centre, one end and its width.",
+   "demo": [
+    [
+     "sketch.slot.center_point",
+     {
+      "center": [
+       0,
+       0
+      ],
+      "end": [
+       20,
+       0
+      ],
+      "width": 10
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.slot.arc_three_point",
+   "setup": "sketch",
+   "about": "A curved slot through three points.",
+   "demo": [
+    [
+     "sketch.slot.arc_three_point",
+     {
+      "start": [
+       -20,
+       0
+      ],
+      "through": [
+       0,
+       15
+      ],
+      "end": [
+       20,
+       0
+      ],
+      "width": 6
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.slot.arc_center",
+   "setup": "sketch",
+   "about": "A curved slot from its centre and ends.",
+   "demo": [
+    [
+     "sketch.slot.arc_center",
+     {
+      "center": [
+       0,
+       0
+      ],
+      "start": [
+       20,
+       0
+      ],
+      "end": [
+       0,
+       20
+      ],
+      "width": 6
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.ellipse",
+   "setup": "sketch",
+   "about": "An ellipse from its centre, major axis and minor radius.",
+   "demo": [
+    [
+     "sketch.ellipse",
+     {
+      "center": [
+       0,
+       0
+      ],
+      "major": [
+       25,
+       0
+      ],
+      "minor_radius": 12
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "setup": "sketch",
+   "about": "A smooth curve through the points you click.",
+   "demo": [
+    [
+     "sketch.spline.fit_point",
+     {
+      "points": [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        10
+       ],
+       [
+        25,
+        4
+       ],
+       [
+        40,
+        16
+       ]
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.spline.control_point",
+   "setup": "sketch",
+   "about": "A smooth curve pulled by control points.",
+   "demo": [
+    [
+     "sketch.spline.control_point",
+     {
+      "points": [
+       [
+        0,
+        0
+       ],
+       [
+        10,
+        15
+       ],
+       [
+        25,
+        -5
+       ],
+       [
+        40,
+        12
+       ]
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.spline.control_point_5",
+   "setup": "sketch",
+   "about": "A degree-5 control point curve (smoother bends).",
+   "demo": [
+    [
+     "sketch.spline.control_point_5",
+     {
+      "points": [
+       [
+        0,
+        0
+       ],
+       [
+        8,
+        14
+       ],
+       [
+        18,
+        -6
+       ],
+       [
+        28,
+        14
+       ],
+       [
+        36,
+        -4
+       ],
+       [
+        44,
+        10
+       ]
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.conic",
+   "setup": "sketch",
+   "about": "A conic curve between two ends, pulled toward an apex.",
+   "demo": [
+    [
+     "sketch.conic",
+     {
+      "start": [
+       0,
+       0
+      ],
+      "end": [
+       40,
+       0
+      ],
+      "apex": [
+       20,
+       25
+      ],
+      "rho": 0.5
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.centerline",
+   "setup": "sketch_line",
+   "about": "Marks a line as a centerline (an axis, never part of a profile).",
+   "demo": [
+    [
+     "sketch.centerline",
+     {
+      "curves": [
+       "l1"
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.text",
+   "setup": "sketch",
+   "about": "Text as outlines you can extrude or cut.",
+   "demo": [
+    [
+     "sketch.text",
+     {
+      "text": "SolidCraft",
+      "at": [
+       0,
+       0
+      ],
+      "height": 8
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constrainer",
+   "setup": "sketch_slanted",
+   "about": "Applies the constraint the geometry nearly has: the almost-flat line becomes horizontal.",
+   "demo": [
+    [
+     "sketch.constrainer",
+     {
+      "entities": [
+       "l1"
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.project",
+   "setup": "plate_sketch",
+   "about": "Copies a body's edges into the sketch, linked to them.",
+   "demo": [
+    [
+     "sketch.project",
+     {
+      "refs": [
+       {
+        "face": [
+         30,
+         20,
+         10
+        ]
+       }
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.intersect",
+   "setup": "pin_sketch",
+   "about": "Where a body crosses the sketch plane, as linked curves.",
+   "demo": [
+    [
+     "sketch.intersect",
+     {
+      "refs": [
+       {
+        "body": "Pin"
+       }
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.include_3d",
+   "setup": "plate_sketch",
+   "about": "Brings 3D edges into the sketch, flattened onto its plane.",
+   "demo": [
+    [
+     "sketch.include_3d",
+     {
+      "refs": [
+       {
+        "edge": [
+         30,
+         0,
+         10
+        ]
+       },
+       {
+        "edge": [
+         60,
+         20,
+         10
+        ]
+       }
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.project_to_surface",
+   "setup": "plate_projection",
+   "about": "Projects another sketch's curve onto a face.",
+   "demo": [
+    [
+     "sketch.project_to_surface",
+     {
+      "curves": [
+       {
+        "sketch": "Source",
+        "curve": "c1"
+       }
+      ],
+      "face": [
+       30,
+       20,
+       10
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.intersection_curve",
+   "setup": "pin_sketch",
+   "about": "The curve where two bodies meet.",
+   "demo": [
+    [
+     "sketch.intersection_curve",
+     {
+      "a": {
+       "body": "Plate"
+      },
+      "b": {
+       "body": "Pin"
+      }
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.spun_profile",
+   "setup": "rod_sketch",
+   "about": "A turned body's outline, drawn in the sketch.",
+   "demo": [
+    [
+     "sketch.spun_profile",
+     {
+      "body": "Rod",
+      "axis": "Z"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.isoparametric_curve",
+   "setup": "rod_sketch",
+   "about": "A curve that runs along a face's own grid.",
+   "demo": [
+    [
+     "sketch.isoparametric_curve",
+     {
+      "face": [
+       8,
+       0,
+       10
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.fit_curves_to_section",
+   "setup": "mesh_sketch",
+   "about": "Fits lines and arcs to a mesh's cross-section.",
+   "demo": [
+    [
+     "sketch.fit_curves_to_section",
+     {
+      "body": "Scan"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.horizontal_vertical",
+   "setup": "sketch_slanted",
+   "about": "Makes a line horizontal or vertical.",
+   "demo": [
+    [
+     "sketch.constraint.horizontal_vertical",
+     {
+      "line": "l1",
+      "mode": "horizontal"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.coincident",
+   "setup": "sketch_gap",
+   "about": "Joins two points: the lines now meet.",
+   "demo": [
+    [
+     "sketch.constraint.coincident",
+     {
+      "a": "l1.end",
+      "b": "l2.start"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.tangent",
+   "setup": "sketch_line_circle",
+   "about": "Makes curves touch smoothly: the circle rests on the line.",
+   "demo": [
+    [
+     "sketch.constraint.tangent",
+     {
+      "a": "l1",
+      "b": "c1"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.equal",
+   "setup": "sketch_two_circles",
+   "about": "Makes two lines or circles the same size.",
+   "demo": [
+    [
+     "sketch.constraint.equal",
+     {
+      "a": "c1",
+      "b": "c2"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.parallel",
+   "setup": "sketch_two_lines",
+   "about": "Makes two lines parallel.",
+   "demo": [
+    [
+     "sketch.constraint.parallel",
+     {
+      "a": "l1",
+      "b": "l2"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.perpendicular",
+   "setup": "sketch_two_lines",
+   "about": "Makes two lines square to each other.",
+   "demo": [
+    [
+     "sketch.constraint.perpendicular",
+     {
+      "a": "l1",
+      "b": "l2"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.fix",
+   "setup": "sketch_rect",
+   "about": "Pins geometry where it is.",
+   "demo": [
+    [
+     "sketch.constraint.fix",
+     {
+      "entity": "l1"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.midpoint",
+   "setup": "sketch_two_lines",
+   "about": "Puts a point on the middle of a line.",
+   "demo": [
+    [
+     "sketch.constraint.midpoint",
+     {
+      "point": "l2.start",
+      "line": "l1"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.concentric",
+   "setup": "sketch_two_circles",
+   "about": "Gives two circles the same centre.",
+   "demo": [
+    [
+     "sketch.constraint.concentric",
+     {
+      "a": "c1",
+      "b": "c2"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.collinear",
+   "setup": "sketch_two_lines",
+   "about": "Puts two lines on one line.",
+   "demo": [
+    [
+     "sketch.constraint.collinear",
+     {
+      "a": "l1",
+      "b": "l2"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.symmetry",
+   "setup": "sketch_two_circles",
+   "about": "Mirrors two items about a line (here the sketch's Y axis).",
+   "demo": [
+    [
+     "sketch.constraint.symmetry",
+     {
+      "a": "c1",
+      "b": "c2",
+      "line": "y"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.curvature",
+   "setup": "sketch_line_spline",
+   "about": "Makes two curves meet with matching curvature (G2).",
+   "demo": [
+    [
+     "sketch.constraint.curvature",
+     {
+      "a": "l1",
+      "b": "s1"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.constraint.polygon",
+   "setup": "sketch_quad",
+   "about": "Makes a closed chain of lines a regular polygon.",
+   "demo": [
+    [
+     "sketch.constraint.polygon",
+     {
+      "lines": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.auto_constrain",
+   "setup": "sketch_rect",
+   "about": "Adds the constraints and dimensions until the sketch is fully defined.",
+   "demo": [
+    [
+     "sketch.auto_constrain",
+     {}
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.auto_constrain_from_datum",
+   "setup": "sketch_rect",
+   "about": "Like AutoConstrain, measuring positions from a datum point.",
+   "demo": [
+    [
+     "sketch.auto_constrain_from_datum",
+     {}
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.blend_curve",
+   "setup": "sketch_apart",
+   "about": "A smooth curve joining the ends of two curves.",
+   "demo": [
+    [
+     "sketch.blend_curve",
+     {
+      "a": "l1.end",
+      "b": "l2.start"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.fillet",
+   "setup": "sketch_rect",
+   "about": "Rounds the corners where sketch curves meet.",
+   "demo": [
+    [
+     "sketch.fillet",
+     {
+      "points": [
+       "l1.start",
+       "l1.end",
+       "l2.end",
+       "l3.end"
+      ],
+      "radius": 5
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.chamfer.equal_distance",
+   "setup": "sketch_rect",
+   "about": "Cuts a corner off at equal distances.",
+   "demo": [
+    [
+     "sketch.chamfer.equal_distance",
+     {
+      "a": "l1",
+      "b": "l2",
+      "distance": 6
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.chamfer.distance_angle",
+   "setup": "sketch_rect",
+   "about": "Cuts a corner off at a distance and angle.",
+   "demo": [
+    [
+     "sketch.chamfer.distance_angle",
+     {
+      "a": "l1",
+      "b": "l2",
+      "distance": 8,
+      "angle": 30
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.chamfer.two_distance",
+   "setup": "sketch_rect",
+   "about": "Cuts a corner off at two distances.",
+   "demo": [
+    [
+     "sketch.chamfer.two_distance",
+     {
+      "a": "l1",
+      "b": "l2",
+      "distance": 5,
+      "distance2": 10
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.offset",
+   "setup": "sketch_rect",
+   "about": "Copies curves at a distance, linked to the originals.",
+   "demo": [
+    [
+     "sketch.offset",
+     {
+      "curves": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ],
+      "distance": 4,
+      "side": [
+       20,
+       12
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.trim",
+   "setup": "sketch_cross",
+   "about": "Removes a piece of a curve between crossings.",
+   "demo": [
+    [
+     "sketch.trim",
+     {
+      "curve": "l1",
+      "at": [
+       30,
+       0
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.extend",
+   "setup": "sketch_reach",
+   "about": "Lengthens a curve to the next one.",
+   "demo": [
+    [
+     "sketch.extend",
+     {
+      "curve": "l1",
+      "at": [
+       14,
+       0
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.break",
+   "setup": "sketch_cross",
+   "about": "Splits a curve where it crosses another.",
+   "demo": [
+    [
+     "sketch.break",
+     {
+      "curve": "l1",
+      "at": [
+       10,
+       0
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.scale",
+   "setup": "sketch_rect",
+   "about": "Resizes sketch geometry about a point.",
+   "demo": [
+    [
+     "sketch.scale",
+     {
+      "entities": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ],
+      "base": [
+       0,
+       0
+      ],
+      "factor": 1.5
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.move",
+   "setup": "sketch_rect",
+   "about": "Moves (or copies) sketch geometry.",
+   "demo": [
+    [
+     "sketch.move",
+     {
+      "entities": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ],
+      "translate": [
+       20,
+       10
+      ],
+      "copy": true
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.insert_dxf",
+   "setup": "empty",
+   "about": "Brings a DXF drawing in as sketch curves.",
+   "demo": [
+    [
+     "sketch.insert_dxf",
+     {
+      "text": "0\nSECTION\n2\nENTITIES\n0\nCIRCLE\n8\n0\n10\n20\n20\n15\n30\n0\n40\n8\n0\nLINE\n8\n0\n10\n0\n20\n0\n30\n0\n11\n40\n21\n0\n31\n0\n0\nLINE\n8\n0\n10\n40\n20\n0\n30\n0\n11\n40\n21\n30\n31\n0\n0\nENDSEC\n0\nEOF\n"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sketch.insert_svg",
+   "setup": "empty",
+   "about": "Brings an SVG drawing in as sketch curves.",
+   "demo": [
+    [
+     "sketch.insert_svg",
+     {
+      "text": "<svg xmlns='http://www.w3.org/2000/svg' width='40' height='30'><rect x='0' y='0' width='40' height='30'/><circle cx='20' cy='15' r='8'/></svg>"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "canvas.insert",
+   "setup": "empty",
+   "about": "Puts a reference picture on a plane to trace over.",
+   "demo": [
+    [
+     "canvas.insert",
+     {
+      "data": "{PNG}",
+      "plane": "XY",
+      "width": 60
+     }
+    ]
+   ]
+  },
+  {
+   "command": "canvas.decal",
+   "setup": "plate",
+   "about": "Sticks a picture onto a face.",
+   "demo": [
+    [
+     "canvas.decal",
+     {
+      "data": "{PNG}",
+      "face": [
+       30,
+       20,
+       10
+      ],
+      "width": 30
+     }
+    ]
+   ]
+  },
+  {
+   "command": "canvas.edit",
+   "setup": "canvas",
+   "about": "Changes a canvas: its size, angle and opacity.",
+   "demo": [
+    [
+     "canvas.edit",
+     {
+      "canvas": "Canvas1",
+      "opacity": 0.9,
+      "angle": 30,
+      "width": 80
+     }
+    ]
+   ]
+  },
+  {
+   "command": "inspect.curvature_comb",
+   "setup": "rod",
+   "about": "Shows curvature as a comb along curves or faces.",
+   "demo": [
+    [
+     "inspect.curvature_comb",
+     {
+      "faces": [
+       [
+        4,
+        0,
+        10
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "inspect.minimum_radius",
+   "setup": "plate_fillet",
+   "about": "Finds the smallest radius of curvature.",
+   "demo": [
+    [
+     "inspect.minimum_radius",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "inspect.isocurve",
+   "setup": "rod",
+   "about": "Shows a face's own grid lines.",
+   "demo": [
+    [
+     "inspect.isocurve",
+     {
+      "faces": [
+       [
+        4,
+        0,
+        10
+       ]
+      ],
+      "count": 8
+     }
+    ]
+   ]
+  },
+  {
+   "command": "inspect.center_of_mass",
+   "setup": "plate_and_pin",
+   "about": "Where bodies balance.",
+   "demo": [
+    [
+     "inspect.center_of_mass",
+     {
+      "bodies": [
+       "Plate",
+       "Pin"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "inspect.zebra",
+   "setup": "plate_fillet",
+   "about": "Stripes that show how smoothly faces meet.",
+   "demo": [
+    [
+     "inspect.zebra",
+     {
+      "stripes": 12
+     }
+    ]
+   ]
+  },
+  {
+   "command": "inspect.draft",
+   "setup": "plate_fillet",
+   "about": "Colours faces by their draft angle for moulding.",
+   "demo": [
+    [
+     "inspect.draft",
+     {
+      "angle": 1
+     }
+    ]
+   ]
+  },
+  {
+   "command": "inspect.environment_map",
+   "setup": "plate_fillet",
+   "about": "A shiny reflection to judge surface quality.",
+   "demo": [
+    [
+     "inspect.environment_map",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "inspect.accessibility",
+   "setup": "plate_fillet",
+   "about": "Shows which faces a tool can reach from a direction.",
+   "demo": [
+    [
+     "inspect.accessibility",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "inspect.curvature_map",
+   "setup": "plate_fillet",
+   "about": "Colours faces by their curvature.",
+   "demo": [
+    [
+     "inspect.curvature_map",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "inspect.continuity",
+   "setup": "plate_fillet",
+   "about": "Checks how smoothly faces meet along their edges.",
+   "demo": [
+    [
+     "inspect.continuity",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "surface.boundary",
+   "setup": "sketch_loop",
+   "about": "A surface filling a loop of curves.",
+   "demo": [
+    [
+     "surface.boundary",
+     {
+      "curves": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.patch",
+   "setup": "profile",
+   "about": "A flat surface on a sketch region (or a loop of edges).",
+   "demo": [
+    [
+     "surface.patch",
+     {
+      "sketch": "Profile"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.thicken",
+   "setup": "surface_sheet",
+   "about": "Gives a surface thickness, making a solid.",
+   "demo": [
+    [
+     "surface.thicken",
+     {
+      "bodies": [
+       "Sheet"
+      ],
+      "thickness": 2
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.extrude",
+   "setup": "curve_sketch",
+   "about": "Pulls curves into a surface (walls, no caps).",
+   "demo": [
+    [
+     "surface.extrude",
+     {
+      "sketch": "Curve",
+      "curves": [
+       "a1"
+      ],
+      "distance": 30,
+      "body_name": "Wall"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.revolve",
+   "setup": "curve_sketch",
+   "about": "Turns curves around an axis into a surface.",
+   "demo": [
+    [
+     "surface.revolve",
+     {
+      "sketch": "Curve",
+      "curves": [
+       "a1"
+      ],
+      "axis": "y",
+      "angle": "270 deg",
+      "body_name": "Dome"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.sweep",
+   "setup": "sweep_path",
+   "about": "Moves curves along a path into a surface.",
+   "demo": [
+    [
+     "surface.sweep",
+     {
+      "sketch": "Profile",
+      "path_sketch": "Path",
+      "path": [
+       "l1",
+       "a1"
+      ],
+      "body_name": "Tube"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.loft",
+   "setup": "loft_sections",
+   "about": "A surface blending between sections.",
+   "demo": [
+    [
+     "surface.loft",
+     {
+      "sections": [
+       {
+        "sketch": "Base"
+       },
+       {
+        "sketch": "Top"
+       }
+      ],
+      "body_name": "Skin"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.offset",
+   "setup": "plate",
+   "about": "Copies faces at a distance as a new surface.",
+   "demo": [
+    [
+     "surface.offset",
+     {
+      "faces": [
+       [
+        30,
+        20,
+        10
+       ]
+      ],
+      "distance": 8,
+      "body_name": "Lid"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.ruled",
+   "setup": "plate",
+   "about": "A strip of surface running out from edges.",
+   "demo": [
+    [
+     "surface.ruled",
+     {
+      "body": "Plate",
+      "edges": [
+       [
+        30,
+        0,
+        10
+       ]
+      ],
+      "distance": 8,
+      "body_name": "Strip"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.blend",
+   "setup": "two_strips",
+   "about": "A smooth surface bridging two edges.",
+   "demo": [
+    [
+     "surface.blend",
+     {
+      "from": {
+       "body": "Left",
+       "edges": [
+        [
+         20,
+         0,
+         0
+        ]
+       ]
+      },
+      "to": {
+       "body": "Right",
+       "edges": [
+        [
+         40,
+         0,
+         -12
+        ]
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.stitch",
+   "setup": "touching_strips",
+   "about": "Sews surfaces that share edges into one body.",
+   "demo": [
+    [
+     "surface.stitch",
+     {
+      "bodies": [
+       "Floor",
+       "Wall"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.extend",
+   "setup": "surface_sheet",
+   "about": "Grows a surface past its edge.",
+   "demo": [
+    [
+     "surface.extend",
+     {
+      "body": "Sheet",
+      "edges": [
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      "distance": 8
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.trim",
+   "setup": "surface_sheet",
+   "about": "Cuts a surface with a plane, keeping one side.",
+   "demo": [
+    [
+     "surface.trim",
+     {
+      "body": "Sheet",
+      "plane": {
+       "origin": [
+        20,
+        0,
+        0
+       ],
+       "normal": [
+        1,
+        0,
+        0
+       ]
+      },
+      "keep": [
+       8,
+       0,
+       -6
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.untrim",
+   "setup": "plate_hole",
+   "about": "Fills a face's holes back in (as a surface).",
+   "demo": [
+    [
+     "surface.untrim",
+     {
+      "face": {
+       "body": "Plate",
+       "point": [
+        10,
+        10,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.unstitch",
+   "setup": "plate",
+   "about": "Takes a body apart into separate surfaces.",
+   "demo": [
+    [
+     "surface.unstitch",
+     {
+      "body": "Plate"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.reverse_normal",
+   "setup": "surface_sheet",
+   "about": "Turns a surface over (its normal flips).",
+   "demo": [
+    [
+     "surface.reverse_normal",
+     {
+      "body": "Sheet"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "surface.fair",
+   "setup": "ball_shell",
+   "about": "Smooths a free-form surface's shape (its panel; a face with control points is needed).",
+   "demo": "open"
+  },
+  {
+   "command": "surface.match",
+   "setup": "two_strips",
+   "about": "Rebuilds a surface's edge to meet another surface.",
+   "demo": "open"
+  },
+  {
+   "command": "sketch.mirror",
+   "setup": "sketch_mirror",
+   "about": "Mirrors sketch geometry about a line.",
+   "demo": [
+    [
+     "sketch.mirror",
+     {
+      "entities": [
+       "c1"
+      ],
+      "line": "l1"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.pattern.circular",
+   "setup": "sketch_small_circle",
+   "about": "Copies sketch geometry around a centre.",
+   "demo": [
+    [
+     "sketch.pattern.circular",
+     {
+      "entities": [
+       "c1"
+      ],
+      "center": [
+       0,
+       0
+      ],
+      "count": 6
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.pattern.rectangular",
+   "setup": "sketch_small_circle",
+   "about": "Copies sketch geometry in rows and columns.",
+   "demo": [
+    [
+     "sketch.pattern.rectangular",
+     {
+      "entities": [
+       "c1"
+      ],
+      "count": 4,
+      "spacing": 12,
+      "count2": 3,
+      "spacing2": 12
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "solid.fillet",
+   "setup": "plate",
+   "about": "Rounds edges: here the plate's front top edge.",
+   "demo": [
+    [
+     "solid.fillet",
+     {
+      "edges": [
+       [
+        30,
+        0,
+        10
+       ]
+      ],
+      "radius": 4
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.chamfer",
+   "setup": "plate",
+   "about": "Bevels edges at a distance.",
+   "demo": [
+    [
+     "solid.chamfer",
+     {
+      "edges": [
+       [
+        30,
+        0,
+        10
+       ],
+       [
+        60,
+        20,
+        10
+       ]
+      ],
+      "distance": 3
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.combine",
+   "setup": "plate_and_pin",
+   "about": "Joins, cuts or intersects bodies: the pin is cut out of the plate.",
+   "demo": [
+    [
+     "solid.combine",
+     {
+      "target": "Plate",
+      "tools": [
+       "Pin"
+      ],
+      "operation": "cut"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.scale",
+   "setup": "plate",
+   "about": "Resizes bodies by a factor.",
+   "demo": [
+    [
+     "solid.scale",
+     {
+      "bodies": [
+       "Plate"
+      ],
+      "factor": 1.5
+     }
+    ]
+   ]
+  },
+  {
+   "command": "face.delete",
+   "setup": "plate_hole",
+   "about": "Removes faces and heals the gap: the hole disappears.",
+   "demo": [
+    [
+     "face.delete",
+     {
+      "faces": [
+       [
+        35,
+        20,
+        5
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.offset_face",
+   "setup": "plate",
+   "about": "Moves faces along their normals; neighbours follow.",
+   "demo": [
+    [
+     "solid.offset_face",
+     {
+      "faces": [
+       [
+        60,
+        20,
+        5
+       ]
+      ],
+      "distance": 10
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.shell",
+   "setup": "plate",
+   "about": "Hollows a solid, removing the faces you pick.",
+   "demo": [
+    [
+     "solid.shell",
+     {
+      "faces": [
+       [
+        30,
+        20,
+        10
+       ]
+      ],
+      "thickness": 2
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.draft",
+   "setup": "plate",
+   "about": "Tilts faces for moulding.",
+   "demo": [
+    [
+     "solid.draft",
+     {
+      "faces": [
+       [
+        60,
+        20,
+        5
+       ],
+       [
+        0,
+        20,
+        5
+       ]
+      ],
+      "angle": "10 deg",
+      "neutral": "XY"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.split_face",
+   "setup": "plate",
+   "about": "Divides a face in two along a plane.",
+   "demo": [
+    [
+     "solid.split_face",
+     {
+      "faces": [
+       [
+        30,
+        20,
+        10
+       ]
+      ],
+      "plane": {
+       "origin": [
+        30,
+        0,
+        0
+       ],
+       "normal": [
+        1,
+        0,
+        0
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.cut_body",
+   "setup": "plate",
+   "about": "Cuts a body in two along a plane; neither half is new material.",
+   "demo": [
+    [
+     "solid.cut_body",
+     {
+      "body": "Plate",
+      "plane": {
+       "origin": [
+        30,
+        0,
+        0
+       ],
+       "normal": [
+        1,
+        0,
+        0
+       ]
+      }
+     }
+    ],
+    [
+     "solid.move",
+     {
+      "bodies": [
+       "Plate (1)"
+      ],
+      "translate": [
+       10,
+       0,
+       0
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.press_pull",
+   "setup": "plate",
+   "about": "Pushes or pulls a face: the top rises by 8 mm.",
+   "demo": [
+    [
+     "solid.press_pull",
+     {
+      "face": [
+       30,
+       20,
+       10
+      ],
+      "distance": 8
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.move",
+   "setup": "plate",
+   "about": "Moves and turns bodies (here a copy, moved and turned 30°).",
+   "demo": [
+    [
+     "solid.move",
+     {
+      "bodies": [
+       "Plate"
+      ],
+      "translate": [
+       0,
+       60,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "angle": "30 deg",
+      "copy": true
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.replace_face",
+   "setup": "plate",
+   "about": "Moves a face onto a plane: the top goes up to 25 mm.",
+   "demo": [
+    [
+     "solid.replace_face",
+     {
+      "faces": [
+       [
+        30,
+        20,
+        10
+       ]
+      ],
+      "target": {
+       "origin": [
+        0,
+        0,
+        25
+       ],
+       "normal": [
+        0,
+        0,
+        1
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.align",
+   "setup": "two_blocks",
+   "about": "Moves a body so one face meets another.",
+   "demo": [
+    [
+     "solid.align",
+     {
+      "bodies": [
+       "B"
+      ],
+      "from_face": [
+       40,
+       5,
+       5
+      ],
+      "to_face": [
+       10,
+       5,
+       5
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "solid.remove",
+   "setup": "plate_and_pin",
+   "about": "Removes bodies from here on in the timeline.",
+   "demo": [
+    [
+     "solid.remove",
+     {
+      "bodies": [
+       "Pin"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "timeline.compute_all",
+   "setup": "plate_fillet",
+   "about": "Rebuilds every feature in the timeline.",
+   "demo": [
+    [
+     "timeline.compute_all",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "timeline.delete",
+   "setup": "plate_fillet",
+   "about": "Deletes a feature: the fillet goes.",
+   "demo": [
+    [
+     "timeline.delete",
+     {
+      "feature": "Round"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "parameters.change",
+   "setup": "params",
+   "about": "Changes a design parameter: the block follows its width.",
+   "demo": [
+    [
+     "parameters.change",
+     {
+      "name": "width",
+      "expression": "70 mm"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "material.assign",
+   "setup": "plate",
+   "about": "Gives a body a physical material (for mass and looks).",
+   "demo": [
+    [
+     "material.assign",
+     {
+      "bodies": [
+       "Plate"
+      ],
+      "material": "Brass"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "appearance.assign",
+   "setup": "plate_and_pin",
+   "about": "Colours a body (or faces).",
+   "demo": [
+    [
+     "appearance.assign",
+     {
+      "bodies": [
+       "Plate"
+      ],
+      "color": "#e0702c"
+     }
+    ],
+    [
+     "appearance.assign",
+     {
+      "bodies": [
+       "Pin"
+      ],
+      "color": "#3c8ce0"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.plane.offset",
+   "setup": "plate",
+   "about": "A plane parallel to another at a distance.",
+   "demo": [
+    [
+     "construct.plane.offset",
+     {
+      "base": "XY",
+      "offset": 25
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.plane.at_angle",
+   "setup": "plate",
+   "about": "A plane turned about an axis.",
+   "demo": [
+    [
+     "construct.plane.at_angle",
+     {
+      "base": "XY",
+      "axis": "X",
+      "angle": "30 deg"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.axis.through_cylinder",
+   "setup": "rod",
+   "about": "An axis through a cylinder's centre.",
+   "demo": [
+    [
+     "construct.axis.through_cylinder",
+     {
+      "face": {
+       "face": [
+        4,
+        0,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.axis.normal_to_face",
+   "setup": "plate",
+   "about": "An axis square to a face, through a point.",
+   "demo": [
+    [
+     "construct.axis.normal_to_face",
+     {
+      "face": {
+       "face": [
+        30,
+        20,
+        10
+       ]
+      },
+      "point": {
+       "point": [
+        30,
+        20,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.axis.two_planes",
+   "setup": "plate",
+   "about": "An axis where two planes meet.",
+   "demo": [
+    [
+     "construct.axis.two_planes",
+     {
+      "a": "XY",
+      "b": "XZ"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.axis.two_points",
+   "setup": "plate",
+   "about": "An axis through two points.",
+   "demo": [
+    [
+     "construct.axis.two_points",
+     {
+      "a": {
+       "vertex": [
+        0,
+        0,
+        0
+       ]
+      },
+      "b": {
+       "vertex": [
+        60,
+        40,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.axis.edge",
+   "setup": "plate",
+   "about": "An axis along a straight edge.",
+   "demo": [
+    [
+     "construct.axis.edge",
+     {
+      "edge": {
+       "edge": [
+        30,
+        0,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.point.vertex",
+   "setup": "plate",
+   "about": "A construction point at a corner.",
+   "demo": [
+    [
+     "construct.point.vertex",
+     {
+      "point": {
+       "vertex": [
+        60,
+        40,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.point.two_edges",
+   "setup": "plate",
+   "about": "A point where two edges meet.",
+   "demo": [
+    [
+     "construct.point.two_edges",
+     {
+      "a": {
+       "edge": [
+        30,
+        0,
+        10
+       ]
+      },
+      "b": {
+       "edge": [
+        60,
+        20,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.point.three_planes",
+   "setup": "plate",
+   "about": "A point where three planes meet.",
+   "demo": [
+    [
+     "construct.point.three_planes",
+     {
+      "a": {
+       "face": [
+        30,
+        20,
+        10
+       ]
+      },
+      "b": {
+       "face": [
+        30,
+        0,
+        5
+       ]
+      },
+      "c": {
+       "face": [
+        60,
+        20,
+        5
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.point.center",
+   "setup": "rod",
+   "about": "A point at the centre of a circle or sphere.",
+   "demo": [
+    [
+     "construct.point.center",
+     {
+      "of": {
+       "edge": [
+        4,
+        0,
+        20
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.point.edge_plane",
+   "setup": "plate",
+   "about": "A point where an edge passes through a plane.",
+   "demo": [
+    [
+     "construct.point.edge_plane",
+     {
+      "edge": {
+       "edge": [
+        60,
+        0,
+        5
+       ]
+      },
+      "plane": {
+       "face": [
+        30,
+        20,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.point.along_path",
+   "setup": "plate",
+   "about": "A point part way along an edge.",
+   "demo": [
+    [
+     "construct.point.along_path",
+     {
+      "path": {
+       "edge": [
+        30,
+        0,
+        10
+       ]
+      },
+      "t": 0.25
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.plane.midplane",
+   "setup": "plate",
+   "about": "A plane halfway between two faces.",
+   "demo": [
+    [
+     "construct.plane.midplane",
+     {
+      "a": {
+       "face": [
+        30,
+        20,
+        10
+       ]
+      },
+      "b": {
+       "face": [
+        30,
+        20,
+        0
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.plane.two_edges",
+   "setup": "plate",
+   "about": "A plane through two edges.",
+   "demo": [
+    [
+     "construct.plane.two_edges",
+     {
+      "a": {
+       "edge": [
+        30,
+        0,
+        10
+       ]
+      },
+      "b": {
+       "edge": [
+        30,
+        40,
+        0
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.plane.three_points",
+   "setup": "plate",
+   "about": "A plane through three points.",
+   "demo": [
+    [
+     "construct.plane.three_points",
+     {
+      "a": {
+       "vertex": [
+        0,
+        0,
+        10
+       ]
+      },
+      "b": {
+       "vertex": [
+        60,
+        0,
+        10
+       ]
+      },
+      "c": {
+       "vertex": [
+        0,
+        40,
+        0
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.plane.tangent",
+   "setup": "rod",
+   "about": "A plane touching a round face.",
+   "demo": [
+    [
+     "construct.plane.tangent",
+     {
+      "face": {
+       "face": [
+        4,
+        0,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.plane.along_path",
+   "setup": "plate",
+   "about": "A plane square to an edge, part way along it.",
+   "demo": [
+    [
+     "construct.plane.along_path",
+     {
+      "path": {
+       "edge": [
+        30,
+        0,
+        10
+       ]
+      },
+      "t": 0.5
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.plane.perpendicular",
+   "setup": "plate",
+   "about": "A plane through a line, square to another plane.",
+   "demo": [
+    [
+     "construct.plane.perpendicular",
+     {
+      "plane": "XY",
+      "line": {
+       "edge": [
+        30,
+        0,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sheet.flange",
+   "setup": "sheet",
+   "about": "Bends a wall up from a sheet edge.",
+   "demo": [
+    [
+     "sheet.flange",
+     {
+      "edges": [
+       [
+        30,
+        0,
+        2.5
+       ]
+      ],
+      "height": 20
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sheet.perforate",
+   "setup": "sheet",
+   "about": "Covers a sheet with a hole pattern.",
+   "demo": [
+    [
+     "sheet.perforate",
+     {
+      "diameter": 3,
+      "pitch": 6
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sheet.hem",
+   "setup": "sheet_flanged",
+   "about": "Folds a sheet edge back on itself.",
+   "demo": [
+    [
+     "sheet.hem",
+     {
+      "edges": [
+       [
+        30,
+        0,
+        20
+       ]
+      ],
+      "length": 8
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sheet.fold",
+   "setup": "sheet",
+   "about": "Bends a sheet along a line.",
+   "demo": [
+    [
+     "sheet.fold",
+     {
+      "points": [
+       [
+        30,
+        0,
+        2.5
+       ],
+       [
+        30,
+        40,
+        2.5
+       ]
+      ],
+      "angle": "60 deg"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sheet.convert",
+   "setup": "plate",
+   "about": "Turns a plate into a sheet metal body.",
+   "demo": [
+    [
+     "sheet.convert",
+     {
+      "body": "Plate",
+      "face": [
+       30,
+       20,
+       0
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sheet.flat_pattern",
+   "setup": "sheet_flanged",
+   "about": "Lists the flat pattern: size, outline and bends.",
+   "demo": [
+    [
+     "sheet.flat_pattern",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sheet.unfold",
+   "setup": "sheet_flanged",
+   "about": "Lays the bends flat.",
+   "demo": [
+    [
+     "sheet.unfold",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sheet.refold",
+   "setup": "sheet_unfolded",
+   "about": "Folds an unfolded sheet back up.",
+   "demo": [
+    [
+     "sheet.refold",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sheet.manage_rules",
+   "setup": "sheet",
+   "about": "Makes or edits a sheet metal rule (thickness, bend radius…).",
+   "demo": [
+    [
+     "sheet.manage_rules",
+     {
+      "name": "Steel 2 mm",
+      "thickness": 2
+     }
+    ]
+   ]
+  },
+  {
+   "command": "plastic.boss",
+   "setup": "case",
+   "about": "A screw boss on the inside of a case.",
+   "demo": [
+    [
+     "plastic.boss",
+     {
+      "position": [
+       30,
+       20,
+       2
+      ],
+      "diameter": 8,
+      "height": 10,
+      "hole_diameter": 3
+     }
+    ]
+   ]
+  },
+  {
+   "command": "plastic.lip",
+   "setup": "case",
+   "about": "A lip around a case's rim, to locate its lid.",
+   "demo": [
+    [
+     "plastic.lip",
+     {
+      "face": [
+       1,
+       20,
+       25
+      ],
+      "width": 1,
+      "height": 2
+     }
+    ]
+   ]
+  },
+  {
+   "command": "plastic.snap_fit",
+   "setup": "case",
+   "about": "A snap-fit hook.",
+   "demo": [
+    [
+     "plastic.snap_fit",
+     {
+      "position": [
+       30,
+       20,
+       2
+      ],
+      "direction": [
+       0,
+       0,
+       1
+      ],
+      "hook": [
+       1,
+       0,
+       0
+      ],
+      "length": 12,
+      "thickness": 1.5,
+      "width": 6,
+      "catch_depth": 1,
+      "catch_length": 3
+     }
+    ]
+   ]
+  },
+  {
+   "command": "plastic.rest",
+   "setup": "case",
+   "about": "A raised rest pad.",
+   "demo": [
+    [
+     "plastic.rest",
+     {
+      "position": [
+       30,
+       20,
+       2
+      ],
+      "width": 10,
+      "length": 16,
+      "along": [
+       1,
+       0,
+       0
+      ],
+      "height": 4
+     }
+    ]
+   ]
+  },
+  {
+   "command": "plastic.manage_rules",
+   "setup": "case",
+   "about": "Makes or edits a plastic rule (wall, draft, clearance…).",
+   "demo": [
+    [
+     "plastic.manage_rules",
+     {
+      "name": "Thick ABS",
+      "thickness": 3,
+      "draft": "1.5 deg"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "plastic.assign_rule",
+   "setup": "case_rule",
+   "about": "Gives bodies a plastic rule.",
+   "demo": [
+    [
+     "plastic.assign_rule",
+     {
+      "bodies": [
+       "Case"
+      ],
+      "rule": "Thick ABS"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "component.create",
+   "setup": "plate",
+   "about": "A new component (a part of the assembly).",
+   "demo": [
+    [
+     "component.create",
+     {
+      "name": "Bracket"
+     }
+    ],
+    [
+     "solid.box",
+     {
+      "length": 20,
+      "width": 10,
+      "height": 30,
+      "corner": [
+       70,
+       0,
+       0
+      ]
+     }
+    ],
+    [
+     "component.activate",
+     {
+      "component": "root"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "component.insert_design",
+   "setup": "files",
+   "about": "Places another design as a linked component.",
+   "demo": [
+    [
+     "component.insert_design",
+     {
+      "path": "{TMP}/Block.solidcraft"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "joint.create",
+   "setup": "assembly",
+   "about": "Connects two parts with a joint (here a slider), then moves it.",
+   "demo": [
+    [
+     "joint.create",
+     {
+      "type": "slider",
+      "a": {
+       "face": [
+        10,
+        5,
+        5
+       ]
+      },
+      "b": {
+       "face": [
+        20,
+        5,
+        5
+       ]
+      },
+      "name": "Rail"
+     }
+    ],
+    [
+     "joint.drive",
+     {
+      "joint": "Rail",
+      "value": 10
+     }
+    ]
+   ]
+  },
+  {
+   "command": "joint.as_built",
+   "setup": "assembly",
+   "about": "A joint between parts where they already are.",
+   "demo": [
+    [
+     "joint.as_built",
+     {
+      "type": "slider",
+      "a": "A",
+      "b": "B",
+      "name": "Rail"
+     }
+    ],
+    [
+     "joint.drive",
+     {
+      "joint": "Rail",
+      "value": 10
+     }
+    ]
+   ]
+  },
+  {
+   "command": "joint.rigid_group",
+   "setup": "assembly",
+   "about": "Makes parts move together as one.",
+   "demo": [
+    [
+     "joint.rigid_group",
+     {
+      "occurrences": [
+       "A",
+       "B"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "joint.drive",
+   "setup": "assembly_slider",
+   "about": "Moves a joint to a value: B slides 15 mm.",
+   "demo": [
+    [
+     "joint.drive",
+     {
+      "joint": "Rail",
+      "value": 15
+     }
+    ]
+   ]
+  },
+  {
+   "command": "joint.motion_link",
+   "setup": "gears",
+   "about": "Ties one joint's motion to another's.",
+   "demo": [
+    [
+     "joint.motion_link",
+     {
+      "a": "G1",
+      "b": "G2",
+      "ratio": -0.5
+     }
+    ],
+    [
+     "joint.drive",
+     {
+      "joint": "G1",
+      "value": 90
+     }
+    ]
+   ]
+  },
+  {
+   "command": "joint.gear",
+   "setup": "gears",
+   "about": "Makes two turning joints mesh like gears.",
+   "demo": [
+    [
+     "joint.gear",
+     {
+      "a": "G1",
+      "b": "G2",
+      "ra": 10,
+      "rb": 20
+     }
+    ],
+    [
+     "joint.drive",
+     {
+      "joint": "G1",
+      "value": 90
+     }
+    ]
+   ]
+  },
+  {
+   "command": "joint.rack_pinion",
+   "setup": "rack",
+   "about": "A turning pinion drives a sliding rack.",
+   "demo": [
+    [
+     "joint.rack_pinion",
+     {
+      "a": "Pinion",
+      "b": "Rail",
+      "radius": 8
+     }
+    ],
+    [
+     "joint.drive",
+     {
+      "joint": "Pinion",
+      "value": 90
+     }
+    ]
+   ]
+  },
+  {
+   "command": "joint.screw",
+   "setup": "nut",
+   "about": "A cylindrical joint whose turn drives its travel, like a nut on a thread.",
+   "demo": [
+    [
+     "joint.screw",
+     {
+      "joint": "Thread",
+      "pitch": 2
+     }
+    ],
+    [
+     "joint.drive",
+     {
+      "joint": "Thread",
+      "value": 720
+     }
+    ]
+   ]
+  },
+  {
+   "command": "joint.cam",
+   "setup": "gears",
+   "about": "A cam turning drives a follower along its profile.",
+   "demo": "open"
+  },
+  {
+   "command": "contact.enable_sets",
+   "setup": "assembly_slider",
+   "about": "Turns contact sets on: parts stop instead of passing through each other.",
+   "demo": [
+    [
+     "contact.create",
+     {
+      "occurrences": [
+       "A",
+       "B"
+      ]
+     }
+    ],
+    [
+     "contact.enable_sets",
+     {
+      "enabled": true
+     }
+    ]
+   ]
+  },
+  {
+   "command": "contact.enable_all",
+   "setup": "assembly_slider",
+   "about": "Every part takes part in contact.",
+   "demo": [
+    [
+     "contact.enable_all",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "contact.disable_all",
+   "setup": "assembly_slider",
+   "about": "Turns contact off.",
+   "demo": [
+    [
+     "contact.enable_all",
+     {}
+    ],
+    [
+     "contact.disable_all",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "contact.create",
+   "setup": "assembly_slider",
+   "about": "A contact set: these parts can't pass through each other.",
+   "demo": [
+    [
+     "contact.create",
+     {
+      "occurrences": [
+       "A",
+       "B"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "motion.study",
+   "setup": "assembly_slider",
+   "about": "A motion over time, from key values of joints.",
+   "demo": [
+    [
+     "motion.study",
+     {
+      "name": "Travel",
+      "steps": 20,
+      "keys": [
+       {
+        "joint": "Rail",
+        "points": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          15
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "motion.trace",
+   "setup": "assembly_slider",
+   "about": "Traces a point's path as a joint moves.",
+   "demo": [
+    [
+     "motion.trace",
+     {
+      "occurrence": "B",
+      "point": [
+       30,
+       10,
+       10
+      ],
+      "joint": "Rail",
+      "from": 0,
+      "to": 15
+     }
+    ]
+   ]
+  },
+  {
+   "command": "explode.create",
+   "setup": "assembly",
+   "about": "An exploded view: parts pushed apart.",
+   "demo": [
+    [
+     "explode.create",
+     {
+      "name": "Apart",
+      "scale": 1
+     }
+    ]
+   ]
+  },
+  {
+   "command": "component.capture_position",
+   "setup": "assembly",
+   "about": "Keeps parts where you moved them.",
+   "demo": [
+    [
+     "component.capture_position",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "component.revert_position",
+   "setup": "assembly",
+   "about": "Puts moved parts back.",
+   "demo": [
+    [
+     "component.revert_position",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "inspect.interference",
+   "setup": "plate_and_pin",
+   "about": "Finds where bodies overlap, and how much.",
+   "demo": [
+    [
+     "inspect.interference",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "assembly.bom",
+   "setup": "assembly",
+   "about": "A bill of materials: the parts and how many.",
+   "demo": [
+    [
+     "assembly.bom",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "inspect.measure",
+   "setup": "plate",
+   "about": "Volume, area and size of bodies (the numbers appear below).",
+   "demo": [
+    [
+     "inspect.measure",
+     {
+      "bodies": [
+       "Plate"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "inspect.section",
+   "setup": "plate_and_pin",
+   "about": "Cuts the view open on a plane to see inside.",
+   "demo": [
+    [
+     "inspect.section",
+     {
+      "plane": "XZ",
+      "offset": 20
+     }
+    ]
+   ]
+  },
+  {
+   "command": "config.configure",
+   "setup": "params",
+   "about": "Makes a configuration table column from a parameter.",
+   "demo": [
+    [
+     "config.configure",
+     {
+      "params": [
+       "width"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "config.table",
+   "setup": "configured",
+   "about": "Shows the configuration table.",
+   "demo": [
+    [
+     "config.table",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "parts.fastener",
+   "setup": "plate_hole",
+   "about": "Inserts a standard fastener.",
+   "demo": [
+    [
+     "parts.fastener",
+     {
+      "family": "socket_head_cap_screw",
+      "size": "M6",
+      "length": 20,
+      "point": [
+       80,
+       20,
+       0
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "file.insert_step",
+   "setup": "files",
+   "about": "Inserts a STEP file's bodies as a component.",
+   "demo": [
+    [
+     "file.insert_step",
+     {
+      "path": "{TMP}/Block.step"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "file.insert_mesh",
+   "setup": "files",
+   "about": "Inserts a mesh file (STL, 3MF, OBJ, glTF) as mesh bodies.",
+   "demo": [
+    [
+     "file.insert_mesh",
+     {
+      "path": "{TMP}/Block.stl"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "file.save_mesh",
+   "setup": "plate",
+   "about": "Saves bodies as an STL or 3MF mesh (for printing).",
+   "demo": [
+    [
+     "file.save_mesh",
+     {
+      "path": "{TMP}/Plate.stl",
+      "bodies": [
+       "Plate"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "mesh.convert",
+   "setup": "mesh",
+   "about": "Rebuilds a scanned or STL mesh of a mechanical part as editable faces.",
+   "demo": [
+    [
+     "component.activate",
+     {
+      "component": "Scan"
+     }
+    ],
+    [
+     "mesh.convert",
+     {
+      "body": "Scan"
+     }
+    ],
+    [
+     "component.activate",
+     {
+      "component": "root"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "render.start",
+   "setup": "plate_fillet",
+   "about": "Renders a realistic image of the design (in the Render workspace).",
+   "demo": "open"
+  },
+  {
+   "command": "render.scene",
+   "setup": "plate_fillet",
+   "about": "Lists what the renderer will draw.",
+   "demo": [
+    [
+     "render.scene",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "solid.cone",
+   "setup": "empty",
+   "about": "A cone or a truncated cone from its base circle, height and top.",
+   "demo": [
+    [
+     "solid.cone",
+     {
+      "radius": 15,
+      "height": 30,
+      "top_radius": 5
+     }
+    ]
+   ]
+  },
+  {
+   "command": "construct.plane.axis_point",
+   "setup": "plate",
+   "about": "A plane through an axis and a point off it.",
+   "demo": [
+    [
+     "construct.plane.axis_point",
+     {
+      "axis": {
+       "axis": "Z"
+      },
+      "point": {
+       "vertex": [
+        60,
+        40,
+        10
+       ]
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sketch.point.divide",
+   "setup": "sketch_line",
+   "about": "Puts points that divide a curve into equal lengths, and keeps them spaced as it changes.",
+   "demo": [
+    [
+     "sketch.point.divide",
+     {
+      "curve": "l1",
+      "segments": 4
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.equation_curve",
+   "setup": "sketch",
+   "about": "A curve from formulas for x and y over a range of t.",
+   "demo": [
+    [
+     "sketch.equation_curve",
+     {
+      "x": "20 * cos(t)",
+      "y": "10 * sin(2 * t)",
+      "start": 0,
+      "end": "2 * pi"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.transform",
+   "setup": "sketch_rect",
+   "about": "Scales, turns and moves sketch geometry in one step.",
+   "demo": [
+    [
+     "sketch.transform",
+     {
+      "entities": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ],
+      "factor": 1.25,
+      "angle": 15
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.inspect",
+   "setup": "sketch_rect",
+   "about": "What the sketch holds and whether it is fully defined (the numbers appear below).",
+   "demo": [
+    [
+     "sketch.inspect",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.cancel",
+   "setup": "plate",
+   "about": "Leaves a sketch without keeping what changed since it was opened; one Undo brings it back.",
+   "demo": [
+    [
+     "sketch.create",
+     {
+      "plane": "XY",
+      "name": "Scratch"
+     }
+    ],
+    [
+     "sketch.rectangle.two_point",
+     {
+      "p0": [
+       10,
+       10
+      ],
+      "p1": [
+       50,
+       30
+      ]
+     }
+    ],
+    [
+     "sketch.cancel",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "frame.member",
+   "setup": "frame_sketch",
+   "about": "A frame member along each line of a sketch, in the section you choose.",
+   "demo": [
+    [
+     "frame.member",
+     {
+      "sketch": "Frame",
+      "profile": {
+       "kind": "rect_tube",
+       "width": 40,
+       "height": 40,
+       "wall": 3
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sheet.path_flange",
+   "setup": "sheet_path",
+   "about": "Walls and bends along a path drawn across a sheet edge.",
+   "demo": [
+    [
+     "sheet.path_flange",
+     {
+      "edge": [
+       0,
+       20,
+       2.5
+      ],
+      "sketch": "Path",
+      "curves": [
+       "l1",
+       "l2"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "timeline.play",
+   "setup": "plate_fillet",
+   "about": "Replays the history from the marker to the end, a step at a time.",
+   "demo": [
+    [
+     "timeline.play",
+     {
+      "action": "play"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "inspect.colored_components",
+   "setup": "assembly",
+   "about": "Gives each component a colour of its own, without changing its appearance.",
+   "demo": [
+    [
+     "inspect.colored_components",
+     {
+      "enabled": true
+     }
+    ]
+   ]
+  },
+  {
+   "command": "pointcloud.insert",
+   "setup": "empty",
+   "about": "Brings a scanned point cloud (.ply, .xyz, .pts) into the design as points.",
+   "demo": "open"
+  },
+  {
+   "command": "file.send_to_slicer",
+   "setup": "plate",
+   "about": "Saves the bodies and opens them in your 3D-printing slicer.",
+   "demo": "open"
+  },
+  {
+   "command": "sketch.edit",
+   "setup": "plate_finished_sketch",
+   "about": "Reopens a finished sketch to change it.",
+   "demo": [
+    [
+     "sketch.edit",
+     {
+      "sketch": "Sketch"
+     }
+    ],
+    [
+     "sketch.circle.center",
+     {
+      "center": [
+       10,
+       10
+      ],
+      "radius": 4
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.infinite",
+   "setup": "sketch_line",
+   "about": "Draws a line across the whole view, as a reference rather than an edge.",
+   "demo": [
+    [
+     "sketch.infinite",
+     {
+      "curves": [
+       "l1"
+      ],
+      "value": true
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction_line",
+   "setup": "sketch_rect",
+   "about": "A reference line through two points; it guides geometry without becoming an edge.",
+   "demo": [
+    [
+     "sketch.construction_line",
+     {
+      "at": [
+       0,
+       0
+      ],
+      "through": [
+       40,
+       25
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction_line.horizontal",
+   "setup": "sketch_rect",
+   "about": "A reference line straight across, through a point.",
+   "demo": [
+    [
+     "sketch.construction_line.horizontal",
+     {
+      "at": [
+       0,
+       12.5
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction_line.vertical",
+   "setup": "sketch_rect",
+   "about": "A reference line straight up, through a point.",
+   "demo": [
+    [
+     "sketch.construction_line.vertical",
+     {
+      "at": [
+       20,
+       0
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction_line.angle",
+   "setup": "sketch_rect",
+   "about": "A reference line at an angle from the sketch's X.",
+   "demo": [
+    [
+     "sketch.construction_line.angle",
+     {
+      "at": [
+       0,
+       0
+      ],
+      "angle": 30
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction_line.parallel",
+   "setup": "sketch_corner",
+   "about": "A reference line parallel to a curve, through a point.",
+   "demo": [
+    [
+     "sketch.construction_line.parallel",
+     {
+      "at": [
+       0,
+       15
+      ],
+      "curve": "l1"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction_line.perpendicular",
+   "setup": "sketch_corner",
+   "about": "A reference line square to a curve, through a point.",
+   "demo": [
+    [
+     "sketch.construction_line.perpendicular",
+     {
+      "at": [
+       20,
+       10
+      ],
+      "curve": "l1"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction_line.tangent_external",
+   "setup": "sketch_two_circles",
+   "about": "A reference line from a point, touching a circle.",
+   "demo": [
+    [
+     "sketch.construction_line.tangent_external",
+     {
+      "at": [
+       60,
+       30
+      ],
+      "curve": "c1"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction_line.tangent_at",
+   "setup": "sketch_two_circles",
+   "about": "A reference line touching a circle where you pick it.",
+   "demo": [
+    [
+     "sketch.construction_line.tangent_at",
+     {
+      "at": [
+       10,
+       0
+      ],
+      "curve": "c1"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction_line.tangent_two",
+   "setup": "sketch_two_circles",
+   "about": "A reference line touching two circles.",
+   "demo": [
+    [
+     "sketch.construction_line.tangent_two",
+     {
+      "at": [
+       20,
+       10
+      ],
+      "curve": "c1",
+      "curve2": "c2"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.construction_line.bisector",
+   "setup": "sketch_corner",
+   "about": "A reference line halving the angle between two curves.",
+   "demo": [
+    [
+     "sketch.construction_line.bisector",
+     {
+      "at": [
+       10,
+       10
+      ],
+      "curve": "l1",
+      "curve2": "l2"
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.line3d",
+   "setup": "sketch_3d",
+   "about": "Lines drawn through points anywhere in space, not on one plane.",
+   "demo": [
+    [
+     "sketch.line3d",
+     {
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        40,
+        0,
+        10
+       ],
+       [
+        40,
+        30,
+        25
+       ]
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.spline3d",
+   "setup": "sketch_3d",
+   "about": "A smooth curve through points anywhere in space.",
+   "demo": [
+    [
+     "sketch.spline3d",
+     {
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        20,
+        10,
+        12
+       ],
+       [
+        40,
+        0,
+        25
+       ]
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.arc3d",
+   "setup": "sketch_3d",
+   "about": "An arc through three points in space.",
+   "demo": [
+    [
+     "sketch.arc3d",
+     {
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "through": [
+       15,
+       10,
+       10
+      ],
+      "end": [
+       30,
+       0,
+       20
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.point3d",
+   "setup": "sketch_3d",
+   "about": "A point anywhere in space, to build on.",
+   "demo": [
+    [
+     "sketch.point3d",
+     {
+      "point": [
+       20,
+       15,
+       10
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.copy",
+   "setup": "sketch_rect",
+   "about": "Copies sketch geometry, with the constraints among it.",
+   "demo": [
+    [
+     "sketch.copy",
+     {
+      "entities": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ]
+     }
+    ],
+    [
+     "sketch.paste",
+     {
+      "translate": [
+       50,
+       0
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.cut",
+   "setup": "sketch_rect",
+   "about": "Takes sketch geometry out, ready to paste elsewhere.",
+   "demo": [
+    [
+     "sketch.cut",
+     {
+      "entities": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sketch.paste",
+   "setup": "sketch_rect",
+   "about": "Puts copied sketch geometry back, where you choose.",
+   "demo": [
+    [
+     "sketch.copy",
+     {
+      "entities": [
+       "l1",
+       "l2",
+       "l3",
+       "l4"
+      ]
+     }
+    ],
+    [
+     "sketch.paste",
+     {
+      "at": [
+       70,
+       40
+      ]
+     }
+    ],
+    [
+     "sketch.finish",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "sheet.export_dxf",
+   "setup": "sheet_unfolded",
+   "about": "Writes the flat pattern as a DXF for the cutter.",
+   "demo": [
+    [
+     "sheet.export_dxf",
+     {
+      "path": "{TMP}/Sheet.dxf"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "sheet.export_bend_table",
+   "setup": "sheet_flanged",
+   "about": "Writes the bends, their angles and radii as a table.",
+   "demo": [
+    [
+     "sheet.export_bend_table",
+     {
+      "path": "{TMP}/Bends.csv"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "component.from_bodies",
+   "setup": "two_blocks",
+   "about": "Turns bodies into components of their own.",
+   "demo": [
+    [
+     "component.from_bodies",
+     {
+      "bodies": [
+       "A",
+       "B"
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "command": "component.finish_edit",
+   "setup": "assembly",
+   "about": "Leaves the component being edited and returns to the assembly.",
+   "demo": "open"
+  },
+  {
+   "command": "component.properties",
+   "setup": "assembly",
+   "about": "A component's mass, volume and centre of mass (the numbers appear below).",
+   "demo": [
+    [
+     "component.properties",
+     {
+      "component": "A"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "occurrence.move",
+   "setup": "assembly",
+   "about": "Moves one placement of a component, leaving the others where they are.",
+   "demo": "open"
+  },
+  {
+   "command": "occurrence.ground",
+   "setup": "assembly",
+   "about": "Pins a placement where it is, so joints and drives move the rest.",
+   "demo": "open"
+  },
+  {
+   "command": "component.update_links",
+   "setup": "assembly",
+   "about": "Reads linked designs again and brings in what changed.",
+   "demo": "open"
+  },
+  {
+   "command": "component.break_link",
+   "setup": "assembly",
+   "about": "Keeps a linked component's geometry and stops following its file.",
+   "demo": "open"
+  },
+  {
+   "command": "joint.reach",
+   "setup": "assembly_slider",
+   "about": "Where a joint can take a point, over its whole travel.",
+   "demo": "open"
+  },
+  {
+   "command": "joint.limits",
+   "setup": "assembly_slider",
+   "about": "How far a joint may move or turn.",
+   "demo": "open"
+  },
+  {
+   "command": "contact.edit",
+   "setup": "assembly",
+   "about": "Changes which bodies in a contact set are kept from passing through each other.",
+   "demo": "open"
+  },
+  {
+   "command": "contact.list",
+   "setup": "assembly",
+   "about": "The contact sets in the design (the list appears below).",
+   "demo": [
+    [
+     "contact.list",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "contact.check",
+   "setup": "assembly",
+   "about": "Whether anything in a contact set is touching or overlapping now.",
+   "demo": "open"
+  },
+  {
+   "command": "config.preview",
+   "setup": "configured",
+   "about": "Shows a configuration without switching to it.",
+   "demo": "open"
+  },
+  {
+   "command": "config.rules",
+   "setup": "configured",
+   "about": "What each configuration sets, as rules you can read and edit.",
+   "demo": "open"
+  },
+  {
+   "command": "parts.library",
+   "setup": "empty",
+   "about": "The standard parts available to drop into a design.",
+   "demo": "open"
+  },
+  {
+   "command": "parts.insert",
+   "setup": "plate",
+   "about": "Puts a standard part (a screw, a bearing, a nut) into the design.",
+   "demo": "open"
+  },
+  {
+   "command": "parts.resize",
+   "setup": "plate",
+   "about": "Changes a standard part's size to another from its table.",
+   "demo": "open"
+  },
+  {
+   "command": "document.units",
+   "setup": "plate",
+   "about": "The unit the design shows and measures in.",
+   "demo": [
+    [
+     "document.units",
+     {
+      "units": "in"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "document.inspect",
+   "setup": "plate_hole",
+   "about": "What the design holds: its features, bodies and sketches (below).",
+   "demo": [
+    [
+     "document.inspect",
+     {
+      "measure": true
+     }
+    ]
+   ]
+  },
+  {
+   "command": "view.save",
+   "setup": "plate",
+   "about": "Keeps the view you are looking from, to come back to.",
+   "demo": [
+    [
+     "view.save",
+     {
+      "name": "Corner",
+      "camera": {
+       "target": [
+        30,
+        20,
+        5
+       ],
+       "yaw": 0.9,
+       "pitch": 0.6,
+       "distance": 220,
+       "fov": 0.0
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "command": "view.apply",
+   "setup": "plate",
+   "about": "Goes back to a view you kept, or to a standard one.",
+   "demo": [
+    [
+     "view.apply",
+     {
+      "view": "iso"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "view.rename",
+   "setup": "plate",
+   "about": "Gives a kept view another name.",
+   "demo": "open"
+  },
+  {
+   "command": "view.delete",
+   "setup": "plate",
+   "about": "Forgets a kept view.",
+   "demo": "open"
+  },
+  {
+   "command": "view.list",
+   "setup": "plate",
+   "about": "The views this design keeps (the list appears below).",
+   "demo": [
+    [
+     "view.list",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "edit.checkpoint",
+   "setup": "plate",
+   "about": "Remembers the whole design, to come back to with Restore Checkpoint.",
+   "demo": [
+    [
+     "edit.checkpoint",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "edit.restore_checkpoint",
+   "setup": "plate",
+   "about": "Puts the design back as a checkpoint remembered it.",
+   "demo": "open"
+  },
+  {
+   "command": "timeline.dependents",
+   "setup": "plate_fillet",
+   "about": "What else would go or fail if a feature were deleted (below).",
+   "demo": [
+    [
+     "timeline.dependents",
+     {
+      "feature": "Round"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "parameters.move",
+   "setup": "params",
+   "about": "Moves a parameter in the list, so related ones sit together.",
+   "demo": "open"
+  },
+  {
+   "command": "parameters.graph",
+   "setup": "params",
+   "about": "How the parameters depend on one another.",
+   "demo": "open"
+  },
+  {
+   "command": "parameters.export",
+   "setup": "params",
+   "about": "Writes the parameters out as a table.",
+   "demo": [
+    [
+     "parameters.export",
+     {
+      "format": "csv"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "parameters.import",
+   "setup": "params",
+   "about": "Reads a table of parameters in, all or nothing.",
+   "demo": [
+    [
+     "parameters.import",
+     {
+      "text": "name,expression\nheight,12 mm"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "inspect.compare",
+   "setup": "two_plates",
+   "about": "Where two bodies differ, and by how much (below).",
+   "demo": [
+    [
+     "inspect.compare",
+     {
+      "a": "Plate",
+      "b": "Thicker"
+     }
+    ]
+   ]
+  },
+  {
+   "command": "material.properties.validate",
+   "setup": "plate",
+   "about": "Checks the physical data a material carries.",
+   "demo": "open"
+  },
+  {
+   "command": "library.inspect",
+   "setup": "plate",
+   "about": "What your local library holds.",
+   "demo": "open"
+  },
+  {
+   "command": "library.export",
+   "setup": "plate",
+   "about": "Writes the design's materials and appearances out as a library.",
+   "demo": "open"
+  },
+  {
+   "command": "library.apply",
+   "setup": "plate",
+   "about": "Takes a material or appearance from the library onto what is selected.",
+   "demo": "open"
+  },
+  {
+   "command": "view.fit",
+   "setup": "plate_hole",
+   "about": "Frames the whole model, or just what is selected.",
+   "demo": [
+    [
+     "view.fit",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "view.home",
+   "setup": "plate_hole",
+   "about": "Back to the view a design opens in.",
+   "demo": [
+    [
+     "view.home",
+     {}
+    ]
+   ]
+  },
+  {
+   "command": "view.navigate",
+   "setup": "plate_hole",
+   "about": "Turns the view to a standard direction: front, top, isometric.",
+   "demo": [
+    [
+     "view.navigate",
+     {
+      "camera": {
+       "target": [
+        30,
+        20,
+        5
+       ],
+       "yaw": 0.0,
+       "pitch": 0.0,
+       "distance": 220,
+       "fov": 0.0
+      },
+      "action": "right",
+      "degrees": 45
+     }
+    ]
+   ]
+  },
+  {
+   "command": "view.tool",
+   "setup": "plate",
+   "about": "Picks what dragging in the view does: orbit, pan or zoom.",
+   "demo": "open"
+  },
+  {
+   "command": "view.spin",
+   "setup": "plate_hole",
+   "about": "Keeps the model turning, to look it over.",
+   "demo": "open"
+  },
+  {
+   "command": "view.visual_style",
+   "setup": "plate_hole",
+   "about": "How the model is drawn: shaded, with edges, or as lines alone.",
+   "demo": "open"
+  },
+  {
+   "command": "view.grid",
+   "setup": "plate",
+   "about": "The grid in the viewport, on or off.",
+   "demo": [
+    [
+     "view.grid",
+     {
+      "on": true
+     }
+    ]
+   ]
+  },
+  {
+   "command": "view.ground_shadow",
+   "setup": "plate",
+   "about": "A shadow under the model, which says where the ground is.",
+   "demo": "open"
+  },
+  {
+   "command": "view.navigation_bar",
+   "setup": "plate",
+   "about": "The navigation bar beside the view, on or off.",
+   "demo": "open"
+  },
+  {
+   "command": "view.ribbon_tabs_only",
+   "setup": "plate",
+   "about": "Folds the ribbon down to its tabs, for a larger view.",
+   "demo": "open"
+  }
+ ]
+}

@@ -250,14 +250,16 @@ fn browser_body_clicks_respect_the_active_dialog_input() {
     h.app.dialog.as_mut().unwrap().preview_enabled = false;
     h.settle();
     h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
-    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "a target pick advances to Tool Bodies");
+    // Target Bodies takes a whole selection (one tool cuts a row of parts), so a pick keeps the
+    // focus there instead of advancing: the next click adds another target.
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0, "a multi input keeps the focus for its next pick");
+    h.step(&json!({"click":{"handle":"row:Two"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Body { name: "One".into() }, Sel::Body { name: "Two".into() }]);
+    h.call("ui.dialogInput", json!({"index":1}));
     h.step(&json!({"click":{"handle":"row:Two"}})).unwrap();
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "One".into() }]);
-    assert_eq!(d.inputs[1].items, vec![Sel::Body { name: "Two".into() }]);
-    h.call("ui.dialogInput", json!({"index":0}));
-    h.step(&json!({"click":{"handle":"row:Two"}})).unwrap();
-    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Body { name: "Two".into() }], "a single input replaces its pick");
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "One".into() }, Sel::Body { name: "Two".into() }]);
+    assert_eq!(d.inputs[1].items, vec![Sel::Body { name: "Two".into() }], "the pick goes to whichever input is active");
     h.step(&json!({"key":"Escape"})).unwrap();
     h.app.start("solid.fillet");
     h.settle();
@@ -1172,7 +1174,9 @@ fn history_bodies_and_origin_work_with_browser_hidden() {
     h.app.run("select.clear", json!({})).unwrap();
     h.app.start("solid.combine");
     h.frames(2);
-    for name in ["One", "Two"] {
+    // Target Bodies takes several, so the tool input is asked for by hand.
+    for (index, name) in [(0, "One"), (1, "Two")] {
+        h.call("ui.dialogInput", json!({"index": index}));
         let body = semantic_at(ContentOwner::HISTORY, name);
         h.step(&json!({"click":[body.x, body.y]})).unwrap();
     }
@@ -1208,9 +1212,11 @@ fn semantic_owner_submission_order_preserves_hover_selection_picks_and_single_vi
                 let body = semantic_at(owner, name);
                 semantic_click(&mut h, &owners, body, egui::Modifiers::NONE);
             }
+            // Target Bodies takes a whole selection, so both picks land there and the tool input
+            // waits to be asked for; what this test is about is that each click reaches the card.
             let dialog = h.app.dialog.as_ref().unwrap();
-            assert_eq!(dialog.inputs[0].items, [Sel::Body { name: "One".into() }]);
-            assert_eq!(dialog.inputs[1].items, [Sel::Body { name: "Three".into() }]);
+            assert_eq!(dialog.inputs[0].items, [Sel::Body { name: "One".into() }, Sel::Body { name: "Three".into() }]);
+            assert!(dialog.inputs[1].items.is_empty());
             assert!(h.app.session.selection.is_empty());
         }
     }

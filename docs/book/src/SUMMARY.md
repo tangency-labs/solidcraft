@@ -6,6 +6,7 @@
 
 - [Getting started](guide/getting-started.md)
 - [A tour of the window](guide/ui-tour.md)
+- [Plasticity controls](guide/plasticity-controls.md)
 - [How a design is built](guide/design-approach.md)
 - [Sketching and constraints](guide/sketching.md)
   - [Equation curves](guide/equation-curves.md)
@@ -19,6 +20,7 @@
 - [Updates and privacy](guide/updates.md)
 - [Troubleshooting: SolidCraft won't start](guide/troubleshooting.md)
 - [Driving SolidCraft with an AI agent (MCP)](guide/mcp.md)
+- [Tutorial mode](guide/tutorial.md)
 - [Agent chat](guide/agent-chat.md)
 - [Local models with the Assistant](guide/local-models.md)
 

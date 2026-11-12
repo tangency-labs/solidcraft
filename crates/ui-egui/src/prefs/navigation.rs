@@ -10,6 +10,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             app.tr("prefs.structure.navigation_note"),
             Some(crate::settings_profiles::tag),
         );
+        scheme(app, ui, t);
         mouse(app, ui, t);
         orbit(app, ui, t);
         wheel(app, ui, t);
@@ -72,6 +73,41 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
         ]);
     }
     gestures
+}
+
+/// The control scheme: which keys, selection habits and mouse the app answers to.
+///
+/// It sits above the mouse mapping because picking Plasticity also picks that scheme's mouse
+/// preset, so the row below it changes with this one.
+fn scheme(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    let (heading, label, help) =
+        (app.tr("prefs.controls_heading").to_owned(), app.tr("prefs.control_scheme").to_owned(), app.tr("prefs.control_scheme_help").to_owned());
+    ui_kit::settings_section(ui, "control_scheme", &heading, |ui| {
+        let width = ui_kit::ContentWidth::label(ui, &label) + t.space_16 + t.space_4;
+        ui_kit::settings_form(ui, width, |ui| {
+            ui_kit::settings_row_help(ui, &label, &help, |ui| {
+                ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
+                    let current = app.preferences.control_scheme.clone();
+                    ui_kit::dropdown_menu(ui, "pref_control_scheme", scheme_label(&current), |ui| {
+                        for s in [crate::plasticity::SCHEME_SOLIDCRAFT, crate::plasticity::SCHEME_PLASTICITY] {
+                            if ui_kit::list_picker(ui, s, scheme_label(s), current == s).clicked() && current != s {
+                                crate::plasticity::apply(app, s);
+                            }
+                        }
+                    });
+                });
+            });
+        });
+    });
+}
+
+/// A control scheme's name, translated.
+fn scheme_label(scheme: &str) -> &'static str {
+    if scheme == crate::plasticity::SCHEME_PLASTICITY {
+        crate::i18n::tr("prefs.scheme.plasticity")
+    } else {
+        crate::i18n::tr("prefs.scheme.solidcraft")
+    }
 }
 
 fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {

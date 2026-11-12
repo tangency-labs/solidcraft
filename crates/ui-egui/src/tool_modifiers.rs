@@ -180,6 +180,19 @@ thread_local! {
     static MANIPULATOR_DRAGGING: Cell<bool> = const { Cell::new(false) };
 }
 
+/// Forget everything the held keys have left behind on this thread.
+///
+/// All three of these live in thread-local cells, and a test harness that finishes while one
+/// of them is still set leaves it set: the harness's thread goes on to run the next test,
+/// which then starts out believing a key is down that it never pressed. That is a test
+/// passing alone and failing in a parallel run, which is the worst kind. So a harness starts
+/// by forgetting all of it, next to where it already forgets the measured widths.
+pub fn forget_held_state() {
+    MANIPULATOR_FREE.with(|c| c.set(false));
+    TARGET_MIDPOINT.with(|c| c.set(false));
+    MANIPULATOR_DRAGGING.with(|c| c.set(false));
+}
+
 /// Set whether manipulator drags are free (no snap) this frame.
 ///
 /// Call from the viewport *before* canvas / gizmo rendering, passing the result of
@@ -228,6 +241,8 @@ pub enum ModAction {
     TextHandleConstrain = 8,
     IsoCurveAlternate = 9,
     ExtendPair = 10,
+    SelectWholeObject = 11,
+    SnapManipulatorDrag = 12,
 }
 
 impl ModAction {
@@ -243,6 +258,8 @@ impl ModAction {
         Self::TextHandleConstrain,
         Self::IsoCurveAlternate,
         Self::ExtendPair,
+        Self::SelectWholeObject,
+        Self::SnapManipulatorDrag,
     ];
 
     pub const fn id(self) -> &'static str {
@@ -258,6 +275,8 @@ impl ModAction {
             Self::TextHandleConstrain => "text_handle_constrain",
             Self::IsoCurveAlternate => "isocurve_alternate",
             Self::ExtendPair => "extend_pair",
+            Self::SelectWholeObject => "select_whole_object",
+            Self::SnapManipulatorDrag => "snap_manipulator_drag",
         }
     }
 
@@ -341,6 +360,17 @@ const SELECTION_BINDINGS: &[Binding] = &[
         trigger: Trigger::Press,
         rebindable: true,
     },
+    Binding {
+        // Alt/Option on a face, an edge or a vertex takes the body it belongs to. It is the
+        // momentary form of the "Click selects whole bodies" preference, which stays on and
+        // stops edges and vertices being picked at all; this one leaves the filter alone, so
+        // the same click still reaches the piece under the cursor once the key is let go.
+        action: ModAction::SelectWholeObject,
+        defaults: &[ModifierCombo::ALT],
+        matching: Match::AtLeast,
+        trigger: Trigger::Press,
+        rebindable: true,
+    },
 ];
 
 const SKETCH_SNAP_BINDINGS: &[Binding] = &[
@@ -362,13 +392,25 @@ const SKETCH_SNAP_BINDINGS: &[Binding] = &[
     },
 ];
 
-const MANIPULATOR_BINDINGS: &[Binding] = &[Binding {
-    action: ModAction::FreeManipulatorDrag,
-    defaults: &[ModifierCombo::CTRL, ModifierCombo::ALT],
-    matching: Match::AtLeast,
-    trigger: Trigger::Live,
-    rebindable: true,
-}];
+const MANIPULATOR_BINDINGS: &[Binding] = &[
+    Binding {
+        action: ModAction::FreeManipulatorDrag,
+        defaults: &[ModifierCombo::CTRL, ModifierCombo::ALT],
+        matching: Match::AtLeast,
+        trigger: Trigger::Live,
+        rebindable: true,
+    },
+    Binding {
+        // Primary also puts the thing being dragged on the place under the cursor on the rest of
+        // the model -- a corner, the middle of an edge, a centre -- the way Plasticity's Ctrl
+        // does. Where there is no such place it is the free drag above and nothing more.
+        action: ModAction::SnapManipulatorDrag,
+        defaults: &[ModifierCombo::CTRL],
+        matching: Match::AtLeast,
+        trigger: Trigger::Live,
+        rebindable: true,
+    },
+];
 
 const FEATURE_PREVIEW_BINDINGS: &[Binding] = &[Binding {
     // Hold Primary to roll the command preview back so obscured geometry can be (re)selected.
@@ -420,6 +462,12 @@ pub fn selection_click(held: Held, shift_add_only: bool) -> (bool, bool) {
     let add = toggle || actions.contains(ModAction::SelectAdd);
     let allow_toggle = if shift_add_only { toggle } else { add };
     (add, allow_toggle)
+}
+
+/// Whether the held keys ask a click to take the whole object -- the body a face, an edge or a
+/// vertex belongs to -- rather than the piece under the cursor.
+pub fn select_whole_object(held: Held) -> bool {
+    resolve(&[Scope::Selection], None, held, Trigger::Press).contains(ModAction::SelectWholeObject)
 }
 
 /// Whether preview reselect should apply: Primary chord matched and no manipulator drag under way.
@@ -551,6 +599,20 @@ mod tests {
         assert_eq!(ModifierCombo { shift: true, ctrl: true, alt: false }.label_for(Platform::Other), "Shift+Ctrl/Cmd");
     }
 
+    /// A cell one test leaves set is a cell the next test on that thread starts with, so the
+    /// harness forgets them all. `MANIPULATOR_DRAGGING` is the one that reads across a frame
+    /// boundary, and it is the one that would carry.
+    #[test]
+    fn a_fresh_harness_forgets_what_the_last_test_left_held() {
+        set_manipulator_free(true);
+        set_target_midpoint(true);
+        set_manipulator_dragging(true);
+        let _h = crate::scenario::Harness::new();
+        assert!(!manipulator_free(), "a fresh harness starts with nothing held");
+        assert!(!target_midpoint());
+        assert!(!manipulator_dragging());
+    }
+
     #[test]
     fn manipulator_free_thread_local_roundtrip() {
         set_manipulator_free(true);
@@ -607,6 +669,35 @@ mod tests {
         let combo = resolve(&[Scope::Selection], None, both, Trigger::Press);
         assert!(combo.contains(ModAction::SelectToggle));
         assert!(!combo.contains(ModAction::SelectAdd));
+    }
+
+    /// Primary both frees a manipulator drag from its round steps and lands it on the model:
+    /// off a place it is the free drag, over one it snaps. Alt frees without snapping.
+    #[test]
+    fn primary_snaps_a_manipulator_drag_and_alt_only_frees_it() {
+        let primary = Held { primary: true, ..Default::default() };
+        let alt = Held { alt: true, ..Default::default() };
+        let set = resolve(&[Scope::Manipulator], None, primary, Trigger::Live);
+        assert!(set.contains(ModAction::SnapManipulatorDrag));
+        assert!(set.contains(ModAction::FreeManipulatorDrag));
+        let only_free = resolve(&[Scope::Manipulator], None, alt, Trigger::Live);
+        assert!(only_free.contains(ModAction::FreeManipulatorDrag));
+        assert!(!only_free.contains(ModAction::SnapManipulatorDrag), "Alt is the free drag, not the snap");
+        assert!(!resolve(&[Scope::Manipulator], None, Held::default(), Trigger::Live).contains(ModAction::SnapManipulatorDrag));
+    }
+
+    /// Alt takes the whole object. It stacks with Shift and Ctrl, which go on saying how the
+    /// selection changes, and Alt on its own still replaces it.
+    #[test]
+    fn alt_takes_the_whole_object_alongside_add_and_toggle() {
+        let alt = Held { alt: true, ..Default::default() };
+        assert!(select_whole_object(alt));
+        assert!(!select_whole_object(Held::default()));
+        assert!(!select_whole_object(Held { shift: true, ..Default::default() }));
+        let shift_alt = Held { shift: true, alt: true, ..Default::default() };
+        assert!(select_whole_object(shift_alt));
+        assert_eq!(selection_click(shift_alt, false), (true, true));
+        assert_eq!(selection_click(alt, false), (false, false), "Alt alone replaces the selection");
     }
 
     #[test]

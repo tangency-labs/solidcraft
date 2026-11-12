@@ -59,7 +59,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "construct.plane.offset", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "construct.plane.along_path", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "construct.plane.at_angle", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
-    ToolModifiers { tool: "solid.split_body", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "solid.cut_body", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.scale", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.offset_face", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.thread", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -80,8 +80,8 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "solid.combine", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
 ];
 
-pub(crate) const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
-pub(crate) const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
+pub(crate) const OPS: [&str; 5] = ["new", "join", "cut", "intersect", "slice"];
+pub(crate) const OP_LABELS: [&str; 5] = ["New Body", "Join", "Cut", "Intersect", "Slice"];
 const DIRS: [&str; 5] = ["positive", "negative", "symmetric", "positive", "negative"];
 /// The "Two sides" direction (a second distance the other way).
 pub const TWO_SIDES: usize = 3;
@@ -95,6 +95,10 @@ pub fn two_sided(direction: usize) -> bool {
 /// Thin Extrude wall locations, as `solid.extrude` names them, and their labels.
 const WALL_SIDES: [&str; 4] = ["center", "inside", "outside", "two_sides"];
 const WALL_LABELS: [&str; 4] = ["Center", "Inside", "Outside", "Two Sides"];
+/// Pushing a face: what the walls around it do. Fixed holds them and builds new ones square
+/// to the face (an extrude of the face); Moving stretches them to follow it (an offset of
+/// the face).
+pub(crate) const WALL_GROW: [&str; 2] = ["Fixed", "Moving"];
 /// What an extrude's first input picks: profiles or planar faces, or curves too when thin.
 const EXTRUDE_ACCEPT: Accept = PROFILES | PLANAR_FACES;
 const THIN_ACCEPT: Accept = PROFILES | CURVES;
@@ -260,8 +264,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 t: String,
                 sketch: Option<u64>,
             },
-            /// Split a body by a plane.
-            Split,
+            /// Cut a body in two with a plane, a face or a sketch line.
+            Cut,
             /// A cosmetic thread on a cylindrical face.
             Thread {
                 designation: String,
@@ -556,6 +560,12 @@ pub struct Dialog {
     pub press_pull: bool,
     /// The operation the window chooses by itself (#6901).
     pub op_auto: crate::op_auto::OpAuto,
+    /// Opened by the viewport on a pick rather than by the person asking for the command
+    /// (`canvas::selection_handle`): the shaping of whatever was just picked, standing ready.
+    /// It keeps out of the way until the person uses it -- picks go on reaching the selection,
+    /// and its value box does not take the keyboard, so shortcuts still answer. Dragging its
+    /// handle or typing a size makes it an ordinary command.
+    pub provisional: bool,
     /// Where the face that reopened this fillet or chamfer was clicked (Press Pull): its arrow
     /// sits on the edge nearest it. UI state only, never saved.
     pub(crate) anchor_hint: Option<Vec3>,
@@ -823,6 +833,7 @@ impl Dialog {
             shell_chain: Default::default(),
             press_pull: false,
             op_auto: Default::default(),
+            provisional: false,
             anchor_hint: None,
         }
     }
@@ -976,10 +987,9 @@ impl Dialog {
             "construct.plane.along_path" => {
                 Dialog::new(Kind::PathPlane { t: "0.5".into(), sketch: None }, vec![SelInput::new("Path", CURVES | EDGES, false)])
             }
-            "solid.split_body" => Dialog::new(
-                Kind::Split,
-                vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
-            ),
+            "solid.cut_body" => {
+                Dialog::new(Kind::Cut, vec![SelInput::new("Body to cut", BODIES, false), SelInput::new("Cutting tool", PLANES | FACES | AXES, false)])
+            }
             "solid.thread" => Dialog::new(
                 Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new(), options: Default::default() },
                 crate::dialogs_thread::inputs(),
@@ -1109,7 +1119,7 @@ impl Dialog {
             ),
             "solid.combine" => Dialog::new(
                 Kind::Combine { operation: 1, keep_tools: false },
-                vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
+                vec![SelInput::new("Target Bodies", BODIES, true), SelInput::new("Tool Bodies", BODIES, true)],
             ),
             _ => {
                 let (kind, inputs) = Kind::simple_start(id)
@@ -1382,7 +1392,7 @@ impl Dialog {
                 | Kind::Shell { .. }
                 | Kind::Draft { .. }
                 | Kind::Mirror
-                | Kind::Split
+                | Kind::Cut
                 | Kind::Rib { .. }
                 | Kind::Emboss { .. }
                 | Kind::ReplaceFace
@@ -1478,6 +1488,9 @@ impl Dialog {
     }
 
     pub fn wants_picks(&self) -> bool {
+        if self.provisional {
+            return false;
+        }
         !self.inputs.is_empty()
     }
 
@@ -1760,6 +1773,18 @@ impl Dialog {
 
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
+        self.pick_with(s, sel, true);
+    }
+
+    /// The same, saying whether the pick joins what is already picked or replaces it.
+    ///
+    /// It replaces only for a fillet or chamfer's edges, and that is Plasticity's rule for the
+    /// tool this one answers to: a plain pick is the new selection and a Shift-pick adds to it,
+    /// so a run of picks walks from edge to edge instead of piling them up. Everywhere else a
+    /// pick joins, as it always has -- an extrude's profiles, a loft's sections, a measurement's
+    /// two ends are each gathered a pick at a time, and a dialog that gathers is not one you
+    /// walk through. [`Self::take_box`] already draws the same line for a box selection.
+    pub fn pick_with(&mut self, s: &Session, sel: Sel, add: bool) {
         self.awaiting_pick = false;
         self.pick_refused = None;
         if self.take_extrude_target(s, &sel) {
@@ -1795,6 +1820,14 @@ impl Dialog {
         }
         let is_fillet = matches!(self.kind, Kind::Fillet { .. }) && self.active == 0;
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
+        // A plain pick on a round's edges is the new selection. Clearing first rather than
+        // skipping the toggle keeps one property worth having: picking the edge that is already
+        // the only one leaves it picked, so a second click on the same edge does not empty the
+        // dialog under the pointer. Shift still toggles, which is how an edge comes back off.
+        if is_fillet && !add {
+            inp.items.clear();
+            self.picked_edges.clear();
+        }
         if is_fillet {
             self.chain_applied = chain;
             if picked.iter().all(|p| inp.items.iter().any(|x| selection::same_item(x, p))) {
@@ -2588,7 +2621,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Remove => "REMOVE",
         Kind::ChatContext => "PICK CONTEXT",
         Kind::PathPattern { .. } => "PATTERN ON PATH",
-        Kind::Split => "SPLIT BODY",
+        Kind::Cut => "CUT BODY",
         Kind::Thread { .. } => "THREAD",
         Kind::Section { .. } => "SECTION ANALYSIS",
         Kind::PatternRect { .. } => "RECTANGULAR PATTERN",
@@ -4391,6 +4424,8 @@ fn mode_inputs_key(kind: &Kind) -> Option<usize> {
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
+    // A shape being drawn belongs to the dialog being cancelled, and goes with it.
+    crate::solid_draw::clear(app);
     app.session.feature_edit_sketch = None;
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();
@@ -5111,6 +5146,30 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     {
         return Err("enter the thickness".into());
     }
+    // A round or a chamfer of no size is not a mistake to report either: the dialog opens at
+    // nothing and waits for the handle to be dragged or a value typed, so until then there is
+    // no feature yet -- as there is none before an edge is picked. Building it anyway put the
+    // kernel's refusal of a zero size under the dialog on every pick after it. A size
+    // that cannot be read at all is left to the command, which names what it could not read.
+    if let Kind::Fillet { radius, chamfer, .. } = &d.kind
+        && !matches!(d.extra.get("type").and_then(Value::as_str), Some("variable" | "spline"))
+        && crate::length_input::eval(&s.doc, radius, ValueKind::Length).is_ok_and(|v| !(v.is_finite() && v > 1e-6))
+    {
+        return Err(if *chamfer { "enter the distance".into() } else { "enter the radius".into() });
+    }
+    // Nor is a command that merely stands ready on a pick. It opens at nothing and waits for its
+    // handle to be dragged or a size to be typed (`provisional`, `canvas::selection_handle`), so
+    // a face clicked with nothing open built a push of no distance and put the kernel's refusal of
+    // it under the dialog before anything had been done -- the error on every pick, in whichever
+    // command the pick offered. Once a size is there it is an ordinary command.
+    if d.provisional {
+        let mut standing = d.clone();
+        if let Some((label, kind, value)) = standing.primary()
+            && crate::length_input::eval(&s.doc, value, kind).is_ok_and(|v| !(v.is_finite() && v.abs() > 1e-6))
+        {
+            return Err(format!("enter the {}", label.to_lowercase()));
+        }
+    }
     let (cmd, params): (&str, Value) = match &d.kind {
         Kind::ChatContext => return Err("the chat takes these picks; nothing runs".into()),
         Kind::Extrude {
@@ -5188,6 +5247,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     wall_params["thickness2"] = json!(wall2);
                 }
                 return Ok(vec![("solid.extrude".to_string(), with(wall_params))]);
+            }
+            // Walls that follow the pushed face: the face is offset along its normal and they
+            // stretch with it, which is one command and no Boolean. Walls held fixed fall through
+            // to the extrude below, which builds new ones square to the face.
+            if d.extra.get("grow").and_then(Value::as_str) == Some("moving") && !*thin {
+                let picks = sels(d, 0);
+                let faces: Vec<Value> =
+                    picks.iter().filter_map(|x| if let Sel::Face { point, .. } = x { Some(pt(*point)) } else { None }).collect();
+                if !faces.is_empty() && faces.len() == picks.len() {
+                    return Ok(vec![("solid.offset_face".to_string(), json!({"faces": faces, "distance": distance}))]);
+                }
             }
             let mut out = Vec::new();
             let (sketch, idx) = profiles();
@@ -5413,7 +5483,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 (None, Some(k)) => k,
                 (None, None) => return Err("select a direction (an axis, a sketch line or a straight edge) first".into()),
             };
-            let mut p = json!({"dir1": pt(d1), "count1": count, "spacing1": spacing});
+            let whole = |extra: &serde_json::Map<String, Value>, key: &str| extra.get(key).and_then(Value::as_bool).unwrap_or(false);
+            let (key1, key2) = (
+                if whole(&d.extra, "extent1") { "distance1" } else { "spacing1" },
+                if whole(&d.extra, "extent2") { "distance2" } else { "spacing2" },
+            );
+            let mut p = json!({"dir1": pt(d1), "count1": count, key1: spacing});
             pattern_objects(s, sels(d, 0), &mut p);
             let kept2 = d.extra.get("dir2").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
             let d2 = match sels(d, 2).first() {
@@ -5423,7 +5498,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if let Some(d2) = d2 {
                 p["dir2"] = pt(d2);
                 p["count2"] = json!(count2);
-                p["spacing2"] = json!(spacing2);
+                p[key2] = json!(spacing2);
             }
             ("solid.pattern.rectangular", p)
         }
@@ -5434,7 +5509,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 Some(x) => axis_param(app, x)?,
                 None => return Err("select an axis".into()),
             };
-            let mut p = json!({"axis": axis, "count": count, "angle": angle});
+            let by_step = d.extra.get("step").and_then(Value::as_bool).unwrap_or(false);
+            let mut p = json!({"axis": axis, "count": count});
+            p[if by_step { "step" } else { "angle" }] = json!(angle);
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.pattern.circular", p)
         }
@@ -5689,9 +5766,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             ("solid.bounding_solid", p)
         }
-        Kind::Split => {
-            need(0, "the body to split")?;
-            need(1, "the splitting plane")?;
+        Kind::Cut => {
+            need(0, "the body to cut")?;
+            need(1, "the cutting plane")?;
             let body = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
             // A plane, a planar face's plane, or any other face (its surface extended).
             let p = match sels(d, 1).first() {
@@ -5714,7 +5791,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 _ => return Err("pick a plane, a face or a sketch line".into()),
             };
-            ("solid.split_body", p)
+            ("solid.cut_body", p)
         }
         Kind::Scale { .. } => {
             need(0, "bodies")?;
@@ -5902,30 +5979,52 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 p.remove("diameter");
                 p.remove("section_size");
             }
-            if let Some((point, normal)) = *at {
-                match *cmd {
-                    "solid.box" => {
-                        p.insert("corner".into(), box_corner(s, fields, point, normal));
-                    }
-                    "solid.cylinder" | "solid.coil" | "solid.cone" => {
-                        p.insert("base".into(), pt(point));
-                        if let Some(n) = normal {
-                            p.insert("axis".into(), pt(n));
-                        }
-                        // Reference edges (#6380) place the base by its distances from them.
-                        let references = crate::hole_refs::params(d);
-                        if !references.is_empty() {
-                            p.insert("references".into(), json!(references));
-                        }
-                    }
-                    _ => {
-                        p.insert("center".into(), pt(point));
-                    }
+            // A shape drawn in the viewport (`crate::solid_draw`) carries its own placement in
+            // the extras: `at` belongs to the window's pick and placement machinery, which
+            // clears it as the window syncs, and a drawn shape must keep where it was drawn.
+            let drawn_keys = [("drawn_corner", "corner"), ("drawn_base", "base"), ("drawn_center", "center")];
+            let drawn_place = drawn_keys.iter().any(|(from, _)| d.extra.contains_key(*from));
+            for (from, to) in drawn_keys {
+                if let Some(v) = d.extra.get(from).cloned() {
+                    p.insert(to.into(), v);
                 }
-            } else {
-                crate::primitive_placement::params(s, cmd, &d.extra, &mut p);
+            }
+            for key in ["drawn_axis", "drawn_x_axis"] {
+                if let Some(v) = d.extra.get(key).cloned() {
+                    p.insert(key.trim_start_matches("drawn_").into(), v);
+                }
+            }
+            if !drawn_place {
+                if let Some((point, normal)) = *at {
+                    match *cmd {
+                        // A click only places one corner, so `at` centres the box on it instead
+                        // (see `box_corner`).
+                        "solid.box" => {
+                            p.insert("corner".into(), box_corner(s, fields, point, normal));
+                        }
+                        "solid.cylinder" | "solid.coil" | "solid.cone" => {
+                            p.insert("base".into(), pt(point));
+                            if let Some(n) = normal {
+                                p.insert("axis".into(), pt(n));
+                            }
+                            // Reference edges (#6380) place the base by its distances from them.
+                            let references = crate::hole_refs::params(d);
+                            if !references.is_empty() {
+                                p.insert("references".into(), json!(references));
+                            }
+                        }
+                        _ => {
+                            p.insert("center".into(), pt(point));
+                        }
+                    }
+                } else {
+                    crate::primitive_placement::params(s, cmd, &d.extra, &mut p);
+                }
             }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
+            if d.extra.get("keep_tools").and_then(Value::as_bool).unwrap_or(false) {
+                p.insert("keep_tools".into(), json!(true));
+            }
             (cmd, Value::Object(p))
         }
         Kind::BoundaryFill { operation, cells, .. } => {
@@ -5940,13 +6039,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             )
         }
         Kind::Combine { operation, keep_tools } => {
-            need(0, "the target body")?;
+            need(0, "the target bodies")?;
             need(1, "tool bodies")?;
-            let target = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
-            let tools: Vec<String> = sels(d, 1).body_names().into_iter().filter(|n| *n != target).collect();
+            let targets = sels(d, 0).body_names();
+            let tools: Vec<String> = sels(d, 1).body_names().into_iter().filter(|n| !targets.contains(n)).collect();
             (
                 "solid.combine",
-                json!({"target": target, "tools": tools, "operation": OPS.get(*operation).copied().unwrap_or("join"), "keep_tools": keep_tools}),
+                json!({"targets": targets, "tools": tools, "operation": OPS.get(*operation).copied().unwrap_or("join"), "keep_tools": keep_tools}),
             )
         }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
@@ -6630,6 +6729,7 @@ pub(crate) fn op_index(o: &Operation) -> usize {
         Operation::Join => 1,
         Operation::Cut => 2,
         Operation::Intersect => 3,
+        Operation::Slice => 4,
     }
 }
 
@@ -7031,7 +7131,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Box { corner, length, width, height, operation } => {
+        FeatureKind::Box { corner, length, width, height, operation, .. } => {
             let mut d = start("solid.box")?;
             d.kind = Kind::Primitive {
                 cmd: "solid.box",
@@ -7191,11 +7291,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools } => {
+        FeatureKind::Combine { targets, tools, operation, keep_tools } => {
             let mut d = start("solid.combine")?;
             d.kind = Kind::Combine { operation: op_index(operation).max(1), keep_tools: *keep_tools };
             if let Some(inp) = d.inputs.get_mut(0) {
-                inp.items = vec![Sel::Body { name: target.to_string() }];
+                inp.items = targets.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
             }
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = tools.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
@@ -7246,8 +7346,23 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 copied.iter().map(|name| Sel::Body { name: name.to_string() }).collect()
             };
             let mut d = match pattern {
-                PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
+                PatternKind::Rectangular {
+                    dir1,
+                    count1,
+                    spacing1,
+                    dir2,
+                    count2,
+                    spacing2,
+                    alignment,
+                    alignment2,
+                    reversed,
+                    reversed2,
+                    extent1,
+                    extent2,
+                } => {
                     let mut d = start("solid.pattern.rectangular")?;
+                    d.extra.insert("extent1".into(), json!(extent1));
+                    d.extra.insert("extent2".into(), json!(extent2));
                     d.extra.insert("alignment".into(), json!(alignment));
                     d.extra.insert("alignment2".into(), json!(alignment2));
                     d.extra.insert("reversed".into(), json!(reversed));
@@ -7274,8 +7389,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     d
                 }
-                PatternKind::Circular { origin, axis, count, angle, alignment, reversed, axis_ref, axis_feature } => {
+                PatternKind::Circular { origin, axis, count, angle, alignment, reversed, axis_ref, axis_feature, step } => {
                     let mut d = start("solid.pattern.circular")?;
+                    d.extra.insert("step".into(), json!(step));
                     d.extra.insert("alignment".into(), json!(alignment));
                     d.extra.insert("reversed".into(), json!(reversed));
                     d.kind = Kind::PatternCirc { count: count.to_string(), angle: angle.to_string() };
@@ -7495,7 +7611,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
         FeatureKind::Split { body, plane, tool, sketch, line } => {
-            let mut d = start("solid.split_body")?;
+            let mut d = start("solid.cut_body")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
             }
@@ -7688,6 +7804,10 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         }
     }
     d.editing = Some((id, marker));
+    // Keep Tools is the feature's, not its kind's, so it comes back for every card that offers it.
+    if f.keep_tool {
+        d.extra.insert("keep_tools".into(), json!(true));
+    }
     d.active = 0;
     d.error = None;
     Some(d)
@@ -8325,8 +8445,10 @@ mod shell_body_tests {
 }
 
 #[cfg(test)]
-mod shell_thickness_tests {
-    //! Shell with its Thickness box emptied (#960).
+mod no_value_yet_tests {
+    //! A dialog whose value is not there yet -- Shell with its Thickness box emptied
+    //! (#960), a round dragged back to no radius: OK waits for one, and the
+    //! command never runs to be refused.
 
     use super::*;
     use crate::scenario::Harness;
@@ -8348,6 +8470,58 @@ mod shell_thickness_tests {
         }
         let d = h.app.dialog.as_ref().unwrap();
         assert_eq!(dialog_commands(&h.app, d).err().as_deref(), Some("enter the thickness"));
+    }
+
+    /// A round of no size waits for one, as Shell waits for its thickness. The dialog
+    /// opens at a size, but the handle can be dragged back to nothing -- and the kernel's refusal
+    /// of a zero size then stood in red under the dialog, on that pick and on every pick after it.
+    #[test]
+    fn a_round_of_no_size_makes_no_command() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.step(&json!({"click":{"world":[10,0,10]}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().expect("the fillet dialog");
+        assert!(!d.inputs[0].items.is_empty(), "an edge is picked");
+        assert!(dialog_commands(&h.app, d).is_ok(), "2 mm by default");
+        if let Some(Dialog { kind: Kind::Fillet { radius, .. }, .. }) = h.app.dialog.as_mut() {
+            *radius = "0 mm".into();
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(dialog_commands(&h.app, d).err().as_deref(), Some("enter the radius"));
+        // Nothing is previewed, so nothing is reported: the dialog waits with OK out of reach.
+        h.frames(2);
+        assert_eq!(h.app.preview.error, None, "no refusal under the dialog");
+    }
+
+    /// A command the viewport offers on a pick stands at nothing until it is used
+    /// (`canvas::selection_handle`), so it builds nothing until then. A face clicked under
+    /// Plasticity's controls opened Press Pull at no distance, and the kernel's refusal of that
+    /// nothing stood in red under the window with a button to report it -- on that pick and on
+    /// every pick after it.
+    #[test]
+    fn a_command_standing_ready_on_a_pick_makes_no_command() {
+        let mut h = Harness::new();
+        crate::plasticity::apply(&mut h.app, crate::plasticity::SCHEME_PLASTICITY);
+        h.app.run("solid.box", json!({"length":40,"width":40,"height":40})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"world":[20.0,20.0,40.0]}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().expect("the push the pick offered");
+        assert!(d.provisional, "offered, not asked for");
+        assert_eq!(dialog_commands(&h.app, d).err().as_deref(), Some("enter the distance"));
+        h.frames(2);
+        assert_eq!(h.app.preview.error, None, "no refusal under a window nobody has used yet");
+        // Used: a size typed in, and it is an ordinary command again.
+        if let Some(d) = h.app.dialog.as_mut()
+            && let Some((_, _, v)) = d.primary()
+        {
+            *v = "5 mm".into();
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        assert!(dialog_commands(&h.app, d).is_ok(), "a size typed in builds the push");
     }
 }
 

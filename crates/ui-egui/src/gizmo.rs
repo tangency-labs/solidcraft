@@ -27,6 +27,28 @@ pub enum Handle {
     Ball,
 }
 
+impl Handle {
+    /// Which of X, Y and Z a drag on this handle is free to set: an arrow its own one, a square
+    /// the two across its axis, the ball all three. A ring turns and sets none of them.
+    pub fn axes(self) -> [bool; 3] {
+        match self {
+            Self::Axis(i) => [i == 0, i == 1, i == 2],
+            Self::Plane(i) => [i != 0, i != 1, i != 2],
+            Self::Ring(_) => [false; 3],
+            Self::Ball => [true; 3],
+        }
+    }
+}
+
+/// The translate that lands `pivot` on `place`, keeping from `free` the distances the handle
+/// being dragged does not own. This is what the snap chord does to a drag: the place under the
+/// cursor sets what the handle can reach, and the drag's own distance stands for the rest.
+pub fn snapped(handle: Handle, free: Vec3, pivot: Vec3, place: Vec3) -> Vec3 {
+    let to = place - pivot;
+    let [x, y, z] = handle.axes();
+    Vec3::new(if x { to.x } else { free.x }, if y { to.y } else { free.y }, if z { to.z } else { free.z })
+}
+
 /// What a drag has done so far.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Change {

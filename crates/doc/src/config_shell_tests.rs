@@ -405,7 +405,7 @@ fn saved_stepped_tab_cut_piece_projection_asks_for_its_face_again_without_expand
         doc.feature_mut(id).unwrap().body_names = vec![name.into()];
     }
     doc.add_feature(
-        FeatureKind::Combine { target: "Case".into(), tools: vec!["Tab".into()], operation: crate::Operation::Join, keep_tools: false },
+        FeatureKind::Combine { targets: vec!["Case".into()], tools: vec!["Tab".into()], operation: crate::Operation::Join, keep_tools: false },
         None,
     )
     .unwrap();
@@ -420,7 +420,7 @@ fn saved_stepped_tab_cut_piece_projection_asks_for_its_face_again_without_expand
         .unwrap();
     doc.feature_mut(tool).unwrap().body_names = vec!["Pocket tool".into()];
     doc.add_feature(
-        FeatureKind::Combine { target: "Case".into(), tools: vec!["Pocket tool".into()], operation: crate::Operation::Cut, keep_tools: false },
+        FeatureKind::Combine { targets: vec!["Case".into()], tools: vec!["Pocket tool".into()], operation: crate::Operation::Cut, keep_tools: false },
         Some("Pocket"),
     )
     .unwrap();

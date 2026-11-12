@@ -1,8 +1,9 @@
-//! Fillet and chamfer drag arrows on outside and inside edges (#1384): the arrow points where
-//! the value grows (into the body on an outside edge, into the open corner on an inside one),
-//! and dragging out along it increases the value.
+//! Fillet and chamfer drag handles on outside and inside edges (#1384): the handle stands away
+//! from the material on an edge of either kind, where it can be seen and taken hold of; dragging
+//! it out increases the value, and dragging it back through its own base turns the blend into the
+//! other kind. It stops where the edges around it leave room.
 
-use crate::canvas::{anchor, blend_grow_dir};
+use crate::canvas::{anchor, blend_cap, blend_grow_dir, blend_room};
 use crate::dialogs::Kind;
 use crate::scenario::Harness;
 use serde_json::json;
@@ -41,22 +42,25 @@ const INSIDE: Vec3 = Vec3::new(20.0, 15.0, 20.0);
 const OUTSIDE: Vec3 = Vec3::new(40.0, 15.0, 20.0);
 const STEP_TOP: Vec3 = Vec3::new(20.0, 15.0, 30.0);
 
-/// The direction function on its own: the corner's open side on the inside edge, into the
-/// material on the outside ones, each edge of a mixed chain on its own.
+/// The direction function on its own: away from the material on an edge of either kind, which
+/// on the inside edge is the corner's open side and on an outside one is out of the body. It is
+/// the bisector of the two faces every time, so a mixed chain gets one rule, not two.
 #[test]
-fn grow_direction_follows_each_edges_convexity() {
+fn the_grow_direction_leads_away_from_the_material_on_every_edge() {
     let h = l_step();
     let s = std::f64::consts::FRAC_1_SQRT_2;
     let open = Vec3::new(s, 0.0, s);
     assert!(close(grow(&h, &edge(&h, INSIDE)), open), "inside: {:?}", grow(&h, &edge(&h, INSIDE)));
-    assert!(close(grow(&h, &edge(&h, OUTSIDE)), Vec3::new(-s, 0.0, -s)), "outside: {:?}", grow(&h, &edge(&h, OUTSIDE)));
-    // Same face normals as the inside edge, but outside: the opposite way.
-    assert!(close(grow(&h, &edge(&h, STEP_TOP)), -open), "step top: {:?}", grow(&h, &edge(&h, STEP_TOP)));
+    assert!(close(grow(&h, &edge(&h, OUTSIDE)), Vec3::new(s, 0.0, s)), "outside: {:?}", grow(&h, &edge(&h, OUTSIDE)));
+    // The same face normals as the inside edge, and now the same answer: both lead out of the
+    // material, which is where the handle can be seen and taken hold of.
+    assert!(close(grow(&h, &edge(&h, STEP_TOP)), open), "step top: {:?}", grow(&h, &edge(&h, STEP_TOP)));
 }
 
-/// A plain box's outside edge keeps its arrow into the body.
+/// A plain box's outside edge: the handle stands out of the body, clear of the part, not down
+/// into the material where the model hides it.
 #[test]
-fn box_edge_arrow_still_points_into_the_body() {
+fn a_box_edges_handle_stands_out_of_the_body() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
     let e = edge(&h, Vec3::new(20.0, 0.0, 20.0));
@@ -64,7 +68,7 @@ fn box_edge_arrow_still_points_into_the_body() {
         h.app.session.selection = vec![e.clone()];
         h.app.start(id);
         let dir = anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().1.unwrap();
-        assert!(dir.y > 0.5 && dir.z < -0.5, "{id}: {dir:?}");
+        assert!(dir.y < -0.5 && dir.z > 0.5, "{id}: {dir:?}");
         h.app.dialog = None;
     }
 }
@@ -129,4 +133,140 @@ fn two_distances_chamfer_has_an_arrow_along_each_face() {
         assert!(close(dir, expected.0), "flip {flip}: arrow {dir:?}");
         h.app.dialog = None;
     }
+}
+
+fn room(h: &Harness, s: &Sel) -> f64 {
+    let Sel::Edge { body, index, .. } = s else { panic!("an edge") };
+    let st = h.app.session.world_state().unwrap();
+    blend_room(&st.body(body).unwrap().mesh(), *index).expect("the edge has room")
+}
+
+/// A fillet or chamfer has the room its neighbouring edges leave it: across each of the two
+/// faces at the edge to whatever bounds them, the smaller of the two. The step's short side is
+/// 10 mm, so every edge along it stops there however much room the face above or beside it has.
+#[test]
+fn a_blend_has_the_room_its_neighbouring_edges_leave() {
+    let h = l_step();
+    // 20 mm across the block's top face to the step, 20 mm down its right face to the bottom.
+    assert!((room(&h, &edge(&h, OUTSIDE)) - 20.0).abs() < 1e-6, "outside: {}", room(&h, &edge(&h, OUTSIDE)));
+    // 20 mm across the step's top, but only the step's 10 mm down its side.
+    assert!((room(&h, &edge(&h, STEP_TOP)) - 10.0).abs() < 1e-6, "step top: {}", room(&h, &edge(&h, STEP_TOP)));
+    // The inside corner is held to the same 10 mm side.
+    assert!((room(&h, &edge(&h, INSIDE)) - 10.0).abs() < 1e-6, "inside: {}", room(&h, &edge(&h, INSIDE)));
+}
+
+/// A round over several edges stops at the tightest of them, and nothing else is capped: the
+/// cap is what the handle and the window's arrow are held to, and only a blend has one.
+#[test]
+fn a_round_over_several_edges_is_capped_by_the_tightest() {
+    let mut h = l_step();
+    // The block's own top edge has 20 mm, the step's 10; together the round stops at 10.
+    h.app.session.selection = vec![edge(&h, OUTSIDE), edge(&h, STEP_TOP)];
+    h.app.start("solid.fillet");
+    h.frames(2);
+    let d = h.app.dialog.clone().unwrap_or_else(|| panic!("the fillet opens"));
+    let cap = blend_cap(&h.app, &d).unwrap_or_else(|| panic!("both edges have room"));
+    assert!((cap - 10.0).abs() < 1e-6, "the tightest edge sets it: {cap}");
+
+    // One edge alone is its own room.
+    h.app.session.selection = vec![edge(&h, OUTSIDE)];
+    h.app.start("solid.fillet");
+    h.frames(2);
+    let d = h.app.dialog.clone().unwrap_or_else(|| panic!("the fillet opens"));
+    assert!((blend_cap(&h.app, &d).unwrap_or_default() - 20.0).abs() < 1e-6);
+
+    // An extrude is not a blend and has no room to run out of.
+    h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: face_index(&h), point: Vec3::new(30.0, 15.0, 20.0) }];
+    h.app.start("solid.press_pull");
+    h.frames(2);
+    let d = h.app.dialog.clone().unwrap_or_else(|| panic!("the push opens"));
+    assert_eq!(blend_cap(&h.app, &d), None, "only a blend is capped");
+}
+
+/// The room is measured across the faces beside the edge, which cannot see what a round must
+/// also fit round: a rim whose corners are rounded takes no more than those corners, whatever
+/// the faces allow. The kernel says so when it refuses one, naming the largest that fits, and
+/// the handle then stops there instead of standing where nothing builds.
+#[test]
+fn the_kernels_own_limit_holds_the_handle_where_the_room_alone_would_not() {
+    let mut h = l_step();
+    h.app.session.selection = vec![edge(&h, OUTSIDE)];
+    h.app.start("solid.fillet");
+    h.frames(2);
+    let d = h.app.dialog.clone().unwrap_or_else(|| panic!("the fillet opens"));
+    assert!((blend_cap(&h.app, &d).unwrap_or_default() - 20.0).abs() < 1e-6, "the room alone");
+
+    // What a refusal of this very setup said: 6 mm, and the handle goes no further.
+    h.app.preview.fit = Some((7, 6.0));
+    assert!((blend_cap(&h.app, &d).unwrap_or_default() - 6.0).abs() < 1e-6, "the kernel's word");
+    // Never upward: a limit wider than the room leaves the room in charge.
+    h.app.preview.fit = Some((7, 50.0));
+    assert!((blend_cap(&h.app, &d).unwrap_or_default() - 20.0).abs() < 1e-6, "the tighter of the two");
+    h.app.preview.fit = None;
+
+    // And it is still only a blend that is capped at all.
+    h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: face_index(&h), point: Vec3::new(30.0, 15.0, 20.0) }];
+    h.app.start("solid.press_pull");
+    h.frames(2);
+    let d = h.app.dialog.clone().unwrap_or_else(|| panic!("the push opens"));
+    h.app.preview.fit = Some((7, 6.0));
+    assert_eq!(blend_cap(&h.app, &d), None, "a push has no blend to cap");
+}
+
+/// The index of the block's own top face (the one at z 20, right of the step).
+fn face_index(h: &Harness) -> usize {
+    let st = h.app.session.world_state().unwrap();
+    let b = st.body("Body1").unwrap();
+    let m = b.mesh();
+    let f = m
+        .tri_face
+        .iter()
+        .copied()
+        .find(|f| {
+            solidcraft_engine::geom::snap::planar_face_center(&m, *f)
+                .is_some_and(|(c, n)| (c.z - 20.0).abs() < 1e-6 && n.z > 0.9 && c.x > 20.0)
+        })
+        .expect("the block's own top face");
+    usize::try_from(f).unwrap_or_default()
+}
+
+/// Which kind of blend the open window makes is the drag's to say, not only the bare edge's:
+/// carried back through the handle's own base, a fillet becomes a chamfer at the size the drag has
+/// reached, and carried back again it rounds off once more. The handle turns with it each time, so
+/// the same drag carries on sizing what it is now making instead of running into the near end.
+#[test]
+fn a_drag_back_through_the_base_turns_a_fillet_into_a_chamfer_and_back() {
+    let is_chamfer = |h: &Harness| match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(Kind::Fillet { chamfer, .. }) => *chamfer,
+        other => panic!("not a blend: {other:?}"),
+    };
+    let mut h = l_step();
+    h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "fit"}})).unwrap();
+    h.app.session.selection = vec![edge(&h, OUTSIDE)];
+    h.app.start("solid.fillet");
+    h.frames(3);
+    assert!(!is_chamfer(&h), "it opens as a fillet");
+    let (at, dir) = anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let dir = dir.expect("the handle has a direction");
+
+    // Out along the handle first: an ordinary fillet of about 4 mm.
+    let out = at + dir * 4.0;
+    h.step(&json!({"drag": [{"handle": "arrow"}, {"world": [out.x, out.y, out.z]}], "ctrl": true})).unwrap();
+    assert!(!is_chamfer(&h), "out along the handle keeps it a fillet");
+    assert!((value(&h) - 4.0).abs() < 0.5, "{}", value(&h));
+
+    // Back through the base: a chamfer, sized by how far past the base the drag went.
+    let back = at - dir * 3.0;
+    h.step(&json!({"drag": [{"handle": "arrow"}, {"world": [back.x, back.y, back.z]}], "ctrl": true})).unwrap();
+    assert!(is_chamfer(&h), "dragged back through its base, the fillet becomes a chamfer");
+    assert!(value(&h) > 0.0, "a chamfer is a size, never a direction: {}", value(&h));
+
+    // The handle turned with it, so the same gesture back again rounds it off once more.
+    let (at2, dir2) = anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let dir2 = dir2.expect("the turned handle has a direction");
+    assert!(close(dir2, -dir), "the handle turned round: {dir2:?} against {dir:?}");
+    let back2 = at2 - dir2 * 3.0;
+    h.step(&json!({"drag": [{"handle": "arrow"}, {"world": [back2.x, back2.y, back2.z]}], "ctrl": true})).unwrap();
+    assert!(!is_chamfer(&h), "and back again it is a fillet");
 }

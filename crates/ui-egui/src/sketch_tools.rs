@@ -900,6 +900,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         lined: Vec::new(),
         chain: Default::default(),
         normal: false,
+        square: false,
     })
 }
 

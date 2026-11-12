@@ -1428,6 +1428,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             None => ok(json!({"question": app.tree.capture_prompt, "pending_moves": app.session.pending_moves.len()})),
         },
         "ui.prefs" => wrap(crate::prefs::control(app, p)),
+        "ui.tutorial" => wrap(crate::tutorial::control(app, p)),
         "ui.agent_chat" => wrap(crate::agent_chat::control(app, ctx, p)),
         "ui.help" => match s("item") {
             Some(i @ ("about" | "updates" | "shortcuts" | "report" | "crashes")) => {

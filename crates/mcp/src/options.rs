@@ -11,6 +11,13 @@ pub const COMPACT_ENV: &str = "SOLIDCRAFT_MCP_COMPACT";
 /// The command-line flag that turns on compact output.
 pub const COMPACT_FLAG: &str = "--compact";
 
+/// The environment variable that serves FreeCAD AI Bridge's tool names beside our own,
+/// read like [`COMPACT_ENV`]. `solidcraft-cli mcp --freecad` does the same.
+pub const FREECAD_ENV: &str = "SOLIDCRAFT_MCP_FREECAD";
+
+/// The command-line flag that serves FreeCAD's tool names.
+pub const FREECAD_FLAG: &str = "--freecad";
+
 /// Output options of the MCP server.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Options {
@@ -19,6 +26,20 @@ pub struct Options {
     /// tool results that are JSON are not pretty-printed. Off: `inspect_design` returns every
     /// sketch in full, and JSON is pretty-printed.
     pub compact: bool,
+    /// Serve FreeCAD AI Bridge's 107 tool names and schemas beside SolidCraft's own, so a
+    /// client written for FreeCAD's bridge drives SolidCraft unchanged. Off: only our own
+    /// tools are listed, and a FreeCAD name is an unknown tool.
+    pub freecad: bool,
+}
+
+/// An option's environment variable: `1`, `true`, `yes` or `on` is on; `0`, `false`, `no`,
+/// `off` or empty is off; anything else is an error, so a typo is not silently off.
+fn truthy(name: &str, v: Option<&str>) -> Result<bool, String> {
+    match v.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        None | Some("" | "0" | "false" | "no" | "off") => Ok(false),
+        Some("1" | "true" | "yes" | "on") => Ok(true),
+        Some(other) => Err(format!("{name} must be 1 or 0 (true/false, yes/no, on/off), not `{other}`")),
+    }
 }
 
 impl Options {
@@ -30,24 +51,29 @@ impl Options {
             Some("1" | "true" | "yes" | "on") => true,
             Some(other) => return Err(format!("{COMPACT_ENV} must be 1 or 0 (true/false, yes/no, on/off), not `{other}`")),
         };
-        Ok(Self { compact: flag || from_env })
+        Ok(Self { compact: flag || from_env, freecad: false })
     }
 
     /// [`Options::resolve`] with this process's command-line arguments (`args`, after the
     /// subcommand) and environment.
     pub fn from_args_and_env(args: &[String]) -> Result<Self, String> {
-        Self::resolve(args.iter().any(|a| a == COMPACT_FLAG), std::env::var(COMPACT_ENV).ok().as_deref())
+        let mut o = Self::resolve(args.iter().any(|a| a == COMPACT_FLAG), std::env::var(COMPACT_ENV).ok().as_deref())?;
+        o.freecad = args.iter().any(|a| a == FREECAD_FLAG) || truthy(FREECAD_ENV, std::env::var(FREECAD_ENV).ok().as_deref())?;
+        Ok(o)
     }
 
     /// The options the app reports in its `mcp.options` reply (`{"compact": bool}`); a field
     /// missing or of another type is off.
     pub fn from_app(reply: &serde_json::Value) -> Self {
-        Self { compact: reply.get("compact").and_then(serde_json::Value::as_bool).unwrap_or(false) }
+        Self {
+            compact: reply.get("compact").and_then(serde_json::Value::as_bool).unwrap_or(false),
+            freecad: reply.get("freecad").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        }
     }
 
     /// Each option on when it is on in `self` or in `other`.
     pub fn or(self, other: Self) -> Self {
-        Self { compact: self.compact || other.compact }
+        Self { compact: self.compact || other.compact, freecad: self.freecad || other.freecad }
     }
 
     /// Tool JSON as text: compact, or pretty-printed (the default).
@@ -62,23 +88,23 @@ mod tests {
 
     #[test]
     fn off_unless_asked() {
-        assert_eq!(Options::default(), Options { compact: false });
-        assert_eq!(Options::resolve(false, None), Ok(Options { compact: false }));
+        assert_eq!(Options::default(), Options { compact: false, freecad: false });
+        assert_eq!(Options::resolve(false, None), Ok(Options { compact: false, freecad: false }));
         for v in ["", "0", "false", "No", " off "] {
-            assert_eq!(Options::resolve(false, Some(v)), Ok(Options { compact: false }), "{v:?}");
+            assert_eq!(Options::resolve(false, Some(v)), Ok(Options { compact: false, freecad: false }), "{v:?}");
         }
         for v in ["1", "true", "YES", "on"] {
-            assert_eq!(Options::resolve(false, Some(v)), Ok(Options { compact: true }), "{v:?}");
+            assert_eq!(Options::resolve(false, Some(v)), Ok(Options { compact: true, freecad: false }), "{v:?}");
         }
-        assert_eq!(Options::resolve(true, None), Ok(Options { compact: true }));
-        assert_eq!(Options::resolve(true, Some("0")), Ok(Options { compact: true }), "the flag wins");
+        assert_eq!(Options::resolve(true, None), Ok(Options { compact: true, freecad: false }));
+        assert_eq!(Options::resolve(true, Some("0")), Ok(Options { compact: true, freecad: false }), "the flag wins");
         assert!(Options::resolve(false, Some("maybe")).is_err_and(|e| e.contains(COMPACT_ENV)));
     }
 
     #[test]
     fn the_app_or_the_command_line_turns_it_on() {
         let off = Options::default();
-        let on = Options { compact: true };
+        let on = Options { compact: true, freecad: false };
         assert_eq!(Options::from_app(&serde_json::json!({"compact": true})), on);
         for reply in [serde_json::json!({}), serde_json::json!({"compact": "yes"}), serde_json::json!(null), serde_json::json!({"compact": false})] {
             assert_eq!(Options::from_app(&reply), off, "{reply}");

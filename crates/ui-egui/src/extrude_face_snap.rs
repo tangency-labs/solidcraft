@@ -7,6 +7,12 @@
 //! this off with the round steps. Preferences › Tools › `extrude_arrow_face_stops` (on by
 //! default) turns it off for good: the arrow then moves in round steps only, as before.
 //!
+//! Under Plasticity's controls the chord asks for the snap instead of taking it away
+//! (`prefs::snapping_on`): the arrow stops at nothing until it is held, and while it is held it
+//! stops at anything -- every edge and every face of the shown bodies, wherever they stand, at
+//! the distance that brings the push level with them ([`anywhere`]). The round steps are off
+//! while it is held, so between two stops the drag is free.
+//!
 //! The distance stays a distance: the face is not stored with the extrude (To Object does that).
 
 use std::cell::RefCell;
@@ -30,12 +36,28 @@ const PARALLEL: f64 = 1.0 - 1e-6;
 /// The most faces looked at in one model, and the most points kept of each.
 const MAX_FACES: usize = 20_000;
 const MAX_POINTS: usize = 4_096;
+/// The most edges one body offers a stop on, and the most stops kept in all: a model with a
+/// great many of either costs a bounded pass per frame of the drag, never an unbounded one.
+const MAX_EDGES: usize = 20_000;
+const MAX_STOPS: usize = 4_096;
+/// How near two levels along the arrow must be to count as the same stop (millimetres).
+const LEVEL_TOL: f64 = 1e-6;
 
-/// A face the arrow can stop at: `distance` along the arrow from its base to the face's plane.
+/// What a stop stands on: a face of the model, or one of its edges.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Of {
+    /// A face, by mesh face index: its own plane when it squares up to the arrow, otherwise the
+    /// level of its nearest or its furthest point along the arrow.
+    Face(usize),
+    /// An edge, by mesh edge index: the level of one of its ends along the arrow.
+    Edge(usize),
+}
+
+/// A place the arrow can stop at: `distance` along the arrow from its base to it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stop {
     pub body: String,
-    pub face: usize,
+    pub of: Of,
     pub distance: f64,
 }
 
@@ -152,19 +174,72 @@ fn footprint(app: &SolveApp, d: &Dialog, faces: &[FlatFace]) -> Vec<Vec3> {
     out
 }
 
-/// The faces the open extrude's arrow (from `base` along `n`) can stop at: flat faces of shown
-/// bodies, parallel to the arrow, off the base's own plane, over the footprint.
-pub(crate) fn stops(app: &SolveApp, d: &Dialog, base: Vec3, n: Vec3) -> Vec<Stop> {
-    if !app.preferences.extrude_arrow_face_stops || !matches!(d.kind, Kind::Extrude { .. }) {
+/// Where the open extrude's arrow (from `base` along `n`) can stop. `snapping` is whether a snap
+/// is on at all this frame (`prefs::snapping_on`): under Plasticity's controls that is the chord,
+/// and then the stops are everything ([`anywhere`]); otherwise they are the flat faces parallel
+/// to the arrow, off the base's own plane and over the profile's footprint (#2398).
+pub(crate) fn stops(app: &SolveApp, d: &Dialog, base: Vec3, n: Vec3, snapping: bool) -> Vec<Stop> {
+    if !app.preferences.extrude_arrow_face_stops || !matches!(d.kind, Kind::Extrude { .. }) || !snapping {
         return Vec::new();
     }
-    let Some(plane) = Plane::from_normal(base, n) else { return Vec::new() };
     let Ok(st) = app.session.world_state() else { return Vec::new() };
     let faces = flat_faces(&st);
-    let Some((lo, hi)) = bounds_2d(&plane, footprint(app, d, &faces)) else { return Vec::new() };
+    let mut out =
+        if crate::plasticity::active(app) { anywhere(app, &st, &faces, base, n) } else { over_the_footprint(app, d, &faces, base, n) };
+    out.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+    // Two places at the same level are one stop, and the first of them keeps it.
+    out.dedup_by(|a, b| (a.distance - b.distance).abs() <= LEVEL_TOL);
+    out.truncate(MAX_STOPS);
+    out
+}
+
+/// Every edge and face of the shown bodies, at the distance that brings the push level with it:
+/// a face squared up to the arrow gives its own plane, one seen at an angle gives its nearest and
+/// its furthest point, and an edge gives each of its ends. Nothing has to lie over the profile,
+/// so a face across the part catches the arrow as the one under it does.
+fn anywhere(app: &SolveApp, st: &Arc<ModelState>, faces: &[FlatFace], base: Vec3, n: Vec3) -> Vec<Stop> {
+    let mut out: Vec<Stop> = Vec::new();
+    let level = |p: Vec3| -> Option<f64> { Some((p - base).dot(n)).filter(|d| d.is_finite() && d.abs() > LEVEL_TOL) };
+    let near_far = |points: &mut dyn Iterator<Item = f64>| -> Option<(f64, f64)> {
+        points.fold(None, |found: Option<(f64, f64)>, d| Some(found.map_or((d, d), |(lo, hi)| (lo.min(d), hi.max(d)))))
+    };
+    for f in faces.iter().filter(|f| app.body_visible(&f.body)) {
+        if f.normal.dot(n).abs() >= PARALLEL {
+            if let Some(distance) = level(f.point) {
+                out.push(Stop { body: f.body.clone(), of: Of::Face(f.face), distance });
+            }
+            continue;
+        }
+        // Seen at an angle a face has no one level: its near and its far side are what a push
+        // can be brought level with.
+        if let Some((lo, hi)) = near_far(&mut f.points.iter().filter_map(|p| level(*p))) {
+            out.push(Stop { body: f.body.clone(), of: Of::Face(f.face), distance: lo });
+            if (hi - lo).abs() > LEVEL_TOL {
+                out.push(Stop { body: f.body.clone(), of: Of::Face(f.face), distance: hi });
+            }
+        }
+    }
+    for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
+        let m = b.mesh();
+        for (e, points) in m.edges.iter().enumerate().take(MAX_EDGES) {
+            let Some((lo, hi)) = near_far(&mut points.iter().take(MAX_POINTS).filter_map(|p| level(*p))) else { continue };
+            out.push(Stop { body: b.name.clone(), of: Of::Edge(e), distance: lo });
+            if (hi - lo).abs() > LEVEL_TOL {
+                out.push(Stop { body: b.name.clone(), of: Of::Edge(e), distance: hi });
+            }
+        }
+    }
+    out
+}
+
+/// The flat faces parallel to the arrow, off the base's own plane and over the profile's
+/// footprint: the stops SolidCraft's own controls offer, with no chord held (#2398).
+fn over_the_footprint(app: &SolveApp, d: &Dialog, faces: &[FlatFace], base: Vec3, n: Vec3) -> Vec<Stop> {
+    let Some(plane) = Plane::from_normal(base, n) else { return Vec::new() };
+    let Some((lo, hi)) = bounds_2d(&plane, footprint(app, d, faces)) else { return Vec::new() };
     let size = lo.dist(hi).max(1.0);
     let tol = size * 1e-6;
-    let mut out: Vec<Stop> = faces
+    faces
         .iter()
         .filter(|f| f.normal.dot(n).abs() >= PARALLEL && app.body_visible(&f.body))
         .filter_map(|f| {
@@ -174,11 +249,9 @@ pub(crate) fn stops(app: &SolveApp, d: &Dialog, base: Vec3, n: Vec3) -> Vec<Stop
             }
             let (flo, fhi) = bounds_2d(&plane, f.points.iter().copied())?;
             let over = flo.x <= hi.x + tol && fhi.x >= lo.x - tol && flo.y <= hi.y + tol && fhi.y >= lo.y - tol;
-            over.then(|| Stop { body: f.body.clone(), face: f.face, distance })
+            over.then(|| Stop { body: f.body.clone(), of: Of::Face(f.face), distance })
         })
-        .collect();
-    out.sort_by(|a, b| a.distance.total_cmp(&b.distance));
-    out
+        .collect()
 }
 
 /// The stop nearest the arrow's tip on screen when the tip is at `along` (from `base` along
@@ -193,14 +266,20 @@ pub(crate) fn nearest<'a>(proj: &Proj, base: Vec3, n: Vec3, along: f64, stops: &
         .map(|(s, _)| s)
 }
 
-/// Outlines the face the arrow stopped at, as a hovered face's edges are drawn.
+/// Outlines what the arrow stopped at, as a hovered face's or edge's own outline is drawn.
 pub(crate) fn outline(app: &SolveApp, painter: &egui::Painter, proj: &Proj, stop: &Stop) {
     let Ok(st) = app.session.world_state() else { return };
     let Some(b) = st.body(&stop.body) else { return };
     let m = b.mesh();
     let t = Tokens::get();
-    let Ok(face) = u32::try_from(stop.face) else { return };
-    for e in m.face_edges(face) {
+    let edges: Vec<usize> = match stop.of {
+        Of::Edge(e) => vec![e],
+        Of::Face(face) => match u32::try_from(face) {
+            Ok(face) => m.face_edges(face),
+            Err(_) => return,
+        },
+    };
+    for e in edges {
         let Some(pts) = m.edges.get(e) else { continue };
         let screen: Vec<Pos2> = pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
         if screen.len() < 2 {

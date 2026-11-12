@@ -567,6 +567,8 @@ fn an_evaluation_on_another_thread_reuses_the_written_features() {
 fn plate_with_holes(doc: &mut Document, comp: u64, tools: u64, holes: usize) -> String {
     let length = format!("{}", 10 * holes.max(1));
     let kind = FeatureKind::Box {
+        axis: crate::z_axis(),
+        x_axis: crate::x_axis(),
         corner: point_expr(Vec3::ZERO),
         length: length.into(),
         width: "10".into(),
@@ -580,7 +582,7 @@ fn plate_with_holes(doc: &mut Document, comp: u64, tools: u64, holes: usize) -> 
     let body = model.state().bodies.iter().find(|b| b.feature == plate).unwrap().name.clone();
     for k in 0..holes {
         let corner = point_expr(Vec3::new(10.0 * k as f64 + 4.0, 4.0, -1.0));
-        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let kind = FeatureKind::Box { axis: crate::z_axis(), x_axis: crate::x_axis(), corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
         let id = doc.add_feature(kind, None).unwrap();
         let f = doc.feature_mut(id).unwrap();
         f.component = tools;
@@ -715,6 +717,8 @@ fn shared_evaluation_requires_its_actual_model_and_unmodified_geometry_inputs() 
     let feature = doc
         .add_feature(
             FeatureKind::Box {
+                axis: crate::z_axis(),
+                x_axis: crate::x_axis(),
                 corner: point_expr(Vec3::ZERO),
                 length: "2".into(),
                 width: "3".into(),
@@ -863,7 +867,7 @@ fn saved_states_read_back_their_sketch_keys() {
         doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(f64::from(i) + 1.0, 1.0)), None).unwrap();
         for j in 0..3 {
             let corner = point_expr(Vec3::new(f64::from(i) * 20.0, f64::from(j) * 20.0, 0.0));
-            let kind = FeatureKind::Box { corner, length: "5".into(), width: "5".into(), height: "5".into(), operation: Operation::NewBody };
+            let kind = FeatureKind::Box { axis: crate::z_axis(), x_axis: crate::x_axis(), corner, length: "5".into(), width: "5".into(), height: "5".into(), operation: Operation::NewBody };
             doc.add_feature(kind, None).unwrap();
         }
     }
@@ -948,13 +952,13 @@ fn blocks_with_cuts(doc: &mut Document, comp: u64, blocks: usize, cuts: usize) {
     let y = 100.0 * comp as f64;
     for k in 0..blocks {
         let corner = point_expr(Vec3::new(20.0 * k as f64, y, 0.0));
-        let kind = FeatureKind::Box { corner, length: "10".into(), width: "10".into(), height: "4".into(), operation: Operation::NewBody };
+        let kind = FeatureKind::Box { axis: crate::z_axis(), x_axis: crate::x_axis(), corner, length: "10".into(), width: "10".into(), height: "4".into(), operation: Operation::NewBody };
         let id = doc.add_feature(kind, None).unwrap();
         doc.feature_mut(id).unwrap().component = comp;
     }
     for k in 0..cuts {
         let corner = point_expr(Vec3::new(20.0 * k as f64 + 4.0, y + 4.0, -1.0));
-        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let kind = FeatureKind::Box { axis: crate::z_axis(), x_axis: crate::x_axis(), corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
         let id = doc.add_feature(kind, None).unwrap();
         doc.feature_mut(id).unwrap().component = comp;
     }
@@ -1151,6 +1155,8 @@ fn block(doc: &mut Document, name: &str, corner: Vec3, size: [f64; 3]) {
     let id = doc
         .add_feature(
             FeatureKind::Box {
+                axis: crate::z_axis(),
+                x_axis: crate::x_axis(),
                 corner: point_expr(corner),
                 length: size[0].to_string().into(),
                 width: size[1].to_string().into(),
@@ -1214,6 +1220,8 @@ fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
     let mut doc = Document::new("edge");
     block(&mut doc, "A", Vec3::ZERO, [50.0, 40.0, 30.0]);
     let along = FeatureKind::Box {
+        axis: crate::z_axis(),
+        x_axis: crate::x_axis(),
         corner: point_expr(Vec3::new(50.0, 0.0, 30.0)),
         length: "10".into(),
         width: "40".into(),
@@ -1227,6 +1235,8 @@ fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
     doc.add_feature(FeatureKind::Sphere { center: point_expr(Vec3::new(0.0, 0.0, -10.0)), radius: "20".into(), operation: Operation::NewBody }, None)
         .unwrap();
     let below = FeatureKind::Box {
+        axis: crate::z_axis(),
+        x_axis: crate::x_axis(),
         corner: point_expr(Vec3::new(-30.0, -30.0, -40.0)),
         length: "60".into(),
         width: "60".into(),

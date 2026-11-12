@@ -574,7 +574,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     let mut geometry = harness();
     geometry.app.home.open = false;
     geometry.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Audit block"})).unwrap();
-    geometry.app.run("solid.split_body", json!({"body":"Audit block","plane":{"origin":[5,0,0],"normal":[1,0,0]}})).unwrap();
+    geometry.app.run("solid.cut_body", json!({"body":"Audit block","plane":{"origin":[5,0,0],"normal":[1,0,0]}})).unwrap();
     geometry.frames(3);
     collect(&mut geometry, "Split feature history", &mut requested);
     geometry.app.run("sketch.create", json!({"plane":"XY","name":"Wall profile"})).unwrap();

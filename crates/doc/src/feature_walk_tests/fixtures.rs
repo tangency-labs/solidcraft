@@ -68,7 +68,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "cone",
             json!({"type": "cone", "base": ["cone.x", "cone.y", "cone.z"], "radius": "cone.radius", "top_radius": "cone.top_radius", "height": "cone.height"}),
         ),
-        ("combine", json!({"type": "combine", "target": "A", "tools": ["B"], "operation": "join"})),
+        ("combine", json!({"type": "combine", "targets": ["A"], "tools": ["B"], "operation": "join"})),
         (
             "pattern_rectangular",
             pattern(
@@ -257,7 +257,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {
             json!({"body": "B"})
         }
-        "combine" => json!({"target": "B", "tools": ["B"]}),
+        "combine" => json!({"targets": ["B"], "tools": ["B"]}),
         "pattern_rectangular" | "pattern_circular" | "pattern_path" | "mirror" => json!({"bodies": ["B"]}),
         "hole_simple" | "hole_drilled" | "hole_counterbore" | "hole_countersink" => json!({"points": {"sketch": 3, "ids": ["p"]}}),
         "loft" => json!({"sections": [{"sketch": 4, "profiles": {"type": "all"}}, {"sketch": 5, "profiles": {"type": "all"}}], "targets": ["B"],

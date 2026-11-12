@@ -224,6 +224,8 @@
 | Curvature Map Analysis | 曲率マップ解析 | `cmd.inspect_curvature_map` |
 | Customize Toolbar | ツールバーのカスタマイズ | `Customize Toolbar` |
 | Cut | 切り取り | `ui.cut` |
+| Cut Body | ボディを分割 | `ui.cut_body` |
+| CUT BODY | ボディを分割 | `ui.heading_cut_body` |
 | Cylinder | 円柱 | `ui.cylinder` |
 | CYLINDER | 円柱 | `ui.heading_cylinder` |
 | Dark | ダーク | `ui.dark` |
@@ -750,8 +752,6 @@
 | Sphere | 球 | `ui.sphere` |
 | SPHERE | 球 | `ui.heading_sphere` |
 | Spline | スプライン | `ui.spline` |
-| Split Body | ボディを分割 | `ui.split_body` |
-| SPLIT BODY | ボディを分割 | `ui.heading_split_body` |
 | Split Face | 面を分割 | `cmd.solid_split_face` |
 | Spun Profile | 回転プロファイル | `cmd.sketch_spun_profile` |
 | Stand it up | 正立させる | `Stand it up` |

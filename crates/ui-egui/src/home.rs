@@ -621,6 +621,7 @@ enum FileAction {
     Settings,
     Shortcuts,
     Crashes,
+    Tutorial,
     About,
     Recovery(solidcraft_engine::recovery::Entry, bool),
 }
@@ -758,6 +759,7 @@ fn navigation(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>
         ("home:settings", app.tr("home.settings"), format!("{primary},"), None, true, FileAction::Settings),
         ("home:shortcuts", app.tr("home.shortcuts"), String::new(), None, true, FileAction::Shortcuts),
         ("home:crashes", app.tr("home.crashes"), String::new(), None, true, FileAction::Crashes),
+        ("home:tutorial", app.tr("tutorial.title"), String::new(), None, true, FileAction::Tutorial),
         ("home:about", app.tr_label("About SolidCraft"), String::new(), None, true, FileAction::About),
     ];
     for (index, (id, label, key, section, enabled, picked)) in nav.into_iter().enumerate() {
@@ -1125,6 +1127,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
             app.keymap.read_only = true;
         }
         FileAction::Crashes => crate::help::run(app, ctx, "crashes"),
+        FileAction::Tutorial => crate::tutorial::start(app),
         FileAction::About => crate::help::run(app, ctx, "about"),
         FileAction::Recovery(entry, recover) => crate::recovery_ui::apply(app, entry, recover),
     }

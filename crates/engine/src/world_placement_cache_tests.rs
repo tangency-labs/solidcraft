@@ -138,6 +138,8 @@ fn placement_dependent_cross_component_cuts_still_evaluate_and_undo() {
     let feature = document
         .add_feature(
             FeatureKind::Box {
+                axis: solidcraft_doc::z_axis(),
+                x_axis: solidcraft_doc::x_axis(),
                 corner: point_expr(Vec3::ZERO),
                 length: "10".into(),
                 width: "10".into(),
@@ -154,6 +156,8 @@ fn placement_dependent_cross_component_cuts_still_evaluate_and_undo() {
     let feature = document
         .add_feature(
             FeatureKind::Box {
+                axis: solidcraft_doc::z_axis(),
+                x_axis: solidcraft_doc::x_axis(),
                 corner: point_expr(Vec3::new(4., 4., -1.)),
                 length: "2".into(),
                 width: "2".into(),

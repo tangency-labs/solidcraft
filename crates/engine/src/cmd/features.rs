@@ -54,7 +54,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("box")
         .contract(&BOX_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z] (numbers in mm or length expressions; default: the origin); operation?, touching?, targets?: [body], name?, body_name?"),
+        .params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (the way `height` runs, the normal of the face the box stands on; default Z); x_axis?: X|Y|Z|[x,y,z] (the way `length` runs across `axis`; default X); operation?, touching?, targets?: [body], name?, body_name?"),
     CommandSpec::new("solid.cylinder", "Cylinder", crate::checked!("solid.cylinder", prim_cylinder))
         .at("SOLID", "CREATE")
         .icon("cylinder")
@@ -87,15 +87,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FilletResult>)
         .params("edges: [[x,y,z] point on edge | {body, index}] ; radius: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); body?; type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); turn?: mitre|swept (where two rounds turn round a sharp, straight, convex side edge square to both on a plane, such as the rounds along a boss's base at its upright edges: mitre, the default, runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus; swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
     CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}] ; distance: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is cut with it; false: exactly the picked edges); distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
-    CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
+    CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("targets: [body] (or target: body); tools: [body]; operation?: join|cut|intersect|slice; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
-        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip)"),
+        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1 (between copies) | distance1 (first to last); dir2?, count2?, spacing2? | distance2?; alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip)"),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
-        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
+        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (the whole turn, default 360 deg; partial arcs include both ends) | step? (the angle from one copy to the next); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", pattern_path)
         .at("SOLID", "CREATE")
         .icon("pattern_path")
@@ -162,7 +162,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal)",
         ),
-    CommandSpec::new("solid.split_body", "Split Body", split_body)
+    CommandSpec::new("solid.cut_body", "Cut Body", cut_body)
         .at("SOLID", "MODIFY")
         .icon("split_body")
         .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
@@ -352,7 +352,7 @@ fn through_all_reach(st: &solidcraft_doc::ModelState, p: &Value, base: Vec3) -> 
 pub(super) fn operation(p: &Value, cmd: &str) -> Result<Operation> {
     match str_(p, "operation") {
         None => Ok(Operation::NewBody),
-        Some(o) => Operation::parse(o).ok_or_else(|| bad(cmd, format!("unknown operation `{o}` (new, join, cut, intersect)"))),
+        Some(o) => Operation::parse(o).ok_or_else(|| bad(cmd, format!("unknown operation `{o}` (new, join, cut, intersect, slice)"))),
     }
 }
 
@@ -794,6 +794,15 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         check_plane_name(n, "construct.plane")?;
     }
     let id = s.doc_mut().add_feature(kind, name)?;
+    // Keep tools: the shape the feature is built from stays a body of its own as well (`T` on a
+    // command's card). Combine's tools are bodies that were already there, and it keeps them
+    // through its own `keep_tools`, so it is left out here.
+    if !matches!(s.doc.feature(id).map(|f| &f.kind), Some(FeatureKind::Combine { .. }))
+        && bool_(p, "keep_tools").unwrap_or(false)
+        && let Some(f) = s.doc_mut().feature_mut(id)
+    {
+        f.keep_tool = true;
+    }
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.participants = participants;
         f.touching = touching;
@@ -1432,9 +1441,15 @@ pub(super) fn point_param(s: &Session, p: &Value, key: &str, cmd: &str) -> Resul
 
 /// An axis direction: X|Y|Z or a non-zero `[x, y, z]`; `Z` when it is not given.
 pub(super) fn axis_dir_param(p: &Value, cmd: &str) -> Result<Vec3> {
-    match p.get("axis") {
-        None => Ok(Vec3::Z),
-        Some(v) => axis_dir_form(v).map_err(|why| bad(cmd, why)),
+    dir_param(p, cmd, "axis", Vec3::Z)
+}
+
+/// A direction parameter by name, `fallback` where it is absent: X, Y, Z or `[x, y, z]`, read
+/// as [`axis_dir_form`] reads them, with the key in the message.
+pub(super) fn dir_param(p: &Value, cmd: &str, key: &str, fallback: Vec3) -> Result<Vec3> {
+    match p.get(key) {
+        None => Ok(fallback),
+        Some(v) => axis_dir_form(v).map_err(|why| bad(cmd, why.replace("`axis`", &format!("`{key}`")))),
     }
 }
 
@@ -1478,7 +1493,15 @@ fn prim_box(s: &mut Session, p: &Value) -> Result<Value> {
         }
         _ => point_expr(Vec3::ZERO),
     };
-    add_feature(s, p, FeatureKind::Box { corner, length: l, width: w, height: h, operation: operation(p, cmd)? })
+    // The frame it stands in: `axis` is the way its height runs (a face normal), `x_axis` the
+    // way its length runs across that. Absent, they are the world's, as every box was before.
+    let axis = dir_param(p, cmd, "axis", Vec3::Z)?;
+    let x_axis = dir_param(p, cmd, "x_axis", Vec3::X)?;
+    add_feature(
+        s,
+        p,
+        FeatureKind::Box { corner, axis: Dir(axis), x_axis: Dir(x_axis), length: l, width: w, height: h, operation: operation(p, cmd)? },
+    )
 }
 
 fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1890,20 +1913,28 @@ fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn combine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.combine";
-    let target = str_(p, "target").ok_or_else(|| bad(cmd, "`target` must be a body name"))?.to_string();
+    // `targets` takes a whole selection, the way Plasticity's Boolean does; `target` is the one
+    // body the command used to take, and still answers to that name.
+    let mut targets = string_list(cmd, p, "targets")?;
+    if targets.is_empty() {
+        targets = string_list(cmd, p, "target")?;
+    }
+    let Some(target) = targets.first().cloned() else {
+        return Err(bad(cmd, "`targets` must name the bodies to work on"));
+    };
     let tools = string_list(cmd, p, "tools")?;
     if tools.is_empty() {
         return Err(bad(cmd, "`tools` must list bodies"));
     }
     let op = match str_(p, "operation") {
         None => Operation::Join,
-        Some(o) => Operation::parse(o).filter(|o| *o != Operation::NewBody).ok_or_else(|| bad(cmd, "operation must be join, cut or intersect"))?,
+        Some(o) => Operation::parse(o).filter(|o| *o != Operation::NewBody).ok_or_else(|| bad(cmd, "operation must be join, cut, intersect or slice"))?,
     };
     let mut out = add_feature(
         s,
         p,
         FeatureKind::Combine {
-            target: target.clone().into(),
+            targets: targets.iter().map(|t| BodyName(t.clone())).collect(),
             tools: tools.into_iter().map(BodyName).collect(),
             operation: op,
             keep_tools: bool_(p, "keep_tools").unwrap_or(false),
@@ -1913,7 +1944,7 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "new_component").unwrap_or(false) {
         let name = str_(p, "component_name").map(str::to_string).unwrap_or_else(|| format!("{target} Combined"));
         let c = s.execute("component.create", &json!({"name": name, "activate": false}))?;
-        super::component::transfer_constructor_result(s, &json!({"bodies": [target], "component": c["component"]}))?;
+        super::component::transfer_constructor_result(s, &json!({"bodies": targets, "component": c["component"]}))?;
         out["component"] = c["component"].clone();
     }
     Ok(out)
@@ -2266,16 +2297,25 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let dir1 = p.get("dir1").and_then(vec3).ok_or_else(|| bad(cmd, "`dir1` must be [x, y, z]"))?;
     let count1 = req_expr(cmd, p, "count1")?;
-    let spacing1 = req_expr(cmd, p, "spacing1")?;
     check_count(s, &count1, cmd, "count1")?;
-    check_expr(s, &spacing1, Kind::Length, cmd, "spacing1")?;
+    // `spacing1` is the step between neighbours, `distance1` the span from the first copy to the
+    // last; a pattern along a path already takes either, and Plasticity's array card calls the
+    // two Spacing and Extent.
+    let (spacing1, extent1) = match (expr(p, "spacing1"), expr(p, "distance1")) {
+        (Some(_), Some(_)) => return Err(bad(cmd, "give `spacing1` (between copies) or `distance1` (first to last), not both")),
+        (Some(sp), None) => (sp, false),
+        (None, Some(d)) => (d, true),
+        (None, None) => return Err(bad(cmd, "give `spacing1` (between copies) or `distance1` (first to last)")),
+    };
+    check_expr(s, &spacing1, Kind::Length, cmd, if extent1 { "distance1" } else { "spacing1" })?;
     let dir2 = p.get("dir2").and_then(vec3);
-    let (count2, spacing2) = (expr(p, "count2"), expr(p, "spacing2"));
+    let extent2 = expr(p, "spacing2").is_none() && expr(p, "distance2").is_some();
+    let (count2, spacing2) = (expr(p, "count2"), expr(p, "spacing2").or_else(|| expr(p, "distance2")));
     if let Some(c) = &count2 {
         check_count(s, c, cmd, "count2")?;
     }
     if let Some(c) = &spacing2 {
-        check_expr(s, c, Kind::Length, cmd, "spacing2")?;
+        check_expr(s, c, Kind::Length, cmd, if extent2 { "distance2" } else { "spacing2" })?;
     }
     let pattern = solidcraft_doc::PatternKind::Rectangular {
         dir1: Dir(dir1),
@@ -2288,6 +2328,8 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
         alignment2: super::alignment_param(p, "alignment2", cmd)?,
         reversed: super::reversed_param(p, "reversed", cmd)?,
         reversed2: super::reversed_param(p, "reversed2", cmd)?,
+        extent1,
+        extent2,
     };
     finish_pattern(s, p, features, pattern, bodies)
 }
@@ -2314,8 +2356,14 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
     let (origin, axis, axis_ref, axis_feature) = pattern_axis(s, p, cmd)?;
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
-    let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
-    check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
+    // `angle` is the whole turn the copies are spread over, `step` the angle from one to the
+    // next, which is what Plasticity's radial array calls Total and Spacing.
+    let (angle, step) = match (expr(p, "angle"), expr(p, "step")) {
+        (Some(_), Some(_)) => return Err(bad(cmd, "give `angle` (the total) or `step` (between copies), not both")),
+        (None, Some(st)) => (st, true),
+        (a, None) => (a.unwrap_or_else(|| "360 deg".into()), false),
+    };
+    check_expr(s, &angle, Kind::Angle, cmd, if step { "step" } else { "angle" })?;
     let pattern = solidcraft_doc::PatternKind::Circular {
         origin,
         axis: Dir(axis),
@@ -2325,6 +2373,7 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
         reversed: super::reversed_param(p, "reversed", cmd)?,
         axis_ref,
         axis_feature,
+        step,
     };
     finish_pattern(s, p, features, pattern, bodies)
 }
@@ -2590,8 +2639,8 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, kind)
 }
 
-fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "solid.split_body";
+fn cut_body(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.cut_body";
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));

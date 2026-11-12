@@ -1239,3 +1239,59 @@ fn circular_pattern_of_a_moved_copy_adds_one_body_per_instance() {
     let far = s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
     assert!(far > 20.0, "the repeats follow the redefined Move: {far}");
 }
+
+/// A rectangular pattern takes the span from the first copy to the last, not only the step
+/// between neighbours: Plasticity's array card calls the two Extent and Spacing, and a pattern
+/// along a path already took either. Four copies across 90 mm stand 30 mm apart.
+#[test]
+fn a_rectangular_pattern_spreads_its_copies_across_a_distance() {
+    let mut by_step = Session::default();
+    run(&mut by_step, "solid.box", json!({"length": 4, "width": 4, "height": 4, "body_name": "Peg"}));
+    run(&mut by_step, "solid.pattern.rectangular", json!({"bodies": ["Peg"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 30}));
+    let mut by_span = Session::default();
+    run(&mut by_span, "solid.box", json!({"length": 4, "width": 4, "height": 4, "body_name": "Peg"}));
+    run(&mut by_span, "solid.pattern.rectangular", json!({"bodies": ["Peg"], "dir1": [1, 0, 0], "count1": 4, "distance1": 90}));
+    let far = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::NEG_INFINITY, f64::max);
+    assert_eq!(by_span.world_state().unwrap().bodies.len(), 4);
+    assert!((far(&by_span) - far(&by_step)).abs() < 1e-6, "90 mm across in four is 30 mm apart: {} vs {}", far(&by_span), far(&by_step));
+    assert!((far(&by_span) - 94.0).abs() < 1e-6, "the last peg ends at 94 mm: {}", far(&by_span));
+    // Giving both is refused rather than quietly picking one.
+    assert!(
+        by_span
+            .execute("solid.pattern.rectangular", &json!({"bodies": ["Peg"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 5, "distance1": 9}))
+            .is_err()
+    );
+}
+
+/// A circular pattern takes the angle from one copy to the next, not only the whole turn.
+/// Six copies 30 degrees apart sweep the same 150 degrees as six across a total of 150.
+#[test]
+fn a_circular_pattern_takes_the_angle_between_copies() {
+    let mut by_total = Session::default();
+    run(&mut by_total, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [20, -2, 0], "body_name": "Peg"}));
+    run(&mut by_total, "solid.pattern.circular", json!({"bodies": ["Peg"], "axis": "Z", "count": 6, "angle": "150 deg"}));
+    let mut by_step = Session::default();
+    run(&mut by_step, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [20, -2, 0], "body_name": "Peg"}));
+    run(&mut by_step, "solid.pattern.circular", json!({"bodies": ["Peg"], "axis": "Z", "count": 6, "step": "30 deg"}));
+    assert_eq!(by_step.world_state().unwrap().bodies.len(), 6);
+    let centre = |s: &Session| {
+        let mut c: Vec<[f64; 2]> = s
+            .model
+            .state()
+            .bodies
+            .iter()
+            .map(|b| {
+                let m = b.mesh().bounds().center();
+                [m.x, m.y]
+            })
+            .collect();
+        c.sort_by(|a, b| a[1].atan2(a[0]).partial_cmp(&b[1].atan2(b[0])).unwrap_or(std::cmp::Ordering::Equal));
+        c
+    };
+    for (a, b) in centre(&by_step).into_iter().zip(centre(&by_total)) {
+        assert!((a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6, "{a:?} against {b:?}");
+    }
+    assert!(
+        by_step.execute("solid.pattern.circular", &json!({"bodies": ["Peg"], "axis": "Z", "count": 2, "angle": "90 deg", "step": "10 deg"})).is_err()
+    );
+}

@@ -73,6 +73,8 @@ const FIXED_ARRAYS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs", "ISO_COARSE"),                // ISO metric coarse diameter/pitch pairs.
     ("crates/doc/src/format.rs", "JSON_STEPS"),              // Frozen historical migrations; additions use format/pending.
     ("crates/engine/src/cmd/features.rs", "TABLE"),          // ISO 273 metric bolt clearance-hole dimensions.
+    ("crates/sim/src/flow.rs", "C"),                         // The D3Q19 lattice velocity set, fixed by the scheme.
+    ("crates/sim/src/flow.rs", "W"),                         // The D3Q19 weights, one per velocity in C.
     ("crates/engine/src/cmd/parts.rs", "BEARINGS"),          // Standard deep-groove ball bearing dimensions.
     ("crates/engine/src/cmd/parts.rs", "HEX_BOLT"),          // ISO 4017 hex bolt dimensions.
     ("crates/engine/src/cmd/parts.rs", "HEX_NUT"),           // ISO 4032 hex nut dimensions.

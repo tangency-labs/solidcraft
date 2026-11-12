@@ -210,6 +210,9 @@ pub struct ViewportState {
     pub hover_feature: Option<u64>,
     /// Bodies whose browser row is under the cursor: highlighted the same way.
     pub hover_bodies: Vec<String>,
+    /// The whole-object chord lit the body under the cursor, so this frame may put it out again
+    /// (the browser rewrites `hover_bodies` every frame, but only while its panel is drawn).
+    pub(crate) lit_whole_body: bool,
     /// The origin or construction plane whose browser row is under the cursor: lit as if the
     /// pointer were on it in the view.
     pub hover_plane: Option<String>,
@@ -1924,6 +1927,11 @@ pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
     }
 }
 
+/// How near the horizon a view must be for the ground to count as seen exactly edge-on: about a
+/// degree. The ground grid then draws nothing at all, so the Front, Back, Left and Right views
+/// take the upright origin plane facing them whatever Preferences > Grid follows the view says.
+const SQUARE_ON_GROUND: f64 = 0.02;
+
 /// View-dependent geometry: grid, sketch feedback and the ground shadow's visibility.
 pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let tk = Tokens::get();
@@ -1951,7 +1959,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         // would take; otherwise the ground plane: XY with Z up, XZ with Y up (laid out in the
         // camera's Z-up frame), or the upright origin plane facing the view when the ground is
         // seen edge-on.
-        let (c, u, v, slant, ext, far_reach, w3): (Vec3, Vec3, Vec3, f64, f64, f64, Box<dyn Fn(Vec3) -> [f32; 3]>) = if let Some(pl) = &sketch_plane {
+        let (c, u, v, slant, ext, far_reach, world): (Vec3, Vec3, Vec3, f64, f64, f64, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = &sketch_plane {
             let (c, u, v) = solidcraft_engine::view::sketch_grid_frame(pl, app.cam.target, major);
             // How steeply the sketch's plane is seen: the grid reaches as far on it as the view
             // is wide, so the fade with the distance does too (#4214). The sketch's plane is in
@@ -1960,7 +1968,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             let slant = app.cam.back().dot(n);
             let ext = grid_ext(app.cam.half_height(), major, slant);
             let far_reach = solidcraft_engine::view::grid_far_reach(&proj.cam, picture_far(app, &proj.cam), c, n);
-            (c, u, v, slant, ext, far_reach, Box::new(|p| p.to_f32()))
+            (c, u, v, slant, ext, far_reach, Box::new(|p| p))
         } else {
             let tf = app.cam.to_frame(app.cam.target);
             // On the ground (XY) unless the Grid follows the view preference is on (#1470); then on
@@ -1971,7 +1979,18 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
                     last.axes()
                 })
             } else {
-                (Vec3::X, Vec3::Y)
+                // Off, the grid stays on the ground at every angle the ground draws something --
+                // which a view straight along it does not: there it is exactly edge-on, and the
+                // choice is between the upright plane facing the view and no grid at all. The
+                // Front, Back, Left and Right views therefore take their wall whatever the
+                // preference says, and only they do; a view a degree off it keeps the ground.
+                let back = app.cam.to_frame(app.cam.back());
+                let horizontal = back.x.hypot(back.y);
+                if back.z.abs() <= SQUARE_ON_GROUND && horizontal > 0.0 && back.z.is_finite() && horizontal.is_finite() {
+                    if back.y.abs() >= back.x.abs() { GridPlane::Xz.axes() } else { GridPlane::Yz.axes() }
+                } else {
+                    (Vec3::X, Vec3::Y)
+                }
             };
             // Centred where the view's axis meets the ground, the part of the ground in the middle
             // of the view (#3087): the camera's target may lie off the ground (above a part, or
@@ -1988,13 +2007,19 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             // The far plane cuts the ground, and the grid's plane is the camera's frame's.
             let far_reach =
                 solidcraft_engine::view::grid_far_reach(&proj.cam, picture_far(app, &proj.cam), app.cam.from_frame(c), app.cam.from_frame(n));
-            (c, u, v, slant, ext, far_reach, Box::new(|p| app.cam.from_frame(p).to_f32()))
+            (c, u, v, slant, ext, far_reach, Box::new(|p| app.cam.from_frame(p)))
         };
         // The grid fades out with the distance from the middle of the view (#4214): it used to
         // stop at a fixed distance, so its edge showed as a cut across the picture. Each line is
         // now drawn in pieces, each as faint as the fade makes it there, and the grid is gone
         // before its own edge, which is therefore never seen.
         let fade = GridFade::new(app.cam.half_height(), slant, ext, far_reach);
+        // Square on to the grid's plane -- straight down X, Y or Z -- the grid fills the view, and
+        // the model stands in the middle of it, over the very lines a part is lined up and
+        // measured against. Seen that way the grid is drawn over the model as well, in the same
+        // colour: a sheet of squared paper the part lies on rather than one it hides. At any other
+        // angle it stays under the model, which is what tells the eye the model sits on it.
+        let over_model = slant.abs() >= solidcraft_engine::view::GRID_FACE_ON;
         let (grid, grid_major) = (c4(tk.grid), c4(tk.grid_major));
         // Near a switch of the spacing the outgoing and incoming levels cross-fade (#9570), each
         // line on its own place on the plane: the grid's centre on each axis, from the plane's
@@ -2002,16 +2027,32 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let origin = sketch_plane.as_ref().map_or(Vec3::ZERO, |pl| pl.origin);
         let (at_u, at_v) = ((c - origin).dot(u), (c - origin).dot(v));
         // Two lines through the point `c + u * t`: one along v, one along u.
+        let on_pixels = app.viewport.pixels_per_point();
         for (along, across, at) in [(v, u, at_u), (u, v, at_v)] {
+            // A line thinner than a pixel is drawn a pixel wide, faded by the width it lacks
+            // (`viewport.wgsl`): lying between two rows of pixels it is half as strong in each.
+            // Seen at a slant that befalls a line here and there; straight down an axis every
+            // line of the grid runs along a row at once, and the whole grid halves until it
+            // reads as nothing. There each line is put on the nearest row instead, a
+            // move of under half a pixel that nothing can measure on a grid. A line across the
+            // rows is left exactly where it belongs.
+            let to_row = pixel_rows(proj, &world, c, across, along, on_pixels);
             for line in grid_lines(app.cam.half_height(), at, fade.end, 300) {
                 let t = line.offset;
                 // A line two levels share with different kinds blends between the minor and
                 // the major look.
                 let col = grid_blend(grid, grid_major, line.major);
                 let wd = 0.7 + 0.3 * line.major;
+                let at = t + to_row(t);
                 for (s0, s1, alpha) in fade.pieces(t) {
                     let col = sc.color(grid_colour(col, alpha * line.weight));
-                    sc.under_line(w3(c + across * t + along * s0), w3(c + across * t + along * s1), col, wd);
+                    let (p0, p1) = (c + across * at + along * s0, c + across * at + along * s1);
+                    let (p0, p1) = (world(p0).to_f32(), world(p1).to_f32());
+                    if over_model {
+                        sc.over_line(p0, p1, col, wd);
+                    } else {
+                        sc.under_line(p0, p1, col, wd);
+                    }
                 }
             }
         }
@@ -3660,6 +3701,41 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
     hits.iter().filter(|h| pick_allowed(app, h)).filter_map(|h| hit_candidate(app, h)).collect()
 }
 
+/// Light the whole body under the cursor while the whole-object chord is held, so the click's
+/// wider reach can be seen before it happens, and put it out again once the key is let go.
+/// Select Other's own row feedback wins while its list is open.
+fn whole_object_hover(app: &mut SolveApp, hit: Option<&Hit>, mods: egui::Modifiers) {
+    if crate::select_other::is_open(app) {
+        return;
+    }
+    let held = crate::tool_modifiers::Held::from_modifiers(mods);
+    let taking_whole = crate::tool_modifiers::select_whole_object(held) && app.dialog.is_none() && app.tool.is_none();
+    let body = hit.filter(|_| taking_whole).and_then(|h| match h {
+        Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. } => Some(body.clone()),
+        _ => None,
+    });
+    match body {
+        Some(b) => {
+            app.viewport.hover_bodies = vec![b];
+            app.viewport.lit_whole_body = true;
+        }
+        None if app.viewport.lit_whole_body => {
+            app.viewport.hover_bodies.clear();
+            app.viewport.lit_whole_body = false;
+        }
+        None => {}
+    }
+}
+
+/// The object a piece belongs to: the body behind a face, an edge or a vertex. Sketch
+/// geometry, origin planes and axes have nothing above them, so they stand as they are.
+pub(crate) fn whole_object(sel: Sel) -> Sel {
+    match sel {
+        Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => Sel::Body { name: body },
+        other => other,
+    }
+}
+
 /// What the selection filter lets a click pick with no dialog.
 fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
     let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
@@ -3712,6 +3788,12 @@ pub(crate) fn component_selection(app: &SolveApp, body: &str) -> Sel {
 
 /// A pick for the open dialog's active input (a click, or a Select Other row).
 pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
+    dialog_pick_adding(app, hit, sel, true);
+}
+
+/// The same, saying whether the pick joins the dialog's selection or replaces it -- see
+/// [`crate::dialogs::Dialog::pick_with`], which only a fillet or chamfer's edges read.
+pub(crate) fn dialog_pick_adding(app: &mut SolveApp, hit: &Hit, sel: Sel, add: bool) {
     // While OK computes, the dialog's inputs hold.
     if app.applying.is_some() {
         return;
@@ -3735,6 +3817,22 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         app.start("solid.press_pull");
         return;
     }
+    // And the other way about: a flat face picked while a round or a chamfer is open is a
+    // push-pull, not a blend. Both take a face as every edge of it, which a curved face and a
+    // Shift-pick still do; a plain pick of a planar face is what Press Pull is for, so the two
+    // hand over to each other by what is clicked rather than the blend holding every pick.
+    if !add
+        && let Some(d) = &app.dialog
+        && matches!(d.kind, crate::dialogs::Kind::Fillet { .. })
+        && d.active == 0
+        && let Sel::Face { body, index, .. } = &sel
+        && crate::dialogs::planar_face(&app.session, body, *index).is_some()
+    {
+        crate::dialogs::cancel(app);
+        app.session.selection = vec![sel];
+        app.start("solid.press_pull");
+        return;
+    }
     let sel = crate::dialogs_move::from_shown(app, sel);
     let Some(mut d) = app.dialog.take() else { return };
     // With holes moving by clicking (Preferences), a Single hole picked again on its face moves there.
@@ -3747,10 +3845,10 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         // window stays on the input it was on (#11700).
         let on = d.active;
         d.active = 0;
-        d.pick(&app.session, sel);
+        d.pick_with(&app.session, sel, add);
         d.active = on;
     } else {
-        d.pick(&app.session, sel);
+        d.pick_with(&app.session, sel, add);
     }
     if let crate::dialogs::Kind::PathPlane { sketch, .. } = &mut d.kind {
         *sketch = match hit {
@@ -3760,7 +3858,7 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         d.extra.remove("path");
     }
     // Split Body's sketch line keeps the sketch it was picked in (curve ids repeat across sketches).
-    if matches!(d.kind, crate::dialogs::Kind::Split) {
+    if matches!(d.kind, crate::dialogs::Kind::Cut) {
         if let Hit::SketchCurve { sketch, .. } = hit {
             d.extra.insert("tool_sketch".into(), serde_json::json!(sketch));
         } else {
@@ -4897,7 +4995,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.viewport.physical_scale = ui.ctx().pixels_per_point();
     // Suppress-snap chord and manipulator-free prefs; Shift midpoint targeting while sketching.
     // Preview reselect uses Primary but is skipped while a manipulator drag is under way.
-    crate::drag_snap::set_suppressed(crate::prefs::suppress_sketch_snap_held(app, mods));
+    // The snap chord and the suppress-snap chord are both Primary by default, and on a
+    // manipulator the snap is the whole point of holding it: there the model snap stays on.
+    let snapping_bodies = if crate::prefs::manipulator_snap_held(mods) {
+        let mut on_the_move = crate::dialogs_move::moving_bodies(app);
+        on_the_move.extend(crate::browser::occurrence_moving_bodies(app));
+        on_the_move
+    } else {
+        Vec::new()
+    };
+    crate::drag_snap::set_suppressed(!crate::prefs::snapping_on(app, mods) && snapping_bodies.is_empty());
     crate::tool_modifiers::set_manipulator_free(crate::prefs::manipulator_free_held(app, mods));
     let manipulator_dragging = crate::tool_modifiers::manipulator_dragging();
     crate::tool_modifiers::set_manipulator_dragging(false);
@@ -4950,6 +5057,18 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         })
         .map(|p| pick_cached(app, &proj, p))
         .unwrap_or_default();
+    // What the cursor locks onto on the model: a corner, the middle of an edge, the centre of a
+    // hole or of a face, a quarter turn. A face place moves to it, so the click takes the place
+    // the hover showed; an edge or vertex pick keeps its own point, which is its identity.
+    let snap_hits = (!snapping_bodies.is_empty()).then(|| crate::model_snap::without(&hits, &snapping_bodies));
+    // Everything under the cursor is on the move: it has landed on the place and covers it now.
+    crate::model_snap::set_hold(snap_hits.as_ref().is_some_and(|kept| kept.is_empty() && !hits.is_empty()));
+    let model_snap = crate::model_snap::find(app, &proj, hover.filter(|_| inside && !navigating), snap_hits.as_deref().unwrap_or(&hits));
+    let hits = crate::model_snap::apply(&hits, model_snap.as_ref());
+    // A primitive being drawn follows the cursor on the plane it is being drawn on.
+    if let Some(p) = hover.filter(|_| inside && !navigating && app.solid_draw.is_some()) {
+        crate::solid_draw::on_move(app, &proj, p);
+    }
     // The Fillet and Chamfer window resolves its own corners: the nearest sketch point to a
     // corner drawn from the origin is the fixed origin, which ends no two curves.
     let corner = hover.filter(|_| inside && !navigating).and_then(|p| crate::sketch_modify_ui::corner_hit(app, &proj, p));
@@ -4971,6 +5090,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
     list_hover(app);
+    whole_object_hover(app, cand.as_ref().map(|c| &c.0), mods);
     let painter = ui.painter_at(rect);
     crate::gpu::paint_background(&painter, rect, &t);
     crate::gpu::paint_background_picture(app, &painter, rect);
@@ -5253,13 +5373,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             dialog.restore_value_focus = true;
         }
         if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !app.viewport.draw_drag_handled {
-            if crate::browser_canvas::click(app, &proj, p) {
+            if crate::solid_draw::wants_points(app) {
+                crate::solid_draw::on_click(app, &proj, p);
+            } else if crate::browser_canvas::click(app, &proj, p) {
                 // Calibrate Canvas: the click sets Point A or B on the image (#9108).
             } else if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
                 if let Some((hit, Some(sel))) = cand {
-                    dialog_pick(app, &hit, sel);
+                    dialog_pick_adding(app, &hit, sel, add);
                 } else if let Some(mut dialog) = app.dialog.take() {
                     // A pick field clicked into says what it is for when the click is not one (#10428).
                     if dialog.awaiting_pick {
@@ -5287,13 +5409,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if crate::sketch_text_handles::over(app, &proj, p) {
                     // A text's resize or rotation handle: the text stays selected.
                 } else if !crate::sketch3d::click(app, &proj, p) {
+                    let whole = crate::tool_modifiers::select_whole_object(held_mods);
                     match annotation {
                         Some(sel) => select(app, Some(sel), add, allow_toggle),
                         // Clicking again on the same spot selects the next thing under it (not
-                        // the second click of a double-click, which has its own actions).
-                        None if !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
+                        // the second click of a double-click, which has its own actions). The
+                        // whole-object chord names the body outright, so it has nothing to cycle.
+                        None if !add && !whole && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
                         None => {
-                            let sel = cand.and_then(|c| c.1);
+                            let sel = cand.and_then(|c| c.1).map(|s| if whole { whole_object(s) } else { s });
                             select(app, sel.clone(), add, allow_toggle);
                             crate::select_other::note_click(app, p, if add { None } else { sel });
                         }
@@ -5661,6 +5785,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::inference::track_and_show(app, &painter, &proj, tracking_cursor);
     crate::inference::show(app, &painter, &proj);
     crate::drag_snap::show(app, &painter, &proj);
+    crate::model_snap::show(app, &painter);
+    crate::solid_draw::show(app, &painter, &proj);
     crate::insert_handles::show(app, ui, &proj);
     crate::sketch_transform_ui::refresh(app);
     crate::sketch_transform_ui::show(app, ui, &proj);
@@ -5687,6 +5813,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::tools::preview(app, tl, &painter, &proj);
     }
     crate::canvas::show(app, ui, &painter, &proj);
+    crate::solid_draw::handles(app, ui, &painter, &proj);
     crate::sketch_tools::show(app, ui, &painter, &proj);
     crate::sketch_line_arc::paint_mode(app, ui, &painter, &proj);
     crate::design_properties::overlay(app, &painter, &proj);
@@ -5697,6 +5824,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::view_angles::show(app, ui, rect);
         crate::navigation_bar_view::show(app, ui, rect);
     }
+    crate::key_hints::show(app, ui, rect);
     crate::viewport_status::show(app, ui.ctx(), rect);
     crate::viewport_status_fixture::show(app, ui.ctx(), rect);
     // The notices and the agent chip first, so the 3D mouse picture can keep clear of them.
@@ -6754,7 +6882,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
 }
 
 /// Whether the origin point is drawn (the Origin shown and its point not hidden).
-fn origin_point_shown(app: &SolveApp) -> bool {
+pub(crate) fn origin_point_shown(app: &SolveApp) -> bool {
     app.origin_visible() && !app.session.visibility.hidden_origin.iter().any(|h| h == "O")
 }
 
@@ -6863,6 +6991,57 @@ fn grid_centre(tf: Vec3, back: Vec3, n: Vec3, ext: f64) -> Vec3 {
     let along = (back - n * slant) * (-height * slant / (reach_slant * reach_slant));
     let len = along.len();
     if len > ext && len > 0.0 { under + along * (ext / len) } else { under + along }
+}
+
+/// How far along `across` a grid line at an offset must move to land on a row of pixels,
+/// for a grid laid out from `c` along `across` and `along` and drawn through `world`.
+///
+/// The answer is always under half a pixel, and zero unless the line runs along a row or a
+/// column of the screen: only then does a line thinner than a pixel lose half its strength to
+/// the row beside it, and only then does every line of the grid lose it at once (see the call).
+/// A plane seen face on is drawn to one scale all over, so one step across it measures the
+/// whole grid; seen at any slant the test below fails and nothing moves.
+fn pixel_rows<'a>(
+    proj: &'a Proj,
+    world: &'a dyn Fn(Vec3) -> Vec3,
+    c: Vec3,
+    across: Vec3,
+    along: Vec3,
+    pixels_per_point: f32,
+) -> impl Fn(f64) -> f64 + 'a {
+    let places = || -> Option<(f64, f64)> {
+        let ppp = f64::from(pixels_per_point);
+        if !(ppp.is_finite() && ppp > 0.0) {
+            return None;
+        }
+        let (o, step, next) = (proj.to_screen(world(c))?, proj.to_screen(world(c + across))?, proj.to_screen(world(c + along))?);
+        let run = next - o;
+        let len = run.length();
+        if !(len.is_finite() && len > 1e-6) {
+            return None;
+        }
+        // Which way the line runs on screen: along a row, down a column, or neither.
+        let (dx, dy) = ((run.x / len).abs(), (run.y / len).abs());
+        let (from, per) = if dx > 0.9999 {
+            (o.y, (step - o).y)
+        } else if dy > 0.9999 {
+            (o.x, (step - o).x)
+        } else {
+            return None;
+        };
+        let per = f64::from(per) * ppp;
+        (per.is_finite() && per.abs() > 1e-6).then_some((f64::from(from) * ppp, per))
+    };
+    let found = places();
+    move |offset: f64| {
+        let Some((from, per)) = found else { return 0.0 };
+        let at = from + per * offset;
+        if !at.is_finite() {
+            return 0.0;
+        }
+        // The middle of the nearest row of pixels.
+        ((at - 0.5).round() + 0.5 - at) / per
+    }
 }
 
 /// Hover feedback for the active sketch's points and curves (drawn on top of everything).
@@ -7494,6 +7673,9 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if hr.backing_on_hover_text(crate::i18n::tr_label("Home view")).clicked() {
         app.animate_view("home");
     }
+    // The Grid switch, in Home's own chip at the corner opposite it, which this navigator
+    // leaves free (the axis ends keep to the circle and to the middle of each side).
+    navigation_cube::grid_switch(app, ui, &painter, pos2(c.x + 37.0, c.y - 37.0), 18.0, t);
 }
 
 /// At a halfway tie, prefer the square heading nearer the standard plan view.
@@ -9881,6 +10063,56 @@ mod tests {
                 }
             }
             assert!(checked > 50, "style {style}: only {checked} samples");
+        }
+    }
+
+    #[test]
+    fn whole_object_takes_the_body_behind_a_face_edge_or_vertex() {
+        let body = || "Body1".to_string();
+        let whole = Sel::Body { name: body() };
+        assert_eq!(whole_object(Sel::Face { body: body(), index: 3, point: Vec3::ZERO }), whole);
+        assert_eq!(whole_object(Sel::Edge { body: body(), index: 2, point: Vec3::ZERO }), whole);
+        assert_eq!(whole_object(Sel::Vertex { body: body(), point: Vec3::ZERO }), whole);
+        // Sketch geometry and origin planes have nothing above them to take.
+        for same in [Sel::SketchCurve { id: "c1".into(), sketch: None }, Sel::SketchPoint { id: "p1".into() }, Sel::Plane { name: "XY".into() }] {
+            assert_eq!(whole_object(same.clone()), same);
+        }
+    }
+
+    /// Alt on a face takes the body it belongs to, and lights that body while the key is held;
+    /// the same click without Alt still picks the face under the cursor.
+    #[test]
+    fn alt_click_selects_the_whole_object_and_lights_it() {
+        for alt in [false, true] {
+            // A fresh app per case: two clicks on one spot in one context are a double-click.
+            let ctx = crate::fonts::test_context();
+            let mut s = solidcraft_engine::Session::default();
+            s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+            let mut app = SolveApp::new(s, crate::Services::default());
+            app.set_origin_shown(false);
+            app.cam.target = Vec3::new(20.0, 15.0, 10.0);
+            hover_frame(&mut app, &ctx, vec![]);
+            // The middle of the top face.
+            let p = projection(&app, app.viewport.rect.unwrap()).to_screen(Vec3::new(20.0, 15.0, 20.0)).unwrap();
+            let modifiers = if alt { egui::Modifiers { alt: true, ..Default::default() } } else { egui::Modifiers::NONE };
+            // Every frame restates the held keys: a bare `RawInput` carries none.
+            let frame = |app: &mut SolveApp, mut events: Vec<egui::Event>| {
+                events.insert(0, egui::Event::ModifiersChanged(modifiers));
+                hover_frame(app, &ctx, events);
+            };
+            frame(&mut app, vec![egui::Event::PointerMoved(p)]);
+            frame(&mut app, vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers }]);
+            frame(&mut app, vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers }]);
+            if alt {
+                assert_eq!(app.session.selection, vec![Sel::Body { name: "Body1".into() }]);
+                assert_eq!(app.viewport.hover_bodies, vec!["Body1".to_string()], "the body under the cursor lights while Alt is held");
+                hover_frame(&mut app, &ctx, vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE), egui::Event::PointerMoved(p)]);
+                assert!(app.viewport.hover_bodies.is_empty(), "letting Alt go puts the body out again");
+                assert_eq!(app.session.selection, vec![Sel::Body { name: "Body1".into() }], "and leaves the selection alone");
+            } else {
+                assert!(matches!(app.session.selection.as_slice(), [Sel::Face { .. }]), "{:?}", app.session.selection);
+                assert!(app.viewport.hover_bodies.is_empty(), "no body lights up without the chord");
+            }
         }
     }
 
@@ -13417,12 +13649,134 @@ mod grid_plane_tests {
         assert_eq!(grid_plane(low(10.0), GridPlane::Yz), GridPlane::Xz, "the Front view's wall takes over near it");
     }
 
+    /// The grid's lines, wherever the scene puts them: over the model in a view square on to the
+    /// grid's plane (`view::GRID_FACE_ON`), under it at every other angle. These scenes hold no other
+    /// lines, so whichever list has them is the grid.
+    fn grid_lines_of(scene: &GpuScene) -> &[u8] {
+        if scene.under.is_empty() { &scene.over } else { &scene.under }
+    }
+
+    /// Square on to the grid's plane -- straight down X, Y or Z -- the model stands in the middle
+    /// of the grid and hid it exactly where a part is lined up and measured against it. The grid
+    /// is drawn over the model there; at any other angle it stays under it, which is what tells
+    /// the eye the model sits on it.
+    #[test]
+    fn a_view_square_on_to_the_grid_draws_it_over_the_model() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.show_grid = true;
+        app.cam.yaw = 0.0;
+        app.cam.target = Vec3::ZERO;
+        app.cam.distance = 100.0;
+        app.cam.pitch = std::f64::consts::FRAC_PI_2;
+        let square = build_sketch_scene(&app, &projection(&app, rect));
+        assert!(square.under.is_empty(), "straight down Z nothing of the grid is left under the model");
+        assert!(!square.over.is_empty(), "straight down Z the grid is drawn over the model");
+        app.cam.pitch = 0.5;
+        let slanted = build_sketch_scene(&app, &projection(&app, rect));
+        assert!(!slanted.under.is_empty(), "at a slant the grid is under the model");
+        assert!(slanted.over.is_empty(), "at a slant nothing of the grid is drawn over it");
+    }
+
+    /// With Grid follows the view off the grid stays on the ground wherever the ground draws
+    /// something -- which a view straight along it does not. The Front and Right views have their
+    /// upright plane whatever the preference says; a view off them keeps the ground.
+    #[test]
+    fn a_front_view_has_a_grid_with_the_preference_off() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.show_grid = true;
+        app.preferences.grid_follows_view = false;
+        app.cam.target = Vec3::ZERO;
+        app.cam.distance = 100.0;
+        app.cam.yaw = 0.0;
+        app.cam.pitch = 0.0;
+        let scene = build_sketch_scene(&app, &projection(&app, rect));
+        let ys: Vec<f32> = grid_lines_of(&scene)
+            .as_chunks::<32>()
+            .0
+            .iter()
+            .flat_map(|l| [&l[4..8], &l[16..20]])
+            .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        assert!(!ys.is_empty(), "the Front view has a grid");
+        assert!(ys.iter().all(|y| y.abs() < 1e-3), "it lies on the upright plane facing the view (XZ)");
+        // A view well off the horizon is the ground's again, as the preference asks.
+        app.cam.pitch = 0.5;
+        let tilted = build_sketch_scene(&app, &projection(&app, rect));
+        let zs: Vec<f32> = grid_lines_of(&tilted)
+            .as_chunks::<32>()
+            .0
+            .iter()
+            .flat_map(|l| [&l[8..12], &l[20..24]])
+            .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        assert!(!zs.is_empty(), "the tilted view has a grid");
+        assert!(zs.iter().all(|z| z.abs() < 1e-3), "on the ground, as the preference off asks");
+    }
+
     /// #1993: a hostile view direction (a design file, a control request) never panics and never
     /// leaves the grid off the ground's axes.
     #[test]
     fn a_hostile_view_direction_stays_on_the_ground() {
         for back in [Vec3::new(f64::NAN, 0.0, 0.0), Vec3::new(0.0, f64::NEG_INFINITY, 0.0), Vec3::new(0.0, 0.0, f64::INFINITY), Vec3::ZERO] {
             assert_eq!(grid_plane(back, GridPlane::Xz), GridPlane::Ground, "{back:?}");
+        }
+    }
+
+    /// A line thinner than a pixel that lies between two rows of pixels is drawn at half
+    /// strength in each. Straight down an axis every line of the grid runs along a row at once, so
+    /// the whole grid halved and the view looked as if the grid were off; each line is put on the
+    /// nearest row instead. Seen at a slant no line runs along a row, and none moves.
+    #[test]
+    fn a_view_down_an_axis_puts_the_grid_on_whole_rows_of_pixels() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.show_grid = true;
+        app.preferences.grid_follows_view = true;
+        let segments = |app: &SolveApp| -> Vec<(Vec3, Vec3)> {
+            let at = |b: &[u8]| {
+                let f = |i: usize| f64::from(f32::from_le_bytes(b[i..i + 4].try_into().unwrap()));
+                Vec3::new(f(0), f(4), f(8))
+            };
+            let scene = build_sketch_scene(app, &projection(app, rect));
+            grid_lines_of(&scene).as_chunks::<32>().0.iter().map(|l| (at(&l[0..12]), at(&l[12..24]))).collect()
+        };
+        // Straight down Z, where every line runs along a row or a column of the screen.
+        app.cam.yaw = 0.0;
+        app.cam.pitch = std::f64::consts::FRAC_PI_2;
+        let proj = projection(&app, rect);
+        let ppp = f64::from(app.viewport.pixels_per_point());
+        let lines = segments(&app);
+        assert!(lines.len() > 50, "the grid is drawn: {} lines", lines.len());
+        let mut checked = 0;
+        for (a, b) in &lines {
+            let (sa, sb) = (proj.to_screen(*a).unwrap(), proj.to_screen(*b).unwrap());
+            let run = sb - sa;
+            if run.length() < 2.0 {
+                continue;
+            }
+            let across = if run.x.abs() < 1e-3 {
+                f64::from(sa.x)
+            } else if run.y.abs() < 1e-3 {
+                f64::from(sa.y)
+            } else {
+                panic!("a line of the grid runs neither along a row nor down a column: {run:?}");
+            };
+            let off = (across * ppp - 0.5).rem_euclid(1.0);
+            assert!(off < 0.02 || off > 0.98, "a line between two rows of pixels, {off} of one from the middle of a row");
+            checked += 1;
+        }
+        assert!(checked > 50, "{checked} lines measured");
+        // Seen at a slant every line keeps its own place on the ground, a whole step from the origin.
+        app.cam.yaw = -0.785;
+        app.cam.pitch = 0.615;
+        let minor = solidcraft_engine::view::grid_step(app.cam.half_height()).0;
+        for (a, b) in segments(&app) {
+            let along_y = (b.x - a.x).abs() < 1e-6;
+            let across = if along_y { a.x } else { a.y };
+            let steps = across / minor;
+            assert!((steps - steps.round()).abs() < 1e-3, "a line {across} is off its own {minor} mm step");
         }
     }
 
@@ -13632,7 +13986,7 @@ mod grid_plane_tests {
         app.cam.target = Vec3::ZERO;
         app.cam.distance = 100.0;
         let scene = build_sketch_scene(&app, &projection(&app, rect));
-        let under = &scene.under;
+        let under = grid_lines_of(&scene);
         // Each line of the grid: two points, a colour and a width.
         let segments: Vec<([f32; 3], [f32; 3], u8)> = under
             .as_chunks::<32>()
@@ -13688,14 +14042,17 @@ mod grid_plane_tests {
             app.cam.distance = 1.0;
             app.cam.distance = hh / app.cam.half_height();
             let scene = build_sketch_scene(&app, &projection(&app, rect));
-            scene
-                .under
+            // Straight down an axis each line is put on the nearest row of pixels, so its place
+            // on the ground is exact only to under half a pixel; the lines this looks
+            // for stand whole millimetres apart.
+            let near = (2.0 * hh / f64::from(rect.height())) as f32;
+            grid_lines_of(&scene)
                 .as_chunks::<32>()
                 .0
                 .iter()
                 .filter(|l| {
                     let f = |at: usize| f32::from_le_bytes(l[at..at + 4].try_into().unwrap());
-                    (f(0) - x).abs() < 1e-4 && (f(12) - x).abs() < 1e-4
+                    (f(0) - x).abs() < near && (f(12) - x).abs() < near
                 })
                 .filter_map(|l| scene.palette.get(crate::gpu::PaletteIndex(u32::from_le_bytes(l[24..28].try_into().unwrap()))).map(|c| c[3]))
                 .max()

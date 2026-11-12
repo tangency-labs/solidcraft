@@ -188,6 +188,9 @@ pub enum Operation {
     Join,
     Cut,
     Intersect,
+    /// Divide the targets by the tools and keep both halves: what lies outside the tools stays
+    /// under the target's name, what lies inside becomes a body of its own.
+    Slice,
 }
 
 impl Operation {
@@ -197,6 +200,7 @@ impl Operation {
             "join" | "union" | "add" => Operation::Join,
             "cut" | "subtract" | "difference" => Operation::Cut,
             "intersect" | "intersection" => Operation::Intersect,
+            "slice" | "divide" => Operation::Slice,
             _ => return None,
         })
     }
@@ -795,6 +799,14 @@ pub enum FeatureKind {
         #[serde(with = "point_expr")]
         #[walk(placement)]
         corner: PointExpr,
+        /// The way `height` runs: the normal of the face the box stands on, +Z for one made
+        /// square to the world (as every box was before boxes could stand on a face).
+        #[serde(default = "z_axis")]
+        axis: Dir,
+        /// The way `length` runs, across `axis`. With `axis` it fixes the frame the box is
+        /// made in, so `width` runs along `axis` crossed with it.
+        #[serde(default = "x_axis")]
+        x_axis: Dir,
         #[walk(length = "Length")]
         length: Expr,
         #[walk(length = "Width")]
@@ -860,7 +872,10 @@ pub enum FeatureKind {
         operation: Operation,
     },
     Combine {
-        target: BodyName,
+        /// The bodies worked on. Several, as Plasticity's Boolean takes several: one tool can
+        /// cut a whole row of parts at once.
+        #[serde(alias = "target", deserialize_with = "one_or_more_bodies")]
+        targets: Vec<BodyName>,
         tools: Vec<BodyName>,
         operation: Operation,
         #[serde(default)]
@@ -2493,6 +2508,12 @@ pub enum PatternKind {
         reversed: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reversed2: bool,
+        /// `spacing1` is the distance from the first copy to the last, not between neighbours.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        extent1: bool,
+        /// The same for `spacing2`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        extent2: bool,
     },
     Circular {
         /// A point on the axis the copies turn about: numbers, or length expressions it follows
@@ -2519,6 +2540,9 @@ pub enum PatternKind {
         /// `origin` and `axis` are where it was when the pattern was made.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_feature: Option<FeatureName>,
+        /// `angle` is the angle from one copy to the next, not the total swept.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        step: bool,
     },
     /// Copies along a chain of sketch curves: instance k moves by path(k·spacing) − path(0),
     /// measured along the path from its start.
@@ -2546,8 +2570,34 @@ fn default_pattern_alignment(alignment: &solidcraft_sketch::PatternAlignment) ->
     *alignment == solidcraft_sketch::PatternAlignment::Right
 }
 
-fn z_axis() -> Dir {
+/// One body name or a list of them, for a field that takes several where it used to take one.
+///
+/// A Combine saved `target`, a single name, before it could work on several bodies. An older
+/// design is brought forward by the format step, but a feature can also arrive as JSON without
+/// going through a file -- `timeline.add`, a recording, a script -- and such a caller may still
+/// write `target: "B"`. Both spellings read as the list they mean.
+fn one_or_more_bodies<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Vec<BodyName>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMore {
+        One(BodyName),
+        More(Vec<BodyName>),
+    }
+    Ok(match OneOrMore::deserialize(d)? {
+        OneOrMore::One(name) => vec![name],
+        OneOrMore::More(names) => names,
+    })
+}
+
+/// The way a box square to the world has its height run, and the serde default for an older
+/// design that saved no frame at all.
+pub fn z_axis() -> Dir {
     Dir(Vec3::Z)
+}
+
+/// The way such a box has its length run, across [`z_axis`].
+pub fn x_axis() -> Dir {
+    Dir(Vec3::X)
 }
 
 /// A point whose coordinates are length expressions (`["basin_width / 2", "10 mm", "0"]`), so
@@ -2902,7 +2952,7 @@ impl FeatureKind {
             FeatureKind::Sweep { .. } => "Sweep",
             FeatureKind::Shell { .. } => "Shell",
             FeatureKind::Draft { .. } => "Draft",
-            FeatureKind::Split { .. } => "Split",
+            FeatureKind::Split { .. } => "Cut",
             FeatureKind::SplitFace { .. } => "SplitFace",
             FeatureKind::ConstructionAxis { .. } => "Axis",
             FeatureKind::ConstructionPoint { .. } => "Point",
@@ -2999,6 +3049,12 @@ pub struct Feature {
     /// where newer ones number them after the first name (`Ribs (4)`, #373).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub shell_piece_order: bool,
+    /// Keep the shape this feature is built from as a body of its own, beside what it did to the
+    /// bodies it worked on: Plasticity's `T` ("Keep tools") on a command's card. A New Body
+    /// operation leaves that shape anyway, so it means nothing there. Combine's tools are bodies
+    /// that were already in the design, so Combine keeps them through its own `keep_tools`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_tool: bool,
     /// The pieces of a face this feature splits are numbered in the kernel's order and by the
     /// index of the face they came from, as builds before #3902 numbered them, instead of by
     /// place. Set on the features of designs saved before then, whose stored `#k` face names
@@ -3213,6 +3269,9 @@ pub struct Document {
     /// Configurations (rows of parameter values and suppressions).
     #[serde(default, skip_serializing_if = "crate::config::ConfigTable::is_empty")]
     pub configs: crate::config::ConfigTable,
+    /// Analysis studies: the questions put to the solvers, kept so they can be asked again.
+    #[serde(default, skip_serializing_if = "crate::analysis::Studies::is_empty")]
+    pub analysis: crate::analysis::Studies,
     /// Favourite parameters (by name).
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub favorites: std::collections::BTreeSet<String>,
@@ -3536,6 +3595,7 @@ impl Document {
             sheet: Default::default(),
             plastic: Default::default(),
             configs: Default::default(),
+            analysis: Default::default(),
             parts: Default::default(),
             links: Default::default(),
             body_components: Default::default(),
@@ -4092,6 +4152,7 @@ impl Document {
             face_names: Vec::new(),
             participants: Vec::new(),
             shell_piece_order: false,
+            keep_tool: false,
             kernel_piece_order: false,
             inserted: false,
             link_faces: Vec::new(),

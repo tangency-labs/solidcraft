@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.sketch.faces_edges_help": "A click picks the face, edge or vertex under the cursor. Hold Alt (Option) to take the body it belongs to instead.",
+    "prefs.sketch.whole_bodies_help": "A click takes the body, and edges and vertices are not picked at all."
+  },
+  "ar": {
+    "prefs.sketch.faces_edges_help": "ينتقي النقر السطح أو الحافة أو الرأس الذي تحت المؤشر. أمسك Alt (Option) ليأخذ المجسم الذي ينتمي إليه بدلاً من ذلك.",
+    "prefs.sketch.whole_bodies_help": "يأخذ النقر المجسم كله، ولا تُنتقى الحواف والرؤوس إطلاقًا."
+  },
+  "de": {
+    "prefs.sketch.faces_edges_help": "Ein Klick wählt die Fläche, Kante oder den Eckpunkt unter dem Zeiger. Mit gehaltener Alt- (Option-)Taste stattdessen den zugehörigen Körper.",
+    "prefs.sketch.whole_bodies_help": "Ein Klick nimmt den Körper; Kanten und Eckpunkte werden überhaupt nicht gewählt."
+  },
+  "he": {
+    "prefs.sketch.faces_edges_help": "לחיצה בוחרת את הפאה, המקצוע או הקודקוד שמתחת לסמן. החזקת Alt (Option) לוקחת במקום זאת את הגוף שהם שייכים אליו.",
+    "prefs.sketch.whole_bodies_help": "לחיצה לוקחת את הגוף, ומקצועות וקודקודים אינם נבחרים כלל."
+  },
+  "ja": {
+    "prefs.sketch.faces_edges_help": "クリックはカーソル下の面・稜線・頂点を選びます。Alt（Option）を押しながらだと、それが属するボディを選びます。",
+    "prefs.sketch.whole_bodies_help": "クリックはボディを選び、稜線や頂点は選べなくなります。"
+  },
+  "ko": {
+    "prefs.sketch.faces_edges_help": "클릭은 커서 아래의 면, 모서리, 정점을 선택합니다. Alt(Option)를 누르고 있으면 그것이 속한 바디를 선택합니다.",
+    "prefs.sketch.whole_bodies_help": "클릭은 바디를 선택하며, 모서리와 정점은 아예 선택되지 않습니다."
+  },
+  "vi": {
+    "prefs.sketch.faces_edges_help": "Một cú nhấp chọn mặt, cạnh hoặc đỉnh dưới con trỏ. Giữ Alt (Option) để chọn khối mà nó thuộc về.",
+    "prefs.sketch.whole_bodies_help": "Một cú nhấp chọn cả khối, còn cạnh và đỉnh không được chọn."
+  },
+  "zh": {
+    "prefs.sketch.faces_edges_help": "单击拾取光标下的面、边或顶点。按住 Alt（Option）则改为选取它所属的实体。",
+    "prefs.sketch.whole_bodies_help": "单击选取整个实体，边与顶点完全不被拾取。"
+  }
+}

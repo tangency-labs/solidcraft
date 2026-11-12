@@ -311,6 +311,74 @@ pub struct MeshMeasure {
     pub volume: f64,
     pub area: f64,
     pub centroid: Vec3,
+    /// What the triangles leave open: [`Mesh::vector_area`], the zero vector when they close.
+    ///
+    /// While it is not zero, `volume` and `centroid` are not properties of the mesh. They are
+    /// properties of the mesh and of the point it was measured from, which was
+    /// [`volume_reference`]'s choice and no part of the answer:
+    ///
+    /// ```text
+    /// V(q) = V(p) - (vector_area . (q - p))/3
+    /// ```
+    ///
+    /// exactly. A cover patch 28 mm square reads 2506 mm³ from the world origin and -438 mm³ from
+    /// its own middle -- the same triangles, opposite signs. So two volumes are subtractable only
+    /// while both close or both were taken from the same point, and [`MeshMeasure::is_closed`] is
+    /// the question to ask before reading `volume` at all.
+    pub vector_area: Vec3,
+}
+
+impl MeshMeasure {
+    /// Whether the triangles close, and so whether `volume` and `centroid` are the mesh's own
+    /// rather than the reference point's.
+    ///
+    /// The test is against the surface area, which is the only length² the measurement carries
+    /// and the right one anyway: both sums run over the same triangles, so the ratio is also
+    /// about how much of the volume is in doubt. The volume moves by `vector_area . d / 3` over a
+    /// displacement `d`, and over the part's own size that comes to roughly `vector_area / area`
+    /// of it.
+    ///
+    /// A millionth is where the measured cases separate. A box or a sphere comes to exactly zero
+    /// and a 787 000-triangle torus to 8e-10, so rounding is nowhere near. Over the bodies the
+    /// robustness fuzzer builds, the gaps fall into two groups with nothing between them: slivers
+    /// at the seams, from 1e-9 to a few times 1e-7 of the area, which move their volumes by less
+    /// than a millionth; and real gaps from a few times 1e-6 up to 1e-3 of it, which move them by
+    /// up to half a per cent -- worse than the tessellation's own accuracy, and worth saying. The
+    /// threshold sits in the gap between the two. How many bodies fall in the upper group is left
+    /// out on purpose: it is a moving number, since every upstream fix closes some. The millimetre
+    /// floor is for a mesh with no area to divide by, which closes vacuously.
+    ///
+    /// One caveat on that band, because the measured cases came from assembled measurements
+    /// rather than from single meshes: `solidcraft_kernel`'s `mass` takes each face from whichever
+    /// of three tessellations agrees with the next coarser, so its vector area belongs to a
+    /// surface no one tessellation produced, and part of any gap there is the seam between two
+    /// meshes rather than a hole in either. The sliver band is largely those seams. That makes it
+    /// the right term for the volume it qualifies, since the volume is summed over the same picked
+    /// faces -- but a census of tessellation holes wants a single tessellation, where a gap can
+    /// only be a hole.
+    ///
+    /// Note what this does NOT answer: whether the body is a solid. A sheet is not closed and has
+    /// no volume at all, while a solid whose triangles do not close has one that is merely
+    /// uncertain by the ratio above. Only the topology tells those apart --
+    /// `solidcraft_kernel::Body::is_solid`, which answers it for a mesh body too, where
+    /// `is_surface` is false whether the mesh closes or not -- and a caller deciding whether to
+    /// report a volume wants both questions.
+    ///
+    /// This measures the gap; it does not say what opened it, and "the tessellator dropped a face"
+    /// is the wrong guess -- no face is missing in any case traced so far. Two causes have been
+    /// traced, and they were not the same defect. In the first the mesh was faithful and the body
+    /// was not: a shell's cavity edges were rebuilt off the faces they bound, and faces that do
+    /// not share an edge cannot meet along it once each is meshed on its own surface. In the
+    /// second the body was sound and the mesher was not: where a face's boundary reaches a pole,
+    /// a parameter line the surface collapses to a point, the free parameter along it was read
+    /// off a projection of that point -- which every value of it names, so the answer was
+    /// arbitrary -- and a drill tip's cone sector came out meshed across its two neighbours,
+    /// past its own boundary. Both are fixed. While they lasted both held constant as the
+    /// tolerance fell, which is why a caller should not answer this with a finer mesh -- and why
+    /// the predicate names no cause.
+    pub fn is_closed(&self) -> bool {
+        self.vector_area.len() <= 1.0e-6 * self.area.max(1.0)
+    }
 }
 
 /// Volume, centroid and inertia tensor of a closed mesh at unit density: the inertia is about
@@ -322,11 +390,50 @@ pub struct MassProperties {
     pub inertia: [[f64; 3]; 3],
 }
 
+/// Where to take a volume sum from, for a part of extent `size` whose middle sits at `at`.
+///
+/// `a . (b x c)` is six times the volume between a triangle and the point it is measured from,
+/// and it is worked out from the coordinates themselves: products the size of their squares,
+/// cancelling back down to the size of the part. A mesh `R` out from the origin therefore carries
+/// a rounding error around `R^3 * eps` against an answer around `s^3`, so the error grows as
+/// `(R/s)^3` and in the end swallows the answer -- a 24 mm ring measured a thousand kilometres
+/// out reads 19 % heavy. Measured from a point in the part it does not, because over a closed
+/// surface the sum does not depend on that point at all.
+///
+/// So the origin is kept while its error stays far below anything anyone reads, and left behind
+/// once the part is further out than [`FAR`] times its own size. Keeping it is not only thrift.
+/// The sum is free of the point only over a CLOSED surface: a mesh with a hole in it has a vector
+/// area `A = sum (b-a)x(c-a)/2` that is not zero, and then
+///
+/// ```text
+/// V(p) = V(0) - (A . p)/3
+/// ```
+///
+/// exactly -- its volume is a function of where it was measured from. Holding every mesh near the
+/// origin to one point keeps such volumes comparable with one another, which is what a caller
+/// does whenever it subtracts one from another. Two bodies measured from their own middles can
+/// differ by the whole of that term, and a hollow part is not rarer than a watertight one.
+pub fn volume_reference(at: Vec3, size: f64) -> Vec3 {
+    let far = at.len();
+    if size.is_finite() && size > 0.0 && far.is_finite() && far > FAR * size { at } else { Vec3::ZERO }
+}
+
+/// How far out, counted in the part's own sizes, before moving the arithmetic is worth it. At a
+/// hundred the relative error is about 1e-10, well under anything measured here, and it climbs
+/// with the cube from there.
+pub const FAR: f64 = 1.0e2;
+
 impl Mesh {
     /// [`MassProperties`] of a closed mesh, by the divergence theorem over the tetrahedra its
-    /// triangles make with the origin. `None` unless every edge (by vertex index: weld first) is
-    /// shared by exactly two triangles that cross it in opposite directions (closed, consistently
-    /// oriented), or for a mesh without volume or with non-finite values.
+    /// triangles make with the point [`volume_reference`] picks. `None` unless every edge (by
+    /// vertex index: weld first) is shared by exactly two triangles that cross it in opposite
+    /// directions (closed, consistently oriented), or for a mesh without volume or with
+    /// non-finite values.
+    ///
+    /// Matching by index is the stricter test -- it catches a surface that closes but is not a
+    /// manifold -- and the useless one on a tessellation, where no two faces share a vertex
+    /// index and so no edge is ever matched. That is why the one production caller welds first,
+    /// and why [`Mesh::vector_area`] rather than this is what a measurement asks.
     pub fn mass_properties(&self) -> Option<MassProperties> {
         // Closed and consistently oriented: each edge is crossed once in each direction.
         let mut edges: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
@@ -338,10 +445,18 @@ impl Mesh {
         if edges.is_empty() || edges.iter().any(|(&(a, b), n)| *n != 1 || edges.get(&(b, a)) != Some(&1)) {
             return None;
         }
+        // Measured from the origin while that is harmless, and from the mesh once it is far
+        // enough out ([`volume_reference`]). The inertia suffers worst from the distance: it is
+        // what is left when the centroid's share is taken off the second moments, and from a
+        // remote origin those two are huge and nearly equal. The closure test above has already
+        // passed here, so this mesh is one whose sums do not depend on the point at all.
+        let bounds = self.bounds();
+        let o = volume_reference(bounds.center(), bounds.diagonal());
         let xyz = |v: Vec3| [v.x, v.y, v.z];
         let (mut v6, mut first, mut second) = (0.0, Vec3::ZERO, [[0.0f64; 3]; 3]);
         for t in &self.triangles {
             let [a, b, c] = self.tri(t)?;
+            let (a, b, c) = (a - o, b - o, c - o);
             let det = a.dot(b.cross(c));
             v6 += det;
             first += (a + b + c) * det;
@@ -359,6 +474,8 @@ impl Mesh {
         // Inward-facing: every sum changes sign together.
         let sign = v6.signum();
         let volume = v6.abs() / 6.0;
+        // About `o`, which is the frame the second moments below are in; the caller's frame is
+        // put back at the end.
         let centroid = first / (4.0 * v6);
         let c = xyz(centroid);
         let mut about = [[0.0f64; 3]; 3];
@@ -375,7 +492,7 @@ impl Mesh {
             }
         }
         let finite = volume.is_finite() && c.iter().all(|x| x.is_finite()) && inertia.iter().flatten().all(|x| x.is_finite());
-        finite.then_some(MassProperties { volume, centroid, inertia })
+        finite.then_some(MassProperties { volume, centroid: centroid + o, inertia })
     }
 }
 
@@ -586,19 +703,57 @@ impl Mesh {
         b
     }
 
-    /// Signed volume (divergence theorem), surface area and volume centroid.
+    /// The vector area, `A = sum (b-a) x (c-a) / 2` over the triangles, from the corners as they
+    /// stand.
+    ///
+    /// The zero vector over a closed oriented surface, and the missing lid over one with a hole in
+    /// it: a 20 × 30 box without its bottom face comes to `(0, 0, 600)` mm², the bottom face
+    /// itself. It is the only test for closure that works on what a tessellation actually is --
+    /// a soup of triangles, each face's own, with no two faces sharing a vertex index. That is why
+    /// [`Mesh::mass_properties`]'s stricter test cannot stand in for it: matching directed edges
+    /// by index answers "not closed" for every tessellated solid in this program, which is why its
+    /// one caller welds first and why nothing else calls it.
+    ///
+    /// It is also exactly the term by which a volume depends on the point it was measured from,
+    /// so whoever holds it knows both whether the volume means anything and how much of it is the
+    /// point: see [`MeshMeasure::vector_area`], which carries it beside the volume it qualifies,
+    /// and is where to read it from when a measurement is wanted anyway.
+    pub fn vector_area(&self) -> Vec3 {
+        let mut a = Vec3::ZERO;
+        for t in &self.triangles {
+            let Some([p, q, r]) = self.tri(t) else { continue };
+            a += (q - p).cross(r - p) * 0.5;
+        }
+        a
+    }
+
+    /// Signed volume (divergence theorem), surface area and volume centroid, with the vector area
+    /// of what the triangles leave open ([`MeshMeasure::vector_area`]) -- without which there is
+    /// no telling the first two from numbers.
     pub fn measure(&self) -> MeshMeasure {
-        let (mut v6, mut area, mut c) = (0.0, 0.0, Vec3::ZERO);
+        // Taken from the world origin while that is harmless, and from the mesh itself once it
+        // is far enough out for the arithmetic to lose the answer: see [`volume_reference`],
+        // which also says why the origin is worth keeping. The area is a difference of corners
+        // and is taken from them as they stand.
+        let bounds = self.bounds();
+        let about = volume_reference(bounds.center(), bounds.diagonal());
+        let (mut v6, mut area, mut c, mut open) = (0.0, 0.0, Vec3::ZERO, Vec3::ZERO);
         for t in &self.triangles {
             let Some([a, b, cc]) = self.tri(t) else { continue };
+            // Both area sums from the corners as they stand: each is a difference of them
+            // already, so moving them first would shift its last bits for nothing -- and the
+            // vector area's last bits are the ones its own test reads.
+            let cross = (b - a).cross(cc - a);
+            area += cross.len() * 0.5;
+            open += cross * 0.5;
+            let (a, b, cc) = (a - about, b - about, cc - about);
             let d = a.dot(b.cross(cc));
             v6 += d;
             c += (a + b + cc) * d;
-            area += (b - a).cross(cc - a).len() * 0.5;
         }
         let volume = v6 / 6.0;
-        let centroid = if v6.abs() > 1e-12 { c / (4.0 * v6) } else { self.bounds().center() };
-        MeshMeasure { volume, area, centroid }
+        let centroid = if v6.abs() > 1e-12 { c / (4.0 * v6) + about } else { self.bounds().center() };
+        MeshMeasure { volume, area, centroid, vector_area: open }
     }
 
     /// Append another mesh (face ids offset by `face_offset`).

@@ -28,7 +28,7 @@ fn square(s: &mut Session) -> [String; 4] {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<BoundaryParams>(),
-        &["body_name", "body_names", "continuity", "crown", "curves", "name", "operation", "participants", "samples", "sketch", "u", "v"],
+        &["body_name", "body_names", "continuity", "crown", "curves", "keep_tools", "name", "operation", "participants", "samples", "sketch", "u", "v"],
     );
 }
 

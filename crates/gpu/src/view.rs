@@ -532,6 +532,10 @@ pub struct GpuScene {
     /// Lines drawn first, under everything (the ground grid: the model hides it, it never
     /// hides the model).
     pub under: Vec<u8>,
+    /// Lines drawn over the model, under what is drawn on top of it (sketches, highlights): the
+    /// grid in a view square on to its plane, where the model would otherwise hide the very lines
+    /// it is lined up against.
+    pub over: Vec<u8>,
     /// Origin and construction planes (translucent, like `trans`) and their axes (lines, like
     /// `lines`): reference geometry, never cut away by a section (#1229).
     pub guide_trans: Vec<u8>,
@@ -921,6 +925,11 @@ impl GpuScene {
         }
         self.xray.extend_from_slice(&c.0.to_le_bytes());
     }
+    /// A line over the model (see [`GpuScene::over`]).
+    pub fn over_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
+        self.over.extend_from_slice(&line_record(a, b, c, width.to_bits()));
+    }
+
     /// A line under everything (see [`GpuScene::under`]).
     pub fn under_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
         for v in a.iter().chain(&b) {
@@ -1743,6 +1752,7 @@ struct Batches {
     ghost: Option<Batch>,
     xray: Option<Batch>,
     under: Option<Batch>,
+    overs: Option<Batch>,
     guide_trans: Option<Batch>,
     guide_lines: Option<Batch>,
     planned: Vec<PlannedDraw>,
@@ -1870,6 +1880,7 @@ impl Batches {
             self.ghost = own("sc_ghost", &sc.ghost, TRI_SIZE);
             self.xray = own("sc_xray", &sc.xray, TRI_SIZE);
             self.under = own("sc_under", &sc.under, LINE_SIZE);
+            self.overs = own("sc_over", &sc.over, LINE_SIZE);
             self.guide_trans = own("sc_guide_trans", &sc.guide_trans, TRI_SIZE);
             self.guide_lines = own("sc_guide_lines", &sc.guide_lines, LINE_SIZE);
             let blocks: Vec<&BlockGpu> = self.block_order.iter().filter_map(|k| self.blocks.get(k)).collect();
@@ -4125,7 +4136,10 @@ impl Renderer {
         tris(pass, &res.xray, &h.xray);
         pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
         tris(pass, &res.xray, &pv.xray);
+        pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
+        lines(pass, &res.overlay, &sk.overs);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        lines(pass, &res.overlay, &m.overs);
         lines(pass, &res.overlay, &m.overlays);
         if let Some(mv) = moving {
             pass.set_bind_group(0, scene_bind(mv, &res.moving_bind), &[]);

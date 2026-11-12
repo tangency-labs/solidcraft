@@ -147,6 +147,11 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("navigation.rs", 1, "the navigation cube's face shading, made from a token"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
     (
+        "tutorial.rs",
+        9,
+        "the tutorial pointer and its keycaps: a white arrow with a black outline, and light keys with dark legends, neutral by nature so they read on any model and in any theme",
+    ),
+    (
         "body_gizmo.rs",
         3,
         "the custom view navigator's raster: the design's appearance and tokens, shaded, as pixels, drawn with the white image tint",

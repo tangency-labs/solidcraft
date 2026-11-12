@@ -239,7 +239,11 @@ fn running_command(app: &SolveApp) -> Option<String> {
         (Some(tool), _) => Some(tool.cmd.to_string()),
         // Create Sketch never lands in last_command (it is not repeatable).
         (None, Some(d)) if matches!(d.kind, crate::dialogs::Kind::Sketch) => Some("sketch.create".to_string()),
-        (None, Some(_)) => app.last_command.as_ref().map(|(id, _)| id.clone()),
+        // The dialog's own command, which is what its own header shows. A command the viewport
+        // offered on a pick (`canvas::selection_handle`) leaves `last_command` as the person last
+        // asked for it, so the toolbar pressed that one over a window standing open for another:
+        // Fillet pressed while Offset Face was the window on screen.
+        (None, Some(d)) => d.command().map(str::to_string).or_else(|| app.last_command.as_ref().map(|(id, _)| id.clone())),
         _ => None,
     }
 }
@@ -3640,6 +3644,15 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             app.last_escape = None;
         }
         if shown && (crate::keymap::drag_zoom_key(app, k, mods) || crate::navigation::view_key(app, ctx, k, mods, repeat)) {
+            continue;
+        }
+        // A shape being drawn in the viewport holds the keys of its own card first: those
+        // letters belong to commands the rest of the time.
+        if shown && crate::key_hints::handle_key(app, &crate::keymap::key_name(k, mods)) {
+            continue;
+        }
+        // The Plasticity control scheme's own keys (selection modes, hide/isolate, views, S, F…).
+        if shown && crate::plasticity::handle_key(app, ctx, &crate::keymap::key_name(k, mods)) {
             continue;
         }
         if mods.command {

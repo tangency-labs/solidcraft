@@ -296,6 +296,6 @@ chamfers, pattern and mirror copies, sides a Join merged, revolves, lofts, sweep
 shell rims, the plastic features' faces and the faces around them, and pieces of a split face (by
 the piece's own name where Offset Face moved it off the others' plane). Sheet metal panels, their
 rims and the flat ends of bends attach by name. What still refuses a sketch is what makes faces
-without recording their history (some cuts, the face a Split Body cuts with another body's
+without recording their history (some cuts, the face a Cut makes with another body's
 face): press-pull and extrude-from-face then fall back to a legacy face sketch found again by a
 point.

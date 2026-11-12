@@ -486,12 +486,111 @@ fn mass_properties_of_a_cylinder_are_close() {
 #[test]
 fn mass_properties_are_translation_invariant_about_the_centroid() {
     let at_origin = offset_box(Vec3::ZERO, 20.0, 30.0, 40.0).mass_properties().unwrap();
-    let moved = offset_box(Vec3::new(100.0, -50.0, 7.0), 20.0, 30.0, 40.0).mass_properties().unwrap();
-    assert!((moved.centroid - Vec3::new(110.0, -35.0, 27.0)).len() < 1e-9, "{moved:?}");
-    for r in 0..3 {
-        for c in 0..3 {
-            assert!((moved.inertia[r][c] - at_origin.inertia[r][c]).abs() <= 1e-9 * at_origin.inertia[0][0], "{r}{c}");
+    // A hundred millimetres away and a kilometre away alike. Summed from the world origin these
+    // drift in step with the distance -- a URDF written for a part that sits where its own
+    // coordinates put it carried an inertia that was wrong by more the further out it stood.
+    for at in [Vec3::new(100.0, -50.0, 7.0), Vec3::new(1.0e5, -7.0e4, 3.0e4), Vec3::new(1.0e6, -7.0e5, 3.0e5)] {
+        let moved = offset_box(at, 20.0, 30.0, 40.0).mass_properties().unwrap();
+        assert!((moved.centroid - (at + Vec3::new(10.0, 15.0, 20.0))).len() < 1e-6, "{at:?}: {moved:?}");
+        assert!(close(moved.volume, at_origin.volume, 1e-12), "{at:?}: {} against {}", moved.volume, at_origin.volume);
+        for r in 0..3 {
+            for c in 0..3 {
+                assert!((moved.inertia[r][c] - at_origin.inertia[r][c]).abs() <= 1e-9 * at_origin.inertia[0][0], "{at:?} {r}{c}");
+            }
         }
+    }
+}
+
+/// A volume is taken from the world origin until that costs the answer.
+#[test]
+fn a_volume_is_measured_from_the_origin_until_that_costs_the_answer() {
+    // An ordinary design sits within a few of its own sizes of the origin. The origin is kept
+    // there, so every body in it is measured from one point and their volumes can be subtracted
+    // from one another -- see `an_open_mesh_measures_differently_wherever_it_stands` for why
+    // that matters more than the handful of digits it costs.
+    assert_eq!(volume_reference(Vec3::new(30.0, -10.0, 5.0), 40.0), Vec3::ZERO);
+    assert_eq!(volume_reference(Vec3::new(1.0e3, 0.0, 0.0), 40.0), Vec3::ZERO);
+    // A part a long way out is measured from itself: from the origin the rounding of each term
+    // grows with the cube of the distance and in the end swallows the answer.
+    let far = Vec3::new(1.0e5, -7.0e4, 3.0e4);
+    assert_eq!(volume_reference(far, 40.0), far);
+    // Nothing to go on, so nothing is moved.
+    assert_eq!(volume_reference(Vec3::new(1.0e9, 0.0, 0.0), 0.0), Vec3::ZERO);
+    assert_eq!(volume_reference(Vec3::new(f64::NAN, 0.0, 0.0), 40.0), Vec3::ZERO);
+    assert_eq!(volume_reference(far, f64::INFINITY), Vec3::ZERO);
+}
+
+/// A measurement says whether the surface it came from closes, because its volume means nothing
+/// otherwise -- and the thing that says so is the vector area, which needs no welding and so
+/// works on the triangle soup a tessellation is.
+#[test]
+fn a_measurement_says_whether_its_surface_closes() {
+    let (a, b, c) = (20.0, 30.0, 40.0);
+    let shut = offset_box(Vec3::ZERO, a, b, c);
+    let m = shut.measure();
+    assert!(m.is_closed(), "a box closes: {:?}", m.vector_area);
+    assert!(close(m.volume, a * b * c, 1e-9), "{}", m.volume);
+    // The same box without the two triangles of its bottom face. The vector area is that face,
+    // facing the way the hole does, which is what tells a hole from the last bits of rounding.
+    let mut open = shut.clone();
+    open.triangles.drain(0..2);
+    let o = open.measure();
+    assert!((o.vector_area - Vec3::new(0.0, 0.0, a * b)).len() < 1e-9, "the hole is the bottom face: {:?}", o.vector_area);
+    assert!(!o.is_closed(), "and so it does not close");
+    // The area is still the faces it has -- five of the six -- so it is reported either way.
+    let want = 2.0 * (a * b + b * c + c * a) - a * b;
+    assert!(close(o.area, want, 1e-9), "{} against {want}", o.area);
+    // The sum a measurement carries and the one taken on its own are the same sum.
+    assert_eq!(open.vector_area(), o.vector_area);
+    assert_eq!(shut.vector_area(), m.vector_area);
+    // A mesh with nothing in it closes vacuously, rather than dividing by no area at all.
+    assert!(Mesh::default().measure().is_closed());
+    // A hole does not hide behind a mesh too fine to see it: 1 mm² of hole in 5 200 mm² of box
+    // is four orders of magnitude above the rounding a closed mesh carries.
+    let mut nicked = shut.clone();
+    let [p, q, r] = nicked.tri(&nicked.triangles[0]).expect("a triangle");
+    nicked.triangles.remove(0);
+    let gone = (q - p).cross(r - p).len() * 0.5;
+    assert!(gone > 1.0, "the triangle taken out is worth seeing: {gone}");
+    assert!(!nicked.measure().is_closed(), "one triangle short of closed is not closed");
+}
+
+/// An open mesh measures differently wherever it stands, which is why the point a volume is
+/// taken from is shared rather than each mesh's own.
+///
+/// Over a closed surface `sum a . (b x c)` does not depend on the point it is taken from. Over an
+/// open one it does, by an exact amount: moving the mesh by `d` moves the volume it reports by
+/// `(A . d)/3`, where `A = sum (b-a)x(c-a)/2` is the surface's vector area -- the zero vector
+/// when it is closed, and the missing lid when it is not. Tessellations here are not always
+/// watertight, so this is not a contrived case. A caller that subtracts one measured volume from
+/// another needs both taken from the SAME point for the leak to cancel out of the difference,
+/// which is what [`volume_reference`] does by holding everything near the origin to the origin.
+#[test]
+fn an_open_mesh_measures_differently_wherever_it_stands() {
+    let (a, b, c) = (20.0, 30.0, 40.0);
+    // The box without the two triangles of its bottom face.
+    let lidless = |at: Vec3| {
+        let mut m = offset_box(at, a, b, c);
+        m.triangles.drain(0..2);
+        m
+    };
+    let m = lidless(Vec3::ZERO);
+    let mut area_vec = Vec3::ZERO;
+    for t in &m.triangles {
+        let [p, q, r] = m.tri(t).expect("a triangle");
+        area_vec += (q - p).cross(r - p) * 0.5;
+    }
+    // Not the zero vector: that is what tells a leak from a watertight surface.
+    assert!((area_vec - Vec3::new(0.0, 0.0, a * b)).len() < 1e-9, "the hole is the bottom face: {area_vec:?}");
+    let here = m.measure().volume;
+    for d in [Vec3::new(1.0, 2.0, 3.0), Vec3::new(-40.0, 15.0, 70.0), Vec3::new(0.0, 0.0, -11.0)] {
+        let there = lidless(d).measure().volume;
+        let want = area_vec.dot(d) / 3.0;
+        assert!(close(there - here, want, 1e-9), "moved {d:?}: {} against {want}", there - here);
+        // Both were taken from the origin, which is what makes that difference the honest one
+        // instead of two numbers measured from two different places.
+        let bb = lidless(d).bounds();
+        assert_eq!(volume_reference(bb.center(), bb.diagonal()), Vec3::ZERO, "moved {d:?}");
     }
 }
 

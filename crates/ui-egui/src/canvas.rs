@@ -152,6 +152,12 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         Kind::SketchModify(_) => (at, crate::sketch_modify_ui::arrow(app, d).or(normal)),
         _ => (at, None),
     })
+    .map(|(at, normal)| {
+        // A blend begun by dragging an edge backwards grows the way that drag was going, so the
+        // drag carries on sizing it instead of running into the arrow's near end.
+        let back = d.extra.get(ARROW_BACK).and_then(serde_json::Value::as_bool).unwrap_or(false);
+        (at, if back { normal.map(|n| -n) } else { normal })
+    })
 }
 
 /// The direction a rectangular pattern's Spacing 2 grows along (#2462): a solid pattern's picked
@@ -214,7 +220,7 @@ fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcore_r
 
 /// The two faces at an edge, near `p`: for each, the normal and centroid of its triangle nearest
 /// `p`.
-fn edge_sides(m: &Mesh, index: usize, p: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
+pub(crate) fn edge_sides(m: &Mesh, index: usize, p: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
     let faces = m.edge_faces.get(index)?;
     faces
         .iter()
@@ -230,28 +236,124 @@ fn edge_sides(m: &Mesh, index: usize, p: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
         .collect()
 }
 
+/// How far a fillet or chamfer on edge `index` may grow before it runs past the edges that
+/// bound the faces it lies between -- the room it has, in millimetres.
+///
+/// For each of the two faces at the edge this walks square to the edge, across the face, and
+/// measures how far it is to whatever bounds the face on the other side; the smaller of the two
+/// is the room. That is the limit the eye expects: a round stops where the face it is eating
+/// into runs out, and the neighbouring edges are where it runs out. The ends of the edge are
+/// left out of the sampling, since the edges that meet it there touch it and would read as no
+/// room at all.
+///
+/// `None` where it cannot be told -- an edge with one face, a face nothing bounds across from
+/// the edge, a degenerate normal -- and the caller then sets no limit rather than a wrong one.
+/// The kernel still has the last word, refusing or reducing a radius that does not fit, so this
+/// is what the drag is held to and not a promise about the build. It is measured off the
+/// display mesh for that reason: it is a guard on a gesture, not geometry the model keeps.
+pub(crate) fn blend_room(m: &Mesh, index: usize) -> Option<f64> {
+    const SAMPLES: usize = 9;
+    let edge = m.edges.get(index)?;
+    let rim = m.circular_rim(index);
+    let faces = m.edge_faces.get(index)?;
+    let mut room = f64::INFINITY;
+    for (side, f) in faces.iter().enumerate() {
+        let others: Vec<usize> = m.face_edges(*f).into_iter().filter(|e| !rim.contains(e)).collect();
+        if others.is_empty() {
+            continue;
+        }
+        for k in 0..SAMPLES {
+            let u = (k as f64 + 1.0) / (SAMPLES as f64 + 1.0);
+            let Some(p) = point_along(edge, u) else { continue };
+            // This face's own normal and centroid near the sample (`edge_sides` answers in
+            // `edge_faces` order, so `side` picks the face being measured).
+            let Some(&(n, centroid)) = edge_sides(m, index, p).as_ref().and_then(|v| v.get(side)) else { continue };
+            let Some(tangent) = edge_tangent(edge, p) else { continue };
+            // Square to the edge, lying in the face, pointing into it.
+            let Some(across) = n.cross(tangent).normalized() else { continue };
+            let across = if (centroid - p).dot(across) < 0.0 { -across } else { across };
+            let mut nearest = f64::INFINITY;
+            for e in &others {
+                let Some(poly) = m.edges.get(*e) else { continue };
+                for w in poly.windows(2) {
+                    if let Some(t) = ray_segment(p, across, n, w[0], w[1]) {
+                        nearest = nearest.min(t);
+                    }
+                }
+            }
+            room = room.min(nearest);
+        }
+    }
+    room.is_finite().then_some(room).filter(|r| *r > 0.0)
+}
+
+/// The point a fraction `u` of the way along a polyline.
+fn point_along(poly: &[Vec3], u: f64) -> Option<Vec3> {
+    let total: f64 = poly.windows(2).map(|w| w[0].dist(w[1])).sum();
+    if total <= 0.0 {
+        return poly.first().copied();
+    }
+    let mut want = total * u;
+    for w in poly.windows(2) {
+        let d = w[0].dist(w[1]);
+        if want <= d {
+            return Some(w[0] + (w[1] - w[0]) * (want / d.max(1e-300)));
+        }
+        want -= d;
+    }
+    poly.last().copied()
+}
+
+/// The direction of a polyline over the segment nearest `p`.
+fn edge_tangent(poly: &[Vec3], p: Vec3) -> Option<Vec3> {
+    let w = poly.windows(2).min_by(|a, b| p.dist_to_segment(a[0], a[1]).total_cmp(&p.dist_to_segment(b[0], b[1])))?;
+    (w[1] - w[0]).normalized()
+}
+
+/// Where a ray from `p` along `dir` meets the segment `a`-`b`, both flattened into the plane
+/// through `p` with normal `n`: the distance along the ray, or `None` where they do not meet in
+/// front of `p`.
+fn ray_segment(p: Vec3, dir: Vec3, n: Vec3, a: Vec3, b: Vec3) -> Option<f64> {
+    // Plane coordinates with `dir` as the x axis and `side` as the y axis.
+    let side = n.cross(dir);
+    let flat = |q: Vec3| {
+        let v = q - p;
+        (v.dot(dir), v.dot(side))
+    };
+    let (ax, ay) = flat(a);
+    let (bx, by) = flat(b);
+    // The segment has to cross the ray's line, y = 0.
+    if ay.signum() == by.signum() && ay != 0.0 && by != 0.0 {
+        return None;
+    }
+    let dy = by - ay;
+    if dy.abs() < 1e-12 {
+        return None;
+    }
+    let t = (-ay / dy).clamp(0.0, 1.0);
+    let x = ax + (bx - ax) * t;
+    (x > 1e-9 && x.is_finite()).then_some(x)
+}
+
 /// The outward direction between the two faces at an edge: the mean of their normals.
 fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     edge_sides(m, index, p)?.iter().fold(Vec3::ZERO, |sum, (n, _)| sum + *n).normalized()
 }
 
-/// Whether the edge is an inside (concave) one: each face near it lies in front of the other's
-/// plane, where on an outside edge it lies behind. Only the offset across the edge counts, since
-/// each normal is square to the edge.
-fn edge_concave(m: &Mesh, index: usize, p: Vec3) -> Option<bool> {
-    let sides = edge_sides(m, index, p)?;
-    let [(n1, c1), (n2, c2)] = sides.as_slice() else { return None };
-    let s = (*c1 - p).dot(*n2) + (*c2 - p).dot(*n1);
-    Some(s > 0.0)
-}
-
-/// The direction a fillet's radius or a chamfer's distance grows from an edge, along the bisector
-/// of its faces: into the body on an outside edge, where the blend takes material away, and out
-/// into the open corner on an inside edge, where it adds material (#1384). Dragging along it
-/// increases the value either way.
+/// Which way a fillet's or chamfer's handle runs from its edge: out of the material, along the
+/// bisector of the two faces (#1384).
+///
+/// The same rule on an edge of either kind -- out of the body on an outside edge, into the open
+/// corner on an inside one -- because the handle's job is to be seen and taken hold of, and the
+/// one place it is never in the way is clear of the part. Dragging it away from the material
+/// rounds the edge off, and pushing it back through its own base takes the corner off square.
 pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
-    let n = edge_bisector(m, index, p)?;
-    Some(if edge_concave(m, index, p).unwrap_or(false) { n } else { -n })
+    // The bisector of the two faces, which point out of the solid, so it points away from the
+    // material on an edge of either kind: out of the body on an outside edge, into the open
+    // corner on an inside one. The handle stands clear of the part that way, where it can be
+    // seen and taken hold of, and pulling it away from the material is what rounds the edge off;
+    // pushing it back through the base takes the corner off square instead.
+    edge_bisector(m, index, p)
 }
 
 /// A Section Analysis dialog reopened from its section's own geometry (Show viewport section
@@ -319,6 +421,27 @@ pub(crate) fn chamfer_face_dirs(app: &SolveApp, d: &Dialog, at: Vec3) -> Option<
     Some(if (n2.dot(up) > n1.dot(up)) != *flip { (t2, t1) } else { (t1, t2) })
 }
 
+/// The room a fillet or chamfer in this dialog has: the least of its edges' ([`blend_room`]),
+/// so a drag over several edges stops at the tightest one, and no larger than the kernel's
+/// own limit where it has refused this selection and named it (`preview.fit`). The room is
+/// measured across the faces and cannot see what a round must also fit round -- a rim whose
+/// corners are 6 mm rounds takes 6 mm, whatever the wall below it is -- so the kernel's word
+/// is taken as soon as there is one. None for any other dialog, and where neither is known.
+pub(crate) fn blend_cap(app: &SolveApp, d: &Dialog) -> Option<f64> {
+    let Kind::Fillet { .. } = &d.kind else { return None };
+    let room = || -> Option<f64> {
+        let st = app.session.world_state().ok()?;
+        let mut cap: Option<f64> = None;
+        for item in d.inputs.first().into_iter().flat_map(|i| &i.items) {
+            let Sel::Edge { body, index, .. } = item else { continue };
+            let room = st.body(body).and_then(|b| blend_room(&b.mesh(), *index))?;
+            cap = Some(cap.map_or(room, |c: f64| c.min(room)));
+        }
+        cap
+    };
+    [room(), app.preview.fit.map(|(_, size)| size)].into_iter().flatten().reduce(f64::min)
+}
+
 /// Whether a dynamically registered canvas handle owns this point before navigation.
 pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
     // The triad only registers an egui hit widget after a handle is under the pointer.
@@ -339,14 +462,216 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
 }
 
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
+/// The extras key that turns the handle round, so a chamfer grows the way the drag was going.
+pub(crate) const ARROW_BACK: &str = "arrow_back";
+
+/// The radius of the knob at a drag handle's end (screen points): a fixed size, so it is as easy
+/// to see and to hit however far away the camera is.
+const HEAD_PX: f32 = 5.5;
+
+/// How far the pointer must carry the handle before the command takes over (screen points).
+const HANDLE_BEGUN_PX: f64 = 10.0;
+
+/// The way a push of this face goes: the normal of a planar face, else the surface normal
+/// where it was picked.
+///
+/// A blend's own round face is the exception, and has none: the kernel will not offset it, and
+/// what grows a blend is its radius, which is edited through the feature that made it.
+pub(crate) fn face_push_dir(s: &solidcraft_engine::Session, body: &str, index: usize, point: Vec3) -> Option<Vec3> {
+    if let Some((_, n)) = crate::dialogs::planar_face(s, body, index) {
+        return Some(n);
+    }
+    if crate::dialogs::blend_feature(s, body, index).is_some() {
+        return None;
+    }
+    let st = s.world_state().ok()?;
+    let mesh = st.body(body)?.mesh();
+    crate::dialogs_assembly::face_normal_near(&mesh, u32::try_from(index).ok()?, point)
+}
+
+/// What is picked, as a key: a provisional command belongs to one pick, and a different pick
+/// gets its own.
+pub(crate) fn shaped_key(sel: &[Sel]) -> String {
+    sel.iter()
+        .map(|s| match s {
+            Sel::Face { body, index, .. } => format!("f{body}:{index}"),
+            Sel::Edge { body, index, .. } => format!("e{body}:{index}"),
+            other => format!("{other:?}"),
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The handle on what is picked, and the shaping command it stands for.
+///
+/// Picking a face or an edge is already the command: the shaping command for what was picked
+/// opens at once -- Press Pull for a face, Fillet for edges -- so its handle is there to drag
+/// and its number there to type, without reaching for a command first. Nothing opens for
+/// anything else, nor inside a sketch.
+///
+/// Cancelling it leaves the same things picked, and they keep a handle of their own here rather
+/// than opening the command over and over. That handle drags straight back into the command (the
+/// same handle, in the same place, under the same id, so egui carries the gesture on into it),
+/// and which way an edge is dragged says whether it is rounded off or taken off square.
+///
+/// This is one of Plasticity's habits, and this base answers a face gesture its own way already
+/// (`crate::drag_extrude`: press on a face and pull, and Extrude starts on the pick). So the
+/// control scheme says which applies, as it does for drawing a primitive.
+pub(crate) fn selection_handle(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    if !crate::plasticity::active(app) || app.session.active_sketch.is_some() || app.applying.is_some() {
+        return;
+    }
+    let sel = app.session.selection.clone();
+    let Some(first) = sel.first() else {
+        // Nothing picked: the next pick is a new one, even of the same face.
+        app.shaped_selection = None;
+        return;
+    };
+    // Both go either way: a face pushes out or pulls in, and an edge rounds off one way or
+    // cuts a chamfer the other.
+    let (base, dir, edges) = match first {
+        // Faces together, since one pick is often more than one face: a cylinder's wall comes
+        // back as the two halves its seam splits it into, and both are pushed as one.
+        Sel::Face { body, index, point } if sel.iter().all(|s| matches!(s, Sel::Face { .. })) => {
+            match face_push_dir(&app.session, body, *index, *point) {
+                Some(n) => (*point, n, false),
+                None => return,
+            }
+        }
+        Sel::Edge { body, index, point } if sel.iter().all(|s| matches!(s, Sel::Edge { .. })) => {
+            let Ok(st) = app.session.world_state() else { return };
+            match st.body(body).and_then(|b| blend_grow_dir(&b.mesh(), *index, *point)) {
+                Some(n) => (*point, n, true),
+                None => return,
+            }
+        }
+        _ => return,
+    };
+    // Newly picked: its shaping command opens at once, standing ready -- the handle to drag and
+    // the size to type are both there without reaching for a command. It keeps out of the way
+    // until it is used (`Dialog::provisional`), and the pick it was cancelled out of does not
+    // open it again, so Esc still gets out. Where something else is already waiting on the pick
+    // -- a sketch whose plane is being reattached asks for a face -- nothing opens and the handle
+    // alone stands there, which starts the command on a drag the way it always did.
+    let shaped = shaped_key(&sel);
+    if app.tree.redefine_draft.is_none() && app.shaped_selection.as_ref() != Some(&shaped) {
+        app.shaped_selection = Some(shaped);
+        let last = app.last_command.clone();
+        app.start(if edges { "solid.fillet" } else { "solid.press_pull" });
+        let zero = format_len(&app.session.doc, 0.0);
+        if let Some(d) = app.dialog.as_mut() {
+            d.provisional = true;
+            // The box must not take the keyboard, or a letter typed for a shortcut would go
+            // into it instead.
+            d.focus = false;
+            // At nothing, not at the command's usual size: a command that opened on the pick
+            // alone must change nothing until it is used, so the model stays as it was and the
+            // size grows from zero under the pointer.
+            if let Some((_, _, v)) = d.primary() {
+                *v = zero;
+            }
+        }
+        // Repeat repeats what the person asked for, not what a pick offered, and what was
+        // picked stays picked: starting a command hands the pre-selection to its inputs, but a
+        // command merely standing ready has taken nothing, and the next thing the person does
+        // may well be a sketch on that face rather than a push of it.
+        app.last_command = last;
+        app.session.selection = sel.clone();
+        return;
+    }
+    let Some(bs) = proj.to_screen(base) else { return };
+    let mut value = format_len(&app.session.doc, 0.0);
+    let half_height = app.cam.half_height();
+    // On an edge this handle is a fillet about to happen, so it stops where one would.
+    let cap = edges
+        .then(|| match first {
+            Sel::Edge { body, index, .. } => {
+                app.session.world_state().ok().and_then(|st| st.body(body).and_then(|b| blend_room(&b.mesh(), *index)))
+            }
+            _ => None,
+        })
+        .flatten();
+    crate::canvas::drag_arrow_capped(
+        &app.session.doc,
+        ui,
+        painter,
+        proj,
+        base,
+        bs,
+        dir,
+        0.0,
+        true,
+        egui::Id::unique("sc_manipulator"),
+        half_height,
+        0.0,
+        &mut value,
+        cap,
+    );
+    let Some(dragged) = value.split_whitespace().next().and_then(|n| n.parse::<f64>().ok()) else { return };
+    // What the knob reads is how far the pointer has carried it from where it was taken hold
+    // of, so the handover waits only until the drag has said something -- a short reach, the
+    // same either way, since which way it went is what an edge becomes. The feature then opens
+    // at the size dragged so far, which is still next to nothing: a fillet grows from a sharp
+    // corner the way it does under the pointer, instead of starting at the handle's own length.
+    let begun = HANDLE_BEGUN_PX * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
+    if dragged.abs() < begun {
+        return;
+    }
+    let back = dragged < 0.0;
+    // Dragging has begun: hand it over with what has been dragged so far, so nothing is lost in
+    // the change-over. Which way an edge was dragged says what it becomes: the way the blend
+    // grows rounds it off, the other way takes the corner off square.
+    let magnitude = format_len(&app.session.doc, dragged.abs());
+    match (edges, back) {
+        (true, false) => app.start("solid.fillet"),
+        (true, true) => app.start("solid.chamfer"),
+        (false, _) => app.start("solid.press_pull"),
+    }
+    if edges
+        && back
+        && let Some(d) = app.dialog.as_mut()
+    {
+        d.extra.insert(ARROW_BACK.into(), serde_json::json!(true));
+        // The chamfer turns the handle round to grow the way the drag was going, so the gap the
+        // drag has been measured against turns with it. Left as it was, every further step of
+        // the same drag reads as a size going the wrong way and the chamfer sticks at one step.
+        if let Some(p) = ui.input(|i| i.pointer.interact_pos())
+            && let Some(v) = along(proj, p, base, -dir)
+            && let Some(g) = Some(v - dragged.abs()).filter(|g| g.is_finite())
+        {
+            ui.data_mut(|data| data.insert_temp(egui::Id::unique("sc_manipulator").with("stem grab"), g));
+        }
+    }
+    if let Some(d) = app.dialog.as_mut()
+        && let Some((_, _, v)) = d.primary()
+    {
+        // A radius or a chamfer is a size, never a direction, so the sign is spent on the choice.
+        *v = if edges { magnitude } else { value };
+    }
+}
+
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
     crate::extrude_face_snap::set(None);
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
         return;
     }
+    // While a command the person asked for is open -- or a tool is running -- whatever is picked
+    // is that command's business, so it counts as already shaped: cancelling a hole, a thread or
+    // a sketch must not leave a push opening in its place on the face it was working on.
+    if app.tool.is_some() || app.dialog.as_ref().is_some_and(|d| !d.provisional) {
+        app.shaped_selection = Some(shaped_key(&app.session.selection));
+    }
+    // A command the viewport opened on a pick gives way as soon as the pick changes, or a
+    // sketch's plane is being reattached: it was never asked for, so it must not linger.
+    let yields = app.tree.redefine_draft.is_some() || app.shaped_selection.as_deref() != Some(shaped_key(&app.session.selection).as_str());
+    if app.dialog.as_ref().is_some_and(|d| d.provisional) && yields {
+        app.dialog = None;
+        app.shaped_selection = None;
+    }
     if app.dialog.is_none() && app.tool.is_none() {
         crate::browser::occurrence_triad(app, ui, painter, proj);
+        selection_handle(app, ui, painter, proj);
     }
     let Some(mut d) = app.dialog.take() else { return };
     if matches!(d.kind, Kind::Assembly(_)) {
@@ -378,7 +703,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         if let Some(t) = crate::dialogs_move::triad(app, &d)
             && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::unique("sc_move_triad"), &t, snap_step(app.cam.half_height()))
         {
-            crate::dialogs_move::drag(app, &mut d, g);
+            // Holding the snap chord lands the pivot on the place the hover has locked onto:
+            // the same corners, middles and centres a click takes, on everything but the bodies
+            // on the move (the viewport keeps those out of the candidates).
+            let snap = crate::prefs::manipulator_snap_held(ui.input(|i| i.modifiers)).then(crate::model_snap::current).flatten().map(|s| s.at);
+            crate::dialogs_move::drag(app, &mut d, g, snap);
             dragging = true;
         }
         // Read the triad again after the drag, so the box follows it in the same frame. Move
@@ -489,17 +818,38 @@ fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter
     Some((end, *angle != before))
 }
 
-/// A round step for dragged values at this zoom (1, 2 or 5 times a power of ten).
+/// The coarsest a dragged value steps. Every hundredth of a millimetre is reachable at any
+/// working zoom: a drag is for landing on the value you want, not on a round one.
+const COARSEST_STEP: f64 = 0.01;
+
+/// A round step for dragged values: [`COARSEST_STEP`] at any ordinary zoom, and finer still
+/// (1, 2 or 5 times a power of ten) once the view is closer in than that. Hold Alt or Ctrl to
+/// drag free of the step, or type the value into the box.
 pub fn snap_step(half_height: f64) -> f64 {
     let raw = (half_height / 40.0).max(1e-4);
     let p = 10f64.powf(raw.log10().floor());
-    if raw / p < 2.0 {
+    let step = if raw / p < 2.0 {
         p
     } else if raw / p < 5.0 {
         2.0 * p
     } else {
         5.0 * p
-    }
+    };
+    step.min(COARSEST_STEP)
+}
+
+/// A dragged length, to a thousandth of a millimetre.
+///
+/// A drag already steps by [`COARSEST_STEP`] or finer, so this never costs a value anything the
+/// person could have aimed at; what it removes is the sixteen digits a raw measurement carries.
+/// A drag held at `blend_room`'s cap is the one that shows them: the cap is a distance measured
+/// off the model, and clamping writes it into the field as it stands. At the cap the rounding
+/// goes toward zero, so the value stays inside the room that was measured rather than a
+/// thousandth past it.
+fn tidy(v: f64, capped: bool) -> f64 {
+    const PER_MM: f64 = 1000.0;
+    let r = if capped { (v * PER_MM).trunc() / PER_MM } else { (v * PER_MM).round() / PER_MM };
+    if r.is_finite() { r } else { v }
 }
 
 /// Parameter along the line `base + dir * t` closest to the view ray through `pos`.
@@ -586,8 +936,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // Extrudes, moves, pattern spacings and one-sided sketch offsets go either way (#5497);
     // radii, thicknesses, depths and heights stay positive. A symmetric offset takes the
     // distance's size only, so a drag past its curve would just turn the arrow round.
+    // A blend's handle is signed so a drag may carry it back through its own base: there a
+    // fillet becomes a chamfer and a chamfer a fillet, the way the one handle on a bare edge
+    // already does before either command is open (`turn_blend_round`).
     let signed = match &d.kind {
-        Kind::Extrude { .. }
+        Kind::Fillet { .. }
+        | Kind::Extrude { .. }
         | Kind::Move { .. }
         | Kind::Section { .. }
         | Kind::OffsetPlane { .. }
@@ -597,6 +951,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { mode, .. }) => !crate::sketch_modify_ui::offset_symmetric(*mode),
         _ => false,
     };
+    // Typing a number is the other way to use a command the pick offered, beside dragging its
+    // handle, and it is how Plasticity's blend works: click an edge, type the size. The box is
+    // kept off the keyboard until then (see where `provisional` is set), so the first digit has
+    // to both seed it and hand it the keyboard.
+    let mut seeded = false;
+    if d.provisional
+        && let Some(seed) = typed_size_start(ui)
+    {
+        if let Some((_, _, v)) = d.primary() {
+            *v = seed;
+            seeded = true;
+        }
+        // Used, so it is an ordinary command from here -- the same as the handle's first drag.
+        d.provisional = false;
+        d.focus = true;
+    }
     let mut focus = take_focus(ui.ctx(), d);
     let half_height = app.cam.half_height();
     let axis = revolve_axis(app, d);
@@ -664,19 +1034,23 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // Holes: the depth arrow points into the material (empty depth: through all); the
     // diameter is typed in the box.
     let mut dir = dir;
-    // Extrude taper: a handle beside the arrow tip; dragging it sideways tilts the walls.
+    // Extrude taper: a handle beside the arrow tip; dragging it sideways tilts the walls. It
+    // comes out only once the taper is in play -- an angle typed under ADVANCED, or one the
+    // feature was reopened with -- so an ordinary push or pull carries the one handle and nothing
+    // standing next to it to be mistaken for it, which is how Plasticity's push face works.
     let cam_right = app.cam.basis().0;
     if let (Kind::Extrude { direction: 0 | 1, distance, taper, taper_present, to_offset, smart, .. }, Some(n)) = (&mut d.kind, dir) {
         let n = n * sign;
         let span =
             to_span.map(|span| span.abs() + crate::length_input::eval(&app.session.doc, to_offset, ValueKind::Length).unwrap_or(0.0)).or(all_span);
-        if let Ok(l) = span.map(Ok).unwrap_or_else(|| crate::length_input::eval(&app.session.doc, distance, ValueKind::Length))
+        let ang = crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
+        if (*taper_present || ang.abs() > 1e-12)
+            && let Ok(l) = span.map(Ok).unwrap_or_else(|| crate::length_input::eval(&app.session.doc, distance, ValueKind::Length))
             && l.is_finite()
             && l.abs() > 1e-9
             && let Some(e) = (cam_right - n * cam_right.dot(n)).normalized()
         {
             let px = 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
-            let ang = crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
             let before = taper.clone();
             let st = crate::open_meshing::session_world(&app.session);
             let regions: Vec<&solidcore_record::Region2> = d
@@ -759,10 +1133,17 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     // A placement marker at the base: the arrow stands above it and the base dot is the marker's.
     let clear = crate::place_gizmo::arrow_clearance(app, d);
-    // While an extrude's arrow is dragged, the flat faces it can stop at (#2398).
+    // While an extrude's arrow is dragged, where it can stop (#2398).
+    // A fillet or chamfer stops where the faces around its edges run out.
+    let cap = blend_cap(app, d);
     let arrow_id = egui::Id::unique("sc_manipulator");
+    // A free drag under SolidCraft's own controls passes the stops by, as it always has. Under
+    // Plasticity's the chord that frees the arrow of its round steps is the one that asks for
+    // them, so there a free drag is exactly where the stops belong.
+    let snapping = crate::prefs::snapping_on(app, ui.input(|i| i.modifiers))
+        && (crate::plasticity::active(app) || !crate::tool_modifiers::manipulator_free());
     let stops = match dir {
-        Some(n) if ui.ctx().is_being_dragged(arrow_id) => crate::extrude_face_snap::stops(app, d, base, n * sign),
+        Some(n) if ui.ctx().is_being_dragged(arrow_id) => crate::extrude_face_snap::stops(app, d, base, n * sign, snapping),
         _ => Vec::new(),
     };
     let Some((label, kind, value)) = d.primary() else { return };
@@ -790,7 +1171,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             ui,
             painter,
             proj,
-            ArrowLine { base, bs, n, l: half + baseline, signed, clear_px: clear },
+            ArrowLine { base, bs, n, l: half + baseline, signed, clear_px: clear, cap },
             arrow_id,
             half_height,
             &stops,
@@ -825,11 +1206,42 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let size = box_size(ui, egui::Id::unique("sc_canvas_area"), label, note.as_deref());
     let box_at = clear_of_dialog(rect_at(box_at, egui::Align2::LEFT_TOP, size), place).min;
     let box_at = crate::place_gizmo::yield_box(ui, anchor, box_at);
-    value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref(), BoxPlace { dialog: None, ..place });
-    if *value != before
+    let take = match () {
+        // Seeded by the digit that opened it: the caret goes after that digit so the rest of the
+        // number carries on from it rather than wiping it.
+        () if seeded => Take::End,
+        () => Take::all_if(focus || *value != before),
+    };
+    value_box_noted(ui, label, value, box_at, take, note.as_deref(), BoxPlace { dialog: None, ..place });
+    let changed = *value != before;
+    // Dragged back across the handle's base: a blend turns into the other kind, at the size the
+    // drag has reached. Read here while the value is still in hand; done below, once it is not.
+    let turned = changed
+        .then(|| value.split_whitespace().next().and_then(|n| n.parse::<f64>().ok()))
+        .flatten()
+        .filter(|v| *v < 0.0 && matches!(d.kind, Kind::Fillet { .. }))
+        .map(|v| crate::length_input::model(&app.session.doc, -v));
+    if changed
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
         *all = false;
+    }
+    if let Some(size) = turned {
+        turn_blend_round(d, size);
+    }
+}
+
+/// A blend dragged back across its own base becomes the other kind at `size`: a fillet is a
+/// chamfer taken off square, a chamfer a fillet rounded off. The handle turns with it
+/// (`ARROW_BACK`) so the drag carries on sizing what it is now making instead of running into
+/// the handle's near end.
+fn turn_blend_round(d: &mut Dialog, size: String) {
+    let Kind::Fillet { chamfer, .. } = &mut d.kind else { return };
+    *chamfer = !*chamfer;
+    let back = !d.extra.get(ARROW_BACK).and_then(serde_json::Value::as_bool).unwrap_or(false);
+    d.extra.insert(ARROW_BACK.into(), serde_json::json!(back));
+    if let Some((_, _, v)) = d.primary() {
+        *v = size;
     }
 }
 
@@ -873,6 +1285,51 @@ fn take_focus(ctx: &egui::Context, d: &mut Dialog) -> bool {
     boxes_shown(ctx) && std::mem::take(&mut d.focus)
 }
 
+/// How the value box takes the keyboard, when it takes it at all.
+///
+/// A box that has just been handed the keyboard holds a value the person did not type, so the
+/// first thing they type should replace it: [`Take::All`]. A box seeded with the digit that
+/// handed it the keyboard holds a value they *did* type, and the next digit belongs after it,
+/// not instead of it: [`Take::End`] -- without which typing 7.5 leaves .5 behind.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Take {
+    /// Leave the keyboard where it is.
+    No,
+    /// Take it, with the value selected, so typing replaces it.
+    All,
+    /// Take it, with the caret after the value, so typing carries on from it.
+    End,
+}
+
+impl Take {
+    /// What every box but the seeded one asks for: the whole value, or nothing.
+    fn all_if(on: bool) -> Self {
+        if on { Self::All } else { Self::No }
+    }
+}
+
+/// A size begun at the keyboard, taken out of this frame's events.
+///
+/// Only a digit, a point or a minus starts one. That is the whole trick: a command the pick
+/// offered must leave the keyboard alone, because a letter typed at it is a shortcut and would
+/// otherwise disappear into a number box -- but no shortcut is a bare digit, so a digit can
+/// only mean a size, and taking it is safe.
+///
+/// The event is taken rather than read, so the character does not arrive twice: once here as the
+/// seed, and again at the box that is about to take the keyboard.
+fn typed_size_start(ui: &egui::Ui) -> Option<String> {
+    ui.input_mut(|i| {
+        let at = i.events.iter().position(|e| match e {
+            egui::Event::Text(t) => t.chars().next().is_some_and(|c| c.is_ascii_digit() || c == '.' || c == '-'),
+            _ => false,
+        })?;
+        match i.events.remove(at) {
+            egui::Event::Text(t) => Some(t),
+            _ => None,
+        }
+    })
+}
+
 /// The command's main value in the viewport, next to the geometry: the keyboard goes here while
 /// the window is open, so a number typed straight after a pick sets the value. `at` is its
 /// top-left corner. `select_all` re-selects the whole field, both right after a pick and on every
@@ -894,9 +1351,9 @@ fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, 
 }
 
 /// [`value_box`] with a note after the field (a pull's step size).
-fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, note: Option<&str>, place: BoxPlace) {
+fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, take: Take, note: Option<&str>, place: BoxPlace) {
     let ids = (egui::Id::unique("sc_canvas_area"), egui::Id::unique("sc_canvas_value"));
-    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), note, place);
+    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (take, false), note, place);
 }
 
 /// [`value_box_with`] under its own ids (its area's and its field's), for a value beside the main
@@ -912,7 +1369,7 @@ pub(crate) fn value_box_in(
     keep_tab: bool,
     place: BoxPlace,
 ) -> Option<egui::Rect> {
-    value_box_full(ui, ids, label, value, at, (select_all, keep_tab), None, place)
+    value_box_full(ui, ids, label, value, at, (Take::all_if(select_all), keep_tab), None, place)
 }
 
 /// [`value_box_in`] with a short dimmed note after the field (a pull's step size).
@@ -922,7 +1379,7 @@ fn value_box_full(
     label: &str,
     value: &mut String,
     (at, pivot): (Pos2, egui::Align2),
-    (select_all, keep_tab): (bool, bool),
+    (take, keep_tab): (Take, bool),
     note: Option<&str>,
     place: BoxPlace,
 ) -> Option<egui::Rect> {
@@ -958,11 +1415,13 @@ fn value_box_full(
                 ui.label(egui::RichText::new(crate::i18n::tr_label(label)).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
                 let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab);
                 crate::params_dialog::complete(ui, &r, value);
-                if select_all {
+                if take != Take::No {
                     r.request_focus();
                     let n = value.chars().count();
+                    let from = if take == Take::All { 0 } else { n };
                     let mut st = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
-                    st.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
+                    st.cursor
+                        .set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(from), egui::text::CCursor::new(n))));
                     st.store(ui.ctx(), id);
                 }
                 if let Some(note) = note {
@@ -1079,7 +1538,7 @@ fn to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 /// the base free: the arrow starts past them and its shortest length grows by them, so it stands
 /// above a placement marker drawn at the base instead of through it.
 #[allow(clippy::too_many_arguments)]
-fn drag_arrow(
+pub(crate) fn drag_arrow(
     doc: &solidcraft_engine::doc::Document,
     ui: &mut egui::Ui,
     painter: &egui::Painter,
@@ -1094,7 +1553,29 @@ fn drag_arrow(
     clear_px: f32,
     value: &mut String,
 ) -> Option<Pos2> {
-    let line = ArrowLine { base, bs, n, l, signed, clear_px };
+    drag_arrow_capped(doc, ui, painter, proj, base, bs, n, l, signed, id, half_height, clear_px, value, None)
+}
+
+/// [`drag_arrow`] held to `cap`: the largest value the drag may reach, where the geometry sets
+/// one (a fillet or chamfer's room, [`blend_room`]).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn drag_arrow_capped(
+    doc: &solidcraft_engine::doc::Document,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    base: Vec3,
+    bs: Pos2,
+    n: Vec3,
+    l: f64,
+    signed: bool,
+    id: egui::Id,
+    half_height: f64,
+    clear_px: f32,
+    value: &mut String,
+    cap: Option<f64>,
+) -> Option<Pos2> {
+    let line = ArrowLine { base, bs, n, l, signed, clear_px, cap };
     drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], value).map(|(ts, _)| ts)
 }
 
@@ -1108,6 +1589,8 @@ struct ArrowLine {
     l: f64,
     signed: bool,
     clear_px: f32,
+    /// The largest value the drag may reach, where the geometry sets one ([`blend_room`]).
+    cap: Option<f64>,
 }
 
 /// [`drag_arrow`] that also stops at `stops` (#2398): a drag whose tip comes near a stop's
@@ -1125,7 +1608,7 @@ fn drag_arrow_to(
     stops: &[crate::extrude_face_snap::Stop],
     value: &mut String,
 ) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>)> {
-    let ArrowLine { base, bs, n, l, signed, clear_px } = line;
+    let ArrowLine { base, bs, n, l, signed, clear_px, cap } = line;
     let mut stopped = None;
     let t = Tokens::get();
     let min = f64::from(40.0 + clear_px) * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
@@ -1168,7 +1651,10 @@ fn drag_arrow_to(
         let v = v - ui.data(|d| d.get_temp::<f64>(grab)).unwrap_or(0.0);
         let free = crate::tool_modifiers::manipulator_free();
         let step = snap_step(half_height);
-        stopped = if free { None } else { crate::extrude_face_snap::nearest(proj, base, n, v, stops).cloned() };
+        // Whether a stop was asked for at all is settled where they are gathered, so what arrives
+        // here is only ever a stop this drag wants: a free drag that asked for them stops at
+        // them, and runs free of the round steps between them.
+        stopped = crate::extrude_face_snap::nearest(proj, base, n, v, stops).cloned();
         let mut v = match &stopped {
             Some(stop) => stop.distance,
             None if free => v,
@@ -1177,8 +1663,17 @@ fn drag_arrow_to(
         if !signed {
             v = v.max(if free { 1e-3 } else { step });
         }
-        *value = format_len(doc, v);
-        ts = tip(v)?;
+        // A fillet or chamfer stops where the faces it lies between run out: the handle follows
+        // the pointer only as far as the edges around it leave room, and stands there after.
+        let capped = cap.filter(|c| c.is_finite() && *c > 0.0);
+        if let Some(cap) = capped {
+            v = v.clamp(-cap, cap);
+        }
+        // A stop is an exact distance to a face (#2398) and keeps every digit of it; only a value
+        // the drag itself arrived at is tidied.
+        let shown = if stopped.is_some() { v } else { tidy(v, capped.is_some()) };
+        *value = format_len(doc, shown);
+        ts = tip(shown)?;
     }
     // Paint the value just read from this frame's pointer, including the value box anchor.
     // Using the old distance here made both trail the drag by another frame.
@@ -1187,7 +1682,7 @@ fn drag_arrow_to(
     let col = if hot { t.accent } else { t.manipulator };
     arrow(painter, start(ts), ts, col);
     if hot {
-        painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
+        painter.circle_stroke(ts, HEAD_PX + 3.5, Stroke::new(1.5, col));
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
     Some((ts, stopped))
@@ -1278,9 +1773,10 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
             let (spline, start) = law.as_ref()?;
             let other = if start.dist(*a) <= start.dist(*b) { *b } else { *a };
             let mid = *start + (other - *start) * 0.5;
-            // Between the two faces, the way this edge's radius grows: into the body on an outside
-            // edge, into the corner on an inside one (the edge is straight between planar faces).
-            let n = blend_grow_dir(mesh, *index, mid)?;
+            // Into the material, against the handle's own direction: this curve is not a thing to
+            // pull on but a picture of how far the blend reaches along the edge, and it has to lie
+            // where the blend will be to say that. (The edge is straight between planar faces.)
+            let n = -blend_grow_dir(mesh, *index, mid)?;
             let curve = (0..=48)
                 .filter_map(|k| {
                     let u = f64::from(k) / 48.0;
@@ -2054,11 +2550,11 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
     if l < 1.0 {
         return;
     }
-    let u = v / l;
-    let n = vec2(-u.y, u.x);
     painter.line_segment([a, b], Stroke::new(2.0, col));
-    let head = 11.0f32.min(l * 0.6);
-    painter.add(egui::Shape::convex_polygon(vec![b, b - u * head + n * head * 0.45, b - u * head - n * head * 0.45], col, Stroke::NONE));
+    // A round knob, not an arrowhead: it is a thing to take hold of rather than a sign pointing
+    // somewhere, it is the same size whichever way the handle runs, and it is a bigger target.
+    // Its white ring keeps it legible against a face of its own colour.
+    painter.circle(b, HEAD_PX, col, Stroke::new(1.5, Color32::WHITE));
 }
 
 #[cfg(test)]
@@ -2104,12 +2600,33 @@ mod tests {
 
     #[test]
     fn snapping_steps_and_formatting() {
-        assert_eq!(snap_step(40.0), 1.0);
-        assert_eq!(snap_step(100.0), 2.0);
-        assert_eq!(snap_step(4.0), 0.1);
+        // Every ordinary zoom steps by a hundredth, so any hundredth of a millimetre is reachable.
+        assert_eq!(snap_step(40.0), 0.01);
+        assert_eq!(snap_step(100.0), 0.01);
+        assert_eq!(snap_step(4.0), 0.01);
+        assert_eq!(snap_step(0.4), 0.01, "the zoom at which the round step is already a hundredth");
+        // Closer in than that, the round step leads and the drag gets finer still.
+        assert_eq!(snap_step(0.2), 0.005);
+        assert_eq!(snap_step(0.04), 0.001);
+        assert_eq!(snap_step(1e-9), 1e-4, "and it stops there");
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), 12.0), "12 mm");
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), -2.5), "-2.5 mm");
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), -0.0001), "-0.0001 mm");
+    }
+
+    /// A dragged length reads as a number a person could have aimed at, not as the measurement it
+    /// came from. The one that shows the difference is a drag held at `blend_room`'s cap, which is a
+    /// distance measured off the model: there the rounding goes toward zero, so the value stays
+    /// inside the room that was measured.
+    #[test]
+    fn a_dragged_length_is_tidied_to_a_thousandth_and_a_capped_one_rounds_inward() {
+        assert_eq!(tidy(5.971_801_936_382_056_5, false), 5.972, "a raw measurement reads as three decimals");
+        assert_eq!(tidy(5.971_801_936_382_056_5, true), 5.971, "held at the cap, it rounds inward");
+        assert_eq!(tidy(5.970_000_000_000_001, false), 5.97, "and a step's own float noise goes with it");
+        assert_eq!(tidy(-4.000_6, true), -4.0, "toward zero on the other side too");
+        assert_eq!(tidy(20.0, false), 20.0, "a round value is left alone");
+        // Finer than any step a drag takes, so this never costs a value the person could have aimed at.
+        assert!(tidy(0.001, false) > 0.0, "a thousandth survives");
     }
 
     /// #6608: a canvas value box never covers the command window: it moves out of it.

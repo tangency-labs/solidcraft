@@ -22,11 +22,13 @@ pub use design::{
 };
 mod legacy_dir;
 pub mod limits;
+mod mesh_refine;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
 pub mod paper;
+pub mod plasticity;
 mod ply;
 mod ply_complex;
 pub use ply::{ply_counts, read_ply_mesh};
@@ -273,12 +275,13 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     })
 }
 
-/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, `.glb`, `.gltf`, any case)?
+/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, `.glb`, `.gltf`, `.plasticity`, any
+/// case)? A Plasticity file opens as mesh bodies from its cached tessellation ([`plasticity`]).
 pub fn is_mesh_path(path: &str) -> bool {
     std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| ["3mf", "stl", "obj", "glb", "gltf"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+        .is_some_and(|e| ["3mf", "stl", "obj", "glb", "gltf", "plasticity"].iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
 /// A 3MF, STL, OBJ or glTF file read as a mesh import feature.
@@ -288,6 +291,8 @@ pub struct MeshFeature {
     pub kind: solidcraft_doc::FeatureKind,
     pub body_names: Vec<String>,
     pub warnings: Vec<String>,
+    /// Bodies (by position in `body_names`) the file had hidden.
+    pub hidden: Vec<usize>,
 }
 
 /// Read 3MF, STL, OBJ, PLY or glTF bytes (the format from `file`'s extension) into a MeshImport
@@ -326,7 +331,19 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
     let path = std::path::Path::new(file);
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Mesh".into());
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    let (mut objects, warnings) = if ext == "obj" {
+    let mut hidden = Vec::new();
+    let (mut objects, warnings) = if ext == "plasticity" {
+        let f = plasticity::read_plasticity(bytes, true)?;
+        let mut warnings = Vec::new();
+        if f.skipped_curves > 0 {
+            warnings.push(format!("{} curve(s) not read (a Plasticity file keeps no mesh for curves)", f.skipped_curves));
+        }
+        if f.skipped_measurements > 0 {
+            warnings.push(format!("{} measurement(s) not read", f.skipped_measurements));
+        }
+        hidden = f.items.iter().enumerate().filter(|(_, i)| i.hidden).map(|(n, _)| n).collect();
+        (f.items.into_iter().map(|i| i.object).collect(), warnings)
+    } else if ext == "obj" {
         obj::read_obj(bytes, &stem)?
     } else if ext == "ply" {
         ply::read_ply_mesh(bytes, &stem)?
@@ -375,6 +392,7 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
         body_names: objects.iter().map(|o| o.name.clone()).collect(),
         kind: solidcraft_doc::FeatureKind::MeshImport { file: file_name, meshes },
         warnings,
+        hidden,
     })
 }
 
@@ -1007,13 +1025,15 @@ pub const MAX_STL_TRIANGLES: usize = 20_000_000;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore_record::Vec3;
-    use solidcraft_doc::{FeatureKind, Model, Operation, point_expr};
+use solidcraft_doc::{FeatureKind, Model, Operation, point_expr};
+use solidcore_record::Vec3;
 
     fn model() -> (Document, Model) {
         let mut doc = Document::new("t");
         doc.add_feature(
             FeatureKind::Box {
+                axis: solidcraft_doc::z_axis(),
+                x_axis: solidcraft_doc::x_axis(),
                 corner: point_expr(Vec3::ZERO),
                 length: "10".into(),
                 width: "20".into(),
@@ -1405,6 +1425,8 @@ mod tests {
         let mut doc = Document::new("t");
         doc.add_feature(
             FeatureKind::Box {
+                axis: solidcraft_doc::z_axis(),
+                x_axis: solidcraft_doc::x_axis(),
                 corner: point_expr(Vec3::ZERO),
                 length: "40".into(),
                 width: "30".into(),
@@ -1528,6 +1550,8 @@ mod tests {
         let mut doc = Document::new("t");
         doc.add_feature(
             FeatureKind::Box {
+                axis: solidcraft_doc::z_axis(),
+                x_axis: solidcraft_doc::x_axis(),
                 corner: point_expr(Vec3::new(0.1, -0.3, 1.0 / 3.0)),
                 length: "40".into(),
                 width: "30".into(),

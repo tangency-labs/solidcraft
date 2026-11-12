@@ -341,8 +341,35 @@ pub fn effective(app: &SolveApp, id: &str) -> Option<String> {
 pub fn keys(app: &SolveApp, id: &str) -> Vec<String> {
     match app.keymap.custom.get(id) {
         Some(keys) => keys.clone(),
-        None => solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty()).map(str::to_string).into_iter().collect(),
+        None => default_keys(app, id).into_iter().map(str::to_string).collect(),
     }
+}
+
+/// A command's keys before the user's own changes: the Plasticity scheme's while it applies
+/// ([`crate::plasticity`]), else the command's own default.
+pub fn default_keys(app: &SolveApp, id: &str) -> Vec<&'static str> {
+    if crate::plasticity::keys_apply(app) {
+        return crate::plasticity::command_keys(id).to_vec();
+    }
+    let default = solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty());
+    // Inside a sketch the scheme keeps SolidCraft's own sketch keys, which stay first and so stay
+    // the ones shown, and adds Plasticity's curve keys beside them.
+    if crate::plasticity::active(app) && app.session.active_sketch.is_some() {
+        let plasticity = crate::plasticity::sketch_keys(id);
+        if !plasticity.is_empty() {
+            return default.into_iter().chain(plasticity.iter().copied()).collect();
+        }
+    }
+    default.into_iter().collect()
+}
+
+/// Keys the application, or the control scheme in force, handles before command shortcuts.
+pub fn reserved(app: &SolveApp, key: &str) -> bool {
+    if crate::plasticity::active(app) {
+        // The scheme hands S to Scale and takes its own UI action keys.
+        return (RESERVED.contains(&key) && key != "S") || crate::plasticity::ui_key(key);
+    }
+    RESERVED.contains(&key)
 }
 
 /// Drag to Zoom has no default binding. Compare the keys and current modifiers using the
@@ -359,7 +386,7 @@ pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
 fn keys_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Vec<&'a str> {
     match app.keymap.custom.get(command.id) {
         Some(keys) => keys.iter().map(String::as_str).collect(),
-        None => command.shortcut.filter(|k| !k.is_empty()).into_iter().collect(),
+        None => default_keys(app, command.id),
     }
 }
 
@@ -520,7 +547,7 @@ pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, rep
     let spec = solidcraft_engine::find_command(id).ok_or_else(|| format!("no command `{id}`"))?;
     let canonical = if key.is_empty() { String::new() } else { canonical_key(key).ok_or("unknown shortcut key")? };
     let key = canonical.as_str();
-    if RESERVED.contains(&key) {
+    if reserved(app, key) {
         return Err(format!("{key} is used by SolidCraft itself"));
     }
     let mut list = keys(app, id);
@@ -559,7 +586,7 @@ pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, rep
 
 /// Keep a command's keys, as a change only when they aren't its default.
 fn set_keys(app: &mut SolveApp, id: &str, keys: Vec<String>) {
-    let default = solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty());
+    let default = default_keys(app, id);
     if keys.iter().map(String::as_str).eq(default) {
         app.keymap.custom.remove(id);
     } else {

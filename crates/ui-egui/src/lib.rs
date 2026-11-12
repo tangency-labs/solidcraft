@@ -14,6 +14,7 @@ pub mod agent_chat;
 pub mod agent_cursor;
 pub mod ai_connect;
 pub mod bidi;
+pub(crate) mod blend_preview;
 pub mod blur;
 pub mod bom_panel;
 pub mod browser;
@@ -195,6 +196,10 @@ pub(crate) mod navigation;
 pub mod navigation_bar;
 mod navigation_bar_view;
 pub use navigation::WebWheelGestures;
+pub(crate) mod key_hints;
+pub(crate) mod model_snap;
+pub mod narration;
+pub mod narration_neural;
 pub mod network_prompt;
 pub mod op_auto;
 pub mod open_elsewhere;
@@ -204,6 +209,7 @@ pub mod params_dialog;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+pub mod plasticity;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
@@ -288,6 +294,7 @@ mod sketch_transform_ui;
 pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
+pub(crate) mod solid_draw;
 pub mod space_mouse;
 pub mod space_mouse_calibration;
 pub mod space_mouse_model;
@@ -313,6 +320,7 @@ pub mod tool_modifiers;
 pub mod toolbar;
 pub mod toolbar_custom;
 pub mod tools;
+pub mod tutorial;
 pub mod ui_kit;
 #[cfg(test)]
 mod ui_kit_guard_tests;
@@ -606,6 +614,8 @@ pub struct SolveApp {
     pub issue_report: issue_report::ReportState,
     /// The Crash Reports window.
     pub crashes: crash_ui::CrashUi,
+    /// Tutorial mode (its window, the lesson shown and the pointer acting it out).
+    pub tutorial: tutorial::State,
     /// The update check and its window (`update`).
     pub updater: update::Updater,
     /// Safari's steps for installing the web app, while their window is open (`install`).
@@ -655,6 +665,14 @@ pub struct SolveApp {
     pub(crate) apply_gate: Option<std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>>,
     /// The last command started interactively (id, label), for Repeat.
     pub last_command: Option<(String, String)>,
+    /// The pick a command the viewport opened belongs to (`canvas::selection_handle`). A new
+    /// pick opens one for that instead; the pick it was cancelled out of does not open it again.
+    pub(crate) shaped_selection: Option<String>,
+    /// What was hidden before the selection was isolated, so isolating again comes back to it
+    /// rather than to everything. `None` while nothing is isolated.
+    pub(crate) hidden_before_isolate: Option<Vec<String>>,
+    /// A primitive being drawn in the viewport ([`solid_draw`]).
+    pub solid_draw: Option<solid_draw::SolidDraw>,
     /// Bodies copied with Copy (by name), pasted into the active component by Paste.
     pub copied_bodies: Vec<String>,
     /// Text a copy left for the system clipboard, written on the next frame (so a paste event
@@ -860,6 +878,9 @@ impl SolveApp {
             viewport: viewport::ViewportState::default(),
             render_workspace,
             tool: None,
+            shaped_selection: None,
+            hidden_before_isolate: None,
+            solid_draw: None,
             dialog: None,
             remembered_commands: Vec::new(),
             params: None,
@@ -877,6 +898,7 @@ impl SolveApp {
             messages: messages::Messages::default(),
             issue_report: issue_report::ReportState::default(),
             crashes: crash_ui::CrashUi::default(),
+            tutorial: tutorial::State::default(),
             updater: update::Updater::default(),
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
@@ -1713,12 +1735,19 @@ impl SolveApp {
 
     /// Start an interactive command with its menu anchored below the invoking button.
     pub(crate) fn start_at(&mut self, id: &str, opener: Option<egui::Rect>) {
+        // Tutorial mode: a ribbon click shows the lesson for that command instead (#tutorial).
+        if tutorial::toolbar_start(self, id) {
+            return;
+        }
         self.start_with_variant_memory(id, true, opener, false);
     }
 
     /// A dedicated toolbar button starts its exact tool without replacing the sketch family's
     /// main button. Choosing a variant from a menu still uses `start` and remembers that choice.
     pub(crate) fn start_pinned(&mut self, id: &str, opener: Option<egui::Rect>) {
+        if tutorial::toolbar_start(self, id) {
+            return;
+        }
         self.start_with_variant_memory(id, false, opener, false);
     }
 
@@ -1998,6 +2027,7 @@ impl SolveApp {
         }
         dim_view::cancel();
         self.tool = None;
+        solid_draw::clear(self);
         self.home.open = false;
         if dialogs_sheet::start_export(self, id) || toolbar::start_export(self, id) {
             return;
@@ -2281,6 +2311,9 @@ impl SolveApp {
             }
             let extrude = matches!(d.kind, dialogs::Kind::Extrude { .. });
             self.dialog = Some(d);
+            // A primitive is drawn in the viewport: its base is clicked out on a plane and its
+            // height set after, so nothing appears until the shape has been said.
+            solid_draw::start(self, id);
             if extrude {
                 self.turn_for_extrude();
             }
@@ -3213,6 +3246,7 @@ impl SolveApp {
         self.follow_view_request(true);
         self.return_from_extrude_view();
         agent_cursor::step(self, ctx);
+        tutorial::step(self, ctx);
         browser::eye_drag_frame(self, ctx);
         if !self.synthetic.is_empty() || !self.held_click.is_empty() {
             ctx.request_repaint();
@@ -3365,7 +3399,11 @@ impl SolveApp {
             issue_report::show(self, ui.ctx());
         }
         if !self.home.open {
+            tutorial::show(self, ui.ctx());
+        }
+        if !self.home.open {
             agent_cursor::paint(self, ui.ctx());
+            tutorial::paint(self, ui.ctx());
         }
         if self.file_picker_busy() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));

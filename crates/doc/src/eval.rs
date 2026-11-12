@@ -1834,10 +1834,12 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         // A mirror of placed bodies follows the placements it was picked at and its own component's
         // frame, not every occurrence: moving an unrelated one leaves it (and its cache) alone.
         FeatureKind::Mirror { placements, bodies, .. } if !placements.is_empty() => return mirror_placements_digest(doc, f, placements, bodies),
-        // A combine moves tools placed differently from its target into the target's frame (#3383).
-        FeatureKind::Combine { target, tools, .. } => {
-            frame = st.and_then(|st| st.body(target)).map(|b| body_world(doc, b));
-            reads.placed_body(st, target);
+        // A combine moves tools placed differently from its targets into their frame (#3383).
+        FeatureKind::Combine { targets, tools, .. } => {
+            frame = targets.first().and_then(|t| st.and_then(|st| st.body(t))).map(|b| body_world(doc, b));
+            for target in targets {
+                reads.placed_body(st, target);
+            }
             for tool in tools {
                 reads.placed_body(st, tool);
             }
@@ -3064,6 +3066,28 @@ fn apply_op(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Body
 /// Many cut tools clear of each other (a pattern's copies, the circles of a vent field in one
 /// sketch) as one tool of many pieces, so the target is cut once instead of rebuilding an ever
 /// more complex body for every tool (#261, #368). Tools that may meet are left as they are.
+/// What Slice keeps beside the cut: the part of each target that lies inside the tools, paired
+/// with the name of the target it came from. The tools are taken together, so a target inside any
+/// of them is kept once; a mesh body has no boolean and is left whole.
+fn slice_inside(state: &ModelState, target_idx: &[usize], tools: &[Traced]) -> Result<Vec<(String, Traced)>> {
+    let one = intersection_tool_union(tools.to_vec())?;
+    let mut out = Vec::new();
+    for &ti in target_idx {
+        let Some(mb) = state.bodies.get(ti).filter(|b| !b.body.is_mesh()) else { continue };
+        let mut acc = Some(mb.traced());
+        for t in &one {
+            acc = match acc {
+                Some(a) => kernel::boolean(&a.body, &t.body, BoolOp::Intersect)?.map(|r| Traced::step(r, &[&a, t])),
+                None => None,
+            };
+        }
+        if let Some(inside) = acc {
+            out.push((mb.name.clone(), inside));
+        }
+    }
+    Ok(out)
+}
+
 fn clear_tools_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
     if tools.len() < 8 {
         return Ok(tools);
@@ -3159,7 +3183,7 @@ pub(crate) fn boolean_scope(state: &ModelState, f: &Feature, targets: &[String])
 
 /// Suggest one nearby body without changing the default component scope or running a boolean.
 fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools: &[Traced], default_targets: bool) -> DocError {
-    let plain = "there is no body to cut or intersect";
+    let plain = "there is no body to cut, intersect or slice";
     if !default_targets {
         return DocError::Invalid(plain.into());
     }
@@ -3254,7 +3278,7 @@ fn apply_traced_with(
         }
     }
     if op == Operation::NewBody || target_idx.is_empty() {
-        if op == Operation::Cut || op == Operation::Intersect {
+        if matches!(op, Operation::Cut | Operation::Intersect | Operation::Slice) {
             return Err(empty_boolean_targets(doc, state, f, &tools, targets.is_empty()));
         }
         for (k, t) in tools.into_iter().enumerate() {
@@ -3263,7 +3287,7 @@ fn apply_traced_with(
         }
         return Ok(());
     }
-    if matches!(op, Operation::Cut | Operation::Intersect) {
+    if matches!(op, Operation::Cut | Operation::Intersect | Operation::Slice) {
         // A cut that cannot reach a sheet leaves it as it is (#10226): a sheet whose box lies
         // clear of every tool's, in its own frame, needs no boolean to show it. An intersect
         // removes the sheets it misses, and checks each one as before.
@@ -3287,6 +3311,10 @@ fn apply_traced_with(
             }
         }
     }
+    // Keep tools: the shape the feature is built from stays a body of its own beside what it did
+    // to the targets. A New Body operation leaves it anyway, and so does an operation that finds
+    // nothing to work on, which has returned above.
+    let kept_tools = if f.keep_tool && op != Operation::NewBody { tools.clone() } else { Vec::new() };
     match op {
         Operation::Join => {
             let joined = join(state, tools, &target_idx)?;
@@ -3301,9 +3329,12 @@ fn apply_traced_with(
                 }
             }
         }
-        Operation::Cut | Operation::Intersect => {
-            let bop = if op == Operation::Cut { BoolOp::Cut } else { BoolOp::Intersect };
-            let tools = if op == Operation::Cut { clear_tools_as_one(tools)? } else { tools };
+        Operation::Cut | Operation::Intersect | Operation::Slice => {
+            // Slice is the cut, plus the halves it takes out: those are worked out first, while
+            // the targets are still whole, and put back as bodies of their own at the end.
+            let sliced = if op == Operation::Slice { slice_inside(state, &target_idx, &tools)? } else { Vec::new() };
+            let bop = if op == Operation::Intersect { BoolOp::Intersect } else { BoolOp::Cut };
+            let tools = if matches!(op, Operation::Cut | Operation::Slice) { clear_tools_as_one(tools)? } else { tools };
             // Each target's pieces before the cut: a body joined from separate pieces stays one.
             let affected: std::collections::BTreeMap<String, usize> =
                 target_idx.iter().filter_map(|i| state.bodies.get(*i)).map(|b| (b.name.clone(), b.body.lumps().map_or(1, |l| l.len()))).collect();
@@ -3399,8 +3430,18 @@ fn apply_traced_with(
                 split.extend(named_pieces_of(&mb, pieces, &mut taken, f.id, &f.body_names, &mut extra));
             }
             state.bodies = split;
+            // The halves that were inside the tools, under names nothing else has taken.
+            for (source, inside) in sliced {
+                let Some(name) = (1..=taken.len() + 1).map(|j| format!("{source} ({j})")).find(|n| !taken.contains(n)) else { continue };
+                taken.insert(name.clone());
+                state.bodies.push(ModelBody::traced_new(name, inside, f.id));
+            }
         }
         Operation::NewBody => {}
+    }
+    for (k, tool) in kept_tools.into_iter().enumerate() {
+        let name = new_name(state, f, k);
+        state.bodies.push(ModelBody::traced_new(name, tool, f.id));
     }
     Ok(())
 }
@@ -6337,12 +6378,34 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
     };
     let mut out = Vec::new();
     match p {
-        crate::PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
-            let (n1, s1) = (count(count1)?, val(vals, spacing1, Kind::Length)?);
+        crate::PatternKind::Rectangular {
+            dir1,
+            count1,
+            spacing1,
+            dir2,
+            count2,
+            spacing2,
+            alignment,
+            alignment2,
+            reversed,
+            reversed2,
+            extent1,
+            extent2,
+        } => {
+            // A spacing given as an extent is the distance from the first copy to the last, so the
+            // step between neighbours is that shared out, as a pattern along a path already does.
+            let share = |d: f64, n: usize, whole: bool| if whole { if n > 1 { d / (n - 1) as f64 } else { 0.0 } } else { d };
+            let n1 = count(count1)?;
+            let s1 = share(val(vals, spacing1, Kind::Length)?, n1, *extent1);
             let d1 = dir1.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
             let (n2, s2, d2) = match (dir2, count2, spacing2) {
                 (Some(d), Some(c), Some(sp)) => {
-                    (count(c)?, val(vals, sp, Kind::Length)?, d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?)
+                    let n = count(c)?;
+                    (
+                        n,
+                        share(val(vals, sp, Kind::Length)?, n, *extent2),
+                        d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?,
+                    )
                 }
                 _ => (1, 0.0, Vec3::Y),
             };
@@ -6392,7 +6455,7 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 out.push(m);
             }
         }
-        crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_ref, axis_feature } => {
+        crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_ref, axis_feature, step: by_step } => {
             // On an edge or round face: about it as it is now; on a construction axis: where it is;
             // else through its origin, whose expressions follow the parameters (#10852).
             let (origin, axis) = match (axis_ref, axis_feature) {
@@ -6408,12 +6471,17 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 }
             };
             let n = count(c)?;
-            let total = val(vals, angle, Kind::Angle)?;
-            let full = (total.abs() - std::f64::consts::TAU).abs() < 1e-9;
-            let step = if full {
-                total / n as f64
+            let turn = val(vals, angle, Kind::Angle)?;
+            // Given as the angle from one copy to the next, it is the step already; given as the
+            // total swept, a full turn shares it among all the copies and a partial one spans the
+            // ends.
+            let full = (turn.abs() - std::f64::consts::TAU).abs() < 1e-9;
+            let step = if *by_step {
+                turn
+            } else if full {
+                turn / n as f64
             } else if n > 1 {
-                total / (n - 1) as f64
+                turn / (n - 1) as f64
             } else {
                 0.0
             };
@@ -7328,6 +7396,15 @@ fn chamfer_with(
     })
 }
 
+/// The frame a box stands in: its corner, `length` along `x` across the normal, `width` along the
+/// normal crossed with it, `height` along the normal. The given x is squared up against the normal
+/// rather than trusted, so a direction read off a drag still makes a right-angled box.
+fn box_frame(corner: Vec3, axis: Vec3, x: Vec3) -> Result<Plane> {
+    let n = axis.normalized().ok_or_else(|| DocError::Invalid("box axis".into()))?;
+    let x = (x - n * n.dot(x)).normalized().ok_or_else(|| DocError::Invalid("box length direction".into()))?;
+    Ok(Plane { origin: corner, x, y: n.cross(x) })
+}
+
 fn eval_feature(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -8003,12 +8080,24 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Box { corner, length, width, height, operation } => {
+        FeatureKind::Box { corner, axis, x_axis, length, width, height, operation } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
             let corner = point(vals, corner)?;
-            let b = kernel::box_solid(corner, corner + s)?;
+            // A box square to the world is built as it always was, down to the sheet-metal cut it
+            // takes part in; only one standing on a face goes through the frame.
+            let square = axis.0 == Vec3::Z && x_axis.0 == Vec3::X;
+            let b = if square {
+                kernel::box_solid(corner, corner + s)?
+            } else {
+                let plane = box_frame(corner, axis.0, x_axis.0)?;
+                kernel::box_on(&plane, Vec2::ZERO, Vec2::new(s.x, s.y), 0.0, s.z)?
+            };
             let b = if matches!(operation, Operation::NewBody | Operation::Join) { b.with_box_certificate(f.id)? } else { b };
-            let handled = more::sheet_primitive_cut(f, st, &b, more::PrimitivePrism::Box { lo: corner, hi: corner + s }, *operation, false, warning)?;
+            let handled = if square {
+                more::sheet_primitive_cut(f, st, &b, more::PrimitivePrism::Box { lo: corner, hi: corner + s }, *operation, false, warning)?
+            } else {
+                Vec::new()
+            };
             let tools = vec![crate::lineage::box_tool(b)];
             if !handled.is_empty() {
                 return apply_beside_sheet_cut(doc, st, f, tools, *operation, &[], &handled);
@@ -8042,14 +8131,24 @@ fn eval_feature(
             let tool = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
             apply_traced(doc, st, f, vec![tool], *operation, &[])
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools } => {
-            if tools.iter().any(|t| t == target) {
+        FeatureKind::Combine { targets, tools, operation, keep_tools } => {
+            // Several targets, as Plasticity's Boolean takes several: one tool cuts a whole row of
+            // parts at once. The first names the feature in its messages.
+            let Some(target) = targets.first() else {
+                return Err(DocError::Invalid("a combine needs a body to work on".into()));
+            };
+            if tools.iter().any(|t| targets.contains(t)) {
                 return Err(DocError::Invalid("a body cannot be combined with itself".into()));
             }
             // Each body is kept in its own component's frame: a tool placed differently from the
-            // target is moved into the target's frame, so it is combined where it is shown (#3383).
-            // A tool placed exactly as the target is left as it is.
-            let target_world = st.body(target).map(|b| body_world(doc, b));
+            // targets is moved into their frame, so it is combined where it is shown (#3383). A tool
+            // placed exactly as they are is left as it is. One tool is placed against every target
+            // at once, so the targets have to share a frame for that to mean anything.
+            let worlds: Vec<_> = targets.iter().filter_map(|t| st.body(t)).map(|b| body_world(doc, b)).collect();
+            if worlds.iter().any(|w| Some(w) != worlds.first()) {
+                return Err(DocError::Invalid("the bodies a combine works on must be placed alike".into()));
+            }
+            let target_world = worlds.first().copied();
             let mut tb = Vec::new();
             for t in tools {
                 match st.body(t) {
@@ -8073,7 +8172,7 @@ fn eval_feature(
                         Some(base)
                             if st.body(base).is_some()
                                 && (tools.iter().any(|o| **o == *base)
-                                    || (**target == *base && matches!(operation, Operation::Join | Operation::NewBody))) =>
+                                    || (targets.iter().any(|x| *x.0 == *base) && matches!(operation, Operation::Join | Operation::NewBody))) =>
                         {
                             append_warning(warning, format!("`{t}` is part of `{base}` now"));
                         }
@@ -8081,14 +8180,17 @@ fn eval_feature(
                     },
                 }
             }
-            if st.body(target).is_none() {
-                return Err(DocError::Unknown(format!("body `{target}`")));
+            for target in targets {
+                if st.body(target).is_none() {
+                    return Err(DocError::Unknown(format!("body `{target}`")));
+                }
             }
             if tb.is_empty() && !tools.is_empty() {
                 return Ok(()); // the pieces were all joined back into the body they are part of
             }
             let op = if *operation == Operation::NewBody { Operation::Join } else { *operation };
-            apply_traced(doc, st, f, tb, op, std::slice::from_ref(&target.0))?;
+            let names: Vec<String> = targets.iter().map(|t| t.0.clone()).collect();
+            apply_traced(doc, st, f, tb, op, &names)?;
             if !keep_tools {
                 st.bodies.retain(|b| !tools.iter().any(|t| *t == b.name));
             }
@@ -9039,6 +9141,8 @@ mod world_placement_cache_tests {
         let feature = doc
             .add_feature(
                 FeatureKind::Box {
+                    axis: crate::z_axis(),
+                    x_axis: crate::x_axis(),
                     corner: crate::point_expr(Vec3::ZERO),
                     length: "2 mm".into(),
                     width: "3 mm".into(),
@@ -9163,6 +9267,8 @@ mod chain_tests {
         let mut doc = Document::new("T");
         doc.add_feature(
             FeatureKind::Box {
+                axis: crate::z_axis(),
+                x_axis: crate::x_axis(),
                 corner: crate::point_expr(Vec3::ZERO),
                 length: "40".into(),
                 width: "30".into(),
@@ -9225,6 +9331,8 @@ mod chain_tests {
         let build = |chain: bool| {
             let mut doc = Document::new("T");
             let solid = FeatureKind::Box {
+                axis: crate::z_axis(),
+                x_axis: crate::x_axis(),
                 corner: crate::point_expr(Vec3::ZERO),
                 length: "20".into(),
                 width: "20".into(),

@@ -932,6 +932,37 @@ fn press_pull_then_curved_face_offsets_it() {
     assert!(matches!(app.dialog.as_ref().unwrap().kind, Kind::Extrude { .. }));
 }
 
+/// The hand-over goes both ways: Press Pull gives a curved face or an edge to the blend, and a
+/// plain pick of a flat face gives the blend to Press Pull, so a face clicked while Fillet is
+/// open is the push it looks like instead of the tool seeming stuck. Shift still gathers, which
+/// is how a face's every edge is rounded from inside the dialog.
+#[test]
+fn a_flat_face_picked_in_fillet_hands_over_to_press_pull() {
+    let script = json!([{"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}]);
+    let mut app = app_with(script.clone());
+    app.start("solid.fillet");
+    assert!(matches!(app.dialog.as_ref().unwrap().kind, Kind::Fillet { .. }));
+    let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
+    let Sel::Face { index, .. } = &top else { panic!("the top is a face") };
+    let p = Vec3::new(5.0, 5.0, 20.0);
+    let hit = crate::viewport::Hit::Face { body: "Body1".into(), index: *index, point: p };
+    crate::viewport::dialog_pick_adding(&mut app, &hit, top.clone(), false);
+    let d = app.dialog.clone().unwrap_or_else(|| panic!("a command is open"));
+    assert!(matches!(d.kind, Kind::Extrude { .. }), "a flat face opens the push");
+    assert_eq!(d.inputs[0].items.len(), 1, "on the face that was clicked");
+
+    // Shift gathers as it always has: the face's every edge joins the round.
+    let mut app = app_with(script);
+    app.start("solid.fillet");
+    crate::viewport::dialog_pick_adding(&mut app, &hit, top, true);
+    let d = app.dialog.clone().unwrap_or_else(|| panic!("the round is still open"));
+    assert!(matches!(d.kind, Kind::Fillet { .. }), "Shift keeps the round");
+    assert_eq!(d.inputs[0].items.len(), 1, "the face itself is what was picked");
+    let cmds = apply_commands(&app, &d).unwrap_or_else(|e| panic!("the round is ready to run: {e}"));
+    let edges = cmds[0].1.get("edges").and_then(|v| v.as_array()).map_or(0, Vec::len);
+    assert_eq!(edges, 4, "and it rounds the top face's four edges");
+}
+
 /// Press Pull on a fillet's round face reopens the fillet to change its radius, as the
 /// command does, rather than an Offset Face that refuses it (#1932): picked first, or picked
 /// with Press Pull already open.
@@ -1308,16 +1339,17 @@ fn curvature_canvas_value_uses_equivalent_radius_when_created_and_reopened() {
     }
 }
 
-/// The radius arrow points into the body: dragging toward the material grows the round.
+/// The radius handle stands out of the body, away from the material: dragging it out there grows
+/// the round, and pushing it back through its own base takes the corner off square instead.
 #[test]
-fn fillet_and_chamfer_arrows_point_into_the_body() {
+fn fillet_and_chamfer_handles_stand_out_of_the_body() {
     for id in ["solid.fillet", "solid.chamfer"] {
         let mut app = boxed();
         let e = edge(&app, Vec3::new(20.0, 0.0, 20.0));
         let d = start(&mut app, vec![e], id);
         let (_, dir) = crate::canvas::anchor(&app, &d).unwrap();
         let dir = dir.unwrap();
-        assert!(dir.y > 0.5 && dir.z < -0.5, "{id}: {dir:?}");
+        assert!(dir.y < -0.5 && dir.z > 0.5, "{id}: {dir:?}");
     }
 }
 
@@ -2633,7 +2665,7 @@ fn split_body_by_a_curved_face_sends_it_as_a_tool() {
     let t = m.triangles.iter().position(|t| crate::dialogs::point_tri_dist(p, m.tri(t).unwrap()) < 0.3).unwrap();
     let side = Sel::Face { body: cyl.name.clone(), index: m.tri_face[t] as usize, point: p };
     drop(st);
-    let mut d = start(&mut app, vec![], "solid.split_body");
+    let mut d = start(&mut app, vec![], "solid.cut_body");
     d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
     d.inputs[1].items = vec![side];
     let p = apply_commands(&app, &d).unwrap().remove(0).1;
@@ -3246,7 +3278,9 @@ fn combine_takes_bodies_clicked_in_the_browser_in(layout: &str, control: bool) {
     h.app.session.selection.clear();
     h.app.start("solid.combine");
     h.frames(2);
-    for label in ["Block", "Cutter"] {
+    // Target Bodies takes several, so the tool input is asked for by hand.
+    for (index, label) in [(0, "Block"), (1, "Cutter")] {
+        h.call("ui.dialogInput", json!({"index": index}));
         if control {
             let rows = h.call("ui.handles", json!({"prefix": "row:"}))["result"].clone();
             let rows = rows.get("handles").cloned().unwrap_or(rows);
@@ -3858,4 +3892,292 @@ fn fix_takes_a_boxed_selection_with_its_dimensions_and_hundreds_of_entities() {
         assert!(h.app.tool.is_none(), "{lines} lines: Fix applied at once, no pick tool left running");
         assert!(h.app.session.selection.is_empty(), "{lines} lines: the selection is used up");
     }
+}
+
+/// Picking a face or an edge is already the command, under Plasticity's controls: the shaping
+/// command for what was picked opens at once, standing at nothing so the model is left as it
+/// was, with its handle there to drag and its number there to type. Under SolidCraft's controls
+/// a pick is a pick, and this base's own face gesture (press and pull, `drag_extrude`) stands.
+#[test]
+fn a_bare_pick_offers_its_shaping_command_under_plasticitys_controls() {
+    let boxed = |scheme: &str| {
+        let mut h = crate::scenario::Harness::new();
+        crate::plasticity::apply(&mut h.app, scheme);
+        h.app.run("solid.box", json!({"length": 40, "width": 40, "height": 40})).unwrap();
+        h.frames(2);
+        h
+    };
+    let size = |h: &mut crate::scenario::Harness| {
+        h.app.dialog.as_mut().and_then(|d| d.primary().map(|(_, _, v)| v.clone())).unwrap_or_default()
+    };
+
+    // An edge: a round, offered at nothing.
+    let mut h = boxed(crate::plasticity::SCHEME_PLASTICITY);
+    h.step(&json!({"click": {"world": [0.0, 20.0, 40.0]}})).unwrap();
+    h.frames(2);
+    assert!(
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Fillet { .. })),
+        "a bare edge click offers a round: {:?}",
+        h.app.dialog.as_ref().map(|d| &d.kind)
+    );
+    assert_eq!(size(&mut h), "0 mm", "standing at nothing, so the model is left as it was");
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.provisional), "it was offered, not asked for");
+    assert!(!h.app.dialog.as_ref().is_some_and(|d| d.wants_picks()), "so picks go on reaching the selection");
+
+    // A face: a push.
+    let mut h = boxed(crate::plasticity::SCHEME_PLASTICITY);
+    h.step(&json!({"click": {"world": [20.0, 20.0, 40.0]}})).unwrap();
+    h.frames(2);
+    // Press Pull of a flat face already picked is an extrude of it, which is the kind the window
+    // opens with (its own `press_pull` flag is for the other way round -- opened with
+    // nothing picked, so that its first pick may be a curved face or an edge instead).
+    assert!(
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Extrude { .. })),
+        "a bare face click offers a push: {:?}",
+        h.app.dialog.as_ref().map(|d| &d.kind)
+    );
+    assert_eq!(size(&mut h), "0 mm");
+
+    // SolidCraft's controls: the pick is a pick, and nothing opens.
+    let mut h = boxed(crate::plasticity::SCHEME_SOLIDCRAFT);
+    h.step(&json!({"click": {"world": [0.0, 20.0, 40.0]}})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.is_none(), "nothing opens: {:?}", h.app.dialog.as_ref().map(|d| &d.kind));
+    assert!(!h.app.session.selection.is_empty(), "the edge is picked, as it always was");
+    let _ = size(&mut h);
+}
+
+/// Picking edges for a round the way Plasticity does: a plain pick is the new selection, a
+/// Shift-pick adds to it, and a Shift-pick of an edge already in takes it back out.
+///
+/// Measured in Plasticity 25.2.11 on a 40 mm box. With the fillet dialog open on one top edge,
+/// Shift-clicking the next lit both and left one gizmo driving the pair together -- one signed
+/// distance, both edges equal. Clicking it plainly instead moved the whole selection to the edge
+/// clicked and dropped the first. SolidCraft used to add either way, so a run of picks piled
+/// edges up and there was no way to walk from one edge to the next without first clicking the
+/// old one off; a Shift-pick, the one thing that should have added, did the same as a plain one.
+///
+/// Only a round's edges work this way. A dialog that gathers -- an extrude's profiles, a loft's
+/// sections -- still adds on a plain pick, because gathering is what it is for.
+#[test]
+fn a_plain_edge_pick_for_a_round_replaces_and_shift_adds() {
+    let mut app = boxed();
+    let (a, b) = (edge(&app, Vec3::new(20.0, 0.0, 20.0)), edge(&app, Vec3::new(20.0, 30.0, 20.0)));
+    let mut d = start(&mut app, vec![a.clone()], "solid.fillet");
+    assert_eq!(d.inputs[0].items, vec![a.clone()]);
+
+    // Plain: the pick is the selection now, not another one added to it.
+    d.pick_with(&app.session, b.clone(), false);
+    assert_eq!(d.inputs[0].items, vec![b.clone()], "a plain pick on a round's edge should replace");
+
+    // Plain, on the edge already picked: it stays picked rather than the dialog emptying.
+    d.pick_with(&app.session, b.clone(), false);
+    assert_eq!(d.inputs[0].items, vec![b.clone()], "a plain pick on the edge already picked should leave it picked");
+
+    // Shift: both, and one value drives them, which is what `blend_cap` reads them for.
+    d.pick_with(&app.session, a.clone(), true);
+    assert_eq!(d.inputs[0].items.len(), 2, "a Shift-pick should add");
+    let cmds = crate::dialogs::apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["edges"].as_array().unwrap().len(), 2, "one command, both edges");
+
+    // Shift again on one of them takes it back out.
+    d.pick_with(&app.session, a.clone(), true);
+    assert_eq!(d.inputs[0].items, vec![b.clone()], "a Shift-pick of a picked edge should remove it");
+
+    // A dialog that gathers is untouched: an extrude's profiles still add on a plain pick.
+    let mut app = app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY"}},
+        {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 5}},
+        {"command": "sketch.circle.center", "params": {"center": [20, 0], "radius": 5}},
+        {"command": "sketch.finish", "params": {}},
+    ]));
+    let sk = app.session.doc.features.first().unwrap().id;
+    let mut d = start(&mut app, vec![Sel::Profile { sketch: sk, index: 0 }], "solid.extrude");
+    d.pick_with(&app.session, Sel::Profile { sketch: sk, index: 1 }, false);
+    assert_eq!(d.inputs[0].items.len(), 2, "an extrude still gathers profiles on a plain pick");
+}
+
+/// The same rule on shapes where one pick stands for several edges: a tangent run, and a
+/// cylinder's rim.
+///
+/// This is where the old behaviour was worst. With Tangent Chain on -- which is the default, and
+/// Plasticity's -- one pick is already four edges on a rounded slot, so a second pick added a
+/// second four and rounded eight edges at once. The replacing pick has to take the whole of the
+/// first run away, and it has to take it out of `picked_edges` too, or unticking Tangent Chain
+/// afterwards brings the old run back from the dead.
+#[test]
+fn a_round_walks_from_one_tangent_run_to_the_next_rather_than_piling_them_up() {
+    // `edge` wants the point exactly on a segment, which no tessellated rim has at a given
+    // angle; this takes the nearest edge instead.
+    fn near(app: &SolveApp, p: Vec3) -> Sel {
+        let st = app.session.model.state();
+        let m = st.body("Body1").unwrap().mesh();
+        let d = |e: &Vec<Vec3>| e.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
+        let i = (0..m.edges.len()).min_by(|a, b| d(&m.edges[*a]).total_cmp(&d(&m.edges[*b]))).expect("an edge");
+        Sel::Edge { body: "Body1".into(), index: i, point: p }
+    }
+
+    let mut h = crate::scenario::Harness::new();
+    for (cmd, p) in [
+        ("sketch.create", json!({"plane":"XY"})),
+        ("sketch.slot.center_to_center", json!({"p0":[-20,0],"p1":[20,0],"width":20})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance":10})),
+    ] {
+        h.app.run(cmd, p).unwrap();
+    }
+    // Both rims are read off the plain extrusion, before the dialog puts a preview in its place.
+    let top = crate::viewport::grouped_selection(&h.app.session, &near(&h.app, Vec3::new(0.0, 10.0, 10.0)));
+    let bottom = near(&h.app, Vec3::new(0.0, 10.0, 0.0));
+    h.app.session.selection = top.clone();
+    h.app.start("solid.fillet");
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 4, "the slot's top is one tangent run of four");
+
+    // The bottom rim, picked plainly: the round moves to it, it does not become eight edges.
+    h.app.dialog.as_mut().unwrap().pick_with(&h.app.session, bottom.clone(), false);
+    let items = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    assert_eq!(items.len(), 4, "a plain pick of another run should replace the first, not add to it");
+    assert!(!items.iter().any(|x| top.iter().any(|t| crate::selection::same_item(x, t))), "the first run should be gone: {items:?}");
+
+    // And it is gone from `picked_edges` as well, so unticking Tangent Chain leaves the one edge
+    // actually picked rather than resurrecting the run that was replaced.
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    let items = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    assert_eq!(items.len(), 1, "unticking Tangent Chain should leave the edge picked, not the old run: {items:?}");
+    assert!(crate::selection::same_item(&items[0], &bottom));
+
+    // Shift still gathers runs deliberately: chain back on, Shift the top, and both are in.
+    h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 4);
+    h.app.dialog.as_mut().unwrap().pick_with(&h.app.session, top[0].clone(), true);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 8, "a Shift-pick should add the whole second run");
+
+    // A cylinder's rim is one edge to the eye and may be two in the mesh; a plain pick takes
+    // whichever halves stand for it and leaves nothing of the rim picked before.
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 30, "base": [0, 0, 0]})).unwrap();
+    h.frames(2);
+    let rim_top = crate::viewport::grouped_selection(&h.app.session, &near(&h.app, Vec3::new(10.0, 0.0, 30.0)));
+    let rim_bottom = near(&h.app, Vec3::new(10.0, 0.0, 0.0));
+    h.app.session.selection = rim_top.clone();
+    h.app.start("solid.fillet");
+    h.frames(2);
+    let picked = h.app.dialog.as_ref().unwrap().inputs[0].items.len();
+    assert!(picked >= 1, "the top rim is picked");
+    h.app.dialog.as_mut().unwrap().pick_with(&h.app.session, rim_bottom, false);
+    let items = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    assert!(!items.iter().any(|x| rim_top.iter().any(|t| crate::selection::same_item(x, t))), "the top rim should be gone: {items:?}");
+}
+
+/// The whole way through, from a click in the viewport rather than from `pick_with`.
+///
+/// The rule itself is pinned above; this pins the plumbing that carries it -- a click's held
+/// keys reaching `selection_click`, its `add` reaching `dialog_pick_adding`, and that reaching
+/// `Dialog::pick_with`. None of that is exercised by calling `pick_with` directly, and it is
+/// where a Shift-click would quietly go back to meaning what a plain one means.
+///
+/// It also starts the way a person does in Plasticity: no command, just a click on an edge,
+/// which opens the round provisionally at nothing and leaves the pin ready to drag.
+#[test]
+fn a_shift_click_in_the_viewport_adds_an_edge_to_a_round_and_a_plain_one_replaces() {
+    let mut h = crate::scenario::Harness::new();
+    // A bare pick opening the command it shapes belongs to Plasticity's controls; under
+    // SolidCraft's a pick is a pick (`crate::plasticity`).
+    crate::plasticity::apply(&mut h.app, crate::plasticity::SCHEME_PLASTICITY);
+    h.app.run("solid.box", json!({"length": 40, "width": 40, "height": 40})).unwrap();
+    h.frames(2);
+
+    let picked = |h: &crate::scenario::Harness| -> Vec<Vec3> {
+        h.app.dialog.as_ref().map_or_else(Vec::new, |d| {
+            d.inputs[0]
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    Sel::Edge { point, .. } => Some(*point),
+                    _ => None,
+                })
+                .collect()
+        })
+    };
+
+    let (a, b, c) = ([0.0, 20.0, 40.0], [40.0, 20.0, 40.0], [20.0, 0.0, 40.0]);
+
+    // No command: the click alone opens the round.
+    h.step(&json!({"click": {"world": a}})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Fillet { .. })), "a bare edge click opens a round");
+    assert_eq!(picked(&h).len(), 1, "one edge: {:?}", picked(&h));
+
+    // Plain on another edge: the round moves to it.
+    h.step(&json!({"click": {"world": b}})).unwrap();
+    h.frames(2);
+    let now = picked(&h);
+    assert_eq!(now.len(), 1, "a plain click should replace: {now:?}");
+    assert!(now[0].dist(Vec3::new(b[0], b[1], b[2])) < 1e-6, "and it should be the edge clicked: {now:?}");
+
+    // Shift: added, and a third adds again.
+    h.step(&json!({"click": {"world": a}, "shift": true})).unwrap();
+    h.frames(2);
+    assert_eq!(picked(&h).len(), 2, "a Shift-click should add: {:?}", picked(&h));
+    h.step(&json!({"click": {"world": c}, "shift": true})).unwrap();
+    h.frames(2);
+    assert_eq!(picked(&h).len(), 3, "and again: {:?}", picked(&h));
+
+    // Shift on one already in takes it back out.
+    h.step(&json!({"click": {"world": a}, "shift": true})).unwrap();
+    h.frames(2);
+    let now = picked(&h);
+    assert_eq!(now.len(), 2, "Shift on a picked edge should remove it: {now:?}");
+    assert!(!now.iter().any(|q| q.dist(Vec3::new(a[0], a[1], a[2])) < 1e-6), "and it should be that edge: {now:?}");
+}
+
+/// A size typed straight after picking an edge, which is Plasticity's way into a round: click
+/// the edge, type the number. Measured there on a 40 mm box -- `C` then `5` gives a chamfer of
+/// 5 mm, a digit alone gives the fillet -- and here it did nothing at all, because the command a
+/// pick offers deliberately keeps off the keyboard.
+///
+/// It has to keep off it for letters: `E` is Extrude, and a command the pick merely offered must
+/// not swallow the shortcut for one the person actually asked for. But no shortcut is a bare
+/// digit, so a digit can only mean a size. That is the whole of the rule, and both halves of it
+/// are pinned here -- the second is the one that would quietly rot.
+#[test]
+fn a_size_typed_after_a_pick_goes_to_the_round_and_a_letter_stays_a_shortcut() {
+    fn boxed_and_picked() -> crate::scenario::Harness {
+        let mut h = crate::scenario::Harness::new();
+        // A bare pick offering its command belongs to Plasticity's controls (`crate::plasticity`).
+        crate::plasticity::apply(&mut h.app, crate::plasticity::SCHEME_PLASTICITY);
+        h.app.run("solid.box", json!({"length": 40, "width": 40, "height": 40})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"world": [0.0, 20.0, 40.0]}})).unwrap();
+        h.frames(2);
+        h
+    }
+    fn size(h: &mut crate::scenario::Harness) -> String {
+        h.app.dialog.as_mut().and_then(|d| d.primary().map(|(_, _, v)| v.clone())).unwrap_or_default()
+    }
+
+    // The pick alone offers the round, standing at nothing so the model is left as it was.
+    let mut h = boxed_and_picked();
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Fillet { .. })), "the pick offers a round");
+    assert_eq!(size(&mut h), "0 mm");
+
+    // Typed a character at a time, which is how it arrives: the first takes the keyboard and
+    // seeds the box, and the rest carry on from it rather than replacing it.
+    for c in ["7", ".", "5"] {
+        h.step(&json!({ "text": c })).unwrap();
+        h.frames(2);
+    }
+    assert_eq!(size(&mut h), "7.5", "the digits should build the size up");
+    assert!(!h.app.dialog.as_ref().is_some_and(|d| d.provisional), "typing uses the command, as dragging its handle does");
+
+    // A letter is still the shortcut it names, and E is Extrude.
+    let mut h = boxed_and_picked();
+    h.step(&json!({"key": "E"})).unwrap();
+    h.frames(2);
+    assert!(
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Extrude { .. })),
+        "E after a pick should still start Extrude, not go into the round's size: {:?}",
+        h.app.dialog.as_ref().map(|d| &d.kind)
+    );
 }

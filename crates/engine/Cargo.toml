@@ -41,6 +41,7 @@ solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 solidcraft-io = { workspace = true }
+solidcraft-sim = { workspace = true }
 solidcraft-render = { workspace = true }
 solidcraft-profile = { workspace = true }
 # reference pictures for inspect.compare_picture (PNG and JPEG decode, PNG encode)

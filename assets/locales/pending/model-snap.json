@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.model.snap": "Snap Points"
+  },
+  "ar": {
+    "cmd.model.snap": "نقاط الالتقاط"
+  },
+  "de": {
+    "cmd.model.snap": "Fangpunkte"
+  },
+  "he": {
+    "cmd.model.snap": "נקודות הצמדה"
+  },
+  "ja": {
+    "cmd.model.snap": "スナップ点"
+  },
+  "ko": {
+    "cmd.model.snap": "스냅 점"
+  },
+  "vi": {
+    "cmd.model.snap": "Các điểm bắt dính"
+  },
+  "zh": {
+    "cmd.model.snap": "捕捉点"
+  }
+}

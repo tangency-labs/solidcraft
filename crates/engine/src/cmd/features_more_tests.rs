@@ -2704,3 +2704,36 @@ fn an_emboss_that_works_has_no_warning() {
         run(&mut s, "edit.undo", json!({}));
     }
 }
+
+/// A box stands in the frame it is given: `axis` is the way its height runs and `x_axis` the way
+/// its length runs across it, so a box drawn on a tilted face sits on that face instead of being
+/// square to the world. Without them it is the world's box, as every box was. The sizes differ
+/// from each other on purpose -- a cube would look the same whichever way it was turned.
+#[test]
+fn a_box_stands_in_the_frame_it_is_given() {
+    use solidcore_record::Vec3;
+    let sizes = json!({"length": 30, "width": 20, "height": 10});
+    let bounds = |p: serde_json::Value| {
+        let mut s = Session::default();
+        let mut params = sizes.clone();
+        for (k, v) in p.as_object().unwrap() {
+            params[k] = v.clone();
+        }
+        s.execute("solid.box", &params).unwrap();
+        s.model.state().bodies[0].mesh().bounds()
+    };
+    // Square to the world: length along x, width along y, height along z.
+    let bb = bounds(json!({}));
+    assert!(bb.min.dist(Vec3::ZERO) < 1e-6 && bb.max.dist(Vec3::new(30.0, 20.0, 10.0)) < 1e-6, "{bb:?}");
+    // Stood on its side: height runs along +x and length along +y, so the same box lies the other
+    // way about -- 10 across x, 30 across y, 20 up z.
+    let bb = bounds(json!({"axis": "X", "x_axis": "Y"}));
+    assert!(bb.min.dist(Vec3::ZERO) < 1e-6 && bb.max.dist(Vec3::new(10.0, 30.0, 20.0)) < 1e-6, "{bb:?}");
+    // Tilted 45 degrees about y: it leans, reaching back along -x as far as its width takes it.
+    let d = 1.0 / 2f64.sqrt();
+    let bb = bounds(json!({"axis": [d, 0, d], "x_axis": "Y"}));
+    assert!((bb.max.z - 30.0 * d).abs() < 1e-3, "it rises by its width and height across the tilt: {bb:?}");
+    assert!((bb.min.x + 20.0 * d).abs() < 1e-3, "and leans back by its width: {bb:?}");
+    assert!((bb.max.x - 10.0 * d).abs() < 1e-3, "and forward by its height: {bb:?}");
+    assert!((bb.max.y - 30.0).abs() < 1e-6, "its length still runs along y: {bb:?}");
+}

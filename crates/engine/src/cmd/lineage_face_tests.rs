@@ -388,7 +388,7 @@ fn the_face_a_split_cuts_takes_a_sketch_and_an_offset_plane_that_follow_the_plan
                 json!({"body": "Block", "sketch": id, "line": "cut"})
             }
         };
-        run(&mut s, "solid.split_body", split);
+        run(&mut s, "solid.cut_body", split);
         no_errors(&s);
         // Each part's cut face (the two lie on one another, so each is picked by body and index).
         let cut_face = |s: &Session, body: &str, x: f64| {

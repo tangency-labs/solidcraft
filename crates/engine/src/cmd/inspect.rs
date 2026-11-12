@@ -414,6 +414,9 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             };
             if let Some(o) = v.as_object_mut() {
                 o.insert("visible".into(), json!(s.body_visible(&b.name)));
+                // Whether it is a mesh body: a caller that offers solid operations needs to know,
+                // and the kernel knows while the reply did not say.
+                o.insert("mesh".into(), json!(b.body.is_mesh()));
                 if s.body_removed_later(&b.name) {
                     // Editing a sketch rolls the timeline back; this body is deleted further on.
                     o.insert("removed_later".into(), json!(true));
@@ -926,4 +929,30 @@ fn colored_components(s: &mut Session, p: &Value) -> Result<Value> {
         s.colored_components = None;
     }
     Ok(json!({"enabled": enabled}))
+}
+
+/// Why a body that encloses nothing has no volume, in the words
+/// [`solidcraft_kernel::Body::validity`] and the URDF export already use for it: the name, what is
+/// true, then what it costs the reader.
+pub fn no_volume(name: &str, missing: f64) -> String {
+    format!(
+        "`{name}` is not closed: it is a surface body, or a mesh with holes in it, with about {missing:.3} mm² \
+         of its surface missing, so it has no volume, centre of mass or mass -- a sum over an open surface is as \
+         much about the point it is taken from as about the body. Its area is the area of the faces it has."
+    )
+}
+
+/// Why a solid's volume is worth less than it looks: it has one, but its triangles do not close,
+/// so part of the number is the point it was measured from.
+///
+/// Said rather than withheld, because the number is still mostly the body's: the volume moves by
+/// `|A| . d / 3` over a displacement `d`, which over the part's own size is about `|A| / area` of
+/// it. The worst of these in the robustness fuzzer's designs is half a per cent.
+pub fn volume_in_doubt(name: &str, missing: f64, share: f64) -> String {
+    format!(
+        "`{name}` closes as a solid, but its triangles do not: about {missing:.3} mm² short, so its volume, \
+         centre of mass and mass are uncertain by roughly {:.3}% -- more than the tessellation's own \
+         accuracy, so a finer tolerance is unlikely to close it. Its area and box are unaffected.",
+        100.0 * share
+    )
 }

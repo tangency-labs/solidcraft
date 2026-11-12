@@ -855,7 +855,7 @@ struct Probe {
 #[test]
 fn feature_common_flattens_into_a_contract() {
     let c = TypedContract::<Probe>::new();
-    assert_keys(input_schema_for::<Probe>(), &["body_name", "body_names", "edges", "faces", "name", "participants", "path_sketch", "radius"]);
+    assert_keys(input_schema_for::<Probe>(), &["body_name", "body_names", "edges", "faces", "keep_tools", "name", "participants", "path_sketch", "radius"]);
     let ok = c.check(&json!({"radius": 1, "name": "Round", "body_name": "B", "body_names": ["B", "C"], "participants": "A"}));
     assert!(ok.is_empty(), "{ok:?}");
     assert!(c.check(&json!({"radius": 1, "name": null, "participants": null})).is_empty(), "null is absent, as for `str_`");

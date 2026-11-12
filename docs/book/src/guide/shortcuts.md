@@ -118,3 +118,16 @@ While drawing or dragging a sketch point:
 
 Change the snap-suppress chord in Preferences › Sketch. Selection still uses Shift and
 Ctrl/Cmd to add or toggle (Preferences › Selection can make Shift add-only).
+
+### Move triad modifiers
+
+While dragging the Move/Copy triad, or an assembly occurrence's:
+
+| Keys | Action |
+|---|---|
+| Ctrl/Cmd | snap the bodies onto the place under the cursor — a corner, the middle of an edge, the centre of a hole or face, a quarter turn — and drag freely where there is none |
+| Alt/Option | drag freely, off the round steps, without snapping |
+
+The arrow being dragged sets one distance, the square across an axis the other two, and the
+centre ball all three. The bodies on the move offer no places of their own to land on, and the
+place a drag has taken stands while they cover it.

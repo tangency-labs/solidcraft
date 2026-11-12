@@ -1921,7 +1921,13 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
-    if std::mem::discriminant(&new.kind) != std::mem::discriminant(&old.kind) && !(boundary(&new.kind) && boundary(&old.kind)) {
+    // A round and a chamfer are the one blend of the same edges in two forms, and the handle
+    // passes from one to the other by being pulled back through nothing: an edit may swap them.
+    // The feature keeps its name, as every edit does, so a round named Fillet1 stays Fillet1
+    // once it is a chamfer.
+    let blend = |k: &FeatureKind| matches!(k, FeatureKind::Fillet { .. } | FeatureKind::Chamfer { .. });
+    let pair = |a: &FeatureKind, b: &FeatureKind| (boundary(a) && boundary(b)) || (blend(a) && blend(b));
+    if std::mem::discriminant(&new.kind) != std::mem::discriminant(&old.kind) && !pair(&new.kind, &old.kind) {
         return Err(bad(cmd, format!("{} is not a {} feature", old.name, cid)));
     }
     // The trial still holds the old feature, so a plane offset from its own name was made there,

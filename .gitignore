@@ -1,6 +1,7 @@
 /target*/
 /plan/
 /dist/
+/Installer/
 *~
 .DS_Store
 *.swp

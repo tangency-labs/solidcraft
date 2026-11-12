@@ -67,3 +67,41 @@ fn occurrence_gizmo_drag_matches_numeric_input_and_preserves_joints_capture_and_
     assert_eq!(serde_json::to_value(&h.app.session.doc.assembly.joints).unwrap(), joints);
     assert!(!h.app.session.selection.contains(&Sel::Occurrence { path: vec![second] }));
 }
+
+/// Holding the snap chord while the occurrence triad is dragged lands the occurrence on the place
+/// under the cursor, the way the Move triad lands a body's pivot. The arrow owns its one distance,
+/// so X takes the corner and Y and Z stay where they were; and the occurrence being moved follows
+/// the cursor, so its own corners must not be among the places on offer.
+#[test]
+fn the_snap_chord_lands_an_occurrence_on_a_corner_of_another() {
+    let mut h = Harness::new();
+    let part = h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
+    let first = part["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let second = h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[60,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.set_origin_shown(false);
+    let initial = doc::apply_point(&h.app.session.occurrence_placement(&[first]).unwrap().world, Vec3::ZERO);
+    let corner = doc::apply_point(&h.app.session.occurrence_placement(&[second]).unwrap().world, Vec3::ZERO);
+    h.app.cam.target = initial;
+    h.app.cam.distance = 100.;
+    h.frames(3);
+    let target = Target::Occurrence { path: vec![first] };
+    let item = context_menu::items(&h.app, &target).into_iter().find(|item| item.id == "ui.moveOccurrence").unwrap();
+    context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    h.frames(3);
+    assert_eq!(
+        crate::browser::occurrence_moving_bodies(&h.app),
+        h.app.session.occurrence_bodies(&[first], true).unwrap(),
+        "the bodies it places are the ones the snap keeps out of its candidates"
+    );
+    // Along the X arrow, letting go over the other block's near corner.
+    let start = crate::gizmo::handle_point("x", Vec3::ZERO, 60.).unwrap();
+    let from = h.at(&json!({"world":[start.x,start.y,start.z]})).unwrap();
+    let to = h.at(&json!({"world":[corner.x,corner.y,corner.z]})).unwrap();
+    h.call("ui.drag", json!({"x0":from[0],"y0":from[1],"x1":to[0],"y1":to[1],"steps":12,"ctrl":true,"hold_end":4}));
+    h.frames(3);
+    let landed = doc::apply_point(&h.app.session.occurrence_placement(&[first]).unwrap().world, Vec3::ZERO);
+    assert!((landed.x - corner.x).abs() < 1e-6, "X lands on the corner: {landed:?} wanted x = {}", corner.x);
+    assert!(landed.y.abs() < 1e-6 && landed.z.abs() < 1e-6, "the arrow owns X alone: {landed:?}");
+}

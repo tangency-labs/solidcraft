@@ -217,6 +217,7 @@ solid.boundary_fill
 solid.chamfer
 solid.coil
 solid.combine
+solid.cut_body
 solid.draft
 solid.emboss
 solid.hole
@@ -233,7 +234,6 @@ solid.replace_face
 solid.revolve
 solid.rib
 solid.shell
-solid.split_body
 solid.split_face
 solid.sweep
 solid.thread

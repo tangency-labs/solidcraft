@@ -43,6 +43,11 @@ struct Job {
     a: Body,
     b: Body,
     names: (String, String),
+    /// Their display meshes, for an estimate where the boolean finds nothing to intersect.
+    meshes: (Arc<Mesh>, Arc<Mesh>),
+    /// How far the meshes may stray from the faces (both chord tolerances): deeper than this
+    /// into both bodies, a sample is a real clash rather than faceting.
+    tol: f64,
     /// Faces of one times faces of the other: the slowest pairs start first.
     cost: usize,
 }
@@ -147,6 +152,8 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
             a: a.body.clone(),
             b: b.body.clone(),
             names: (a.name.clone(), b.name.clone()),
+            meshes: (meshes.get(i).cloned().unwrap_or_default(), meshes.get(j).cloned().unwrap_or_default()),
+            tol: chords.get(i).copied().unwrap_or(0.0) + chords.get(j).copied().unwrap_or(0.0),
             cost: a.body.face_count().saturating_mul(b.body.face_count()),
         });
     }
@@ -267,16 +274,20 @@ fn any_inside(points: &[Vec3], outer: &Mesh) -> bool {
 /// The exact check of one pair: the bodies' intersection, measured.
 fn check(job: &Job) -> Done {
     let started = web_time::Instant::now();
-    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names));
+    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names, &job.meshes, job.tol));
     Done { outcome, ms: started.elapsed().as_secs_f64() * 1000.0, kernel }
 }
 
-fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
+fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), (ma, mb): &(Arc<Mesh>, Arc<Mesh>), tol: f64) -> Outcome {
     let threshold = 1e-9 * a.size().max(1.0).powi(3);
     // A pair whose shared part can't be worked out is reported, not passed as clear.
     let shared = match solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect) {
         Ok(Some(o)) => o,
-        Ok(None) => return Outcome::Clear,
+        // Nothing to intersect, although the mesh pass did not clear this pair. Where the
+        // meshes really do pass through each other -- a sample deeper than their own sag
+        // inside both -- that is a clash the boolean has ignored, so it is reported with its
+        // volume estimated from the meshes. Bodies that merely touch stay clear.
+        Ok(None) => return estimated_hit(ma, mb, tol, na, nb).map_or(Outcome::Clear, Outcome::Hit),
         Err(e) => return Outcome::Unchecked(e.to_string()),
     };
     let m = match solidcraft_kernel::measure_mass(&shared) {
@@ -289,6 +300,62 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
         return Outcome::Hit(hit);
     }
     Outcome::Clear
+}
+
+/// Sample points along each axis of the boxes' overlap for [`sampled_overlap`].
+const SAMPLES: usize = 48;
+
+/// A hit whose volume is estimated from the display meshes (`estimated: true`), for a pair the
+/// boolean found nothing to intersect in although their facets pass through each other.
+fn estimated_hit(ma: &Mesh, mb: &Mesh, tol: f64, na: &str, nb: &str) -> Option<Value> {
+    let (volume, center, bbox) = sampled_overlap(ma, mb, tol)?;
+    Some(json!({"a": na, "b": nb, "volume_mm3": volume, "center": center, "bbox": {"min": bbox.min, "max": bbox.max}, "estimated": true}))
+}
+
+/// The volume two closed meshes share, estimated on a grid over their boxes' overlap: (volume,
+/// centre, bounding box of the shared samples). `None` unless some sample lies deeper than `tol`
+/// inside both (bodies that only touch overlap by their facets' sag, which is no clash).
+fn sampled_overlap(ma: &Mesh, mb: &Mesh, tol: f64) -> Option<(f64, Vec3, Aabb3)> {
+    let (ba, bb) = (ma.bounds(), mb.bounds());
+    if ba.is_empty() || bb.is_empty() {
+        return None;
+    }
+    let lo = Vec3::new(ba.min.x.max(bb.min.x), ba.min.y.max(bb.min.y), ba.min.z.max(bb.min.z));
+    let hi = Vec3::new(ba.max.x.min(bb.max.x), ba.max.y.min(bb.max.y), ba.max.z.min(bb.max.z));
+    if lo.x >= hi.x || lo.y >= hi.y || lo.z >= hi.z {
+        return None;
+    }
+    let n = SAMPLES;
+    let step = Vec3::new((hi.x - lo.x) / n as f64, (hi.y - lo.y) / n as f64, (hi.z - lo.z) / n as f64);
+    let (ia, ib) = (ma.inside_index(), mb.inside_index());
+    let (mut count, mut sum, mut found, mut deep) = (0usize, Vec3::ZERO, Aabb3::EMPTY, false);
+    let d = tol.max(1e-6);
+    let around = [
+        Vec3::new(d, 0.0, 0.0),
+        Vec3::new(-d, 0.0, 0.0),
+        Vec3::new(0.0, d, 0.0),
+        Vec3::new(0.0, -d, 0.0),
+        Vec3::new(0.0, 0.0, d),
+        Vec3::new(0.0, 0.0, -d),
+    ];
+    for i in 0..n {
+        for j in 0..n {
+            for k in 0..n {
+                let p = Vec3::new(lo.x + (i as f64 + 0.5) * step.x, lo.y + (j as f64 + 0.5) * step.y, lo.z + (k as f64 + 0.5) * step.z);
+                if ia.contains(p) && ib.contains(p) {
+                    count += 1;
+                    sum += p;
+                    found = found.union(&Aabb3 { min: p - step * 0.5, max: p + step * 0.5 });
+                    deep = deep || around.iter().all(|o| ia.contains(p + *o) && ib.contains(p + *o));
+                }
+            }
+        }
+    }
+    if count == 0 || !deep {
+        return None;
+    }
+    let volume = count as f64 * step.x * step.y * step.z;
+    Some((volume, sum / count as f64, found))
 }
 
 /// Each job's answer (in pair order, with the pair's names; `None`: not finished within

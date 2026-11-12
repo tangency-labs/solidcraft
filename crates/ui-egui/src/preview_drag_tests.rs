@@ -34,8 +34,8 @@ fn check_drag(s: &Session, commands: impl Fn(i32) -> Vec<(String, Value)>, base_
     for (finished, wanted) in [(10, 20), (20, 30), (30, 30)] {
         let old = commands(finished);
         let new = commands(wanted);
-        let old_key = job_key(&old, s.revision, colors());
-        let key = job_key(&new, s.revision, colors());
+        let old_key = job_key(&old, s.revision, colors(), false);
+        let key = job_key(&new, s.revision, colors(), false);
         let (tx, rx) = std::sync::mpsc::channel();
         pv.running = Some((old_key, rx));
         pv.running_tool = as_new_body(&old).is_some();
@@ -147,12 +147,12 @@ fn distance_results_reject_other_setups_and_obsolete_errors() {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         let mut pv = PreviewState {
-            running: Some((job_key(&old, s.revision, colors()), rx)),
+            running: Some((job_key(&old, s.revision, colors(), false), rx)),
             running_stream_key: stream_key(&old, s.revision, colors()),
             ..Default::default()
         };
         tx.send(Ok(built)).unwrap();
-        pv.poll(job_key(&current, revision, colors()), stream_key(&current, revision, colors()));
+        pv.poll(job_key(&current, revision, colors(), false), stream_key(&current, revision, colors()));
         assert!(!pv.active && pv.error.is_none() && pv.shown_key.is_none());
     }
     let mut join = current.clone();
@@ -171,8 +171,8 @@ fn fillet_preview_keeps_moving_while_its_radius_changes() {
     let mut pv = PreviewState::default();
     for (finished, wanted) in [(4, 6), (6, 8), (8, 8)] {
         let (old, new) = (fillet(finished), fillet(wanted));
-        let old_key = job_key(&old, s.revision, colors());
-        let key = job_key(&new, s.revision, colors());
+        let old_key = job_key(&old, s.revision, colors(), false);
+        let key = job_key(&new, s.revision, colors(), false);
         let (tx, rx) = std::sync::mpsc::channel();
         pv.running = Some((old_key, rx));
         pv.running_tool = false;
@@ -198,7 +198,7 @@ fn a_new_selection_does_not_wait_for_the_previous_selections_preview() {
             vec![("solid.fillet".into(), json!({"edges":edges,"radius":1.0}))]
         })
         .collect();
-    let keys = |c: &[(String, Value)]| (job_key(c, s.revision, colors()), stream_key(c, s.revision, colors()));
+    let keys = |c: &[(String, Value)]| (job_key(c, s.revision, colors(), false), stream_key(c, s.revision, colors()));
     let running = |pv: &mut PreviewState, c: &[(String, Value)]| {
         let (tx, rx) = std::sync::mpsc::channel::<Job>();
         let progress = Arc::new(Progress::default());
@@ -281,7 +281,7 @@ fn a_preview_left_behind_stops_before_its_next_feature() {
         vec![("timeline.redefine".to_string(), json!({"feature":fillet,"command":"solid.fillet","params":{"edges":edges,"radius":2.0}}))]
     };
     let (first, second) = (redefine(json!([[5, 0, 10]])), redefine(json!([[5, 0, 10], [0, 5, 10]])));
-    let keys = |c: &[(String, Value)]| (job_key(c, s.revision, colors()), stream_key(c, s.revision, colors()));
+    let keys = |c: &[(String, Value)]| (job_key(c, s.revision, colors(), false), stream_key(c, s.revision, colors()));
     assert!(keys(&first).1.is_some() && keys(&first).1 != keys(&second).1, "another selection is another setup");
     let mut pv = PreviewState::default();
     let progress = Arc::new(Progress::default());

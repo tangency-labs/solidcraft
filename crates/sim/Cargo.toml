@@ -1,0 +1,25 @@
+[package]
+name = "solidcraft-sim"
+description = "SolidCraft analysis: heat conduction and air flow over a model, on a lattice, from its material cards"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcore-record = { workspace = true }
+solidcraft-geom = { workspace = true }
+solidcraft-doc = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+# Threads for the solvers. The browser build has none and runs the same loops on one; see
+# src/par.rs.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { workspace = true }
+
+[dev-dependencies]
+# The material-card tests build cards as JSON, the way a caller will.
+serde_json = { workspace = true }

@@ -157,7 +157,7 @@ pub mod watch;
 
 pub use blend::{
     ChamferSide, FilletTurn, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_max, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners,
-    fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_removing, fillet_setback, largest_fit_note,
+    fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_removing, fillet_setback, largest_fit, largest_fit_note,
     names_largest_fit, tangent_chain, with_fit_note,
 };
 pub use blend_corner::fillet_radii;
@@ -170,7 +170,7 @@ pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
 pub use bridge::{Frame, blend_between, bridge, chain, chain_closes, frames, frames_across, sample_grid};
 pub use build::{
-    PathSeg, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
+    PathSeg, box_on, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
     loft_with_rails, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
 };
 pub use continuity::{

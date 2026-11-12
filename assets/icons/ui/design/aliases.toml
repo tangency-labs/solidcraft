@@ -52,3 +52,15 @@ bom = "list"
 # Render workspace drafts: shared meanings; owner review remains Open.
 # Removing a look override returns the body to its material look.
 render_remove_override = "render_from_material"
+
+# The analysis workspace's own artwork has not been drawn yet, so each command stands in with the
+# nearest existing master: the analysis contour glyph for the three study types, the discretised
+# body for the lattice they solve on, the material glyph for their material table, and the compute
+# glyph for a study itself. The ids stay distinct so artwork can land without touching the command
+# registry.
+sim_flow = "iso_analysis"
+sim_stress = "iso_analysis"
+sim_thermal = "iso_analysis"
+sim_lattice = "mesh_body"
+sim_materials = "material"
+sim_study = "compute"

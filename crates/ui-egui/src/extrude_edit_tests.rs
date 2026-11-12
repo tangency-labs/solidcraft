@@ -783,6 +783,32 @@ fn the_extrude_arrow_stops_at_a_parallel_face_and_outlines_it() {
     assert!((volume(&h, "Block") - expected).abs() < 1e-6, "{} for {expected}", volume(&h, "Block"));
 }
 
+/// Under Plasticity's controls the arrow stops at nothing until the snap chord is held, and at
+/// anything while it is: the block's underside, which SolidCraft's own controls stop at on their
+/// own, waits for the chord, and the block beside the profile -- which the footprint rule never
+/// offered at all -- takes the arrow with it held.
+#[test]
+fn the_arrow_stops_at_anything_with_the_chord_under_plasticitys_controls() {
+    let mut h = cut_into_block();
+    crate::plasticity::apply(&mut h.app, crate::plasticity::SCHEME_PLASTICITY);
+    h.frames(2);
+    assert_eq!(hold_arrow_at(&mut h, json!({"world":[5,5,-12.2]})), None, "no chord, no stop");
+    let_go(&mut h);
+    // Letting go drops the keys with the button, so each drag takes the chord again.
+    h.app.synthetic_mods.ctrl = true;
+    let stop = hold_arrow_at(&mut h, json!({"world":[5,5,-12.2]})).expect("the chord stops it at the underside");
+    assert_eq!(stop.body, "Block", "{stop:?}");
+    assert!((stop.distance - 12.345678).abs() < 1e-9, "{stop:?}");
+    assert!((dialog_distance(&h) - 12.345678).abs() < 1e-9, "{}", dialog_distance(&h));
+    let_go(&mut h);
+    h.app.synthetic_mods.ctrl = true;
+    let beside = hold_arrow_at(&mut h, json!({"world":[5,5,-7.75]})).expect("a face beside the profile stops it too");
+    assert_eq!(beside.body, "Beside", "{beside:?}");
+    assert!((beside.distance - 7.777).abs() < 1e-9, "{beside:?}");
+    let_go(&mut h);
+    h.app.synthetic_mods.ctrl = false;
+}
+
 /// The free drag (Ctrl held) passes the face by, and a face beside the profile never catches the
 /// arrow: the distance stays the pointer's or a round step.
 #[test]
@@ -811,4 +837,88 @@ fn without_face_stops_the_extrude_arrow_moves_in_round_steps() {
     let step = crate::canvas::snap_step(h.app.cam.half_height());
     assert!(((d / step).round() * step - d).abs() < 1e-9, "{d} is not a multiple of the {step} mm step");
     let_go(&mut h);
+}
+
+/// Pushing a face, the walls around it either follow it or stay where they are -- Plasticity's
+/// grow mode. Both were already here as two separate commands, with no way to choose between
+/// them mid-push: Walls now picks, and on a drafted box the two give different solids.
+#[test]
+fn a_pushed_face_either_takes_its_walls_with_it_or_leaves_them() {
+    use solidcraft_engine::Sel;
+    let faces_of = |h: &Harness| {
+        let st = h.app.session.world_state().ok();
+        st.and_then(|st| st.body("Body1").map(|b| b.mesh().tri_face.iter().collect::<std::collections::BTreeSet<_>>().len()))
+    };
+    // The top face of the drafted box, by its upward normal.
+    let top_face = |h: &Harness| {
+        let st = h.app.session.world_state().ok().unwrap_or_else(|| panic!("a model"));
+        let b = st.body("Body1").unwrap_or_else(|| panic!("the body"));
+        let m = b.mesh();
+        let f = m
+            .tri_face
+            .iter()
+            .copied()
+            .find(|f| solidcraft_engine::geom::snap::planar_face_center(&m, *f).is_some_and(|(c, n)| (c.z - 20.0).abs() < 1e-6 && n.z > 0.9))
+            .unwrap_or_else(|| panic!("a top face"));
+        usize::try_from(f).unwrap_or_default()
+    };
+    let drafted = || {
+        let mut h = Harness::new();
+        h.app.set_origin_shown(false);
+        // A bare pick offers the push, which belongs to Plasticity's controls.
+        crate::plasticity::apply(&mut h.app, crate::plasticity::SCHEME_PLASTICITY);
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app
+            .run(
+                "solid.draft",
+                json!({"faces": [[20, 0, 10], [20, 30, 10], [0, 15, 10], [40, 15, 10]], "neutral": "XY", "angle": 10}),
+            )
+            .unwrap();
+        h.frames(4);
+        h
+    };
+    let push = |moving: bool| {
+        let mut h = drafted();
+        let before = faces_of(&h).unwrap_or(0);
+        let index = top_face(&h);
+        h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index, point: [20.0, 15.0, 20.0].into() }];
+        h.frames(3);
+        let d = h.app.dialog.as_mut().unwrap_or_else(|| panic!("the push opens"));
+        if moving {
+            d.extra.insert("grow".into(), json!("moving"));
+        }
+        if let Some((_, _, v)) = d.primary() {
+            *v = "5 mm".into();
+        }
+        h.frames(3);
+        let built = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap_or_else(|e| panic!("{e}"));
+        h.step(&json!({"widget": "OK"})).unwrap();
+        h.settle();
+        (built[0].0.clone(), before, faces_of(&h).unwrap_or(0))
+    };
+    let (command, before, fixed) = push(false);
+    assert_eq!(command, "solid.extrude", "walls held fixed are an extrude of the face");
+    let (command, _, moving) = push(true);
+    assert_eq!(command, "solid.offset_face", "walls that follow are an offset of the face");
+    // An offset reaches no object and goes through nothing, so the window must not be left
+    // offering an extent it would quietly drop.
+    {
+        let mut h = drafted();
+        let index = top_face(&h);
+        h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index, point: [20.0, 15.0, 20.0].into() }];
+        h.frames(3);
+        let d = h.app.dialog.as_mut().unwrap_or_else(|| panic!("the push opens"));
+        d.extra.insert("grow".into(), json!("moving"));
+        if let crate::dialogs::Kind::Extrude { all, .. } = &mut d.kind {
+            *all = true;
+        }
+        h.frames(3);
+        let d = h.app.dialog.as_ref().unwrap_or_else(|| panic!("still open"));
+        assert!(
+            matches!(d.kind, crate::dialogs::Kind::Extrude { all: false, .. }),
+            "following walls go a distance, not through all"
+        );
+    }
+    assert_eq!(moving, before, "following walls leave the solid with the faces it had");
+    assert!(fixed > before, "held walls leave the new ones beside them: {before} then {fixed}");
 }

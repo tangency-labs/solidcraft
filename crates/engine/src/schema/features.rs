@@ -35,6 +35,15 @@ pub struct BoxParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub center: Option<PointExpr3>,
+    /// The way `height` runs: the normal of the face the box stands on. Default: Z.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "AxisDir")]
+    pub axis: Option<AxisDir>,
+    /// The way `length` runs, across `axis`; it is squared up against `axis` rather than
+    /// trusted. Default: X.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "AxisDir")]
+    pub x_axis: Option<AxisDir>,
     /// How the box combines with existing bodies. Default: new.
     #[serde(default)]
     pub operation: Option<OperationParam>,
@@ -58,6 +67,11 @@ pub struct BoxParams {
     /// Names for the new bodies, in order.
     #[serde(default)]
     pub body_names: Option<StringList>,
+    /// Keep the shape the feature is built from as a body of its own as well, beside what it
+    /// did to the bodies it worked on. Nothing to a new-body operation, which leaves that shape
+    /// anyway.
+    #[serde(default)]
+    pub keep_tools: Option<bool>,
 }
 
 /// Extrude sketch profiles (or a planar body face) into a solid.
@@ -158,6 +172,11 @@ pub struct ExtrudeParams {
     /// Names for the new bodies, in order.
     #[serde(default)]
     pub body_names: Option<StringList>,
+    /// Keep the shape the feature is built from as a body of its own as well, beside what it
+    /// did to the bodies it worked on. Nothing to a new-body operation, which leaves that shape
+    /// anyway.
+    #[serde(default)]
+    pub keep_tools: Option<bool>,
     /// A thin wall along sketch curves instead of solid profiles.
     // `skip_serializing_if` keeps schemars from writing `default: null`, which `bool` refuses.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]

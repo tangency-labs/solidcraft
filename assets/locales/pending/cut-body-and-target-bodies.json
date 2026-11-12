@@ -1,0 +1,42 @@
+{
+  "en": {
+    "Body to cut": "Body to cut",
+    "Cutting tool": "Cutting tool",
+    "Target Bodies": "Target Bodies"
+  },
+  "ar": {
+    "Body to cut": "الجسم المراد تقسيمه",
+    "Cutting tool": "أداة التقسيم",
+    "Target Bodies": "الأجسام الهدف"
+  },
+  "de": {
+    "Body to cut": "Zu teilender Körper",
+    "Cutting tool": "Trennwerkzeug",
+    "Target Bodies": "Zielkörper"
+  },
+  "he": {
+    "Body to cut": "הגוף לפיצול",
+    "Cutting tool": "כלי פיצול",
+    "Target Bodies": "גופי יעד"
+  },
+  "ja": {
+    "Body to cut": "分割するボディ",
+    "Cutting tool": "分割ツール",
+    "Target Bodies": "ターゲットボディ"
+  },
+  "ko": {
+    "Body to cut": "분할할 바디",
+    "Cutting tool": "분할 도구",
+    "Target Bodies": "대상 바디"
+  },
+  "vi": {
+    "Body to cut": "Khối cần phân tách",
+    "Cutting tool": "Công cụ cắt chia",
+    "Target Bodies": "Các khối mục tiêu"
+  },
+  "zh": {
+    "Body to cut": "要分割的实体",
+    "Cutting tool": "分割工具",
+    "Target Bodies": "目标实体"
+  }
+}

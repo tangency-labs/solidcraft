@@ -278,6 +278,71 @@ fn redefining_a_fillet_as_g2_on_sloped_ends_survives_undo_and_reopen() {
     assert!((volume(&reopened) - expected(3.0)).abs() < 0.05);
 }
 
+/// Pulling a blend's handle back through nothing turns a round into a chamfer, and the dialog
+/// asks for that as a redefine of the feature already there. Both are the one blend of the same
+/// edges, so the swap is allowed: the feature keeps its id, its name and its place, the features
+/// after it rebuild, and the swap saves, reopens and undoes like any other edit.
+#[test]
+fn a_round_redefined_as_a_chamfer_keeps_the_feature_and_rebuilds_the_rest() {
+    use solidcraft_doc::{Document, FeatureKind};
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 20]], "radius": 2, "name": "Round"}));
+    // A feature after it, so the redefine has a tail to rebuild (the slow case in the app).
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 30, 20]], "distance": 1, "name": "Cut"}));
+    let volume = |s: &Session| {
+        let bodies = &s.model.state().bodies;
+        assert_eq!(bodies.len(), 1);
+        bodies.first().unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.0001)).unwrap().measure().volume
+    };
+    // Along a 40 mm square edge a round takes off (1 - pi/4) r^2, a chamfer d^2 / 2.
+    let round = |r: f64| 40.0 * (1.0 - std::f64::consts::FRAC_PI_4) * r * r;
+    let flat = |d: f64| 40.0 * d * d / 2.0;
+    let before = (*s.doc).clone();
+    assert!((volume(&s) - (24000.0 - round(2.0) - flat(1.0))).abs() < 0.05, "{}", volume(&s));
+    let id = s.doc.find_feature("Round").unwrap().id;
+    let names = s.doc.find_feature("Round").unwrap().param_names.clone();
+
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "solid.chamfer", "params": {"edges": [[20, 0, 20]], "distance": 2}}),
+    );
+    let f = s.doc.find_feature("Round").unwrap();
+    assert_eq!(f.id, id, "the same feature, not a new one");
+    assert!(matches!(f.kind, FeatureKind::Chamfer { .. }), "it is a chamfer now: {:?}", f.kind);
+    assert_eq!(f.name, "Round", "an edit never renames the feature it edits");
+    assert_eq!(s.doc.features.len(), before.features.len(), "no feature added or lost");
+    assert_eq!(s.doc.next_id, before.next_id, "the trial's definition consumed no id");
+    assert_eq!(s.doc.features.last().unwrap().name, "Cut", "Cut still comes after it");
+    assert_eq!(names.len(), f.param_names.len(), "the blend's one length keeps its parameter");
+    assert!((volume(&s) - (24000.0 - flat(2.0) - flat(1.0))).abs() < 0.05, "{}", volume(&s));
+
+    // It saves and reopens as a chamfer, and the whole swap undoes.
+    let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    assert!((volume(&reopened) - (24000.0 - flat(2.0) - flat(1.0))).abs() < 0.05);
+    let edited = s.doc.clone();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(*s.doc, before, "undo puts the round back");
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc, edited);
+
+    // And back the other way, which is the same gesture carried on through nothing again.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "solid.fillet", "params": {"edges": [[20, 0, 20]], "radius": 3}}),
+    );
+    assert!(matches!(s.doc.find_feature("Round").unwrap().kind, FeatureKind::Fillet { .. }));
+    assert!((volume(&s) - (24000.0 - round(3.0) - flat(1.0))).abs() < 0.05, "{}", volume(&s));
+    // A kind that is not the blend's other form is still refused.
+    assert!(
+        s.execute("timeline.redefine", &json!({"feature": id, "command": "solid.shell", "params": {"faces": [[20, 15, 20]], "thickness": 1}}))
+            .is_err()
+    );
+}
+
 #[test]
 fn redefining_a_blend_replaces_persistent_edge_selection_and_survives_resize() {
     let mut s = Session::default();

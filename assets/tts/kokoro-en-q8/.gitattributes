@@ -1,0 +1,4 @@
+# The neural voice package is verified against pinned SHA-256 hashes when it loads
+# (crates/ui-egui/src/narration_neural.rs). Never convert line endings or otherwise alter these
+# files, or the checksums fail on a fresh checkout and narration drops to the system voice.
+* -text

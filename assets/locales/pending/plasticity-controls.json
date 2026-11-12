@@ -1,0 +1,90 @@
+{
+  "en": {
+    "nav.plasticity.label": "Plasticity",
+    "nav.plasticity.help": "Middle drag orbits, Shift+middle pans, Ctrl+middle zooms; right drag orbits, Shift+right pans",
+    "prefs.controls_heading": "Controls",
+    "prefs.control_scheme": "Control scheme",
+    "prefs.control_scheme_help": "Plasticity: Plasticity's keys (E extrude, B fillet, Q boolean, G/R move, S scale, F search…), selection modes 1–5, and its mouse; inside a sketch SolidCraft's sketch keys apply. The full list is under Keyboard Shortcuts.",
+    "prefs.scheme.plasticity": "Plasticity",
+    "prefs.scheme.solidcraft": "SolidCraft",
+    "keymap.plasticity_keys": "Plasticity scheme: selection, visibility and view keys",
+    "keymap.plasticity_keys_note": "These keys belong to the Plasticity scheme (Preferences › Navigation › Control scheme). Command keys are in the list below. Inside a sketch SolidCraft's sketch keys apply."
+  },
+  "ar": {
+    "nav.plasticity.label": "Plasticity",
+    "nav.plasticity.help": "سحب الزر الأوسط يدوّر، Shift+الأوسط يحرّك، Ctrl+الأوسط يقرّب؛ سحب الزر الأيمن يدوّر، Shift+الأيمن يحرّك.",
+    "prefs.controls_heading": "التحكم",
+    "prefs.control_scheme": "نظام التحكم",
+    "prefs.control_scheme_help": "Plasticity: مفاتيح Plasticity (E بثق، B تدوير حواف، Q بوليان، G/R نقل، S تحجيم، F بحث…) وأنماط التحديد 1–5 وماوسها؛ داخل الرسم تُستخدم مفاتيح الرسم في SolidCraft. القائمة الكاملة في اختصارات لوحة المفاتيح.",
+    "prefs.scheme.plasticity": "Plasticity",
+    "prefs.scheme.solidcraft": "SolidCraft",
+    "keymap.plasticity_keys": "نظام Plasticity: مفاتيح التحديد والإظهار والعرض",
+    "keymap.plasticity_keys_note": "هذه المفاتيح تخص نظام Plasticity (التفضيلات › التنقل › نظام التحكم). مفاتيح الأوامر في القائمة أدناه. داخل الرسم تُستخدم مفاتيح الرسم في SolidCraft."
+  },
+  "de": {
+    "nav.plasticity.label": "Plasticity",
+    "nav.plasticity.help": "Mittlere Maustaste ziehen dreht, Shift+Mitte verschiebt, Ctrl+Mitte zoomt; rechts ziehen dreht, Shift+rechts verschiebt.",
+    "prefs.controls_heading": "Steuerung",
+    "prefs.control_scheme": "Steuerungsschema",
+    "prefs.control_scheme_help": "Plasticity: die Tasten von Plasticity (E Extrusion, B Verrundung, Q Boolesch, G/R Verschieben, S Skalieren, F Suche…), die Auswahlmodi 1–5 und seine Maus; in einer Skizze gelten SolidCrafts Skizzentasten. Die vollständige Liste steht unter Tastenkürzel.",
+    "prefs.scheme.plasticity": "Plasticity",
+    "prefs.scheme.solidcraft": "SolidCraft",
+    "keymap.plasticity_keys": "Plasticity-Schema: Tasten für Auswahl, Sichtbarkeit und Ansicht",
+    "keymap.plasticity_keys_note": "Diese Tasten gehören zum Plasticity-Schema (Einstellungen › Navigation › Steuerungsschema). Befehlstasten stehen in der Liste darunter. In einer Skizze gelten SolidCrafts Skizzentasten."
+  },
+  "he": {
+    "nav.plasticity.label": "Plasticity",
+    "nav.plasticity.help": "גרירה עם הלחצן האמצעי מסובבת, Shift+אמצעי מזיז, Ctrl+אמצעי מקרב; גרירה עם הלחצן הימני מסובבת, Shift+ימני מזיז.",
+    "prefs.controls_heading": "בקרות",
+    "prefs.control_scheme": "סכמת בקרה",
+    "prefs.control_scheme_help": "Plasticity: המקשים של Plasticity (E הקשיה, B פילט, Q בוליאני, G/R הזזה, S שינוי קנה מידה, F חיפוש…), מצבי בחירה 1–5 והעכבר שלה; בתוך סקיצה מקשי הסקיצה של SolidCraft חלים. הרשימה המלאה תחת קיצורי מקלדת.",
+    "prefs.scheme.plasticity": "Plasticity",
+    "prefs.scheme.solidcraft": "SolidCraft",
+    "keymap.plasticity_keys": "סכמת Plasticity: מקשי בחירה, הצגה ותצוגה",
+    "keymap.plasticity_keys_note": "מקשים אלה שייכים לסכמת Plasticity (העדפות › ניווט › סכמת בקרה). מקשי הפקודות ברשימה שלהלן. בתוך סקיצה מקשי הסקיצה של SolidCraft חלים."
+  },
+  "ja": {
+    "nav.plasticity.label": "Plasticity",
+    "nav.plasticity.help": "中ボタンのドラッグで回転、Shift+中ボタンでパン、Ctrl+中ボタンでズーム。右ドラッグで回転、Shift+右でパン。",
+    "prefs.controls_heading": "操作方法",
+    "prefs.control_scheme": "操作スキーム",
+    "prefs.control_scheme_help": "Plasticity: Plasticity のキー（E 押し出し、B フィレット、Q ブーリアン、G/R 移動、S 尺度、F 検索…）、選択モード 1〜5、およびそのマウス操作。スケッチ内では SolidCraft のスケッチキーが使われます。一覧はキーボードショートカットにあります。",
+    "prefs.scheme.plasticity": "Plasticity",
+    "prefs.scheme.solidcraft": "SolidCraft",
+    "keymap.plasticity_keys": "Plasticity スキーム: 選択・表示・ビューのキー",
+    "keymap.plasticity_keys_note": "これらのキーは Plasticity スキーム（環境設定 › ナビゲーション › 操作スキーム）のものです。コマンドキーは下の一覧にあります。スケッチ内では SolidCraft のスケッチキーが使われます。"
+  },
+  "ko": {
+    "nav.plasticity.label": "Plasticity",
+    "nav.plasticity.help": "가운데 버튼 드래그로 회전, Shift+가운데로 이동, Ctrl+가운데로 확대/축소, 오른쪽 드래그로 회전, Shift+오른쪽으로 이동.",
+    "prefs.controls_heading": "조작 방식",
+    "prefs.control_scheme": "조작 구성",
+    "prefs.control_scheme_help": "Plasticity: Plasticity의 키(E 돌출, B 필릿, Q 불리언, G/R 이동, S 축척, F 검색…), 선택 모드 1–5 및 해당 마우스 설정. 스케치 안에서는 SolidCraft의 스케치 키가 적용됩니다. 전체 목록은 키보드 단축키에 있습니다.",
+    "prefs.scheme.plasticity": "Plasticity",
+    "prefs.scheme.solidcraft": "SolidCraft",
+    "keymap.plasticity_keys": "Plasticity 구성: 선택·표시·보기 키",
+    "keymap.plasticity_keys_note": "이 키들은 Plasticity 구성(환경 설정 › 내비게이션 › 조작 구성)에 속합니다. 명령 키는 아래 목록에 있습니다. 스케치 안에서는 SolidCraft의 스케치 키가 적용됩니다."
+  },
+  "vi": {
+    "nav.plasticity.label": "Plasticity",
+    "nav.plasticity.help": "Kéo chuột giữa để quay, Shift+giữa để trượt, Ctrl+giữa để thu phóng; kéo chuột phải để quay, Shift+phải để trượt.",
+    "prefs.controls_heading": "Điều khiển",
+    "prefs.control_scheme": "Lược đồ điều khiển",
+    "prefs.control_scheme_help": "Plasticity: các phím của Plasticity (E đùn, B vê tròn, Q boolean, G/R di chuyển, S tỉ lệ, F tìm…), các chế độ chọn 1–5 và chuột của nó; trong bản vẽ phác, các phím phác thảo của SolidCraft được dùng. Danh sách đầy đủ ở Phím tắt.",
+    "prefs.scheme.plasticity": "Plasticity",
+    "prefs.scheme.solidcraft": "SolidCraft",
+    "keymap.plasticity_keys": "Lược đồ Plasticity: các phím chọn, hiển thị và khung nhìn",
+    "keymap.plasticity_keys_note": "Các phím này thuộc lược đồ Plasticity (Tùy chọn › Điều hướng › Lược đồ điều khiển). Phím lệnh ở danh sách bên dưới. Trong bản vẽ phác, các phím phác thảo của SolidCraft được dùng."
+  },
+  "zh": {
+    "nav.plasticity.label": "Plasticity",
+    "nav.plasticity.help": "中键拖动旋转，Shift+中键平移，Ctrl+中键缩放；右键拖动旋转，Shift+右键平移。",
+    "prefs.controls_heading": "操作方式",
+    "prefs.control_scheme": "操作方案",
+    "prefs.control_scheme_help": "Plasticity：使用 Plasticity 的按键（E 拉伸、B 圆角、Q 布尔、G/R 移动、S 缩放、F 搜索…）、选择模式 1–5 及其鼠标操作；在草图中使用 SolidCraft 的草图按键。完整列表见键盘快捷键。",
+    "prefs.scheme.plasticity": "Plasticity",
+    "prefs.scheme.solidcraft": "SolidCraft",
+    "keymap.plasticity_keys": "Plasticity 方案：选择、显示和视图按键",
+    "keymap.plasticity_keys_note": "这些按键属于 Plasticity 方案（首选项 › 导航 › 操作方案）。命令按键见下方列表。在草图中使用 SolidCraft 的草图按键。"
+  }
+}

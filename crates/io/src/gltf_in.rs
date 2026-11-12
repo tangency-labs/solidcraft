@@ -193,7 +193,13 @@ pub fn read_gltf(bytes: &[u8], file: &str, load: Loader<'_>) -> Result<GltfImpor
     let file_name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     let body_names = reader.meshes.iter().map(|m| m.name.clone()).collect();
     Ok(GltfImport {
-        feature: MeshFeature { name, body_names, kind: solidcraft_doc::FeatureKind::MeshImport { file: file_name, meshes: reader.meshes }, warnings },
+        feature: MeshFeature {
+            name,
+            body_names,
+            kind: solidcraft_doc::FeatureKind::MeshImport { file: file_name, meshes: reader.meshes },
+            warnings,
+            hidden: Vec::new(),
+        },
         plan: reader.plan,
         looks: reader.looks,
     })

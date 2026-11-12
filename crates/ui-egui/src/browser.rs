@@ -3558,20 +3558,39 @@ pub(crate) fn occurrence_triad_model(app: &SolveApp) -> Option<crate::gizmo::Tri
     Some(crate::gizmo::Triad { center, translate: true, rotate: true })
 }
 
+/// The bodies the occurrence being moved places: a snap keeps them out of its candidates, since
+/// they follow the cursor and a drag that could take them would snap to itself and never move.
+pub(crate) fn occurrence_moving_bodies(app: &SolveApp) -> Vec<String> {
+    let Some(m) = app.tree.occurrence_move.as_ref() else { return Vec::new() };
+    let path = if m.path.is_empty() { vec![m.occurrence] } else { m.path.clone() };
+    app.session.occurrence_bodies(&path, true).unwrap_or_default()
+}
+
 /// Occurrence handles belong to the viewport, not the clipped Move panel's child UI.
 pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &crate::viewport::Proj) {
     use crate::gizmo::{self, Change};
+    use solidcore_record::Vec3;
     let Some(mut m) = app.tree.occurrence_move.clone() else { return };
     let before = (m.translate, m.angles);
     let Some(t) = occurrence_triad_model(app) else { return };
     let step = crate::canvas::snap_step(app.cam.half_height());
     let Some(g) = gizmo::show(ui, painter, proj, egui::Id::unique("sc_occ_triad"), &t, step) else { return };
+    // Holding the snap chord lands the occurrence's origin on the place under the cursor, the
+    // same corners, middles and centres the Move triad takes.
+    let place = crate::prefs::manipulator_snap_held(ui.input(|i| i.modifiers)).then(crate::model_snap::current).flatten().map(|s| s.at).zip(m.pivot);
     if g.started || m.drag0.is_none() {
         m.drag0 = Some((m.translate, m.angles));
     }
     let (t0, a0) = m.drag0.unwrap_or((m.translate, m.angles));
     match g.change {
-        Change::Translate(v) => m.translate = [t0[0] + v.x, t0[1] + v.y, t0[2] + v.z],
+        Change::Translate(v) => {
+            let free = Vec3::new(t0[0] + v.x, t0[1] + v.y, t0[2] + v.z);
+            let moved = match place {
+                Some((at, pivot)) => gizmo::snapped(g.handle, free, pivot, at),
+                None => free,
+            };
+            m.translate = [moved.x, moved.y, moved.z];
+        }
         Change::Rotate { axis, angle } => {
             if let Some(slot) = m.angles.get_mut(axis) {
                 *slot = a0.get(axis).copied().unwrap_or(0.0) + angle.to_degrees();

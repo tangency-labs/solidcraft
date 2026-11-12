@@ -272,6 +272,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let square_on = faces.iter().filter(|f| f.text_axes.is_some()).count() == 1;
     arrows(app, ui, &painter, c, scale, active, square_on, t);
     home(app, ui, &painter, c, scale, active, t);
+    grid(app, ui, &painter, c, scale, active, t);
     let fit = Rect::from_center_size(c + vec2(67.0, 67.0) * scale, vec2(22.0, 22.0) * scale);
     let fit_hover = control(app, ui, fit, "fit", "Fit model in view");
     if active {
@@ -294,6 +295,38 @@ pub(super) fn home(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let home_hover = control(app, ui, home, "home", "Home: isometric view and fit model");
     if active {
         icons::paint_icon(painter, home.shrink(4.0 * scale), "home", f32::from((if home_hover { t.accent } else { t.cube_face }).a()) / 255.0);
+    }
+}
+
+/// The Grid switch under Home on a gizmo centred at `c` ([`grid_switch`]). It sits below Home
+/// because this gizmo's other three corners are taken -- the roll arrows, the triad and Fit --
+/// and clear of the left orbit arrow, which keeps to the middle of that side.
+pub(super) fn grid(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, t: Tokens) {
+    if active {
+        grid_switch(app, ui, painter, c + vec2(-65.0, -34.0) * scale, 20.0 * scale, t);
+    }
+}
+
+/// The Grid switch: the viewport's grid turned on and off beside the view gizmo, in a chip like
+/// Home's. Green while the grid is drawn and red while it is not, so which it is reads from
+/// across the viewport without hovering it; the chip is filled while it is on as well, so the
+/// switch does not rest on a red-green difference alone. Both colours are the theme's, so every
+/// theme and the colour-vision adaptation carry it.
+pub(crate) fn grid_switch(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, centre: Pos2, size: f32, t: Tokens) {
+    let rect = Rect::from_center_size(centre, vec2(size, size));
+    crate::scenario::publish_target("axis_view:grid", rect);
+    let on = app.ui.show_grid;
+    let response = ui.interact(rect, ui.scope_id().with("view_gizmo_grid"), Sense::click());
+    let chip = size * 0.68;
+    let fill = if on { t.accent_soft } else { t.overlay };
+    painter.circle(rect.center(), chip, fill.gamma_multiply(if response.hovered() { 0.95 } else { 0.6 }), Stroke::new(1.0, t.border));
+    crate::icons::paint_ink(painter, rect, "grid", if on { t.manipulator } else { t.error });
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let tip = crate::i18n::tr_label(if on { "Grid: on" } else { "Grid: off" });
+    if response.backing_on_hover_text(tip).clicked() {
+        let _ = app.run("view.grid", serde_json::json!({ "on": !on }));
     }
 }
 

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "Walls": "Walls",
+    "Moving": "Moving"
+  },
+  "ar": {
+    "Walls": "الجدران",
+    "Moving": "متحركة"
+  },
+  "de": {
+    "Walls": "Wände",
+    "Moving": "Mitlaufend"
+  },
+  "he": {
+    "Walls": "דפנות",
+    "Moving": "נעות"
+  },
+  "ja": {
+    "Walls": "壁",
+    "Moving": "追従"
+  },
+  "ko": {
+    "Walls": "벽면",
+    "Moving": "따라 이동"
+  },
+  "vi": {
+    "Walls": "Vách",
+    "Moving": "Di chuyển theo"
+  },
+  "zh": {
+    "Walls": "侧壁",
+    "Moving": "跟随"
+  }
+}

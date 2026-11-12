@@ -716,6 +716,8 @@ mod tests {
         let mut doc = Document::new("Cross-unit drive graph");
         doc.add_feature(
             crate::FeatureKind::Box {
+                axis: crate::z_axis(),
+                x_axis: crate::x_axis(),
                 corner: ["0".into(), "0".into(), "0".into()],
                 length: "10 mm".into(),
                 width: "5 mm".into(),

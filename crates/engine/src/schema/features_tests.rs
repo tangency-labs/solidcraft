@@ -12,7 +12,23 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<BoxParams>(),
-        &["body_name", "body_names", "center", "corner", "height", "length", "name", "operation", "participants", "targets", "touching", "width"],
+        &[
+            "axis",
+            "body_name",
+            "body_names",
+            "center",
+            "corner",
+            "height",
+            "keep_tools",
+            "length",
+            "name",
+            "operation",
+            "participants",
+            "targets",
+            "touching",
+            "width",
+            "x_axis",
+        ],
     );
     assert_keys(
         input_schema_for::<ExtrudeParams>(),
@@ -31,6 +47,7 @@ fn schemas_and_the_key_check_agree() {
             "face_body",
             "faces",
             "from",
+            "keep_tools",
             "name",
             "operation",
             "participants",
@@ -51,15 +68,15 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<CylinderParams>(),
-        &["axis", "base", "body_name", "body_names", "diameter", "height", "name", "operation", "participants", "radius", "references", "targets"],
+        &["axis", "base", "body_name", "body_names", "diameter", "height", "keep_tools", "name", "operation", "participants", "radius", "references", "targets"],
     );
     assert_keys(
         input_schema_for::<SphereParams>(),
-        &["body_name", "body_names", "center", "diameter", "name", "operation", "participants", "radius", "targets"],
+        &["body_name", "body_names", "center", "diameter", "keep_tools", "name", "operation", "participants", "radius", "targets"],
     );
     assert_keys(
         input_schema_for::<TorusParams>(),
-        &["body_name", "body_names", "center", "major", "minor", "name", "operation", "participants", "targets"],
+        &["body_name", "body_names", "center", "keep_tools", "major", "minor", "name", "operation", "participants", "targets"],
     );
     assert_keys(
         input_schema_for::<ConeParams>(),
@@ -70,6 +87,7 @@ fn schemas_and_the_key_check_agree() {
             "body_names",
             "diameter",
             "height",
+            "keep_tools",
             "name",
             "operation",
             "participants",
@@ -81,9 +99,9 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<PipeParams>(),
-        &["body_name", "body_names", "diameter", "name", "operation", "participants", "path", "path_sketch", "targets", "wall"],
+        &["body_name", "body_names", "diameter", "keep_tools", "name", "operation", "participants", "path", "path_sketch", "targets", "wall"],
     );
-    assert_keys(input_schema_for::<BoundingSolidParams>(), &["bodies", "body_name", "body_names", "margin", "name", "participants"]);
+    assert_keys(input_schema_for::<BoundingSolidParams>(), &["bodies", "body_name", "body_names", "keep_tools", "margin", "name", "participants"]);
     assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
@@ -96,6 +114,7 @@ fn schemas_and_the_key_check_agree() {
             "corner",
             "edges",
             "fit",
+            "keep_tools",
             "knots",
             "mid",
             "name",

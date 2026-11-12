@@ -149,6 +149,12 @@ pub struct PreviewState {
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     straight: crate::extrude_preview::StraightPreview,
+    /// Fillet and chamfer feedback without the kernel (`crate::blend_preview`).
+    blend: crate::blend_preview::BlendPreview,
+    /// The largest blend size the kernel says fits, from its refusal of this very setup
+    /// (the [`stream_key`] it was refused on, and the size in millimetres). The handle stops
+    /// there: the room measured off the mesh cannot see what a round must also fit round.
+    pub fit: Option<(u64, f64)>,
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
     pub rolled_back: bool,
@@ -172,6 +178,7 @@ impl PreviewState {
 
     fn clear(&mut self) {
         self.straight.clear();
+        self.blend.clear();
         self.moving.clear();
         self.detach();
         self.running_tool = false;
@@ -366,7 +373,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             }
         }
     }
-    Some(job_key(&setup, revision, colors))
+    Some(job_key(&setup, revision, colors, false))
 }
 
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
@@ -391,17 +398,38 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
-    let key = job_key(&cmds, app.session.revision, colors);
+    let quick = quick_blend(&cmds);
+    let key = job_key(&cmds, app.session.revision, colors, quick);
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
     let pv = &mut app.preview;
     pv.poll(key, stream_key);
+    // A blend too large for its faces is refused with the largest size that fits named in it.
+    // Keeping that size turns the refusal into a stop: the handle cannot be dragged past it,
+    // so the next drag asks for something the kernel builds instead of standing at a value
+    // that builds nothing. It belongs to the edges and the design, not to the size being
+    // dragged, so it is kept against the setup's own key and dropped when that changes.
+    match (pv.error.as_deref().and_then(solidcraft_engine::kernel::largest_fit), stream_key) {
+        (Some(size), Some(k)) => pv.fit = Some(match pv.fit {
+            Some((had, was)) if had == k => (k, was.min(size)),
+            _ => (k, size),
+        }),
+        _ if pv.fit.is_some_and(|(k, _)| Some(k) != stream_key) => pv.fit = None,
+        _ => {}
+    }
     if pv.running.is_none() && pv.shown_key != Some(key) {
         pv.started = crate::now_ms();
         pv.running_stream_key = stream_key;
         let mut straight = std::mem::take(&mut app.preview.straight);
         let mut job = straight.compute(app, &cmds, colors);
         app.preview.straight = straight;
+        // While the handle is moving, the blend is drawn from the geometry already on screen;
+        // the frame after it is let go, the key changes and the kernel draws the exact shape.
+        if job.is_none() && quick {
+            let mut blend = std::mem::take(&mut app.preview.blend);
+            job = blend.compute(app, &cmds, colors);
+            app.preview.blend = blend;
+        }
         if job.is_none() {
             let mut moving = std::mem::take(&mut app.preview.moving);
             job = moving.compute(app, &cmds, colors);
@@ -423,12 +451,26 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// What tells one preview computation from another: its commands, the document revision they
 /// run on and the colours.
-fn job_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> u64 {
+pub(crate) fn job_key(cmds: &[(String, Value)], revision: u64, colors: Colors, quick: bool) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     serde_json::to_string(cmds).unwrap_or_default().hash(&mut h);
     revision.hash(&mut h);
     format!("{colors:?}").hash(&mut h);
+    quick.hash(&mut h);
     h.finish()
+}
+
+/// Whether this frame may answer with `crate::blend_preview`'s quick picture instead of the
+/// kernel's exact one: a blend whose handle is being dragged right now.
+///
+/// The flag is last frame's, since the preview is brought up to date before the viewport draws
+/// again; that is what makes letting go of the handle change the key and ask the kernel. Only a
+/// blend reads it, so no other feature is recomputed when a drag ends.
+pub(crate) fn quick_blend(cmds: &[(String, Value)]) -> bool {
+    let blend = |id: &str| matches!(id, "solid.fillet" | "solid.chamfer");
+    let [(id, params)] = cmds else { return false };
+    let is_blend = blend(id) || (id == "timeline.redefine" && params.get("command").and_then(Value::as_str).is_some_and(blend));
+    is_blend && crate::tool_modifiers::manipulator_dragging()
 }
 
 /// Start computing the preview of `cmds`: for a tool feature (`tool`), only its tool.
@@ -487,7 +529,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
     }) {
         let preview = s.preview_visible_world(cmds).map_err(|error| error.to_string())?;
         return std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut built = build(&preview.before, &preview.after, colors);
+            let mut built = build(&preview.before, &preview.after, colors, None);
             built.bounds = state_bounds(&preview.after);
             built
         }))
@@ -507,11 +549,12 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let p = s.preview(cmds).map_err(|e| e.to_string())?;
             let guard =
                 |f: &dyn Fn() -> Built| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| "the preview failed".to_string());
-            let mut b = guard(&|| build(&p.before, &p.after, colors))?;
+            let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
+            let cut = cuts_a_body(cmds).then(features).and_then(|mut f| f.next()).map(|feature| Cut { feature });
+            let mut b = guard(&|| build(&p.before, &p.after, colors, cut))?;
             b.bounds = state_bounds(&p.after);
             // The radius a previewed fillet used when it reduced the one asked for (a new
             // fillet or an edited one: the feature the replies name).
-            let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
             Ok(b)
@@ -534,6 +577,13 @@ fn compute_tool(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
         .map_err(|_| "the preview failed".to_string())?;
     b.bounds = state_bounds(&tool.after);
     Ok(b)
+}
+
+/// Whether these commands cut a body in two (directly, or through a timeline redefine).
+fn cuts_a_body(cmds: &[(String, Value)]) -> bool {
+    cmds.iter().any(|(id, params)| {
+        id == "solid.cut_body" || (id == "timeline.redefine" && params.get("command").and_then(Value::as_str) == Some("solid.cut_body"))
+    })
 }
 
 fn extrusion_params<'a>(id: &str, params: &'a Value) -> Option<&'a Value> {
@@ -662,7 +712,18 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 
 /// The preview scene: changed and new bodies (new surface tinted) and, as a ghost, the old
 /// version of changed or removed bodies.
-pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
+/// A cut in progress: the feature whose faces are the cut itself.
+///
+/// A cut takes nothing away -- one body becomes two -- so neither half is new material and
+/// neither is drawn as one. What the preview has to show is where the cut runs, which is the
+/// pair of faces the cut feature made, one on each half. They are drawn in the cut colour and
+/// also through the solid, so the cut reads from whichever side the model is being looked at.
+#[derive(Clone, Copy, Debug)]
+pub struct Cut {
+    pub feature: u64,
+}
+
+pub fn build(before: &ModelState, after: &ModelState, c: Colors, cut: Option<Cut>) -> Built {
     let mut sc = GpuScene::default();
     let added_color = sc.color(c.added);
     let added_plane = sc.color([c.added[0], c.added[1], c.added[2], 64]);
@@ -696,13 +757,24 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
         // Material removed from a body (a hole, a pocket): its new faces also show through the
         // body in the cut colour, so the cut is seen from any side.
-        let cut = c.cut_tint && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        let removes = c.cut_tint && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        // The faces this cut made, by the name the cutting feature left on them.
+        let cut_faces: Vec<bool> = match cut {
+            Some(Cut { feature }) => {
+                let prefix = format!("F{feature}:");
+                let names = solidcraft_engine::doc::naming::face_names(a);
+                let n = am.tri_face.iter().max().map_or(0, |m| *m as usize + 1);
+                (0..n).map(|i| names.get(i).is_some_and(|x| x.starts_with(&prefix))).collect()
+            }
+            None => Vec::new(),
+        };
+        let is_cut_face = |f: usize| cut_faces.get(f).copied().unwrap_or(false);
         // Which of the body's faces the feature made, asked only when something is drawn from
         // the answer: the cut above, and the tint the preference offers. A changed body is
         // otherwise drawn as itself, so a preview looks like the model and nothing has to be
         // worked out face by face.
         let new_face: Vec<bool> = match &old {
-            Some(bm) if cut || c.tint_new => {
+            Some(bm) if removes || c.tint_new => {
                 let mut new = new_faces(&am, am.tri_face.iter().max().map_or(0, |m| *m as usize + 1), bm);
                 // The kernel recorded which faces the operation that made this body generated,
                 // i.e. has no face of an input under it. The two answers are taken together
@@ -724,8 +796,19 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         let kept = if old.is_some() { body_color } else { new_body };
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
             let new = new_face.get(*f as usize).copied().unwrap_or(false);
-            let col = if new && c.tint_new { added_color } else { kept };
-            let through = cut && new;
+            let on_cut = is_cut_face(*f as usize);
+            // A cut's halves keep the body colour: the far half is not new material, and the cut
+            // itself is what the colour is spent on.
+            let col = if on_cut {
+                removed
+            } else if cut.is_some() {
+                body_color
+            } else if new && c.tint_new {
+                added_color
+            } else {
+                kept
+            };
+            let through = (removes && new) || on_cut;
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (am.positions.get(i), am.normals.get(i)) {
@@ -1250,7 +1333,7 @@ mod tests {
                 }
             }
         }
-        let built = build(&before, &after, colors());
+        let built = build(&before, &after, colors(), None);
         assert_eq!(built.sketches.len(), 1);
         for preview in &built.sketches {
             assert_eq!(preview.curves, vec![0, 1]);
@@ -1322,13 +1405,27 @@ mod tests {
         let mut s = solidcraft_engine::Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         let p = s.preview(&[("solid.hole".to_string(), json!({"position": [20, 15, 20], "diameter": 5, "depth": 10}))]).unwrap();
-        let b = build(&p.before, &p.after, colors());
+        let b = build(&p.before, &p.after, colors(), None);
         // The hole's walls are drawn see-through in the cut colour (seen from any side).
         assert!(count(&b.scene, &b.scene.xray, 28, colors().removed) > 0);
         // A feature that only adds material shows no cut.
         let p = s.preview(&[("solid.box".to_string(), json!({"length": 10, "width": 10, "height": 30, "operation": "join"}))]).unwrap();
-        let b = build(&p.before, &p.after, colors());
+        let b = build(&p.before, &p.after, colors(), None);
         assert_eq!(count(&b.scene, &b.scene.xray, 28, colors().removed), 0);
+    }
+
+    /// A cut shows where it runs: the faces it makes are drawn in the cut colour, on the solid
+    /// and through it, and neither half is coloured as material the feature added.
+    #[test]
+    fn a_cut_shows_its_cut_faces_in_the_cut_colour() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let cmds = [("solid.cut_body".to_string(), json!({"body": "Body1", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}))];
+        let b = compute(&s, &cmds, colors()).expect("the cut previews");
+        assert!(count(&b.scene, &b.scene.tris, 28, colors().removed) > 0, "the cut faces take the cut colour");
+        assert!(count(&b.scene, &b.scene.xray, 28, colors().removed) > 0, "and show through the solid");
+        assert_eq!(count(&b.scene, &b.scene.tris, 28, colors().new_body), 0, "the far half is not new material");
+        assert_eq!(count(&b.scene, &b.scene.tris, 28, colors().added), 0, "and nothing was added");
     }
 
     /// Graphics' Show removed material in red, off: the cut and the ghost of the shape the
@@ -1340,10 +1437,10 @@ mod tests {
         let cmds = [("solid.hole".to_string(), json!({"position": [20, 15, 20], "diameter": 5, "depth": 10}))];
         let p = s.preview(&cmds).unwrap();
         let plain = colors();
-        let b = build(&p.before, &p.after, plain);
+        let b = build(&p.before, &p.after, plain, None);
         assert!(count(&b.scene, &b.scene.ghost, 28, plain.removed) > 0, "the replaced shape is ghosted while the tint is on");
         let quiet = Colors { cut_tint: false, ..plain };
-        let b = build(&p.before, &p.after, quiet);
+        let b = build(&p.before, &p.after, quiet, None);
         assert_eq!(count(&b.scene, &b.scene.xray, 28, quiet.removed), 0, "no see-through cut");
         assert_eq!(count(&b.scene, &b.scene.ghost, 28, quiet.removed), 0, "no ghost of the old shape");
         assert!(count(&b.scene, &b.scene.tris, 28, quiet.body) > 0, "the body is still drawn");

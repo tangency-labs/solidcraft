@@ -425,6 +425,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
     if shown.home {
         navigation_cube::home(app, ui, &painter, c, scale, active, t);
     }
+    // The Grid switch belongs to the viewport, not to the navigator's own shape, so it is here
+    // whichever navigator is drawn and whether or not Home is.
+    navigation_cube::grid(app, ui, &painter, c, scale, active, t);
 }
 
 #[cfg(test)]

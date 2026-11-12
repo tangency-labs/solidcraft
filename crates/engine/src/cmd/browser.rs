@@ -2042,7 +2042,7 @@ mod tests {
         let ok = |s: &Session| s.model.results.iter().all(|r| r.error.is_none());
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, -5], "body_name": "Top"}));
-        run(&mut s, "solid.split_body", json!({"body": "Top", "plane": "XY"}));
+        run(&mut s, "solid.cut_body", json!({"body": "Top", "plane": "XY"}));
         assert_eq!(names(&s), vec!["Top", "Top (1)"]);
         run(&mut s, "solid.move", json!({"bodies": ["Top (1)"], "translate": [0, 0, -5]}));
         run(&mut s, "body.rename", json!({"body": "Top", "name": "Upper"}));
@@ -2062,7 +2062,7 @@ mod tests {
         let ok = |s: &Session| s.model.results.iter().all(|r| r.error.is_none());
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, -5]}));
-        run(&mut s, "solid.split_body", json!({"body": "Body1", "plane": "XY"}));
+        run(&mut s, "solid.cut_body", json!({"body": "Body1", "plane": "XY"}));
         assert_eq!(names(&s), ["Body1", "Body1 (1)"]);
         run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [10, 0, -5], "operation": "new", "body_name": "Tab"}));
         run(&mut s, "solid.combine", json!({"target": "Tab", "tools": ["Body1 (1)"], "operation": "join"}));

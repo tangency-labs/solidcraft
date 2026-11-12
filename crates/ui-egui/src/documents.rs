@@ -273,6 +273,8 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     app.viewport.orbit_free = None;
     app.preview.reset();
     app.viewport.hover = None;
+    // The places the cursor had locked onto belong to the model being put away.
+    crate::model_snap::clear();
     crate::design_properties::close_object(app);
     crate::sketch_attachment_ui::clear(app);
     crate::agent_chat::leave_document(app);
@@ -507,26 +509,7 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 /// otherwise in a new tab. Whether it is shown (no tab left for it: the status says so).
 pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
     if active_is_blank(app) {
-        let rev = app.session.revision;
-        crate::browser::discard_reveals(app);
-        crate::semantic_content::leave_document(app);
-        crate::dialogs::cancel(app);
-        app.tool = None;
-        crate::design_properties::close_object(app);
-        crate::sketch_attachment_ui::clear(app);
-        app.session.replace_design(session);
-        reset_chat(app);
-        // The blank design's record of its links goes with it; the new one's start now.
-        app.docs.link_stamps.clear();
-        crate::history_folds::load(app);
-        crate::timeline_scope::reset(app);
-        crate::render_workspace::reset_document(app);
-        app.session.invalidate_view(rev);
-        app.cam = Camera::default();
-        app.fit_view();
-        // The linked designs that changed while it was closed are read again (#9739): last, as a
-        // read is taken up only by the design revision it started from.
-        crate::linked_source::update_changed(app);
+        replace_active(app, session);
         true
     } else if let Err(e) = open_tab(app, session) {
         app.set_status(e, true);
@@ -534,6 +517,31 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
     } else {
         true
     }
+}
+
+/// Put `session` in the active tab in place of the design that is there, which must be one
+/// that may be discarded: a blank design, or a tutorial's scratch design.
+pub fn replace_active(app: &mut SolveApp, session: Session) {
+    let rev = app.session.revision;
+    crate::browser::discard_reveals(app);
+    crate::semantic_content::leave_document(app);
+    crate::dialogs::cancel(app);
+    app.tool = None;
+    crate::design_properties::close_object(app);
+    crate::sketch_attachment_ui::clear(app);
+    app.session.replace_design(session);
+    reset_chat(app);
+    // The blank design's record of its links goes with it; the new one's start now.
+    app.docs.link_stamps.clear();
+    crate::history_folds::load(app);
+    crate::timeline_scope::reset(app);
+    crate::render_workspace::reset_document(app);
+    app.session.invalidate_view(rev);
+    app.cam = Camera::default();
+    app.fit_view();
+    // The linked designs that changed while it was closed are read again (#9739): last, as a
+    // read is taken up only by the design revision it started from.
+    crate::linked_source::update_changed(app);
 }
 
 /// The active design as its file holds it (`document.export`): what a host that keeps the files

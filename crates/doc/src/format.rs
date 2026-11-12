@@ -1935,6 +1935,8 @@ mod tests {
         document
             .add_feature(
                 FeatureKind::Box {
+                    axis: crate::z_axis(),
+                    x_axis: crate::x_axis(),
                     corner: ["0".into(), "0".into(), "0".into()],
                     length: "d1".into(),
                     width: "4".into(),
@@ -2200,6 +2202,8 @@ mod tests {
         let feature = d
             .add_feature(
                 crate::FeatureKind::Box {
+                    axis: crate::z_axis(),
+                    x_axis: crate::x_axis(),
                     corner: ["0".into(), "0".into(), "0".into()],
                     length: "width".into(),
                     width: "20".into(),
@@ -2323,6 +2327,8 @@ mod tests {
         for i in 0..5 {
             d.add_feature(
                 crate::FeatureKind::Box {
+                    axis: crate::z_axis(),
+                    x_axis: crate::x_axis(),
                     corner: ["0".into(), "0".into(), "0".into()],
                     length: "10".into(),
                     width: "10".into(),
@@ -2353,6 +2359,8 @@ mod tests {
         let id = d
             .add_feature(
                 crate::FeatureKind::Box {
+                    axis: crate::z_axis(),
+                    x_axis: crate::x_axis(),
                     corner: ["0".into(), "0".into(), "0".into()],
                     length: "10".into(),
                     width: "10".into(),

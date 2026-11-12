@@ -27,7 +27,7 @@ fillet_spline
 chamfer
   moves: edges[0][0], edges[0][1], edges[0][2]
 box
-  moves: corner[0], corner[1], corner[2]
+  moves: axis[0], axis[2], corner[0], corner[1], corner[2], x_axis[0], x_axis[1]
   placement: box.x, box.y, box.z
 cylinder
   moves: axis[0], axis[2], base[0], base[1], base[2]

@@ -3,6 +3,9 @@
 //! construction planes and axes, bodies (a Remove feature from here on in the timeline), occurrences and
 //! components, canvases, point clouds and joints. `dry_run` reports what would go and what would fail without
 //! changing anything, so the UI can ask first.
+//!
+//! A face a fillet or chamfer made is the exception among faces: deleting it takes the blend
+//! away rather than cutting a hole where it was. See [`blend_feature`].
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
@@ -22,6 +25,31 @@ fn sub(s: &mut Session, id: &str, p: Value) -> Result<Value> {
     let r = spec.run_nested(s, &p)?;
     s.refresh();
     Ok(r)
+}
+
+/// The fillet or chamfer that made the face at `point`, where one did.
+///
+/// A blend's own faces carry the feature that made them in their name (`F7:blend:<edge>`), so
+/// the face under the pointer is enough to find the fillet it belongs to.
+///
+/// This is what makes Delete on a rounded face take the rounding off. The alternative -- what
+/// every other face does -- is a Delete Face feature, which cuts the face out and heals the hole
+/// by running its neighbours together. On a blend that is the long way round to the same shape:
+/// it leaves the fillet in the history with a second feature undoing it, and it asks the kernel
+/// for a heal where simply not filleting would do. Taking the feature out is cheaper, leaves the
+/// history as though the blend had never been made, and is what someone pressing Delete on a
+/// round means.
+///
+/// A fillet that rounded several edges goes whole: it is one feature. The caller runs this under
+/// `dry_run` first and reports what would go, so that is on screen before anything happens.
+fn blend_feature(s: &Session, point: Vec3) -> Option<u64> {
+    use solidcraft_doc::persistent_name;
+    let name = solidcraft_doc::naming::face_names_at(&s.model.state(), std::slice::from_ref(&point)).into_iter().next()?;
+    if !persistent_name::is_blend(&name) {
+        return None;
+    }
+    let id = persistent_name::made_by(&name)?;
+    matches!(s.doc.feature(id)?.kind, FeatureKind::Fillet { .. } | FeatureKind::Chamfer { .. }).then_some(id)
 }
 
 fn keys(p: &Value, k: &str) -> Vec<String> {
@@ -112,9 +140,13 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 _ => skip(format!("no construction point named \"{name}\"")),
             },
             Sel::Body { name } => bodies.push(name.clone()),
-            Sel::Face { body, point, .. } => match faces.iter_mut().find(|(b, _)| b == body) {
-                Some((_, ps)) => ps.push(*point),
-                None => faces.push((body.clone(), vec![*point])),
+            // A face a blend made takes the blend away; any other face becomes a Delete Face.
+            Sel::Face { body, point, .. } => match blend_feature(s, *point) {
+                Some(id) => features.push(id),
+                None => match faces.iter_mut().find(|(b, _)| b == body) {
+                    Some((_, ps)) => ps.push(*point),
+                    None => faces.push((body.clone(), vec![*point])),
+                },
             },
             Sel::Edge { .. } | Sel::Vertex { .. } => skip("edges and vertices are deleted with their body or face".into()),
             // In the sketch being edited, a profile stands for the curves around it (#7107);
@@ -640,5 +672,73 @@ mod tests {
 
     fn curves(s: &Session, sk: u64) -> Vec<String> {
         s.model.state().sketch(sk).unwrap().sketch.curves.iter().map(|c| c.id.clone()).collect()
+    }
+}
+
+/// Delete on a fillet's or a chamfer's own face takes the blend off, rather than cutting the
+/// face out and healing the hole.
+#[cfg(test)]
+mod blend_tests {
+    use serde_json::{Value, json};
+
+    use crate::Session;
+
+    fn run(s: &mut Session, id: &str, p: Value) -> Value {
+        match s.execute(id, &p) {
+            Ok(v) => v,
+            Err(e) => panic!("{id} {p}: {e}"),
+        }
+    }
+
+    fn volume(s: &Session) -> f64 {
+        s.model.state().bodies.iter().filter_map(|b| solidcraft_kernel::measure(&b.body).ok()).map(|m| m.volume).sum()
+    }
+
+    fn kinds(s: &Session) -> Vec<String> {
+        s.doc.features.iter().map(|f| format!("{:?}", f.kind).split_whitespace().next().unwrap_or_default().to_string()).collect()
+    }
+
+    /// A 40 mm box with one vertical edge rounded, and the point on the round to pick it by.
+    fn rounded() -> (Session, [f64; 3]) {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 40, "body_name": "B"}));
+        // The edge where +x meets +y, taken at its middle.
+        run(&mut s, "solid.fillet", json!({"edges": [[40, 40, 20]], "radius": 6}));
+        // The round's own face sits just inside that corner, level with the edge it replaced.
+        let r = 6.0f64;
+        let d = 40.0 - r + r / 2.0f64.sqrt();
+        (s, [d, d, 20.0])
+    }
+
+    #[test]
+    fn deleting_a_fillets_face_takes_the_fillet_off_rather_than_cutting_a_hole() {
+        let (mut s, on_the_round) = rounded();
+        let filleted = volume(&s);
+        let box_volume = 40.0 * 40.0 * 40.0;
+        assert!(filleted < box_volume, "the fillet should have taken material off: {filleted} of {box_volume}");
+        assert_eq!(kinds(&s), vec!["Box", "Fillet"], "the part is a box and a fillet");
+
+        let item = json!({"type": "face", "body": "B", "index": 0, "point": on_the_round});
+        let report = run(&mut s, "selection.delete", json!({"items": [item], "dry_run": true}));
+        assert!(report["deleted"].as_array().is_some_and(|a| !a.is_empty()), "the dry run should say the fillet goes: {report}");
+
+        run(&mut s, "selection.delete", json!({"items": [item]}));
+        // The fillet is gone from the history -- not undone by a second feature on top of it.
+        assert_eq!(kinds(&s), vec!["Box"], "only the box should be left");
+        // And the part is the box it was before the fillet, to the last digit.
+        assert!((volume(&s) - box_volume).abs() < 1e-6, "the box came back as {} of {box_volume}", volume(&s));
+    }
+
+    /// A face no blend made is untouched by this: it is still a Delete Face, which on a box's
+    /// flat side is refused because nothing can close the gap. Either way the history keeps its
+    /// features -- only a blend's own face takes one away.
+    #[test]
+    fn deleting_a_plain_face_takes_no_feature_away() {
+        let (mut s, _) = rounded();
+        let before = kinds(&s);
+        let flat = json!({"type": "face", "body": "B", "index": 0, "point": [20, 0, 20]});
+        // Refused or not, what must not happen is the fillet (or the box) quietly going.
+        let _ = s.execute("selection.delete", &json!({"items": [flat]}));
+        assert_eq!(kinds(&s), before, "a flat face must not remove a feature");
     }
 }

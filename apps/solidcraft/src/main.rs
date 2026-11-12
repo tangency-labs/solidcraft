@@ -820,6 +820,9 @@ fn graphics() -> Option<serde_json::Value> {
 fn restore_preferences(app: &mut SolveApp, stored_ui: Option<&str>, saved_graphics: Option<&serde_json::Value>, safe_mode: bool) {
     if let Some(p) = stored_ui.filter(|_| !safe_mode) {
         app.load_prefs(p);
+    } else if !safe_mode {
+        // First run: start with Plasticity's controls (Preferences > Navigation switches back).
+        solidcraft_ui_egui::plasticity::apply(app, solidcraft_ui_egui::plasticity::SCHEME_PLASTICITY);
     }
     // Even safe mode edits the real graphics.json. Keep its choices in Preferences so an
     // anti-aliasing change cannot erase them; safe mode's renderer still uses its own defaults.

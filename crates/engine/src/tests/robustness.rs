@@ -444,3 +444,79 @@ fn chamfer_of_a_concave_edge_adds_material() {
     let r = fuzz::run(7100465, 8);
     assert!(r.outcome.kind != "volume", "seed 7100465: {:?}\n{}", r.outcome, r.script());
 }
+
+/// Seed 86, cut down to the four commands that matter: a hole drilled down a joined cylinder,
+/// then patterned. A drill tip is three cone faces meeting at their apex, and there the cone's
+/// parameter around the circle is free -- every value of it names the apex -- so a mesher that
+/// reads it off a projection of the apex can lay a sector's boundary out across its neighbours.
+/// On truck that left the tip's triangles overlapping, the body short of closing, and a boolean
+/// (which measured its own result from that mesh) threw the patterned cut away while reporting
+/// success: the part came out with its second hole missing. This base measures on the exact
+/// surfaces instead, so what is checked here is the outcome -- the copy removes the material it
+/// should.
+#[test]
+fn a_drill_tip_meshes_inside_its_own_faces() {
+    let drilled = |pattern: bool| {
+        let mut steps = vec![
+            json!({"command": "solid.box", "params": {"length": 35, "width": 12.5, "height": 27.5}}),
+            json!({"command": "solid.cylinder", "params": {"axis": [0, 1, 0], "base": [7.5, -1.5625, 0], "height": 22.5, "operation": "join", "radius": 6.25}}),
+            json!({"command": "solid.hole", "params": {"depth": 20.0, "diameter": 5.0, "position": [7.5, -1.5625, 0], "type": "drilled"}}),
+        ];
+        if pattern {
+            steps.push(
+                json!({"command": "solid.pattern.rectangular", "params": {"count1": 2, "dir1": [1, 0, 0], "features": ["Hole1"], "spacing1": 15.0}}),
+            );
+        }
+        script(Value::Array(steps))
+    };
+    let total_volume = |s: &Session| {
+        s.model.state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).map(|m| m.volume).unwrap_or(0.0)).sum::<f64>()
+    };
+    let one = total_volume(&drilled(false));
+    let two = total_volume(&drilled(true));
+    // The copy lands on the plate's own side face, so it takes half of a hole right through
+    // the plate's 12.5 mm: the tip leaves the material and no cone of it stays behind.
+    let want = PI * 2.5 * 2.5 * 12.5 / 2.0;
+    assert!((one - two - want).abs() < 1e-3 * want, "the copy took {}, expected {want}", one - two);
+}
+
+/// Robustness seed 14's part: a plate whose left side is a half round, drilled across by a bore
+/// whose end runs out tangent to that round, then shelled 2 mm with its flat end open. On truck
+/// the shell's cavity was built by moving 16 sampled points of each curved edge onto the moved
+/// faces, which folds onto the far branch past a tangency, so the shelled body's edges lay up to
+/// 1.585 mm off the faces they bounded. Faces that do not share an edge cannot meet along it, so
+/// the body tessellated with a hole that did not close as the mesh was refined: 11.96 mm2 open at
+/// a chord tolerance of 1e-2 and still 11.71 mm2 at 1e-4. `validity()` called the body sound
+/// throughout, so the mesh is what tells.
+///
+/// Refusing is the other acceptable answer, as long as the refusal says it is a limitation.
+#[test]
+fn a_shelled_body_meets_itself_along_its_own_edges() {
+    use solidcraft_geom::prelude::*;
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY"})),
+        ("sketch.line", json!({"points": [[0, 0], [42.5, 0], [42.5, 20.0], [0, 20.0]]})),
+        // The half round the bore runs out tangent to, back from (0, 20) to (0, 0).
+        ("sketch.arc.three_point", json!({"start": [0, 20.0], "through": [-10.0, 10.0], "end": [0, 0]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 27.5})),
+        ("solid.cylinder", json!({"base": [-10.0, 12.5, 12.5], "axis": "X", "radius": 5.0, "height": 17.5, "operation": "cut"})),
+    ] {
+        s.execute(command, &params).unwrap_or_else(|e| panic!("{command} {params}: {e}"));
+    }
+    let drilled = s.model.state().bodies.first().map(|b| b.mesh().measure()).unwrap_or_else(|| panic!("no body"));
+    assert!(drilled.is_closed(), "the drilled plate closes before it is shelled: {:.4} mm2 of {:.1} open", drilled.vector_area.len(), drilled.area);
+    // The face to open: the middle of the flat end at x = 42.5.
+    match s.execute("solid.shell", &json!({"faces": [[42.5, 10.0, 13.75]], "thickness": 2.0})) {
+        Ok(_) => {
+            for b in &s.model.state().bodies {
+                let bad = b.body.validity();
+                assert!(bad.is_empty(), "{}: {bad:?}", b.name);
+                let m = b.mesh().measure();
+                assert!(m.is_closed(), "{} leaves {:.4} mm2 of its {:.1} mm2 open", b.name, m.vector_area.len(), m.area);
+            }
+        }
+        Err(e) => assert!(e.to_string().contains("not supported yet"), "the shell failed without saying it is a limitation: {e}"),
+    }
+}

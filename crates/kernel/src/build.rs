@@ -235,15 +235,27 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
 pub fn box_solid(a: Vec3, b: Vec3) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "box_solid");
     let (lo, hi) = (a.min(b), a.max(b));
-    let s = hi - lo;
+    box_on(&Plane::XY, Vec2::new(lo.x, lo.y), Vec2::new(hi.x, hi.y), lo.z, hi.z)
+}
+
+/// A box standing on `plane`: the rectangle from `lo` to `hi` in the plane's own coordinates,
+/// between `z0` and `z1` along its normal. The axis-aligned box above is this one on `Plane::XY`,
+/// and a box drawn on the face of a body is this one on that face's plane, so its sides and caps
+/// are certified against the frame it was made in rather than against the world.
+pub fn box_on(plane: &Plane, lo: Vec2, hi: Vec2, z0: f64, z1: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "box_on");
+    let (lo, hi) = (Vec2::new(lo.x.min(hi.x), lo.y.min(hi.y)), Vec2::new(lo.x.max(hi.x), lo.y.max(hi.y)));
+    let (z0, z1) = (z0.min(z1), z0.max(z1));
+    let s = Vec3::new(hi.x - lo.x, hi.y - lo.y, z1 - z0);
     if !(s.x > 1e-6 && s.y > 1e-6 && s.z > 1e-6 && s.is_finite() && s.len() < 1e7) {
         return Err(KernelError::Invalid("box needs a positive size in x, y and z".into()));
     }
+    let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("box plane".into()))?;
     let r = Region2 {
         outer: Loop2::polygon(&[Vec2::new(lo.x, lo.y), Vec2::new(hi.x, lo.y), Vec2::new(hi.x, hi.y), Vec2::new(lo.x, hi.y)]),
         holes: vec![],
     };
-    let mut v = extrude(&Plane::XY, &[r], lo.z, hi.z)?;
+    let mut v = extrude(plane, &[r], z0, z1)?;
     let body = v.pop().ok_or_else(|| KernelError::Failed("box".into()))?;
     let sources = body.face_sources().ok_or_else(|| KernelError::Failed("box construction source".into()))?;
     let mut roles = std::collections::HashSet::new();
@@ -263,10 +275,12 @@ pub fn box_solid(a: Vec3, b: Vec3) -> Result<Body> {
         }
         let (axis, high) = role;
         let sign = if high { 1. } else { -1. };
+        // In the frame the box was made in: x and y are the plane's own directions and z its
+        // normal, so a box standing on a face certifies its sides against that face.
         let plane = match axis {
-            0 => Plane { origin: Vec3::X * if high { hi.x } else { lo.x }, x: Vec3::Y, y: Vec3::Z * sign },
-            1 => Plane { origin: Vec3::Y * if high { hi.y } else { lo.y }, x: Vec3::X, y: -Vec3::Z * sign },
-            _ => Plane { origin: Vec3::Z * if high { hi.z } else { lo.z }, x: Vec3::X, y: Vec3::Y * sign },
+            0 => Plane { origin: plane.to_world(Vec2::new(if high { hi.x } else { lo.x }, 0.0)), x: plane.y, y: n * sign },
+            1 => Plane { origin: plane.to_world(Vec2::new(0.0, if high { hi.y } else { lo.y })), x: plane.x, y: -n * sign },
+            _ => Plane { origin: plane.origin + n * if high { z1 } else { z0 }, x: plane.x, y: plane.y * sign },
         };
         certified.push(Some(crate::FaceSource::Box { producer: None, axis, high, plane }));
     }

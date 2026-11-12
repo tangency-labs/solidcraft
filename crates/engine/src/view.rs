@@ -187,6 +187,13 @@ impl GridPlane {
     }
 }
 
+/// How square on to the grid's own plane a view must be for the grid to be drawn over the model
+/// as well as under it: about two degrees, which is a view straight down X, Y or Z and nothing
+/// else. Seen that way the grid fills the view and the model stands in the middle of it, over the
+/// very lines a part is lined up and measured against; at any other angle the grid stays under
+/// the model, which is what tells the eye the model sits on it.
+pub const GRID_FACE_ON: f64 = 0.9994;
+
 /// The plane to draw the grid on for a view whose direction toward the eye is `back` (in the
 /// camera's Z-up frame), given the plane the last frame drew (`last`).
 ///
@@ -836,7 +843,9 @@ fn build_scene(
                             color: col,
                             alpha: alpha * line.weight * share,
                             width,
-                            on_top: false,
+                            // Square on to its plane the grid goes over the model, as the window
+                            // draws it there: the picture and the window draw the same grid.
+                            on_top: slant.abs() >= GRID_FACE_ON,
                         });
                     }
                 }

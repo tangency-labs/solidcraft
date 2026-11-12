@@ -3,6 +3,8 @@
 //! lines up horizontally or vertically with other points (a dashed guide). Letting go on a point,
 //! a midpoint or a curve adds the matching constraint; lining up adds none. The suppress-snap
 //! chord is configurable (default Ctrl/Cmd or Alt/Option; see `prefs::suppress_sketch_snap`).
+//! Under Plasticity's controls that is turned round: the chord asks for the snap rather than
+//! taking it away, so nothing snaps until it is held (`prefs::snapping_on`).
 
 use solidcraft_engine::geom::prelude::*;
 use std::cell::{Cell, RefCell};

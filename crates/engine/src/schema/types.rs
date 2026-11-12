@@ -429,6 +429,7 @@ const OPERATIONS: &[&str] = &[
     "join",
     "cut",
     "intersect",
+    "slice",
     "new_body",
     "newbody",
     "new_component",
@@ -437,6 +438,7 @@ const OPERATIONS: &[&str] = &[
     "add",
     "subtract",
     "difference",
+    "divide",
     "intersection",
 ];
 
@@ -457,7 +459,7 @@ fn string_matching<'de, D: Deserializer<'de>>(
 
 /// `features::operation`'s message for an operation it doesn't know.
 fn unknown_operation(s: &str) -> String {
-    whole(format!("unknown operation `{s}` (new, join, cut, intersect)"))
+    whole(format!("unknown operation `{s}` (new, join, cut, intersect, slice)"))
 }
 
 fn enum_schema(values: &[&str], description: &str) -> Schema {
@@ -530,8 +532,8 @@ pub struct OperationParam(pub Operation);
 
 impl<'de> Deserialize<'de> for OperationParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = string_matching(d, |s| Operation::parse(s).is_some(), "new, join, cut or intersect", unknown_operation)?;
-        Operation::parse(&s).map(OperationParam).ok_or_else(|| D::Error::custom("must be one of new, join, cut or intersect"))
+        let s = string_matching(d, |s| Operation::parse(s).is_some(), "new, join, cut, intersect or slice", unknown_operation)?;
+        Operation::parse(&s).map(OperationParam).ok_or_else(|| D::Error::custom("must be one of new, join, cut, intersect or slice"))
     }
 }
 
@@ -542,7 +544,7 @@ impl JsonSchema for OperationParam {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         enum_schema(
             OPERATIONS,
-            "How the feature combines with existing bodies: new, join, cut or intersect. The others are aliases. Matching ignores case, spaces, '_' and '-'.",
+            "How the feature combines with existing bodies: new, join, cut, intersect or slice. The others are aliases. Matching ignores case, spaces, '_' and '-'.",
         )
     }
 }
@@ -1274,6 +1276,11 @@ pub struct FeatureCommon {
     /// feature.
     #[serde(default)]
     pub participants: Option<StringList>,
+    /// Keep the shape the feature is built from as a body of its own as well, beside what it did
+    /// to the bodies it worked on. Nothing to a new-body operation, which leaves that shape
+    /// anyway. Combine keeps its own tools through its own `keep_tools`.
+    #[serde(default)]
+    pub keep_tools: Option<bool>,
 }
 
 /// Deserializes a flattened [`FeatureCommon`] (or [`ConstructionCommon`], [`PlaneCommon`]) from

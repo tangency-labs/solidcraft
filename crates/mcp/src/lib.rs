@@ -10,13 +10,14 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+mod freecad;
 mod options;
 mod server;
 mod skill_reference;
 mod tools;
 
 pub use backend::{Auto, Backend, Headless, Remote};
-pub use options::{COMPACT_ENV, COMPACT_FLAG, Options};
+pub use options::{COMPACT_ENV, COMPACT_FLAG, FREECAD_ENV, FREECAD_FLAG, Options};
 pub use server::{PROTOCOL_VERSION, SUPPORTED_VERSIONS, Server};
 pub use tools::{call_tool, call_tool_with, tool_definitions, tool_definitions_with};
 

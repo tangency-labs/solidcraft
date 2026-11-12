@@ -10,6 +10,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         opening(app, ui);
         marks(app, ui);
         selecting(app, ui);
+        snap(app, ui);
     });
 }
 
@@ -349,9 +350,17 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
             let cards = ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
                 let width = (t.space_24 * 6.0 + t.space_6).min(ui.max_rect().width());
-                for (bodies, key, label, figure) in [
-                    (false, "faces_edges", "prefs.sketch.faces_edges", ui_kit::paint_select_faces_edges as fn(&egui::Painter, egui::Rect)),
-                    (true, "bodies", "prefs.sketch.whole_bodies", ui_kit::paint_select_bodies),
+                // Which card is chosen decides what a plain click picks; Alt is the momentary
+                // other way round, and the cards are where that can be read.
+                for (bodies, key, label, help, figure) in [
+                    (
+                        false,
+                        "faces_edges",
+                        "prefs.sketch.faces_edges",
+                        "prefs.sketch.faces_edges_help",
+                        ui_kit::paint_select_faces_edges as fn(&egui::Painter, egui::Rect),
+                    ),
+                    (true, "bodies", "prefs.sketch.whole_bodies", "prefs.sketch.whole_bodies_help", ui_kit::paint_select_bodies),
                 ] {
                     let response = ui_kit::picture_card(
                         ui,
@@ -366,7 +375,8 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                             figure: &figure,
                         },
                         width,
-                    );
+                    )
+                    .backing_on_hover_text(app.tr(help));
                     crate::scenario::publish_target(&format!("prefs:pick_bodies:{key}"), response.rect);
                     if bodies {
                         crate::scenario::publish_target("prefs:pick_bodies", response.rect);
@@ -449,6 +459,26 @@ fn picture_group(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)
     if let Some(gate) = &gate {
         crate::prefs_search::block_finish(ui, gate, show, before);
     }
+}
+
+/// Which places a pick locks onto on the model (`crate::model_snap`).
+fn snap(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui_kit::settings_section(ui, "snap_kinds", app.tr("prefs.snap.heading"), |ui| {
+        ui_kit::text(ui, app.tr("prefs.snap.note"), ui_kit::Text::Note("snap_kinds"));
+        for (kind, label) in crate::prefs::SNAP_KIND_SETTINGS {
+            let mut on = crate::prefs::snap_kind_on(&app.preferences, kind);
+            let response = check(ui, &format!("snap_{}", kind.id()), label, None, &mut on);
+            if response.changed() {
+                if on {
+                    app.preferences.snap_kinds_off.remove(kind.id());
+                } else {
+                    app.preferences.snap_kinds_off.insert(kind.id().to_string());
+                }
+            }
+            crate::scenario::publish_rect(&format!("prefs:snap:{}", kind.id()), response.rect);
+        }
+        ui_kit::text(ui, app.tr("prefs.snap.all_off"), ui_kit::Text::Note("snap_kinds_off"));
+    });
 }
 
 fn check_width(ui: &egui::Ui, label: &str, help: bool) -> f32 {

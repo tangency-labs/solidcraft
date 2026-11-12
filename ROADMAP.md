@@ -27,6 +27,58 @@ scripts and AI agents can drive the same commands you use.
 The full list of commands is in [docs/features.md](docs/features.md). Release notes for each
 version are on the [releases page](https://github.com/tangency-labs/solidcraft/releases).
 
+## On this branch: Plasticity-style modelling
+
+This branch (`plasticity-0.40`) carries work that is not in a release and not an upstream
+milestone: the modelling habits of Plasticity, brought onto SolidCraft's own commands, plus
+physics analysis. It is rebuilt on the solidcore kernel, so each piece below was ported rather
+than merged, and the kernel patches the earlier branch carried were dropped and retested.
+
+Built and tested here:
+
+- **Slice**, the fourth boolean: a cut that keeps the halves it takes out. Every feature that
+  goes through the boolean also gains **Keep tools**, so the shape a feature is built from can
+  stay a body of its own.
+- **Combine takes several targets**, so one tool cuts a whole row of parts in one feature.
+- **Arrays read their number either way**: a rectangular array by the step between copies or by
+  the span from the first to the last, a circular one by the whole turn or by the angle between.
+- **A box stands on the face it is drawn on**, carrying the frame it was made in rather than
+  being square to the world.
+- **Snapping to model geometry**: the places a design already has, offered to every tool that
+  takes a point.
+- **Plasticity files open as mesh bodies**, welded from the per-corner normals the format keeps
+  and subdivided where those normals say the surface curves.
+- **Analysis studies**: heat, air flow and stress, solved on a lattice over the design and saved
+  with it. Verified against closed forms, CalculiX and an independent cavity solver; what each
+  number is worth, and where it is not, is written down in `docs/analysis-verification.md`.
+- **Delete on a round takes the round off**, instead of cutting the face out and healing the hole.
+- **FreeCAD's AI Bridge tools**, served by SolidCraft's own MCP server (`--freecad`).
+- **A Plasticity control scheme**: Plasticity's keys, its selection modes and its mouse, under
+  Preferences › Navigation › Control scheme. Where both products answer a gesture, the scheme
+  decides which answer you get.
+- **Primitives are drawn in the viewport**: a box or a cylinder is dragged out on the face or
+  plane you start on, not dropped at the origin.
+- **A pick is already the command** (Plasticity's controls): clicking a face or an edge opens the
+  one that shapes it, standing at nothing, with its handle to drag and its number to type. A
+  plain pick on a round's edges replaces, Shift adds, and a size typed straight after the pick
+  goes into it.
+- **The one pin**: it stops where the edges around it leave room, steps by a hundredth of a
+  millimetre at any working zoom, keeps growing when a drag turns a round into a chamfer, and
+  shares the view with nothing else -- the taper handle waits until there is a taper.
+- **Alt takes the whole object** under the cursor, and **Ctrl lands a moved body or occurrence**
+  on the place under it.
+- **Pushing a face says what its walls do**: they follow the face or stay where they are.
+- **A key strip** in the viewport's corner names the gestures the command in hand answers to.
+- **Tutorial mode**: a lesson for each of the 295 commands the ribbon shows, acted out on a
+  sample model with a pointer and keycaps, and read aloud -- by a bundled neural voice that runs
+  offline, with the operating system's own voice behind it, and the demo paced to whichever is
+  speaking.
+
+The earlier branch is fully ported. The neural voice is the weightiest thing here: 96 MB of
+model and dictionary under `assets/tts/`, a git dependency outside the project's organisation,
+a release-candidate ONNX Runtime binding and an audio stack. Narration works without it through
+the system voice, so the commit that bundles it can be reverted on its own.
+
 ## In progress now
 
 Each feature below is a [milestone](https://github.com/tangency-labs/solidcraft/milestones) holding

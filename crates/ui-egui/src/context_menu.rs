@@ -1580,11 +1580,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.showAll" => {
             // One command and so one undo step: everything shown, folders and placements included.
             let _ = app.run("browser.visibility", json!({ "folder": "all", "visible": true }));
+            app.hidden_before_isolate = None;
         }
         "ui.isolate" => {
             // The picked bodies stay (shown if they were hidden) and everything else goes, other
             // components as components (#7896), in one step.
             if !bodies.is_empty() {
+                // Remembered here too, so the isolate key comes back out of a menu isolate.
+                app.hidden_before_isolate = Some(app.session.visibility.hidden_bodies.clone());
                 let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true, "isolate": true }));
             }
         }

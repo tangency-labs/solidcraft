@@ -175,7 +175,9 @@ impl Tokens {
             construction_geom: icon_primary(crate::icon_svg::CONSTRUCTION_PRIMARY[0]),
             body: Color32::from_rgb(176, 186, 198),
             body_edge: Color32::from_rgb(40, 44, 52),
-            manipulator: Color32::from_rgb(40, 110, 220),
+            // Green, not the interface blue: the handle stands on the very faces and edges the
+            // selection has just turned blue, and there it has to be the first thing the eye finds.
+            manipulator: Color32::from_rgb(46, 190, 102),
             joint_manipulator: Color32::from_rgb(235, 157, 0),
             joint_axis: Color32::from_rgb(0, 95, 110),
             preview_add: Color32::from_rgb(112, 160, 226),

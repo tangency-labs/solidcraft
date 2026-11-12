@@ -49,6 +49,7 @@ pub use file::open_steps::OpenSteps;
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
 pub use parts::part_length_label;
+pub use sim::studies_status;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
 pub use sketch_construction::{
@@ -92,6 +93,7 @@ mod kernel_heal_tests;
 mod panels;
 mod parameter_sweep;
 mod parameters;
+mod model_snap;
 mod plastic;
 mod print_face;
 mod render;
@@ -106,6 +108,7 @@ pub(crate) use sheet::{
     sheet_rule_name, then_list,
 };
 mod silhouette;
+mod sim;
 mod sketch;
 pub(crate) use sketch::author_path_for_rebind;
 pub(crate) use sketch::collapse_reason;
@@ -374,12 +377,27 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
+    v.extend(sim::COMMANDS.iter());
+    v.extend(model_snap::COMMANDS.iter());
     v
 }
 
+/// Commands that were renamed, old id first. The old id goes on working everywhere a command
+/// is named -- scripts, recipes, the CLI, MCP, the control channel -- so designs and automation
+/// written against it keep running; only the new id is registered, listed and documented.
+pub const RENAMED: &[(&str, &str)] = &[
+    // Split Body became Cut, the name Plasticity gives the same operation.
+    ("solid.split_body", "solid.cut_body"),
+];
+
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
     let all = command_specs();
-    all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
+    let found = all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied();
+    if found.is_some() {
+        return found;
+    }
+    let now = RENAMED.iter().find(|(was, _)| was.eq_ignore_ascii_case(id))?.1;
+    all.iter().find(|c| c.id == now).copied()
 }
 
 /// The end of an unknown command's error: up to three ids like `id`, nearest first. Ids a few

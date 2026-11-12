@@ -51,7 +51,7 @@ use solidcraft_doc::{Document, Model, ModelState};
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
     Addition, CommandInfo, CommandSpec, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command,
-    resolve_design_links, shown_scope, standard_view,
+    resolve_design_links, shown_scope, standard_view, studies_status,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -592,6 +592,10 @@ pub struct Session {
     pub colored_components: Option<()>,
     /// Surface analysis shading the model (zebra, draft, curvature map).
     pub analysis: Option<SurfaceAnalysis>,
+    /// What the last analysis found, for the viewport to draw (`sim.*`). Read-only state; the
+    /// design is untouched, and it carries the revision it was worked out at so a stale field
+    /// is not drawn over a model that has changed.
+    pub analysis_result: Option<AnalysisResult>,
     /// The seams `inspect.continuity` last measured, for the viewport to shade. View state: not
     /// part of the design and not an undo step.
     pub continuity: Vec<ContinuitySeam>,
@@ -677,6 +681,660 @@ pub enum SurfaceAnalysis {
     /// Green where a tool coming along `dir` reaches the face (facing it, nothing above), red
     /// elsewhere.
     Access { dir: Vec3 },
+}
+
+/// What an analysis found, laid out for the viewport to draw. View state only: the design is
+/// untouched, and the numbers are read-only.
+///
+/// The engine carries the values and the geometry; the colours belong to the UI, which has the
+/// theme. [`AnalysisField::low_is_cool`] is what tells it which end of the scale is the bad one
+/// -- high is bad for a temperature or a stress, low is bad for a safety factor.
+///
+/// A run works out several fields and keeps them all, on the lattice it solved on, so the answer
+/// can be looked at a second way without being worked out a second time: another quantity
+/// shaded, the scale narrowed, a plane cut through the part, a point probed.
+/// [`AnalysisResult::redraw`] turns the fields and the [`AnalysisView`] into the squares, arrows
+/// and lines the viewport draws; everything under "what is drawn" below is worked out from them
+/// and is not to be set by hand.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct AnalysisResult {
+    /// The study that produced it, for the legend's second line.
+    pub about: String,
+    /// Every field the run worked out, in the order it produces them. Never empty.
+    pub fields: Vec<AnalysisField>,
+    /// Every square of the lattice's surface: where it is, which way it faces, how big it is.
+    /// Each field's `surface` values are in this order.
+    pub skin: Vec<AnalysisFace>,
+    /// The lattice the fields were worked out on, so a plane can be cut through them and a point
+    /// probed. `None` when the lattice was too big to keep.
+    pub lattice: Option<AnalysisLattice>,
+    /// The bodies the study ran on, in the order the lattice numbers its parts, so a square of
+    /// surface can say which body it is on by name.
+    pub bodies: Vec<String>,
+    /// Which way the flow goes, or the part moves, in each cell: one vector per cell of the
+    /// lattice, zero where the run worked none out. Arrows and streamlines follow it.
+    ///
+    /// Not serialised: it is as big as the lattice, and a reply carrying a megabyte of numbers
+    /// nobody asked for is worse than one that leaves them where they are.
+    #[serde(skip_serializing)]
+    pub vectors: Vec<[f32; 3]>,
+    /// What the vectors are, for a label: "Velocity", "Displacement".
+    pub vector_quantity: String,
+    pub vector_unit: String,
+    /// How the result is being looked at (`sim.result.show`).
+    pub view: AnalysisView,
+    /// The session revision this was worked out at. The viewport does not draw a result whose
+    /// model has moved on, because a field drawn over geometry it was not computed for is worse
+    /// than no field at all.
+    pub revision: u64,
+
+    // What is drawn: worked out by `redraw` from the fields above and the view.
+    /// What the shown numbers are, for the legend: "Temperature", "Von Mises stress".
+    pub quantity: String,
+    /// The unit they are in: degrees, megapascals.
+    pub unit: String,
+    /// The range the colours are stretched over.
+    pub low: f64,
+    pub high: f64,
+    /// True when a low number is the comfortable one.
+    pub low_is_cool: bool,
+    /// Squares of the analysis lattice, on the model's surface and on any cut through it.
+    pub patches: Vec<AnalysisPatch>,
+    /// Arrows in the air around it.
+    pub arrows: Vec<AnalysisArrow>,
+    /// Streamlines through the flow, each a chain of points.
+    pub lines: Vec<AnalysisLine>,
+    /// Points someone asked the value at (`sim.result.probe`), for the viewport to mark.
+    pub probes: Vec<AnalysisProbe>,
+    /// The worst place, which the viewport marks.
+    pub worst: Option<Vec3>,
+}
+
+/// One quantity a run worked out: a number in each cell of the lattice, and a number on each
+/// square of its surface.
+///
+/// The two are kept apart because they are not the same measurement. A conduction study solves
+/// for the temperature of each cell and works out the temperature of each wall from the
+/// conditions on it; a flow study reads the pressure on the model from the air outside the wall,
+/// not from the solid cell behind it, which holds no air at all and would read as a vacuum. The
+/// surface is what shades the model; the cells are what a cut through it shows.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct AnalysisField {
+    /// What the numbers are: "Temperature", "Speed", "Safety factor".
+    pub quantity: String,
+    /// The unit they are in.
+    pub unit: String,
+    /// True when a low number is the comfortable one.
+    pub low_is_cool: bool,
+    /// The value in each cell of the lattice, NaN where this field has none there. Empty when
+    /// the lattice was too big to keep, and then nothing can be cut through it.
+    ///
+    /// Not serialised: as big as the lattice (see [`AnalysisResult::vectors`]).
+    #[serde(skip_serializing)]
+    pub cells: Vec<f32>,
+    /// The value on each square of the surface, in [`AnalysisResult::skin`] order.
+    #[serde(skip_serializing)]
+    pub surface: Vec<f32>,
+    /// The worst place in it, which the viewport marks while it is the one shown.
+    pub worst: Option<Vec3>,
+}
+
+impl AnalysisField {
+    /// The lowest and highest the field goes, over the surface and the inside together.
+    ///
+    /// Both, so that cutting into the part does not move the scale under the picture: the inside
+    /// of a wall is cooler than its hot face, and a scale that restretched itself to whatever
+    /// happened to be on screen would make two views of one answer impossible to compare.
+    pub fn extremes(&self) -> Option<(f64, f64)> {
+        let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+        for v in self.surface.iter().chain(&self.cells) {
+            let v = f64::from(*v);
+            if v.is_finite() {
+                low = low.min(v);
+                high = high.max(v);
+            }
+        }
+        (low.is_finite() && high.is_finite()).then_some((low, high))
+    }
+}
+
+/// Where a square of the lattice's surface is, which way it faces, and how big it is.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct AnalysisFace {
+    /// The middle of the square, in world coordinates.
+    pub at: Vec3,
+    /// The way it faces, out of the model.
+    pub normal: Vec3,
+    /// Its side, in millimetres.
+    pub side: f64,
+    /// Which body, and which of that body's faces, this square belongs to, where the lattice
+    /// could match it to one.
+    ///
+    /// `None` for a square of surface no face of the model claims, which the studies already
+    /// warn about by name. It is what lets a field be added up over one face someone picked
+    /// rather than over the whole skin.
+    pub face: Option<(u16, u32)>,
+}
+
+/// The lattice a result was worked out on, enough of it to find a cell and its middle.
+///
+/// A copy of the solver's own grid rather than a borrow of it: a result outlives the study that
+/// made it, and the viewport is not to depend on the solver's types.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct AnalysisLattice {
+    /// The lower corner of cell (0, 0, 0), in world coordinates.
+    pub origin: Vec3,
+    /// A cell's side, in millimetres.
+    pub spacing: f64,
+    /// Cells along x, y and z.
+    pub count: [usize; 3],
+}
+
+impl AnalysisLattice {
+    /// How many cells the lattice holds.
+    pub fn cells(&self) -> usize {
+        self.count[0].saturating_mul(self.count[1]).saturating_mul(self.count[2])
+    }
+
+    /// Which cell an index stands for. Cell `(i, j, k)` is at `i + nx*(j + ny*k)`, the solver's
+    /// own order, because the values come straight from it.
+    pub fn ijk(&self, cell: usize) -> Option<[usize; 3]> {
+        let (nx, ny) = (self.count[0], self.count[1]);
+        let plane = nx.checked_mul(ny)?;
+        if plane == 0 || cell >= self.cells() {
+            return None;
+        }
+        let k = cell / plane;
+        let rest = cell - k * plane;
+        Some([rest % nx, rest / nx, k])
+    }
+
+    /// The index of cell `(i, j, k)`, or `None` when it is off the lattice.
+    pub fn at(&self, i: usize, j: usize, k: usize) -> Option<usize> {
+        let [nx, ny, nz] = self.count;
+        if i >= nx || j >= ny || k >= nz {
+            return None;
+        }
+        Some(i + nx * (j + ny * k))
+    }
+
+    /// The middle of a cell, in world coordinates.
+    pub fn centre(&self, cell: usize) -> Option<Vec3> {
+        let [i, j, k] = self.ijk(cell)?;
+        let h = self.spacing;
+        Some(self.origin + Vec3::new((i as f64 + 0.5) * h, (j as f64 + 0.5) * h, (k as f64 + 0.5) * h))
+    }
+
+    /// The cell a point falls in, or `None` when the point is off the lattice.
+    pub fn cell_at(&self, p: Vec3) -> Option<usize> {
+        let d = p - self.origin;
+        let mut ijk = [0usize; 3];
+        for (a, v) in [d.x, d.y, d.z].into_iter().enumerate() {
+            let t = (v / self.spacing).floor();
+            if !t.is_finite() || t < 0.0 {
+                return None;
+            }
+            *ijk.get_mut(a)? = t as usize;
+        }
+        self.at(ijk[0], ijk[1], ijk[2])
+    }
+
+    /// One step along `axis`, forward or back, or `None` at the edge of the lattice.
+    pub fn step(&self, cell: usize, axis: usize, forward: bool) -> Option<usize> {
+        let mut ijk = self.ijk(cell)?;
+        let at = ijk.get_mut(axis)?;
+        *at = if forward { at.checked_add(1)? } else { at.checked_sub(1)? };
+        self.at(ijk[0], ijk[1], ijk[2])
+    }
+}
+
+/// How a result is being looked at: which field, over what range, and how much of it.
+///
+/// All of it is view state. None of it changes a number the solver worked out, and none of it is
+/// saved with the design.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AnalysisView {
+    /// Which of the result's fields is shaded.
+    pub field: usize,
+    /// The range the colours are stretched over, when it has been set by hand rather than taken
+    /// from what the field actually holds.
+    pub range: Option<(f64, f64)>,
+    /// How many steps the scale is broken into, when it is banded rather than smooth. Bands make
+    /// a contour of a smooth wash, which is easier to read a number off and easier to compare
+    /// between two runs.
+    pub bands: Option<u32>,
+    /// A plane cut through the result: a point on it, and its normal. What the normal points at
+    /// is taken away, and the field is drawn on the cut itself -- the same convention Section
+    /// Analysis uses, so the two agree about which half a normal keeps.
+    pub cut: Option<(Vec3, Vec3)>,
+    /// Draw only where the field is past this value, towards its bad end: above it for a
+    /// temperature or a stress, below it for a safety factor. The surface keeps only the squares
+    /// that qualify, and the inside grows a skin where the field crosses the threshold.
+    pub iso: Option<f64>,
+    /// Follow the flow in lines rather than arrows.
+    pub streamlines: bool,
+    /// Points someone asked the value at.
+    pub probes: Vec<Vec3>,
+}
+
+/// A streamline: where the flow carries a speck let go in it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct AnalysisLine {
+    /// The path, in world coordinates.
+    pub points: Vec<Vec3>,
+    /// Where the speed at each point sits on the speed scale, 0 to 1.
+    pub fractions: Vec<f64>,
+}
+
+/// A point someone asked the value at, and what was there.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct AnalysisProbe {
+    pub at: Vec3,
+    /// The value of the shown field in the cell the point falls in, or `None` when the point is
+    /// off the lattice or the field has no value there.
+    pub value: Option<f64>,
+    /// Where that value sits on the scale, 0 to 1.
+    pub fraction: f64,
+}
+
+/// How far a square stands off the surface it belongs to, as a fraction of its own side.
+const SURFACE_LIFT: f64 = 0.1;
+/// How far a square on a cut sits behind the plane, as a fraction of its own side. Small, so it
+/// reads as the cut face; never zero, or the clip that opens the model takes it as well.
+const CUT_LIFT: f64 = -0.02;
+
+/// Most squares one result draws. Past this they are smaller than a pixel on any ordinary view
+/// and all they cost is memory.
+const MAX_DRAWN_PATCHES: usize = 400_000;
+/// About how many arrows a flow result shows. A field of arrows is unreadable long before it is
+/// slow: one per cell is a solid mat of them, and a thousand or so is enough to show where the
+/// air goes.
+const SHOWN_ARROWS: usize = 1_200;
+/// How many streamlines are seeded, and how far each is followed. A screenful of lines reads as
+/// a flow; a hundred screenfuls reads as fog.
+const SHOWN_STREAMLINES: usize = 140;
+/// How far a streamline is followed in each direction from its seed.
+const STREAMLINE_STEPS: usize = 300;
+/// How many points someone may keep probes at. Each one is drawn and labelled.
+pub const MAX_PROBES: usize = 32;
+
+impl AnalysisResult {
+    /// The field being shown.
+    pub fn field(&self) -> Option<&AnalysisField> {
+        self.fields.get(self.view.field)
+    }
+
+    /// Where a value sits on the scale, from 0 at the comfortable end to 1 at the bad one.
+    ///
+    /// Which end is which is the point of [`AnalysisField::low_is_cool`]: a temperature and a
+    /// stress are worst at the top of their range, a safety factor at the bottom of its, and a
+    /// picture that got that backwards would be read exactly wrong.
+    ///
+    /// With bands asked for, the answer is the middle of the band the value falls in, so every
+    /// value in one band is drawn in one colour.
+    pub fn fraction(&self, value: f64) -> f64 {
+        let span = self.high - self.low;
+        let t = if span > 0.0 { (value - self.low) / span } else { 0.5 };
+        let t = t.clamp(0.0, 1.0);
+        let t = if self.low_is_cool { t } else { 1.0 - t };
+        match self.view.bands {
+            Some(n) if n >= 1 => {
+                let n = f64::from(n);
+                ((t * n).floor().min(n - 1.0) + 0.5) / n
+            }
+            _ => t,
+        }
+    }
+
+    /// Whether a point is on the side of the cut that is kept.
+    ///
+    /// Nothing is cut away without a cut plane, and a normal that is not a direction cuts
+    /// nothing: a result half-drawn because a parameter was malformed is harder to understand
+    /// than one drawn whole.
+    fn kept(&self, at: Vec3) -> bool {
+        let Some((origin, normal)) = self.view.cut else { return true };
+        let Some(n) = normal.normalized() else { return true };
+        (at - origin).dot(n) <= 0.0
+    }
+
+    /// Whether a value is past the threshold, towards the field's bad end.
+    fn beyond(&self, value: f64) -> bool {
+        let Some(iso) = self.view.iso else { return true };
+        if !value.is_finite() {
+            return false;
+        }
+        if self.low_is_cool { value >= iso } else { value <= iso }
+    }
+
+    /// Work out what the viewport draws -- the squares, the arrows, the lines and the probes --
+    /// from the fields the run kept and the way they are being looked at.
+    ///
+    /// Every way of looking at a result goes through here, so there is one place where a cut, a
+    /// threshold and a narrowed scale meet, rather than one for each and a question about what
+    /// happens when two are asked for at once.
+    pub fn redraw(&mut self) {
+        self.patches.clear();
+        self.arrows.clear();
+        self.lines.clear();
+        self.probes.clear();
+        if self.view.field >= self.fields.len() {
+            self.view.field = 0;
+        }
+        let Some(field) = self.fields.get(self.view.field) else { return };
+        self.quantity = field.quantity.clone();
+        self.unit = field.unit.clone();
+        self.low_is_cool = field.low_is_cool;
+        self.worst = field.worst;
+        let Some((low, high)) = self.view.range.or_else(|| field.extremes()) else {
+            // Nothing finite anywhere in it: a stress study with no load has no safety factor to
+            // speak of. The scale is cleared rather than left showing the last field's range,
+            // which would read as this field's, and the probes still answer -- with nothing.
+            (self.low, self.high) = (0.0, 0.0);
+            self.probe_values();
+            return;
+        };
+        // A range given the wrong way round is read as a range rather than refused: someone
+        // dragging the two ends of a scale past each other means the span between them.
+        (self.low, self.high) = (low.min(high), low.max(high));
+
+        self.skin_patches();
+        self.cut_patches();
+        self.iso_patches();
+        if self.view.streamlines {
+            self.streamlines();
+        } else {
+            self.flow_arrows();
+        }
+        self.probe_values();
+    }
+
+    /// The model's own surface, square by square, less whatever the cut and the threshold take
+    /// away.
+    fn skin_patches(&mut self) {
+        let Some(field) = self.fields.get(self.view.field) else { return };
+        let mut out = Vec::new();
+        for (face, value) in self.skin.iter().zip(&field.surface) {
+            if out.len() >= MAX_DRAWN_PATCHES {
+                break;
+            }
+            let value = f64::from(*value);
+            if !value.is_finite() || !self.kept(face.at) || !self.beyond(value) {
+                continue;
+            }
+            out.push(AnalysisPatch { at: face.at, normal: face.normal, side: face.side, value, lift: face.side * SURFACE_LIFT });
+        }
+        self.patches = out;
+    }
+
+    /// The face of the cut itself: the field in the cells the plane passes through, drawn as
+    /// squares lying in the plane.
+    ///
+    /// This is what a cut is for. Shading the outside of a part says where its surface is hot;
+    /// only a cut says whether the heat went through it.
+    fn cut_patches(&mut self) {
+        let (Some((origin, normal)), Some(lattice)) = (self.view.cut, self.lattice) else { return };
+        let Some(n) = normal.normalized() else { return };
+        let Some(field) = self.fields.get(self.view.field) else { return };
+        if field.cells.is_empty() {
+            return;
+        }
+        // The one layer of cells the plane passes through: those whose own half-cell reaches it.
+        // The band is a whole cell wide and half-open, [-h/2, +h/2), which is what makes it
+        // exactly one layer wherever the plane lands. A band of only half a cell would find
+        // nothing at all for half of the positions a slider can take, because cell middles are
+        // a whole cell apart; a closed band of a whole cell would find two layers whenever the
+        // plane fell on a boundary, and draw both in the same place.
+        let reach = lattice.spacing * 0.5;
+        let mut out = Vec::new();
+        for (cell, value) in field.cells.iter().enumerate() {
+            if self.patches.len() + out.len() >= MAX_DRAWN_PATCHES {
+                break;
+            }
+            let value = f64::from(*value);
+            if !value.is_finite() || !self.beyond(value) {
+                continue;
+            }
+            let Some(at) = lattice.centre(cell) else { continue };
+            let along = (at - origin).dot(n);
+            if along < -reach || along >= reach {
+                continue;
+            }
+            // Sat on the plane rather than at the cell's own middle, so the cut reads as one
+            // flat face and not as a staircase of cell centres straddling it.
+            out.push(AnalysisPatch { at: at - n * along, normal: n, side: lattice.spacing, value, lift: lattice.spacing * CUT_LIFT });
+        }
+        self.patches.extend(out);
+    }
+
+    /// A skin around everywhere the field is past the threshold: the faces where a cell that
+    /// qualifies meets one that does not.
+    ///
+    /// Blocky, like the rest of the picture, and for the same reason: the answer has the
+    /// resolution of the lattice, and a smoothed surface would claim one it does not have.
+    fn iso_patches(&mut self) {
+        let (Some(_), Some(lattice)) = (self.view.iso, self.lattice) else { return };
+        let Some(field) = self.fields.get(self.view.field) else { return };
+        if field.cells.is_empty() {
+            return;
+        }
+        let half = lattice.spacing * 0.5;
+        let mut out = Vec::new();
+        for (cell, value) in field.cells.iter().enumerate() {
+            if self.patches.len() + out.len() >= MAX_DRAWN_PATCHES {
+                break;
+            }
+            let value = f64::from(*value);
+            if !value.is_finite() || !self.beyond(value) {
+                continue;
+            }
+            let Some(at) = lattice.centre(cell) else { continue };
+            if !self.kept(at) {
+                continue;
+            }
+            for axis in 0..3usize {
+                for forward in [false, true] {
+                    let inside =
+                        lattice.step(cell, axis, forward).and_then(|c| field.cells.get(c)).map(|v| f64::from(*v)).is_some_and(|v| self.beyond(v));
+                    if inside {
+                        continue;
+                    }
+                    let mut normal = Vec3::new(0.0, 0.0, 0.0);
+                    let sign = if forward { 1.0 } else { -1.0 };
+                    match axis {
+                        0 => normal.x = sign,
+                        1 => normal.y = sign,
+                        _ => normal.z = sign,
+                    }
+                    out.push(AnalysisPatch { at: at + normal * half, normal, side: lattice.spacing, value, lift: lattice.spacing * SURFACE_LIFT });
+                }
+            }
+        }
+        self.patches.extend(out);
+    }
+
+    /// Where a speed sits on the speed scale, for colouring an arrow or a line.
+    ///
+    /// Its own scale, not the shaded field's: an arrow coloured by speed on a pressure scale is
+    /// a picture that invites exactly one reading and means another.
+    fn speed_fraction(&self) -> impl Fn(f64) -> f64 + use<> {
+        let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+        for v in &self.vectors {
+            let speed = Vec3::new(f64::from(v[0]), f64::from(v[1]), f64::from(v[2])).len();
+            if speed.is_finite() {
+                low = low.min(speed);
+                high = high.max(speed);
+            }
+        }
+        let span = high - low;
+        move |speed: f64| if span > 0.0 { ((speed - low) / span).clamp(0.0, 1.0) } else { 0.5 }
+    }
+
+    /// The vector in a cell, in the unit the run worked it out in.
+    fn vector(&self, cell: usize) -> Option<Vec3> {
+        let v = self.vectors.get(cell)?;
+        let v = Vec3::new(f64::from(v[0]), f64::from(v[1]), f64::from(v[2]));
+        v.is_finite().then_some(v)
+    }
+
+    /// Arrows for where the flow goes, thinned to a coarser lattice than it ran on: one per cell
+    /// is a solid mat of them.
+    ///
+    /// Every arrow the same length, pointing the way the flow goes, with its speed in its
+    /// colour. A field of arrows of differing length is far harder to read than a field of equal
+    /// ones, and colour carries the speed better than length does.
+    fn flow_arrows(&mut self) {
+        let Some(lattice) = self.lattice else { return };
+        if self.vectors.is_empty() {
+            return;
+        }
+        let cells = lattice.cells();
+        let every = ((cells as f64 / SHOWN_ARROWS as f64).cbrt().ceil() as usize).max(1);
+        let length = lattice.spacing * every as f64 * 0.55;
+        let fraction = self.speed_fraction();
+        let mut out = Vec::new();
+        for cell in 0..cells {
+            let Some(ijk) = lattice.ijk(cell) else { continue };
+            if ijk.iter().any(|v| !v.is_multiple_of(every)) {
+                continue;
+            }
+            let Some(u) = self.vector(cell) else { continue };
+            let Some(dir) = u.normalized() else { continue };
+            let Some(from) = lattice.centre(cell) else { continue };
+            if !self.kept(from) {
+                continue;
+            }
+            let speed = u.len();
+            out.push(AnalysisArrow { from, to: from + dir * length, value: speed, fraction: fraction(speed) });
+        }
+        self.arrows = out;
+    }
+
+    /// Streamlines: where a speck let go in the flow is carried.
+    ///
+    /// Followed half a cell at a time by the midpoint rule -- enough to turn a corner the way
+    /// the flow does, which a straight step from each cell's own vector would cut. A line stops
+    /// when it leaves the lattice, reaches still air, or has been followed as far as it is worth
+    /// following.
+    fn streamlines(&mut self) {
+        let Some(lattice) = self.lattice else { return };
+        if self.vectors.is_empty() {
+            return;
+        }
+        let cells = lattice.cells();
+        let every = ((cells as f64 / SHOWN_STREAMLINES as f64).cbrt().ceil() as usize).max(1);
+        let step = lattice.spacing * 0.5;
+        let fraction = self.speed_fraction();
+        let mut out = Vec::new();
+        for cell in 0..cells {
+            if out.len() >= SHOWN_STREAMLINES {
+                break;
+            }
+            let Some(ijk) = lattice.ijk(cell) else { continue };
+            if ijk.iter().any(|v| !v.is_multiple_of(every)) {
+                continue;
+            }
+            let Some(seed) = lattice.centre(cell) else { continue };
+            // Followed back from the seed as well as forward, so the line shows the whole path a
+            // speck takes past the model rather than beginning in the middle of nowhere. The
+            // backward half is walked first and turned round, and the two are joined at the seed.
+            let (mut back, mut back_f) = self.follow(&lattice, seed, step, -1.0, &fraction);
+            back.reverse();
+            back_f.reverse();
+            let (ahead, ahead_f) = self.follow(&lattice, seed, step, 1.0, &fraction);
+            back.extend(ahead);
+            back_f.extend(ahead_f);
+            if back.len() > 2 {
+                out.push(AnalysisLine { points: back, fractions: back_f });
+            }
+        }
+        self.lines = out;
+    }
+
+    /// One half of a streamline: where the flow carries a speck from `seed`, going with the
+    /// current (`way` = 1) or against it (`way` = -1).
+    ///
+    /// Half a cell at a time by the midpoint rule, which is enough to turn a corner the way the
+    /// flow does where a straight step from each cell's own vector would cut it. It stops when
+    /// the path leaves the lattice, reaches still air, crosses the cut, or has been followed as
+    /// far as it is worth following.
+    fn follow(&self, lattice: &AnalysisLattice, seed: Vec3, step: f64, way: f64, fraction: &impl Fn(f64) -> f64) -> (Vec<Vec3>, Vec<f64>) {
+        let (mut points, mut fractions) = (Vec::new(), Vec::new());
+        let mut at = seed;
+        for _ in 0..STREAMLINE_STEPS {
+            if !self.kept(at) {
+                break;
+            }
+            let Some(here) = lattice.cell_at(at).and_then(|c| self.vector(c)) else { break };
+            let Some(dir) = here.normalized().map(|d| d * way) else { break };
+            points.push(at);
+            fractions.push(fraction(here.len()));
+            // Look half a step ahead, then take the whole step the way the flow goes there.
+            let mid = at + dir * (step * 0.5);
+            let ahead = lattice.cell_at(mid).and_then(|c| self.vector(c)).and_then(|u| u.normalized()).map(|d| d * way).unwrap_or(dir);
+            at += ahead * step;
+        }
+        (points, fractions)
+    }
+
+    /// What the shown field reads at each point someone has probed.
+    ///
+    /// The value of the cell the point falls in, not a blend of the cells around it: the answer
+    /// has the resolution of the lattice, and a reading smoothed between cells would look more
+    /// precise than the number behind it.
+    fn probe_values(&mut self) {
+        // Read first, with the field borrowed and nothing copied out of it; then put the values
+        // on the scale, which needs the whole result and so cannot be done while it is borrowed.
+        let found: Vec<(Vec3, Option<f64>)> = {
+            let Some(field) = self.fields.get(self.view.field) else { return };
+            let lattice = self.lattice;
+            self.view
+                .probes
+                .iter()
+                .take(MAX_PROBES)
+                .map(|at| {
+                    let value =
+                        lattice.and_then(|l| l.cell_at(*at)).and_then(|c| field.cells.get(c)).map(|v| f64::from(*v)).filter(|v| v.is_finite());
+                    (*at, value)
+                })
+                .collect()
+        };
+        let probes: Vec<AnalysisProbe> =
+            found.into_iter().map(|(at, value)| AnalysisProbe { at, value, fraction: value.map(|v| self.fraction(v)).unwrap_or(0.0) }).collect();
+        self.probes = probes;
+    }
+}
+
+/// A square of an analysis lattice, as the viewport draws it: on the model's surface, on a cut
+/// through it, or on the skin of everywhere past a threshold.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct AnalysisPatch {
+    /// The middle of the square, in world coordinates.
+    pub at: Vec3,
+    /// The way it faces.
+    pub normal: Vec3,
+    /// Its side, in millimetres.
+    pub side: f64,
+    pub value: f64,
+    /// How far along its normal the viewport draws it, so the model does not fight it for the
+    /// same pixels.
+    ///
+    /// Positive for a square on the model's own surface, which stands a little proud of it.
+    /// Negative for a square on a cut, which has to sit just *behind* the plane: the model is
+    /// clipped there, and anything in front of the plane is clipped away with the half of the
+    /// part that was taken off.
+    pub lift: f64,
+}
+
+/// One arrow of a flow field.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct AnalysisArrow {
+    pub from: Vec3,
+    pub to: Vec3,
+    /// The speed it stands for.
+    pub value: f64,
+    /// Where that speed sits on the speed scale, 0 to 1. Its own scale, so the arrows read as
+    /// speed whatever field is shaded behind them.
+    pub fraction: f64,
 }
 
 /// One seam measured by `inspect.continuity`, where the viewport shades it: the stations it was
@@ -855,6 +1513,7 @@ impl Session {
             section_hatch: true,
             colored_components: None,
             analysis: None,
+            analysis_result: None,
             continuity: Vec::new(),
             isocurves: Vec::new(),
             comb: None,
@@ -1970,6 +2629,7 @@ impl Session {
             section_hatch: true,
             colored_components: None,
             analysis: None,
+            analysis_result: None,
             continuity: Vec::new(),
             isocurves: Vec::new(),
             comb: None,
@@ -2468,6 +3128,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         parts,
         links,
         configs,
+        analysis,
         favorites,
         canvases,
         point_clouds,
@@ -2504,6 +3165,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *parts == b.parts
         && *links == b.links
         && *configs == b.configs
+        && *analysis == b.analysis
         && *favorites == b.favorites
         && *canvases == b.canvases
         && *point_clouds == b.point_clouds

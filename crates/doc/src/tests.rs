@@ -146,6 +146,8 @@ fn set_back_restores_everything_when_states_share_bodies() {
         let height = if i == 0 { "h" } else { "10" };
         doc.add_feature(
             FeatureKind::Box {
+                axis: crate::z_axis(),
+                x_axis: crate::x_axis(),
                 corner: point_expr(Vec3::new(20.0 * i as f64, 0.0, 0.0)),
                 length: "10".into(),
                 width: "10".into(),
@@ -253,6 +255,8 @@ fn rolling_a_large_unchanged_timeline_forward_reuses_its_geometry() {
     for i in 0..80 {
         doc.add_feature(
             FeatureKind::Box {
+                axis: crate::z_axis(),
+                x_axis: crate::x_axis(),
                 corner: point_expr(Vec3::new((i % 10) as f64 * 15.0, (i / 10) as f64 * 15.0, 0.0)),
                 length: "10".into(),
                 width: "10".into(),
@@ -410,6 +414,8 @@ fn errors_are_reported_not_fatal() {
     .unwrap();
     doc.add_feature(
         FeatureKind::Box {
+            axis: crate::z_axis(),
+            x_axis: crate::x_axis(),
             corner: point_expr(Vec3::ZERO),
             length: "nope".into(),
             width: "1".into(),
@@ -492,6 +498,8 @@ fn primitives_and_combine() {
     let mut doc = Document::new("p");
     doc.add_feature(
         FeatureKind::Box {
+            axis: crate::z_axis(),
+            x_axis: crate::x_axis(),
             corner: point_expr(Vec3::ZERO),
             length: "10".into(),
             width: "10".into(),
@@ -513,7 +521,7 @@ fn primitives_and_combine() {
         None,
     )
     .unwrap();
-    doc.add_feature(FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Cut, keep_tools: false }, None)
+    doc.add_feature(FeatureKind::Combine { targets: vec!["Body1".into()], tools: vec!["Body2".into()], operation: Operation::Cut, keep_tools: false }, None)
         .unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
@@ -592,6 +600,33 @@ fn parameter_cycles_are_found() {
     let (vals, errs) = crate::expr::eval_params(&defs, 1.0);
     assert!(errs["a"].contains("circular reference: a → b → c → a"), "{}", errs["a"]);
     assert!(vals.contains_key("d") && errs.contains_key("a") && errs.contains_key("e"));
+}
+
+/// A Combine reads `target`, the one body it took before it could work on several, wherever a
+/// feature arrives as JSON. The format step brings an older design forward, but a feature can
+/// also come straight from a script, a recording or `timeline.add`, which never go through a
+/// file: the browser's own rename-and-rebuild does exactly that.
+#[test]
+fn a_combine_still_reads_the_single_target_it_used_to_take() {
+    let one: FeatureKind =
+        serde_json::from_value(serde_json::json!({"type": "combine", "target": "B", "tools": ["Cutter"], "operation": "cut"})).unwrap();
+    let many: FeatureKind =
+        serde_json::from_value(serde_json::json!({"type": "combine", "targets": ["B"], "tools": ["Cutter"], "operation": "cut"})).unwrap();
+    let names = |k: &FeatureKind| match k {
+        FeatureKind::Combine { targets, .. } => targets.iter().map(|t| t.to_string()).collect::<Vec<_>>(),
+        other => panic!("not a combine: {other:?}"),
+    };
+    assert_eq!(names(&one), ["B"]);
+    assert_eq!(names(&one), names(&many));
+    // And a list of several, which is what the field is for.
+    let row: FeatureKind =
+        serde_json::from_value(serde_json::json!({"type": "combine", "targets": ["A", "B"], "tools": ["Bar"], "operation": "cut"})).unwrap();
+    assert_eq!(names(&row), ["A", "B"]);
+    // Neither spelling at all is still a refusal, naming the field it wants.
+    let e = serde_json::from_value::<FeatureKind>(serde_json::json!({"type": "combine", "tools": ["Cutter"], "operation": "cut"}))
+        .map(|k| format!("{k:?}"))
+        .unwrap_or_else(|e| e.to_string());
+    assert!(e.contains("targets"), "{e}");
 }
 
 /// Features that use a sketch's points or regions go with it (not only profile and path users).
@@ -813,6 +848,8 @@ fn empty_boolean_targets_without_overlap_keep_plain_message() {
             .add_feature(
                 FeatureKind::Box {
                     corner: point_expr(Vec3::new(100.0, 100.0, 100.0)),
+                    axis: crate::z_axis(),
+                    x_axis: crate::x_axis(),
                     length: "1".into(),
                     width: "1".into(),
                     height: "1".into(),
@@ -824,14 +861,18 @@ fn empty_boolean_targets_without_overlap_keep_plain_message() {
         doc.feature_mut(cut).unwrap().component = part;
         let mut model = Model::new();
         model.evaluate(&doc);
-        assert_eq!(model.result(cut).unwrap().error.as_deref(), Some("there is no body to cut or intersect"));
+        assert_eq!(model.result(cut).unwrap().error.as_deref(), Some("there is no body to cut, intersect or slice"));
     }
 }
 
 /// A box of `size` at `corner`, made with `operation`.
 fn cube(doc: &mut Document, corner: Vec3, size: [f64; 3], operation: Operation) -> u64 {
     let [length, width, height] = size.map(|x| Expr::new(x.to_string()));
-    doc.add_feature(FeatureKind::Box { corner: point_expr(corner), length, width, height, operation }, None).unwrap()
+    doc.add_feature(
+        FeatureKind::Box { corner: point_expr(corner), axis: crate::z_axis(), x_axis: crate::x_axis(), length, width, height, operation },
+        None,
+    )
+    .unwrap()
 }
 
 /// The bodies of `doc` evaluated, by name with their volumes and pieces, and how feature
@@ -884,7 +925,7 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
     let combine = doc
         .add_feature(
             FeatureKind::Combine {
-                target: "Body1".into(),
+                targets: vec!["Body1".into()],
                 tools: vec!["Body3".into(), "Body2".into()],
                 operation: Operation::Join,
                 keep_tools: false,

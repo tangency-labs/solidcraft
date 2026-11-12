@@ -33,6 +33,15 @@ pub fn largest_fit_note(size: &str, largest: f64) -> String {
     format!("the largest {size} that fits is {} mm", trimmed_mm(largest))
 }
 
+/// The size a refusal names as the largest that fits ([`largest_fit_note`]), in millimetres.
+/// `None` where it names none, or names one that is no size at all.
+pub fn largest_fit(why: &str) -> Option<f64> {
+    let at = why.find("that fits is ")?.checked_add("that fits is ".len())?;
+    let rest = why.get(at..)?;
+    let end = rest.find(" mm")?;
+    rest.get(..end)?.trim().parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
+}
+
 /// Whether a refusal already names the largest size that fits ([`largest_fit_note`]).
 pub fn names_largest_fit(why: &str) -> bool {
     why.contains("that fits is ")
@@ -1159,6 +1168,22 @@ pub(crate) fn with_continuation(e: KernelError, next: Option<Vec3>) -> KernelErr
 mod tests {
     use super::*;
     use solidcore_record::{Loop2, Plane, Region2, Vec2};
+
+    /// The note a refusal carries and the size read back out of it are the one fact told two
+    /// ways: the handle that stops at the largest size that fits reads it from the words.
+    #[test]
+    fn the_largest_size_that_fits_is_read_back_from_the_words_that_name_it() {
+        for (size, largest) in [("radius", 6.0), ("distance", 0.125), ("chord width", 34.99)] {
+            let why = format!("the fillet is larger than the faces allow: {}", largest_fit_note(size, largest));
+            assert!(names_largest_fit(&why), "{why}");
+            assert_eq!(largest_fit(&why), Some(largest), "{why}");
+        }
+        // A refusal that names no size, and one whose size is no number, leave the handle alone.
+        assert_eq!(largest_fit("the rounds would leave openings"), None);
+        assert_eq!(largest_fit("the largest radius that fits is some mm"), None);
+        assert_eq!(largest_fit("the largest radius that fits is -1 mm"), None);
+        assert_eq!(largest_fit(&largest_fit_note("radius", 0.0)), None, "nothing fits is not a size to stop at");
+    }
 
     /// A round (`round`) or an equal-distance chamfer of the edges nearest `pts`.
     fn blend(body: &Body, pts: &[Vec3], size: f64, round: bool) -> Result<Body> {

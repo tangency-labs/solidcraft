@@ -44,7 +44,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::MeshConvert { .. } => Some("mesh.convert"),
         Kind::Construct { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
-        Kind::Split => Some("solid.split_body"),
+        Kind::Cut => Some("solid.cut_body"),
         Kind::DeleteFaces => Some("face.delete"),
         Kind::Move { .. } => Some("solid.move"),
         Kind::Thread { .. } => Some("solid.thread"),
@@ -308,6 +308,11 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
+/// A card's two-way mode, as a segmented index: 1 when `key` is set in the dialog's extras.
+fn extra_mode(extra: &serde_json::Map<String, Value>, key: &str) -> usize {
+    usize::from(extra.get(key).and_then(Value::as_bool).unwrap_or(false))
+}
+
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
     let value = extra.get("type").and_then(Value::as_str).unwrap_or("constant");
     if value == "g2" { 3 } else { FILLET_TYPES.iter().position(|(_, key)| *key == value).unwrap_or(0) }
@@ -455,6 +460,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             wall_side,
             wall2,
         } => {
+            // Pushing a face, not extruding a profile: how the walls around it behave is a
+            // choice, and walls that follow the face are an offset of it, which reaches no
+            // object and goes through nothing -- so it is a distance and nothing else.
+            let pushing = d.inputs.first().is_some_and(|i| !i.items.is_empty() && i.items.iter().all(|x| matches!(x, Sel::Face { .. })));
+            let mut moving = usize::from(d.extra.get("grow").and_then(Value::as_str) == Some("moving"));
+            let follows = pushing && moving == 1;
             form_row(ui, "Direction", |ui| {
                 // One Side, Two Sides, Symmetric (a flip is a negative distance).
                 let order = [0usize, TWO_SIDES, 2];
@@ -481,11 +492,19 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             });
             let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
             let mut ext = cur;
-            form_row(ui, "Extent Type", |ui| {
-                combo(ui, "ex_ext", &["Distance", "To Object", "All"], &mut ext);
-                *all = ext == 2;
-                set_to_object(&mut d.inputs, &mut d.active, ext == 1);
-            });
+            if follows {
+                // Back to a plain distance, so the window never offers an extent the offset
+                // would quietly drop.
+                ext = 0;
+                *all = false;
+                set_to_object(&mut d.inputs, &mut d.active, false);
+            } else {
+                form_row(ui, "Extent Type", |ui| {
+                    combo(ui, "ex_ext", &["Distance", "To Object", "All"], &mut ext);
+                    *all = ext == 2;
+                    set_to_object(&mut d.inputs, &mut d.active, ext == 1);
+                });
+            }
             if ext == 0 {
                 enter |= expr_row(ui, "Distance", distance);
             }
@@ -495,10 +514,31 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if two_sided(*direction) {
                 enter |= expr_row(ui, "Distance 2", distance2);
             }
-            // A choice made by hand sticks, the shown one included (#6901): Extrude's own choice
-            // stops before the next frame makes it.
-            if crate::op_auto::op_row(ui, "ex_op", operation) {
-                *auto_op = false;
+            // The angle the walls lean at belongs beside the distance rather than under
+            // Advanced, because a push is usually both.
+            if pushing {
+                let was = moving;
+                form_row(ui, "Walls", |ui| combo(ui, "ex_grow", &WALL_GROW, &mut moving));
+                if moving != was {
+                    d.extra.insert("grow".into(), json!(if moving == 1 { "moving" } else { "fixed" }));
+                }
+                if *direction < 2 {
+                    form_row(ui, "Taper Angle", |ui| {
+                        let before = taper.clone();
+                        enter |= field(ui, taper);
+                        if *taper != before {
+                            *taper_present = !taper.trim().is_empty();
+                        }
+                    });
+                }
+            }
+            // Walls that follow the face leave nothing to join or cut: the face simply moves.
+            if !(pushing && moving == 1) {
+                // A choice made by hand sticks, the shown one included (#6901): Extrude's own
+                // choice stops before the next frame makes it.
+                if crate::op_auto::op_row(ui, "ex_op", operation) {
+                    *auto_op = false;
+                }
             }
             ui_kit::section(ui, "extrude_options", "Options", true, |ui| {
                 let was_thin = *thin;
@@ -548,7 +588,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 if st != 0 {
                     enter |= expr_row(ui, "Offset", start);
                 }
-                if *direction < 2 {
+                if *direction < 2 && !pushing {
                     form_row(ui, "Taper Angle", |ui| {
                         let before = taper.clone();
                         enter |= field(ui, taper);
@@ -660,18 +700,40 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
         }
         Kind::PatternRect { count, spacing, count2, spacing2 } => {
+            // Spacing is the step between copies, Extent the span from the first to the last, as
+            // Plasticity's array card offers both.
+            let mut mode = extra_mode(&d.extra, "extent1");
+            form_row(ui, "Mode", |ui| {
+                if ui_kit::segmented(ui, &mut mode, &["Spacing", "Extent"], Default::default()) {
+                    d.extra.insert("extent1".into(), json!(mode == 1));
+                }
+            });
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
-            enter |= expr_row(ui, "Spacing", spacing);
+            enter |= expr_row(ui, if mode == 1 { "Distance" } else { "Spacing" }, spacing);
             enter |= quantity_row(ui, &app.session.doc, "Quantity 2", count2);
-            enter |= expr_row(ui, "Spacing 2", spacing2);
+            let mut mode2 = extra_mode(&d.extra, "extent2");
+            form_row(ui, "Mode 2", |ui| {
+                if ui_kit::segmented(ui, &mut mode2, &["Spacing", "Extent"], Default::default()) {
+                    d.extra.insert("extent2".into(), json!(mode2 == 1));
+                }
+            });
+            enter |= expr_row(ui, if mode2 == 1 { "Distance 2" } else { "Spacing 2" }, spacing2);
             if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
                 feature_pattern_alignment_row(ui, &mut d.extra, 1);
             }
         }
         Kind::PatternCirc { count, angle } => {
+            // Total is the whole turn the copies are spread over, Spacing the angle from one to
+            // the next, as Plasticity's radial array offers both.
+            let mut mode = extra_mode(&d.extra, "step");
+            form_row(ui, "Mode", |ui| {
+                if ui_kit::segmented(ui, &mut mode, &["Total", "Spacing"], Default::default()) {
+                    d.extra.insert("step".into(), json!(mode == 1));
+                }
+            });
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
-            enter |= expr_row(ui, "Total angle", angle);
+            enter |= expr_row(ui, if mode == 1 { "Step angle" } else { "Total angle" }, angle);
             if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
             }
@@ -919,7 +981,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
-        Kind::Split | Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::Construct { t: None, .. } => {}
+        Kind::Cut | Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::Construct { t: None, .. } => {}
         Kind::Rib { thickness, depth, flip, normal, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);
@@ -1075,6 +1137,13 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 });
             }
             crate::op_auto::op_row(ui, "pr_op", operation);
+            // The shape can stay a body of its own as well as joining, cutting or slicing with
+            // it; a New Body shape is one anyway, so the choice is there but does nothing. The row
+            // is always drawn: the card is measured once, when its first preview lands, so a row
+            // that appeared later (the operation settling on Join) would be cut off below it.
+            ui.add_enabled_ui(*operation != 0, |ui| {
+                extra_options(ui, "primitive_keep", &mut d.extra, &[("Keep Tool", "keep_tools")]);
+            });
         }
         Kind::Combine { operation, keep_tools } => {
             form_row(ui, "Operation", |ui| {
