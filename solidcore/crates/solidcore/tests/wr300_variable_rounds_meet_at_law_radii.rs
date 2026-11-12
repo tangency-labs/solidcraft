@@ -86,7 +86,7 @@ fn upstream_holds_the_end_radii_and_the_trace_fails() {
     let mut k = kernel(false);
     let err = two_rounds(&mut k).unwrap_err();
     assert!(
-        matches!(err, solidcore::SolidError::Upstream { code: 1001, .. }),
+        solidcore::error::upstream_status(&err) == Some(1001),
         "{err:?}"
     );
 }

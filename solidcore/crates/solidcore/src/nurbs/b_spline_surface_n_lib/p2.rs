@@ -220,6 +220,10 @@ pub struct SkinnedSurfaceOptions<'a> {
     pub deriv_surfs: Option<[Option<&'a BSplineSurface>; 2]>,
     /// Degree in the sweep direction (`lDegree`, upstream default 3).
     pub degree: usize,
+    /// Not upstream: the skinning parameter of each cross section, increasing from 0 to 1,
+    /// used where there are no rails (with rails, `intersections_with_rails` governs);
+    /// `None` takes the chord-length parameters, as upstream.
+    pub section_params: Option<&'a [f64]>,
 }
 
 impl Default for SkinnedSurfaceOptions<'_> {
@@ -234,6 +238,7 @@ impl Default for SkinnedSurfaceOptions<'_> {
             intersections_with_rails: None,
             deriv_surfs: None,
             degree: 3,
+            section_params: None,
         }
     }
 }
@@ -1029,6 +1034,7 @@ impl BSplineSurface {
             intersections_with_rails,
             deriv_surfs,
             degree,
+            section_params,
         } = opts;
         let num_sections = cross_sections.len();
 
@@ -1303,7 +1309,12 @@ impl BSplineSurface {
                 deg: nl_deg,
                 es: approx_tol,
                 dir: nl_dir,
-                ts: int_params,
+                // Not upstream: without rails, the caller's section parameters (if any).
+                ts: if has_rails {
+                    int_params
+                } else {
+                    int_params.or_else(|| section_params.map(<[f64]>::to_vec))
+                },
                 kns: nl_knots,
             };
             match create_skin_srf_boundary_continuity(&mut curves, &mut sk) {

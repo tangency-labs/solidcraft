@@ -123,22 +123,19 @@ fn marker_moves_a_box_placed_by_its_centre_through_its_centre_fields() {
     h.settle();
     h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
     h.settle();
-    // Edit Feature reads the stored corner back; choosing Center keeps the box where it is.
+    // Edit Feature reads the stored centre back with Center chosen (#14487).
     let at = h.at(&json!({"handle": "primitive:position"})).unwrap();
     let expect = h.at(&json!({"world": [20, 15, 10]})).unwrap();
     assert!((at[0] - expect[0]).hypot(at[1] - expect[1]) < 2.0, "the marker stands under the centre, on the bottom: {at:?} {expect:?}");
-    {
-        let d = h.app.dialog.as_mut().expect("a dialog");
-        d.extra.remove("corner");
-        d.extra.insert("center".into(), json!(["20 mm", "15 mm", "14 mm"]));
-    }
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.extra.contains_key("center") && !d.extra.contains_key("corner")));
     drag(&mut h, [60.0, 35.0, 10.0]);
     let d = h.app.dialog.as_ref().expect("the dialog is open");
     assert!(typed(&h, "center").dist(Vec3::new(60.0, 35.0, 14.0)) < 1e-3, "the centre fields took the drop: {:?}", d.extra.get("center"));
     ok(&mut h);
     let f = h.app.session.doc.find_feature(&name).expect("the Box is still there");
-    let FeatureKind::Box { corner, .. } = &f.kind else { panic!("a Box: {:?}", f.kind) };
-    assert!(point(&h, corner).dist(Vec3::new(55.0, 32.0, 10.0)) < 1e-3, "moved: {:?}", point(&h, corner));
+    let FeatureKind::Box { corner, centred, .. } = &f.kind else { panic!("a Box: {:?}", f.kind) };
+    assert!(*centred, "still placed by its centre");
+    assert!(point(&h, corner).dist(Vec3::new(60.0, 35.0, 14.0)) < 1e-3, "moved: {:?}", point(&h, corner));
     reopened_at(&mut h, &name, [60.0, 35.0, 10.0]);
 }
 

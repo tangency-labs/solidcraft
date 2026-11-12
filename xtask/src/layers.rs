@@ -74,6 +74,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("ui-text", Class::Shared),
     // the MCP server machinery: JSON-RPC over stdio, lifecycle, tool schemas and argument checks; apps register their tools (#12947)
     ("mcp-server", Class::Shared),
+    // versioned file formats: the format tag, the version registry and its upgrade, a newer file told; apps register their versions
+    ("format", Class::Shared),
     // the token contract UI components draw with: light and dark tokens, colour vision, tab accents, theme state (#13304)
     ("theme", Class::Shared),
     // the UI kit and its components (ribbon, app bar, history and navigation bars, view compass, window chrome, theme files), drawn from host data (#14251)
@@ -368,7 +370,7 @@ pub const SEAM_LIST: &str = "xtask/solidcore-seam.txt";
 pub const SEAM_PUBLIC: &[&str] = &["solidcore/public-crates.txt", "xtask/solidcore-public.txt"];
 
 /// The crate names in a public-crates file (`#` comments, blank lines skipped).
-fn parse_public(text: &str) -> Vec<String> {
+pub fn parse_public(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))

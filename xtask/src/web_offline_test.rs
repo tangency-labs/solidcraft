@@ -469,7 +469,13 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
                 "caches.keys().then(async (ks) => { const out = {}; for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) out[r.url] = await (await c.match(r)).text(); } return out; })",
             )
             .unwrap_or_default();
-        return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}"));
+        // Whether the request went through the worker at all (workerStart is 0 when it did not).
+        let how = cdp
+            .eval(
+                "(async () => { const e = performance.getEntriesByType('resource').filter((r) => r.name.includes('shared.js?later')).pop(); const reg = await navigator.serviceWorker.getRegistration(); return { workerStart: e ? e.workerStart : null, controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.state : null, active: reg && reg.active ? reg.active.state : null, installing: Boolean(reg && reg.installing), waiting: Boolean(reg && reg.waiting) }; })()",
+            )
+            .unwrap_or_default();
+        return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}; request: {how}"));
     }
     // A page whose record is lost never gets the worker's build instead: its request fails visibly.
     let lost = cdp.eval(

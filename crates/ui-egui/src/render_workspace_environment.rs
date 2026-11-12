@@ -265,7 +265,9 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui) {
         ground(app, ui);
         atmosphere(app, ui);
     });
-    stage_confirmation(app, ui.ctx());
+    if !crate::panel_runtime::shared_content_measurement(ui.ctx()) {
+        stage_confirmation(app, ui.ctx());
+    }
 }
 
 pub(super) fn open_sources(app: &mut SolveApp) {

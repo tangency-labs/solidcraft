@@ -799,6 +799,12 @@ drawing and answering while it runs:
 - Batches with `timings` or `profile` still run on the window thread, so the times they report
   measure the real work.
 
+A file being opened or inserted (from the window or the control channel) holds the agent's
+design changes the same way until it is in, so an agent's `doc.open` and the edits after it go
+in that order. The person at the window can go on working meanwhile: the file is a row of the
+operations panel, and its result lands after their edits (`ui.prefs {"file_operations_wait":
+true}` brings back the card over the design that makes everything wait for the file).
+
 Timeouts and `control.pending` work as described above. A slow command is still answered when it
 is done, from a later frame. With the preference off, commands run on the window thread, and the
 window waits for each one.
@@ -885,7 +891,7 @@ no box selection.
 | `ui.confirm` | `accept?`: bool | answers the Delete confirmation (shown when a delete takes other features with it or makes some fail); without `accept`, what it lists |
 | `ui.messages` | `clear?`: `true` (empty the list), `open?`: bool (show or hide the Messages window) | every status message of this run, oldest first (the last 200; a message repeated in a row is one entry with a `count`): `messages` `[{text, error, at, count}]` (`at` in ms since the Unix epoch), and whether the window is `open` (#2763) |
 | `ui.documents` | `action?`: `new`, `switch`, `close`, `close_all`, `close_others`, `move`, `quit`; `index?`; `from?`, `to?` (move); `save_indices?`: array of tab indices to tick in the grouped save prompt; `save_row?`, `discard_row?`: tab index to save or discard and close in that prompt; `force?` (close without asking); `answer?`: `save`, `dont_save`, `cancel` (answers "save changes?"); `open_elsewhere?`: `read_only`, `anyway`, `cancel` (answers "open elsewhere" for the first Open waiting); `changed_on_disk?`: `save_copy`, `overwrite`, `cancel` (answers "changed on disk" before a Save) | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt, `save_prompt` (null or rows with `index`, `name`, `path` (null if never saved), `selected`), whether a quit is asking, whether the active design is `read_only`, the Opens waiting for "open elsewhere" (`open_elsewhere`) and a waiting "changed on disk" (`changed_on_disk`) |
-| `ui.operations` | `cancel?`: an operation's `key` | the operations under way, newest first, as the view's operations panel shows them: `key`, `label`, `steps` (`{done, total}` when the work counts them), `queued`, `cancelling`, `cancellable`, and whether the panel is `shown`. With `cancel`: cancels that operation as its X does (its work stops at its next check and nothing of it is applied; operations queued behind it go on); an error when no such operation is under way or it can't be cancelled (a save being written) |
+| `ui.operations` | `cancel?`: an operation's `key` | the operations under way, newest first, as the view's operations panel shows them: `key`, `label`, `steps` (`{done, total}` when the work counts them), `queued`, `cancelling`, `cancellable`; those that ended in the last minute (`finished`, newest first, at most 16): `key`, `label`, `outcome` (`done`, `failed` with its `error`, or `cancelled`) and `ms_ago` (one done within the app's wait was never under way, and isn't listed); and whether the panel is `shown`. With `cancel`: cancels that operation as its X does (its work stops at its next check and nothing of it is applied; operations queued behind it go on); an error when no such operation is under way or it can't be cancelled (a save being written) |
 | `ui.file` | `path`; `insert?`: bool | starts an interactive background Open or Insert; poll `ui.inspect.file_busy` for completion; the window stays responsive |
 | `ui.home` | `open?`: bool; `sample?`: index | the start page: show or hide it, open a built-in sample (once built); returns `open` and the recent designs |
 | `ui.shortcut` | `command`, `key?`, `slot?`, `replace?` | a command's keys (`key`: the first, shown in menus; `keys`: all), or rebinds it: `key` becomes its only key, or with `slot` replaces its key there (one past the last adds a key, `""` there removes that key); `""` without `slot` clears them; key names are case-insensitive and modifiers are normalized (`shift+ctrl+t` becomes `Ctrl+Shift+T`); unknown and reserved keys are refused; a key another command uses is refused unless `replace` |
@@ -976,6 +982,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `hole_several` (default false: a face takes several Single holes; a pick elsewhere on a face that has a hole adds another, and a pick on a hole takes it out)
 - `hole_snaps` (default false: a Single hole snaps to its face's middle and round edges' centres)
 - `home_fit_size` (0.1…1, default 1: how much of the view the model fills when Home, Fit, an opened design or a navigator view change frames it, with `navigator_fit` on or off; 1 fills the room between the panels, the compass and the navigation bar, as before; #10091)
+- `joint_drag_trackball` (default true: dragging a part that a ball joint holds to a part fixed in place turns it by the smallest turn about the joint, like a trackball the size of the part; false: the grabbed point follows the pointer and the part may spin about it, as before #13262)
 - `joint_rotation_coarse` (default 10°): coarse Assembly Move rotation step, in 0.001…180°.
 - `joint_rotation_fine` (default 0.1°): fine Assembly Move rotation step, in 0.001…180°.
 - `keep_unsaved_also_asks` (default true; web app, with `keep_unsaved_in_browser` on: the browser's "leave site?" box still appears when the tab closes with unsaved work; off, it appears only while a copy isn't current yet, #10220)

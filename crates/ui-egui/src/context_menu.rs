@@ -210,6 +210,8 @@ pub struct MenuState {
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenameWhat {
     Body(String),
+    /// Several bodies renamed with one name, numbered after the first (#12341).
+    Bodies(Vec<String>),
     Feature(u64),
     Component(u64),
     Group(u64),
@@ -225,8 +227,9 @@ pub struct Rename {
     pub text: String,
     pub at: Pos2,
     pub(crate) focused: bool,
-    /// Edited in the browser row itself (a double-click on a body), not in the floating box.
+    /// Edited in the browser row itself, not in the floating box.
     pub(crate) inline: bool,
+    pub(crate) inline_id: Option<egui::Id>,
 }
 
 /// Radial slots, clockwise from the top.
@@ -238,6 +241,14 @@ const RY: f32 = crate::ui_kit::RADIAL_RADIUS;
 // ---------------------------------------------------------------------------------------------
 // What the menus offer
 // ---------------------------------------------------------------------------------------------
+
+/// The bodies a body menu's Rename Selected Bodies renames together (#12341): the selection,
+/// when it holds several bodies and the menu is for one or all of them. `None` leaves the item
+/// out.
+fn rename_selected(app: &SolveApp, bodies: &[String]) -> Option<Vec<String>> {
+    let selected = sel_bodies(app);
+    (selected.len() > 1 && !bodies.is_empty() && bodies.iter().all(|b| selected.contains(b))).then_some(selected)
+}
 
 fn sel_bodies(app: &SolveApp) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
@@ -375,7 +386,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 act("ui.workspace.render", "Render", "ws_render")
                     .with(json!({"workspace":"render"}))
                     .key(if rendering { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
+                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load_holds()),
             ];
             for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", ""), ("Drawing", "ws_drawing")] {
                 v.push(act("ui.workspace", w, icon).key("coming later").on(false));
@@ -755,6 +766,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let one = bodies.len() == 1;
     let locked = bodies.iter().all(|b| app.session.visibility.locked_bodies.contains(b));
     let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
+    let several = rename_selected(app, bodies);
     let mut v = vec![
         act("ui.moveBodies", "Move/Copy", "move").key("M").with(json!({ "bodies": names })).on(!locked),
         cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })),
@@ -773,12 +785,20 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": items })).on(!locked),
         cmd(app, "solid.remove", "Remove").with(json!({ "bodies": names })).on(!locked),
-        act("ui.rename", "Rename", "rename").key("F2").with(json!({ "body": bodies.first() })).on(one),
+        // F2 renames the selection: with several bodies selected, it is Rename Selected Bodies.
+        act("ui.rename", "Rename", "rename").key(if several.is_some() { "" } else { "F2" }).with(json!({ "body": bodies.first() })).on(one),
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
         act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })),
     ];
+    // Several selected bodies take one name, numbered after the first (#12341), as F2 renames
+    // them. Rename itself still renames only the body the menu is for.
+    if let Some(list) = several
+        && let Some(at) = v.iter().position(|i| i.id == "ui.rename")
+    {
+        v.insert(at + 1, act("ui.rename", "Rename Selected Bodies", "rename").key("F2").with(json!({ "bodies": list })));
+    }
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
@@ -1619,7 +1639,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             app.start("solid.move");
         }
         "ui.rename" => {
-            let what = if let Some(b) = p.get("body").and_then(Value::as_str) {
+            let several: Option<Vec<String>> =
+                p.get("bodies").and_then(Value::as_array).and_then(|a| a.iter().map(|b| b.as_str().map(str::to_string)).collect());
+            let what = if let Some(mut list) = several.filter(|l| !l.is_empty()) {
+                if list.len() == 1 { RenameWhat::Body(list.remove(0)) } else { RenameWhat::Bodies(list) }
+            } else if let Some(b) = p.get("body").and_then(Value::as_str) {
                 RenameWhat::Body(b.to_string())
             } else if let Some(f) = id_of(&p, "feature") {
                 // The History bar renames in a dialog.
@@ -1672,7 +1696,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
             let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
-            app.pick_save_command(&format!("{name}.step"), &["step", "stp", "igs", "stl", "3mf", "obj"], "file.export", json!({"bodies": bodies}));
+            app.pick_save_command(
+                &format!("{name}.step"),
+                &["step", "stp", "igs", "stl", "3mf", "obj", "glb"],
+                "file.export",
+                json!({"bodies": bodies}),
+            );
         }
         "ui.findBrowser" => {
             if let Some(b) = p.get("body").and_then(Value::as_str) {
@@ -2157,6 +2186,15 @@ pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
     }
     let what = match (app.session.selection.as_slice(), app.tree.picked_components.as_slice(), app.tree.picked_canvases.as_slice()) {
         ([Sel::Body { name }], [], []) => RenameWhat::Body(name.clone()),
+        // F2 on several selected bodies renames them all, numbered after the first (#12341).
+        (sel, [], []) if sel.len() > 1 && sel.iter().all(|s| matches!(s, Sel::Body { .. })) => RenameWhat::Bodies(
+            sel.iter()
+                .filter_map(|s| match s {
+                    Sel::Body { name } => Some(name.clone()),
+                    _ => None,
+                })
+                .collect(),
+        ),
         ([Sel::Feature { id }], [], []) => RenameWhat::Feature(*id),
         ([Sel::Occurrence { path }], [], []) => match app.session.occurrence_placement(path) {
             Ok(p) => RenameWhat::Component(p.component),
@@ -2200,6 +2238,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
     let doc = &app.session.doc;
     let text = match &what {
         RenameWhat::Body(b) => b.clone(),
+        RenameWhat::Bodies(list) => list.first().cloned().unwrap_or_default(),
         RenameWhat::Feature(f) => doc.feature(*f).map(|f| f.name.clone()).unwrap_or_default(),
         RenameWhat::Component(0) => doc.name.clone(),
         RenameWhat::Component(c) => doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
@@ -2209,7 +2248,15 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::View(v) => v.clone(),
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
     };
-    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false });
+    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false, inline_id: None });
+}
+
+pub(crate) fn start_inline_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2, row_id: egui::Id) {
+    start_rename(app, what, at);
+    if let Some(rename) = app.menu.rename.as_mut() {
+        rename.inline = true;
+        rename.inline_id = Some(row_id);
+    }
 }
 
 pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) -> Result<(), String> {
@@ -2222,8 +2269,16 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) -> Result<(), String
             // The command renames the body where it is hidden or locked too.
             app.run_heavy("body.rename", json!({ "body": old, "name": name })).map(|_| ())
         }
+        RenameWhat::Bodies(list) => app.run_heavy("body.rename", json!({ "bodies": list, "name": name })).map(|_| ()),
         RenameWhat::Feature(f) => app.run("timeline.rename", json!({ "feature": f, "name": name })).map(|_| ()),
-        RenameWhat::Component(c) => app.run("component.rename", json!({ "component": c, "name": name })).map(|_| ()),
+        RenameWhat::Component(c) => {
+            // A name another component has takes the next free number: `Bracket` → `Bracket (2)`.
+            let c = *c;
+            let doc = &app.session.doc;
+            let taken = |n: &str| doc.components.iter().any(|k| k.id != c && k.name == n);
+            let name = if taken(&name) { solidcraft_engine::doc::copy_name(&name, taken) } else { name };
+            app.run("component.rename", json!({ "component": c, "name": name })).map(|_| ())
+        }
         RenameWhat::Group(g) => {
             crate::browser::group_action(app, "ui.renameGroup", &json!({ "group": g, "name": name }));
             Ok(())

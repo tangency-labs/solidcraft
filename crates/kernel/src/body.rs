@@ -240,14 +240,32 @@ pub struct Paint {
     /// 1 = opaque.
     pub opacity: f32,
     pub faces: Vec<FacePaint>,
+    /// The body colour's name in the file it came from (a STEP `COLOUR_RGB` name), if it had one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
-/// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity.
+/// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity, and
+/// its name in the file it came from, if it had one.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FacePaint {
     pub face: usize,
     pub color: [f32; 3],
     pub opacity: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// The most characters a colour name read from a file keeps (as a design look's name).
+pub const COLOUR_NAME_MAX: usize = 128;
+
+/// A colour name read from a file, made safe to show and keep: control characters dropped,
+/// surrounding space trimmed, at most [`COLOUR_NAME_MAX`] characters. `None` when nothing is left.
+pub fn colour_name(raw: &str) -> Option<String> {
+    let cleaned: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let name: String = cleaned.trim().chars().take(COLOUR_NAME_MAX).collect();
+    let name = name.trim_end();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// A B-rep edge as seen by the rest of the application.
@@ -980,21 +998,24 @@ impl Body {
         self.paint.as_deref()
     }
 
-    /// The same body with opacity and face colours for export (`None` or opaque with no face
-    /// colours clears them).
+    /// The same body with opacity, face colours and colour names for export (`None`, or opaque
+    /// with no face colours and no name, clears them).
     pub fn with_paint(mut self, p: Option<Paint>) -> Body {
         let clean = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
         self.paint = p
             .map(|mut p| {
                 p.opacity = clean(p.opacity);
+                p.name = p.name.as_deref().and_then(colour_name);
                 p.faces.retain(|f| f.color.iter().all(|x| x.is_finite()));
                 for f in &mut p.faces {
                     f.color = f.color.map(|x| x.clamp(0.0, 1.0));
                     f.opacity = clean(f.opacity);
+                    f.name = f.name.as_deref().and_then(colour_name);
                 }
                 p
             })
-            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty())
+            // An opaque body colour's name is kept with it: the paint holds it.
+            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty() || p.name.is_some())
             .map(std::sync::Arc::new);
         self.regularization_protected |= self.paint().is_some_and(|paint| !paint.faces.is_empty());
         self

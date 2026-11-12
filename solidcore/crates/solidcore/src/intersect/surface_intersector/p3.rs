@@ -78,7 +78,7 @@
 
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::Curve;
-use crate::error::{passed_on, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{passed_on, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -262,11 +262,10 @@ impl SurfaceIntersector<'_> {
         let get = |i: SrfIndex| match surface_cache::<SrfIndex>(k, self.surface(i), Some(i)) {
             Ok(c) => Ok(c),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) => Err(SolidError::Upstream {
-                operation: OP_FBSP,
-                code: SM_ERR_NULL_POINTER,
-                entity: None,
-            }),
+            Err(_) => Err(SolidError::intersect_missing(
+                OP_FBSP,
+                "the surface's cache",
+            )),
         };
         let mut caches = vec![get(SrfIndex::First)?];
         if !self.doing_self_intersection {
@@ -315,11 +314,10 @@ impl SurfaceIntersector<'_> {
         queries: Option<&dyn FaceQueries<O>>,
     ) -> Result<()> {
         if caches.is_empty() {
-            return Err(SolidError::Upstream {
-                operation: OP_FBSP,
-                code: SM_ERR_NULL_POINTER,
-                entity: None,
-            });
+            return Err(SolidError::intersect_missing(
+                OP_FBSP,
+                "the surfaces' caches",
+            ));
         }
 
         // Turn on boundary curve processing to force LocalSolve to look for drop
@@ -369,11 +367,9 @@ impl SurfaceIntersector<'_> {
             // Get thisSurface->3DBoundaryCurves: [0] min u, [1] min v, [2] max u,
             // [3] max v
             let cache_index = l_srf.min(caches.len() - 1);
-            let cache = caches.get_mut(cache_index).ok_or(SolidError::Upstream {
-                operation: OP_FBSP,
-                code: SM_ERR_NULL_POINTER,
-                entity: None,
-            })?;
+            let cache = caches
+                .get_mut(cache_index)
+                .ok_or_else(|| SolidError::intersect_missing(OP_FBSP, "the surface's cache"))?;
             let iso = cache.iso_boundary_curves(k, &domain, self.this_approx_tol_3d / 3.0)?;
 
             // add the intervals of the iso curves (statuses ignored, passed on with
@@ -422,13 +418,12 @@ impl SurfaceIntersector<'_> {
                 } else {
                     // on OtherSurface's cache: upstream's GlobalCurveIntersect fetches
                     // that same cache (smsurf_GetSurfaceCache) and solves on its tree
-                    let other_cache = caches.get((1 - l_srf).min(caches.len() - 1)).ok_or(
-                        SolidError::Upstream {
-                            operation: OP_FBSP,
-                            code: SM_ERR_NULL_POINTER,
-                            entity: None,
-                        },
-                    )?;
+                    let other_cache =
+                        caches
+                            .get((1 - l_srf).min(caches.len() - 1))
+                            .ok_or_else(|| {
+                                SolidError::intersect_missing(OP_FBSP, "the other surface's cache")
+                            })?;
                     surface_global_curve_intersect(
                         k,
                         self.surface(other),
@@ -896,7 +891,10 @@ impl SurfaceIntersector<'_> {
         if !self.uv_domains[0].contains_point(prev_tsp.uv_pos(s0), EFF_ZERO)
             || !self.uv_domains[1].contains_point(prev_tsp.uv_pos(s1), EFF_ZERO)
         {
-            return Err(SolidError::sm_err(OP_NEXT));
+            return Err(SolidError::intersect_failed(
+                OP_NEXT,
+                "the previous point lies outside a surface's domain",
+            ));
         }
 
         // if needed: clip stepsize to keep nextTSP in both surfaces

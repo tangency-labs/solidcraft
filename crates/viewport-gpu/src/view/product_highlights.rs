@@ -225,7 +225,8 @@ impl Renderer {
             pass.draw_indexed(0..draw.mesh.index_count, 0, 0..1);
             tally.triangles(draw.mesh.index_count, 1);
         }
-        for draw in model.instanced.iter().filter(|draw| draw.look == InstanceLook::Opaque) {
+        // PBR placements are opaque too: they occlude feedback as the built ones do.
+        for draw in model.instanced.iter().filter(|draw| matches!(draw.look, InstanceLook::Opaque | InstanceLook::Pbr)) {
             draw.draw(pass, &depth.instanced, &depth.instanced, tally);
         }
         // Render's build_highlight emits self-contained mesh triangles/edges, including

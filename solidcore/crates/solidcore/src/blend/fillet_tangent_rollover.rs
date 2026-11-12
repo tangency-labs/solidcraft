@@ -101,7 +101,7 @@ pub fn tangent_rollover_supports(
     let mut normals = [Vec3::UNDEF; 2];
     for (normal, &face) in normals.iter_mut().zip(&faces) {
         let surface = crate::topology::face::p2::surface(target, face)?
-            .ok_or_else(|| SolidError::sm_err(OP))?
+            .ok_or_else(|| SolidError::blend_failed(OP, "a face of the edge has no surface"))?
             .clone_for_evaluation()?;
         if !surface.is_planar(k, tol)?.is_planar {
             return Ok(none);
@@ -215,7 +215,7 @@ fn offset_folds(
     offset: f64,
 ) -> Result<bool> {
     let surface = crate::topology::face::p2::surface(target, face)?
-        .ok_or_else(|| SolidError::sm_err(OP))?
+        .ok_or_else(|| SolidError::blend_failed(OP, "the face has no surface"))?
         .clone_for_evaluation()?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let dropped = surface.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;

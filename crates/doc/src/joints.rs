@@ -2081,6 +2081,27 @@ fn close_group(
     let bounds = limit_bounds(tree, &vars);
     // Closer than the conflict check needs: 1e-7 mm, and turns of 1e-10 rad across the loop.
     let tol = (1e-10 * scale).min(1e-7);
+    let stored: Vec<f64> = vars.iter().map(|(id, i)| vals.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0)).collect();
+    // A ball joint moves by a turn from where it starts, as in a reach (`BallTurn`), not by its
+    // angles: at pitch 0, where a ball made as built starts, they can't tilt it about its x, and a
+    // loop that needs that tilt can't move (#14852).
+    let balls = reach::ball_turns(tree, &vars, &stored, &bounds);
+    let (mut x0, mut free) = (stored, bounds.clone());
+    for k in balls.iter().flat_map(|b| b.at..b.at + 3) {
+        if let (Some(x), Some(b)) = (x0.get_mut(k), free.get_mut(k)) {
+            (*x, *b) = (0.0, (f64::NEG_INFINITY, f64::INFINITY));
+        }
+    }
+    // The values for the solve's `x`.
+    let values = |x: &[f64]| -> Vec<f64> {
+        let mut v = x.to_vec();
+        for b in &balls {
+            if let (Some(q), Some(slot)) = (b.values(x), v.get_mut(b.at..b.at + 3)) {
+                slot.copy_from_slice(&q);
+            }
+        }
+        v
+    };
     // The values with the held ones `t` of the way along (and the unknowns at `x`).
     let place = |work: &mut Values, x: &[f64], t: f64| {
         for (id, i, from, to) in moves {
@@ -2088,20 +2109,27 @@ fn close_group(
                 *slot = from + (to - from) * t;
             }
         }
-        for ((id, i), (v, (lo, hi))) in vars.iter().zip(x.iter().zip(&bounds)) {
+        for ((id, i), (v, (lo, hi))) in vars.iter().zip(values(x).iter().zip(&bounds)) {
             if let Some(slot) = work.get_mut(id).and_then(|q| q.get_mut(*i)) {
                 *slot = v.max(*lo).min(*hi);
             }
         }
         apply_links(asm, work);
     };
-    let x0: Vec<f64> = vars.iter().map(|(id, i)| vals.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0)).collect();
     // Steps that move no value around the loops (links included) more than 5 degrees or a
     // twentieth of the loops' size.
     // How many such steps apart two sets of values are, over the loops' values.
     let stride = |a: &Values, b: &Values| -> f64 {
         let mut most = 0.0f64;
         for j in around.iter().filter_map(|id| tree.joints.get(id)) {
+            if j.kind == JointKind::Ball {
+                // A ball joint by how far it turns.
+                let three = |v: &Values| v.get(&j.id).and_then(|q| Some([*q.first()?, *q.get(1)?, *q.get(2)?]));
+                if let (Some(p), Some(q)) = (three(a), three(b)) {
+                    most = most.max(reach::ball_turn_between(p, q) / 5f64.to_radians());
+                }
+                continue;
+            }
             for i in 0..j.kind.dofs().len() {
                 let (Some(p), Some(q)) = (a.get(&j.id).and_then(|v| v.get(i)), b.get(&j.id).and_then(|v| v.get(i))) else { continue };
                 let step = if j.kind.is_angle(i) { 5f64.to_radians() } else { 0.05 * scale };
@@ -2144,7 +2172,7 @@ fn close_group(
     let mut x = x0;
     let start = largest(&gaps(&x, 0.0)?);
     let loose = loose_gap(scale);
-    let tol = match close_within(&mut |x| gaps(x, 0.0), &mut x, &bounds, tol, loose)? {
+    let tol = match close_within(&mut |x| gaps(x, 0.0), &mut x, &free, tol, loose)? {
         t if t > tol && moves.is_empty() && start <= t => return Some(BTreeMap::new()),
         t => t,
     };
@@ -2158,7 +2186,7 @@ fn close_group(
         let mut trial = x.clone();
         // Each step as closed as the start, or within the conflict check where the loop's gap
         // grows as it moves (axes a hair out of parallel, #6211).
-        if close_within(&mut |x| gaps(x, t1), &mut trial, &bounds, tol, loose).is_some() {
+        if close_within(&mut |x| gaps(x, t1), &mut trial, &free, tol, loose).is_some() {
             // A step that moved some loop value too far (through a link and a limit, or close to
             // a dead point) is taken again in halves.
             let next = effective(&trial, t1);
@@ -2179,7 +2207,7 @@ fn close_group(
     // The values that changed from what is stored.
     let moved = vars
         .iter()
-        .zip(&x)
+        .zip(&values(&x))
         .filter(|((id, i), v)| tree.joints.get(id).is_some_and(|j| j.values.get(*i).is_none_or(|s| (s - *v).abs() > 1e-12)))
         .map(|(var, v)| (*var, *v))
         .collect();

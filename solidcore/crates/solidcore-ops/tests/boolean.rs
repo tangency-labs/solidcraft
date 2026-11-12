@@ -7,7 +7,7 @@ use std::io::Read as _;
 use serde_json::Value;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
 use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
-use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error};
+use solidcore_ops::{make_box, make_sphere, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::brep::Brep as Record;
 
 fn all_fixes() {
@@ -63,6 +63,66 @@ fn boxes_touching_along_an_edge_union_to_a_closed_body() {
     let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
     assert!(near(volume(&u), 2.0), "{}", volume(&u));
     assert_eq!(u.solid_count().unwrap(), 2);
+}
+
+/// A 20 mm box with a closed void at its middle: a 10 mm cube void, or a sphere void of radius 5.
+fn box_with_void(cube: bool) -> Body {
+    let tool = if cube {
+        make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap()
+    } else {
+        make_sphere([10.0, 10.0, 10.0], 5.0).unwrap()
+    };
+    let b = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]).unwrap();
+    boolean(b, tool, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+#[test]
+fn a_union_that_fills_a_void_is_the_whole_box() {
+    all_fixes();
+    // Every face of the void is deleted, and the region they joined is material. The tool's
+    // faces lie on the void's, or inside the box's material, so none of them is copied in.
+    let fillers = [
+        (true, make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap()),
+        (true, make_box([4.0, 4.0, 4.0], [12.0, 12.0, 12.0]).unwrap()),
+        (true, make_box([5.0, 4.0, 4.0], [12.0, 12.0, 12.0]).unwrap()),
+        (false, make_sphere([10.0, 10.0, 10.0], 5.0).unwrap()),
+        (false, make_sphere([10.0, 10.0, 10.0], 6.0).unwrap()),
+        (
+            false,
+            make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap(),
+        ),
+    ];
+    for (n, (cube, filler)) in fillers.into_iter().enumerate() {
+        let u = boolean(box_with_void(cube), filler, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        assert!(near(volume(&u), 8000.0), "filler {n}: {}", volume(&u));
+        assert_eq!(u.counts().unwrap(), [6, 12, 8], "filler {n}");
+        assert!(u.is_manifold_solid().unwrap(), "filler {n}");
+        assert!(u.to_record().is_ok(), "filler {n}");
+    }
+    // A filler that leaves part of the void keeps that part: 20³ − 10 · 10 · 1.
+    let part = make_box([6.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    let u = boolean(box_with_void(true), part, BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    assert!(near(volume(&u), 7900.0), "{}", volume(&u));
+}
+
+#[test]
+fn a_cube_on_a_void_is_kept_out_by_a_difference_and_shares_nothing_with_it() {
+    all_fixes();
+    let cube = || make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    // The faces bound material on opposite sides: a difference keeps them, so the box is
+    // unchanged, and an intersection deletes them and leaves nothing.
+    let d = boolean(box_with_void(true), cube(), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    assert!(near(volume(&d), 7000.0), "{}", volume(&d));
+    assert_eq!(d.counts().unwrap(), [12, 24, 16]);
+    assert!(boolean(box_with_void(true), cube(), BooleanOp::Intersect)
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -305,4 +365,86 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
         took < Duration::from_millis(500),
         "returned {took:?} after Cancel"
     );
+}
+
+/// #13295: a bar of L section (100 long; its step's top edge along x at y 12.527, z 19.567)
+/// cut by a circle of radius 4.717 sketched on the plane at 45 degrees through that edge and
+/// extruded into the bar. The sketch puts the circle's centre 7.9e-6 off the edge, so the cut
+/// wall's corner on the edge, where its seam edge ends, lies that far across the wall's
+/// seam: inside the vertex's 1e-5 tolerance, with no sliver beside the seam. The check
+/// refused it (face test 36) for centres 1e-7 to 1e-5 off. Every offset now gives one valid
+/// solid, its volume moving with the offset by no more than the wall's swept area allows.
+#[test]
+fn a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid() {
+    all_fixes();
+    let (y0, z1, yc, z2) = (
+        16.423877938511588,
+        13.06859205815335,
+        12.527075811882755,
+        19.566787029154483,
+    );
+    let p = [
+        [0.0, 0.0, 0.0],
+        [0.0, y0, 0.0],
+        [0.0, y0, z1],
+        [0.0, yc, z1],
+        [0.0, yc, z2],
+        [0.0, 0.0, z2],
+    ];
+    let profile: Vec<Curve> = (0..6)
+        .map(|i| Curve::Line {
+            start: p[i],
+            end: p[(i + 1) % 6],
+        })
+        .collect();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let radius = 4.716_990_566_008_734;
+    let cut = |d: f64| {
+        let bar = extrude(
+            &profile,
+            [1.0, 0.0, 0.0],
+            100.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        // the circle's centre `d` off the edge, in the sketch plane (normal (0, 1, 1) / sqrt 2)
+        let centre = [20.4216146277246, yc + d * s, z2 - d * s];
+        let circle = [Curve::Arc {
+            center: centre,
+            axis: [0.0, s, s],
+            reference: [1.0, 0.0, 0.0],
+            radius,
+            start: 0.0,
+            end: TAU,
+        }];
+        let tool = extrude(
+            &circle,
+            [0.0, -s, -s],
+            60.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        boolean(bar, tool, BooleanOp::Subtract)
+            .unwrap_or_else(|e| panic!("d {d}: {e:?}"))
+            .unwrap()
+    };
+    let exact = volume(&cut(0.0));
+    // (1e-6 off, the cut is no solid, before this change too: #14840)
+    for d in [1e-9, 1e-7, 3e-7, 2e-6, 7.868_858_162e-6, 1e-5, 3e-5, 1e-4] {
+        let r = cut(d);
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "d {d}");
+        // the wall moves by d: the volume by at most its perimeter times its length times d
+        let bound = TAU * radius * 60.0 * d + 1e-7 * exact;
+        assert!(
+            (volume(&r) - exact).abs() <= bound,
+            "d {d}: {} vs {exact}",
+            volume(&r)
+        );
+    }
 }
