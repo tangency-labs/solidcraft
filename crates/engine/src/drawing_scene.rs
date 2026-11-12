@@ -13,7 +13,8 @@
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
 //! then moved to its centre, so the same lines on the same centre are the same bytes however they
-//! got there. It reads the model as it is: no model is evaluated.
+//! got there. It reads the model as it is: no model is evaluated, but a view of another configuration
+//! evaluates a copy of the design ([`copy_for`]); the design is unchanged.
 //!
 //! The sheet page draws through the provider instead, which keeps each view's lines between frames:
 //! [`extract`] returns the last scene at once and says which views are out of date, and [`step`]
@@ -22,7 +23,9 @@
 //! are, the dimensions of one view that changed. A view moved across its sheet is moved, never
 //! projected again, and an edited dimension is read again alone. A view drawn from a world state that
 //! showed the same bodies, where and as they are now (`SourceKey`), is up to date: an appearance,
-//! or an edit taken back, draws nothing. The provider evaluates no model either. Its cache is the
+//! or an edit taken back, draws nothing. The provider evaluates no model either, but in the job that
+//! draws a view of another configuration ([`Job::run`]): nothing the window does each frame makes
+//! that view's copy, so it stays out of date until its job draws it. Its cache is the
 //! session's view state, beside the drawing: never saved, never an undo step, and dropped when its
 //! drawing closes, all but its views' and dimensions' lines (`drawing_scene_kept.rs`), which the
 //! drawing opened again starts from.
@@ -318,7 +321,8 @@ pub struct LineHit {
 /// The line under `point_mm` on sheet `sheet` of the drawing open, within `band_mm`: in the view
 /// [`hit`] there, the nearest of its strokes ([`nearest_stroke`]). The sheet's views out of date are
 /// drawn first, as the page draws them ([`step`]), so the line is one the page shows. A view that
-/// can't be drawn, or isn't in the scene, has no lines. No model is evaluated.
+/// can't be drawn, or isn't in the scene, has no lines. A view of another configuration evaluates a
+/// copy of the design; the design is unchanged.
 pub fn line_at(s: &mut Session, sheet: u64, point_mm: Vec2, band_mm: f64) -> Result<Option<LineHit>> {
     let d = s.drawing(CMD)?.clone();
     extract(s, sheet)?;
@@ -366,7 +370,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // state of the assembly it draws, and its bodies.
     let mut owners = Vec::new();
     let drawn = on.iter().map(|(id, view, centre)| {
-        let choice = Choice::of(view);
+        let choice = sessions.choice(view);
         let drawn = match sessions.drawing(&choice) {
             Ok(from) => draw(from, shown.entry(choice.clone()).or_insert_with(|| crate::drawing_view::shown(from)), *id, view),
             Err(why) => draw(s, &Err(why), *id, view),
@@ -1216,6 +1220,16 @@ impl Cache {
         d.updates == Updates::Deferred && !self.updated.as_ref().is_some_and(|updated| Arc::ptr_eq(updated, state))
     }
 
+    /// Hands view `id` back to its job: it keeps its lines, drawn from a world state that has gone (as
+    /// [`Self::take_kept`]'s are), so it is out of date until its job draws it and its records again.
+    /// A change to the cache, so [`extract`] doesn't give its last answer again.
+    fn redraw(&mut self, id: u64) {
+        if let Some(entry) = self.views.get_mut(&id) {
+            entry.state = Arc::default();
+            self.serial += 1;
+        }
+    }
+
     /// Whether view `id`, drawing as `view` now, was last drawn so, from `state`.
     fn fresh(&self, id: u64, state: &Arc<ModelState>, view: &ResolvedView) -> bool {
         self.views.get(&id).is_some_and(|e| Arc::ptr_eq(&e.state, state) && e.view == *view)
@@ -1376,7 +1390,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     let state = s.world_state()?;
     let lettering = Lettering::of(s, &d);
     let on = views_on(&d, sheet)?;
-    set_waiting_dimensions(s, &d, &on, &state, &lettering);
+    let handed_back = set_waiting_dimensions(s, &d, &on, &state, &lettering);
     let revision = s.revision;
     let last = s.drawing_scenes.last.as_ref().filter(|last| !last.pending && last.reads(sheet, &d, &s.doc, &state, &lettering));
     if let Some(last) = last
@@ -1405,7 +1419,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     let (stale_notes, stale_dimensions): (Vec<Annotation>, Vec<Annotation>) =
         cache.stale_dimensions(&d, &on, &state, &lettering, revision).into_iter().partition(Annotation::is_note);
     let (stale_dimensions, stale_notes) = (stale_dimensions.iter().map(Annotation::id).collect(), stale_notes.iter().map(Annotation::id).collect());
-    let waiting_for_fonts = pending || !cache.waiting_dimensions(&d, &on, &state, &lettering, revision).is_empty();
+    let waiting_for_fonts = pending || handed_back || !cache.waiting_dimensions(&d, &on, &state, &lettering, revision).is_empty();
     let inputs = cache.inputs(&d, record, &on);
     let (scene, views, objects, dimensions, notes_drawn, generation) = match cache.last.take() {
         // Text set while a font was looked for can differ with the same cells and faces.
@@ -1474,9 +1488,15 @@ type ShownFor = (Arc<ModelState>, std::result::Result<ShownSet, Unmeasured>);
 /// out anywhere, and [`finish`] takes them.
 pub struct Job {
     /// The session as its view draws the design: as it places its parts, or in another state of it.
+    /// For a view of another configuration, the design its copy is made from.
     copy: Session,
     /// Why the view can't be drawn, when the copy it draws from can't be made ([`copy_for`]).
     refused: Option<Unmeasured>,
+    /// What a view of another configuration draws ([`ViewSessions::choice`]): its copy evaluates the
+    /// design, so [`Job::run`] makes it, off the window's thread.
+    later: Option<Choice>,
+    /// Whether its view draws the design as it places its parts, whose shown set the cache keeps.
+    placed: bool,
     /// The drawing open when the job was asked for: its records of the view's dimensions and notes.
     drawing: Arc<Drawing>,
     ticket: Ticket,
@@ -1510,7 +1530,27 @@ pub struct Done {
 impl Job {
     /// Works the view's lines, dimensions and notes out: the one long piece of work, on any thread.
     pub fn run(self) -> Done {
-        let Job { copy, refused, drawing, ticket, shown } = self;
+        let Job { copy, refused, later, placed, drawing, ticket, shown } = self;
+        // A view of another configuration: its copy, made here ([`copy_for`]). A panic while it is made
+        // fails the view, as `Session::execute` fails a command, and the view is then up to date: its
+        // job isn't asked for again until the design changes.
+        let made = later.map(|choice| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let made = copy_for(&copy, &choice);
+                // Planted after the copy is evaluated, so its results are already in the shared cache.
+                #[cfg(test)]
+                copy_panics::check();
+                made
+            }))
+        });
+        let panicked = matches!(made, Some(Err(_)));
+        let (copy, refused) = match made {
+            Some(Ok(Ok(made))) => (made, None),
+            Some(Ok(Err(why))) => (copy, Some(why)),
+            // Drawn as its placeholder, then failed, below.
+            Some(Err(_)) => (copy, Some(Unmeasured::NotConfigured)),
+            None => (copy, refused),
+        };
         // A design whose parts can't be placed draws its views as placeholders (`shown` says why).
         let state = copy.world_state().unwrap_or_else(|_| copy.model.state());
         let shown = match (refused, shown) {
@@ -1518,15 +1558,53 @@ impl Job {
             (None, Some((was, shown))) if Arc::ptr_eq(&was, &state) => shown,
             _ => crate::drawing_view::shown(&copy),
         };
-        let drawn = draw(&copy, &shown, ticket.view, &ticket.resolved);
+        let mut drawn = draw(&copy, &shown, ticket.view, &ticket.resolved);
+        if panicked {
+            drawn.status = Status::Failed(COPY_PANICKED.into());
+        }
         let shows = SourceKey::of(&shown);
         // The view's dimensions and notes through its new frame, taken in the same swap as its lines.
         let frame = drawn.frame.map(|frame| (frame, ticket.resolved.line_group.value));
         let dimensions = dimensions_on(&drawing, std::iter::once(ticket.view));
-        // `copy` is the session the view draws from, so its records are read on it.
+        // `copy` is the session the view draws from (its row's copy, or the design when the row can't be
+        // put on it), so its records are read on it.
         let lines = draw_dimensions(&copy, None, &drawing, &dimensions, |_| frame, false);
-        let shown = Choice::of(&ticket.resolved).is_placed().then_some((state, shown));
+        let shown = placed.then_some((state, shown));
         Done { ticket, drawn, shows, dimensions, lines, shown }
+    }
+}
+
+/// Why a view whose job panicked while making its copy is failed ([`Job::run`]).
+const COPY_PANICKED: &str = "internal error while making the copy of the design it draws";
+
+/// Makes the copies [`Job::run`] makes panic on this thread, for tests of what a panic there does.
+#[cfg(test)]
+pub(crate) mod copy_panics {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ON: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(crate) fn check() {
+        if ON.with(Cell::get) {
+            panic!("a planted panic in a view's copy");
+        }
+    }
+
+    /// Puts it back when dropped, also when the test panics.
+    struct Restore(bool);
+
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ON.with(|on| on.set(self.0));
+        }
+    }
+
+    /// Runs `f` with every copy a job makes panicking.
+    pub(crate) fn with<R>(f: impl FnOnce() -> R) -> R {
+        let _restore = Restore(ON.with(|on| on.replace(true)));
+        f()
     }
 }
 
@@ -1545,17 +1623,20 @@ fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state
     let request = REQUEST.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     s.drawing_scenes.requested = Some(request);
     let lettering = Lettering::of(s, d);
-    let choice = Choice::of(&view);
-    let (copy, refused, shown) = if choice.is_placed() {
-        (designed(s), None, s.drawing_scenes.shown.take())
+    let choice = ViewSessions::new(s).choice(&view);
+    let placed = choice.is_placed();
+    let (copy, refused, later, shown) = if placed {
+        (designed(s), None, None, s.drawing_scenes.shown.take())
+    } else if choice.evaluates() {
+        (designed(s), None, Some(choice), None)
     } else {
         match copy_for(s, &choice) {
-            Ok(copy) => (copy, None, None),
-            Err(why) => (designed(s), Some(why), None),
+            Ok(copy) => (copy, None, None, None),
+            Err(why) => (designed(s), Some(why), None, None),
         }
     };
     let ticket = Ticket { request, view: id, resolved: view, state, revision: s.revision, lettering };
-    Job { copy, refused, drawing: d.clone(), ticket, shown }
+    Job { copy, refused, later, placed, drawing: d.clone(), ticket, shown }
 }
 
 /// Takes a job's work into the cache when it is for its latest request and nothing it was asked from
@@ -1610,6 +1691,11 @@ fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)
     let revision = s.revision;
     let stale = s.drawing_scenes.stale_dimensions(d, on, state, &lettering, revision);
     let Some(view) = stale.first().map(Annotation::view) else { return false };
+    // Its copy evaluates the design, which only its job does: its job reads them again with its lines.
+    if by_their_jobs(s, on).contains(&view) {
+        s.drawing_scenes.redraw(view);
+        return true;
+    }
     let (these, others): (Vec<_>, Vec<_>) = stale.into_iter().partition(|record| record.view() == view);
     let entry = s.drawing_scenes.views.get(&view);
     let frame = entry.and_then(|e| Some((e.drawn.frame?, e.view.line_group.value)));
@@ -1619,6 +1705,13 @@ fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)
     cache.serial += 1;
     cache.keep_dimensions(these, lines, state, view_serial, &lettering, revision);
     !others.is_empty()
+}
+
+/// The views of `on` whose copy evaluates the design ([`Choice::evaluates`]): the window's frame paths
+/// never read their records, as that would make the copy; their jobs do.
+fn by_their_jobs(s: &Session, on: &[(u64, ResolvedView, Vec2)]) -> BTreeSet<u64> {
+    let sessions = ViewSessions::new(s);
+    on.iter().filter(|(_, view, _)| sessions.choice(view).evaluates()).map(|(id, ..)| *id).collect()
 }
 
 /// Brings the cache to `d`, the drawing open, and `state`, before anything reads or draws from it:
@@ -1636,12 +1729,20 @@ fn catch_up(s: &mut Session, d: &Drawing, on: impl Iterator<Item = u64> + Clone,
 
 /// Sets the text of each dimension and note on `on` that waited for its font, once the search has
 /// answered: one read of those alone, kept only when its text is set, so a text still waiting
-/// changes nothing.
-fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, lettering: &Lettering) {
+/// changes nothing. Says whether it handed any back to its view's job: that text still waits, though
+/// its view, now out of date, no longer counts it.
+fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, lettering: &Lettering) -> bool {
     let revision = s.revision;
     let waiting = s.drawing_scenes.waiting_dimensions(d, on, state, lettering, revision);
+    // Those of a view whose copy evaluates the design are read again by its job, with its lines.
+    let jobs = by_their_jobs(s, on);
+    let (waiting, theirs): (Vec<Annotation>, Vec<Annotation>) = waiting.into_iter().partition(|record| !jobs.contains(&record.view()));
+    for record in &theirs {
+        s.drawing_scenes.redraw(record.view());
+    }
+    let handed_back = !theirs.is_empty();
     if waiting.is_empty() {
-        return;
+        return handed_back;
     }
     let cache = &s.drawing_scenes;
     let frame = |view: u64| cache.views.get(&view).and_then(|e| Some((e.drawn.frame?, e.view.line_group.value)));
@@ -1653,22 +1754,27 @@ fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView
         cache.serial += 1;
         cache.keep_dimensions(vec![record], vec![drawn], state, view_serial, lettering, revision);
     }
+    handed_back
 }
 
 /// Each view of `on` drawn from another world state that showed what `state` shows takes `state`:
 /// drawn as it draws now, it is then up to date ([`Cache::fresh`]) and draws nothing. What a view
 /// shows is what it draws: the design as it places its parts, whose shown set is worked out once and
 /// kept for [`step`] to draw from, or its exploded view's (#13048), one for each exploded view behind.
-/// Each is worked out only when a view drawing it is behind.
+/// Each is worked out only when a view drawing it is behind. A view of another configuration is left
+/// behind: its copy evaluates the design, which only its job does ([`Job::run`]).
 fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
     // Each with what it says now: a joint deleted may leave its picture as it was.
     let says = |view: &ResolvedView| crate::drawing_view::position_reason(s, view);
-    let behind: Vec<(u64, Choice, Option<String>)> = on
-        .filter_map(|id| {
+    // Each by the key of the session it draws from, so a view of the active row is the design's.
+    let behind: Vec<(u64, Choice, Option<String>)> = {
+        let sessions = ViewSessions::new(s);
+        on.filter_map(|id| {
             let entry = s.drawing_scenes.views.get(&id).filter(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))?;
-            Some((id, Choice::of(&entry.view), says(&entry.view)))
+            Some((id, sessions.choice(&entry.view), says(&entry.view)))
         })
-        .collect();
+        .collect()
+    };
     let mut now: BTreeMap<Choice, Option<Arc<SourceKey>>> = BTreeMap::new();
     if behind.iter().any(|(_, choice, _)| choice.is_placed()) {
         let shown = match s.drawing_scenes.shown.take() {
@@ -1681,7 +1787,7 @@ fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clo
     {
         let mut sessions = ViewSessions::new(s);
         for (_, choice, _) in &behind {
-            if !now.contains_key(choice) {
+            if !now.contains_key(choice) && !choice.evaluates() {
                 let shown = sessions.drawing(choice).and_then(crate::drawing_view::shown);
                 now.insert(choice.clone(), SourceKey::of(&shown));
             }

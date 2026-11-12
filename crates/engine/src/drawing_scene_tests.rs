@@ -99,6 +99,27 @@ pub(crate) fn add_a_pin(s: &mut Session) {
     run(s, "component.activate", json!({"component": "root"}));
 }
 
+/// A block 100 x 50 x 20 mm along X, Y and Z from the origin, its length parameter `L`, with
+/// configuration rows Default (as it is, the active row) and Long (`L` = 120 mm): the session and
+/// Long's row id.
+pub(crate) fn configured_block() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "100 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 50, "height": 20, "body_name": "Block"}));
+    run(&mut s, "config.configure", json!({"params": ["L"]}));
+    let table = run(&mut s, "config.row", json!({"name": "Long", "values": {"L": "120 mm"}}));
+    let long = table["rows"].as_array().and_then(|rows| rows.iter().find(|row| row["name"] == "Long")).and_then(|row| row["id"].as_u64());
+    (s, long.unwrap())
+}
+
+/// [`front_and_top`]'s drawing of [`configured_block`], so each view is `L` / 2 wide on paper: the
+/// session, the sheet, the two views and Long's row id.
+pub(crate) fn configured_front_and_top() -> (Session, u64, [u64; 2], u64) {
+    let (s, long) = configured_block();
+    let (s, sheet, views) = front_and_top_of(s);
+    (s, sheet, views, long)
+}
+
 /// Sheet `sheet` of the drawing open, built at once.
 fn built(s: &Session, sheet: u64) -> SheetScene {
     let d = s.drawing("test").unwrap().clone();
@@ -947,6 +968,176 @@ fn views_at_one_study_step_share_one_copy() {
     }
     assert_eq!(sessions.copies(), 2);
     built(&s, sheet);
+}
+
+/// How wide view `id` is on sheet `sheet` built at once, round what it draws, in paper millimetres.
+fn drawn_width(s: &Session, sheet: u64, id: u64) -> f64 {
+    built(s, sheet).objects.iter().find(|o| o.object == id).map_or(f64::NAN, |o| o.bounds_mm.size().x)
+}
+
+/// Views of one row of the configuration table share one copy, and a view of the design's active row,
+/// which the design matches, draws the design itself, with no copy (#13048). Once `L` is edited by
+/// hand the design no longer matches its active row, so a view of that row draws the row, from a copy
+/// of its own.
+#[test]
+fn views_of_one_row_share_one_copy_and_the_active_row_needs_none() {
+    let (mut s, sheet, [front, top], _) = configured_front_and_top();
+    let default = s.doc.configs.active_row().map(|row| row.id).unwrap();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    let p = json!({"sheet": ids::encode(sheet), "view": "front", "scale": "1:2", "position_mm": [300, 80], "configuration": default});
+    let own_row = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    let copies = |s: &Session| {
+        let d = s.drawing("test").unwrap().clone();
+        let mut sessions = crate::drawing_view::ViewSessions::new(s);
+        for view in [front, top, own_row] {
+            sessions.of(&d.resolve_view(view).unwrap()).unwrap();
+        }
+        sessions.copies()
+    };
+    assert_eq!(copies(&s), 1);
+    let widths = |s: &Session| [front, top, own_row].map(|view| drawn_width(s, sheet, view));
+    assert!(widths(&s).iter().zip([60.0, 60.0, 50.0]).all(|(got, want)| (got - want).abs() < 1e-6), "{:?}", widths(&s));
+    in_the_model(&mut s, "parameters.change", json!({"name": "L", "expression": "110 mm"}));
+    assert_eq!(copies(&s), 2, "the design no longer matches Default");
+    assert!((drawn_width(&s, sheet, own_row) - 50.0).abs() < 1e-6, "the row, not the design's 55: {:?}", widths(&s));
+}
+
+/// A view of a row the design no longer has is its placeholder, and so are the views that follow it:
+/// each can still be picked, by the 20 x 20 mm round its centre (#13048).
+#[test]
+fn a_view_of_a_deleted_row_is_an_object_at_its_placeholder() {
+    let (mut s, sheet, [front, top], _) = configured_front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    in_the_model(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    let scene = built(&s, sheet);
+    for (view, min, max) in [(front, [140.0, 140.0], [160.0, 160.0]), (top, [140.0, 210.0], [160.0, 230.0])] {
+        let status = scene.views.iter().find(|v| v.view == view).map(|v| v.status.clone());
+        assert_eq!(status, Some(Status::Placeholder(Unmeasured::NoConfiguration)));
+        let object = scene.objects.iter().find(|o| o.object == view).unwrap();
+        assert!(near(&object.bounds_mm, min, max) && object.boundary_mm == Some(object.bounds_mm), "{object:?}");
+    }
+}
+
+/// A view of a configuration of its own draws from a copy that evaluates the design, so only its job
+/// makes that copy (#13048). Behind after `L` is edited by hand, though it would show the same, the
+/// window's paths (the sheet extracted a hundred times, the drawing's standing, the job asked for)
+/// copy nothing and leave it behind; its job draws it.
+#[test]
+fn only_its_job_makes_a_configuration_views_copy() {
+    let (mut s, sheet, [front, top], _) = configured_front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    settled(&mut s, sheet);
+    in_the_model(&mut s, "parameters.change", json!({"name": "L", "expression": "110 mm"}));
+    crate::tests::doc_copies::take();
+    for _ in 0..100 {
+        extract(&mut s, sheet).unwrap();
+    }
+    let d = s.drawing("test").unwrap().clone();
+    standing(&mut s, &d);
+    let job = begin(&mut s).unwrap();
+    assert_eq!(crate::tests::doc_copies::take(), 0, "nothing copied on the window's thread");
+    let mut behind = vec![front, top];
+    behind.sort_unstable();
+    assert_eq!(extract(&mut s, sheet).unwrap().stale, behind);
+    assert!(finish(&mut s, job.run()));
+    assert!(crate::tests::doc_copies::take() > 0, "the job made it");
+    let answer = settled(&mut s, sheet);
+    assert!(answer.stale.is_empty() && answer.views.iter().all(|v| v.status == Status::Drawn));
+    assert_eq!(bytes(&answer.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// A dimension on a view of a configuration of its own, edited while its view is up to date, isn't read
+/// again on the window's paths, as its view's copy evaluates the design ([`Choice::evaluates`]): the
+/// view is handed back to its job, which reads it with its lines, on the row: the top front edge
+/// measures Long's 120 mm (#13048).
+#[test]
+fn a_configuration_views_dimension_is_read_again_by_its_job() {
+    let (mut s, sheet, [front, _], _) = configured_front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}});
+    let added = run(&mut s, "drawing.dimension.add", p)["dimension"].clone();
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": added, "set": {"offset_mm": 15}}));
+    crate::tests::doc_copies::take();
+    extract(&mut s, sheet).unwrap();
+    assert!(step(&mut s), "the view's job is still to run");
+    assert_eq!(crate::tests::doc_copies::take(), 0, "nothing copied on the window's paths");
+    assert!(extract(&mut s, sheet).unwrap().stale.contains(&front), "handed back to its job");
+    let answer = settled(&mut s, sheet);
+    assert!(answer.stale.is_empty());
+    assert_eq!(bytes(&answer.scene), bytes(&built(&s, sheet).scene));
+    let read = run(&mut s, "drawing.dimension.inspect", json!({"dimension": added}));
+    assert!(read["value"].as_f64().is_some_and(|value| (value - 120.0).abs() < 1e-9), "{read}");
+}
+
+/// A dimension on a view of a configuration of its own whose text waits for its font is drawn again by
+/// its view's job once the font is found, never on the window's paths, which would copy the design
+/// (#13048). The character is this test's alone.
+#[test]
+fn a_configuration_views_waiting_text_is_drawn_by_its_job() {
+    let (mut s, sheet, [front, _], _) = configured_front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}});
+    let added = run(&mut s, "drawing.dimension.add", p)["dimension"].clone();
+    let id = added.as_str().and_then(ids::decode).unwrap();
+    settled(&mut s, sheet);
+    // Its text through edit, which lays nothing out, so the view's job is the first to ask for its font.
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": added, "set": {"override_text": "\u{30f6} 100"}}));
+    extract(&mut s, sheet).unwrap();
+    assert!(step(&mut s), "handed back to its job");
+    step(&mut s);
+    assert!(s.drawing_scenes.dimensions[&id].drawn.pending, "the view's job asked, not waited");
+    crate::tests::doc_copies::take();
+    let handed = extract(&mut s, sheet).unwrap();
+    assert_eq!(crate::tests::doc_copies::take(), 0, "nothing copied on the window's paths");
+    assert!(handed.stale.contains(&front), "handed back to its job again");
+    // Its view, out of date now, no longer counts its text, which still waits: a page that stepped before it
+    // extracted would otherwise stop with nothing out of date and nothing waiting.
+    assert!(handed.waiting_for_fonts, "the answer still says its text is waiting");
+    let answer = settled(&mut s, sheet);
+    assert!(!s.drawing_scenes.dimensions[&id].drawn.pending, "its job set the text");
+    assert_eq!(bytes(&answer.scene), bytes(&built(&s, sheet).scene));
+    let read = run(&mut s, "drawing.dimension.inspect", json!({"dimension": added}));
+    assert!(read["value"].as_f64().is_some_and(|value| (value - 120.0).abs() < 1e-9), "{read}");
+}
+
+/// A panic while a view's job makes its copy of another configuration fails the view, and the view
+/// that follows it, saying why; each is then up to date, so the next tick asks for nothing and the
+/// copy isn't made again every frame (#13048).
+#[test]
+fn a_copy_that_panics_in_its_job_fails_its_view_and_is_not_asked_for_again() {
+    let (mut s, sheet, [front, top], _) = configured_front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    let answer = copy_panics::with(|| settled(&mut s, sheet));
+    for view in [front, top] {
+        let status = answer.views.iter().find(|v| v.view == view).map(|v| v.status.clone());
+        assert_eq!(status, Some(Status::Failed(COPY_PANICKED.into())), "{view}");
+    }
+    assert!(answer.stale.is_empty() && begin(&mut s).is_none() && !step(&mut s), "nothing is asked for again");
+}
+
+/// A view's copy that panics after evaluating its row leaves only whole results in the evaluation cache
+/// the design shares with it: the design then activates that row (with the drawing closed, as a model
+/// edit has it) and draws it as a session whose copy never panicked does, Long's 120 mm at 1:2 (#13048).
+#[test]
+fn a_copy_that_panics_after_evaluating_leaves_the_design_drawing_its_row_right() {
+    let width_after = |panics: bool| {
+        let (mut s, sheet, [front, top], _) = configured_front_and_top();
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+        if panics {
+            copy_panics::with(|| settled(&mut s, sheet));
+        } else {
+            settled(&mut s, sheet);
+        }
+        let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+        run(&mut s, "drawing.close", json!({}));
+        run(&mut s, "config.activate", json!({"row": "Long"}));
+        run(&mut s, "drawing.open", drawing);
+        [drawn_width(&s, sheet, front), drawn_width(&s, sheet, top)]
+    };
+    let (panicked, fresh) = (width_after(true), width_after(false));
+    assert_eq!(panicked, fresh);
+    assert!(panicked.iter().all(|w| (w - 60.0).abs() < 1e-6), "{panicked:?}");
 }
 
 /// A view in a position of its own is up to date by what it draws: driving the hinge in the design

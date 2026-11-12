@@ -220,6 +220,23 @@ fn a_view_with_nothing_to_measure_is_listed() {
     assert_eq!(of_kind(&reply, "nothing_shown"), [named("view", &view)], "{reply}");
 }
 
+/// A view of a configuration row the design no longer has shows nothing, and nor do the views that
+/// follow it: each is listed, saying why (#13048).
+#[test]
+fn a_view_of_a_deleted_configuration_row_is_listed() {
+    let (mut s, _, [front, top], _) = crate::drawing_scene::tests::configured_front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    with_model_changed(&mut s, |s| {
+        run(s, "config.row", json!({"name": "Long", "delete": true}));
+    });
+    let reply = checked(&mut s, json!({}));
+    let mut views = vec![named("view", &json!(ids::encode(front))), named("view", &json!(ids::encode(top)))];
+    views.sort();
+    assert_eq!(of_kind(&reply, "nothing_shown"), views, "{reply}");
+    let whys: Vec<&Value> = reply["findings"].as_array().unwrap().iter().filter(|f| f["kind"] == "nothing_shown").map(|f| &f["why"]).collect();
+    assert_eq!(whys, [&json!("the configuration it draws is no longer in the design"); 2], "{reply}");
+}
+
 fn object_of(kind: CheckedKind, id: u64) -> CheckedObject {
     CheckedObject { kind, id: ids::encode(id) }
 }
