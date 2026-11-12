@@ -491,6 +491,58 @@ impl ProceduralSweep {
         }
     }
 
+    /// The exact offset source's section, as the definition keeps it
+    /// ([`Self::cached_screw_offset_section`]), for a definition with an offset source
+    /// whose kept section is that source's ([`super::offset_profile::OffsetProfile::section`]
+    /// by the definition's own screw motion); `None` otherwise (no offset, a class the
+    /// checked evaluator does not cover, a derivation that failed), where a caller forms
+    /// it afresh.
+    fn kept_offset_section(&self) -> Option<&KeptSection> {
+        self.offset.as_ref()?;
+        self.cached_screw_offset_section().ok().flatten()
+    }
+
+    /// The exact offset source's point and tangent at `w`
+    /// ([`super::offset_profile::OffsetProfile::evaluate`]), on the kept section when
+    /// there is one: the same section value, so the same arithmetic and bits.
+    ///
+    /// # Errors
+    /// Those of the evaluation, and of forming the section afresh.
+    pub(super) fn offset_point(
+        &self,
+        offset: &super::offset_profile::OffsetProfile,
+        motion: &super::ScrewMotion,
+        w: f64,
+    ) -> Result<(Point3, Vec3)> {
+        match self.kept_offset_section() {
+            Some((section, range)) => {
+                super::offset_profile::OffsetProfile::evaluate_on(section, *range, w)
+            }
+            None => offset.evaluate(motion, w),
+        }
+    }
+
+    /// The exact offset source's derivatives at `w` to `order`
+    /// ([`super::offset_profile::OffsetProfile::derivatives`]), on the kept section when
+    /// there is one.
+    ///
+    /// # Errors
+    /// Those of the evaluation, and of forming the section afresh.
+    pub(super) fn offset_derivatives(
+        &self,
+        offset: &super::offset_profile::OffsetProfile,
+        motion: &super::ScrewMotion,
+        w: f64,
+        order: usize,
+    ) -> Result<Vec<Vec3>> {
+        match self.kept_offset_section() {
+            Some((section, range)) => {
+                super::offset_profile::OffsetProfile::derivatives_on(section, *range, w, order)
+            }
+            None => offset.derivatives(motion, w, order),
+        }
+    }
+
     fn checked_span(&self, t: f64, ending: bool) -> Result<(f64, f64, f64)> {
         self.checked_span_index(t, ending)
             .map(|(t, a, b, _)| (t, a, b))

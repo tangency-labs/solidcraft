@@ -83,7 +83,7 @@ impl ProceduralSweep {
         let ending_w = (w_side == Side::Right) != (self.map.b[0] < 0.0);
         let ending_t = (t_side == Side::Right) != (self.map.b[1] < 0.0);
         let profile = if let Some(offset) = &self.offset {
-            offset.derivatives(motion, w, dw)?
+            self.offset_derivatives(offset, motion, w, dw)?
         } else {
             self.profile.evaluate(w, dw, !ending_w, false)?
         };

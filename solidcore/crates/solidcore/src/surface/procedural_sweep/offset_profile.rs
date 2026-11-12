@@ -67,7 +67,16 @@ impl OffsetProfile {
     /// Evaluates the exact offset source at its original profile parameter, including
     /// continuation beyond that source's original ends.
     pub(crate) fn evaluate(&self, motion: &ScrewMotion, w: f64) -> Result<(Point3, Vec3)> {
-        let (section, [lo, hi]) = self.section(motion)?;
+        let (section, range) = self.section(motion)?;
+        Self::evaluate_on(&section, range, w)
+    }
+
+    /// [`Self::evaluate`] on the section and source interval [`Self::section`] gives.
+    pub(crate) fn evaluate_on(
+        section: &ScrewOffsetSection,
+        [lo, hi]: [f64; 2],
+        w: f64,
+    ) -> Result<(Point3, Vec3)> {
         let (point, tangent) = section.evaluate((w - lo) / (hi - lo))?;
         Ok((point, tangent / (hi - lo)))
     }
@@ -78,7 +87,17 @@ impl OffsetProfile {
         w: f64,
         order: usize,
     ) -> Result<Vec<Vec3>> {
-        let (section, [lo, hi]) = self.section(motion)?;
+        let (section, range) = self.section(motion)?;
+        Self::derivatives_on(&section, range, w, order)
+    }
+
+    /// [`Self::derivatives`] on the section and source interval [`Self::section`] gives.
+    pub(crate) fn derivatives_on(
+        section: &ScrewOffsetSection,
+        [lo, hi]: [f64; 2],
+        w: f64,
+        order: usize,
+    ) -> Result<Vec<Vec3>> {
         let width = hi - lo;
         let mut derivatives = section.derivatives((w - lo) / width, order)?;
         let mut factor = 1.0;

@@ -766,7 +766,7 @@ impl ProceduralSweep {
         }
         let w = crate::math::clamp_between(wt.x, domain.min(), domain.max());
         let (point, tangent) = if let Some(offset) = &self.offset {
-            offset.evaluate(m, w)?
+            self.offset_point(offset, m, w)?
         } else {
             // At a profile knot, the profile span the face starts with, as the higher-order
             // partials take it (`screw_derivatives_with_flags`).
