@@ -52,13 +52,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("E")
         .contract(&EXTRUDE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("distance: expr (or through_all: true); taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller); corner?: preserve_curvature|tangent|round (how a taper closes a sharp corner its offset opens: each wall continues as itself, a line's plane or an arc's cone, until it meets its neighbour; each continues straight along its end tangent; or an arc about the corner. Without it, each profile preserves curvature where every curve is a line or an arc and takes tangent where another curve has a corner, and the feature's warning says so; a corner rule given is kept, and refused where the kernel cannot build it); sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile; a pick on a drawn profile that reference geometry, such as the projected outline of the face the sketch is on, cuts into regions takes the whole drawn profile); exact_regions?: bool (each index or point pick is exactly the region it names, as the dialogs send); default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (how a symmetric distance is read; default total_distance, split evenly around the start plane; legacy_per_side: the distance on each side, as older symmetric extrudes keep); distance2?: expr (Two Sides: a second distance on the side direction leaves free, the first side may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it; a negative distance only turns its own side over); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); from?: [x,y,z] (From Object: start at that face or point); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
+        .params("distance: expr (or through_all: true); taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller); corner?: preserve_curvature|tangent|round (how a taper closes a sharp corner its offset opens: each wall continues as itself, a line's plane or an arc's cone, until it meets its neighbour; each continues straight along its end tangent; or an arc about the corner. Without it, each profile preserves curvature where every curve is a line or an arc and takes tangent where another curve has a corner, and the feature's warning says so; a corner rule given is kept, and refused where the kernel cannot build it); sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile; a pick on a drawn profile that reference geometry, such as the projected outline of the face the sketch is on, cuts into regions takes the whole drawn profile); exact_regions?: bool (each index or point pick is exactly the region it names, as the dialogs send); default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); fixed?: true (with face or faces: start on the face's plane as a fixed plane, which won't follow later changes to the face; for a face whose history can't keep an attachment, such as a converted mesh's); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (how a symmetric distance is read; default total_distance, split evenly around the start plane; legacy_per_side: the distance on each side, as older symmetric extrudes keep); distance2?: expr (Two Sides: a second distance on the side direction leaves free, the first side may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it; a negative distance only turns its own side over); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); from?: [x,y,z] (From Object: start at that face or point); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
     CommandSpec::new("solid.revolve", "Revolve", crate::checked!("solid.revolve", revolve))
         .at("SOLID", "CREATE")
         .icon("revolve")
         .contract(&REVOLVE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world) | {type: world, axis: X|Y|Z} (as returned by timeline.inspect) | {sketch, curve} (a line of another sketch, followed in that sketch) | construction axis name (followed when edited) | {origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (Two Sides: the other side's angle); direction?: symmetric (angle split either side, independent of axis direction); convention?: sketch_normal|legacy_axis_start (default sketch_normal; legacy retains older angular starts); to?: [x,y,z] (To Object: turn until that face, vertex or point); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile) and face_body?: name (whose face, where faces of several bodies meet), operation?, touching?, targets?, name?, body_name?"),
+        .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world) | {type: world, axis: X|Y|Z} (as returned by timeline.inspect) | {sketch, curve} (a line of another sketch, followed in that sketch) | construction axis name (followed when edited) | {origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (Two Sides: the other side's angle); direction?: symmetric (angle split either side, independent of axis direction); convention?: sketch_normal|legacy_axis_start (default sketch_normal; legacy retains older angular starts); to?: [x,y,z] (To Object: turn until that face, vertex or point); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile) and face_body?: name (whose face, where faces of several bodies meet) and fixed?: true (the face's plane as a fixed plane, as solid.extrude's), operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.sweep", "Sweep", crate::checked!("solid.sweep", sweep))
         .at("SOLID", "CREATE")
         .icon("sweep")
@@ -932,13 +932,14 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
             .filter(|faces| !faces.is_empty() && faces.len() <= 1024)
             .ok_or_else(|| bad(cmd, "faces must contain between 1 and 1024 points"))?;
         let points = faces.iter().map(|point| vec3(point).ok_or_else(|| bad(cmd, "faces must be points [x,y,z]"))).collect::<Result<Vec<_>>>()?;
+        let fixed = fixed_param(p, cmd)?;
         let groups = super::face::face_groups(s, &points, cmd, str_(p, "face_body"))?;
         // Faces in different planes extrude each by itself. Every face's profile is taken from
         // the body as picked, before the first extrusion grows it (#11492).
         if groups.len() > 1 {
             let mut profiles = Vec::new();
             for group in &groups {
-                let (id, points, body) = super::face::sketch_of_faces(s, group, cmd, str_(p, "face_body"))?;
+                let (id, points, body) = super::face::sketch_of_faces(s, group, cmd, str_(p, "face_body"), fixed)?;
                 profiles.push((id, Some(ProfileSel::Points { points }), Some(body)));
             }
             let mut reply = Value::Null;
@@ -947,7 +948,7 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
             }
             return Ok(reply);
         }
-        let (id, points, body) = super::face::sketch_of_faces(s, &points, cmd, str_(p, "face_body"))?;
+        let (id, points, body) = super::face::sketch_of_faces(s, &points, cmd, str_(p, "face_body"), fixed)?;
         Some((id, Some(ProfileSel::Points { points }), Some(body)))
     } else {
         None
@@ -963,7 +964,7 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
     } else {
         match p.get("face").and_then(vec3) {
             Some(fp) => {
-                let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"))?;
+                let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
                 (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
             }
             None => (feature_sketch(s, p, cmd)?, None, None),
@@ -1041,6 +1042,11 @@ fn cut_scope(s: &Session, p: &Value, operation: Operation, sketch: u64, face_bod
     }
     parts.push(body);
     Ok(Some(parts))
+}
+
+/// A solid feature's `profiles`: as given, or, when omitted, what an extrude takes (#14395).
+fn profiles_or_default(s: &Session, p: &Value, sketch: u64, cmd: &str) -> Result<ProfileSel> {
+    if p.get("profiles").is_none() { Ok(default_extrude_profiles(s, sketch)) } else { profiles(p, cmd) }
 }
 
 /// The profiles an extrude takes when `profiles` is omitted: even-odd nesting over what was drawn,
@@ -1341,12 +1347,21 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
     })
 }
 
+/// `fixed` of a face extrude or revolve: the face's plane as a fixed plane ([`super::face::sketch_of_face`]).
+fn fixed_param(p: &Value, cmd: &str) -> Result<bool> {
+    match p.get("fixed") {
+        None => Ok(false),
+        Some(Value::Bool(fixed)) => Ok(*fixed),
+        Some(_) => Err(bad(cmd, "`fixed` must be true or false")),
+    }
+}
+
 fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.revolve";
     // A planar body face revolves like a profile (its edges projected into a sketch on it).
     let (sketch, face_profile) = match p.get("face").and_then(vec3) {
         Some(fp) => {
-            let (id, inside, _) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"))?;
+            let (id, inside, _) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
             s.active_sketch = None;
             (id, Some(ProfileSel::Points { points: vec![inside] }))
         }
@@ -1357,7 +1372,7 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let profiles = match face_profile {
         Some(f) => f,
-        None => profiles(p, cmd)?,
+        None => profiles_or_default(s, p, sketch, cmd)?,
     };
     let angle2 = expr(p, "angle2");
     if let Some(a) = &angle2 {
@@ -1642,7 +1657,7 @@ struct RowHit {
 const NAMED_BODIES: usize = 8;
 
 /// A body's size, its edges' polylines and which of them are seams.
-type EdgeShape = (f64, Vec<Vec<Vec3>>, Vec<bool>);
+type EdgeShape = (f64, Vec<Vec<Vec3>>, Vec<bool>, Option<solidcraft_geom::Mesh>);
 
 /// How far a polyline is from `q`.
 fn polyline_dist(points: &[Vec3], q: Vec3) -> f64 {
@@ -1722,10 +1737,11 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
             // meeting) can't be blended either: nobody means it by a pick.
             Ok(m) => Some((
                 size,
-                m.edges,
+                Vec::new(),
                 m.seams.iter().zip(&m.smooth_edges).map(|(s, t)| *s || *t).chain(m.seams.iter().skip(m.smooth_edges.len()).copied()).collect(),
+                Some(m),
             )),
-            Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new())),
+            Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new(), None)),
         };
         if let Some(shape) = shape {
             shapes.insert(i, shape);
@@ -1790,14 +1806,20 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
         let mut hits: Vec<RowHit> = Vec::new();
         for (k, q) in culled {
             let Some(r) = rows.get(k) else { continue };
-            let (Some((size, edges, seams)), Some(b)) = (shapes.get(&r.body), st.bodies.get(r.body)) else { continue };
+            let (Some((size, listed, seams, mesh)), Some(b)) = (shapes.get(&r.body), st.bodies.get(r.body)) else { continue };
+            // The display mesh's polylines, else the body's own edge list.
+            let edges = mesh.as_ref().map_or(listed, |m| &m.edges);
             let chord = (size * 2e-3).max(1e-3);
             let mut near = Vec::new();
             let mut candidates = Vec::new();
             for (i, points) in edges.iter().enumerate() {
                 let d = polyline_dist(points, q);
                 if d <= edge_reach(*size) {
-                    let seam = seams.get(i).copied().unwrap_or(false);
+                    // Where two faces meet tangentially (a flat wall running into a round one)
+                    // there is nothing to blend, so nobody means the edge by the pick (#12215).
+                    // Decided only for the edges near the pick: it reads the faces' normals.
+                    let seam =
+                        seams.get(i).copied().unwrap_or(false) || mesh.as_ref().is_some_and(|m| m.tangent_join(i, solidcraft_geom::TANGENT_CHAIN));
                     near.push((d, seam, leaving(points, q)));
                     candidates.push((i, d, seam));
                 }
@@ -1826,7 +1848,8 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
             for r in &rows {
                 let Some(q) = q_of(r) else { continue };
                 shape_of(r.body, &mut shapes);
-                let Some((_, edges, _)) = shapes.get(&r.body) else { continue };
+                let Some((_, listed, _, mesh)) = shapes.get(&r.body) else { continue };
+                let edges = mesh.as_ref().map_or(listed, |m| &m.edges);
                 nearest = edges.iter().map(|points| polyline_dist(points, q)).fold(nearest, f64::min);
             }
             let far = if nearest.is_finite() { format!("the nearest edge is {nearest:.3} mm away") } else { "there is no edge".to_string() };
@@ -1843,7 +1866,7 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
         let mut groups: Vec<&RowHit> = Vec::new();
         for h in hits.iter().filter(|h| h.d <= 2.0 * d_min + 1e-3) {
             let Some(r) = rows.get(h.row) else { continue };
-            let size = shapes.get(&r.body).map_or(1.0, |(size, _, _)| *size);
+            let size = shapes.get(&r.body).map_or(1.0, |(size, _, _, _)| *size);
             let same = |g: &&RowHit| {
                 rows.get(g.row).is_some_and(|o| o.body == r.body) && ((g.edge.is_some() && g.edge == h.edge) || g.q.dist(h.q) <= 1e-6 * size.max(1.0))
             };
@@ -1919,7 +1942,8 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
                         continue;
                     }
                     shape_of(other.body, &mut shapes);
-                    let Some((size, edges, seams)) = shapes.get(&other.body) else { continue };
+                    let Some((size, listed, seams, mesh)) = shapes.get(&other.body) else { continue };
+                    let edges = mesh.as_ref().map_or(listed, |m| &m.edges);
                     // The exact curve is no nearer than the polyline less its chord tolerance.
                     let chord = (size * 2e-3).max(1e-3);
                     let ghost = edges.iter().enumerate().filter(|(k, _)| !seams.get(*k).copied().unwrap_or(false)).any(|(k, points)| {
@@ -2496,19 +2520,24 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// A copy keeps the look and the material of the body it came from (#6423): the copy is the same
-/// part in another place, so it looks the same.
+/// part in another place, so it looks the same. A feature makes the same number of copies of each
+/// source (a Move copy one, a Pattern its count less one), the sources' copies together and in
+/// the sources' order.
 fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd: &str) -> Result<()> {
     let id = reply.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no feature id"))?;
     let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
-    if copies.len() != sources.len() {
-        return Err(bad(cmd, "the copy did not make one body per body it copied"));
-    }
-    for (source, copy) in sources.iter().zip(copies.iter()) {
-        if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
-            s.doc_mut().appearances.bodies.insert(copy.clone(), look);
-        }
-        if let Some(material) = s.doc.materials.get(source).cloned() {
-            s.doc_mut().materials.insert(copy.clone(), material);
+    let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
+    let Some(each) = each else {
+        return Err(bad(cmd, "the copy did not make the same number of bodies for each body it copied"));
+    };
+    for (source, copies) in sources.iter().zip(copies.chunks(each)) {
+        for copy in copies {
+            if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
+                s.doc_mut().appearances.bodies.insert(copy.clone(), look);
+            }
+            if let Some(material) = s.doc.materials.get(source).cloned() {
+                s.doc_mut().materials.insert(copy.clone(), material);
+            }
         }
     }
     Ok(())
@@ -2586,7 +2615,15 @@ fn finish_pattern(
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
     if comps.is_empty() {
-        return add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() });
+        let copied = bodies.clone();
+        let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() })?;
+        // The pattern is added either way: when it made no copies (the feature failed to
+        // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
+        // and they keep no look, as before.
+        if !copied.is_empty() {
+            let _ = copy_keeps_appearance(s, &reply, &copied, "pattern");
+        }
+        return Ok(reply);
     }
     let cmd = "pattern (components)";
     let mats = solidcraft_doc::pattern_matrices(&s.doc, &s.model.state(), &pattern)?;
@@ -3637,7 +3674,7 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::Sweep {
             sketch: SketchId(sketch),
-            profiles: profiles(p, cmd)?,
+            profiles: profiles_or_default(s, p, sketch, cmd)?,
             path_sketch: SketchId(path_sketch),
             path,
             path_body,
@@ -3812,7 +3849,7 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
             });
             continue;
         }
-        sections.push(solidcraft_doc::LoftSection { sketch: SketchId(sketch), profiles: profiles(sec, cmd)?, point: None });
+        sections.push(solidcraft_doc::LoftSection { sketch: SketchId(sketch), profiles: profiles_or_default(s, sec, sketch, cmd)?, point: None });
     }
     let (rails, rail_fit) = guide_rails(s, p, cmd, "loft", None)?;
     let operation = operation(p, cmd)?;
@@ -4084,6 +4121,9 @@ mod revolve_convention_tests;
 #[path = "single_hole_tests.rs"]
 mod single_hole_tests;
 
+#[cfg(test)]
+#[path = "ring_default_tests.rs"]
+mod ring_default_tests;
 #[cfg(test)]
 #[path = "sweep_options_tests.rs"]
 mod sweep_options_tests;

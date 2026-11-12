@@ -292,21 +292,6 @@ mod tests {
     #[test]
     fn the_blend_routines_build_no_bare_statuses() {
         const WAITING: &[(&str, usize)] = &[
-            ("blend/fillet_corner/p1.rs", 46),
-            ("blend/fillet_corner/p2.rs", 17),
-            ("blend/fillet_corner/p3.rs", 25),
-            ("blend/fillet_corner/topology.rs", 7),
-            ("blend/fillet_corner/topology/ball.rs", 2),
-            ("blend/fillet_corner/topology/closed_turn.rs", 2),
-            ("blend/fillet_corner/topology/concave_4x2.rs", 2),
-            ("blend/fillet_corner/topology/concave_nxn.rs", 2),
-            ("blend/fillet_corner/topology/end_corners.rs", 4),
-            ("blend/fillet_corner/topology/end_smooth.rs", 3),
-            ("blend/fillet_corner/topology/join.rs", 19),
-            ("blend/fillet_corner/topology/mixed.rs", 2),
-            ("blend/fillet_corner/topology/mixed_3x2.rs", 5),
-            ("blend/fillet_corner/topology/nx1_end.rs", 1),
-            ("blend/fillet_corner/topology/swept_turn.rs", 3),
             ("blend/fillet_executive/session/finish.rs", 2),
             ("blend/fillet_section/recertify.rs", 14),
         ];

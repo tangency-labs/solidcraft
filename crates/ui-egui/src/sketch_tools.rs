@@ -982,7 +982,9 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.slot.center_point" => "Slot: click the centre, an arc centre, then the width",
             "sketch.slot.arc_three_point" => "Arc slot: click start, a point on the arc, the end, then the width",
             "sketch.slot.arc_center" => "Arc slot: click the centre, the start, the end, then the width",
-            "sketch.spline.fit_point" => "Spline: click fit points; click the start to close smoothly, or right-click to finish",
+            "sketch.spline.fit_point" => {
+                "Spline: click fit points; click the start to close smoothly, or right-click to finish; then select the spline to drag its tangent handles"
+            }
             "sketch.spline.control_point" | "sketch.spline.control_point_5" => "Control point spline: click control points; right-click to finish",
             "sketch.text" => "Text: click where the text starts",
             "sketch.edit_text" => "Edit Text: click a letter interior or outline",
@@ -2150,6 +2152,9 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
     crate::scenario::publish_count("sketch_align_guides", guides.len() as f64);
     let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
+    // The tool at the cursor sits in the same corner of the pointer (#15391).
+    let r = crate::tool_cursor::clear_of_badge(app, painter, proj.rect, r);
+    crate::scenario::publish_rect("viewport:snap_hint", r);
     painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
     painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro), tk.text);
 }

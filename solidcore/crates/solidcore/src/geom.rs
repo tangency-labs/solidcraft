@@ -20,6 +20,7 @@ pub mod geom_utility;
 pub mod global_solver;
 pub mod grid;
 pub mod hash_table;
+pub mod krawczyk;
 pub mod local_solve1d;
 pub mod local_solve_nd;
 pub mod matrix;

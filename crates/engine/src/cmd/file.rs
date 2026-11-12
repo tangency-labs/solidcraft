@@ -904,7 +904,12 @@ fn write_bytes(
         "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
         _ => return Err(bad("file.save", "format must be container or json")),
     };
-    // Atomic, keeping the version being replaced as `<file>.bak`.
+    // Cancelled while the design was being prepared (a watched save): nothing is written.
+    if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
+        return Err(EngineError::Other(format!("{path}: save cancelled")));
+    }
+    // Atomic, keeping the version being replaced as `<file>.bak`; a watched save reports how far
+    // the write is and stops on Cancel until the file is replaced.
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
@@ -963,9 +968,57 @@ impl Session {
         // first undo after opening evaluated the whole timeline again (82-93 s in a
         // 5,484-feature design). The pinned names are the ones the file's bodies have, so
         // opening is no change: the pinned design is the saved one.
+        let unpinned = session.doc.reserved_body_names.is_empty() && session.doc.features.iter().all(|f| f.body_names.is_empty());
+        let before = session.doc.clone();
         session.pin_body_names();
+        if unpinned || !std::sync::Arc::ptr_eq(&before, &session.doc) {
+            session.pin_rolled_back_body_names();
+        }
         session.saved = session.doc.clone();
         session
+    }
+
+    /// Pin the names of the bodies the features after the timeline marker make, in a design
+    /// saved rolled back before names were pinned (#14008). Those features were never evaluated,
+    /// so [`Session::pin_body_names`] left them unpinned: a body then made at the marker took the
+    /// number of a later body, every later counted body shifted, and a combine that names them
+    /// failed or joined another body. The names are the ones the whole timeline gives, which is
+    /// what the design called those bodies when it was saved. The design stays rolled back.
+    ///
+    /// The whole timeline is evaluated on a scratch copy, and only the names it pins come back:
+    /// refreshing this session there would also work out what the design reads from the later
+    /// geometry (a gear's ratio from a face after the marker, joint placements) and keep it.
+    fn pin_rolled_back_body_names(&mut self) {
+        if !self.doc.marker.is_some_and(|m| m < self.doc.features.len()) {
+            return;
+        }
+        let mut whole = self.scratch();
+        whole.doc_mut().marker = None;
+        whole.model.evaluate_shared(&whole.doc);
+        whole.pin_body_names();
+        let pins: Vec<(u64, Vec<String>)> = whole
+            .doc
+            .features
+            .iter()
+            .filter(|f| self.doc.feature(f.id).is_some_and(|mine| mine.body_names != f.body_names))
+            .map(|f| (f.id, f.body_names.clone()))
+            .collect();
+        let reserve: Vec<String> = whole.doc.reserved_body_names.difference(&self.doc.reserved_body_names).cloned().collect();
+        if pins.is_empty() && reserve.is_empty() {
+            return;
+        }
+        // As `pin_body_names` stores names: the bodies keep the names they have, so no result
+        // changes and none is evaluated again.
+        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).collect();
+        let keep = self.model.pinned_prefix(&self.doc, &renamed);
+        let doc = self.doc_mut();
+        for (id, names) in pins {
+            if let Some(f) = doc.feature_mut(id) {
+                f.body_names = names;
+            }
+        }
+        doc.reserved_body_names.extend(reserve);
+        self.model.refingerprint_shared(&self.doc, keep);
     }
 
     /// Prepare only the file's copy with relative paths; saving never rewrites live history.

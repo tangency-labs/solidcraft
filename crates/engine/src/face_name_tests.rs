@@ -5,6 +5,7 @@ use std::f64::consts::PI;
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -308,14 +309,44 @@ fn a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone()
     run(&mut s, "solid.fillet", json!({"edges": [[0, -11, 10]], "radius": 1, "name": "Round"}));
     assert!(volume(&mut s, "Body1") < volume_before);
     let filleted = volume(&mut s, "Body1");
+    let filleted_faces = faces(&mut s, "Body1");
     let round_id = s.doc.features.iter().position(|f| f.name == "Round").unwrap();
     assert!(s.doc.features[round_id].edge_names.iter().all(|name| !name.contains(&tab_name)), "{:?}", s.doc.features[round_id].edge_names);
 
     // A design saved while the wall was named after the tab still finds its edge.
     let mut saved = (*s.doc).clone();
     saved.features[round_id].edge_names = vec![format!("F2:top|{tab_name}:side:l4#[F2:side:l1]")];
-    let mut reopened = Session::opened_at(saved, None, None);
+    let mut reopened = Session::opened_at(saved.clone(), None, None);
     let result = reopened.model.result(reopened.doc.features[round_id].id).unwrap();
     assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
     assert!((volume(&mut reopened, "Body1") - filleted).abs() < 1e-6);
+    // The same edge: the plate is symmetric, so the volume alone would take a round on a mirrored
+    // edge as well. Every face of the body filleted fresh is there, where it was.
+    let reopened_faces = faces(&mut reopened, "Body1");
+    assert_eq!(reopened_faces.len(), filleted_faces.len(), "{reopened_faces:?}");
+    for face in &filleted_faces {
+        assert!(reopened_faces.iter().any(|f| vec(&f["point"]).dist(vec(&face["point"])) < 1e-6), "{face} is not in {reopened_faces:?}");
+    }
+
+    // Only the point says which edge that old name meant, and only among the edges of the face the
+    // name still finds. Each of these still asks for the edge again: a point on the wall but on no
+    // edge; the corner where the wall's top edge meets the plate's straight side; a face of a
+    // feature that made nothing on the body (removed, not renamed); the plate's bottom, which the
+    // wall's top edge does not bound.
+    let on_edge = Vec3::new(0.0, -11.0, 10.0);
+    for (name, at) in [
+        (format!("F2:top|{tab_name}:side:l4#[F2:side:l1]"), Vec3::new(0.0, -11.0, 5.0)),
+        (format!("F2:top|{tab_name}:side:l4#[F2:side:l1]"), Vec3::new(57.0_f64.sqrt(), -8.0, 10.0)),
+        ("F2:top|F99:side:l4#[F2:side:l1]".to_string(), on_edge),
+        (format!("F2:start|{tab_name}:side:l4#[F2:side:l1]"), on_edge),
+    ] {
+        let mut off = saved.clone();
+        off.features[round_id].edge_names = vec![name.clone()];
+        if let solidcraft_doc::FeatureKind::Fillet { edges, .. } = &mut off.features[round_id].kind {
+            edges[0].0 = at;
+        }
+        let reopened = Session::opened_at(off, None, None);
+        let result = reopened.model.result(reopened.doc.features[round_id].id).unwrap();
+        assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{name} at {at:?}: {:?}", result.error);
+    }
 }

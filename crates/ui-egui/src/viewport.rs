@@ -147,6 +147,9 @@ pub struct ViewportState {
     /// greys out with it.
     pub(crate) corner_ok: bool,
     pub gpu: Option<GpuTarget>,
+    /// The view's pipelines could not be built (the thread compiling them at start failed): the
+    /// view says so where the model would be, instead of staying empty (#1210).
+    pub gpu_unavailable: bool,
     /// The GPU plan evaluation still compiling: `gpu.tess` once it is ready (#4860).
     pub(crate) tess_ready: Option<solidcraft_viewport_egui::TessReady>,
     /// What the GPU drew last frame, shared with the renderer (the frame-rate details, #2548).
@@ -203,6 +206,12 @@ pub struct ViewportState {
     pub woken_centre: Option<(u64, String)>,
     /// The centre or midpoint most recently hovered for visual H/V tracking.
     pub(crate) tracking: crate::inference::Tracking,
+
+    /// Snap points woken by the last edge or face hovered (`snap_wake`).
+    pub woken: crate::snap_wake::Woken,
+    /// Every point woken while this dialog is open, with the item that woke it, so a pick can
+    /// be saved as the snap point it is after other points have woken (`snap_wake::snapped`).
+    pub snapped: Vec<(Sel, solidcraft_engine::snap::SnapPoint)>,
     pub mouse: Option<Pos2>,
     /// Box selection being dragged.
     pub boxsel: Option<BoxSel>,
@@ -216,7 +225,8 @@ pub struct ViewportState {
     pub hover_plane: Option<String>,
     /// Joint whose browser row is under the cursor: its glyph is drawn in the hover colour.
     pub hover_joint: Option<u64>,
-    /// The model point an orbit turns around (Preferences: orbit around the cursor).
+    /// The point the orbit under way turns around (Preferences: orbit around the cursor, or the
+    /// view's centre (`navigation::view_middle`)), chosen when it begins.
     pub orbit_pivot: Option<Vec3>,
     /// The orbit drag under way, summed from where it began (see [`crate::navigation::orbit`]).
     pub orbit_from: Option<crate::navigation::OrbitFrom>,
@@ -225,8 +235,9 @@ pub struct ViewportState {
     pub(crate) cursor_wrap: Option<egui::Vec2>,
     /// Continuous orbit: the view turns about the vertical until the next click or key.
     pub spin: bool,
-    /// The point continuous orbit turns about (Orbit around: origin or the cursor's model point),
-    /// chosen when it starts and kept until it stops, so the model stays in view (#1044).
+    /// The point continuous orbit turns about (Orbit around: origin, the cursor's model point, or
+    /// the view's centre (`navigation::view_middle`)), chosen when it starts and kept until it
+    /// stops, so the model stays in view (#1044).
     pub spin_pivot: Option<Vec3>,
     /// The 3D mouse's motion this frame, for the page showing the camera to apply with what its
     /// camera may do (`navigation::device`).
@@ -245,6 +256,10 @@ pub struct ViewportState {
     /// Inside a bracketed trackpad scroll (`Start` without its `End` yet):
     /// point moves pan, bare moves are a mouse.
     pub(crate) trackpad_gesture: bool,
+    /// The platform's own bracket around that scroll: it opens with the gesture's `Start`
+    /// and closes with its `End` or `Cancel`, and outlasts the scroll's idle timeout
+    /// (#2130).
+    pub(crate) trackpad_gesture_bracketed: bool,
     /// The inertia after the fingers lift, which ends when the modifiers change (#7327).
     pub(crate) trackpad_coast: crate::navigation::TrackpadCoast,
     /// A primary press on the axis gizmo: the pointer position used by its last orbit step.
@@ -264,7 +279,7 @@ pub struct ViewportState {
     pub select_other: crate::select_other::State,
     /// A sketch point or curve being dragged (its id, the undo depth when the drag began: the
     /// whole drag is one undo step, and for a curve where it was last under the cursor).
-    pub point_drag: Option<(String, usize, Option<Vec2>)>,
+    pub point_drag: Option<(String, usize, Option<Vec2>, Vec2, bool)>,
     /// Checkpoint and source for a cancellable whole-text drag.
     pub(crate) text_drag: Option<(u64, String)>,
     /// A part that joints place, being dragged.
@@ -2021,6 +2036,8 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
                 sc.line(a.to_f32(), b.to_f32(), *color, *width, through);
             }
         }
+        // A selected spline's tangent guides follow the selection, which this cached scene does
+        // not: `overlays` draws them every frame (#6502).
     }
     let guide_unit = grid_step(app.cam.half_height()).0;
     let warning = sc.color(c4(tk.warning));
@@ -2030,6 +2047,94 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         }
     }
     sc
+}
+
+fn selected_spline_handles(
+    sk: &solidcraft_engine::sketch::Sketch,
+    selection: &[Sel],
+) -> (std::collections::HashSet<String>, std::collections::HashSet<usize>) {
+    let selected: std::collections::HashSet<String> = selection
+        .iter()
+        .filter_map(|item| match item {
+            Sel::SketchCurve { id, .. } => sk.curve_index(id).and_then(|index| {
+                matches!(sk.curves.get(index).map(|curve| &curve.kind), Some(CurveKind::Spline { control: false, .. })).then(|| id.clone())
+            }),
+            _ => None,
+        })
+        .collect();
+    let handles = selected
+        .iter()
+        .filter_map(|id| sk.curve_index(id).and_then(|index| sk.curves.get(index)))
+        .flat_map(|curve| match &curve.kind {
+            CurveKind::Spline { handles, .. } => handles.to_vec(),
+            _ => Vec::new(),
+        })
+        .collect();
+    (selected, handles)
+}
+
+fn selected_spline_handle_mirrors(sk: &solidcraft_engine::sketch::Sketch, selection: &[Sel]) -> Vec<(usize, Vec2)> {
+    let (selected, _) = selected_spline_handles(sk, selection);
+    let mut mirrors = Vec::new();
+    for id in selected {
+        let Some(index) = sk.curve_index(&id) else { continue };
+        let Some(curve) = sk.curves.get(index) else { continue };
+        let CurveKind::Spline { pts, handles, .. } = &curve.kind else { continue };
+        for (fit, handle) in pts.iter().zip(handles) {
+            let (Some(fit), Some(handle_pos)) = (sk.point(*fit), sk.point(*handle)) else { continue };
+            mirrors.push((*handle, fit * 2.0 - handle_pos));
+        }
+    }
+    mirrors
+}
+
+fn point_drag_mapping(sk: &solidcraft_engine::sketch::Sketch, id: &str, hit_at: Vec2, pointer_at: Vec2, selection: &[Sel]) -> (Vec2, bool) {
+    let Some(index) = sk.resolve_point(id) else { return (Vec2::ZERO, false) };
+    let Some(point) = sk.point(index) else { return (Vec2::ZERO, false) };
+    let mirrored = selected_spline_handle_mirrors(sk, selection)
+        .into_iter()
+        .any(|(handle, mirror)| handle == index && mirror.dist(hit_at) <= 1e-9 && mirror.dist(point) > 1e-9);
+    (if mirrored { point + pointer_at } else { point - pointer_at }, mirrored)
+}
+
+/// A press at `at` on a tangent handle that a selected fit spline only shows (#6502): the
+/// spline, which of its fit points the handle belongs to, and whether the press was on the
+/// guide's mirrored end.
+fn preview_handle_at(app: &SolveApp, proj: &Proj, at: Pos2) -> Option<(String, usize, bool)> {
+    let sid = app.session.active_sketch?;
+    let st = crate::open_meshing::shown_world(app);
+    let ss = st.sketch(sid)?;
+    let (selected, _) = selected_spline_handles(&ss.sketch, &app.session.selection);
+    let mut best: Option<(f32, String, usize, bool)> = None;
+    for id in selected {
+        let Some(curve) = ss.sketch.curve_index(&id) else { continue };
+        for (k, guide) in solidcraft_engine::view::spline_tangent_guides(&ss.sketch, curve).into_iter().enumerate() {
+            if guide.point.is_some() {
+                continue;
+            }
+            for (end, mirrored) in [(guide.handle, false), (guide.mirror, true)] {
+                let Some(screen) = proj.to_screen(ss.plane.to_world(end)) else { continue };
+                let distance = screen.distance(at);
+                if distance < 8.0 && best.as_ref().is_none_or(|b| distance < b.0) {
+                    best = Some((distance, id.clone(), k, mirrored));
+                }
+            }
+        }
+    }
+    best.map(|(_, id, k, mirrored)| (id, k, mirrored))
+}
+
+/// Store the tangent handles of `curve` (`sketch.spline.handles`) for a drag that starts on the
+/// one at fit point `k` (on its mirrored end with `mirrored`), and that handle point as the
+/// drag's hit. `None`, leaving the sketch as it was, when they cannot be stored.
+fn store_preview_handle(app: &mut SolveApp, curve: &str, k: usize, mirrored: bool) -> Option<Hit> {
+    let sketch = app.session.active_sketch?;
+    let reply = app.session.execute("sketch.spline.handles", &json!({ "curve": curve })).ok()?;
+    let id = reply.get("handles")?.get(k)?.as_str()?.to_string();
+    let st = crate::open_meshing::shown_world(app);
+    let sk = &st.sketch(sketch)?.sketch;
+    let guide = solidcraft_engine::view::spline_tangent_guides(sk, sk.curve_index(curve)?).into_iter().nth(k)?;
+    Some(Hit::SketchPoint { sketch, id, at: if mirrored { guide.mirror } else { guide.handle } })
 }
 
 #[derive(Clone)]
@@ -2730,6 +2835,13 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
     origin_point_shown(app).hash(&mut h);
+    // Where each woken point shows (a Move preview moves them), on which body and of what kind:
+    // a hit of the same place on another body is another hit.
+    for (at, p) in crate::snap_wake::shown(app) {
+        [at.x, at.y, at.z].map(f64::to_bits).hash(&mut h);
+        p.body.hash(&mut h);
+        (p.kind as u8).hash(&mut h);
+    }
     app.view_fov().to_bits().hash(&mut h);
     (proj.rect.width().to_bits(), proj.rect.height().to_bits()).hash(&mut h);
     crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
@@ -2896,6 +3008,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     {
         let mut mids = Near::new(all);
         for (i, curve) in ss.sketch.curves.iter().enumerate() {
+            if curve.spline_handle_of.is_some() {
+                continue;
+            }
             if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
                 continue;
             }
@@ -2953,8 +3068,10 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                 }
             }
         }
-        for (p, locked) in ss.sketch.points.iter().zip(ss.sketch.locked_points()) {
-            if !visible.takes(p) || shown.as_ref().is_some_and(|f| !f.takes(p)) {
+        let (_, selected_handles) = selected_spline_handles(&ss.sketch, &s.selection);
+        let locked_points = ss.sketch.locked_points();
+        for (index, (p, locked)) in ss.sketch.points.iter().zip(locked_points.iter().copied()).enumerate() {
+            if (!visible.takes(p) && !selected_handles.contains(&index)) || shown.as_ref().is_some_and(|f| !f.takes(p)) {
                 continue;
             }
             if let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)) {
@@ -2969,6 +3086,21 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                 }
             }
         }
+        // A guide's mirrored end is only for dragging its handle: a tool or dialog never snaps to it.
+        let mirrors = if app.tool.is_none() && app.dialog.is_none() { selected_spline_handle_mirrors(&ss.sketch, &s.selection) } else { Vec::new() };
+        for (index, mirror) in mirrors {
+            let Some(point) = ss.sketch.points.get(index) else { continue };
+            if shown.as_ref().is_some_and(|f| !f.takes(point)) {
+                continue;
+            }
+            if let Some(sp) = proj.to_screen(ss.plane.to_world(mirror)) {
+                let dd = sp.distance(pos) - if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
+                let rank = (dd, prefer_free && locked_points.get(index).copied().unwrap_or(false));
+                if dd < 8.0 && best.wants(rank) {
+                    best.offer(rank, Hit::SketchPoint { sketch: sid, id: point.id.clone(), at: mirror });
+                }
+            }
+        }
     }
     for (name, point) in construction_points(app) {
         if let Some(sp) = proj.to_screen(point) {
@@ -2979,10 +3111,17 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             }
         }
     }
+    // The nearest sketch or construction point: a woken point further off yields to it.
+    let point_near = best.v.iter().map(|x| x.0.0).fold(f32::INFINITY, f32::min);
     hits.extend(best.hits());
+    // Where a woken point no nearer than these points goes: after them, so one the input takes
+    // wins and one it doesn't still leaves the woken point to pick.
+    let after_points = hits.len();
     // Sketch curves: the active sketch's own before projected and other sketches' ones, then
     // nearest (the active sketch wins ties).
     let mut bestc = Near::new(all);
+    // The nearest curve whatever its tier: a woken point wins only over a curve further off.
+    let mut curve_near = f32::INFINITY;
     for sid in sketches.clone().into_iter().filter(|_| !crate::render_workspace::active(app)) {
         let Some(ss) = st.sketch(sid) else { continue };
         let active = s.active_sketch == Some(sid);
@@ -2991,8 +3130,10 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         // Trim / Extend / Break edit free curves; projected edges under the same click should
         // yield so a drawn rectangle on a face is not refused as projected geometry (#8979).
         let trim_prefers_free = app.tool.as_ref().is_some_and(|t| matches!(t.cmd, "sketch.trim" | "sketch.extend" | "sketch.break"));
+        let (selected_splines, _) = selected_spline_handles(&ss.sketch, &s.selection);
         for (i, c) in ss.sketch.curves.iter().enumerate() {
-            if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
+            let selected_handle = c.spline_handle_of.as_ref().is_some_and(|parent| selected_splines.contains(parent));
+            if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) && !selected_handle {
                 continue;
             }
             let straight = matches!(c.kind, CurveKind::Line { .. });
@@ -3002,10 +3143,20 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             // still offers both.
             let helper = if c.construction || c.centerline { 0.5 } else { 0.0 };
             let linked_penalty = if trim_prefers_free && !own { 3.5 } else { 0.0 };
-            for part in &crate::sketch_display::curve_sample(app, sid, i, &ss.plane, proj).parts {
+            let parts = if selected_handle {
+                solidcraft_engine::view::spline_handle_display_line(&ss.sketch, i)
+                    .map(|(a, b)| vec![vec![ss.plane.to_world(a), ss.plane.to_world(b)]])
+                    .unwrap_or_default()
+            } else {
+                crate::sketch_display::curve_sample(app, sid, i, &ss.plane, proj).parts.clone()
+            };
+            for part in &parts {
                 let pts: Vec<(Pos2, Vec3)> = part.iter().filter_map(|q| proj.to_screen(*q).map(|sp| (sp, *q))).collect();
                 for w in pts.windows(2) {
                     let dd = seg_dist(pos, w[0].0, w[1].0) - bonus + helper + linked_penalty;
+                    if dd < 6.0 {
+                        curve_near = curve_near.min(dd);
+                    }
                     if dd < 6.0 && bestc.wants((tier, dd)) {
                         let point = ray_segment_closest(o, d, w[0].1, w[1].1);
                         bestc.offer((tier, dd), Hit::SketchCurve { sketch: sid, id: c.id.clone(), straight, point });
@@ -3020,6 +3171,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             let pts: Vec<(Pos2, Vec3)> = w.pts.iter().filter_map(|q| proj.to_screen(*q).map(|sp| (sp, *q))).collect();
             for seg in pts.windows(2) {
                 let dd = seg_dist(pos, seg[0].0, seg[1].0) - bonus;
+                if dd < 6.0 {
+                    curve_near = curve_near.min(dd);
+                }
                 if dd < 6.0 && bestc.wants((tier, dd)) {
                     let point = ray_segment_closest(o, d, seg[0].1, seg[1].1);
                     bestc.offer((tier, dd), Hit::SketchCurve { sketch: sid, id: w.id.clone(), straight, point });
@@ -3180,6 +3334,42 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             bestv.offer(dd, Hit::Vertex { body: String::new(), point: Vec3::ZERO });
         }
     }
+    // Woken snap points (a hole's centre, a line's middle) come first: right under the
+    // pointer over anything (a line's middle lies on the line), further out unless an edge or a
+    // sketch curve under the pointer is nearer (a small hole's rim stays pickable).
+    let edge_near = beste.v.iter().map(|x| x.0.0).fold(curve_near, f32::min);
+    // Like a vertex, a woken point behind the nearest face or cut away by the section is not
+    // picked; a centre inside its own face (a sphere's, a torus's) is, when that face is in front.
+    let own_face_in_front = cap.is_none()
+        && matches!(&bestf, Some((_, Hit::Face { body, index, .. })) if [&app.viewport.woken.item, &app.viewport.woken.face].into_iter().flatten().any(|w| matches!(w, Sel::Face { body: wb, index: wi, .. } if body == wb && index == wi)));
+    // A body's point lies on the face in front within that body's own slack, as its vertices do;
+    // a point of no body (sketch geometry) takes the scene's.
+    let point_slack = |body: &str| {
+        st.bodies.iter().enumerate().find(|(_, b)| b.name == body).and_then(|(i, b)| body_box(i, b)).map_or(slack, |bb| pick_slack(bb.diagonal()))
+    };
+    // A vertex of another body nearer than a woken point comes before it, even within a woken
+    // point's own few pixels: it is the one the pointer is on, and it puts the woken points to
+    // sleep (`snap_wake::update`).
+    let woken_body = app.viewport.woken.points.first().map(|p| p.body.as_str()).filter(|b| !b.is_empty());
+    let other_vertex = bestv
+        .v
+        .iter()
+        .filter(|(_, h)| matches!(h, Hit::Vertex { body, .. } if !body.is_empty() && woken_body.is_some_and(|w| w != body)))
+        .map(|x| x.0)
+        .fold(f32::INFINITY, f32::min);
+    let (woken, behind_points): (Vec<_>, Vec<_>) = crate::snap_wake::hits(app, proj, pos)
+        .into_iter()
+        .filter(|(dd, h, kind)| {
+            *dd < other_vertex
+                && (*dd < crate::snap_wake::ON || *dd < edge_near)
+                && matches!(h, Hit::Vertex { body, point } if visible(*point, point_slack(body))
+                    || (kept(*point) && own_face_in_front && *kind == solidcraft_engine::snap::SnapKind::Centre))
+        })
+        // A sketch or construction point as near (within a point) comes first: a sketch point
+        // on a line's middle stays the sketch point.
+        .partition(|(dd, ..)| *dd + 1.0 < point_near);
+    hits.splice(after_points..after_points, behind_points.into_iter().map(|x| x.1));
+    hits.splice(0..0, woken.into_iter().map(|x| x.1));
     hits.extend(bestv.hits());
     hits.extend(beste.hits());
     // Origin axes.
@@ -5056,6 +5246,15 @@ pub(crate) fn preview_should_roll_back(app: &SolveApp, held: crate::tool_modifie
     app.dialog.as_ref().is_some_and(|d| d.previews()) && app.preview.active && crate::tool_modifiers::preview_reselect(held, manipulator_dragging)
 }
 
+/// The view has no GPU pipelines (their compile failed at start, #1210): it says so in its middle,
+/// in the theme's text colour, rather than showing an empty view.
+fn unavailable_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
+    let t = Tokens::get();
+    let galley =
+        painter.layout(app.tr("starting.view_unavailable").to_owned(), FontId::proportional(t.font_body), t.text, (rect.width() * 0.6).max(200.0));
+    painter.galley(rect.center() - galley.size() / 2.0, galley, t.text);
+}
+
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::joint_handles::sync(app);
     let t = Tokens::get();
@@ -5071,6 +5270,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let input =
         if flat { crate::dialogs_sheet::navigate(app, ui, rect, &resp) } else { crate::navigation::handle(app, ui, rect, &resp, NavCaps::MODEL) };
+    // The face under a still pointer keeps its highlight while the view moves under it
+    // (#2130); a mouse drag owns the pointer instead, and its hover goes off.
+    let hover_frozen = crate::navigation::hover_is_frozen(&input, app);
     let CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, inside, axes, pinch, pan, primary_nav, mode } =
         input;
     app.viewport.physical_scale = ui.ctx().pixels_per_point();
@@ -5108,9 +5310,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // still under a mode lit in the navigation bar or a held Space: they own drags, and the
     // press may be opening Select Other (#8864); once it drags, `mode` says so. A preset's
     // left-button binding or Ctrl+left orbit navigates from the press on.
-    let navigating = scroll != 0.0
-        || pinch != 1.0
-        || pan != egui::Vec2::ZERO
+    //
+    // The wheel, the trackpad and the pinch are the other kind of gesture: the view moves
+    // under a pointer that stays where it is. The face under it keeps its highlight, the
+    // way Fusion does (#2130): the pick is not taken again while the view moves, so the
+    // highlight cannot jump to another face, and the hover is frozen rather than cleared.
+    // A mouse drag, the spin and an animated view move the pointer's own target instead:
+    // what is under the pointer is not what the user means to click, so their hover goes
+    // off as before.
+    let view_moving = crate::navigation::view_moving(app, scroll, pinch, pan);
+    let navigating = view_moving
         || middle
         || secondary_down
         || (app.viewport.primary_nav.is_some() && primary_down)
@@ -5139,8 +5348,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         candidate(app, &hits).map(|(h, s)| (h, Some(s)))
     };
-    app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
+    // The view moved under a still pointer: the highlight under it stays on the face it
+    // was on instead of going off (#2130). It is picked again when the gesture ends.
+    if !(hover_frozen && inside) {
+        app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
+    }
     wake_centre(app, &hits);
+
+    crate::snap_wake::update(app, &hits);
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up. A mode lit in the navigation bar or a
     // held Space owns drags, not a still press, so only a navigation that has started cancels
@@ -5253,6 +5468,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.lowered_noted = true;
             app.set_status(app.tr("ui.gpu_memory_lowered"), false);
         }
+    } else if app.viewport.gpu_unavailable {
+        unavailable_note(app, &painter, rect);
     }
     let overlay_rect = crate::shell::bottom_overlay_rect(app, rect);
     crate::viewport_details::legacy_legends(app, ui, overlay_rect);
@@ -5538,7 +5755,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             let m = b.mesh();
             let items: Vec<Sel> = m
-                .tangent_chain(index, 2f64.to_radians())
+                .tangent_chain(index, solidcraft_engine::geom::TANGENT_CHAIN)
                 .into_iter()
                 .filter_map(|i| m.edges.get(i).map(|e| Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) }))
                 .collect();
@@ -5587,6 +5804,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .flatten()
             .filter(|a| !crate::sketch_text_handles::drag_start(app, &proj, *a) && !crate::sketch3d::drag_start(app, &proj, *a))
             .map(|a| (a, pick(app, &proj, a).into_iter().next()));
+        // A drag from a tangent handle a selected spline only shows stores its handles first,
+        // in the drag's undo step (#6502).
+        let undo_before = app.session.undo.len();
+        let mut stored_handle = false;
+        let grabbed = grabbed.map(|(a, hit)| match preview_handle_at(app, &proj, a) {
+            Some((curve, k, mirrored)) => match store_preview_handle(app, &curve, k, mirrored) {
+                Some(handle) => {
+                    stored_handle = true;
+                    (a, Some(handle))
+                }
+                None => (a, hit),
+            },
+            None => (a, hit),
+        });
         if let Some((a, hit)) = &grabbed
             && !crate::sketch_text_handles::dragging(app)
             && let Some(q) = on_plane(app, *a)
@@ -5625,18 +5856,25 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let hit = if own { hit } else { crate::sketch_text_handles::grab_inside(app, &proj, a).or(hit) };
             let hit = hit.map(|hit| point_at_midpoint(app, hit));
             match hit {
-                Some(Hit::SketchPoint { sketch, id, .. }) if Some(sketch) == active => {
+                Some(Hit::SketchPoint { sketch, id, at }) if Some(sketch) == active => {
                     // A point dragged with the rest of a selection slides with it, from where it
                     // was grabbed, rather than going to the cursor.
-                    let grab = if dragged_with(app, &id).is_empty() { None } else { on_plane(app, a) };
-                    app.viewport.point_drag = Some((id, app.session.undo.len(), grab))
+                    let pointer_at = on_plane(app, a).unwrap_or(at);
+                    let grab = (!dragged_with(app, &id).is_empty()).then_some(pointer_at);
+                    // The mirrored end of a guide moves opposite to its stored handle point.
+                    // From the sketch as shown: projected geometry may have moved a fit point.
+                    let (offset, mirrored) = crate::open_meshing::shown_world(app)
+                        .sketch(sketch)
+                        .map_or((Vec2::ZERO, false), |ss| point_drag_mapping(&ss.sketch, &id, at, pointer_at, &app.session.selection));
+                    let depth = if stored_handle { undo_before } else { app.session.undo.len() };
+                    app.viewport.point_drag = Some((id, depth, grab, offset, mirrored))
                 }
                 Some(Hit::SketchCurve { sketch, id, .. } | Hit::SketchMidpoint { sketch, id, .. }) if Some(sketch) == active => {
-                    app.viewport.point_drag = on_plane(app, a).map(|q| (id, app.session.undo.len(), Some(q)));
+                    app.viewport.point_drag = on_plane(app, a).map(|q| (id, app.session.undo.len(), Some(q), Vec2::ZERO, false));
                 }
                 _ => {}
             }
-            if let Some((id, _, _)) = &app.viewport.point_drag {
+            if let Some((id, _, _, _, _)) = &app.viewport.point_drag {
                 let link = app.session.active_sketch.and_then(|sid| app.session.doc.sketch(sid).ok()).and_then(|sk| {
                     let link = sk
                         .curve_index(id)
@@ -5648,7 +5886,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if let Some(link) = link
                     && let Some(q) = on_plane(app, a)
                 {
-                    if let Some((_, _, grab)) = &mut app.viewport.point_drag {
+                    if let Some((_, _, grab, _, _)) = &mut app.viewport.point_drag {
                         *grab = Some(q);
                     }
                     if let Ok(result) = app.session.execute("edit.checkpoint", &json!({}))
@@ -5659,11 +5897,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         }
-        if let Some((id, depth, grab)) = app.viewport.point_drag.clone()
+        if let Some((id, depth, grab, offset, mirrored)) = app.viewport.point_drag.clone()
             && (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped())
             && let Some(mut q) = hover.and_then(|p| on_plane(app, p))
         {
-            let from = grab.unwrap_or(q);
+            q = if mirrored { offset - q } else { q + offset };
+            let from = grab.map_or(q, |point| if mirrored { offset - point } else { point + offset });
             let with = dragged_with(app, &id);
             // Snap the dragged point (or the line's ends) to other geometry, like drawing.
             let snap = {
@@ -5702,13 +5941,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             };
             // The grab stays on the geometry: what it could not follow this frame it catches up
             // with on the next one instead of lagging the cursor for the rest of the drag.
+            // `grab` is where the pointer is, `at` where the point got to: back through the offset
+            // (or the handle mirror) to the pointer.
             if grab.is_some() {
-                app.viewport.point_drag = Some((id, depth, Some(at)));
+                let pointer = if mirrored { offset - at } else { at - offset };
+                app.viewport.point_drag = Some((id, depth, Some(pointer), offset, mirrored));
             }
         }
         if resp.drag_stopped() {
             crate::sketch_text_handles::drag_end(app);
-            if let Some((_, depth, _)) = app.viewport.point_drag.clone() {
+            if let Some((_, depth, _, _, _)) = app.viewport.point_drag.clone() {
                 // Letting go on a point, midpoint or curve adds the matching constraint, then the
                 // whole model follows the drag, all in the drag's undo step.
                 let _ = app.session.execute("sketch.drag_end", &json!({ "constraint": crate::drag_snap::release() }));
@@ -5915,8 +6157,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             calibration,
             app.space_mouse.raw.into(),
             app.preferences.space_mouse_axis_source,
-            // The mapping navigation really used, so the picture and the view read the device
-            // the same way.
+            // The driver's mapping, the one navigation really used: the picture shows every
+            // motion where the view uses it. The inversions that make the view follow the cap
+            // stay with the view, so the picture shows the device.
             app.space_mouse.mapping,
         );
     }
@@ -6501,29 +6744,18 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     {
         // What the selection filter lets through (window: wholly inside; crossing: touching).
         let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
+        let (selected_splines, _) = selected_spline_handles(&ss.sketch, &app.session.selection);
         for (i, c) in ss.sketch.curves.iter().enumerate().filter(|_| !off("sketch") && !off("sketch_curves")) {
             if accepts
                 .is_some_and(|a| a & crate::selection::CURVES == 0 && (a & crate::selection::AXES == 0 || !matches!(c.kind, CurveKind::Line { .. })))
             {
                 continue;
             }
-            if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
+            let selected_handle = c.spline_handle_of.as_ref().is_some_and(|parent| selected_splines.contains(parent));
+            if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) && !selected_handle {
                 continue;
             }
-            let sampled = if bx.crossing {
-                crate::sketch_display::curve_sample(app, ss.feature, i, &ss.plane, proj)
-            } else {
-                std::sync::Arc::new(crate::sketch_display::curve_unclipped(&ss.sketch, i, &ss.plane, proj, app.viewport.pixels_per_point()))
-            };
-            let parts: Vec<Vec<Pos2>> = sampled.parts.iter().map(|part| to2(part)).collect();
-            let takes = if bx.crossing {
-                parts.iter().any(|part| bx.takes(part))
-            } else {
-                sampled.quality == solidcraft_engine::render::SamplingQuality::Complete
-                    && !parts.is_empty()
-                    && parts.iter().all(|part| bx.takes(part))
-            };
-            if takes {
+            if box_takes_curve(app, ss, i, proj, &bx, selected_handle) {
                 out.push(Sel::SketchCurve { id: c.id.clone(), sketch: None });
             }
         }
@@ -6633,6 +6865,26 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             }
         }
     }
+    // Project takes the visible curves of the other sketches too (#14927): the marquee of its
+    // Geometry input reaches them as a click does, as `ExternalSketchCurve`. Only a marquee that
+    // took nothing else: one over model edges, faces or points takes what it always took.
+    if out.is_empty()
+        && app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchProject { .. }))
+        && accepts.is_some_and(|a| a & crate::selection::SKETCH_LINES != 0)
+        && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves")
+    {
+        for sid in visible_sketches(app) {
+            if app.session.active_sketch == Some(sid) {
+                continue;
+            }
+            let Some(ss) = st.sketch(sid) else { continue };
+            for (i, c) in ss.sketch.curves.iter().enumerate() {
+                if solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) && box_takes_curve(app, ss, i, proj, &bx, false) {
+                    out.push(Sel::ExternalSketchCurve { sketch: sid, id: c.id.clone() });
+                }
+            }
+        }
+    }
     let mut grouped = Vec::new();
     for item in out {
         for piece in grouped_selection(&app.session, &item) {
@@ -6649,6 +6901,29 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     }
     let items = serde_json::to_value(&out).unwrap_or_default();
     let _ = app.run("select.set", json!({"items": items, "add": add}));
+}
+
+/// Whether a marquee takes curve `i` of a sketch: a window takes it when it lies wholly inside,
+/// a crossing box when it touches it. A spline's selected tangent handle is the line it is drawn
+/// as (`selected_handle`).
+fn box_takes_curve(app: &SolveApp, ss: &solidcraft_engine::doc::SolvedSketch, i: usize, proj: &Proj, bx: &BoxSel, selected_handle: bool) -> bool {
+    let to2 = |pts: &[Vec3]| -> Vec<Pos2> { pts.iter().filter_map(|p| proj.to_screen(*p)).collect() };
+    let (parts, complete): (Vec<Vec<Pos2>>, bool) = if selected_handle {
+        (
+            solidcraft_engine::view::spline_handle_display_line(&ss.sketch, i)
+                .map(|(a, b)| vec![to2(&[ss.plane.to_world(a), ss.plane.to_world(b)])])
+                .unwrap_or_default(),
+            true,
+        )
+    } else {
+        let sampled = if bx.crossing {
+            crate::sketch_display::curve_sample(app, ss.feature, i, &ss.plane, proj)
+        } else {
+            std::sync::Arc::new(crate::sketch_display::curve_unclipped(&ss.sketch, i, &ss.plane, proj, app.viewport.pixels_per_point()))
+        };
+        (sampled.parts.iter().map(|part| to2(part)).collect(), sampled.quality == solidcraft_engine::render::SamplingQuality::Complete)
+    };
+    if bx.crossing { parts.iter().any(|part| bx.takes(part)) } else { complete && !parts.is_empty() && parts.iter().all(|part| bx.takes(part)) }
 }
 
 /// Whether the origin point is drawn (the Origin shown and its point not hidden).
@@ -6714,6 +6989,7 @@ fn origin_hidden_by_body(app: &SolveApp, proj: &Proj) -> bool {
 
 /// Screen-space dots: the origin point, and hovered or selected body vertices.
 fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    crate::snap_wake::draw(app, painter, proj);
     let t = Tokens::get();
     // The feature names the loop below asks for, once for the pass (#7313 review).
     let feature_names = FeatureNames::build(app);
@@ -6975,8 +7251,29 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         .iter()
         .filter_map(|item| crate::sketch_modify_ui::point_id(&app.session, item).and_then(|id| sk.resolve_point(id)))
         .collect();
+    let (selected_splines, selected_handles) = selected_spline_handles(sk, &app.session.selection);
+    let handle_mirrors = selected_spline_handle_mirrors(sk, &app.session.selection);
+    // A selected fit spline's tangent guides, stored or only shown (the first drag of a handle
+    // stores them), under the points (#6502).
+    let mut preview_ends = Vec::new();
+    for curve in selected_splines.iter().filter_map(|id| sk.curve_index(id)) {
+        for guide in solidcraft_engine::view::spline_tangent_guides(sk, curve) {
+            let (Some(a), Some(b)) = (proj.to_screen(ss.plane.to_world(guide.mirror)), proj.to_screen(ss.plane.to_world(guide.handle))) else {
+                continue;
+            };
+            painter.line_segment([a, b], Stroke::new(1.5, t.sketch_construction));
+            if guide.point.is_none() {
+                preview_ends.extend([a, b]);
+            }
+        }
+    }
+    if !sk.view.hide_points {
+        for end in preview_ends {
+            painter.rect_filled(Rect::from_center_size(end, vec2(5.0, 5.0)), 0.0, t.sketch_point_free);
+        }
+    }
     for (i, p) in sk.points.iter().enumerate() {
-        if !visible.takes(p) {
+        if !visible.takes(p) && !selected_handles.contains(&i) {
             continue;
         }
         let hidden = (sk.view.hide_points && i != 0) || (sk.view.hide_projected && p.link.is_some());
@@ -7001,6 +7298,19 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
         if selected.contains(&i) {
             painter.circle_stroke(sp, 6.0, Stroke::new(2.0, t.sel_edge));
+        }
+    }
+    for (i, mirror) in handle_mirrors {
+        let det = ss.report.point_determined.get(i).copied().unwrap_or(false);
+        let c = if sk.points.get(i).is_some_and(|point| point.link.is_none() && locked.get(i).copied().unwrap_or(false)) {
+            t.sketch_locked
+        } else if det {
+            t.sketch_point
+        } else {
+            t.sketch_point_free
+        };
+        if let Some(sp) = proj.to_screen(ss.plane.to_world(mirror)).filter(|_| !sk.view.hide_points) {
+            painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
         }
     }
     // The markers and the status line are drawn straight onto the view: its side's colours (#4146).
@@ -7655,6 +7965,49 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    #[test]
+    fn tangent_guides_and_handle_points_follow_spline_selection() {
+        let mut sketch = solidcraft_engine::sketch::Sketch::new();
+        let points =
+            [Vec2::new(0., 0.), Vec2::new(8., 6.), Vec2::new(17., 2.)].into_iter().map(|point| sketch.add_point(point, None).unwrap()).collect();
+        let spline = sketch
+            .add_curve(CurveKind::Spline { pts: points, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1"))
+            .unwrap();
+        sketch.add_spline_handles(spline).unwrap();
+
+        let (unselected, hidden_points) = selected_spline_handles(&sketch, &[]);
+        assert!(unselected.is_empty());
+        assert!(hidden_points.is_empty());
+        assert!(selected_spline_handle_mirrors(&sketch, &[]).is_empty());
+
+        let selection = [Sel::SketchCurve { id: "s1".into(), sketch: None }];
+        let (selected, visible_points) = selected_spline_handles(&sketch, &selection);
+        assert_eq!(selected, ["s1".to_string()].into_iter().collect());
+        let CurveKind::Spline { handles, .. } = &sketch.curves[spline].kind else { panic!("expected a fit spline") };
+        assert_eq!(visible_points, handles.iter().copied().collect());
+        let mirrors = selected_spline_handle_mirrors(&sketch, &selection);
+        assert_eq!(mirrors.len(), handles.len());
+        let CurveKind::Spline { pts, .. } = &sketch.curves[spline].kind else { panic!("expected a fit spline") };
+        for ((handle_index, mirror), (fit, handle)) in mirrors.iter().zip(pts.iter().zip(handles)) {
+            assert_eq!(*handle_index, *handle);
+            assert_eq!(*mirror, sketch.point(*fit).unwrap() * 2.0 - sketch.point(*handle).unwrap());
+            let id = &sketch.points[*handle].id;
+            let handle_position = sketch.point(*handle).unwrap();
+            let pointer_near_mirror = *mirror + Vec2::new(0.25, -0.5);
+            let (mirror_offset, mirrored) = point_drag_mapping(&sketch, id, *mirror, pointer_near_mirror, &selection);
+            assert!(mirrored);
+            assert!((mirror_offset - pointer_near_mirror).dist(handle_position) < 1e-9);
+
+            let pointer_near_handle = handle_position + Vec2::new(-0.25, 0.5);
+            let (handle_offset, mirrored) = point_drag_mapping(&sketch, id, handle_position, pointer_near_handle, &selection);
+            assert!(!mirrored);
+            assert!((pointer_near_handle + handle_offset).dist(handle_position) < 1e-9);
+            let motion = Vec2::new(2.0, -3.0);
+            assert!((pointer_near_handle + motion + handle_offset).dist(handle_position + motion) < 1e-9);
+            assert!((mirror_offset - (pointer_near_mirror + motion)).dist(handle_position - motion) < 1e-9);
+        }
     }
 
     #[test]
@@ -10208,11 +10561,12 @@ mod tests {
                     let values = format!("{:?}", h.app.dialog.as_ref().unwrap().kind);
                     h.call("ui.move", json!({"x":600,"y":350}));
                     let before = h.app.cam;
+                    let centre = orbit_centre(&h);
                     h.call("ui.move", json!({"x":600,"y":350,"alt":alt,"shift":!alt}));
                     h.call("ui.move", json!({"x":660,"y":390,"alt":alt,"shift":!alt}));
                     if alt {
                         assert!((h.app.cam.yaw - before.yaw - 0.48).abs() < 1e-6, "{command}, canvas={canvas}: a focused field must allow orbit");
-                        assert_eq!(h.app.cam.target, before.target);
+                        assert!(turned_about(before, h.app.cam, centre), "{command}, canvas={canvas}: an orbit doesn't pan");
                     } else {
                         assert_ne!(h.app.cam.target, before.target, "{command}, canvas={canvas}: a focused field must allow pan");
                         assert_eq!(h.app.cam.yaw, before.yaw);
@@ -10632,6 +10986,285 @@ mod tests {
         app.cam_anim = None;
         hover_frame(&mut app, &ctx, vec![]);
         assert!(app.viewport.hover.is_some());
+    }
+
+    /// #2130: the face highlight must stay on while the view is panned.
+    ///
+    /// The reporter hovered a face and then panned the view with two fingers on a trackpad: the
+    /// white highlight began to flicker. The cause is in the model viewport's frame loop, which
+    /// drops the hover pick for the whole navigation gesture: `viewport.rs` computes
+    /// `navigating` (which is true while `pan != egui::Vec2::ZERO`) and then filters the hover
+    /// pick out with `!navigating`, so `app.viewport.hover` is set to `None` for as long as the
+    /// view moves. The face under the cursor stops lighting up, and it comes back only when the
+    /// pan stops — the flicker the reporter saw.
+    ///
+    /// The request (from the issue's triage) is the one Fusion has: keep the highlight of the
+    /// surface under the cursor while the view is being rotated or panned.
+    #[test]
+    fn the_face_under_the_pointer_stays_lit_while_the_view_is_panned() {
+        let mut h = top_view();
+        let at = face_pixel(&h);
+
+        // The pointer over the face: the face lights up.
+        h.call("ui.move", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+        assert!(
+            matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })),
+            "the face under the pointer must light up: {:?}",
+            h.app.viewport.hover
+        );
+
+        // Pan the view with the trackpad while the pointer stays over the face. The camera moves.
+        let before = h.app.cam;
+        let gesture = |phase| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(60.0, -40.0),
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
+        h.app.synthetic.push(gesture(egui::TouchPhase::Start));
+        h.frame();
+        h.app.synthetic.push(gesture(egui::TouchPhase::Move));
+        h.frame();
+        assert_ne!(h.app.cam.target, before.target, "the pan must have moved the view");
+
+        // The pointer is still over the same face...
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        assert!(
+            crate::viewport::pick(&h.app, &proj, at).iter().any(|hit| matches!(hit, crate::viewport::Hit::Face { .. })),
+            "the pointer must still be over a face after the pan"
+        );
+        // ...so the face under it must still be lit.
+        assert!(
+            matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })),
+            "the highlight under the pointer must stay on while the view is panned (#2130): {:?}",
+            h.app.viewport.hover
+        );
+    }
+
+    /// #2130: the face that was lit when the movement started stays lit while the view is
+    /// panned, and no other face lights up until the view stops.
+    ///
+    /// The maintainer's question is about the cursor passing over OTHER faces while the view
+    /// moves: does the highlight jump between faces, or flash? The answer needs two identities
+    /// per frame, and they are not the same thing:
+    ///
+    /// - the geometric face under the pointer (`viewport::pick`), which DOES change as the view
+    ///   moves under a still pointer;
+    /// - the lit face (`app.viewport.hover`), which must NOT change during the movement.
+    ///
+    /// So the test asserts both: the pick moves to another face (otherwise the scene proves
+    /// nothing) and the lit face stays the same one for every frame of the gesture.
+    #[test]
+    fn the_lit_face_does_not_change_while_the_view_is_panned() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200}}));
+        h.app.cam =
+            Camera { target: Vec3::new(200.0, 200.0, 100.0), yaw: 0.6, pitch: 0.9, roll: 0.0, distance: 700.0, fov: 0.0, up: Default::default() };
+        h.frames(3);
+        let at = face_pixel(&h);
+        h.call("ui.move", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+        let lit = face_of(&h.app.viewport.hover);
+        assert!(lit.is_some(), "the face under the pointer must light up: {:?}", h.app.viewport.hover);
+
+        let pan = |phase, delta| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Trackpad,
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
+        h.frame_with(vec![pan(egui::TouchPhase::Start, egui::vec2(60.0, -40.0))]);
+        let mut picked = Vec::new();
+        for step in 1..=4 {
+            h.frame_with(vec![pan(egui::TouchPhase::Move, egui::vec2(60.0 * step as f32, -40.0 * step as f32))]);
+            assert_eq!(
+                face_of(&h.app.viewport.hover),
+                lit,
+                "the lit face must not change while the view is panned (frame {step}): {:?}",
+                h.app.viewport.hover
+            );
+            picked.push(picked_face(&h, at));
+        }
+        h.frame_with(vec![pan(egui::TouchPhase::End, egui::vec2(0.0, 0.0))]);
+
+        // The pointer travelled over another face, so the scene really does exercise the case:
+        // the geometry under the pointer moved on, the lit face did not.
+        assert!(
+            picked.iter().any(|face| *face != lit),
+            "the pointer must travel over another face while the view pans, picked {picked:?} against {lit:?}"
+        );
+    }
+
+    /// #2130: the same for a rotation. With the default fusion navigation, Shift and two
+    /// fingers orbit the view, and that gesture does not go through the pan path at all: the
+    /// camera turns under the pointer without the pointer moving.
+    #[test]
+    fn the_lit_face_does_not_change_while_the_view_is_rotated() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200}}));
+        h.app.cam =
+            Camera { target: Vec3::new(200.0, 200.0, 100.0), yaw: 0.6, pitch: 0.9, roll: 0.0, distance: 700.0, fov: 0.0, up: Default::default() };
+        h.frames(3);
+        let at = face_pixel(&h);
+        h.call("ui.move", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+        let lit = face_of(&h.app.viewport.hover);
+        assert!(lit.is_some(), "the face under the pointer must light up: {:?}", h.app.viewport.hover);
+        let yaw_before = h.app.cam.yaw;
+
+        let rotate = |phase, delta| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Trackpad,
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            modifiers: egui::Modifiers { shift: true, ..egui::Modifiers::NONE },
+            phase,
+        };
+        h.frame_with(vec![rotate(egui::TouchPhase::Start, egui::vec2(40.0, 0.0))]);
+        let mut picked = Vec::new();
+        for step in 1..=4 {
+            h.frame_with(vec![rotate(egui::TouchPhase::Move, egui::vec2(40.0 * step as f32, 0.0))]);
+            assert_eq!(
+                face_of(&h.app.viewport.hover),
+                lit,
+                "the lit face must not change while the view is rotated (frame {step}): {:?}",
+                h.app.viewport.hover
+            );
+            picked.push(picked_face(&h, at));
+        }
+        h.frame_with(vec![rotate(egui::TouchPhase::End, egui::vec2(0.0, 0.0))]);
+
+        // The camera really turned: a rotation that did not move the view would prove nothing.
+        assert!(
+            (h.app.cam.yaw - yaw_before).abs() > 0.1,
+            "the rotation must have turned the camera: yaw went from {yaw_before} to {}",
+            h.app.cam.yaw
+        );
+        assert!(
+            picked.iter().any(|face| *face != lit),
+            "the pointer must travel over another face while the view rotates, picked {picked:?} against {lit:?}"
+        );
+    }
+
+    /// The index of the lit face, if a face is lit.
+    fn face_of(hit: &Option<crate::viewport::Hit>) -> Option<usize> {
+        match hit {
+            Some(crate::viewport::Hit::Face { index, .. }) => Some(*index),
+            _ => None,
+        }
+    }
+
+    /// The index of the face under the pointer, as the geometry sees it.
+    fn picked_face(h: &crate::scenario::Harness, at: egui::Pos2) -> Option<usize> {
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        crate::viewport::pick(&h.app, &proj, at).iter().find_map(|hit| match hit {
+            crate::viewport::Hit::Face { index, .. } => Some(*index),
+            _ => None,
+        })
+    }
+
+    /// #2130: the freeze is for a still pointer. A mouse drag owns the pointer, so the
+    /// highlight goes off even while a trackpad gesture moves the view under it.
+    #[test]
+    fn a_mouse_drag_owns_the_pointer_while_a_trackpad_gesture_moves_the_view() {
+        let mut h = top_view();
+        let at = face_pixel(&h);
+
+        // The pointer over the face: the face lights up.
+        h.call("ui.move", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+        assert!(
+            matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })),
+            "the face under the pointer must light up: {:?}",
+            h.app.viewport.hover
+        );
+
+        // The trackpad gesture moves the view under the still pointer.
+        let gesture = |phase| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(60.0, -40.0),
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
+        h.frame_with(vec![gesture(egui::TouchPhase::Start)]);
+        h.frame_with(vec![gesture(egui::TouchPhase::Move)]);
+        assert!(
+            matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })),
+            "the still pointer keeps its highlight while the view moves: {:?}",
+            h.app.viewport.hover
+        );
+
+        // Now the mouse drags: the drag owns the pointer, so the highlight goes off.
+        h.frame_with(vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed: true, modifiers: egui::Modifiers::NONE },
+            gesture(egui::TouchPhase::Move),
+        ]);
+        assert!(h.app.viewport.hover.is_none(), "a mouse drag owns the pointer: the highlight must go off: {:?}", h.app.viewport.hover);
+    }
+
+    /// #2130: with the preference off the highlight goes off while the view moves, as
+    /// it did before the freeze.
+    #[test]
+    fn the_highlight_goes_off_while_the_view_moves_with_the_preference_off() {
+        let mut h = top_view();
+        h.app.preferences.keep_hover_while_navigating = false;
+        let at = face_pixel(&h);
+
+        h.call("ui.move", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+        assert!(
+            matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })),
+            "the face under the pointer must light up: {:?}",
+            h.app.viewport.hover
+        );
+
+        let gesture = |phase| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(60.0, -40.0),
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
+        h.frame_with(vec![gesture(egui::TouchPhase::Start)]);
+        h.frame_with(vec![gesture(egui::TouchPhase::Move)]);
+        assert!(h.app.viewport.hover.is_none(), "with the preference off the highlight must go off while the view moves: {:?}", h.app.viewport.hover);
+    }
+
+    /// A big flat plate with the camera looking straight down at it, so the whole model render
+    /// is over its top face and a pan keeps the pointer over that same face.
+    fn top_view() -> crate::scenario::Harness {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 20}}));
+        h.app.cam = Camera {
+            target: Vec3::new(200.0, 200.0, 10.0),
+            yaw: 0.0,
+            pitch: std::f64::consts::FRAC_PI_2,
+            roll: 0.0,
+            distance: 100.0,
+            fov: 0.0,
+            up: Default::default(),
+        };
+        h.frames(3);
+        h
+    }
+
+    /// A pixel over the model's top face, found by picking.
+    fn face_pixel(h: &crate::scenario::Harness) -> egui::Pos2 {
+        let rect = h.app.viewport.layout.as_ref().unwrap().drawable;
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        for y in 2..18 {
+            for x in 2..18 {
+                let at = rect.min + egui::vec2(rect.width() * x as f32 / 20.0, rect.height() * y as f32 / 20.0);
+                if crate::viewport::pick(&h.app, &proj, at).iter().any(|hit| matches!(hit, crate::viewport::Hit::Face { .. })) {
+                    return at;
+                }
+            }
+        }
+        panic!("the model view must offer a visible face");
     }
 
     /// After a close-up refines a body (#1320), the model draws it from the refined plan (on the
@@ -11678,6 +12311,19 @@ mod tests {
         assert_ne!(h.app.cam.target, legacy_target);
     }
 
+    /// The point the default orbit (Orbit around: the view's centre) turns about with the camera as
+    /// it is now: the point under the middle of the part of the view the panels leave free
+    /// (#14651), or the camera's target when that middle is the view's centre.
+    fn orbit_centre(h: &crate::scenario::Harness) -> Vec3 {
+        h.app.viewport.rect.and_then(|rect| crate::navigation::view_middle(&h.app, rect)).unwrap_or(h.app.cam.target)
+    }
+
+    /// From `a` to `b` the view turned about `centre`: the point kept its place in the camera's
+    /// frame, so it stayed where it was on screen and the view didn't pan.
+    fn turned_about(a: Camera, b: Camera, centre: Vec3) -> bool {
+        a.frame_coords(centre).dist(b.frame_coords(centre)) < 1e-6
+    }
+
     #[test]
     fn fusion_shift_two_finger_scroll_orbits_without_pan_zoom_or_drift() {
         let mut h = crate::scenario::Harness::new();
@@ -11688,6 +12334,7 @@ mod tests {
         h.call("ui.move", json!({"x":800,"y":500}));
         h.step(&json!({"shot":"fusion-trackpad-before"})).unwrap();
         let before = h.app.cam;
+        let centre = orbit_centre(&h);
         for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
             h.app.synthetic.push(egui::Event::MouseWheel {
                 source: egui::MouseWheelSource::Unknown,
@@ -11699,7 +12346,7 @@ mod tests {
             h.frame();
         }
         assert_ne!(h.app.cam.back(), before.back(), "Shift + two fingers must orbit");
-        assert_eq!(h.app.cam.target, before.target, "orbit must not pan");
+        assert!(turned_about(before, h.app.cam, centre), "orbit must not pan");
         assert_eq!(h.app.cam.half_height(), before.half_height(), "orbit must not zoom");
         let after = h.app.cam;
         h.frames(90);
@@ -11740,13 +12387,14 @@ mod tests {
             h.app.synthetic.push(gesture(egui::TouchPhase::Start));
             h.frame();
             let before = h.app.cam;
+            let centre = orbit_centre(&h);
             h.app.synthetic.push(gesture(egui::TouchPhase::Move));
             h.frame();
-            (before, h.app.cam)
+            (before, h.app.cam, centre)
         };
-        let (before, after) = step(true, egui::Modifiers::SHIFT);
+        let (before, after, centre) = step(true, egui::Modifiers::SHIFT);
         let mut expected = before;
-        expected.orbit(-20.0, 10.0);
+        expected.orbit_about(-20.0, 10.0, centre);
         assert_eq!(after, expected, "a reversed orbit turns the other way");
         assert_eq!(step(true, egui::Modifiers::NONE), step(false, egui::Modifiers::NONE), "a pan does not change");
     }
@@ -11768,12 +12416,14 @@ mod tests {
         h.frame();
         for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT, egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
             let before = h.app.cam;
+            let centre = orbit_centre(&h);
             h.app.synthetic.push(gesture(egui::TouchPhase::Move, modifiers));
             h.frame();
             assert_eq!(h.app.cam.half_height(), before.half_height());
             if modifiers.shift {
+                // After the pan just before, about the point under the middle now.
                 let mut expected = before;
-                expected.orbit(20.0, -10.0);
+                expected.orbit_about(20.0, -10.0, centre);
                 assert_eq!(h.app.cam, expected, "Shift must orbit continuously, without snapping");
             } else {
                 assert_eq!(h.app.cam.back(), before.back());
@@ -11853,10 +12503,11 @@ mod tests {
         play(&mut h, Start, Modifiers::SHIFT);
         for modifiers in [Modifiers::SHIFT, Modifiers::NONE, Modifiers::SHIFT] {
             let before = h.app.cam;
+            let centre = orbit_centre(&h);
             play(&mut h, Move, modifiers);
             if modifiers.shift {
                 let mut expected = before;
-                expected.orbit(20.0, -10.0);
+                expected.orbit_about(20.0, -10.0, centre);
                 assert_eq!(h.app.cam, expected, "a new swipe orbits with Shift");
             } else {
                 assert_eq!(h.app.cam.back(), before.back());
@@ -12848,12 +13499,13 @@ mod tests {
             h.app.preferences.nav = preset.into();
             h.call("ui.view", json!({"view":"front"}));
             let before = h.app.cam;
+            let centre = orbit_centre(&h);
             h.call("ui.drag", json!({"x0":800,"y0":500,"x1":850,"y1":520,"button":"middle","shift":true,"steps":20}));
             let mut expected = before;
             expected.orbit(50.0, 20.0);
             assert!((h.app.cam.yaw - expected.yaw).abs() < 1e-6, "{preset}: {:?}", h.app.cam);
             assert!((h.app.cam.pitch - expected.pitch).abs() < 1e-6, "{preset}: {:?}", h.app.cam);
-            assert_eq!(h.app.cam.target, before.target);
+            assert!(turned_about(before, h.app.cam, centre), "{preset}: {:?}", h.app.cam);
             assert_eq!(h.app.cam.distance, before.distance);
             h.call("ui.view", json!({"view":"front"}));
             h.call("ui.drag", json!({"x0":800,"y0":500,"x1":1020,"y1":500,"button":"right","shift":true,"steps":40}));
@@ -12877,6 +13529,7 @@ mod tests {
                 h.app.preferences.nav_drag_keeps_mode = keeps;
                 h.call("ui.view", json!({"view":"front"}));
                 let start = h.app.cam;
+                let start_centre = orbit_centre(&h);
                 let at = h.app.viewport.rect.unwrap().center();
                 send(&mut h, egui::Event::ModifiersChanged(first));
                 send(&mut h, egui::Event::PointerMoved(at));
@@ -12885,6 +13538,7 @@ mod tests {
                     send(&mut h, egui::Event::PointerMoved(at + vec2(4.0 * i as f32, 0.0)));
                 }
                 let half = h.app.cam;
+                let half_centre = orbit_centre(&h);
                 send(&mut h, egui::Event::ModifiersChanged(then));
                 for i in 11..=20 {
                     send(&mut h, egui::Event::PointerMoved(at + vec2(4.0 * i as f32, 0.0)));
@@ -12896,17 +13550,17 @@ mod tests {
                 let end = h.app.cam;
                 // Fusion: Shift+middle orbits, middle alone pans.
                 let case = format!("keeps={keeps}, Shift {} partway", if first.shift { "let go" } else { "pressed" });
-                let moved = |a: Camera, b: Camera, orbit: bool| {
+                let moved = |a: Camera, b: Camera, centre: Vec3, orbit: bool| {
                     if orbit {
                         assert_ne!(a.yaw, b.yaw, "{case}: orbits");
-                        assert_eq!(a.target, b.target, "{case}: doesn't pan");
+                        assert!(turned_about(a, b, centre), "{case}: doesn't pan");
                     } else {
                         assert_eq!(a.yaw, b.yaw, "{case}: doesn't orbit");
                         assert_ne!(a.target, b.target, "{case}: pans");
                     }
                 };
-                moved(start, half, first.shift);
-                moved(half, end, if keeps { first.shift } else { then.shift });
+                moved(start, half, start_centre, first.shift);
+                moved(half, end, half_centre, if keeps { first.shift } else { then.shift });
             }
         }
     }

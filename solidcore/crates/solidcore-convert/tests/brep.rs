@@ -538,6 +538,47 @@ fn a_void_goes_round_as_its_own_region_and_shell() {
     assert_eq!(back.region(region).unwrap().shells, before);
 }
 
+/// The cup and lid on the default kernel: a 100-cube hollowed to an open cup (walls and floor
+/// 10) joined with a lid over its top 10 seals an 80-cube cavity, 1000000 − 512000. The union
+/// leaves the cavity's shell first in the solid region's list; the record still lists the
+/// solid's outer shell first (the one facing the infinite region), so it validates and goes
+/// round. The record is the same whichever way round the kernel lists the solid's shells.
+#[test]
+fn a_void_the_kernel_lists_first_goes_round_with_the_outer_shell_first() {
+    use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+    for lid_first in [false, true] {
+        let mut k = Kernel::new(&KernelOptions::default());
+        let cube = boxed(&mut k, [3.0, 4.0, 5.0], 100.0);
+        let pocket =
+            primitives::create_box(&mut k, Vec3::new(13.0, 14.0, 15.0), 80.0, 80.0, 100.0).unwrap();
+        let lid =
+            primitives::create_box(&mut k, Vec3::new(3.0, 4.0, 95.0), 100.0, 100.0, 10.0).unwrap();
+        let cup = boolean_difference(&mut k, cube, pocket).unwrap();
+        let (a, c) = if lid_first { (lid, cup) } else { (cup, lid) };
+        let mut b = boolean_union(&mut k, a, c).unwrap();
+        let name = format!("cup and lid (lid first: {lid_first})");
+        assert!(
+            (volume(&k, &mut b) - 488_000.0).abs() <= 1e-9 * 488_000.0,
+            "{name}"
+        );
+        let region = b_region_with_two_shells(&b);
+        let listed = b.region(region).unwrap().shells.clone();
+        let (r, _) = round_trip(&mut k, &name, &mut b);
+        assert_eq!(r.regions.len(), 3, "{name}");
+        let material: Vec<_> = r.regions.iter().filter(|g| g.shells.len() == 2).collect();
+        assert_eq!(material.len(), 1, "{name}: {:?}", r.regions);
+        let void = r.regions.iter().find(|g| g.void).expect("a void region");
+        assert_eq!(void.shells, vec![material[0].shells[1]], "{name}");
+        // the kernel's list turned round: the same record
+        b.region_mut(region).unwrap().shells = listed.iter().rev().copied().collect();
+        let (turned, _) = to_record(&mut k, &mut b).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            turned, r,
+            "{name}: the record follows the kernel's list order"
+        );
+    }
+}
+
 fn b_region_with_two_shells(b: &Brep) -> solidcore::topology::RegionId {
     solidcore::topology::brep::p1::regions(b, None)
         .unwrap()

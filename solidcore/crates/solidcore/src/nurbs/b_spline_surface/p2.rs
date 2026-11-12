@@ -69,7 +69,10 @@
 //!   [`UpstreamFixes::sphere_from_arcs_common_centre`](crate::kernel::UpstreamFixes::sphere_from_arcs_common_centre)
 //!   it instead refuses an arc whose centre is farther than `tol_3d` from the first
 //!   arc's with `SM_ERR`, after the radius test; construction still uses the current
-//!   frame's origin.
+//!   frame's origin. Not upstream (WR-502, SolidCraft oracle case 37; the default since
+//!   its flag was retired): four arcs of one centre and radius that close a loop get
+//!   their whole sphere, where upstream refuses anything but three ("only works for 3
+//!   now").
 //! - **Edit notifications.** `SetCanonical`'s `SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`
 //!   (`this`, `SM_NO_GET_OWNER(this)` = null) need the wrapping [`Surface`]'s identity,
 //!   so the B-spline sends them through a caller hook
@@ -579,7 +582,8 @@ impl BSplineSurface {
     /// # Errors
     ///
     /// `SM_ERR` unless there are exactly three arcs of a common center and radius
-    /// meeting at their ends; [`SolidError::Unported`] (`SmCurve::IsArc`).
+    /// meeting at their ends, or four that close a loop (not upstream, WR-502);
+    /// [`SolidError::Unported`] (`SmCurve::IsArc`).
     pub fn create_sphere_from_arcs(
         k: &Kernel,
         arcs: &[SmCurve],
@@ -587,8 +591,8 @@ impl BSplineSurface {
     ) -> Result<SphereFromArcs> {
         let total_curves = arcs.len();
 
-        // no work - not given exactly 3 curves
-        if total_curves == 4 && k.fixes.fillet_corner_sphere_from_four_arcs {
+        // no work - not given exactly 3 curves (not upstream, WR-502: or 4)
+        if total_curves == 4 {
             return Self::sphere_from_four_arcs(k, arcs, tol_3d);
         }
         if total_curves != 3 {
@@ -799,7 +803,7 @@ impl BSplineSurface {
     }
 
     /// [`Self::create_sphere_from_arcs`] for four arcs of one centre and radius that close a
-    /// loop (`Kernel::fixes.fillet_corner_sphere_from_four_arcs`; not upstream): the whole
+    /// loop (not upstream, WR-502): the whole
     /// sphere, a half-meridian revolved a turn about an axis square to the way the four arcs
     /// face, its seam on the far side, so the poles and the seam stay clear of the loop.
     fn sphere_from_four_arcs(k: &Kernel, arcs: &[SmCurve], tol_3d: f64) -> Result<SphereFromArcs> {
@@ -1986,19 +1990,8 @@ mod tests {
         assert_eq!(err.sm_status(), Some(1001));
         assert_eq!(err.operation(), OP_SPHERE);
 
-        // the new flag does not enable the four-arc feature
-        let mut four_on = Kernel::default();
-        four_on.fixes.sphere_from_arcs_common_centre = true;
-        let err4 =
-            BSplineSurface::create_sphere_from_arcs(&four_on, &four_arcs(), 1e-6).unwrap_err();
-        assert_eq!(
-            err4,
-            SolidError::b_spline(
-                OP_SPHERE,
-                BSplineFailure::Failed("a sphere is made from three arcs only")
-            )
-        );
-        assert_eq!(err4.sm_status(), Some(1001));
+        // four arcs of one centre still get their sphere (WR-502) with the check on
+        assert!(BSplineSurface::create_sphere_from_arcs(&on, &four_arcs(), 1e-6).is_ok());
     }
 
     /// `sphere_from_arcs_common_centre` on three arcs of one centre: both settings build
@@ -2107,14 +2100,12 @@ mod tests {
             .collect()
     }
 
-    /// `fillet_corner_sphere_from_four_arcs`: the four arcs get the sphere they lie on, where
-    /// upstream refuses ("only works for 3 now").
+    /// WR-502: the four arcs get the sphere they lie on, where upstream refuses ("only
+    /// works for 3 now").
     #[test]
-    fn sphere_from_four_arcs_only_with_the_fix() {
-        let mut k = Kernel::default();
+    fn four_arcs_get_their_sphere() {
+        let k = Kernel::default();
         let arcs = four_arcs();
-        assert!(BSplineSurface::create_sphere_from_arcs(&k, &arcs, 1e-6).is_err());
-        k.fixes.fillet_corner_sphere_from_four_arcs = true;
         let sphere = BSplineSurface::create_sphere_from_arcs(&k, &arcs, 1e-6)
             .unwrap()
             .sphere;

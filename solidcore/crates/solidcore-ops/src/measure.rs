@@ -17,6 +17,7 @@ use solidcore::query::api_queries::{
     edge_face_gap_samples, face_normal_at_edge,
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects};
+use solidcore::topology::brep::outward_solid_failure;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::{edge, face};
 use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId, RegionId};
@@ -26,7 +27,7 @@ use crate::blend::middle;
 use crate::body::Body;
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{answer, with_body, Answer};
+use crate::session::{answer, measure_body, with_body, Answer};
 use crate::{Error, Result};
 
 impl Answer for Vec<q::EdgeFaceGapSample> {}
@@ -329,6 +330,23 @@ impl Body {
     /// The kernel's error.
     pub fn is_manifold_solid(&self) -> Result<bool> {
         with_body("is_manifold_solid", self, |_, b| brep_is_manifold_solid(b))
+    }
+
+    /// Whether the body is a closed solid facing out, as an operation's result must be when its
+    /// input is one (one closed manifold solid, valid, its volume proved positive): `Ok` where
+    /// it is, else [`Error::NotSolidBecause`] with the first test it fails
+    /// (`solidcore::topology::brep::outward_solid_failure`). The tests run on a copy, so the
+    /// body is unchanged.
+    ///
+    /// # Errors
+    /// [`Error::NotSolidBecause`]; the kernel's error from the tests.
+    pub fn check_solid(&self) -> Result<()> {
+        measure_body("check_solid", self, |k, b| {
+            Ok(match outward_solid_failure(k, b)? {
+                None => Ok(()),
+                Some(test) => Err(Error::NotSolidBecause(test)),
+            })
+        })?
     }
 
     /// How many solids the body has (`SmApiBrepMaterialCensus`, its voids dropped).

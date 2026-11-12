@@ -23,6 +23,7 @@
 mod curve;
 #[cfg(test)]
 mod fixtures;
+mod hash;
 mod iso;
 mod mesh;
 // SolidCraft's mesher, moved here (RFC 0003, item 1.1) and kept in SolidCraft's formatting so it
@@ -79,7 +80,8 @@ pub(crate) fn eval_message(e: solidcore::eval::EvalError) -> String {
         solidcore::eval::EvalError::Invalid(what)
         | solidcore::eval::EvalError::TooLarge(what)
         | solidcore::eval::EvalError::Unevaluable(what)
-        | solidcore::eval::EvalError::Degenerate(what) => what,
+        | solidcore::eval::EvalError::Degenerate(what)
+        | solidcore::eval::EvalError::OffRange(what) => what,
     }
 }
 
