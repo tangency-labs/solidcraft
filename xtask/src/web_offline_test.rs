@@ -259,6 +259,12 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
                 // than `index.html`; copies of one build don't. A file of its own per copy lets
                 // a step hold back what one build has and the next lacks (step 13).
                 std::fs::write(to.join(format!("own-{build}.txt")), format!("{build}\n")).map_err(|e| format!("{}: {e}", to.display()))?;
+                // And a file of one name with each build's own content, as the stand-in has
+                // (`shared.js`): the update-in-another-tab step asks for it to tell which build's
+                // copy answered. A real build has no such file, and the network's 404 would fail
+                // the step whatever the worker does.
+                std::fs::write(to.join("shared.js"), format!("document.documentElement.dataset.shared = \"{build}\";\n"))
+                    .map_err(|e| format!("{}: {e}", to.display()))?;
                 let index = to.join("index.html");
                 let html = std::fs::read_to_string(&index).map_err(|e| format!("{}: {e}", index.display()))?;
                 std::fs::write(&index, mark(&html, build)?).map_err(|e| format!("{}: {e}", index.display()))?;
