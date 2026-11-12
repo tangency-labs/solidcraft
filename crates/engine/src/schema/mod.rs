@@ -122,6 +122,7 @@ pub mod plugin_storage;
 pub mod point_cloud;
 pub mod point_cloud_deviation;
 pub mod print_face;
+pub mod public_geometry;
 pub mod render;
 pub mod render_bindings;
 pub mod render_camera;
