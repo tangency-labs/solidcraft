@@ -107,7 +107,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.iso_curve_sliver_domain_is_degenerate = true;
     k.fixes.topology_failed_evaluations_propagate = true;
     k.fixes.heal_stage3_failures_propagate = true;
-    k.fixes.sweep_frame_on_planar_path_normal = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.boolean2d_plane_covers_far_faces = true;
@@ -128,7 +127,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.internal_pole_row_through_knot = true;
     k.fixes.extrusion_origin_scaled_zero = true;
-    k.fixes.sheet_sweep_joins_profile_wires = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.imprint_trims_edge_to_proto_vertex = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;

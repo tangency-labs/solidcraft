@@ -116,7 +116,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.edge_reversal_keeps_failed_edge = true;
     f.topology_failed_evaluations_propagate = true;
     f.heal_stage3_failures_propagate = true;
-    f.sweep_frame_on_planar_path_normal = true;
     f.cover_refuses_folded_continuation = true;
     f.boolean_vertex_by_best_crossing = true;
     f.boolean_cleanup_removes_slits = true;
@@ -125,7 +124,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
     f.torus_signed_gen_curve_interval = true;
-    f.sheet_sweep_joins_profile_wires = true;
     f.point_solve_keeps_triangle_guess = true;
     f.imprint_trims_edge_to_proto_vertex = true;
     f.imprint_extends_edge_to_proto_vertex = true;
