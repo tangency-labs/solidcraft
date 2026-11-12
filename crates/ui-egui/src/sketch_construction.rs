@@ -52,44 +52,62 @@ pub fn claim_typed_length(app: &SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// The Construction/Normal switch under a construction line tool's Length box (#10258). Normal
-/// makes the segment an ordinary sketch line, ready to close a profile, without converting it
-/// afterwards. It only works with a length: an infinite line stays construction, so the switch
-/// is greyed out and says why until a length is typed. It belongs to the tool alone and leaves
-/// the Sketch Palette's drawing line type (X) as it is.
-pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
-    if construction_line_mode(t.cmd).is_none() {
-        return;
+/// The construction line methods that take a length, and so can draw a Normal segment (#10258).
+pub(crate) fn takes_length(mode: &str) -> bool {
+    matches!(mode, "horizontal" | "vertical" | "angle" | "parallel" | "perpendicular")
+}
+
+/// Whether the tool draws a segment rather than an infinite line: a line type other than
+/// Infinite was chosen, or a length was typed.
+fn segment(t: &Tool) -> bool {
+    t.line_type != 3 || typed_length(t).is_some()
+}
+
+/// The Sketch Palette's Line Type icon that a construction line tool taking a length lights
+/// (#15066): the type chosen, or with Infinite left on, Construction once a length is typed, as
+/// that makes a construction segment.
+pub(crate) fn shown_line_type(t: &Tool) -> u8 {
+    if t.line_type == 3 && typed_length(t).is_some() { 1 } else { t.line_type }
+}
+
+/// A click on the Sketch Palette's Line Type icon `kind` (0 normal, 1 construction,
+/// 2 centerline, 3 infinite) while a construction line tool taking a length runs (#15066). The
+/// icons stay in the palette, so they hold still while the pointer moves; beside the Length box
+/// a switch followed the pointer away from the click. Infinite clears the typed length, so one
+/// click draws an infinite line. The others draw a segment of that type, as the Line tool does:
+/// a first click starts it and a second ends it, at the typed length or where the pointer is.
+/// The palette's drawing line type (X) is left as it is.
+pub(crate) fn choose_line_type(ctx: &egui::Context, t: &mut Tool, kind: u8) {
+    t.line_type = kind;
+    if kind == 3 {
+        t.dim_history.retain(|b| b.label != "Length");
+        if let Some(i) = t.dims.iter().position(|b| b.label == "Length") {
+            t.dims[i].locked = false;
+            t.dims[i].value.clear();
+            ctx.memory_mut(|m| m.surrender_focus(crate::sketch_dims::box_id(i)));
+        }
     }
-    let Some(i) = t.dims.iter().position(|b| b.label == "Length") else { return };
-    let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
-    let tokens = solidcraft_theme::Tokens::get();
-    let has_length = typed_length(t).is_some();
-    let reason = solidcraft_ui_text::tr("ui.construction.normal_needs_length");
-    let refused = [Some(reason), Some(reason)];
-    // The Sketch Palette's own line type names, which `segmented` translates.
-    let options = ["Construction", "Normal"];
-    let mut selected = usize::from(has_length && t.normal);
-    let frame = crate::ui_kit::Container::popup_frame(ui.style()).inner_margin(egui::Margin::same(1)).fill(tokens.panel);
-    crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Canvas)
-        .area(egui::Id::unique("sc_construction_switch"))
-        .fixed_pos(length_box.left_bottom() + egui::vec2(0.0, tokens.space_2))
-        .order(egui::Order::Background)
-        .show(ui.ctx(), |ui| {
-            crate::ui_kit::Container::show_backing(ui, frame, |ui| {
-                let segments = crate::ui_kit::Segments {
-                    disabled_reasons: if has_length { &[] } else { &refused },
-                    targets: &["construction_switch:construction", "construction_switch:normal"],
-                    small: true,
-                    intrinsic: true,
-                    compact: true,
-                    ..Default::default()
-                };
-                if crate::ui_kit::segmented(ui, &mut selected, &options, segments) {
-                    t.normal = selected == 1;
-                }
-            });
-        });
+}
+
+/// The length of the segment ending at `pointer` that the tool would draw now, when it draws one
+/// with no typed length: what its Length box shows.
+pub(crate) fn pointer_segment_length(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>)) -> Option<f64> {
+    if typed_length(t).is_some() {
+        return None;
+    }
+    params(app, t, pointer, true)?.get("length")?.as_f64()
+}
+
+/// How far along the line the pointer is from its start: the length of a segment with no typed
+/// length, which ends where the pointer is.
+fn pointer_length(app: &SolveApp, p: &Value, mode: &str, pointer: Vec2) -> Option<f64> {
+    let state = crate::open_meshing::session_world(&app.session);
+    let ss = app.session.active_sketch.and_then(|sid| state.sketch(sid))?;
+    let lines = construction_line_solutions(&ss.sketch, p, mode).ok()?;
+    let line = *lines.get(construction_line_choice(&lines, p).ok()?)?;
+    let along = line.direction.len();
+    let length = ((pointer - line.start).dot(line.direction) / along).abs();
+    (along > 1e-12 && length > 1e-9).then_some(length)
 }
 
 pub fn hint(id: &str) -> String {
@@ -156,10 +174,13 @@ fn params(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>), preview: b
     }
     if let Some(expression) = typed_length(t) {
         p["length"] = if preview { json!(crate::sketch_dims::locked_value(app, t, "Length")?) } else { json!(expression) };
-        // An infinite line is always construction, so the switch only counts with a length.
-        if t.normal {
-            p["construction"] = json!(false);
-        }
+    } else if segment(t) && takes_length(mode) && !t.pts.is_empty() {
+        p["length"] = json!(pointer_length(app, &p, mode, pointer.0)?);
+    }
+    // An infinite line is always construction, so the line type only counts for a segment. A
+    // centerline is made from a normal segment once it exists (`place_point`).
+    if p.get("length").is_some() && matches!(t.line_type, 0 | 2) {
+        p["construction"] = json!(false);
     }
     Some(p)
 }
@@ -208,9 +229,9 @@ pub fn place_point(app: &mut SolveApp, t: &mut Tool, at: (Vec2, Option<String>))
         return;
     }
     let at = crate::sketch_dims::placed(app, t, &at);
-    // Only a typed length waits for a second click and pins this one as the segment's start.
-    // A typed offset places the infinite line on this click, on the cursor's side of the reference.
-    let picks_side = length_box_at_start(mode) && typed_length(t).is_some();
+    // Only a segment waits for a second click and pins this one as its start. A typed offset
+    // places the infinite line on this click, on the cursor's side of the reference.
+    let picks_side = length_box_at_start(mode) && segment(t);
     if (matches!(mode, "free" | "angle" | "tangent_external") || picks_side) && t.pts.is_empty() {
         t.pts.push(at);
         if picks_side {
@@ -223,7 +244,14 @@ pub fn place_point(app: &mut SolveApp, t: &mut Tool, at: (Vec2, Option<String>))
         return;
     }
     let Some(p) = params(app, t, &at, false) else { return };
-    if app.run(t.cmd, p).is_ok() {
+    let centerline = t.line_type == 2 && p.get("length").is_some();
+    if let Ok(reply) = app.run(t.cmd, p) {
+        if centerline {
+            // Part of the line's own undo step, as the palette's drawing line type is.
+            let depth = app.session.undo.len();
+            let _ = app.session.execute("sketch.centerline", &json!({ "curves": reply["curves"], "value": true }));
+            app.session.undo.truncate(depth);
+        }
         if !t.pts.is_empty() && length_box_at_start(mode) {
             app.set_status(hint(t.cmd), false);
         }
@@ -246,12 +274,23 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let center = ss.plane.to_local(app.cam.target);
     let extent = app.cam.half_height().max(1.0) * 20.0;
     let length = p.get("length").and_then(Value::as_f64);
-    for (i, line) in lines.iter().enumerate() {
+    // A segment shows only itself, as the Line tool does: before its start there is no line yet,
+    // just the point the click puts down (#15066). An infinite line shows itself whole.
+    let waiting = segment(t) && takes_length(mode) && length.is_none();
+    // Drawn in the line type it will get: a construction segment dashed, a normal one solid.
+    let style = match (length, t.line_type) {
+        (Some(_), 0 | 2) => t.line_type,
+        (Some(_), _) => 1,
+        (None, _) => 3,
+    };
+    let mut ends = Vec::new();
+    for (i, line) in lines.iter().enumerate().filter(|_| !waiting) {
         let selected = chosen == Some(i);
-        // A typed length previews the segment the click will create, on the pointer's side.
+        // A length previews the segment the click will create, on the pointer's side.
         let points = match length {
             Some(length) if selected => {
                 let (a, b) = construction_segment(*line, length, Some(pointer.0));
+                ends = vec![a, b];
                 [ss.plane.to_world(a), ss.plane.to_world(b)]
             }
             _ => {
@@ -261,7 +300,19 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         };
         let stroke =
             Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { tokens.preview_new } else { tokens.sketch_accent.gamma_multiply(0.35) });
-        crate::tools::paint_sketch_path(&points, 3, painter, proj, stroke);
+        crate::tools::paint_sketch_path(&points, if selected { style } else { 3 }, painter, proj, stroke);
+    }
+    // The segment's two ends, and before its first click the point that click puts down.
+    for end in ends {
+        if let Some(at) = proj.to_screen(ss.plane.to_world(end)) {
+            painter.circle_filled(at, 3.0, tokens.preview_new);
+        }
+    }
+    if waiting
+        && t.pts.is_empty()
+        && let Some(at) = proj.to_screen(ss.plane.to_world(pointer.0))
+    {
+        painter.circle_stroke(at, if pointer.1.is_some() { 6.0 } else { 3.0 }, Stroke::new(1.5, tokens.sketch_accent));
     }
     if let Some(first) = t.pts.first()
         && let Some(p) = proj.to_screen(ss.plane.to_world(first.0))
