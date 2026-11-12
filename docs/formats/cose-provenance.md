@@ -201,11 +201,15 @@ and small parts are hashed while writing.
 ## Using it
 
 - **Preferences › Security**: *Sign saved designs with GnuPG* (off by default), the signing key
-  (empty: GnuPG's default key) and *Check signatures when opening designs* (off by default; the
-  tab tooltip and the status line then name the signer, and `file.verify` checks on request).
+  (empty: GnuPG's default key; *Choose…* lists the keys GnuPG can sign with, on a smartcard or not)
+  and *Check signatures when opening designs* (off by default; the tab tooltip and the status line
+  then name the signer, and *File › Verify Signature* checks on request).
+- **File › Verify Signature**: checks the open design's saved file in the background and says what
+  it found in the status line; it is disabled for a design that has no file yet. `file.verify`
+  reports the same through the control channel, and `file.gpg_keys` lists the secret keys GnuPG can
+  sign with (marking those on a smartcard).
 - **Commands**: `file.save`/`file.save_as` take `sign: true` and `signing_key` (a fingerprint or
-  user id, empty for GnuPG's default). `file.verify` reports a file's signature. `file.gpg_keys`
-  lists the secret keys GnuPG can sign with and marks those on a smartcard.
+  user id, empty for GnuPG's default).
 - **YubiKey / OpenPGP smartcard**: put the signing key in GnuPG's signing slot (the usual
   `gpg --card-status` setup) and leave the signing key empty or name its fingerprint. GnuPG, not
   SolidCraft, talks to the card and asks for the PIN through its pinentry; the save runs on a

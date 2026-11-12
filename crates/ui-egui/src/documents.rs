@@ -1151,7 +1151,7 @@ fn tab_security(app: &SolveApp) -> Vec<Option<String>> {
 }
 
 /// A verification report as one line for a tab tooltip.
-fn signature_line(report: &solidcraft_engine::io::ProvenanceReport) -> String {
+pub(crate) fn signature_line(report: &solidcraft_engine::io::ProvenanceReport) -> String {
     match &report.status {
         solidcraft_engine::io::ProvenanceStatus::Valid => {
             let key = report.newest().map(signer_name).unwrap_or_default();

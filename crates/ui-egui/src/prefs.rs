@@ -1885,6 +1885,16 @@ pub struct PrefsWindow {
     pub(crate) follow: crate::theme_files::Follow,
     /// Where the theme Import tile was drawn last frame: a file dropped there is a theme (#8226).
     import_tile: Option<egui::Rect>,
+    /// The GnuPG keys listed for the signing-key field, once the user asks for them.
+    pub(crate) signing_keys: Option<Result<Vec<SigningKey>, String>>,
+}
+
+/// A GnuPG secret key offered for the signing-key preference.
+#[derive(Clone, Debug)]
+pub(crate) struct SigningKey {
+    pub fingerprint: String,
+    pub user_id: String,
+    pub on_card: bool,
 }
 
 /// Following a theme file needs the file system: the desktop app only (#7573).

@@ -225,6 +225,18 @@ mod tests {
         assert!(h.app.session.is_dirty() && h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     }
 
+    #[test]
+    fn an_unsigned_save_of_a_signed_design_says_the_earlier_signature_does_not_cover_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.session.path = Some("/work/Signed.sc".into());
+        h.app.session.provenance_chain = Some(solidcraft_engine::io::ProvenanceChain { records: vec![vec![1, 2, 3]], truncated: false });
+        h.app.finish_command("file.save", &Ok(json!({"path": "/work/Signed.sc"})));
+        let (text, _, error) = h.app.status.as_ref().expect("the save says where it went");
+        assert!(text.contains("earlier signature") && text.contains("does not cover"), "{text}");
+        assert!(!error);
+    }
+
     /// A save can be cancelled until its file is replaced: a cancelled save writes nothing, and
     /// the design keeps its changes to save. From the operations panel (here `ui.operations`) its
     /// row's X stops it, and it ends cancelled, not as an error.

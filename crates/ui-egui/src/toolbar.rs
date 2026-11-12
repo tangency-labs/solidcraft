@@ -348,6 +348,8 @@ pub enum FileAction {
     Redo,
     /// Save a JSON design using the existing save-as flow.
     SaveJson,
+    /// Check the signatures of the active design's saved file.
+    VerifySignature,
     /// Export through the format-specific export command.
     Export(&'static str),
     /// Open the mesh export dialog with the selected format.
@@ -371,8 +373,9 @@ pub enum FileAction {
 impl FileAction {
     /// Whether this action is available in the current document, picker and report state.
     pub fn enabled(&self, app: &SolveApp) -> bool {
-        let needs_design = matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_))
-            || matches!(self, Self::Export(extension) if *extension != "json");
+        let needs_design =
+            matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature)
+                || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
         // with unsaved changes under the report, and ask about it where it can't be answered.
@@ -381,6 +384,7 @@ impl FileAction {
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
+            Self::VerifySignature => app.session.path.is_some() && app.verifying.is_none(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
@@ -410,6 +414,9 @@ impl FileAction {
             Self::Undo => drop(app.run("edit.undo", json!({}))),
             Self::Redo => drop(app.run("edit.redo", json!({}))),
             Self::SaveJson => save_as_with_extension(app, "json"),
+            Self::VerifySignature => {
+                crate::verify_job::start(app);
+            }
             Self::Export(extension) => export(app, extension),
             Self::ExportMesh(format) => crate::dialogs_save_mesh::start_with_format(app, format),
             Self::Command(command) => app.start(command),
@@ -482,6 +489,7 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
     rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
+    rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
     // The browser build: a copy as a downloaded file, whatever Save does.
     if app.services.download_design.is_some() {
         rows.push(row("download", app.tr_label("Download design"), "", "export", shown));
@@ -549,6 +557,7 @@ fn run_file_row(app: &mut SolveApp, id: &str) {
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
         "save_json" => FileAction::SaveJson.run(app),
+        "file.verify" => FileAction::VerifySignature.run(app),
         "download" => download_design(app),
         "browser_files" => {
             if let Some(show) = &app.services.browser_files {

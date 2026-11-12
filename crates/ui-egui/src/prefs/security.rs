@@ -17,10 +17,64 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     response
                 });
             });
+            if cfg!(not(target_arch = "wasm32")) {
+                ui_kit::settings_form(ui, labels, |ui| {
+                    if ui.button(app.tr("prefs.security.choose_key")).clicked() {
+                        app.prefs_window.signing_keys = Some(signing_keys(app));
+                    }
+                });
+            }
+            if cfg!(not(target_arch = "wasm32"))
+                && let Some(keys) = app.prefs_window.signing_keys.clone()
+            {
+                ui_kit::settings_form(ui, labels, |ui| {
+                    match keys {
+                        Ok(keys) if keys.is_empty() => {
+                            ui_kit::settings_inline_note(ui, app.tr("prefs.security.no_signing_keys"));
+                        }
+                        Ok(keys) => {
+                            ui.label(app.tr("prefs.security.signing_keys_heading"));
+                            for key in keys {
+                                let suffix = if key.on_card { format!(" ({})", app.tr("prefs.security.key_on_card")) } else { String::new() };
+                                let label = format!("{}{suffix} — {}", key.user_id, key.fingerprint);
+                                if ui.selectable_label(false, label).clicked() {
+                                    app.preferences.signing_key = key.fingerprint.clone();
+                                    app.prefs_window.signing_keys = None;
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            ui_kit::settings_inline_note(ui, &error);
+                        }
+                    }
+                    if ui.button(app.tr("prefs.security.refresh_keys")).clicked() {
+                        app.prefs_window.signing_keys = Some(signing_keys(app));
+                    }
+                });
+            }
             setting::verify_opened_designs(app, ui);
         });
         ui_kit::settings_section(ui, "encryption", app.tr("prefs.security.encryption"), |ui| {
             ui_kit::settings_inline_note(ui, app.tr("prefs.security.encryption_note"));
         });
     });
+}
+
+/// The GnuPG secret keys the signing-key field can use, as `file.gpg_keys` lists them.
+fn signing_keys(app: &mut SolveApp) -> Result<Vec<SigningKey>, String> {
+    let reply = app.run("file.gpg_keys", serde_json::json!({}))?;
+    if !reply.get("available").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+        return Err(app.tr("prefs.security.gpg_missing").to_string());
+    }
+    let keys = reply.get("keys").and_then(serde_json::Value::as_array).ok_or_else(|| app.tr("prefs.security.gpg_missing").to_string())?;
+    Ok(keys
+        .iter()
+        .filter_map(|key| {
+            Some(SigningKey {
+                fingerprint: key.get("fingerprint")?.as_str()?.to_string(),
+                user_id: key.get("user_id")?.as_str()?.to_string(),
+                on_card: key.get("on_card")?.as_bool().unwrap_or(false),
+            })
+        })
+        .collect())
 }
