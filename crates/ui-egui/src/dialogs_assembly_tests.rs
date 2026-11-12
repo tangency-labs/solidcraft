@@ -61,6 +61,7 @@ fn joint_from_two_snaps() {
     assert_eq!(app.session.doc.assembly.joints.len(), 1);
 }
 
+/// Reopening a joint restores all three offsets, and Cancel and Undo preserve the original joint.
 #[test]
 fn editing_a_joint_keeps_all_three_offsets() {
     let mut app = two_boxes();
@@ -76,38 +77,6 @@ fn editing_a_joint_keeps_all_three_offsets() {
     }
     let joint = app.session.doc.assembly.joints[0].id;
     let edited = edit_joint(&app, joint).unwrap();
-    if let Ok(path) = std::env::var("SOLIDCRAFT_JOINT_EVIDENCE") {
-        let mut evidence = SolveApp::new(app.session.scratch(), Services::default());
-        evidence.home.open = false;
-        evidence.dialog = edit_joint(&evidence, joint);
-        let ctx = crate::fonts::test_context();
-        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0));
-        let mut textures = Default::default();
-        let mut paint = |events| {
-            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), events, ..Default::default() }, |ui| {
-                evidence.logic(ui.ctx());
-                evidence.ui(ui);
-            });
-            crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
-            output.textures_delta.clear();
-            (output, textures.clone())
-        };
-        for _ in 0..8 {
-            paint(Vec::new());
-        }
-        let position = crate::scenario::handle_at("dialog:section:Position").expect("Position expander");
-        for pressed in [true, false] {
-            paint(vec![
-                egui::Event::PointerMoved(position),
-                egui::Event::PointerButton { pos: position, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
-            ]);
-        }
-        for _ in 0..8 {
-            paint(Vec::new());
-        }
-        let (output, textures) = paint(Vec::new());
-        crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures).save(path).unwrap();
-    }
     let Kind::Assembly(Asm::Joint(form)) = &edited.kind else { panic!("joint form") };
     for (text, expected) in form.offset.iter().zip([10.0, 30.0, 30.0]) {
         let actual = crate::length_input::eval(&app.session.doc, text, ValueKind::Length).unwrap();
@@ -148,6 +117,7 @@ fn editing_a_joint_keeps_all_three_offsets() {
     assert_eq!(harness.app.session.doc, before, "Undo restores all offsets and the saved attachment");
 }
 
+/// Editing a zero offset uses the saved attachment axes of the rotated component.
 #[test]
 fn editing_zero_offsets_uses_the_saved_rotated_attachment_axes() {
     let mut app = two_boxes();
