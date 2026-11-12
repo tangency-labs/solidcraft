@@ -34,9 +34,10 @@ use crate::curve::line::Line;
 use crate::error::{Result, SolidError};
 use crate::eval::{Curve as Record, Curve2 as Record2, Frame};
 use crate::geom::axis2_placement::Axis2Placement;
-use crate::geom::extent1d::Extent1d;
+use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
@@ -137,6 +138,46 @@ pub fn from_parameters(k: &Kernel, record: &Record, interval: [f64; 2]) -> Resul
             operation: OP,
             reason: "a traced intersection curve has no constructor from its numbers yet",
         }),
+    }
+}
+
+/// The record's parameter of the kernel's parameter `t` on `made`, the curve
+/// [`from_parameters`] makes from `record` over `interval`: the inverse of its parameter map. A
+/// circle's or ellipse's kernel parameter is its rational NURBS's, which is the angle in degrees
+/// only on the quarter grid; the conic's own polar table turns it into the angle in degrees
+/// (`ConvertTFromNURBSToSTEP`), over the interval turned and snapped as [`from_parameters`] does,
+/// so the record's is the interval's start plus the turn from there, in radians. Every other
+/// curve keeps the record's parameter.
+///
+/// # Errors
+///
+/// Those of the polar table's conversion.
+pub fn record_parameter(
+    k: &Kernel,
+    made: &EdgeCurve,
+    record: &Record,
+    interval: [f64; 2],
+    t: f64,
+) -> Result<f64> {
+    match record {
+        Record::Circle { .. } | Record::Ellipse { .. } => {
+            let t = made.curve.convert_t_from_nurbs_to_step(k, t)?;
+            Ok(interval[0] + (t - degrees(turned(interval)[0])).to_radians())
+        }
+        _ => Ok(t),
+    }
+}
+
+/// The record parameter `t` on `interval`, as the kernel classifies a parameter against an
+/// interval (`SmExtent1d::ClassifyPoint` at its default tolerance, `EFF_ZERO`): inside as it is,
+/// on an end moved onto that end (a solve's rounding past it), outside `None`.
+#[must_use]
+pub fn on_interval(interval: [f64; 2], t: f64) -> Option<f64> {
+    match Extent1d::from_min_max(interval[0], interval[1]).classify_point(t, EFF_ZERO) {
+        ExtentPointType::Start | ExtentPointType::Both => Some(interval[0]),
+        ExtentPointType::End => Some(interval[1]),
+        ExtentPointType::Inside => Some(t),
+        ExtentPointType::Outside | ExtentPointType::Unknown => None,
     }
 }
 

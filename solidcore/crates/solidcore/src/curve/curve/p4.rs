@@ -1082,7 +1082,7 @@ impl SolutionObject for PlaneHandle {
 
 /// `pPlane->GlobalCurveIntersect(pPlane->GetNaturalUVDomain(), curve, ivl, tol)`:
 /// the solutions' types, starts and ends.
-fn plane_global_curve_intersect(
+pub(crate) fn plane_global_curve_intersect(
     k: &Kernel,
     plane: &Plane,
     curve: &Curve,
