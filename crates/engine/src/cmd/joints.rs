@@ -2416,7 +2416,7 @@ pub(in crate::cmd) fn revert_values(s: &mut Session) -> usize {
 
 #[cfg(test)]
 #[path = "joints_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 #[path = "joints_turn_tests.rs"]
 mod turn_tests;

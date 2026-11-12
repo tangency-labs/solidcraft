@@ -24,10 +24,11 @@
 //! paper are `geom::drawing_view`'s. Without a scale it takes the largest ISO 5455 scale at
 //! which the view, centred where it goes, lies inside the sheet's drawing border.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use solidcore_record::Plane;
 use solidcore_record::Vec2;
 use solidcraft_doc::display_units::unit_scale;
@@ -37,7 +38,7 @@ use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, rea
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace, check_occurrence_paths, check_pose};
 use solidcraft_doc::drawing_view::{
-    Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, TangentEdges, ViewDirection, ViewOverrides,
+    Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewDirection, ViewOverrides,
 };
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
@@ -60,8 +61,8 @@ use crate::schema::drawing_view::{
     AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, CopyParams, CreateResult, DPI_RANGE, DrawnJointResult,
     EditParams, EditResult, ExplodedParam, ExtentsResult, FromResult, InspectParams, InspectResult, LineResult, LinesStatusResult, MeasureParam,
     MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams,
-    ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, ToSheetResult, ViewLineParam, ViewResult,
-    ViewSet,
+    ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, StudyPoseParam, StudyStepResult,
+    ToSheetResult, ViewLineParam, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -695,10 +696,15 @@ fn exploded_of(s: &Session, chosen: &ExplodedParam, cmd: &str) -> Result<Explode
     found.map(|v| Exploded::View(v.id)).map_err(|key| bad(cmd, format!("no exploded view `{key}` in the design")))
 }
 
-/// `chosen` as a view saves it, for `cmd`: designed, or each joint found by its id or name with its
-/// values read as `joint.drive` reads them, then held to the record's limits ([`check_pose`]).
+/// `chosen` as a view saves it, for `cmd`: designed; each joint found by its id or name with its
+/// values read as `joint.drive` reads them, then held to the record's limits ([`check_pose`]); or a
+/// study found as `motion.play` finds it, at a whole step of its timeline.
 fn pose_of(s: &Session, chosen: &PoseParam, cmd: &str) -> Result<Pose> {
-    let PoseParam::Joints(given) = chosen else { return Ok(Pose::Designed) };
+    let given = match chosen {
+        PoseParam::Designed => return Ok(Pose::Designed),
+        PoseParam::Study(at) => return study_step_of(s, at, cmd).map(Pose::Study),
+        PoseParam::Joints(given) => given,
+    };
     // Bounded before any joint is looked up.
     if given.len() > MAX_POSE_JOINTS {
         return Err(bad(cmd, format!("a position sets at most {MAX_POSE_JOINTS} joints")));
@@ -728,16 +734,38 @@ fn pose_of(s: &Session, chosen: &PoseParam, cmd: &str) -> Result<Pose> {
     Ok(pose)
 }
 
-/// A position as inspect shows it and a view saves it: `"designed"`, or `{"joints": [...]}`.
+/// `at` as a view saves it, for `cmd`: the study by its id, and a whole step of its timeline.
+fn study_step_of(s: &Session, at: &StudyPoseParam, cmd: &str) -> Result<StudyStep> {
+    let index = super::motion::study_index(s, &json!({"study": at.study}), cmd)?;
+    let study = s.doc.assembly.studies.get(index).ok_or_else(|| bad(cmd, "no such motion study"))?;
+    let step = at.step.as_u64().and_then(|step| u32::try_from(step).ok()).filter(|step| *step <= study.steps);
+    let step = step.ok_or_else(|| bad(cmd, format!("`step` is a whole step of motion study `{}`: 0 to {}", study.name, study.steps)))?;
+    Ok(StudyStep { id: study.id, step })
+}
+
+/// A position as inspect shows it and a view saves it: `"designed"`, `{"joints": [...]}`, or
+/// `{"study": {"id": .., "step": ..}}`.
 fn pose_value(pose: Pose) -> Value {
     serde_json::to_value(pose).unwrap_or(Value::Null)
 }
 
 /// Saved view `view`'s position as inspect shows it, where `own` is what the view sets itself; for a
-/// position of its own, also what it draws from `sessions` and the joints `s`'s design no longer has.
+/// position of its own, also what it draws from `sessions`: the joints it sets, or a study keys, at
+/// the values they take, the joints `s`'s design no longer has, and the study step it draws.
 fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, own: Option<Pose>) -> PoseResult {
     let setting = setting(view.pose.clone(), own, pose_value);
-    let Pose::Joints(joints) = &view.pose.value else { return PoseResult { setting, drawn: None, skipped: None } };
+    let (joints, study): (Vec<u64>, Option<StudyStepResult>) = match &view.pose.value {
+        Pose::Designed => return PoseResult { setting, drawn: None, skipped: None, study: None },
+        Pose::Joints(joints) => (joints.iter().map(|j| j.joint).collect(), None),
+        Pose::Study(at) => match at.drawn(&s.doc.assembly.studies) {
+            Some((m, step)) => {
+                // Each joint it keys once, as `motion.play` lists them.
+                let keyed: BTreeSet<u64> = m.keys.iter().map(|k| k.joint).collect();
+                (keyed.into_iter().collect(), Some(StudyStepResult { id: m.id, name: m.name.clone(), step }))
+            }
+            None => (Vec::new(), None),
+        },
+    };
     let skipped = crate::drawing_view::gone_joints(s, view);
     let drawn = match sessions.of(view) {
         Ok(posed) => {
@@ -745,7 +773,7 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
             let placed = solidcraft_doc::joints::joint_values(&posed.doc.assembly);
             joints
                 .iter()
-                .filter_map(|j| posed.doc.assembly.joints.iter().find(|driven| driven.id == j.joint))
+                .filter_map(|joint| posed.doc.assembly.joints.iter().find(|driven| driven.id == *joint))
                 .map(|driven| DrawnJointResult {
                     joint: driven.id,
                     name: driven.name.clone(),
@@ -761,7 +789,7 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
         }
         Err(_) => Vec::new(),
     };
-    PoseResult { setting, drawn: Some(drawn), skipped: Some(skipped) }
+    PoseResult { setting, drawn: Some(drawn), skipped: Some(skipped), study }
 }
 
 /// Refuses a drawing in which one of `views` draws its parts apart in a way it can't draw yet: shaded
