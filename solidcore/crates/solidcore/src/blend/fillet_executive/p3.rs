@@ -263,6 +263,12 @@ pub struct ErrorInfo<O> {
     /// Not upstream: the refusal that noted [`FilletErrorType::NoRoom`], set with that code
     /// (read it with [`ErrorInfo::no_room_reason`], which ignores it under any other code).
     pub no_room: Option<NoRoomReason>,
+    /// Not upstream: the [`FilletErrorType::NoRoom`] code was noted by the generic
+    /// `NoteError(code, comment)` overload, which names no site, so the vertex, edge,
+    /// faces and location left in the record are an earlier failure's (e.g. a corner noted
+    /// unsupported before). A note that names a site clears it. Read only under that code
+    /// (`FilletSession::error_site`).
+    pub no_room_without_site: bool,
 }
 
 impl<O> Default for ErrorInfo<O> {
@@ -285,6 +291,7 @@ impl<O> Default for ErrorInfo<O> {
             comment: "<no comment>\n".into(),
             entity_name: "\n".into(),
             no_room: None,
+            no_room_without_site: false,
         }
     }
 }
@@ -303,6 +310,7 @@ impl<O: Copy> ErrorInfo<O> {
         self.edges.clone_from(&source.edges);
         // (not upstream: the refusal goes with the code it explains)
         self.no_room = source.no_room;
+        self.no_room_without_site = source.no_room_without_site;
     }
 }
 
@@ -3255,11 +3263,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
     /// `NoteError(NoRoom, comment)` (`NoRoom` is not an upstream code), then `SM_ERR`; the
     /// error info also names the refusal (`reason`, not upstream).
-    fn record_no_room(&mut self, reason: NoRoomReason, comment: &str) -> Result<()> {
+    pub(super) fn record_no_room(&mut self, reason: NoRoomReason, comment: &str) -> Result<()> {
         // The generic NoteError overload changes exactly these two members.
         self.error.code = FilletErrorType::NoRoom as i32;
         self.error.comment = comment.into();
         self.error.no_room = Some(reason);
+        self.error.no_room_without_site = true;
         Err(failure())
     }
 
@@ -3614,6 +3623,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             format!("Fillet Error: the round would break through the part's boundary between its rails along the edge: a radius below {} stays inside the part", g(cut.radius))
         };
         self.error.no_room = Some(NoRoomReason::BreaksThrough);
+        self.error.no_room_without_site = true;
         if cut.edge.is_some() {
             if let Some(fit) = access.creation_solver_fit(solver)? {
                 let size = if cut.radius > 0.0 {
@@ -3714,6 +3724,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.error.code = FilletErrorType::NoRoom as i32;
         self.error.comment = why;
         self.error.no_room = Some(reason);
+        self.error.no_room_without_site = true;
         // the largest radius that builds, for a constant ball: where h(r) reaches 0 (closed),
         // or where f_tt first reaches 0 (open: less the fit margin); none where no radius is
         // regular there
@@ -3869,6 +3880,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 format!("Fillet Error: the rolling ball is as wide as a face it rolls on (radius {}): its centre does not move along the edge, and at an end of the edge it has no section, so no round ends there: a radius below {} rolls", g(radius), g(radius))
             };
             self.error.no_room = Some(NoRoomReason::OffsetCollapses);
+            self.error.no_room_without_site = true;
             self.note_open_fit(access, true, radius, FitKind::Radius, solver)?;
             return Err(failure());
         }
@@ -3910,6 +3922,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             format!("Fillet Error: the round would take all of the part between its rails along the edge and cut it into pieces: a radius below {} keeps it whole", g(cut.radius))
         };
         self.error.no_room = Some(NoRoomReason::CutsThePart);
+        self.error.no_room_without_site = true;
         // the largest radius that keeps it whole: the bound is open (at it the part is joined at a
         // line or a point), so less the fit margin (FitMargin)
         if cut.edge.is_some() {
