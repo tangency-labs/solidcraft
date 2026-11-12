@@ -1555,6 +1555,26 @@ fn a_rotate_step_keeps_its_member_through_an_edit() {
         .to_string();
     assert!(e.contains("A Rotate step keeps its member"), "{e}");
     assert_eq!(s.doc.to_json(), before);
+    // `timeline.edit` setting the member's fields straight is refused the same way.
+    let post = s.doc.features.iter().find(|f| f.name == "Post member").unwrap().id;
+    let e = s.execute("timeline.edit", &json!({"feature": "Rotate1", "set": {"member.feature": post}})).unwrap_err().to_string();
+    assert!(e.contains("A Rotate step keeps its member"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// The current turn Parallel To adds its delta to is reduced by whole turns first, as the member
+/// is built: a huge turn keeps its delta instead of landing half a turn off.
+#[test]
+fn parallel_to_reduces_a_huge_current_turn_as_the_member_is_built() {
+    use crate::cmd::frame_rotate_member::half_turns;
+    use std::f64::consts::TAU;
+    for r in [0.0, -PI / 6.0, 190f64.to_radians(), 1e300, -1e300, 1e300f64.to_radians()] {
+        let h = half_turns(r);
+        assert!((-PI..PI).contains(&h), "{r}: {h}");
+        let off = (h - r.rem_euclid(TAU)).rem_euclid(TAU);
+        assert!(off < 1e-9 || TAU - off < 1e-9, "{r}: {h} is {off} off the built turn");
+    }
+    assert!((half_turns(-PI / 6.0) + PI / 6.0).abs() < 1e-12, "-30° stays -30°");
 }
 
 #[test]

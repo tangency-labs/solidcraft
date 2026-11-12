@@ -393,6 +393,23 @@ fn rotate_member_dialog_emits_its_command() {
     assert_eq!(turns(&app), ["30 deg"]);
 }
 
+/// A Parallel To pick that names no one line (a curve id in two sketches) says so on OK, rather
+/// than OK leaving it out.
+#[test]
+fn rotate_member_dialog_reports_an_unresolved_parallel_to() {
+    let mut app = post_app();
+    app.run("sketch.create", json!({"plane": "XY", "name": "Ref 2"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 100], [50, 150]], "ids": ["ref"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let (side, _) = post_side(&app);
+    app.start("frame.rotate_member");
+    let mut d = app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![side];
+    d.inputs[1].items = vec![Sel::SketchCurve { id: "ref".into(), sketch: None }];
+    let e = apply_commands(&app, &d).unwrap_err();
+    assert!(e.contains("only one sketch"), "{e}");
+}
+
 /// Edit Feature opens on the step's member and angle, and runs `timeline.redefine` even with the
 /// angle unchanged.
 #[test]
@@ -502,6 +519,13 @@ fn rotate_member_edit_keeps_its_member() {
     assert_eq!(rotate(&mut e).member, member, "the step's member");
     assert_eq!(rotate(&mut e).angle, "30 deg");
     assert_eq!(e.inputs[0].items, picked, "the pick goes back to the step's member");
+    // Clearing the pick keeps the step's member and the Angle as typed.
+    rotate(&mut e).angle = "45 deg".into();
+    e.inputs[0].items.clear();
+    sync(&app, &mut e);
+    assert_eq!(rotate(&mut e).member, member, "a cleared pick keeps the step's member");
+    assert_eq!(e.inputs[0].items, picked, "and puts its pick back");
+    assert_eq!(rotate(&mut e).angle, "45 deg");
 }
 
 /// Editing a top-level step while another component is active: Parallel To still works the angle

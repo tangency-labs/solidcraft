@@ -869,6 +869,17 @@ impl Vec3 {
                 reason: "non-finite vector",
             });
         }
+        // Only their directions count: scaled to a largest component of 1, so squaring a huge
+        // (or tiny) finite vector can't overflow (or underflow) on the way.
+        let scaled = |v: Self| {
+            let m = v.x.abs().max(v.y.abs()).max(v.z.abs());
+            if m > 0.0 {
+                v / m
+            } else {
+                v
+            }
+        };
+        let (normal, line) = (scaled(normal), scaled(line));
         let target = self.cross(line);
         if self.cross(normal).length_squared() < 100.0 * EFF_ZERO_SQ
             || target.length_squared() < 100.0 * EFF_ZERO_SQ
@@ -1016,6 +1027,15 @@ mod tests {
         assert!((turn([1.0, 0.0, 0.0]) - PI / 2.0).abs() < 1e-12);
         assert!(z.square_turn(x, z).is_err());
         assert!(z.square_turn(x, Vec3::new(f64::NAN, 0.0, 0.0)).is_err());
+        // Huge and tiny finite vectors: the same turn, never NaN.
+        assert!((turn([1e200, 1e200, 0.0]) + PI / 4.0).abs() < 1e-12);
+        assert!(
+            (z.square_turn(x * 1e300, Vec3::new(1e-300, 1e-300, 0.0))
+                .unwrap()
+                + PI / 4.0)
+                .abs()
+                < 1e-12
+        );
     }
 
     /// Fuzz regression: when `|v|^2` overflows, the unit vector underflows to
