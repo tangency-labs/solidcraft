@@ -3125,6 +3125,39 @@ impl SheetBody {
         out
     }
 
+    /// How many pieces the flat material has once every junction slit in the design is cut: the
+    /// slits are not part of [`Self::flat_material`], so they are cut here as slit-thin strips on a
+    /// copy and the pieces counted. Comparing this before and after a feature is what shows that a
+    /// feature's junction cuts parted the blank, including a tear whose slit meets an unrelieved
+    /// junction's cut from the other side (judge rounds 10 and 11).
+    pub(crate) fn junction_pieces(&self) -> Result<usize> {
+        let flat = self.flat_material()?;
+        let slits = self.junction_slits();
+        if slits.is_empty() {
+            return Ok(flat.len());
+        }
+        let eps = 1e-3;
+        let mut tools = Vec::new();
+        for (a, b) in slits {
+            let dir = b - a;
+            let len = dir.dot(dir).sqrt();
+            if len < 1e-9 {
+                continue;
+            }
+            let unit = dir * (1.0 / len);
+            let side = Vec2::new(-unit.y, unit.x) * (eps / 2.0);
+            let tip = b + unit * eps;
+            let ring = Loop2::polygon(&[a + side, tip + side, tip - side, a - side]);
+            tools.push(planar_region(&Region2 { outer: ring.ccw(), holes: Vec::new() })?);
+        }
+        if tools.is_empty() {
+            return Ok(flat.len());
+        }
+        let mut work = FlatWork::new();
+        let cut = material_boolean(&flat, &tools, kernel::BoolOp::Cut, &mut work)?;
+        Ok(cut.len())
+    }
+
     /// The pieces of flat material that a cut parted from the base: `after` is this sheet's
     /// [`Self::flat_material`] after the cut, `before` the sheet before it. A piece is parted when
     /// it holds none of the base panel, lies in a piece that held some before the cut, and no
@@ -4102,6 +4135,9 @@ impl SheetBody {
         }
         // With several edges a message says which one it is about.
         let on = |k: usize| if edges.len() > 1 { format!("edge {}: ", k + 1) } else { String::new() };
+        // The blank's piece count with the junction cuts already in the design: a feature may not
+        // add a piece, however its own reliefs and the junctions it leaves unrelieved combine.
+        let pieces_before = self.junction_pieces()?;
         // Each edge's setback and leg (the panel past the bend) follow its own angle and height.
         let mut sizes = Vec::with_capacity(edges.len());
         for (k, e) in edges.iter().enumerate() {
@@ -4390,6 +4426,14 @@ impl SheetBody {
         notes.extend(self.close_side_corners(&made, relief));
         if relief.shape.unwrap_or(self.relief) == ReliefShape::Tear {
             notes.extend(self.tear_butt_corners(&made));
+        }
+        // The whole sheet, not one relief at a time: a tear can meet an unrelieved junction's own
+        // cut from the other side, and neither of them parts anything on its own.
+        if self.junction_pieces()? > pieces_before {
+            return Err(DocError::Invalid(format!(
+                "{}the junction cuts part the blank: a tear reaches an edge that another junction's cut already reaches; reduce a depth",
+                on(edges.len().saturating_sub(1))
+            )));
         }
         Ok((made, notes))
     }

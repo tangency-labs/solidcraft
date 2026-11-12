@@ -1651,3 +1651,31 @@ fn two_tears_from_opposing_edges_that_overlap_refuse_the_second() {
     assert!(error.contains("it would part the blank"), "{error}");
     assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
 }
+/// A 54 mm tear whose slit tip stops at y = 57, then an unrelieved opposite-side junction on the
+/// far edge whose own cut starts at y = 57: together they run the whole width and part the blank,
+/// so the second feature refuses even though no relief was applied to it (judge round 11, #5942).
+#[test]
+fn a_tear_meeting_an_unrelieved_junction_from_the_other_side_refuses() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50.0, 0.0, 2.0],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":{"shape":"tear","width":"2 mm","depth":"54 mm"}},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    let before = s.doc.to_json();
+    let error = s
+        .execute(
+            "sheet.flange",
+            &json!({"type":"edge","edges":[{"point":[50.0, 60.0, 2.0],"segments":[
+                {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":false},
+                {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm","flip":true}]}],
+                "height":"20 mm","angle":"90 deg"}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("part the blank"), "{error}");
+    assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
+}
