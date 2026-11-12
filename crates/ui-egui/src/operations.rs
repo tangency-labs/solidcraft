@@ -32,6 +32,24 @@ const SLIDE_S: f32 = 0.2;
 const WIDTH: f32 = 300.0;
 const ROW: f32 = 30.0;
 
+/// Waiting agent commands the panel shows as rows of their own; those past them are one summary
+/// row. An agent may queue dozens, and a panel taller than the view is not drawn at all.
+pub(crate) const MAX_WAITING_SHOWN: usize = 4;
+
+/// The key of a waiting agent command's row, followed by its serial; and of the summary row.
+const HELD: &str = "agent:held:";
+const HELD_MORE: &str = "agent:held:more";
+
+/// A place in a queue with a name, as the catalog orders them.
+fn numbered(number: usize, name: &str) -> String {
+    solidcraft_ui_text::format("operations.numbered", &[("number", &number.to_string()), ("name", name)])
+}
+
+/// The keys of the waiting agent commands past [`MAX_WAITING_SHOWN`], in the order they run.
+fn folded(rows: &[Row]) -> Vec<String> {
+    rows.iter().filter(|r| r.key.starts_with(HELD)).skip(MAX_WAITING_SHOWN).map(|r| r.key.clone()).collect()
+}
+
 /// The panel's distance from the view's edges and from what is below it.
 const MARGIN: f32 = 12.0;
 
@@ -86,8 +104,10 @@ enum Cancel {
     Agent,
     /// A save being written: it stops unless the file is already being replaced.
     Save,
-    /// The `n`th request held behind the agent's command (its place in the app's held queue).
-    AgentQueued(usize),
+    /// The request held behind the agent's command that has this [`ControlRequest::serial`].
+    AgentQueued(u64),
+    /// The summary row standing for the waiting requests past [`MAX_WAITING_SHOWN`].
+    AgentMore,
 }
 
 impl Row {
@@ -236,9 +256,11 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
         let steps = steps.and_then(|s| if s.counts().1 > 1 { Some(s.counts()) } else { evaluation_steps(&s.progress) });
         rows.push(Row { steps, cancel: Some(Cancel::Agent), agent: true, next: app.agent_next(), ..Row::new("agent".into(), label) });
     }
-    // Each design change waiting behind it is an operation of its own.
-    for (n, key, label) in app.agent_held() {
-        rows.push(Row { queued: true, agent: true, cancel: Some(Cancel::AgentQueued(n)), ..Row::new(key, label) });
+    // Each design change waiting behind it is an operation of its own, named by its place in the
+    // queue (1 runs next).
+    for (place, (serial, name)) in app.agent_held().into_iter().enumerate() {
+        let label = numbered(place + 1, &name);
+        rows.push(Row { queued: true, agent: true, cancel: Some(Cancel::AgentQueued(serial)), ..Row::new(format!("{HELD}{serial}"), label) });
     }
     rows
 }
@@ -266,6 +288,21 @@ fn evaluation_steps(progress: &solidcraft_engine::doc::progress::Progress) -> Op
 /// Cancel the operation `key` names (as [`current`] lists it). Its work stops at its next check
 /// and nothing of it is applied; operations queued behind it go on.
 pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
+    // The summary row cancels the commands it stands for (each by its own serial, so the ones
+    // after it do not shift).
+    if key == HELD_MORE {
+        let keys = folded(&current(app));
+        if keys.is_empty() {
+            return Err(format!("no operation `{key}` is under way"));
+        }
+        let count = keys.len();
+        for key in keys {
+            let _ = cancel(app, &key);
+        }
+        // One message for the one action, not the last command's.
+        app.set_status(solidcraft_ui_text::format("operations.more_cancelled", &[("count", &count.to_string())]), false);
+        return Ok(());
+    }
     let row = current(app).into_iter().find(|r| r.key == key).ok_or_else(|| format!("no operation `{key}` is under way"))?;
     let Some(how) = row.cancel else { return Err(solidcraft_ui_text::format("operations.cannot_cancel", &[("name", &row.label)])) };
     if row.cancelling {
@@ -304,7 +341,9 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
             }
             return Ok(());
         }
-        Cancel::AgentQueued(n) => app.cancel_held(n),
+        Cancel::AgentQueued(serial) => app.cancel_held(serial),
+        // Taken above: it is no row of `current`.
+        Cancel::AgentMore => return Ok(()),
     }
     record(&mut app.operations, &row.key, row.label.clone(), Outcome::Cancelled);
     app.set_status(solidcraft_ui_text::format("operations.cancelled", &[("name", &row.label)]), false);
@@ -450,6 +489,13 @@ impl Panel {
                 self.shown.push(Shown { row, gone_at: None });
             }
         }
+        // The summary row stands above the waiting rows it follows, also when one unfolds after it.
+        let last = self.shown.iter().rposition(|s| s.row.key.starts_with(HELD));
+        if let (Some(at), Some(last)) = (self.shown.iter().position(|s| s.row.key == HELD_MORE), last)
+            && last > at
+        {
+            self.shown[at..=last].rotate_left(1);
+        }
     }
 
     /// The rows on screen, bottom first, with how opaque each is (fading out: less).
@@ -486,6 +532,13 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     if app.preferences.file_operations_wait {
         rows.retain(|r| !r.key.starts_with("file:"));
         app.operations.shown.retain(|s| !s.row.key.starts_with("file:"));
+    }
+    // An agent can queue dozens of commands: those past the first few are one row.
+    let more = folded(&rows);
+    if !more.is_empty() {
+        rows.retain(|r| !more.contains(&r.key));
+        let label = solidcraft_ui_text::format("operations.more_waiting", &[("count", &more.len().to_string())]);
+        rows.push(Row { queued: true, agent: true, cancel: Some(Cancel::AgentMore), ..Row::new(HELD_MORE.into(), label) });
     }
     app.operations.update(rows, now);
     if app.operations.is_empty() {
@@ -532,7 +585,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     let mut cancel = None;
     for (row, alpha, y) in placed {
         let r = Rect::from_min_max(pos2(panel.left() + pad, y - ROW), pos2(panel.right() - pad, y));
-        if paint_row(ui, &painter, &t, &row, alpha, r) {
+        if paint_row(ui, &painter, &t, &row, alpha, r, panel) {
             cancel = Some(row.key.clone());
         }
     }
@@ -544,22 +597,22 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
 }
 
 /// One row in `r`: name, bar with its step, and the X. True when the X was clicked.
-fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alpha: f32, r: Rect) -> bool {
+fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alpha: f32, r: Rect, panel: Rect) -> bool {
     let fade = |c: Color32| c.gamma_multiply(alpha);
     let accent = match row.ended {
         Some(Outcome::Failed(_)) => t.error,
         _ if row.agent => solidcraft_look::pointer::agent(),
         _ => t.form_primary,
     };
-    // Over the row (the X's own tip wins over its corner): why a failed row failed, else the
-    // steps of a batch still to come.
+    // Over the row (the X's own tip wins over its corner), opening beside the panel so no row is
+    // covered: why a failed row failed, else the steps of a batch still to come.
     let tip = match &row.ended {
         Some(Outcome::Failed(why)) => Some(why.clone()),
         _ if row.next.is_empty() => None,
-        _ => Some(row.next.iter().map(|(n, name)| format!("{n}  {name}")).collect::<Vec<_>>().join("\n")),
+        _ => Some(row.next.iter().map(|(n, name)| numbered(*n, name)).collect::<Vec<_>>().join("\n")),
     };
     if let Some(tip) = tip {
-        let _ = ui.interact(r, egui::Id::unique(("sc_operation_row", &row.key)), Sense::hover()).backing_on_hover_text(tip);
+        let _ = ui.interact(r, egui::Id::unique(("sc_operation_row", &row.key)), Sense::hover()).backing_on_hover_text_beside(panel, tip);
     }
     crate::scenario::publish_rect(&format!("operations:row:{}", row.key), r);
     // The X on the right.

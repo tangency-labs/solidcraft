@@ -1421,3 +1421,59 @@ fn an_agent_request_waiting_its_turn_is_a_row_the_x_cancels() {
     h.app.control_held.push_back(req);
     assert!(agent_rows(&mut h).is_empty());
 }
+
+/// An agent that queues dozens of design changes still gets the operations panel: it shows the
+/// first few waiting ones and one row standing for the rest, whose X cancels exactly those. Every
+/// waiting one stays listed, and cancellable by its own key, over the control channel.
+#[test]
+fn many_waiting_agent_commands_keep_the_panel_and_fold_into_one_row() {
+    use crate::operations::MAX_WAITING_SHOWN;
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let hole = ask(&tx, "engine.execute", second_hole());
+    let waiting: Vec<_> = (0..40).map(|_| ask(&tx, "engine.execute", boss_step())).collect();
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some());
+    assert!(h.app.operations.panel_drew, "the panel is drawn with 40 commands waiting");
+    let shown = h.app.operations.rows(crate::now_ms()).count();
+    assert_eq!(shown, 1 + MAX_WAITING_SHOWN + 1, "the computing one, the first waiting ones and the summary row");
+    let rows = agent_rows(&mut h);
+    assert_eq!(rows.iter().filter(|r| r["queued"] == true).count(), 40, "all of them stay listed");
+    // The summary row's X cancels those past the shown ones, and only them.
+    crate::operations::cancel(&mut h.app, "agent:held:more").unwrap();
+    let status = h.app.status.as_ref().map(|s| s.0.clone());
+    assert_eq!(status.as_deref(), Some("36 waiting commands cancelled"), "one message for the whole action");
+    for (i, w) in waiting.iter().enumerate() {
+        match w.try_recv() {
+            Ok(r) => assert!(i >= MAX_WAITING_SHOWN && r["cancelled"] == true, "{i}: {r}"),
+            Err(_) => assert!(i < MAX_WAITING_SHOWN, "{i} was not answered"),
+        }
+    }
+    assert_eq!(reply_to(&mut h, &hole)["ok"], true);
+    for w in &waiting[..MAX_WAITING_SHOWN] {
+        assert_eq!(reply_to(&mut h, w)["ok"], true);
+    }
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.features.len(), features + 1 + MAX_WAITING_SHOWN, "none of the cancelled ones ran");
+}
+
+/// Waiting rows stay in queue order with the summary row above them all, also when the queue
+/// advances and a folded command unfolds into a row of its own.
+#[test]
+fn the_summary_row_stays_above_the_waiting_rows_when_one_unfolds() {
+    use crate::operations::MAX_WAITING_SHOWN;
+    let (mut h, tx) = agent_harness();
+    let _hole = ask(&tx, "engine.execute", second_hole());
+    let _waiting: Vec<_> = (0..MAX_WAITING_SHOWN + 2).map(|_| ask(&tx, "engine.execute", boss_step())).collect();
+    h.frames(1);
+    // The first waiting one (newest first: the last in the list) goes, and the next unfolds.
+    let rows = agent_rows(&mut h);
+    let first = rows.iter().rfind(|r| r["queued"] == true).unwrap()["key"].as_str().unwrap().to_string();
+    crate::operations::cancel(&mut h.app, &first).unwrap();
+    h.frames(1);
+    let shown: Vec<_> = h.app.operations.rows(crate::now_ms()).map(|(r, alpha)| (r.key.clone(), r.label.clone(), alpha)).collect();
+    assert_eq!(shown.last().map(|r| r.0.as_str()), Some("agent:held:more"), "the summary row is the top one: {shown:?}");
+    let live: Vec<_> = shown.iter().filter(|r| r.0.starts_with("agent:held:") && r.0 != "agent:held:more" && r.2 == 1.0).collect();
+    let places: Vec<_> = live.iter().map(|r| r.1.split('.').next().unwrap().to_string()).collect();
+    assert_eq!(places, (1..=MAX_WAITING_SHOWN).map(|n| n.to_string()).collect::<Vec<_>>(), "in queue order: {shown:?}");
+}

@@ -792,7 +792,9 @@ drawing and answering while it runs:
   many of a batch's steps are done (hover it for the steps still to come) and a red X (with
   **Preferences > Layout > Show operations in the view** off, a chip with **Stop** instead;
   `ui.operations` lists and cancels the rows). Each design change waiting behind it is a row of
-  its own, whose X cancels just that one.
+  its own, numbered by its place in the queue (1 runs next), whose X cancels just that one; the
+  panel shows the first 4 and one "N more waiting" row whose X cancels the rest, while
+  `ui.operations` lists every one of them, each cancellable by its own `key`.
   The X answers `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and
   the requests waiting behind it go on. The computation stops before its next feature or boolean,
   in the background. The agent can do the same for its own request with `control.cancel` (above).
