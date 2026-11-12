@@ -70,7 +70,8 @@ fn kernel_error(e: ExportError) -> KernelError {
         | ExportError::Recursive
         | ExportError::NotRigid
         | ExportError::Colour { .. }
-        | ExportError::Face { .. } => KernelError::Invalid(e.to_string()),
+        | ExportError::Face { .. }
+        | ExportError::NotFinite { .. } => KernelError::Invalid(e.to_string()),
     }
 }
 

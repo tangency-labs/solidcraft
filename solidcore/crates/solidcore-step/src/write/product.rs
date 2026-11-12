@@ -16,10 +16,12 @@
 
 use std::fmt::Write as _;
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::Brep;
 
 use super::{GeomWriter, Writer, string, topology};
 use crate::p21::Param;
+use crate::vec::Vec3Geom as _;
 
 /// A surface colour: sRGB as 0..1, its opacity (1 = opaque) and its name (`COLOUR_RGB`'s name,
 /// empty for none).
@@ -107,6 +109,12 @@ pub enum ExportError {
         /// The body's name.
         name: String,
     },
+    /// A body whose geometry holds a number that is not finite (a coordinate, a weight, a knot):
+    /// STEP has no form for it.
+    NotFinite {
+        /// The body's name.
+        name: String,
+    },
     /// A face colour for a face the body's record does not have.
     Face {
         /// The body's name.
@@ -128,6 +136,7 @@ impl std::fmt::Display for ExportError {
             Self::Body { name, reason } => write!(f, "STEP export of '{name}': {reason}"),
             Self::Record { name, reason } => write!(f, "STEP export of '{name}': no record: {reason}"),
             Self::Colour { name } => write!(f, "STEP export of '{name}': a colour or opacity is not a number from 0 to 1"),
+            Self::NotFinite { name } => write!(f, "STEP export of '{name}': its geometry holds a number that is not finite"),
             Self::Face { name, face, faces } => write!(f, "STEP export of '{name}': face {face} has a colour, but the body has {faces} faces"),
         }
     }
@@ -157,19 +166,19 @@ fn refs(ids: &[u64]) -> Param {
 /// orthogonal and right-handed, and the bottom row (`m[0..3][3]`, `m[3][3]`) must be `0 0 0 1`,
 /// each within 1e-6.
 fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
-    let x = [m[0][0], m[0][1], m[0][2]];
-    let y = [m[1][0], m[1][1], m[1][2]];
-    let z = [m[2][0], m[2][1], m[2][2]];
-    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    let cross = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
-    let unit = |a: [f64; 3]| (dot(a, a) - 1.0).abs() < 1e-6;
+    let axis = |c: &[f64; 4]| Vec3::new(c[0], c[1], c[2]);
+    let (x, y, z) = (axis(&m[0]), axis(&m[1]), axis(&m[2]));
+    // Products by the kernel (`Vec3Geom`); here they are only compared with the tolerances.
+    let dot = |a: Vec3, b: Vec3| a.dot(b);
+    let cross = x.cross(y);
+    let unit = |a: Vec3| (dot(a, a) - 1.0).abs() < 1e-6;
     let rotation =
         unit(x) && unit(y) && unit(z) && dot(x, y).abs() < 1e-6 && dot(x, z).abs() < 1e-6 && dot(y, z).abs() < 1e-6 && dot(cross, z) > 0.999_999;
     let affine = m[0][3].abs() < 1e-6 && m[1][3].abs() < 1e-6 && m[2][3].abs() < 1e-6 && (m[3][3] - 1.0).abs() < 1e-6;
     if !rotation || !affine || m.iter().flatten().any(|v| !v.is_finite()) {
         return Err(ExportError::NotRigid);
     }
-    Ok(([m[3][0], m[3][1], m[3][2]], z, x))
+    Ok(([m[3][0], m[3][1], m[3][2]], [z.x, z.y, z.z], [x.x, x.y, x.z]))
 }
 
 /// STEP text (AP242) for products with bodies and assembly placements; `root` is the top product.
@@ -213,6 +222,9 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
         let colours = b.color.iter().chain(b.faces.iter().map(|(_, c)| c));
         if colours.flat_map(|c| c.rgb.iter().chain(std::iter::once(&c.opacity))).any(|v| !(0.0..=1.0).contains(v)) {
             return Err(ExportError::Colour { name: b.name.clone() });
+        }
+        if b.record.vertices.iter().any(|v| v.point.iter().any(|x| !x.is_finite())) {
+            return Err(ExportError::NotFinite { name: b.name.clone() });
         }
         let faces = b.record.faces.len();
         if let Some(&(face, _)) = b.faces.iter().find(|(i, _)| *i >= faces) {
@@ -305,8 +317,12 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
         }
         let (mut solids, mut sheets) = (Vec::new(), Vec::new());
         for b in &p.bodies {
+            let before = w.non_finite();
             let written = topology::brep(&mut GeomWriter::new(&mut w), b.record, &b.name)
                 .map_err(|reason| ExportError::Body { name: b.name.clone(), reason })?;
+            if w.non_finite() != before {
+                return Err(ExportError::NotFinite { name: b.name.clone() });
+            }
             let items: Vec<u64> = written.solids.iter().copied().chain(written.sheets).collect();
             if let Some(c) = &b.color {
                 for item in &items {
@@ -756,5 +772,29 @@ mod tests {
             let text = bodies(vec![body("B", &record)], &Header { file_name: file.into(), ..Default::default() }).unwrap();
             assert!(text.contains(&format!("PRODUCT({0},{0}", string(part))), "{file}: {text}");
         }
+    }
+
+    /// Geometry with a number that is not finite is refused, not written as `0.`: a vertex
+    /// (checked before anything is written) and a plane's origin (counted by the writer).
+    #[test]
+    fn geometry_that_is_not_finite_is_refused() {
+        let good = box_record();
+        let mut vertex = good.clone();
+        if let Some(v) = vertex.vertices.first_mut() {
+            v.point[1] = f64::NAN;
+        }
+        assert_eq!(bodies(vec![body("V", &vertex)], &Header::default()), Err(ExportError::NotFinite { name: "V".into() }));
+        let mut plane = good.clone();
+        let face = plane.faces.iter_mut().find(|f| matches!(f.surface, solidcore_record::brep::Surface::Plane { .. })).unwrap();
+        if let solidcore_record::brep::Surface::Plane { origin, .. } = &mut face.surface {
+            origin[2] = f64::INFINITY;
+        }
+        assert_eq!(bodies(vec![body("P", &plane)], &Header::default()), Err(ExportError::NotFinite { name: "P".into() }));
+        assert!(bodies(vec![body("B", &good)], &Header::default()).is_ok());
+        // The writer counts every one, in lists and typed values too.
+        let mut w = Writer::new();
+        w.add("A", &[Param::Real(1.0), Param::Real(f64::NAN), Param::List(vec![Param::Real(f64::NEG_INFINITY)])]);
+        w.add_complex(&[("B", vec![Param::Typed("T".into(), vec![Param::Real(f64::INFINITY)])])]);
+        assert_eq!(w.non_finite(), 3);
     }
 }
