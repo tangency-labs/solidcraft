@@ -119,7 +119,10 @@ const CASES: &[(&str, &str, usize, f64, bool)] = &[
         "sweeps/3897-sweep-ring-along-a-short-arc-joined-to-a-collar",
         "b6",
         1,
-        0.0201,
+        // 0.0201 at #3185 with glibc's libm. The label stands, so the distance this margin
+        // divides is the form's rounding residual, set by the libm's last bits: 0.0198 with
+        // `solidcore::math::det`'s (#13866). The other labels moved under 1 % with it.
+        0.0198,
         true,
     ),
     (

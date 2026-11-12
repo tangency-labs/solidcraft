@@ -191,9 +191,11 @@ fn the_pair_is_the_sum_of_each_alone() {
     // 0.159135839836381; these lie 3.1e-11 and 5.9e-11 from it because of the
     // solidcore-native exact spine. Since #2890 (precise properties integrate from the
     // trims' base); they were 0.15913583961037148 and 0.15913583978226598, 1.12e-10 below
-    // and 6.0e-11 above the Pappus wedge
+    // and 6.0e-11 above the Pappus wedge. x > 0 measured with `solidcore::math::det`'s libm
+    // (#13866); with glibc's it was 0.1591358396067335, 1.8e-12 less (the platform libm's
+    // last bits through the round's integration); x < 0 is the same with both
     assert!(
-        (a - 0.159_135_839_606_733_5).abs() <= 1e-12,
+        (a - 0.159_135_839_608_552_5).abs() <= 1e-12,
         "x > 0 alone {a}"
     );
     assert!(

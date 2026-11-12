@@ -64,9 +64,11 @@ const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 /// What the rim's round removes alone (#2176's `the_neighbours_keep_their_rounds`, which
 /// pins the fork's 7.958672926831696: 18e96f1 and 63c7962, `SmApiFilletEdges` r 0.5).
 const RIM_REMOVED: f64 = 7.958_672_926_831_696;
-/// What the rim's round removes alone here: 4.5e-11 more than the fork's
-/// [`RIM_REMOVED`], the solidcore-native exact spine.
-const RIM_MEASURED: f64 = 7.958_672_926_877_170_5;
+/// What the rim's round removes alone here: 5.1e-11 more than the fork's
+/// [`RIM_REMOVED`], the solidcore-native exact spine. Measured with `solidcore::math::det`'s
+/// libm (#13866); it was 7.9586729268771705 with glibc's, 5.9e-12 less: the last bits of the
+/// platform libm's sines and cosines, carried through the round's integration.
+const RIM_MEASURED: f64 = 7.958_672_926_883_082;
 
 /// Every opt-in fix on (as in the issue), with WR-706 as given.
 fn kernel(wr706: bool) -> Kernel {
@@ -196,7 +198,7 @@ fn corner_arc_and_rim_round_together() {
 fn each_edge_alone_is_unchanged() {
     let (rim, faces) = removed(true, &[RIM]).unwrap();
     assert!((rim - RIM_REMOVED).abs() <= 1e-9, "rim {rim}");
-    // pinned at the value measured here, 4.5e-11 more than the fork's `RIM_REMOVED`
+    // pinned at the value measured here, 5.1e-11 more than the fork's `RIM_REMOVED`
     // (the solidcore-native exact spine)
     assert!((rim - RIM_MEASURED).abs() <= 1e-12, "rim {rim}");
     assert_eq!(faces, 9);
