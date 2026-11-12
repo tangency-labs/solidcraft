@@ -401,9 +401,10 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "its offset by {distance} collapses (a radius of curvature {radius})"
             ),
-            OffsetRefusal::LoopsCross { crossing } => {
-                write!(f, "its offset's loops cross ({crossing:?})")
-            }
+            OffsetRefusal::LoopsCross { crossing } => write!(
+                f,
+                "its offset's loops cross in a way the offset cannot resolve: {crossing}"
+            ),
             OffsetRefusal::DistanceUnresolved {
                 distance,
                 resolution,
@@ -436,7 +437,7 @@ impl std::fmt::Display for OffsetRefusal {
                     "a gap in its offset's loops cannot be bridged within tolerance"
                 )
             }
-            OffsetRefusal::Unsound { what } => write!(f, "the body built is unsound ({what:?})"),
+            OffsetRefusal::Unsound { what } => write!(f, "{what}"),
             OffsetRefusal::Phrase { phrase, .. } => f.write_str(phrase),
         }
     }

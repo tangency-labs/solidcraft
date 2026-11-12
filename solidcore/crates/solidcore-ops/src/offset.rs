@@ -42,14 +42,28 @@ const MAX_DISTANCE: f64 = 1e6;
 /// What [`Error::Unsupported`] says for an offset that moves a vertex past an edge's other end.
 const EDGE_VANISHES: &str = "a vertex moved past the other end of an edge";
 
-/// An offset's kernel error as the operation's: a refusal the kernel gives a reason for by that
-/// reason ([`offset_refused`]); one without by its kind ([`by_kind`]), else as
-/// [`crate::error::status`].
+/// An offset's kernel error as the operation's: its offset refusal where it is one
+/// ([`typed`]), else as [`crate::error::status`].
 fn status(e: SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
+    typed(&e, index).unwrap_or_else(|| kernel_status(e))
+}
+
+/// A kernel error as ops' offset refusal, for a caller that holds no [`Order`] of the body (any
+/// face it names is unnamed): what the offset operations give for it ([`typed`]), `None` where
+/// they give the kernel's status instead.
+#[must_use]
+pub fn refusal(e: &SolidError) -> Option<Error> {
+    typed(e, &|_| None)
+}
+
+/// The offset refusal a kernel error is, the one routing [`status`] and [`refusal`] share: a
+/// refusal the kernel gives a reason for by that reason ([`offset_refused`]), its face through
+/// `index`; one without by its kind ([`by_kind`]); `None` for any other error.
+fn typed(e: &SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Option<Error> {
     if let Some(Reason::Offset(o)) = e.failure().map(|f| &f.reason) {
-        return offset_refused(*o, e.entity(), index);
+        return Some(offset_refused(*o, e.entity(), index));
     }
-    by_kind(e.kind()).unwrap_or_else(|| kernel_status(e))
+    by_kind(e.kind())
 }
 
 /// The operation's error for an offset refusal of `kind` that has one of its own: walls that
