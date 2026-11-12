@@ -216,6 +216,10 @@ impl ControlJob {
     }
 }
 
+/// Most steps still to come that the agent row's tooltip lists: a 100-step batch must not fill
+/// the screen.
+pub(crate) const MAX_NEXT_SHOWN: usize = 12;
+
 fn label(app: &SolveApp, command: &str) -> String {
     let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     language.label(solidcraft_engine::find_command(command).map_or(command, |c| c.label)).to_string()
@@ -274,6 +278,12 @@ impl Steps {
     pub(crate) fn current(&self) -> String {
         let now = self.now.load(Ordering::Relaxed).max(1);
         self.labels.get(now - 1).or(self.labels.last()).cloned().unwrap_or_default()
+    }
+
+    /// The steps still to come, as (index, command), after the one running.
+    pub(crate) fn upcoming(&self) -> impl Iterator<Item = (usize, &str)> {
+        let running = self.now.load(Ordering::Relaxed).max(1);
+        self.labels.iter().enumerate().skip(running).map(|(i, l)| (i, l.as_str()))
     }
 
     /// Steps done (the one running not yet) and how many there are.
@@ -449,6 +459,34 @@ impl SolveApp {
     /// steps ([`Steps`]).
     pub(crate) fn agent_steps(&self) -> Option<Arc<Steps>> {
         self.control_job.as_ref().map_or_else(|| self.agent.computing_steps(), |j| j.steps.clone())
+    }
+
+    /// The steps of the computing batch still to come, as (number from 1, command), at most
+    /// [`MAX_NEXT_SHOWN`].
+    pub(crate) fn agent_next(&self) -> Vec<(usize, String)> {
+        let steps = self.agent_steps();
+        steps.iter().flat_map(|s| s.upcoming()).take(MAX_NEXT_SHOWN).map(|(i, l)| (i + 1, l.to_string())).collect()
+    }
+
+    /// The design changes held behind what is running, as (place in the queue, key, command).
+    pub(crate) fn agent_held(&self) -> Vec<(usize, String, String)> {
+        let held = self.control_held.iter().enumerate().filter(|(_, r)| changes_the_design(&r.method));
+        held.map(|(n, r)| {
+            let first = match r.method.as_str() {
+                "engine.execute" | "command" => executed(&r.params).map(|(c, _)| c),
+                _ => r.params.get("commands").and_then(Value::as_array).and_then(|s| s.first()).and_then(crate::control::batch_step_command),
+            };
+            (n, format!("agent:held:{}", r.serial), label(self, first.unwrap_or(&r.method)))
+        })
+        .collect()
+    }
+
+    /// Cancel the `n`th held request (its client is told it was cancelled; it never runs).
+    pub(crate) fn cancel_held(&mut self, n: usize) {
+        if let Some(req) = self.control_held.remove(n) {
+            req.ticket.cancel();
+            let _ = req.reply.send(cancelled_reply(&req.method));
+        }
     }
 
     /// Stop waiting for the agent's design change that is computing: it is answered as stopped
@@ -692,6 +730,43 @@ impl SolveApp {
                 }
                 Err(TryRecvError::Empty) => i += 1,
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A computing batch is one row of the operations panel; its tooltip and `next` list the
+    /// steps still to come (at most [`MAX_NEXT_SHOWN`]) and move up as the batch advances.
+    #[test]
+    fn a_computing_batch_is_one_row_listing_its_next_steps() {
+        let mut h = crate::scenario::Harness::new();
+        let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
+        let request = json!({"commands": (0..20).map(|i| hole(20.0 + 3.0 * f64::from(i))).collect::<Vec<_>>()});
+        let commands = ahead_commands("engine.batch", &request);
+        assert_eq!(commands.len(), 20);
+        let steps = Steps::new(&h.app, &request, &commands);
+        let (req, _reply) = ControlRequest::new("engine.batch", request);
+        // The worker never answers: the batch stays where the test puts it.
+        let (_worker, done) = std::sync::mpsc::channel();
+        h.app.control_job = Some(ControlJob { req, work: Work::Answer, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
+        let rows = |h: &mut crate::scenario::Harness| {
+            let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+            listed["operations"].as_array().unwrap().clone()
+        };
+        for (running, first, count) in [(6, 7, MAX_NEXT_SHOWN), (19, 20, 1), (20, 0, 0)] {
+            steps.now.store(running, Ordering::Relaxed);
+            let rows = rows(&mut h);
+            assert_eq!(rows.len(), 1, "a batch is one operation: {rows:?}");
+            assert_eq!(rows[0]["steps"], json!({"done": running - 1, "total": 20}));
+            let next = rows[0]["next"].as_array().unwrap();
+            assert_eq!(next.len(), count, "running step {running}: {next:?}");
+            assert!(next.iter().all(|n| n.as_str().is_some_and(|n| !n.is_empty() && !n.contains('.'))), "{next:?}");
+            let numbers: Vec<_> =
+                crate::operations::current(&h.app).iter().find(|r| r.key == "agent").unwrap().next.iter().map(|(n, _)| *n).collect();
+            assert_eq!(numbers, (first..first + count).collect::<Vec<_>>());
         }
     }
 }

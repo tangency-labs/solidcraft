@@ -19,6 +19,7 @@ use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 
 use crate::SolveApp;
+use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_theme::Tokens;
 
 /// How long a finished operation takes to fade out (ms).
@@ -59,6 +60,8 @@ pub struct Row {
     cancel: Option<Cancel>,
     /// An agent's command: drawn in the agent cursor's colour.
     agent: bool,
+    /// The steps of an agent's batch still to come, as (number, name): the row's tooltip.
+    pub next: Vec<(usize, String)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -83,11 +86,25 @@ enum Cancel {
     Agent,
     /// A save being written: it stops unless the file is already being replaced.
     Save,
+    /// The `n`th request held behind the agent's command (its place in the app's held queue).
+    AgentQueued(usize),
 }
 
 impl Row {
     fn new(key: String, label: String) -> Self {
-        Row { key, label, steps: None, percent: false, queued: false, waiting: false, cancelling: false, ended: None, cancel: None, agent: false }
+        Row {
+            key,
+            label,
+            steps: None,
+            percent: false,
+            queued: false,
+            waiting: false,
+            cancelling: false,
+            ended: None,
+            cancel: None,
+            agent: false,
+            next: Vec::new(),
+        }
     }
 
     /// Whether its X does anything.
@@ -217,7 +234,11 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
         let label = steps.as_ref().map(|s| s.current()).or_else(|| app.agent_computing().map(|(_, label)| label)).unwrap_or_default();
         // A batch counts its steps; one command, the features it evaluates.
         let steps = steps.and_then(|s| if s.counts().1 > 1 { Some(s.counts()) } else { evaluation_steps(&s.progress) });
-        rows.push(Row { steps, cancel: Some(Cancel::Agent), agent: true, ..Row::new("agent".into(), label) });
+        rows.push(Row { steps, cancel: Some(Cancel::Agent), agent: true, next: app.agent_next(), ..Row::new("agent".into(), label) });
+    }
+    // Each design change waiting behind it is an operation of its own.
+    for (n, key, label) in app.agent_held() {
+        rows.push(Row { queued: true, agent: true, cancel: Some(Cancel::AgentQueued(n)), ..Row::new(key, label) });
     }
     rows
 }
@@ -283,6 +304,7 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
             }
             return Ok(());
         }
+        Cancel::AgentQueued(n) => app.cancel_held(n),
     }
     record(&mut app.operations, &row.key, row.label.clone(), Outcome::Cancelled);
     app.set_status(solidcraft_ui_text::format("operations.cancelled", &[("name", &row.label)]), false);
@@ -529,16 +551,22 @@ fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alph
         _ if row.agent => solidcraft_look::pointer::agent(),
         _ => t.form_primary,
     };
-    // A failed row says why when the pointer is over it.
-    if let Some(Outcome::Failed(why)) = &row.ended {
-        let _ = ui.interact(r, egui::Id::unique(("sc_operation_failed", &row.key)), Sense::hover()).on_hover_text(why);
+    // Over the row (the X's own tip wins over its corner): why a failed row failed, else the
+    // steps of a batch still to come.
+    let tip = match &row.ended {
+        Some(Outcome::Failed(why)) => Some(why.clone()),
+        _ if row.next.is_empty() => None,
+        _ => Some(row.next.iter().map(|(n, name)| format!("{n}  {name}")).collect::<Vec<_>>().join("\n")),
+    };
+    if let Some(tip) = tip {
+        let _ = ui.interact(r, egui::Id::unique(("sc_operation_row", &row.key)), Sense::hover()).backing_on_hover_text(tip);
     }
     crate::scenario::publish_rect(&format!("operations:row:{}", row.key), r);
     // The X on the right.
     let x = Rect::from_center_size(pos2(r.right() - ROW * 0.5, r.center().y), vec2(ROW - 6.0, ROW - 6.0));
     let response =
         ui.interact(x, egui::Id::unique(("sc_operation_cancel", &row.key)), if row.cancellable() { Sense::click() } else { Sense::hover() });
-    let response = response.on_hover_text(if row.cancellable() {
+    let response = response.backing_on_hover_text(if row.cancellable() {
         solidcraft_ui_text::format("operations.cancel", &[("name", &row.label)])
     } else {
         solidcraft_ui_text::format("operations.cannot_cancel", &[("name", &row.label)])
@@ -606,6 +634,7 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
                 "queued": r.queued,
                 "cancelling": r.cancelling,
                 "cancellable": r.cancellable(),
+                "next": r.next.iter().map(|(_, name)| name).collect::<Vec<_>>(),
             })
         })
         .collect();

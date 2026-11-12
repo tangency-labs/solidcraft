@@ -1376,3 +1376,48 @@ fn a_batch_the_cursor_acts_out_computes_nothing_on_the_window_thread() {
         assert_eq!(h.app.session.model.recomputed, recomputed, "edit {edit}: nothing computed on the window thread");
     }
 }
+
+/// The agent's row of the operations panel and the rows queued behind it, as listed by
+/// `ui.operations` (newest first).
+fn agent_rows(h: &mut Harness) -> Vec<serde_json::Value> {
+    let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+    let rows = listed["operations"].as_array().unwrap().clone();
+    rows.into_iter().filter(|r| r["key"].as_str().is_some_and(|k| k.starts_with("agent"))).collect()
+}
+
+/// A design change waiting behind the agent's computing one is a row of its own until it runs,
+/// and its X cancels just that one: answered as cancelled, never run, the others still run. A
+/// request that does not change the design is no row.
+#[test]
+fn an_agent_request_waiting_its_turn_is_a_row_the_x_cancels() {
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let hole = ask(&tx, "engine.execute", second_hole());
+    let boss = ask(&tx, "engine.execute", boss_step());
+    let last = ask(
+        &tx,
+        "engine.execute",
+        json!({"command": "solid.box", "params": {"corner": [70, 5, 10], "length": 5, "width": 5, "height": 5, "operation": "join"}}),
+    );
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some() && boss.try_recv().is_err());
+    let rows = agent_rows(&mut h);
+    let held: Vec<_> = rows.iter().filter(|r| r["queued"] == true).collect();
+    assert!(held.len() == 2 && held.iter().all(|r| r["cancellable"] == true && !r["label"].as_str().unwrap().is_empty()), "{rows:?}");
+    // The first one waiting (newest first: the last in the list) is the boss.
+    let key = held[1]["key"].as_str().unwrap().to_string();
+    assert!(key.starts_with("agent:held:"));
+    crate::operations::cancel(&mut h.app, &key).unwrap();
+    let r = boss.try_recv().expect("answered at once");
+    assert!(r["ok"] == false && r["cancelled"] == true, "{r}");
+    assert_eq!(agent_rows(&mut h).iter().filter(|r| r["queued"] == true).count(), 1);
+    assert_eq!(reply_to(&mut h, &hole)["ok"], true);
+    assert_eq!(reply_to(&mut h, &last)["ok"], true);
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.features.len(), features + 2, "the hole and the last box; the boss never ran");
+    assert!(agent_rows(&mut h).is_empty(), "all ran");
+    // A request that only reads is no row of the agent's work.
+    let (req, _reply) = crate::ControlRequest::new("ui.status", json!({}));
+    h.app.control_held.push_back(req);
+    assert!(agent_rows(&mut h).is_empty());
+}
