@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::cam_adaptive::{AdaptiveOp, AdaptiveReport, AdaptiveRoughingOp};
+use super::cam_stock::{FaceOp, RapidsReport, StockReport, StockSpec, TravelReport};
 use super::types::SketchRef;
 
 #[path = "cam_leads.rs"]
@@ -87,6 +88,17 @@ pub struct CamJob {
     /// work X through work zero. Default: the design's origin.
     #[serde(default)]
     pub origin: Option<[f64; 3]>,
+    /// How the part is turned for this setup, about `origin` (which is then work zero): a job
+    /// that machines the back of a part (op2, after a flip) uses the same design as the job
+    /// that machined its front. `"flip_x"` (half a turn about X: the bottom faces up, Y runs
+    /// the other way), `"flip_y"` (half a turn about Y), `{"axis": [x, y, z], "angle_deg": a}`
+    /// (a right-handed turn about that axis), or `{"sketch": name}` (work X, Y and Z along the
+    /// sketch plane's X, Y and normal: the tool looks down on that plane). The operations'
+    /// coordinates (polygons, heights, boundaries) and the `stock` are in the turned work
+    /// coordinates. A 3-axis machine only: a 4th axis turns the part with its own angles.
+    /// Default: none.
+    #[serde(default)]
+    pub orientation: Option<OrientationSpec>,
     /// The part's bodies by name: the surface 3D operations follow and every operation is
     /// checked for gouges against, drawn in the preview. Default: every visible body not in
     /// `fixtures`.
@@ -108,8 +120,31 @@ pub struct CamJob {
     /// A JSON file holding an array of tools, as `tools`.
     #[serde(default)]
     pub tool_library_path: Option<String>,
+    /// The raw material, in work coordinates: `{box: {min, max}}`, `{cylinder: {radius, x_min,
+    /// x_max}}` (a bar about work X) or `{around_part: {margin: [x, y, z], top?, bottom?}}`. No
+    /// rapid may pass through it below its top, and `face` faces it. Default: none (rapids are
+    /// checked against the part and fixtures only).
+    #[serde(default)]
+    pub stock: Option<StockSpec>,
+    /// How far below the stock's bottom a cut through the stock (a cut-out, a through drill or
+    /// bore) may go, mm, 0 to 25: the room a spoil board, or parallels clear of the cut, leave
+    /// under it. Default: 0 (no cut below the stock's bottom).
+    #[serde(default)]
+    pub breakthrough: Option<f64>,
     /// The operations, run and written in this order.
     pub operations: Vec<OperationSpec>,
+}
+
+/// How a job turns the part (`orientation`).
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum OrientationSpec {
+    /// `"flip_x"` or `"flip_y"`.
+    Named(String),
+    /// A turn about an axis through `origin`.
+    Turn { axis: [f64; 3], angle_deg: f64 },
+    /// Work axes along a sketch's plane.
+    Sketch { sketch: String },
 }
 
 /// A machine: a preset's name or the CAM crate's `Machine` JSON.
@@ -525,7 +560,8 @@ operation! {
     RotaryRoughingOp {
         /// Lines along X, one helix, or rings round the axis.
         pub pattern: PatternSpec,
-        /// The round stock's radius, mm. Required.
+        /// The round stock's radius, mm. Default: the job's `stock` (a cylinder's radius, or how
+        /// far a box's farthest edge is from the A axis).
         #[serde(default)]
         pub stock_radius: Option<f64>,
         /// Radius from the rotary axis rapids go round at, mm.
@@ -699,6 +735,7 @@ pub enum OperationSpec {
     ThreadMill(ThreadMillOp),
     Adaptive(AdaptiveOp),
     AdaptiveRoughing(AdaptiveRoughingOp),
+    Face(FaceOp),
 }
 
 impl OperationSpec {
@@ -728,6 +765,7 @@ impl OperationSpec {
             OperationSpec::ThreadMill(o) => o.common(),
             OperationSpec::Adaptive(o) => o.common(),
             OperationSpec::AdaptiveRoughing(o) => o.common(),
+            OperationSpec::Face(o) => o.common(),
         }
     }
 }
@@ -754,6 +792,12 @@ pub struct CamJobReply {
     /// Moves along which a tool's shank or holder comes closer to the part or fixtures than
     /// zero (tools with holder data only); `null` when no tool has holder data.
     pub holder_collisions: Option<usize>,
+    /// Every rapid of the program as written against the part, fixtures and stock.
+    pub rapids: RapidsReport,
+    /// The linear axes against the machine's `linear_limits`; `null` for a machine without them.
+    pub travel: Option<TravelReport>,
+    /// The job's stock as checked against; `null` without one.
+    pub stock: Option<StockReport>,
     /// Time at feed of the whole program, dwells included, minutes, as written.
     pub cut_minutes: f64,
     /// Whether every check passed.

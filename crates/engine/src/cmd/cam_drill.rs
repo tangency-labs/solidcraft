@@ -119,12 +119,12 @@ fn sketch_holes(ctx: &Ctx<'_>, o: &DrillOp, key: &str, frame: &Frame) -> Result<
     let st = ctx.s.model.state();
     let Some(ss) = st.sketch(id) else { return Err(ctx.bad(op, format!("sketch `{key}` has not been solved"))) };
     let plane = &ss.plane;
-    let normal = frame.dir_to_local(plane.x.cross(plane.y));
+    let normal = frame.dir_to_local(ctx.place.turn_dir(plane.x.cross(plane.y)));
     if !(normal.z.abs() > 1.0 - 1e-6) {
         return Err(ctx.bad(op, format!("sketch `{key}` is not on a plane square to the operation's tool axis")));
     }
     let map = |q: Vec2| {
-        let l = frame.to_local(plane.origin + plane.x * q.x + plane.y * q.y - ctx.origin);
+        let l = frame.to_local(ctx.place.in_work(plane.origin + plane.x * q.x + plane.y * q.y));
         Vec2::new(l.x, l.y)
     };
     let sketch = &ss.sketch;

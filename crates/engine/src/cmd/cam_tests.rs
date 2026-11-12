@@ -2459,3 +2459,340 @@ fn hostile_adaptive_operations_are_refused() {
     let e = s.execute("cam.job", &with("polygon", json!([[-12, -3.5], [12, -3.5], [12, 3.5], [-12, 3.5]]))).unwrap_err();
     assert!(e.to_string().contains("no room for the entry helix"), "{e}");
 }
+
+/// A 50 mm square block, its top at Z -1, under 1 mm of stock: faced with a 32 mm end mill down
+/// to the block's top. Every descent is beside the stock with the whole cutter clear.
+#[test]
+fn facing_a_box_stock_enters_beside_it_and_reads_back() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 10, "corner": [-25, -25, -11], "body_name": "Block"}));
+    let mill = json!({"number": 5, "kind": "flat_endmill", "diameter": 32, "flute_length": 6, "spindle_rpm": 9000, "feed": 1500, "plunge_feed": 400});
+    let job = |stock: Value| {
+        json!({
+            "machine": "3axis", "post": "linuxcnc_4axis", "tools": [mill.clone()], "stock": stock,
+            "operations": [{"name": "face", "type": "face", "tool": 5, "bottom": -1, "stepdown": 0.5}]
+        })
+    };
+    let dir = Dir::new("face");
+    let out = dir.file("face.ngc");
+    let r = run(&mut s, "cam.job", json!({"job": job(json!({"box": {"min": [-25, -25, -11], "max": [25, 25, 0]}})), "output": out}));
+    assert_clean(&r);
+    assert_eq!(r["rapids"]["pass"], true, "{r}");
+    assert_eq!(r["operations"][0]["kind"], "face", "{r}");
+    assert_eq!(r["stock"]["max"], json!([25.0, 25.0, 0.0]), "{r}");
+    let mut last: Option<Vec3> = None;
+    let (mut descents, mut at_bottom) = (0, 0);
+    for b in &blocks(&out) {
+        let (p, cut) = match b {
+            JointWords::Feed { linear, .. } => (*linear, true),
+            JointWords::Rapid { linear, .. } => (*linear, false),
+            _ => continue,
+        };
+        let gap = ((p.x.abs() - 25.0).max(0.0)).hypot((p.y.abs() - 25.0).max(0.0));
+        if last.is_some_and(|q| p.z < q.z - 1e-9) || (!cut && p.z < 0.0) {
+            descents += 1;
+            assert!(gap >= 16.0, "a descent onto the stock at {p:?}");
+        }
+        if cut && (p.z + 1.0).abs() < 1e-9 {
+            at_bottom += 1;
+        }
+        last = Some(p);
+    }
+    assert!(descents >= 2 && at_bottom > 4, "{descents} {at_bottom}");
+    // The same stock as a margin round the part, read on its exact box.
+    let r = run(&mut s, "cam.job", json!({"job": job(json!({"around_part": {"margin": [0, 0, 1]}})), "dry_run": true}));
+    assert_clean(&r);
+    assert_eq!(r["stock"]["min"], json!([-25.0, -25.0, -12.0]), "{r}");
+    assert_eq!(r["stock"]["max"], json!([25.0, 25.0, 0.0]), "{r}");
+    // A face below the block's top cuts into it.
+    let mut deep = job(json!({"box": {"min": [-25, -25, -11], "max": [25, 25, 0]}}));
+    deep["operations"][0]["bottom"] = json!(-2);
+    let r = run(&mut s, "cam.job", json!({"job": deep, "dry_run": true}));
+    assert_eq!(r["gouge"]["pass"], false, "{r}");
+}
+
+/// A `rect` inside the stock along the passes would take the face mill down into the stock, and
+/// a bottom below the stock's would cut what holds it: both refused, naming the operation. A
+/// strip reaching past the stock along the passes is faced.
+#[test]
+fn facing_down_into_the_stock_or_below_it_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 10, "corner": [-25, -25, -11], "body_name": "Block"}));
+    let job = |op: Value| {
+        let mut face = json!({"name": "face", "type": "face", "tool": 1, "bottom": -1, "stepdown": 0.5});
+        if let (Some(o), Value::Object(e)) = (face.as_object_mut(), op) {
+            o.extend(e);
+        }
+        json!({"job": {
+            "machine": "3axis", "post": "linuxcnc_4axis", "tools": [flat(1, 10.0)],
+            "stock": {"box": {"min": [-25, -25, -11], "max": [25, 25, 0]}}, "operations": [face]
+        }, "dry_run": true})
+    };
+    let r = run(&mut s, "cam.job", job(json!({})));
+    assert_clean(&r);
+    for bad in
+        [json!({"rect": [[-15, -25], [15, 25]]}), json!({"rect": [[-25, -5], [25, 5]], "angle_deg": 90}), json!({"bottom": -12, "stepdown": 3})]
+    {
+        let e = s.execute("cam.job", &job(bad.clone())).unwrap_err();
+        assert!(matches!(e, EngineError::BadParams { .. }) && e.to_string().contains("face"), "{bad}: {e}");
+        assert!(e.to_string().contains("into the stock") || e.to_string().contains("below the stock's bottom"), "{bad}: {e}");
+    }
+    let r = run(&mut s, "cam.job", job(json!({"rect": [[-25, -5], [25, 5]]})));
+    assert_clean(&r);
+}
+
+/// Faced all over from Z 0 down to the block's top at -1, the stock is lower for the pocket
+/// after it: the pocket's clearance and retract heights, -0.4 and -0.5, below the stock's first
+/// top, are above what is left. Without the face its rapids across at the clearance height run
+/// through the stock.
+#[test]
+fn rapids_after_a_face_are_held_against_the_faced_stock() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 10, "corner": [-25, -25, -11], "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 1, "corner": [-5, -5, -2], "operation": "cut"}));
+    let face = json!({"name": "face", "type": "face", "tool": 1, "bottom": -1, "stepdown": 0.5});
+    let pocket = json!({"name": "pocket", "type": "pocket", "tool": 2, "polygon": [[-5, -5], [5, -5], [5, 5], [-5, 5]],
+                        "heights": {"clearance": -0.4, "retract": -0.5, "top": -1, "bottom": -2}, "stepover": 2});
+    let job = |ops: Value| {
+        json!({"job": {
+            "machine": "3axis", "post": "linuxcnc_4axis", "tools": [flat(1, 10.0), flat(2, 4.0)],
+            "stock": {"box": {"min": [-25, -25, -11], "max": [25, 25, 0]}}, "operations": ops
+        }, "dry_run": true})
+    };
+    let r = run(&mut s, "cam.job", job(json!([face, pocket])));
+    assert_clean(&r);
+    assert_eq!(r["rapids"]["pass"], true, "{r}");
+    let r = run(&mut s, "cam.job", job(json!([pocket])));
+    assert_eq!(r["rapids"]["pass"], false, "{r}");
+    assert!(r["rapids"]["first"].as_array().unwrap().iter().all(|h| h["kind"] == "stock" && h["operation"] == "pocket"), "{r}");
+}
+
+#[test]
+fn rapids_through_the_stock_and_beyond_the_travel_are_refused() {
+    let mut s = dome();
+    let mut job = dome_job();
+    job["operations"][0]["zigzag"] = json!(false);
+    job["stock"] = json!({"box": {"min": [-20, -20, -20], "max": [20, 20, 18]}});
+    let e = s.execute("cam.job", &json!({"job": job, "output": Dir::new("stock").file("d.ngc")})).unwrap_err();
+    assert!(e.to_string().contains("through the stock"), "{e}");
+    job["stock"] = json!({"box": {"min": [-20, -20, -20], "max": [20, 20, 8]}});
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    // A planned move beyond the travel is refused as the program is written.
+    let at = Vec3::new;
+    let mut m = solidcraft_cam::kinematics::Machine::three_axis();
+    m.linear_limits = Some((at(-200.0, -200.0, -100.0), at(200.0, 200.0, 20.0)));
+    let mut job = dome_job();
+    job["machine"] = serde_json::to_value(&m).unwrap();
+    let e = s.execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("beyond its travel"), "{e}");
+    m.linear_limits = Some((at(-200.0, -200.0, -100.0), at(200.0, 200.0, 50.0)));
+    job["machine"] = serde_json::to_value(&m).unwrap();
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    assert_eq!(r["travel"]["pass"], true, "{r}");
+    // Without `linear_limits` the travel is not checked.
+    assert!(run(&mut s, "cam.job", json!({"job": dome_job(), "dry_run": true}))["travel"].is_null());
+}
+
+/// Round stock of radius 30 reaches past a clearance of 25 round a bar: the rapids are in it,
+/// the turn too. Rotary roughing takes its radius from the job's round stock, and its
+/// clearance must clear that stock.
+#[test]
+fn a_round_stock_holds_the_rapids_and_gives_the_roughing_its_radius() {
+    let mut s = square_block();
+    let mut job = faces_job(json!([{"type": "indexed_pattern", "count": 4, "operation": face_op("face", 25.0)}]));
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    job["stock"] = json!({"cylinder": {"radius": 30, "x_min": -25, "x_max": 25}});
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["stock"]["kind"], "cylinder", "{r}");
+    assert_eq!(r["rapids"]["pass"], false, "{r}");
+    assert!(r["failures"].as_array().unwrap().iter().any(|f| f.as_str().is_some_and(|f| f.contains("through the stock"))), "{r}");
+    // Without `stock_radius` the job's round stock gives it: refused when the clearance is in it ...
+    let mut job = barrel_job();
+    job["stock"] = json!({"cylinder": {"radius": 14, "x_min": -20, "x_max": 20}});
+    job["operations"][0] = json!({
+        "name": "rough", "type": "rotary_roughing", "tool": 3, "pattern": {"type": "rings", "stepover": 3},
+        "clearance": 14, "retract": 14, "range": [-15, 15]
+    });
+    let e = bar().execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("not outside the stock"), "{e}");
+    // ... and planned from it when the clearance is outside it.
+    job["operations"][0]["clearance"] = json!(17);
+    job["operations"][0]["retract"] = json!(15);
+    let r = run(&mut bar(), "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    // Neither the radius nor a stock: refused, saying what to give.
+    job.as_object_mut().unwrap().remove("stock");
+    let e = bar().execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("stock_radius"), "{e}");
+}
+
+/// A cut-out through a box stock goes below its bottom: refused with the `breakthrough` that
+/// lets it, which then passes; a smaller one does not, and nonsense is refused.
+#[test]
+fn a_through_cut_may_go_as_far_below_the_stock_as_the_breakthrough_allows() {
+    let mut s = dome();
+    let mut job = dome_job();
+    job["stock"] = json!({"box": {"min": [-27, -27, -20], "max": [27, 27, 8]}});
+    job["tools"] = json!([flat(1, 6.0)]);
+    job["operations"] = json!([{
+        "name": "cut out", "type": "contour", "tool": 1, "side": "outside", "polygon": [[-20, -20], [20, -20], [20, 20], [-20, 20]],
+        "heights": {"clearance": 30, "retract": 15, "top": 0, "bottom": -21}, "stepdown": 3
+    }]);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    let f = r["failures"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).find(|f| f.starts_with("below the stock")).unwrap();
+    assert!(f.contains("`breakthrough: 1`"), "{f}");
+    job["breakthrough"] = json!(1.5);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    assert!(r["notes"].as_array().unwrap().iter().any(|n| n.as_str().is_some_and(|n| n.contains("breakthrough"))), "{r}");
+    job["breakthrough"] = json!(0.5);
+    assert_eq!(run(&mut s, "cam.job", json!({"job": job, "dry_run": true}))["passed"], false);
+    for bad in [json!(-1), json!(26), json!("deep")] {
+        job["breakthrough"] = bad;
+        assert!(s.execute("cam.job", &json!({"job": job, "dry_run": true})).is_err());
+    }
+}
+
+/// A 2D adaptive clearing takes the job's stock box: round a boss on a plate drawn to the
+/// stock's edge it goes down in the open air beside the stock and cuts in from there, with no
+/// helix; with `from_stock: false` the profiles are full of material and entered with a helix.
+#[test]
+fn a_2d_adaptive_clearing_takes_the_jobs_stock() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 50, "height": 5, "corner": [-30, -25, -10], "body_name": "Part"}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 5, "corner": [-15, -10, -5], "operation": "join"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Clear"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-30, -25], "p1": [30, 25]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-15, -10], "p1": [15, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let job = |from: bool| {
+        json!({"job": {"name": "ring", "machine": "3axis", "post": "linuxcnc_4axis", "tools": [flat(1, 6.0)],
+                       "stock": {"box": {"min": [-30, -25, -10], "max": [30, 25, 0]}},
+                       "operations": [{"name": "clear", "type": "adaptive", "tool": 1, "sketch": "Clear", "profiles": [0],
+                                       "heights": {"clearance": 10, "retract": 2, "top": 0, "bottom": -5}, "stepdown": 5,
+                                       "optimal_load": 0.6, "compare": false, "from_stock": from}]},
+               "dry_run": true})
+    };
+    let r = run(&mut s, "cam.job", job(true));
+    assert_clean(&r);
+    let op = &r["operations"][0];
+    assert_eq!(op["adaptive"]["helices"], 0, "{op}");
+    assert_eq!(op["adaptive"]["full_slot_share"].as_f64(), Some(0.0), "{op}");
+    let ratio = op["cut_length"].as_f64().unwrap() / (2400.0 / 0.6);
+    assert!(ratio <= 1.5, "{ratio}: {op}");
+    let r = run(&mut s, "cam.job", job(false));
+    assert_clean(&r);
+    assert!(r["operations"][0]["adaptive"]["helices"].as_u64().is_some_and(|h| h >= 1), "{r}");
+}
+
+/// A job's `orientation` turns the part for its setup: a pocket in the block's bottom is cut
+/// from above once the block is flipped, however the flip is given, and gouges unturned.
+#[test]
+fn a_job_orientation_turns_the_part_for_its_setup() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [-20, -15, -10], "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 3, "corner": [-5, -5, -10], "operation": "cut"}));
+    let job = |orientation: Option<Value>| {
+        let mut j = json!({"name": "op2", "machine": "3axis", "post": "linuxcnc_4axis", "tools": [flat(1, 4.0)], "origin": [0, 0, -10],
+                           "stock": {"box": {"min": [-21, -16, -10], "max": [21, 16, 0]}},
+                           "operations": [{"name": "back pocket", "type": "pocket", "tool": 1, "polygon": [[-5, -5], [5, -5], [5, 5], [-5, 5]],
+                                           "heights": {"clearance": 20, "retract": 5, "top": 0, "bottom": -3}}]});
+        if let Some(o) = orientation {
+            j["orientation"] = o;
+        }
+        json!({"job": j, "dry_run": true})
+    };
+    for o in [json!("flip_x"), json!("flip_y"), json!({"axis": [1, 0, 0], "angle_deg": 180})] {
+        let r = run(&mut s, "cam.job", job(Some(o.clone())));
+        assert_clean(&r);
+        assert!(r["notes"].as_array().unwrap().iter().any(|n| n.as_str().is_some_and(|n| n.contains("orientation"))), "{o}: {r}");
+    }
+    let r = run(&mut s, "cam.job", job(None));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["gouge"]["worst"].as_f64().is_some_and(|g| g > 1.0), "{r}");
+    // A sketch on the block's bottom, its normal down: work Z along it is the turned block's up.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, -10], "x_dir": [1, 0, 0], "y_dir": [0, -1, 0]}, "name": "Bottom"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "diameter": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    let r = run(&mut s, "cam.job", job(Some(json!({"sketch": "Bottom"}))));
+    assert_clean(&r);
+    for bad in
+        [json!("flip_z"), json!({"axis": [0, 0, 0], "angle_deg": 90}), json!({"axis": [1, 0, 0], "angle_deg": 1e308}), json!({"sketch": "Nope"})]
+    {
+        assert!(s.execute("cam.job", &job(Some(bad.clone()))).is_err(), "{bad}");
+    }
+    // A 4th axis turns the part with its own angles.
+    let mut j = job(Some(json!("flip_x")));
+    j["job"]["machine"] = json!("4axis_a");
+    let e = s.execute("cam.job", &j).unwrap_err();
+    assert!(e.to_string().contains("3-axis machine"), "{e}");
+}
+
+#[test]
+fn hostile_stock_and_face_jobs_are_refused_without_panics() {
+    let mut s = dome();
+    let job = |f: &dyn Fn(&mut Value)| {
+        let mut j = dome_job();
+        f(&mut j);
+        json!({"job": j, "dry_run": true})
+    };
+    // A face with a flat tool (number 7) and `extra` keys.
+    let face = |extra: Value| {
+        let mut j = dome_job();
+        j["tools"] = json!([ball(2, 6.0), flat(7, 10.0)]);
+        let mut op = json!({"name": "f", "type": "face", "tool": 7, "top": 7, "bottom": 6});
+        if let (Some(o), Value::Object(e)) = (op.as_object_mut(), extra) {
+            o.extend(e);
+        }
+        j["operations"] = json!([op]);
+        json!({"job": j, "dry_run": true})
+    };
+    let cases = vec![
+        job(&|j| j["stock"] = json!({"box": {"min": [0, 0, 0], "max": [0, 1, 1]}})),
+        job(&|j| j["stock"] = json!({"box": {"min": [0, 0, 0], "max": [1e308, 1, 1]}})),
+        job(&|j| j["stock"] = json!({"box": {"min": [0, 0], "max": [1, 1, 1]}})),
+        job(&|j| j["stock"] = json!({"box": {"min": [0, 0, 0], "max": [1, 1, 1], "maxx": 1}})),
+        job(&|j| j["stock"] = json!({"cylinder": {"radius": -1, "x_min": 0, "x_max": 1}})),
+        job(&|j| j["stock"] = json!({"cylinder": {"radius": 5, "x_min": 1, "x_max": 1}})),
+        job(&|j| j["stock"] = json!({"around_part": {"margin": [-1, 0, 0]}})),
+        job(&|j| j["stock"] = json!({"around_part": {"margin": [1e308, 0, 0]}})),
+        job(&|j| j["stock"] = json!({"around_part": {"margin": [0, 0, 0], "top": -1}})),
+        job(&|j| j["stock"] = json!({"sphere": {"radius": 5}})),
+        job(&|j| j["stock"] = json!({"simulated": {"path": "x.json"}})),
+        job(&|j| j["stock"] = json!({"box": {"min": [0, 0, 0], "max": [1, 1, 1]}, "cylinder": {"radius": 1, "x_min": 0, "x_max": 1}})),
+        job(&|j| j["stock"] = json!("box")),
+        // A face without a stock or a top, with a ball, with hostile numbers or keys.
+        job(&|j| j["operations"] = json!([{"name": "f", "type": "face", "tool": 2, "bottom": 6}])),
+        job(&|j| j["operations"] = json!([{"name": "f", "type": "face", "tool": 2, "top": 7, "bottom": 6}])),
+        face(json!({"top": null})),
+        face(json!({"stepover": 1e308})),
+        face(json!({"stepover": 1e-12})),
+        face(json!({"stepdown": 1e-300})),
+        face(json!({"bottom": 1e308})),
+        face(json!({"bottom": 8})),
+        face(json!({"rect": [[5, 5], [-5, -5]]})),
+        face(json!({"rect": [[-1e300, 5], [5, 5]]})),
+        face(json!({"overhang": -1})),
+        face(json!({"angle_deg": 1e308})),
+        face(json!({"retract": 1})),
+        face(json!({"clearance": 1e308})),
+        face(json!({"stepdwn": 1})),
+        job(&|j| {
+            j["operations"] = json!([{"type": "indexed", "a_deg": 0, "operation": {"name": "f", "type": "face", "tool": 2, "top": 7, "bottom": 6}}])
+        }),
+    ];
+    for p in &cases {
+        match s.execute("cam.job", p) {
+            Err(EngineError::Internal(_, msg)) => panic!("{p}: panicked: {msg}"),
+            Err(_) => {}
+            Ok(v) => panic!("{p}: accepted: {v}"),
+        }
+    }
+    // The face that the hostile ones start from is fine (it faces above the dome's top).
+    let r = run(&mut s, "cam.job", face(json!({"top": 9, "bottom": 7.5})));
+    assert_eq!(r["passed"], true, "{r}");
+}

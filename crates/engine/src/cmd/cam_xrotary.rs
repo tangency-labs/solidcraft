@@ -232,7 +232,8 @@ pub(super) fn plan_rotary_roughing(ctx: &Ctx<'_>, o: &RotaryRoughingOp) -> Resul
     let r = ctx.resolve(&c)?;
     let params = RotaryRoughingParams {
         pattern: pattern(ctx, c.name, o.pattern)?,
-        stock_radius: o.stock_radius.ok_or_else(|| ctx.bad(c.name, "give the radius of the round stock it roughs, `stock_radius`"))?,
+        stock_radius: roughing_stock_radius(ctx, o)
+            .ok_or_else(|| ctx.bad(c.name, "give `stock_radius`, or the job a `stock` (a `cylinder` about X or a `box`) to take it from"))?,
         clearance: o.clearance,
         retract: o.retract,
         floor: o.floor.unwrap_or(0.0),
@@ -247,6 +248,16 @@ pub(super) fn plan_rotary_roughing(ctx: &Ctx<'_>, o: &RotaryRoughingOp) -> Resul
     let part = ctx.surface_in(c.name, &Frame::IDENTITY)?;
     let path = rotary_roughing(&part, &r.tool, &params).map_err(|e| ctx.bad(c.name, e))?;
     Ok(continuous(c, r, "rotary_roughing", path))
+}
+
+/// The radius a `rotary_roughing` starts from: its own `stock_radius`, else the job's stock's
+/// (a cylinder's radius, or how far a box's farthest edge is from the A axis).
+fn roughing_stock_radius(ctx: &Ctx<'_>, o: &RotaryRoughingOp) -> Option<f64> {
+    use solidcraft_cam::stock::Stock;
+    o.stock_radius.or_else(|| match ctx.stock? {
+        Stock::Cylinder { radius, .. } => Some(*radius),
+        Stock::Box { min, max } => Some(min.y.abs().max(max.y.abs()).hypot(min.z.abs().max(max.z.abs()))),
+    })
 }
 
 /// The flat path of a wrap operation: across at the clearance height, down to the retract
@@ -424,7 +435,7 @@ fn turning_radius(ctx: &Ctx<'_>, spec: &OperationSpec) -> Option<(f64, f64)> {
     };
     match spec {
         OperationSpec::RotaryFinish(o) => Some((o.clearance, f64::NEG_INFINITY)),
-        OperationSpec::RotaryRoughing(o) => Some((o.clearance, o.stock_radius.unwrap_or(f64::NEG_INFINITY))),
+        OperationSpec::RotaryRoughing(o) => Some((o.clearance, roughing_stock_radius(ctx, o).unwrap_or(f64::NEG_INFINITY))),
         OperationSpec::Wrap(o) => Some((o.radius + o.clearance.unwrap_or(WRAP_CLEARANCE), f64::NEG_INFINITY)),
         OperationSpec::WrapPocket(o) => Some((o.radius + o.clearance.unwrap_or(WRAP_CLEARANCE), f64::NEG_INFINITY)),
         OperationSpec::WrapContour(o) => Some((o.radius + o.clearance.unwrap_or(WRAP_CLEARANCE), f64::NEG_INFINITY)),

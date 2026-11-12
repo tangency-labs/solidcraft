@@ -64,6 +64,10 @@ The command never writes a program that fails one of these unless `allow_unsafe`
   it reaches nothing the cutter does not reach first: it may come as close as the gouge check
   allows (a wall the cutter has just cut is no collision). Counts are of moves of the
   operation's toolpath.
+- **Rapids.** Every `G0` of the program as written, the stock and the turns of a 4th axis
+  included (see [The rapid check](#the-rapid-check)).
+- **Travel.** With a machine whose JSON has `linear_limits`, every position is within them.
+- **Below the stock.** No cut below a box stock's bottom, but by the job's `breakthrough`.
 - **The 4th-axis setup check** (see [The setup check](#the-setup-check)).
 - **Operation checks** that are part of planning, each refusing the job with a message that
   names the operation: a tool that cannot cut the operation (below), heights out of order, a
@@ -78,7 +82,9 @@ message. With `dry_run`, the reply carries `passed: false` and `failures`.
 `cut_length`, `cut_minutes`, `rewinds`, `max_tilt_deg`, `a_deg` (indexed ones), `gouge`, `gouge_at`
 (when it gouges), `holder_collisions`, `adaptive` (an adaptive operation's engagement), `warnings`), `program_lines`, `program_head` (the first lines),
 `readback` (`max_tip_deviation`, `max_axis_deviation_deg`, `allowed_tip`, `allowed_axis_deg`,
-`cut_minutes`, `pass`), `gouge` (`worst`, `tolerance`, `tessellation`, `allowed`, `hits`,
+`cut_minutes`, `pass`), `rapids` (`checked`, `hits`, `worst`, `pass`, `from_unknown`, `first`),
+`travel` (`checked`, `violation`, `pass`; `null` without `linear_limits`), `stock` (as checked
+against; `null` without one), `gouge` (`worst`, `tolerance`, `tessellation`, `allowed`, `hits`,
 `at: {operation, move_index, line?, xyz}` for the deepest, `skipped`, `pass`),
 `holder_collisions` (`null` when no tool has holder data), `cut_minutes` (the program's time at
 feed as written), `passed`,
@@ -122,6 +128,9 @@ silently left at its default. That holds for the tools, the machine and the post
 | `post_path` | A post as a JSON file: the CAM crate's `Post5` (`cam.post.get {"name": …}` returns one to start from). This is how a machine's own post is matched: copy the closest built-in post and change its header, tool change, spindle, comments, decimals, inverse time and rotary settings until its output matches. |
 | `work_offset` | 1 to 6 (G54 to G59), for posts whose header writes `{work_offset}`. Default: 1. |
 | `origin` | The design point that is work zero, `[x, y, z]`. On a 4th axis the A axis is work X through it. Default: the design's origin. |
+| `orientation` | How the part is turned for this setup, about `origin`: `"flip_x"`, `"flip_y"`, `{"axis": [x, y, z], "angle_deg": a}` or `{"sketch": name}` (see Coordinates). Default: none. |
+| `stock` | The raw material in work coordinates: `{"box": {"min", "max"}}`, `{"cylinder": {"radius", "x_min", "x_max"}}` (a bar about work X) or `{"around_part": {"margin": [x, y, z], "top"?, "bottom"?}}`. See [Stock, facing and rapid safety](#stock-facing-and-rapid-safety). Default: none. |
+| `breakthrough` | How far below a box stock's bottom a through cut may go, 0 to 25 mm. Default: 0. |
 | `bodies` | The part's bodies by name: the surface the 3D operations follow and every cut is checked for gouges against, drawn in the preview. Default: every visible body not in `fixtures`. |
 | `fixtures` | Bodies the tool must stay clear of (vises, clamps, a fixture plate modelled in the design): checked for gouges and holder collisions, never machined. Default: none. |
 | `tolerance` | 0.0001 to 1 mm (default 0.01): how far a toolpath may be from the profiles and surfaces it follows, and how deep a cut into the part counts as a gouge. |
@@ -131,8 +140,19 @@ silently left at its default. That holds for the tools, the machine and the post
 
 ### Coordinates
 
-Work coordinates are the design's coordinates less `origin`. The operations' polygons and
-heights are in work coordinates, and a sketch is read through the same shift. On a 4th axis
+Work coordinates are the design's coordinates less `origin`, turned about it by the job's
+`orientation` when it has one: `"flip_x"` is half a turn about X (the bottom faces up, Y runs
+the other way), `"flip_y"` half a turn about Y, `{"axis", "angle_deg"}` a right-handed turn
+about that axis, and `{"sketch": name}` puts work X, Y and Z along that sketch's plane's X, Y
+and normal (the tool looks down on the plane; a sketch on a face of the part makes a work
+coordinate system from that face). So op1 and op2 of a part machined from two sides are two
+jobs on the same design: op2 gives the turn and an `origin` on the turned part, and its
+polygons, heights, boundaries and `stock` are in its own (turned) work coordinates. A sketch an
+operation uses must lie square to the tool once turned, either way up: op1's outline drawn on
+the part's top is read through op2's turn as it is, mirrored, its arcs kept as arcs.
+`orientation` is for a 3-axis machine; a 4th axis turns the part with its own angles. The
+operations' polygons and heights are in work coordinates, and a sketch is read through the
+same shift and turn. On a 4th axis
 the rotary axis is work X through work zero: model the part with its turning axis along the
 design's X through the origin, or give `origin` as a point on that axis. A 3-axis operation
 runs with A held at zero unless it is indexed. A rotary toolpath's tip at angle θ and radius ρ
@@ -184,7 +204,7 @@ bottom}` in work coordinates.
 | `contour` | `sketch` (id or name) + `profiles?` (indices; default every drawn profile) or `polygon: [[x, y], …]`; `heights`; `stepdown` (tool's, else half its diameter); `side`: `outside` \| `inside` \| `on` (outside); `climb` (true); `stock_to_leave` (0); `ramp_angle_deg` (0: plunge); `tolerance` (the job's); `lead`, `entry`, `linking`, `tabs`, `finish_passes`, `finish_stepover`, `spring_pass`, `vertical_lead` (see [Leads, entries, linking and tabs](#leads-entries-linking-and-tabs)) |
 | `pocket` | `sketch` + `profiles?` or `polygon`; `heights`; `stepdown`; `stepover` (tool's, else 40% of its diameter); `climb`; `stock_to_leave`; `ramp_angle_deg`; `tolerance`; `entry`; `linking` |
 | `drill` | `sketch` (circle centres, `circles` (true), filtered by `diameter_range: [min, max]`, and lone points, `sketch_points` (true)) or `points: [[x, y], …]`; `heights` (`retract` is the R height, `top` the hole's top, `bottom` its depth); `cycle`: `simple` \| `dwell` \| `peck` \| `chip_break` (simple); `peck` (tool's stepdown, else its diameter); `peck_clearance` (0.5); `back_off` (0.5); `dwell_seconds` (0.5); `to_full_diameter` (false). See [Drilling](#drilling). |
-| `adaptive` | `sketch` + `profiles?` or `polygon`; `heights`; `stepdown` (tool's, else its diameter); `optimal_load` (tool's `stepover`, else 10% of its diameter); `min_engagement_deg`, `max_engagement_deg` (from the load: see [Adaptive clearing](#adaptive-clearing)); `helix_diameter` (80% of the tool's); `ramp_angle_deg` (2); `climb`; `stock_to_leave` (0); `tolerance`; `compare` (true) |
+| `adaptive` | `sketch` + `profiles?` or `polygon`; `heights`; `stepdown` (tool's, else its diameter); `optimal_load` (tool's `stepover`, else 10% of its diameter); `min_engagement_deg`, `max_engagement_deg` (from the load: see [Adaptive clearing](#adaptive-clearing)); `helix_diameter` (80% of the tool's); `ramp_angle_deg` (2); `climb`; `stock_to_leave` (0); `tolerance`; `compare` (true); `from_stock` (true: see [Adaptive clearing](#adaptive-clearing)) |
 | `adaptive_roughing` | `heights` (`top` is the stock's top); `stepdown`; `optimal_load`; `min_engagement_deg`, `max_engagement_deg`; `helix_diameter`; `ramp_angle_deg`; `climb`; `boundary` (the stock's extent; the part's extent); `stock_to_leave` (0.25); `flats` (true); `step_up` (none); `tolerance` |
 | `chamfer` | `sketch` + `profiles?`, `polygon` or `holes: [{center, diameter}]` (each rim inside its hole); `heights: {clearance, retract, top}` (no `bottom`: the depth follows from the width); `width` (across the top); `tip_offset` (0.2); `side`: `outside` \| `inside` (outside); `climb` (true); `tolerance`. A chamfer mill only; see [Chamfers](#chamfers) |
 | `bore` | `sketch` (its circles) + `diameter_range?: [min, max]` or `holes: [{center: [x, y], diameter}]`; `heights` (`top` the hole's top, `bottom` its floor); `pitch` or `ramp_angle_deg` (2, the pitch at most `stepdown`: the tool's, else 10% of its diameter); `stepover` (between rings; the tool's, else 40% of its diameter); `climb` (true); `finish_passes` (0); `stock_to_leave` (0.1 with finishing passes, else 0) |
@@ -199,7 +219,8 @@ bottom}` in work coordinates.
 | `indexed` | `a_deg` and `operation`: any of the 3-axis operations above (`contour` to `rest_finish`, `drill`, `adaptive`, `adaptive_roughing`, `chamfer`), run with A held at `a_deg` (3+1); optionally `name`, used when the inner operation has none. The inner operation carries the tool and feeds. See [4th-axis jobs](#4th-axis-jobs-indexed-rotary-and-wrapped-operations). |
 | `indexed_pattern` | `a_deg: [angles]` or `count` (evenly over a turn, from `start_deg`, 0), and `operation`: any 3-axis operation, run as an `indexed` operation at each angle, named `<name> A<angle>` |
 | `rotary_finish` | `pattern`: `{type: "lines", angle_step_deg, zigzag?}`, `{type: "helix", pitch}` or `{type: "rings", stepover, zigzag?}`; `clearance` and `retract` (radii from the A axis); `floor` (0); `range: [min x, max x]` (the part's extent); `step`; `tolerance`; `stock_to_leave` (0); `max_angle_step_deg` (2) |
-| `rotary_roughing` | As `rotary_finish`, with `stock_radius` (required), `stepdown` (in radius) and `stock_to_leave` (0.25) |
+| `rotary_roughing` | As `rotary_finish`, with `stock_radius` (default: the job's `stock`, a cylinder's radius or a box's farthest edge from the axis), `stepdown` (in radius) and `stock_to_leave` (0.25) |
+| `face` | `bottom`; `top` (the stock's top; required without a stock); `retract` (2 above the top, or the stock's top if higher); `clearance` (10 above the retract); `stepdown` (tool's, else 1); `stepover` (tool's, else 70% of the flat of its end); `angle_deg` (0); `zigzag` (true); `overhang` (half the tool's diameter and 0.5); `rect: [[x, y], [x, y]]` (the stock seen from above, else the part's extent); `lead_radius` (none). A face mill, a flat end mill or a bull nose; see [Facing](#facing). |
 | `wrap` | `radius` (of the cylinder the path is drawn on); `points: [[x, y, z], …]` (x along the axis, y the arc length round it, z the depth: 0 on the cylinder, negative into it) or `sketch` + `curve` (a curve id; its sketch x and y are taken as x and arc length) with `depth` (0); `clearance` (5) and `retract` (1) above the cylinder; `max_angle_step_deg` (2) |
 | `wrap_pocket` | `radius` (of the cylinder the profile is drawn on); `sketch` + `profiles?` or `polygon: [[x, arc length], …]` (unrolled); `bottom` (the floor's depth from the cylinder, negative into it); `top` (0); `stepdown`; `stepover`; `clearance` (5) and `retract` (1) above the cylinder; `climb`; `stock_to_leave` (walls); `ramp_angle_deg`; `tolerance`; `max_angle_step_deg` (2) |
 | `wrap_contour` | As `wrap_pocket`, with `side` (outside) instead of `stepover`: the profile's boundary followed in depth levels |
@@ -351,6 +372,95 @@ while the teeth beyond it cut the thread. The program still names the thread mil
 are refused by every other milling operation, and anywhere else a thread mill is checked whole,
 its teeth and all.
 
+## Stock, facing and rapid safety
+
+A job may say what it starts from with `stock`, in work coordinates. A box gives its corners;
+`around_part` is the box round the part's bodies grown by a margin on each side (the reply's
+`stock` shows the box it came to); a cylinder is a round bar about work X, the A axis of a 4th
+axis set up the usual way. An `around_part` stock is read on the bodies' exact boxes.
+
+A cut that goes below a box stock's bottom on a 3-axis machine fails the job: below it are the
+parallels, the vise's floor or the table that hold the stock, or the lowest fixture that reaches
+under it. The deepest point of every cutting move with the tool upright counts, a drill's point
+included. `breakthrough` (0 to 25 mm) lets a cut go that far below the bottom, onto a spoil
+board or between parallels clear of it; the failure names the `breakthrough` that would let it,
+and a note says when a cut passes only by it. With a stock, the ways down at rapid stop 1 mm
+above the stock's top (on a 4th axis, outside the bar), not only above the operation's own top.
+
+### Facing
+
+`face` cuts the stock's top (or `top`) flat down to `bottom` in levels of at most `stepdown`,
+in straight passes along `angle_deg` at most `stepover` apart, over `rect` (by default the
+stock seen from above). Every pass starts and ends with the whole cutter 1 mm clear of the
+area, so the tool goes down beside the stock at the plunge feed and enters it at depth: it
+never plunges into material. The outermost passes reach `overhang` past the edges (by default
+half the diameter and 0.5 mm, which puts their centres just outside), so the edges come out
+clean. With `zigzag` every other pass runs back and the passes link at depth along a line
+beside the stock, each level starting where the last ended; without it the tool rises to the
+retract height between passes and every pass runs the same way. The stepover is held to the
+flat of the tool's end (its diameter less the corners, for a bull nose), so the floor has no
+ridges. A top below the stock's top is warned of: its first level takes more than a stepdown.
+With a stock, a `face` is refused where a descent or a link between passes would run in the
+stock (a `rect` that stops short of the stock's edges along the passes would take the tool
+straight down into it: give one that reaches past them, or turn the passes), and where its
+`bottom` is below the stock's (whatever holds the stock is there).
+
+With `lead_radius` (mm) each level is entered down a vertical arc: the tool goes down beside the stock to the radius above the level, the radius behind the pass's start,
+and comes down a quarter arc into it; with `zigzag` the passes of the level link round half
+circles outside the area (`G2`/`G3`), and the level's last pass goes out up a quarter arc
+beyond its end. The arcs are `G18` for passes along X (`angle_deg` 0) and `G19` along Y (90),
+lines along the arc at other angles; see [Vertical leads](#vertical-leads). The lead's radius is
+at most ten times the tool's diameter.
+
+### The rapid check
+
+Every `G0` block of the program as written is read back and followed as the controller moves
+through it, every axis evenly from the block's start to its end, sampled every 0.5 mm of the
+tip's travel and of a point at the tool's reach. That covers the move to the first point, the
+links between passes and operations, rotary turns, rewinds, the moves after a tool change and
+the final retract. At every sample, in work coordinates:
+
+- the cutter, as a cylinder of its radius without end above its tip (the shank and spindle are
+  there too), must not be in the part or a fixture by more than the job's tolerance, and a
+  tool's shank and holder (with holder data) must not touch them. In an operation with
+  `gouge_check: false` (it cuts what the model does not show, a deburr of a sharp-edged
+  model), a retract straight up the tool's axis is not held against the part: it leaves the
+  cut its own feed moves made;
+- with a stock, the cutter must not be in the stock. The rapid check does not track what
+  earlier operations removed, so the stock as given is the bound: a rapid below the stock's top over the stock
+  fails, even where an earlier operation has cut it away, except after a `face` (with its
+  default `overhang`) over the whole top of a box stock: the operations after it are held
+  against the stock with its top at the face's `bottom`. A retract straight up the tool's
+  axis out of the cut is exempt too: it only passes through room the tool already fills; so is
+  a rapid back down that line in the same operation, no deeper than the retract started (a peck
+  drill going back into its hole to `peck_clearance` above the depth reached). Keep
+  every retract and clearance height above the stock's top (on a 4th axis, outside its radius);
+- a block that turns the A axis (a table about X) must keep the cutter outside the radius the
+  stock sweeps (a box's farthest corner) all through the turn, wherever the stock is level with
+  the tool along X. Without a stock the part is cut into 128 slices along X, each held to the
+  largest radius of the part over it and the tolerance, so a turn over a slender end of the
+  part is held to that end's radius, as the 4th-axis setup check holds it.
+  A post with `clearance_retract` rises to the operation's highest rapid before it turns; a
+  low clearance height can still leave the tool inside the swept radius, and this check finds it.
+
+A block after a return to the machine's home (`G28`, `G30`), a move in machine coordinates
+(`G53`) or a tool change starts where the program does not say: only its end is checked, which
+with the cutter endless above covers the way down from the machine's top. Turns made there (a
+post's `safe_rotate` lines) are taken to happen at the machine's top, and a tool change to be
+made where the new tool clears everything: give the post a `safe_retract` at tool changes where
+the controller changes tools wherever the spindle is. `rapids.from_unknown` counts these blocks.
+Each block is checked with the tool of its own operation.
+
+A failure names the line, the operation, what the rapid runs into, how deep and where; the
+reply's `rapids.first` lists the first 20. Like the other checks, a failure refuses the call
+unless `dry_run` or `allow_unsafe` is given.
+
+### Travel
+
+A machine given as JSON with `linear_limits: [[x, y, z], [x, y, z]]` (the lowest and highest
+position of the linear axes, as written in the program) has every block's end, and points along
+every arc, held against them. The first position beyond them fails the job, by line and axis.
+
 ## Adaptive clearing
 
 `adaptive` (2D, like `pocket`) and `adaptive_roughing` (3D, like `roughing`) clear material with
@@ -410,12 +520,20 @@ at least 15° more than it; `min_engagement_deg` a third of it, and at most half
 `max_engagement_deg`. A `max_engagement_deg` below the load's engagement wins: the path aims at
 the narrower width the limit allows, which takes more steps.
 
-- **Material.** `adaptive` takes its profiles as full of material, from `top` down, and enters
-  them with a helix. `adaptive_roughing` takes the material as the box over `boundary` (its rectangle,
+- **Material.** `adaptive` takes the job's stock box (with `from_stock`, true by default) as
+  what there is to cut: the material is the profiles' part of it, from its top down. The tool
+  may also stand past a profile's edge where it meets no stock outside the profiles (beyond the
+  stock's edge, or past a profile drawn round the stock), so it goes down in the open air beside
+  the stock and cuts in from there. Without a stock box, inside `indexed` on a tilted frame, or
+  with `from_stock: false`, the profiles are taken as full of material and entered with a helix.
+  Nothing round the stock is modelled: where the tool goes down beside the stock below the top
+  of the vise jaws or clamps, model them as `fixtures` or give `from_stock: false`.
+  `adaptive_roughing` takes the material as the box over `boundary` (its rectangle,
   and inside its polygon too) from `top` down, and goes down to a level in the open air outside
   it. Without `boundary.rect` the stock is the part's extent seen from above, and the report
   warns: a blank larger than that would be cut into from the side at the level's full depth, so
-  give the blank's extent as `boundary.rect`. Nothing round the stock is modelled: keep the
+  give the blank's extent as `boundary.rect`; with a job `stock` the rectangle is held to the
+  stock's outline, as there is no material past it. Nothing round the stock is modelled: keep the
   levels that go down outside it above the vise jaws and clamps.
 
 Each adaptive operation's report carries `adaptive`, measured along the path as written,

@@ -38,7 +38,7 @@ fn sketch_circles(ctx: &Ctx<'_>, op: &str, key: &SketchRef, range: Option<[f64; 
     let frame = frame_for_index(ctx.machine, &vec![0.0; ctx.machine.rotaries.len()]).map_err(|e| ctx.bad(op, e))?;
     let plane = &ss.plane;
     // Either way up: only the centres count.
-    if !(frame.dir_to_local(plane.x.cross(plane.y)).z.abs() > 1.0 - 1e-6) {
+    if !(frame.dir_to_local(ctx.place.turn_dir(plane.x.cross(plane.y))).z.abs() > 1.0 - 1e-6) {
         return Err(ctx.bad(op, format!("sketch `{}` is not on a plane square to the tool: draw the holes on a plane square to it", key.0)));
     }
     let mut holes = Vec::new();
@@ -48,7 +48,7 @@ fn sketch_circles(ctx: &Ctx<'_>, op: &str, key: &SketchRef, range: Option<[f64; 
             continue;
         }
         let Some(q) = ss.sketch.point(c) else { continue };
-        let l = frame.to_local(plane.origin + plane.x * q.x + plane.y * q.y - ctx.origin);
+        let l = frame.to_local(ctx.place.in_work(plane.origin + plane.x * q.x + plane.y * q.y));
         holes.push(Hole { center: Vec2::new(l.x, l.y), diameter: 2.0 * r });
         if holes.len() > MAX_HOLES {
             return Err(ctx.bad(op, format!("sketch `{}` has more than {MAX_HOLES} circles", key.0)));

@@ -27,10 +27,11 @@ use solidcraft_cam::gcode5::{JointWords, MachineOperation, MachineProgram, Post5
 use solidcraft_cam::indexed::{IndexedOperation, frame_for_index};
 use solidcraft_cam::kinematics::{AxisLetter, Carrier, Machine, RotaryAxis};
 use solidcraft_cam::readback5::readback_program;
+use solidcraft_cam::stock::Stock;
 use solidcraft_cam::surface_ops::{Boundary, ParallelParams, RoughingParams, WaterlineParams, parallel, roughing, waterline};
 use solidcraft_cam::{
     CamError, Compaction, ContourParams, Cut, DEFAULT_DESCENT_LIMIT, Feeds, Frame, Heights, HolderSection, LineNumbers, PocketParams, SafeRetract,
-    Side, Surface, Tool, ToolKind, Toolpath, Toolpath5, band_gouges, compact, contour_with, limit_descents, pocket_with,
+    Side, Surface, Tool, ToolKind, Toolpath, Toolpath5, band_gouges, compact, contour_with, lift_entries, limit_descents, pocket_with,
 };
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
@@ -47,6 +48,8 @@ use crate::{EngineError, Result, Session};
 
 #[path = "cam_adaptive.rs"]
 mod adaptive;
+#[path = "cam_stock.rs"]
+mod cam_stock;
 #[path = "cam_chamfer.rs"]
 mod chamfer;
 #[path = "cam_drill.rs"]
@@ -74,7 +77,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "job: {…} | job_path: .json (the CAM job, docs/cam-jobs.md: name?, machine: \"3axis\" | \"4axis_a\" | Machine JSON \
              | machine_path: Machine JSON file, a_reversed?, a_limits_deg?: [min, max], post: built-in name (cam.post.list) | post_path: Post5 JSON file, work_offset?: 1-6, \
-             origin?: [x,y,z] (the design point that is work zero; on a 4th axis the A axis is work X through it), bodies?: [names] (the part: what 3D operations follow and every \
+             origin?: [x,y,z] (the design point that is work zero; on a 4th axis the A axis is work X through it), orientation?: \
+             \"flip_x\" | \"flip_y\" | {axis, angle_deg} | {sketch} (the part turned for this setup, 3-axis), stock?: {box: {min, \
+             max}} | {cylinder: {radius, x_min, x_max}} | {around_part: {margin: [x,y,z], top?, bottom?}} (work coordinates; no rapid \
+             may pass through it), breakthrough?: mm a through cut may go below the stock's bottom (0-25), bodies?: [names] (the part: what 3D operations follow and every \
              cut is checked for gouges against, drawn in the preview; default every visible body), fixtures?: [names] (checked \
              against, never cut), tolerance?: mm (default 0.01; 3D operations plan on the bodies tessellated within a \
              quarter of it), tools: [Tool JSON] | tool_library_path, operations: [{name, type: contour | pocket (sketch + profiles? | \
@@ -85,7 +91,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              | holes, pitch? | ramp_angle_deg?, stepover?, finish_passes?} | thread_mill {sketch | centers, pitch, thread_diameter, \
              internal?, right_hand?, thread_depth?, radial_passes?, spring_pass?} | adaptive {sketch + profiles? | polygon, \
              optimal_load?, min_engagement_deg?, max_engagement_deg?, helix_diameter?, compare?} | adaptive_roughing {boundary?, \
-             optimal_load?, flats?, step_up?, …} | parallel | \
+             optimal_load?, flats?, step_up?, …} | face {bottom, top?, retract?, clearance?, stepdown?, stepover?, angle_deg?, \
+             zigzag?, overhang?, rect?, lead_radius?} | parallel | \
              roughing | waterline | scallop | steep_shallow | pencil | rest_finish (boundary?: {rect?, polygon?, holes?}, stepover?, \
              step?, …) | indexed {a_deg, operation, name?} | indexed_pattern {a_deg: [..] | count, start_deg?, operation, name?} | \
              rotary_finish | rotary_roughing (pattern: lines | helix | rings, clearance, retract, stock_radius?) | wrap | wrap_pocket | \
@@ -96,7 +103,9 @@ pub static COMMANDS: &[CommandSpec] = &[
              kind, tool, moves, cut_length, cut_minutes, rewinds, max_tilt_deg, a_deg?, gouge, gouge_at?, holder_collisions, adaptive? (the engagement measured \
              along its path: max_engagement_deg, full_slot_share, levels, helices, …, pocket?: the plain pocket compared), warnings}], program_lines, program_head, readback: {max_tip_deviation, \
              max_axis_deviation_deg, allowed_tip, allowed_axis_deg, cut_minutes, pass}, gouge: {worst, tolerance, tessellation, \
-             allowed, hits, at?: {operation, move_index, line?, xyz}, skipped, pass}, holder_collisions, cut_minutes, passed, failures, dry_run, outputs: \
+             allowed, hits, at?: {operation, move_index, line?, xyz}, skipped, pass}, holder_collisions, rapids: {checked, hits, \
+             worst, pass, from_unknown, first: [{line, operation?, kind, depth, at}]}, travel: {checked, violation?, pass} | null, \
+             stock, cut_minutes, passed, failures, dry_run, outputs: \
              {gcode?, preview?}, notes. Without dry_run or allow_unsafe a failed check refuses and nothing is written",
         ),
     CommandSpec::new("cam.post.list", "List CAM Posts", crate::checked!("cam.post.list", post_list))
@@ -328,6 +337,88 @@ fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
 
+/// How a job places the design: turned about `origin` by its `orientation`, then moved so
+/// `origin` is work zero. The turned design is still in design units and place, so everything
+/// that takes `origin` off a design point works on [`Placement::turn`] of it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Placement {
+    pub origin: Vec3,
+    /// The work axes' directions in the design, when the part is turned.
+    pub axes: Option<[Vec3; 3]>,
+}
+
+impl Placement {
+    /// The design point `p` turned about `origin`.
+    pub fn turn(&self, p: Vec3) -> Vec3 {
+        self.origin + self.turn_dir(p - self.origin)
+    }
+
+    /// The design direction `d` turned.
+    pub fn turn_dir(&self, d: Vec3) -> Vec3 {
+        match self.axes {
+            None => d,
+            Some([x, y, z]) => Vec3::new(d.dot(x), d.dot(y), d.dot(z)),
+        }
+    }
+
+    /// The design point `p` in work coordinates.
+    pub fn in_work(&self, p: Vec3) -> Vec3 {
+        self.turn(p) - self.origin
+    }
+}
+
+/// The placement of work zero `origin` (design coordinates) and the turn `orientation`, checked.
+fn placement(cmd: &str, s: &Session, origin: [f64; 3], orientation: Option<&crate::schema::cam::OrientationSpec>) -> Result<Placement> {
+    use crate::schema::cam::OrientationSpec;
+    finite_point(&origin, "`origin`").map_err(|e| bad(cmd, e))?;
+    let origin = v3(origin);
+    let unit = |v: Vec3, what: &str| -> Result<Vec3> {
+        let len = v.dot(v).sqrt();
+        if v.x.is_finite() && v.y.is_finite() && v.z.is_finite() && len > 1e-12 {
+            Ok(Vec3::new(v.x / len, v.y / len, v.z / len))
+        } else {
+            Err(bad(cmd, format!("{what} must be a finite, non-zero direction")))
+        }
+    };
+    let axes = match orientation {
+        None => None,
+        Some(OrientationSpec::Named(n)) => match n.as_str() {
+            "flip_x" => Some([Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0), Vec3::new(0.0, 0.0, -1.0)]),
+            "flip_y" => Some([Vec3::new(-1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, -1.0)]),
+            "none" => None,
+            other => {
+                return Err(bad(
+                    cmd,
+                    format!("`orientation` is \"flip_x\", \"flip_y\", {{\"axis\", \"angle_deg\"}} or {{\"sketch\"}}, not \"{other}\""),
+                ));
+            }
+        },
+        Some(OrientationSpec::Turn { axis, angle_deg }) => {
+            finite_point(axis, "`orientation.axis`").map_err(|e| bad(cmd, e))?;
+            let a = unit(v3(*axis), "`orientation.axis`")?;
+            if !(angle_deg.is_finite() && angle_deg.abs() <= 3600.0) {
+                return Err(bad(cmd, "`orientation.angle_deg` must be a finite angle"));
+            }
+            let t = -angle_deg.to_radians();
+            // The work axes in the design: the design's own axes turned back.
+            Some([Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)].map(|e| solidcraft_cam::rotate(e, a, t)))
+        }
+        Some(OrientationSpec::Sketch { sketch }) => {
+            let id = match s.doc.find_feature(sketch) {
+                Some(f) if matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. }) => f.id,
+                _ => return Err(bad(cmd, format!("`orientation`: no sketch `{sketch}`"))),
+            };
+            let st = s.model.state();
+            let Some(ss) = st.sketch(id) else { return Err(bad(cmd, format!("`orientation`: sketch `{sketch}` has not been solved"))) };
+            let (x, y) = (ss.plane.x, ss.plane.y);
+            let z = unit(x.cross(y), "the sketch's normal")?;
+            let x = unit(x, "the sketch's X")?;
+            Some([x, z.cross(x), z])
+        }
+    };
+    Ok(Placement { origin, axes })
+}
+
 /// The job's machine: `machine`, or the file `machine_path` (read from `base`, the job file's
 /// folder, when relative).
 fn machine_of(cmd: &str, job: &CamJob, base: Option<&Path>) -> Result<Machine> {
@@ -458,7 +549,7 @@ fn job_bodies(cmd: &str, s: &Session, job: &CamJob) -> Result<(Vec<String>, Vec<
 /// work coordinates (the design less `origin`): what the 3D operations follow and every
 /// operation is checked for gouges against. The toolpaths are output, planned within the job's
 /// tolerance as an export is; neither they nor the gouge check are yet on the exact surfaces.
-fn bodies_mesh(cmd: &str, st: &solidcraft_doc::ModelState, names: &[String], origin: Vec3, chord: f64, notes: &mut Vec<String>) -> Result<Mesh> {
+fn bodies_mesh(cmd: &str, st: &solidcraft_doc::ModelState, names: &[String], place: &Placement, chord: f64, notes: &mut Vec<String>) -> Result<Mesh> {
     let mut out = Mesh::default();
     for name in names {
         let Some(b) = st.bodies.iter().find(|b| &b.name == name) else { return Err(bad(cmd, format!("no body `{name}`"))) };
@@ -468,9 +559,9 @@ fn bodies_mesh(cmd: &str, st: &solidcraft_doc::ModelState, names: &[String], ori
         let mesh = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(chord))?;
         let Ok(start) = u32::try_from(out.positions.len()) else { return Err(bad(cmd, "the part has too many triangles")) };
         let smooth = mesh.normals.len() == mesh.positions.len();
-        out.positions.extend(mesh.positions.iter().map(|p| *p - origin));
+        out.positions.extend(mesh.positions.iter().map(|p| place.in_work(*p)));
         if smooth {
-            out.normals.extend(mesh.normals.iter().copied());
+            out.normals.extend(mesh.normals.iter().map(|n| place.turn_dir(*n)));
         } else {
             // Not directions: the surface takes each triangle's own normal instead.
             out.normals.extend(std::iter::repeat_n(Vec3::ZERO, mesh.positions.len()));
@@ -496,7 +587,15 @@ struct Surfaces {
 }
 
 /// The [`Surfaces`] of the bodies `part` and `fixtures`, tessellated within `chord`.
-fn surfaces_of(cmd: &str, s: &Session, part: &[String], fixtures: &[String], origin: Vec3, chord: f64, notes: &mut Vec<String>) -> Result<Surfaces> {
+fn surfaces_of(
+    cmd: &str,
+    s: &Session,
+    part: &[String],
+    fixtures: &[String],
+    place: &Placement,
+    chord: f64,
+    notes: &mut Vec<String>,
+) -> Result<Surfaces> {
     if part.is_empty() {
         return Err(bad(
             cmd,
@@ -504,7 +603,7 @@ fn surfaces_of(cmd: &str, s: &Session, part: &[String], fixtures: &[String], ori
         ));
     }
     let st = s.world_state()?;
-    let mut both = bodies_mesh(cmd, &st, part, origin, chord, notes)?;
+    let mut both = bodies_mesh(cmd, &st, part, place, chord, notes)?;
     let part = Surface::from_mesh(&both).map_err(|e| cam_err(cmd, "the part", e))?;
     if part.is_empty() {
         return Err(bad(cmd, "the part's bodies have no surface to machine"));
@@ -512,7 +611,7 @@ fn surfaces_of(cmd: &str, s: &Session, part: &[String], fixtures: &[String], ori
     let (all, fixtures) = if fixtures.is_empty() {
         (part.clone(), None)
     } else {
-        let fix = bodies_mesh(cmd, &st, fixtures, origin, chord, notes)?;
+        let fix = bodies_mesh(cmd, &st, fixtures, place, chord, notes)?;
         let fixture_surface = Surface::from_mesh(&fix).map_err(|e| cam_err(cmd, "the fixtures", e))?;
         let Ok(start) = u32::try_from(both.positions.len()) else { return Err(bad(cmd, "the part has too many triangles")) };
         both.positions.extend(fix.positions);
@@ -527,17 +626,20 @@ fn surfaces_of(cmd: &str, s: &Session, part: &[String], fixtures: &[String], ori
         "bodies tessellated from their exact surfaces within {} mm (a quarter of the job's tolerance), in work coordinates (the design \
          less origin [{}, {}, {}])",
         num(chord),
-        num(origin.x),
-        num(origin.y),
-        num(origin.z)
+        num(place.origin.x),
+        num(place.origin.y),
+        num(place.origin.z)
     ));
+    if place.axes.is_some() {
+        notes.push("the design is turned by the job's `orientation` about its origin before it is machined".into());
+    }
     Ok(Surfaces { part, fixtures, all })
 }
 
 /// The part's triangles for the preview page only, in work coordinates (the design less
 /// `origin`), each as nine numbers: the bodies tessellated within the job's tolerance or
 /// [`PREVIEW_CHORD`], whichever is coarser. Nothing is decided with them.
-fn preview_part(cmd: &str, s: &Session, names: &[String], origin: Vec3, tol: f64) -> Result<Vec<f64>> {
+fn preview_part(cmd: &str, s: &Session, names: &[String], place: &Placement, tol: f64) -> Result<Vec<f64>> {
     let st = s.world_state()?;
     let tolerance = solidcraft_kernel::MeshTolerance::chord(tol.max(PREVIEW_CHORD));
     let mut out: Vec<[Vec3; 3]> = Vec::new();
@@ -545,7 +647,7 @@ fn preview_part(cmd: &str, s: &Session, names: &[String], origin: Vec3, tol: f64
         let Some(b) = st.bodies.iter().find(|b| &b.name == name) else { return Err(bad(cmd, format!("no body `{name}`"))) };
         let mesh = b.body.mesh(&tolerance)?;
         for t in &mesh.triangles {
-            let corner = |i: u32| mesh.positions.get(i as usize).map(|p| *p - origin);
+            let corner = |i: u32| mesh.positions.get(i as usize).map(|p| place.in_work(*p));
             if let (Some(a), Some(b), Some(c)) = (corner(t[0]), corner(t[1]), corner(t[2])) {
                 out.push([a, b, c]);
             }
@@ -593,7 +695,7 @@ fn polygon_region(cmd: &str, what: &str, pts: &[[f64; 2]]) -> Result<Region2> {
 /// The closed profiles of sketch `key` in the coordinates of `frame` (inside work coordinates,
 /// the design less `origin`): the sketch's plane must be square to the frame's Z, facing it or
 /// facing away.
-fn sketch_regions(cmd: &str, s: &Session, key: &str, profiles: Option<&[usize]>, origin: Vec3, frame: &Frame) -> Result<Vec<Region2>> {
+fn sketch_regions(cmd: &str, s: &Session, key: &str, profiles: Option<&[usize]>, place: &Placement, frame: &Frame) -> Result<Vec<Region2>> {
     let id = match s.doc.find_feature(key) {
         Some(f) if matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. }) => f.id,
         _ => return Err(bad(cmd, format!("no sketch `{key}`"))),
@@ -606,9 +708,10 @@ fn sketch_regions(cmd: &str, s: &Session, key: &str, profiles: Option<&[usize]>,
     };
     let regions = solidcraft_doc::select_profiles(ss, &sel)?;
     let plane = &ss.plane;
-    let normal = frame.dir_to_local(plane.x.cross(plane.y));
-    // A sketch facing away from the tool (drawn on a plane whose normal points down) is read as
-    // it is seen from the tool: its profiles mirrored.
+    let normal = frame.dir_to_local(place.turn_dir(plane.x.cross(plane.y)));
+    // A sketch facing away from the tool (drawn on a plane whose normal points down, or op1's
+    // outline on the top of a part op2 has turned over) is read as it is seen from the tool:
+    // its profiles mirrored.
     let mirrored = normal.z < -(1.0 - 1e-6);
     if !(normal.z > 1.0 - 1e-6 || mirrored) {
         return Err(bad(
@@ -616,10 +719,10 @@ fn sketch_regions(cmd: &str, s: &Session, key: &str, profiles: Option<&[usize]>,
             format!("sketch `{key}` is not on a plane square to the operation's tool axis (draw it on a plane facing +Z or -Z of the operation)"),
         ));
     }
-    let lx = frame.dir_to_local(plane.x);
+    let lx = frame.dir_to_local(place.turn_dir(plane.x));
     let turn = lx.y.atan2(lx.x);
     let map = |q: Vec2| {
-        let l = frame.to_local(plane.origin + plane.x * q.x + plane.y * q.y - origin);
+        let l = frame.to_local(place.in_work(plane.origin + plane.x * q.x + plane.y * q.y));
         Vec2::new(l.x, l.y)
     };
     // The sketch's X goes to angle `turn`; mirrored, an angle `a` from its X goes to `turn - a`
@@ -659,8 +762,10 @@ struct Ctx<'a> {
     s: &'a Session,
     machine: &'a Machine,
     tools: &'a [Tool],
-    /// The design point that is work zero.
-    origin: Vec3,
+    /// The design's placement: work zero and the job's `orientation`.
+    place: Placement,
+    /// The job's stock, in work coordinates.
+    stock: Option<&'a Stock>,
     tol: f64,
     post: &'a Post5,
     /// The part as the 3D operations follow it, in work coordinates (when one of them is on).
@@ -797,7 +902,7 @@ impl<'a> Ctx<'a> {
             (Some(_), Some(_)) => Err(self.bad(op, "give `sketch` or `polygon`, not both")),
             (None, None) => Err(self.bad(op, "give a `sketch` or a `polygon` to cut")),
             (None, Some(_)) if profiles.is_some() => Err(self.bad(op, "`profiles` goes with `sketch`")),
-            (Some(k), None) => sketch_regions(self.cmd, self.s, &k.0, profiles, self.origin, frame).map_err(|e| match e {
+            (Some(k), None) => sketch_regions(self.cmd, self.s, &k.0, profiles, &self.place, frame).map_err(|e| match e {
                 EngineError::BadParams { msg, .. } => self.bad(op, msg),
                 other => self.bad(op, other),
             }),
@@ -816,6 +921,7 @@ fn takes_kind(ty: &str, kind: ToolKind) -> Option<&'static str> {
         "thread_mill" => (matches!(kind, ThreadMill), "a thread mill"),
         // A chamfer mill traces a line to a depth (`side: on`).
         "contour" => (matches!(kind, FlatEndmill | BullNose | BallEndmill | FaceMill | Chamfer), "an end mill, a face mill or a chamfer mill"),
+        "face" => (matches!(kind, FaceMill | FlatEndmill | BullNose), "a face mill, a flat end mill or a bull nose"),
         "roughing" | "rotary_roughing" | "adaptive_roughing" => {
             (matches!(kind, FlatEndmill | BullNose | BallEndmill), "a flat end mill, a ball end mill or a bull nose")
         }
@@ -842,6 +948,7 @@ fn type_of(spec: &OperationSpec) -> &'static str {
         OperationSpec::ThreadMill(_) => "thread_mill",
         OperationSpec::Adaptive(_) => "adaptive",
         OperationSpec::AdaptiveRoughing(_) => "adaptive_roughing",
+        OperationSpec::Face(_) => "face",
         OperationSpec::RotaryFinish(_) => "rotary_finish",
         OperationSpec::RotaryRoughing(_) => "rotary_roughing",
         OperationSpec::Wrap(_) => "wrap",
@@ -907,6 +1014,11 @@ fn plan_path(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<(Toolpath, 
         None => path,
     };
     let feed_step = 10f64.powi(-i32::from(b.feed_decimals)) * b.units.mm();
+    // The ways down at rapid stop above where the material may reach, not only above the
+    // operation's own top.
+    if let Some(top) = material_top(ctx, frame) {
+        lift_entries(&mut path, top);
+    }
     // A 3D finish's moves down a wall go down at its descent feed, its entries (straight down)
     // at the plunge feed: the larger of the two bounds both.
     let takes_descent =
@@ -917,6 +1029,51 @@ fn plan_path(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<(Toolpath, 
     };
     limit_descents(&mut path, down, r.feeds.cut, b.decimals, b.units.mm(), feed_step).map_err(|e| ctx.bad(name, e))?;
     Ok((path, r, kind))
+}
+
+/// Where the material may reach in `frame` (the highest Z of the operation's coordinates): the
+/// stock's top seen from there; on a machine with rotaries without a bar stock, the round bar
+/// through the part's farthest point from the A axis too; otherwise not known (the operations'
+/// heights say).
+fn material_top(ctx: &Ctx<'_>, frame: &Frame) -> Option<f64> {
+    let highest = |lo: Vec3, hi: Vec3| -> f64 {
+        let mut top = f64::NEG_INFINITY;
+        for i in 0..8 {
+            let c = Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z });
+            top = top.max(frame.to_local(c).z);
+        }
+        top
+    };
+    // A round bar about work X: its radius where the frame looks square to X.
+    let bar = |radius: f64, x0: f64, x1: f64| -> f64 {
+        if frame.z.x.abs() <= 1e-9 {
+            radius - frame.origin.dot(frame.z)
+        } else {
+            highest(Vec3::new(x0, -radius, -radius), Vec3::new(x1, radius, radius))
+        }
+    };
+    // The round bar through the part's farthest point from work X.
+    let part_bar = || {
+        let (mut reach, mut x0, mut x1) = (0.0f64, f64::INFINITY, f64::NEG_INFINITY);
+        for t in ctx.part?.triangles() {
+            for p in t {
+                reach = reach.max(p.y.hypot(p.z));
+                x0 = x0.min(p.x);
+                x1 = x1.max(p.x);
+            }
+        }
+        (x0 <= x1).then(|| bar(reach, x0, x1))
+    };
+    let rotary = !ctx.machine.rotaries.is_empty();
+    let top = match ctx.stock {
+        Some(Stock::Box { min, max }) if !rotary => highest(*min, *max),
+        // On a 4th axis the round bar through the part's farthest point is above a box too.
+        Some(Stock::Box { min, max }) => part_bar().map_or(highest(*min, *max), |b| b.max(highest(*min, *max))),
+        Some(Stock::Cylinder { radius, x_min, x_max }) => bar(*radius, *x_min, *x_max),
+        None if rotary => part_bar()?,
+        None => return None,
+    };
+    top.is_finite().then_some(top)
 }
 
 /// A 3-axis operation as planned (see [`Planned3`]).
@@ -1146,6 +1303,7 @@ fn plan(ctx: &Ctx<'_>, spec: &OperationSpec) -> Result<Planned> {
         OperationSpec::ThreadMill(o) => helical::thread_mill_op(ctx, o),
         OperationSpec::Adaptive(o) => plan_indexed(ctx, &Op3Spec::Adaptive(o.clone()), zero(), None),
         OperationSpec::AdaptiveRoughing(o) => plan_indexed(ctx, &Op3Spec::AdaptiveRoughing(o.clone()), zero(), None),
+        OperationSpec::Face(o) => cam_stock::plan_face(ctx, o),
         OperationSpec::Indexed(o) => {
             // The inner operation's name, else the wrapper's.
             let name = spec_name(spec).to_string();
@@ -1239,14 +1397,15 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     if !(tol.is_finite() && (TOLERANCE_RANGE.0..=TOLERANCE_RANGE.1).contains(&tol)) {
         return Err(bad(cmd, "the job's `tolerance` must be from 0.0001 to 1 mm"));
     }
-    let origin = job.origin.unwrap_or([0.0; 3]);
-    finite_point(&origin, "`origin`").map_err(|e| bad(cmd, e))?;
-    let origin = v3(origin);
+    let place = placement(cmd, s, job.origin.unwrap_or([0.0; 3]), job.orientation.as_ref())?;
     if job.work_offset.is_some_and(|w| !(1..=6).contains(&w)) {
         return Err(bad(cmd, "`work_offset` must be 1 to 6 (G54 to G59)"));
     }
     let name = job_name(cmd, s, &job)?;
     let machine = machine_of(cmd, &job, base)?;
+    if place.axes.is_some() && !machine.rotaries.is_empty() {
+        return Err(bad(cmd, "`orientation` turns the part on a 3-axis machine; a 4th axis turns it with its own angles"));
+    }
     let (post_name, post) = post_of(cmd, &job, base)?;
     let tools = tools_of(cmd, &job, base)?;
     let (bodies, fixtures) = job_bodies(cmd, s, &job)?;
@@ -1254,7 +1413,13 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     // The part and the fixtures as surfaces: what the 3D and rotary operations follow, what A
     // must never turn into the tool, and what every cut is checked for gouges against.
     let chord = tol * CHORD_SHARE;
-    let surfaces = surfaces_of(cmd, s, &bodies, &fixtures, origin, chord, &mut notes)?;
+    let surfaces = surfaces_of(cmd, s, &bodies, &fixtures, &place, chord, &mut notes)?;
+    let stock = cam_stock::stock_of(cmd, s, &job, &bodies, &place)?;
+    let breakthrough = match job.breakthrough {
+        None => 0.0,
+        Some(b) if b.is_finite() && (0.0..=25.0).contains(&b) => b,
+        Some(_) => return Err(bad(cmd, "the job's `breakthrough` must be from 0 to 25 mm")),
+    };
     // How deep a cut into the tessellated part is allowed: the tolerance less what the
     // tessellation itself may be off by.
     let allowed = tol - chord;
@@ -1272,7 +1437,8 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         s,
         machine: &machine,
         tools: &tools,
-        origin,
+        place,
+        stock: stock.as_ref(),
         tol,
         post: &post,
         part: Some(&surfaces.part),
@@ -1394,6 +1560,23 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     }
     gouge.pass = gouge.hits == 0;
     drop(span);
+    // Every operation's lowest cut against the stock's bottom.
+    let span = solidcraft_profile::span("cam", "job.motion");
+    if let Some(st) = stock.as_ref() {
+        let fixture_low = cam_stock::work_bounds(s, &fixtures, &place)?.map(|b| b.min.z);
+        for (op, depth) in cam_stock::check_below_stock(&planned, st, fixture_low, breakthrough, &machine, tol, &mut failures) {
+            notes.push(format!(
+                "operation `{op}` cuts {} mm below the stock's bottom, as the job's `breakthrough` allows: nothing modelled is under the \
+                 stock there",
+                num(depth)
+            ));
+        }
+    }
+    // Every rapid of the program as written, and every position against the machine's travel.
+    let unchecked: Vec<bool> = planned.iter().map(|p| !p.gouge_check || p.band.is_some()).collect();
+    let written = cam_stock::Written { text: &text, program: &program, post: &post, machine: &machine };
+    let (rapids, travel) = cam_stock::check_motion(cmd, &job, &written, &surfaces, stock.as_ref(), &unchecked, tol, &mut failures)?;
+    drop(span);
     if !readback.pass {
         failures.push(format!(
             "read-back: the written program is up to {} mm and {}° from its toolpaths (the post's precision allows {} mm and {}°)",
@@ -1428,7 +1611,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
             outputs.gcode = Some(path.clone());
         }
         if let Some(path) = &params.preview {
-            let tris = preview_part(cmd, s, &bodies, origin, tol)?;
+            let tris = preview_part(cmd, s, &bodies, &place, tol)?;
             let page = preview_page(&name, &tris, &planned, &text);
             write_file(path, page.as_bytes()).map_err(|e| {
                 let written = outputs.gcode.as_deref().map_or(String::new(), |g| format!(" (the G-code was written to {g})"));
@@ -1448,6 +1631,9 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         readback,
         gouge,
         holder_collisions: holder_total,
+        rapids,
+        travel,
+        stock: stock.as_ref().map(cam_stock::stock_report),
         passed,
         failures,
         dry_run,

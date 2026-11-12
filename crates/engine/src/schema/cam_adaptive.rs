@@ -8,9 +8,9 @@ use super::cam::{BoundarySpec, Common, FeedsSpec, HeightsSpec, operation};
 use super::types::SketchRef;
 
 operation! {
-    /// 2D adaptive clearing of closed profiles, full of material: an engagement-limited path that
-    /// never takes more of the tool's circumference than `max_engagement_deg` (outside its entry
-    /// helix), in depth passes.
+    /// 2D adaptive clearing of closed profiles: an engagement-limited path that never takes more
+    /// of the tool's circumference than `max_engagement_deg` (outside its entry helix), in depth
+    /// passes.
     AdaptiveOp {
         /// The sketch whose closed profiles are cleared (on a plane square to the tool axis,
         /// facing it). Give this or `polygon`.
@@ -58,6 +58,14 @@ operation! {
         /// adaptive path. Default: true.
         #[serde(default)]
         pub compare: Option<bool>,
+        /// Take the job's stock box as what there is to cut: the material is the profiles'
+        /// part of it, the tool goes down in the open air beside the stock (also past a
+        /// profile drawn round the stock) and cuts in from there, and levels above the stock's
+        /// top are left out. false: the profiles are full of material and entered with a helix.
+        /// Without a stock box, or seen other than straight down, the profiles are full of
+        /// material. Default: true.
+        #[serde(default)]
+        pub from_stock: Option<bool>,
     }
 }
 
