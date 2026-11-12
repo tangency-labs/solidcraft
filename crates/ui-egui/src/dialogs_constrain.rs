@@ -8,12 +8,11 @@
 
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
-use solidcraft_engine::Session;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::joints::{self, Constraint, RefShape};
 
 use crate::SolveApp;
-use crate::dialogs_assembly::{Asm, Hover, SNAPS, SnapKind, SnapPt, body_of, occurrence_of_body, picked_snap, side_pick};
+use crate::dialogs_assembly::{Asm, Hover, SNAPS, SnapKind, SnapPt, picked_snap, side_pick};
 use crate::selection::SelInput;
 use crate::ui_kit::{StatusTone, choice_row, expr_row, status_line};
 
@@ -52,12 +51,14 @@ pub fn start(_app: &SolveApp) -> Option<(Asm, Vec<SelInput>)> {
 
 /// The shape of a pick, as the engine sees the joint origin it becomes: a face centre or a datum
 /// plane is a plane, a round edge or face its axis, a datum axis an axis (it is drawn as an edge's
-/// middle, and its origin names the `axis`), any other edge or a vertex a point.
+/// middle, and its origin names the `axis`), any other edge (its middle, or a body's corner
+/// between two edges) an edge, and a sketch or construction point a point.
 fn shape(s: &SnapPt) -> RefShape {
     match s.kind {
         SnapKind::FaceCenter => RefShape::Plane,
         SnapKind::CircleCenter => RefShape::Round,
-        SnapKind::EdgeMid if s.param.get("axis").is_some() => RefShape::Axis,
+        SnapKind::EdgeMid | SnapKind::Vertex if s.param.get("axis").is_some() => RefShape::Axis,
+        SnapKind::EdgeMid | SnapKind::Vertex if s.param.get("edge").is_some() => RefShape::Edge,
         SnapKind::EdgeMid | SnapKind::Vertex => RefShape::Point,
     }
 }
@@ -88,18 +89,46 @@ fn picks(app: &SolveApp, inputs: &[SelInput]) -> Option<[(Sel, SnapPt); 2]> {
     Some([pick(0)?, pick(1)?])
 }
 
-/// The two occurrences picked (a's, b's).
-fn pair(s: &Session, inputs: &[SelInput]) -> Option<(u64, u64)> {
-    let occ = |i: usize| inputs.get(i)?.items.first().and_then(body_of).and_then(|b| occurrence_of_body(s, b));
-    Some((occ(0)?, occ(1)?))
+/// The two references as the rules see them: their shapes, the parts they are on, and the origins a
+/// new rule is made with (`None` for a loaded constraint, which keeps its own).
+struct Refs {
+    shapes: [RefShape; 2],
+    parts: [u64; 2],
+    params: Option<[Value; 2]>,
 }
 
-/// The rules already between two occurrences: (id, name, rule, suppressed).
+/// The references: the picks, or while a loaded constraint's picks are unchanged, its own saved
+/// origins (as the Joint dialog edits a joint: a point side shows its part, which no snap can be
+/// read back from, and keeps its origin).
+fn refs(app: &SolveApp, f: &ConstrainForm, inputs: &[SelInput]) -> Option<Refs> {
+    if let Some(id) = editing(f, inputs) {
+        let j = app.session.doc.assembly.joints.iter().find(|j| j.id == id)?;
+        return Some(Refs { shapes: [RefShape::of(&j.a.snap), RefShape::of(&j.b.snap)], parts: [j.a.part(), j.b.part()], params: None });
+    }
+    let [(_, a), (_, b)] = picks(app, inputs)?;
+    Some(Refs { shapes: [shape(&a), shape(&b)], parts: [part_of(&a), part_of(&b)], params: Some([a.param, b.param]) })
+}
+
+/// The part a snap is on: the placement it names (a datum plane's or axis's as well as a face's;
+/// a part inside a copy of a sub-assembly is that copy's), 0 for the root design.
+fn part_of(s: &SnapPt) -> u64 {
+    s.param.get("occurrence").and_then(Value::as_u64).unwrap_or(0)
+}
+
+/// The two parts of `r` with rule `rule`: (the one held, the one that moves). The engine moves b,
+/// which is the second reference unless the rule wants the plane or axis first (`Fit::swap`).
+fn held_and_moving(r: &Refs, rule: Option<Constraint>) -> (u64, u64) {
+    let swap = rule.and_then(|c| c.fit(r.shapes[0], r.shapes[1])).is_some_and(|fit| fit.swap);
+    if swap { (r.parts[1], r.parts[0]) } else { (r.parts[0], r.parts[1]) }
+}
+
+/// The rules already between two parts, either way round: (id, name, rule, suppressed). A side's part
+/// is the one its geometry is on (`JointOrigin::part`), as a pick names it.
 fn between(doc: &Document, (a, b): (u64, u64)) -> Vec<(u64, String, Constraint, bool)> {
     doc.assembly
         .joints
         .iter()
-        .filter(|j| (j.a.occurrence, j.b.occurrence) == (a, b) || (j.a.occurrence, j.b.occurrence) == (b, a))
+        .filter(|j| (j.a.part(), j.b.part()) == (a, b) || (j.a.part(), j.b.part()) == (b, a))
         .filter_map(|j| Some((j.id, j.name.clone(), j.constraint?, j.suppressed)))
         .collect()
 }
@@ -168,7 +197,8 @@ fn editing(f: &ConstrainForm, inputs: &[SelInput]) -> Option<u64> {
 /// The dialog's rows; true when Enter was pressed in a value.
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs: &mut [SelInput], active: &mut usize) -> bool {
     let mut enter = false;
-    let fit = picks(app, inputs).map(|[(_, a), (_, b)]| Constraint::fitting(shape(&a), shape(&b))).unwrap_or_default();
+    let now = refs(app, f, inputs);
+    let fit = now.as_ref().map(|r| Constraint::fitting(r.shapes[0], r.shapes[1])).unwrap_or_default();
     if fit.is_empty() {
         status_line(ui, solidcraft_ui_text::tr("constrain.pick_hint"), StatusTone::Dim);
     } else {
@@ -191,19 +221,23 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
         if r.clicked()
             && let Ok(cmds) = commands(app, f, inputs)
         {
-            f.pair = pair(&app.session, inputs).or(f.pair);
+            let parts = now.as_ref().map(|r| held_and_moving(r, f.rule));
             f.error = cmds.into_iter().find_map(|(id, p)| app.run(&id, p).err());
-            // Keep the two parts: the next rule is picked on them again, from the first reference,
-            // and starts from the defaults (a gap typed for one rule is not the next one's).
-            for i in inputs.iter_mut() {
-                i.items.clear();
+            // Done: keep the two parts, and pick the next rule on them again, from the first
+            // reference and the defaults (a gap typed for one rule is not the next one's). Refused:
+            // keep the picks and values, to correct the one that was wrong.
+            if f.error.is_none() {
+                for i in inputs.iter_mut() {
+                    i.items.clear();
+                }
+                *active = 0;
+                *f = ConstrainForm { pair: parts.or(f.pair), ..start_form() };
             }
-            *active = 0;
-            *f = ConstrainForm { pair: f.pair, error: f.error.take(), ..start_form() };
         }
     }
     // The rules already between the two parts, and how free the moving one is.
-    if let Some((a, b)) = pair(&app.session, inputs).or(f.pair) {
+    let parts = refs(app, f, inputs).map(|r| held_and_moving(&r, f.rule)).or(f.pair);
+    if let Some((a, b)) = parts {
         let rules = between(&app.session.doc, (a, b));
         if !rules.is_empty() {
             ui.label(egui::RichText::new(solidcraft_ui_text::tr("constrain.between")).strong());
@@ -239,7 +273,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
             load(app, f, inputs, active, id);
         }
         // With a rule previewed, the preview's own reply; else the saved design.
-        let (text, warn) = match app.preview.placed.as_ref().filter(|_| picks(app, inputs).is_some()) {
+        let (text, warn) = match app.preview.placed.as_ref().filter(|_| refs(app, f, inputs).is_some()) {
             Some(reply) => freedom(&app.session.doc, reply, b),
             None => saved_freedom(app, f, b),
         };
@@ -254,14 +288,20 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
 
 /// The command OK (and Apply) runs: a new rule, or a change to the one loaded from the list.
 pub fn commands(app: &SolveApp, f: &ConstrainForm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
-    let [(_, a), (_, b)] = picks(app, inputs).ok_or_else(|| solidcraft_ui_text::tr("constrain.pick_hint").to_string())?;
+    let r = refs(app, f, inputs).ok_or_else(|| solidcraft_ui_text::tr("constrain.pick_hint").to_string())?;
     // The rule chosen, or the likeliest the picks fit (as the Type row shows before it is drawn).
-    let fit = Constraint::fitting(shape(&a), shape(&b));
-    let rule = f.rule.filter(|r| fit.contains(r)).or(fit.first().copied());
+    let fit = Constraint::fitting(r.shapes[0], r.shapes[1]);
+    let rule = f.rule.filter(|c| fit.contains(c)).or(fit.first().copied());
     let rule = rule.ok_or_else(|| solidcraft_ui_text::tr("constrain.none_fit").to_string())?;
-    let mut p = match editing(f, inputs) {
-        Some(id) => json!({"constraint": id, "type": rule.name()}),
-        None => json!({"type": rule.name(), "a": a.param, "b": b.param}),
+    let mut p = match (editing(f, inputs), r.params) {
+        // A changed rule names its type; an unchanged one doesn't, as a new type sets the facing
+        // again from the rule (a flipped mate whose gap is edited stays flipped).
+        (Some(id), _) => {
+            let was = app.session.doc.assembly.joints.iter().find(|j| j.id == id).and_then(|j| j.constraint);
+            if was == Some(rule) { json!({"constraint": id}) } else { json!({"constraint": id, "type": rule.name()}) }
+        }
+        (None, Some([a, b])) => json!({"type": rule.name(), "a": a, "b": b}),
+        (None, None) => return Err(solidcraft_ui_text::tr("constrain.pick_hint").to_string()),
     };
     if f.flip {
         p["flip"] = json!(true);

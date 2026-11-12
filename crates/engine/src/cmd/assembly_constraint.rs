@@ -63,7 +63,7 @@ fn needs(c: Constraint) -> &'static str {
         Constraint::Distance => "two planar faces, or a planar face and a point",
         Constraint::Concentric => "two round faces, round edges or axes",
         Constraint::Insert => "two round edges",
-        Constraint::Parallel | Constraint::Perpendicular | Constraint::Angle => "two faces or axes",
+        Constraint::Parallel | Constraint::Perpendicular | Constraint::Angle => "two faces, edges or axes (a point has no direction)",
         Constraint::Tangent => "a planar face and a round face",
         Constraint::PointOnAxis => "a round face or edge (its axis) or an axis, and a point",
     }

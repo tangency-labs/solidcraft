@@ -497,6 +497,11 @@ impl Constraint {
         let facing = |kind| Some(Fit { kind, flip: None, swap: false });
         // A line: a round face's or edge's axis, or an axis itself.
         let axial = |s: RefShape| matches!(s, Round | Axis);
+        // A position: a point, or an edge's middle.
+        let spot = |s: RefShape| matches!(s, Point | Edge);
+        // An orientation rule turns b by both references' directions: a point has none (its frame's
+        // z is only a default), so it fits none of them.
+        let directed = a != Point && b != Point;
         // A rule between one plane or axis and something else: the plane or axis on side a.
         let onto = |kind, want: &dyn Fn(RefShape) -> bool, other_ok: &dyn Fn(RefShape) -> bool| {
             if want(a) && other_ok(b) {
@@ -511,14 +516,14 @@ impl Constraint {
             (Constraint::Mate, Plane, Plane) => fixed(JointKind::Planar, false),
             (Constraint::Flush, Plane, Plane) => fixed(JointKind::Planar, true),
             (Constraint::Distance, Plane, Plane) => facing(JointKind::Planar),
-            (Constraint::Distance, ..) => onto(JointKind::PointOnPlane, &|s| s == Plane, &|s| matches!(s, Round | Point)),
+            (Constraint::Distance, ..) => onto(JointKind::PointOnPlane, &|s| s == Plane, &|s| s == Round || spot(s)),
             (Constraint::Concentric, ..) if axial(a) && axial(b) => facing(JointKind::Cylindrical),
             (Constraint::Insert, Round, Round) => facing(JointKind::Revolute),
-            (Constraint::Parallel, ..) => facing(JointKind::Parallel),
-            (Constraint::Perpendicular, ..) => fixed(JointKind::Perpendicular, false),
-            (Constraint::Angle, ..) => fixed(JointKind::Angle, false),
+            (Constraint::Parallel, ..) if directed => facing(JointKind::Parallel),
+            (Constraint::Perpendicular, ..) if directed => fixed(JointKind::Perpendicular, false),
+            (Constraint::Angle, ..) if directed => fixed(JointKind::Angle, false),
             (Constraint::Tangent, ..) => onto(JointKind::LineOnPlane, &|s| s == Plane, &|s| s == Round),
-            (Constraint::PointOnAxis, ..) => onto(JointKind::PointOnLine, &axial, &|s| s == Point),
+            (Constraint::PointOnAxis, ..) => onto(JointKind::PointOnLine, &axial, &spot),
             _ => None,
         }
     }
@@ -546,10 +551,13 @@ pub enum RefShape {
     Plane,
     /// A round face's or edge's centre and axis.
     Round,
-    /// A point (a vertex, an edge, a sketch point): its position.
+    /// A point (a vertex, a sketch point): its position only.
     Point,
     /// A datum or construction axis: a line, with no rim or radius.
     Axis,
+    /// A straight or curved edge that is not round: its middle (or a corner), and the direction of
+    /// the face it bounds.
+    Edge,
 }
 
 impl RefShape {
@@ -559,7 +567,8 @@ impl RefShape {
             Snap::FaceCenter { .. } | Snap::Frame { .. } | Snap::Plane { .. } => RefShape::Plane,
             Snap::Axis { .. } => RefShape::Axis,
             Snap::CircleCenter { .. } => RefShape::Round,
-            Snap::Point { .. } | Snap::Edge { .. } => RefShape::Point,
+            Snap::Edge { .. } => RefShape::Edge,
+            Snap::Point { .. } => RefShape::Point,
         }
     }
 }
