@@ -36,7 +36,7 @@ pub(super) type KeptSection = (ScrewOffsetSection, [f64; 2]);
 /// It also remembers the latest checked turns and points ([`Memo`]): each is a pure
 /// function of the definition and its exact input bits, kept only when it succeeded, so a
 /// hit returns what the check computes afresh.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct CheckedCache {
     // (boxed: the section is large, and a definition is kept in every swept face)
     section: OnceLock<Option<Box<KeptSection>>>,
@@ -48,6 +48,18 @@ pub(super) struct CheckedCache {
     points: Memo<[u64; 5], ()>,
     /// [`MapPowers`], formed on first use.
     map_powers: OnceLock<MapPowers>,
+}
+
+impl Default for CheckedCache {
+    fn default() -> Self {
+        Self {
+            section: OnceLock::new(),
+            spans: OnceLock::new(),
+            turns: Memo::growing_to(TURN_MEMO_LARGEST),
+            points: Memo::growing_to(POINT_MEMO_LARGEST),
+            map_powers: OnceLock::new(),
+        }
+    }
 }
 
 /// The checked powers [`powi`]`(b, n)`, `n <= 4`, of the map's two scales `b`, kept with
@@ -62,8 +74,15 @@ struct MapPowers {
 /// How many powers of each map scale are kept: orders `0..=4`, the partials' bound.
 const MAP_POWERS: usize = 5;
 
-/// Slots of a [`Memo`].
+/// Slots of a [`Memo`] when its table is first made.
 const MEMO_SLOTS: usize = 1024;
+/// The most slots a [`Memo`]'s table grows to: the turns' (larger entries) and the points'.
+const TURN_MEMO_LARGEST: usize = 8192;
+const POINT_MEMO_LARGEST: usize = 16384;
+/// A [`Memo`]'s table grows (fourfold, up to its largest) once it has kept this many times
+/// its slots: a definition evaluated that much meets its earlier points again further
+/// apart than the table spans (a curve's tessellation asked again by another cache).
+const MEMO_GROWTH_FILLS: usize = 4;
 
 /// The latest results of a pure function of exact bits, at most one per slot of a table
 /// filled on first use: a key's slot is chosen from its bits alone (never an address), and a
@@ -71,18 +90,27 @@ const MEMO_SLOTS: usize = 1024;
 /// key, so it is the result it gives again; which keys are kept never changes an answer,
 /// only how often it is computed. The evaluator's own refusals are never kept. The table is
 /// locked for each look-up, so a definition shared between threads stays consistent; a
-/// poisoned lock is a miss.
+/// poisoned lock is a miss. A table that has kept [`MEMO_GROWTH_FILLS`] times its slots is
+/// replaced by an empty one four times larger, up to `largest` slots, so a definition
+/// evaluated little keeps a small table.
 pub(super) struct Memo<K, V> {
-    slots: Mutex<Option<Box<Slots<K, V>>>>,
+    slots: Mutex<Option<MemoTable<K, V>>>,
+    largest: usize,
 }
 
-/// A [`Memo`]'s table: a key and its result per slot, or nothing yet.
-type Slots<K, V> = [Option<(K, V)>; MEMO_SLOTS];
+/// A [`Memo`]'s table: a key and its result per slot, or nothing yet, and how many results
+/// it has kept.
+struct MemoTable<K, V> {
+    entries: Vec<Option<(K, V)>>,
+    kept: usize,
+}
 
-impl<K, V> Default for Memo<K, V> {
-    fn default() -> Self {
+impl<K, V> Memo<K, V> {
+    /// An empty memo whose table grows to at most `largest` slots (a power of two).
+    fn growing_to(largest: usize) -> Self {
         Self {
             slots: Mutex::new(None),
+            largest,
         }
     }
 }
@@ -93,29 +121,47 @@ impl<K, V> std::fmt::Debug for Memo<K, V> {
     }
 }
 
-/// The slot of a key whose bits are `bits` (a multiplicative mix, deterministic).
-fn memo_slot(bits: &[u64]) -> usize {
-    let h = bits.iter().fold(0x243f_6a88_85a3_08d3_u64, |h, &b| {
+/// The hash of a key whose bits are `bits` (a multiplicative mix, deterministic); its top
+/// bits, the best mixed, choose the slot ([`memo_index`]).
+fn memo_slot(bits: &[u64]) -> u64 {
+    bits.iter().fold(0x243f_6a88_85a3_08d3_u64, |h, &b| {
         (h ^ b).wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(29)
-    });
-    // the top bits are the best mixed; the mask keeps the slot below MEMO_SLOTS
-    usize::try_from(h >> 48).map_or(0, |slot| slot & (MEMO_SLOTS - 1))
+    })
+}
+
+/// The slot of the hash `h` in a table of `len` slots (a power of two, at most `2^32`).
+fn memo_index(h: u64, len: usize) -> usize {
+    usize::try_from(h >> 32).map_or(0, |slot| slot & len.saturating_sub(1))
 }
 
 impl<K: Copy + PartialEq, V: Copy> Memo<K, V> {
-    fn get(&self, key: K, slot: usize) -> Option<V> {
+    fn get(&self, key: K, hash: u64) -> Option<V> {
         let slots = self.slots.lock().ok()?;
-        match slots.as_ref()?.get(slot)? {
+        let table = slots.as_ref()?;
+        match table.entries.get(memo_index(hash, table.entries.len()))? {
             Some((k, v)) if *k == key => Some(*v),
             _ => None,
         }
     }
 
-    fn put(&self, key: K, slot: usize, value: V) {
+    fn put(&self, key: K, hash: u64, value: V) {
         if let Ok(mut slots) = self.slots.lock() {
-            let table = slots.get_or_insert_with(|| Box::new([None; MEMO_SLOTS]));
-            if let Some(entry) = table.get_mut(slot) {
+            let table = slots.get_or_insert_with(|| MemoTable {
+                entries: vec![None; MEMO_SLOTS],
+                kept: 0,
+            });
+            let len = table.entries.len();
+            if table.kept >= MEMO_GROWTH_FILLS * len && len < self.largest {
+                let grown = (4 * len).min(self.largest);
+                *table = MemoTable {
+                    entries: vec![None; grown],
+                    kept: 0,
+                };
+            }
+            let len = table.entries.len();
+            if let Some(entry) = table.entries.get_mut(memo_index(hash, len)) {
                 *entry = Some((key, value));
+                table.kept += 1;
             }
         }
     }
@@ -1477,6 +1523,34 @@ mod tests {
         moved.swap_map();
         assert!(moved.checked_cache.spans.get().is_none());
         assert!(moved.checked_cache.section.get().is_none());
+    }
+
+    /// A memo's table grows fourfold once it has kept four times its slots, up to its
+    /// largest, starting empty each time; a hit is always the value put for that key.
+    #[test]
+    fn a_memo_table_grows_to_its_largest() {
+        let memo = Memo::<u64, u64>::growing_to(4 * MEMO_SLOTS);
+        let len = |m: &Memo<u64, u64>| m.slots.lock().unwrap().as_ref().map(|t| t.entries.len());
+        assert_eq!(len(&memo), None);
+        let put = |key: u64| memo.put(key, memo_slot(&[key]), key.wrapping_mul(3));
+        for key in 0..(MEMO_GROWTH_FILLS * MEMO_SLOTS) as u64 {
+            put(key);
+        }
+        assert_eq!(len(&memo), Some(MEMO_SLOTS));
+        put(u64::MAX);
+        assert_eq!(len(&memo), Some(4 * MEMO_SLOTS));
+        assert_eq!(
+            memo.get(u64::MAX, memo_slot(&[u64::MAX])),
+            Some(u64::MAX.wrapping_mul(3))
+        );
+        for key in 0..(64 * MEMO_SLOTS) as u64 {
+            put(key);
+            if let Some(value) = memo.get(key, memo_slot(&[key])) {
+                assert_eq!(value, key.wrapping_mul(3));
+            }
+        }
+        assert_eq!(len(&memo), Some(4 * MEMO_SLOTS));
+        assert_eq!(memo.get(7, memo_slot(&[8])), None);
     }
 
     /// The kept map powers are [`powi`]'s, bit for bit, on both scales and every order,
