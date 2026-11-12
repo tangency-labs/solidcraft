@@ -12584,6 +12584,94 @@ mod tests {
         }
     }
 
+    /// #15079: the Blender preset reuses the Fusion gesture mapping with the Shift modifier
+    /// inverted: bare two fingers orbit and Shift + two fingers pans.
+    #[test]
+    fn blender_two_finger_scroll_orbits_and_shift_scroll_pans() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.nav = "blender".into();
+        // The orbit turns about the origin, so the expected camera is exact (#14651 moved the
+        // view's centre pivot to the middle of the view, which moves the camera's target).
+        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        h.call("ui.move", json!({"x":800,"y":500}));
+        let gesture = |phase, modifiers| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(20.0, -10.0),
+            modifiers,
+            phase,
+        };
+        // One gesture: the modifier decides at every move, the other way round from Fusion.
+        h.app.synthetic.push(gesture(egui::TouchPhase::Start, egui::Modifiers::NONE));
+        h.frame();
+        for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT, egui::Modifiers::NONE] {
+            let before = h.app.cam;
+            h.app.synthetic.push(gesture(egui::TouchPhase::Move, modifiers));
+            h.frame();
+            assert_eq!(h.app.cam.half_height(), before.half_height(), "{modifiers:?}: must not zoom");
+            if modifiers.shift {
+                assert_eq!(h.app.cam.back(), before.back(), "{modifiers:?}: must not orbit");
+                assert_ne!(h.app.cam.target, before.target, "{modifiers:?}: must pan");
+            } else {
+                let mut expected = before;
+                expected.orbit_about(20.0, -10.0, Vec3::ZERO);
+                assert_eq!(h.app.cam, expected, "{modifiers:?}: must orbit, without snapping");
+            }
+        }
+        h.app.synthetic.push(gesture(egui::TouchPhase::End, egui::Modifiers::NONE));
+        h.frame();
+        let after = h.app.cam;
+        h.frames(90);
+        assert_eq!(h.app.cam, after, "the orbit must not drift once input stops");
+    }
+
+    /// #15079: only Blender swaps the Fusion mapping. The other presets still pan with two
+    /// fingers, and Blender with two-finger panning off zooms like the wheel.
+    #[test]
+    fn blender_trackpad_scroll_leaves_other_presets_and_legacy_scroll_alone() {
+        for preset in crate::prefs::NAV_PRESETS.iter().map(|preset| preset.id) {
+            if preset == "blender" {
+                continue;
+            }
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.nav = preset.into();
+            h.call("ui.move", json!({"x":800,"y":500}));
+            let before = h.app.cam;
+            for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
+                h.app.synthetic.push(egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: vec2(20.0, -10.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase,
+                });
+                h.frame();
+            }
+            assert_eq!(h.app.cam.back(), before.back(), "{preset}: two fingers must not orbit");
+            if h.app.preferences.trackpad_pans() {
+                assert_ne!(h.app.cam.target, before.target, "{preset}: two fingers must pan");
+                assert_eq!(h.app.cam.half_height(), before.half_height(), "{preset}: must not zoom");
+            }
+        }
+        // With two-finger panning off the scroll zooms like the wheel, in Blender too.
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.nav = "blender".into();
+        h.app.preferences.trackpad_pan = false;
+        h.call("ui.move", json!({"x":800,"y":500}));
+        let height = h.app.cam.half_height();
+        for phase in [egui::TouchPhase::Start, egui::TouchPhase::Move, egui::TouchPhase::End] {
+            h.app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, 120.0),
+                modifiers: egui::Modifiers::NONE,
+                phase,
+            });
+            h.frame();
+        }
+        assert!((h.app.cam.half_height() - height * (-0.18_f64).exp()).abs() < 1e-6, "the legacy scroll must zoom");
+    }
+
     #[test]
     fn fusion_shift_trackpad_respects_orbit_centre_and_rejects_invalid_motion() {
         let mut h = crate::scenario::Harness::new();

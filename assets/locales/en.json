@@ -6356,7 +6356,7 @@
   "ui.top_radius": "Top radius",
   "ui.torus": "Torus",
   "ui.total_angle": "Total angle",
-  "ui.trackpad_pan_tip": "Two-finger scroll pans; in Fusion, Shift + two fingers orbits. Off: scroll zooms. Mouse wheel and pinch zoom; thumb wheel pans sideways.",
+  "ui.trackpad_pan_tip": "Two-finger scroll pans; in Fusion, Shift + two fingers orbits; in Blender, two fingers orbit and Shift + two fingers pans. Off: scroll zooms. Mouse wheel and pinch zoom; thumb wheel pans sideways.",
   "ui.trim": "Trim",
   "ui.turn_up_axis": "Turn Up Axis",
   "ui.twist": "Twist",
