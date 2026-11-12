@@ -362,22 +362,23 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
 /// `blend_failure`: a failure `e` of the session `s` as SolidCraft's error. The refusals are
 /// ops' ([`solidcore_ops::blend::session_refusal`], one implementation for ops and SolidCraft),
 /// taken as they are: a blend too large with the largest size that builds ([`Error::TooLarge`]),
-/// a setback too short for its corner's fill ([`Error::SetbackTooShort`]), a blend larger than
-/// its faces allow, unsized ([`Error::NoRoom`]), a vertex no corner kind handles
-/// ([`Error::CornerUnsupported`]), and a rail leaving its face without the cliff overflow fix
-/// ([`Error::Unsupported`]: the fork decides between building it over the cliff and refusing
-/// it, so an answer here is the fork's only by chance). `corner`: `CreateFilletCorners` noted
-/// a vertex it made no corner for, which stands for whatever a later step noted. `replaced`:
-/// the session marks the corners' patches for another patch to replace, so a setback named is
-/// only what solidcore's corner needs. A failure that is no refusal of the blend passes on as
-/// solidcore's ([`status`]). A sized refusal's point is read once the session lets the body go
-/// ([`solidcore_ops::blend::SessionRefusal::on`]).
+/// a setback too short ([`Error::SetbackTooShort`], `builds` only where the corner fill's test
+/// named it), a blend larger than its faces allow, unsized ([`Error::NoRoom`]), a vertex no
+/// corner kind handles ([`Error::CornerUnsupported`]), and a rail leaving its face without the
+/// cliff overflow fix ([`Error::Unsupported`]: the fork decides between building it over the
+/// cliff and refusing it, so an answer here is the fork's only by chance). `corner`:
+/// `CreateFilletCorners` noted a vertex it made no corner for, which stands for a later step's
+/// failure. `replaced`: the session marks the corners' patches for another patch to replace,
+/// so a setback named is only what solidcore's corner needs. A failure that is no refusal of
+/// the blend, including one solidcore itself types as not supported or not ported, passes on
+/// as solidcore's ([`status`]). A sized refusal's point is read once the session lets the body
+/// go ([`solidcore_ops::blend::SessionRefusal::on`]).
 fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool, replaced: bool, chamfer: bool) -> Result<SessionRefusal> {
     solidcore_ops::blend::session_refusal(s, e, SessionCall { corner, patches: replaced, chamfer }).map_err(status)
 }
 
 /// An ops refusal of the session ([`blend_failure`]) as SolidCraft's error, its fields as they are.
-pub(super) fn refusal(e: solidcore_ops::Error) -> Error {
+fn refusal(e: solidcore_ops::Error) -> Error {
     use solidcore_ops::Error as Ops;
     match e {
         Ops::TooLarge { size, kind, at, why } => Error::TooLarge { size, kind, at, why },

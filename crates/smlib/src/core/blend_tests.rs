@@ -8,7 +8,7 @@ use std::f64::consts::PI;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use super::blend::{Corners, blend, blend_dropping, blend_holes, chamfer_sides, fillet_variable, refusal};
+use super::blend::{Corners, blend, blend_dropping, blend_holes, chamfer_sides, fillet_variable};
 use super::boolean::boolean;
 use super::{Body, counts, make_box, make_cylinder, to_arrays, volume};
 use crate::export::native;
@@ -361,7 +361,8 @@ fn a_blend_too_large_is_refused_with_the_largest_size_that_fits() {
 /// edges of a narrow end, a cube's corner. The collapsed offset's is solidcraft-kernel's
 /// `a_ball_as_wide_as_the_round_it_rolls_on_is_refused_saying_why`. ops' thin wall
 /// (`BreaksThrough`) builds with SolidCraft's fixes, and the rest reach SolidCraft only from
-/// bodies these shapes do not make: [`every_room_reason_is_ops_own`] covers them.
+/// bodies these shapes do not make. These held before the refusals were ops' too: the case
+/// pins that they still do.
 #[test]
 fn each_room_reason_reaches_the_refusal_as_ops_gives_it() {
     use crate::{FitKind as K, RoomReason as R};
@@ -434,43 +435,83 @@ fn each_room_reason_reaches_the_refusal_as_ops_gives_it() {
     }
 }
 
-/// Every reason ops gives a blend too large reaches SolidCraft's [`Error::TooLarge`] unchanged,
-/// with its size, kind and point: SolidCraft's reasons are ops' own (`crate::RoomReason`), so a
-/// reason ops adds reaches SolidCraft with nothing to map (the match fails to compile until it
-/// has a row here).
+/// The 4 mm rib's two top edges chamfered 3 mm along the top at 45 degrees (`chamfer_sides`):
+/// the setbacks are equal, 3 on each face, so the chamfer is the equal chamfer of
+/// `a_blend_too_large_is_refused_with_the_largest_size_that_fits`, whose bands meet at 2.
+/// Refused naming 2 as a distance (the kernel's fit read through the chamfer's definition,
+/// `FilletSession::chamfer_fit`); the named distance builds and 2.01 is refused. (Before the
+/// refusals were ops', only an equal-distance chamfer was sized: this one was a bare no room.)
 #[test]
-fn every_room_reason_is_ops_own() {
-    use solidcore_ops::RoomReason as R;
-    for why in [
-        R::BallDoesNotFit,
-        R::RailLeavesFace,
-        R::FaceConsumed,
-        R::BandsOverlap,
-        R::BallsFold,
-        R::OffsetFolds,
-        R::CutsThePart,
-        R::BreaksThrough,
-        R::OffsetCollapses,
-        R::CornersTakeWholeEdge,
-        R::RunsIntoMaterial,
-    ] {
-        match why {
-            R::BallDoesNotFit
-            | R::RailLeavesFace
-            | R::FaceConsumed
-            | R::BandsOverlap
-            | R::BallsFold
-            | R::OffsetFolds
-            | R::CutsThePart
-            | R::BreaksThrough
-            | R::OffsetCollapses
-            | R::CornersTakeWholeEdge
-            | R::RunsIntoMaterial => {}
-        }
-        let ops = solidcore_ops::Error::TooLarge { size: 2.5, kind: solidcore_ops::FitKind::Chord, at: Some([1.0, 2.0, 3.0]), why: Some(why) };
-        let want: crate::RoomReason = why;
-        assert_eq!(refusal(ops), Error::TooLarge { size: 2.5, kind: crate::FitKind::Chord, at: Some([1.0, 2.0, 3.0]), why: Some(want) });
-    }
+fn a_distance_angle_chamfer_with_equal_setbacks_too_large_names_its_distance() {
+    const RIB: Shape = Shape::Box([0.0; 3], [40.0, 4.0, 20.0]);
+    const TOP: [[f64; 3]; 2] = [[20.0, 0.0, 20.0], [20.0, 4.0, 20.0]];
+    let sides = |d: f64| chamfer_sides(&RIB.core(), &TOP, TOL, d, ChamferSecond::Angle(PI / 4.0), [0.0, 0.0, 1.0]);
+    let e = timed("angle_fit", move || sides(3.0).map(|_| ()).unwrap_err());
+    let Error::TooLarge { size, kind: crate::FitKind::Distance, at: Some(_), why: Some(crate::RoomReason::BandsOverlap) } = e else {
+        panic!("{e:?}")
+    };
+    assert!((size - 2.0).abs() < 1e-9, "{size}");
+    timed("angle_fit_builds", move || sides(size).unwrap());
+    let above = timed("angle_fit_above", move || sides(2.01).map(|_| ()).unwrap_err());
+    assert!(matches!(above, Error::TooLarge { kind: crate::FitKind::Distance, .. }), "{above:?}");
+}
+
+/// A setback shorter than where the rails of its corner's rounds cross: the 60 x 40 x 20 box's
+/// corner (60, 40, 20) with its three edges rounded 5, set back 1. The kernel refuses it naming
+/// 5, the farthest the rails cross an edge from the vertex (solidcore's
+/// `a_setback_asked_that_does_not_fit_or_stops_short_is_refused`); a setback of 5 passes that
+/// test only, so it is not named as building (`builds: false`). The kernel's 8 builds. (Before
+/// the refusals were ops', this refusal was not sized.)
+#[test]
+fn a_setback_short_of_where_the_rails_cross_names_the_least() {
+    const BOX: Shape = Shape::Box([0.0; 3], [60.0, 40.0, 20.0]);
+    const EDGES: [[f64; 3]; 3] = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
+    let set_back = |s: f64| blend(&BOX.core(), Blend::Round, &EDGES, &[5.0], TOL, &[[60.0, 40.0, 20.0]], &[s], Corners::Filled);
+    let e = timed("rails_cross", move || set_back(1.0).map(|_| ()).unwrap_err());
+    let Error::SetbackTooShort { least, at: Some(at), builds: false } = e else { panic!("{e:?}") };
+    assert!((least - 5.0).abs() < 1e-9, "{least}");
+    assert_eq!(at, [60.0, 40.0, 20.0]);
+    timed("rails_cross_builds", move || set_back(8.0).unwrap());
+}
+
+/// A knife edge (the cusp of `knife_edge_chamfers`' profile: an arc of radius 21 running out
+/// tangent into the top line) chamfered 200: refused naming the distance 21 less the fit margin
+/// (a thousand edge tolerances, 20.99). A knife edge's chamfer has no wedge, so its solver
+/// keeps no chamfer definition; its offsets are its distance (the chord between the contacts
+/// of the ball of that radius), so the radius that fits is the distance that fits
+/// (`FilletSession::chamfer_fit`). The named distance builds the closed form's chamfer:
+/// the triangle flat contact, tip, wall contact less the wall's circular segment. (Larger
+/// chamfers between 21 and 175 build too: the fit is a size that builds, the ball's contact
+/// still on the arc, not the largest.)
+#[test]
+fn a_knife_edge_chamfer_too_large_names_its_distance() {
+    use super::sweep::extrude;
+    use crate::sweeps::{Curve, DraftCorner};
+    const R: f64 = 21.0;
+    const TIP: f64 = 62.0 + 1.0 / 6.0;
+    const H: f64 = 10.0;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line { start: [a[0], a[1], 0.0], end: [b[0], b[1], 0.0] };
+    let profile = [
+        line([0.0, 0.0], [0.0, -R]),
+        line([0.0, -R], [TIP - R, -R]),
+        Curve::Arc { center: [TIP, -R, 0.0], axis: [0.0, 0.0, -1.0], reference: [1.0, 0.0, 0.0], radius: R, start: PI, end: 1.5 * PI },
+        line([TIP, 0.0], [0.0, 0.0]),
+    ];
+    let part = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
+    let again = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
+    let before = (TIP - R) * R * H + R * R * (1.0 - PI / 4.0) * H;
+    let tip = [TIP, 0.0, H / 2.0];
+    let e = timed("knife_fit", move || blend(&again, Blend::Chamfer, &[tip], &[200.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
+    let Error::TooLarge { size: d, kind: crate::FitKind::Distance, at: Some(at), .. } = e else { panic!("{e:?}") };
+    assert!((d - 20.99).abs() < 1e-9, "{d}");
+    assert!((0..3).all(|i| (at[i] - tip[i]).abs() < 1e-9), "{at:?}");
+    let cut = timed("knife_fit_builds", move || blend(&part, Blend::Chamfer, &[tip], &[d], TOL, &[], &[], Corners::Filled).unwrap());
+    let flat = TIP - (4.0 * R * d).sqrt();
+    let wy = -R + (R - d) * R / (R + d);
+    let b = ((R - d) / (R + d)).acos();
+    let removed = (0.5 * ((TIP - flat) * wy).abs() - 0.5 * R * R * (b - b.sin())) * H;
+    let v = volume(&cut, 1e-8).unwrap();
+    assert!((v - (before - removed)).abs() < 1e-9 * v, "{v} vs {}", before - removed);
 }
 
 /// A cliff overflow the fork refuses too (`fixes.fillet_cliff_overflow`, solidcore#960): the

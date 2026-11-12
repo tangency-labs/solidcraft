@@ -263,8 +263,8 @@ pub enum Error {
     /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
     /// `BlendRefusal::SetbackTooShort`, whose `why` says which).
     SetbackTooShort {
-        /// The corner's vertex index.
-        vertex: usize,
+        /// The corner's vertex index; `None` where the vertex is no longer the body's.
+        vertex: Option<usize>,
         /// The least setback.
         least: f64,
         /// The corner's point, where the kernel's session notes it.
@@ -664,9 +664,18 @@ impl std::fmt::Display for Error {
                 f,
                 "the round of edge {edge} is too small to change the part: the smallest is {smallest}"
             ),
-            Error::SetbackTooShort { vertex, least, .. } => {
+            Error::SetbackTooShort {
+                vertex: Some(vertex),
+                least,
+                ..
+            } => {
                 write!(f, "the setback at vertex {vertex} is shorter than {least}")
             }
+            Error::SetbackTooShort {
+                vertex: None,
+                least,
+                ..
+            } => write!(f, "the setback at a corner is shorter than {least}"),
             Error::SetbackTooLong { vertex, largest } => {
                 write!(f, "the setback at vertex {vertex} does not fit: below {largest} fits")
             }

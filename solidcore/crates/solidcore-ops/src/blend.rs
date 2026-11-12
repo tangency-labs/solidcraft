@@ -292,7 +292,8 @@ const RAIL_LEAVES_FACE: &str =
 pub struct SessionCall {
     /// The corners step noted a vertex no corner kind handles (`SM_FILERR_CORNER_UNSUPPORTED`
     /// in the session's error info after `create_corners` succeeded): the corner it could not
-    /// make stands for any later failure.
+    /// make stands for a later step's failure, other than one the kernel itself types as not
+    /// supported or not ported (which is its own cause).
     pub corner: bool,
     /// The session marks the set-back corners' patches for another patch to replace
     /// (`set_mark_corner_patches`): the kernel's fill is then not the corner, so a setback it
@@ -326,15 +327,23 @@ impl SessionRefusal {
 /// the refusal it stands for, for an application that drives the session itself: one
 /// implementation of the refusal for ops and its callers.
 ///
-/// - A setback too short for its corner's fill (the kernel's `BlendRefusal::SetbackTooShort`
-///   from the fill's convex or concave test) is [`Error::SetbackTooShort`] with the least
-///   setback, the corner's point and whether that setback builds (not where `call.patches`).
+/// - A setback too short (the kernel's `BlendRefusal::SetbackTooShort`) is
+///   [`Error::SetbackTooShort`] with the least setback, the corner's vertex and point, and
+///   whether that setback builds: only where the corner fill's convex or concave test named
+///   it and no other patch replaces the fill (`call.patches`). A setback short of where the
+///   rails cross names one that passes that test only, so it does not build.
+/// - A failure the kernel itself types as not supported or not ported
+///   (`SolidError::Unsupported`, `SolidError::Unported`) is its own cause: it is given back
+///   (below), whatever an earlier step of the session noted (no room, a fit, an unsupported
+///   vertex), since a size or corner noted before it is not what failed.
 /// - A blend too large that the kernel sizes (`SolidError::FilletRefused`, or the session's
 ///   fit under `SM_FILERR_NO_ROOM`) is [`Error::TooLarge`] with the size, what it sizes, and
 ///   the kernel's reason ([`RoomReason`]), unless the corners step noted an unsupported vertex
-///   or the rail leaves its face; an equal chamfer's fit by radius as its distance, or
-///   [`Error::NoRoom`] where it cannot be read so.
-/// - Otherwise, a vertex no corner kind handles is [`Error::CornerUnsupported`]; a blend whose
+///   or the rail leaves its face; a chamfer's fit by radius whose offsets are equal as its
+///   distance ([`FilletSession::chamfer_fit`], a knife edge's included), or [`Error::NoRoom`]
+///   where it cannot be read so.
+/// - Otherwise, a vertex no corner kind handles (noted by the corners step, `call.corner`, or
+///   by the failing step) is [`Error::CornerUnsupported`]; a blend whose
 ///   rail leaves its face without the cliff overflow fix is [`Error::Unsupported`]; any other
 ///   blend too large is [`Error::NoRoom`].
 ///
@@ -349,18 +358,22 @@ pub fn session_refusal(
 ) -> std::result::Result<SessionRefusal, SolidError> {
     let info = s.error_info();
     if let SolidError::BlendRefused {
-        refusal:
-            BlendRefusal::SetbackTooShort {
-                vertex,
-                least,
-                why: SetbackTooShortWhy::ConvexFill | SetbackTooShortWhy::ConcaveFill,
-            },
+        refusal: BlendRefusal::SetbackTooShort { vertex, least, why },
         ..
     } = e
     {
-        if let Some(error) = setback_too_short(s, vertex, least, true, call.patches) {
-            return Ok(SessionRefusal { error, edge: None });
-        }
+        let fill = matches!(
+            why,
+            SetbackTooShortWhy::ConvexFill | SetbackTooShortWhy::ConcaveFill
+        );
+        let vertex = s.target().vertex_list().iter().position(|&x| x == vertex);
+        let error = Error::SetbackTooShort {
+            vertex,
+            least,
+            at: info.location.map(|p| [p.x, p.y, p.z]),
+            builds: fill && !call.patches,
+        };
+        return Ok(SessionRefusal { error, edge: None });
     }
     let (fit, reason) = match &e {
         SolidError::FilletRefused { fit, reason, .. } => {
@@ -402,12 +415,12 @@ pub fn session_refusal(
     blend_failure_unsized(info, e, call.corner).map(|error| SessionRefusal { error, edge: None })
 }
 
-/// A failure of the session as the operation's: the kernel's refusal of an edge or a corner
-/// by its entity's index ([`refused`]), else [`session_refusal`]'s, the kernel's failures
-/// mapped by [`status`].
+/// A failure of the session as the operation's: the kernel's refusal of an edge, or of a
+/// corner's setback as too long, by its entity's index ([`refused`]), else
+/// [`session_refusal`]'s, the kernel's failures mapped by [`status`].
 fn blend_failure(s: &FilletSession<'_>, e: SolidError, call: SessionCall) -> SessionRefusal {
     if let SolidError::BlendRefused { refusal, .. } = &e {
-        if let Some(error) = refused(s, refusal, call.patches) {
+        if let Some(error) = refused(s, refusal) {
             return SessionRefusal { error, edge: None };
         }
     }
@@ -417,27 +430,10 @@ fn blend_failure(s: &FilletSession<'_>, e: SolidError, call: SessionCall) -> Ses
     })
 }
 
-/// [`Error::SetbackTooShort`] at the session's corner `v`, `fill` the fill's test refusing it
-/// (else the rails'); `None` for a vertex the session's body does not hold.
-fn setback_too_short(
-    s: &FilletSession<'_>,
-    v: VertexId,
-    least: f64,
-    fill: bool,
-    patches: bool,
-) -> Option<Error> {
-    let vertex = s.target().vertex_list().iter().position(|&x| x == v)?;
-    Some(Error::SetbackTooShort {
-        vertex,
-        least,
-        at: s.error_info().location.map(|p| [p.x, p.y, p.z]),
-        builds: fill && !patches,
-    })
-}
-
-/// The kernel's refusal of an edge or a corner as the operation's, its entities by their
-/// indices in the session's body; `None` for an entity that body does not hold.
-fn refused(s: &FilletSession<'_>, refusal: &BlendRefusal, patches: bool) -> Option<Error> {
+/// The kernel's refusal of an edge, or of a corner's setback as too long, as the operation's,
+/// its entities by their indices in the session's body; `None` for an entity that body does
+/// not hold, and for a setback too short ([`session_refusal`]'s).
+fn refused(s: &FilletSession<'_>, refusal: &BlendRefusal) -> Option<Error> {
     let b = s.target();
     let edge = |e: EdgeId| b.edge_list().iter().position(|&x| x == e);
     let vertex = |v: VertexId| b.vertex_list().iter().position(|&x| x == v);
@@ -470,17 +466,6 @@ fn refused(s: &FilletSession<'_>, refusal: &BlendRefusal, patches: bool) -> Opti
             tolerance,
             smallest: smallest_radius,
         },
-        BlendRefusal::SetbackTooShort {
-            vertex: v,
-            least,
-            why,
-        } => {
-            let fill = matches!(
-                why,
-                SetbackTooShortWhy::ConvexFill | SetbackTooShortWhy::ConcaveFill
-            );
-            return setback_too_short(s, v, least, fill, patches);
-        }
         BlendRefusal::SetbackTooLong {
             vertex: v, largest, ..
         } => Error::SetbackTooLong {
@@ -563,8 +548,10 @@ fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::
     };
     let at = match b.edge(edge) {
         Ok(rec) => match rec.curve.as_ref() {
-            Some(c) => answer(c.evaluate_point(k, middle(rec.interval.min(), rec.interval.max())))?
-                .map(|p| [p.x, p.y, p.z]),
+            Some(c) => {
+                answer(c.evaluate_point(k, half_way(rec.interval.min(), rec.interval.max())))?
+                    .map(|p| [p.x, p.y, p.z])
+            }
             None => None,
         },
         Err(_) => None,
@@ -584,6 +571,17 @@ fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::
 )]
 pub(crate) fn middle(lo: f64, hi: f64) -> f64 {
     0.5 * (lo + hi)
+}
+
+/// The parameter half way along `[lo, hi]` as the kernel's interval evaluates it
+/// (`Extent1d::evaluate(0.5)`: `lo + 0.5 (hi - lo)`), the point a sized refusal names, as
+/// SolidCraft named it before its refusals were ops'.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "a sample parameter ops chooses, not a geometric quantity (docs/layers.md)"
+)]
+fn half_way(lo: f64, hi: f64) -> f64 {
+    lo + 0.5 * (hi - lo)
 }
 
 /// The faces of `b`.
