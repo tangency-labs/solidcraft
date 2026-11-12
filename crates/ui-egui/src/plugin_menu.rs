@@ -383,10 +383,9 @@ pub(crate) fn menu(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// Install plugin…: until installing from a file arrives, Preferences › Plugins, which shows the
-/// plugins folder a package goes in.
+/// Install plugin…: pick a plugin `.zip`, review what it asks for, then install it.
 pub(crate) fn install_plugin_action(app: &mut SolveApp) {
-    crate::prefs::open_at(app, crate::prefs::PAGE_PLUGINS);
+    crate::plugin_install::start(app);
 }
 
 /// The dialog of one plugin entry.

@@ -301,10 +301,49 @@ impl NavPreset {
     }
 }
 
+/// What a two-finger trackpad scroll does in a navigation preset (#15079).
+///
+/// Fusion orbits with Shift held and pans without it; Blender is the other way
+/// round; the other presets pan either way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrackpadScroll {
+    /// Bare and Shift scrolls both pan.
+    Pans,
+    /// Shift + two fingers orbits; bare two fingers pan (Fusion).
+    ShiftOrbits,
+    /// Bare two fingers orbit; Shift + two fingers pans (Blender).
+    BareOrbits,
+}
+
+impl TrackpadScroll {
+    /// Whether the two gestures differ, so a coast ends when the modifier changes.
+    pub fn modes_differ(self) -> bool {
+        self != TrackpadScroll::Pans
+    }
+
+    /// Whether a two-finger scroll with `shift` held orbits.
+    pub fn orbits(self, shift: bool) -> bool {
+        match self {
+            TrackpadScroll::Pans => false,
+            TrackpadScroll::ShiftOrbits => shift,
+            TrackpadScroll::BareOrbits => !shift,
+        }
+    }
+}
+
 impl Prefs {
     /// Touchpad scroll zooms without overwriting the user's preference for other presets.
     pub fn trackpad_pans(&self) -> bool {
         self.nav != TOUCHPAD_NAV && self.trackpad_pan
+    }
+
+    /// What a two-finger trackpad scroll does in the chosen preset (#15079).
+    pub fn trackpad_scroll(&self) -> TrackpadScroll {
+        match self.nav.as_str() {
+            "fusion" => TrackpadScroll::ShiftOrbits,
+            "blender" => TrackpadScroll::BareOrbits,
+            _ => TrackpadScroll::Pans,
+        }
     }
 }
 
