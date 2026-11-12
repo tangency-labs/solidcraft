@@ -2257,7 +2257,10 @@ impl Feature {
         let blend = matches!(self.kind, FeatureKind::Fillet { .. } | FeatureKind::Chamfer { .. });
         // A fillet or chamfer finds its edges by name on its own body alone.
         let faces_by_name = self.face_names.iter().any(|n| !n.is_empty());
-        if faces_by_name || (!blend && !by_name(self)) {
+        // A sheet's record (its surfaces, bends, cuts and pockets) is not carried by a replayed
+        // change, only its body: with sheets in the design, every feature is evaluated again
+        // (#6748, as the flat model's sheets were).
+        if !st.surface_sheets.is_empty() || faces_by_name || (!blend && !by_name(self)) {
             return None;
         }
         let named = |names: &[String]| -> Option<Vec<usize>> {
@@ -2384,7 +2387,8 @@ impl ModelState {
             _ => (self.sketches.as_slice(), None),
         };
         let others = before.sketches.iter().filter(|s| s.feature != feature);
-        let same_rest = kept.len() == others.clone().count()
+        let same_rest = self.surface_sheets.is_empty()
+            && kept.len() == others.clone().count()
             && kept.iter().zip(others).all(|(a, b)| Arc::ptr_eq(a, b))
             && (sketch.is_some() || kept.len() == before.sketches.len())
             && self.sketch_keys == before.sketch_keys
@@ -9329,6 +9333,9 @@ fn eval_feature(
             {
                 let reach: Vec<_> = tools.iter().map(|t| more::exact_box(&t.body)).collect();
                 more::surface_thin_layer_refused(st, &reach, &c.plane, c.interval, &crate::plain(targets))?;
+                if *operation == Operation::Cut {
+                    more::surface_corner_graze_refused(f, st, &crate::plain(targets), c)?;
+                }
                 st.cut_extents.insert(f.id, (c.plane, c.interval));
             }
             // A tapered cut's walls are not square to a sheet made from surfaces: refused where it
