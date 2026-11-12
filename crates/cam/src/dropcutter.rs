@@ -311,6 +311,42 @@ pub fn drop_z_from(surface: &Surface, cutter: &Cutter, x: f64, y: f64, hint: f64
     z.is_finite().then_some(z)
 }
 
+/// Whether `blocks` holds for [`drop_z`] at `(x, y)` (false where nothing is under the
+/// cutter), for a `blocks` that, once true, stays true for every higher tip and is false for
+/// every tip no higher than `low`. The same answer as `drop_z(..).is_some_and(blocks)`, found
+/// with less work: triangles that cannot reach above `low` are passed over unopened, and the
+/// search stops at the first tip height that blocks.
+pub fn drop_z_blocks(surface: &Surface, cutter: &Cutter, x: f64, y: f64, low: f64, blocks: impl Fn(f64) -> bool) -> bool {
+    let r = cutter.radius;
+    let top = surface.bounds().max.z + 1.0;
+    let under = surface.raycast(Vec3::new(x, y, top), Vec3::new(0.0, 0.0, -1.0)).map_or(f64::NEG_INFINITY, |(t, _)| top - t);
+    if under.is_finite() && blocks(under) {
+        return true;
+    }
+    // Every tip found is above `best`, which starts a micrometre below `low` (a face's tip may
+    // stand a rounding above its highest corner): a tip height that blocks is above `low`, so
+    // it is found exactly as `drop_z` finds it.
+    let best = Cell::new(under.max(low - 1e-6));
+    let hit = Cell::new(false);
+    surface.visit(
+        |b| !hit.get() && b.max.x >= x - r && b.min.x <= x + r && b.max.y >= y - r && b.min.y <= y + r && b.max.z > best.get(),
+        |_, t| {
+            if hit.get() || t.iter().all(|p| p.z <= best.get()) {
+                return;
+            }
+            if let Some(z) = drop_triangle_above(cutter, t, x, y, best.get())
+                && z > best.get()
+            {
+                best.set(z);
+                if z.is_finite() && blocks(z) {
+                    hit.set(true);
+                }
+            }
+        },
+    );
+    hit.get()
+}
+
 /// Where the tip stops when `cutter`, its axis along the unit-or-not direction `axis` through
 /// `point` (the tool body on the `+axis` side), first touches the surface coming in from
 /// `+axis` far away: the distance along the unit axis from `point` (negative: behind it).

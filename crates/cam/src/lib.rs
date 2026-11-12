@@ -48,8 +48,11 @@
 //!
 //! Adaptive clearing ([`adaptive`]) clears a region level by level with the tool's engagement
 //! (how much of its circumference is in material) held under a limit, for a mill that cannot
-//! take a full-width cut. [`engagement`] measures the engagement along a finished path from
-//! the material itself, not from the planner's model, so a path can be checked against it.
+//! take a full-width cut. Given what is known of the stock (its extent, its top, a height map
+//! of what earlier cuts left), it goes down in the open air beside it and clears only what is
+//! still there; 3D adaptive roughing clears a stock box over a part's surface the same way.
+//! [`engagement`] measures the engagement along a finished path from the material itself, not
+//! from the planner's model, so a path can be checked against it.
 //!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
