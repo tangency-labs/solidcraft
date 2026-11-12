@@ -1135,15 +1135,17 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         k @ Kind::Move { .. } => {
             enter |= crate::dialogs_move::rows(ui, k);
-            extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
-            // Axes on or through the moved bodies go along unless this is unticked. It shows on
-            // every move (not a copy) so it can be found before a pole is added.
+            // One Options section. Axes on or through the moved bodies go along unless Keep Axes
+            // With Body is unticked; it shows on every move (not a copy) so it can be found
+            // before a pole is added.
             let copying = d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false);
+            let mut choices = vec![("Create Copy", "copy")];
             if !copying {
                 let keep = crate::dialogs_move::keeps_axes(d);
                 d.extra.insert("keep_axes".into(), json!(keep));
-                extra_options(ui, "move_axes", &mut d.extra, &[(app.tr("move.keep_axes"), "keep_axes")]);
+                choices.push((app.tr("move.keep_axes"), "keep_axes"));
             }
+            extra_options(ui, "move_options", &mut d.extra, &choices);
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
             let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
