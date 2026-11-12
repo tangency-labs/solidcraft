@@ -2,7 +2,6 @@
 //! and colours, written by solidcore-step ([`solidcore_step::write::product`]) from each body's
 //! record and paint.
 
-pub use solidcore_step::write::product::Header as StepHeader;
 use solidcore_step::write::product::{self, Colour, ExportError};
 
 use crate::body::{Body, colour_name};
@@ -21,6 +20,32 @@ pub struct ExportProduct<'a> {
     pub bodies: Vec<ExportBody<'a>>,
     /// (child product index, rigid placement in this product, column-major 4×4, occurrence name).
     pub children: Vec<(usize, [[f64; 4]; 4], String)>,
+}
+
+/// Header fields.
+#[derive(Clone, Debug, Default)]
+pub struct StepHeader {
+    /// FILE_NAME name (the file's own name).
+    pub file_name: String,
+    /// FILE_NAME time stamp (ISO 8601), empty when unknown.
+    pub time_stamp: String,
+    pub author: String,
+    pub organization: String,
+    /// FILE_DESCRIPTION text; `SolidCraft model` when empty.
+    pub description: String,
+}
+
+/// The header solidcore-step writes: SolidCraft as the program and system that wrote the file.
+fn product_header(h: &StepHeader) -> product::Header {
+    product::Header {
+        file_name: h.file_name.clone(),
+        time_stamp: h.time_stamp.clone(),
+        author: h.author.clone(),
+        organization: h.organization.clone(),
+        description: if h.description.is_empty() { "SolidCraft model".into() } else { h.description.clone() },
+        preprocessor_version: "SolidCraft".into(),
+        originating_system: "SolidCraft".into(),
+    }
 }
 
 /// The body as solidcore-step writes it: its record, its colour with the paint's opacity and
@@ -55,7 +80,7 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         .iter()
         .map(|p| product::ExportProduct { name: p.name.clone(), bodies: p.bodies.iter().map(export_body).collect(), children: p.children.clone() })
         .collect();
-    product::products(&list, root, header).map_err(kernel_error)
+    product::products(&list, root, &product_header(header)).map_err(kernel_error)
 }
 
 /// STEP text for bodies of one part, named after the file.
@@ -64,7 +89,7 @@ pub fn step_export_bodies(bodies: &[ExportBody], header: &StepHeader) -> Result<
     for b in bodies {
         b.body.require_brep("STEP export")?;
     }
-    product::bodies(bodies.iter().map(export_body).collect(), header).map_err(kernel_error)
+    product::bodies(bodies.iter().map(export_body).collect(), &product_header(header)).map_err(kernel_error)
 }
 
 #[cfg(test)]

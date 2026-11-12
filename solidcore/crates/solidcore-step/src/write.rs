@@ -177,7 +177,7 @@ impl Writer {
     /// A whole exchange file around the entities written so far.
     pub fn file(&self, name: &str, schema: &str) -> String {
         format!(
-            "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME({},'',(''),(''),'SolidCraft','SolidCraft','');\nFILE_SCHEMA(({}));\nENDSEC;\nDATA;\n{}ENDSEC;\nEND-ISO-10303-21;\n",
+            "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME({},'',(''),(''),'','','');\nFILE_SCHEMA(({}));\nENDSEC;\nDATA;\n{}ENDSEC;\nEND-ISO-10303-21;\n",
             string(name),
             string(schema),
             self.data()

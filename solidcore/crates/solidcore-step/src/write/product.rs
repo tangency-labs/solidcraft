@@ -48,7 +48,7 @@ pub struct ExportProduct<'a> {
     pub children: Vec<(usize, [[f64; 4]; 4], String)>,
 }
 
-/// Header fields.
+/// Header fields. Each is written as given; an empty field is written as an empty string.
 #[derive(Clone, Debug, Default)]
 pub struct Header {
     /// FILE_NAME name (the file's own name).
@@ -57,14 +57,18 @@ pub struct Header {
     pub time_stamp: String,
     pub author: String,
     pub organization: String,
-    /// FILE_DESCRIPTION text; `SolidCraft model` when empty.
+    /// FILE_DESCRIPTION text.
     pub description: String,
+    /// FILE_NAME preprocessor version: the program that wrote the file.
+    pub preprocessor_version: String,
+    /// FILE_NAME originating system: the system the model comes from.
+    pub originating_system: String,
 }
 
 /// Why products could not be written.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExportError {
-    /// No product, a root that is not one of them, or no body in any product.
+    /// No product, a root that is not one of them, or no body in the products the root reaches.
     Nothing,
     /// A child that is not one of the products.
     BadReference,
@@ -109,14 +113,22 @@ fn refs(ids: &[u64]) -> Param {
 }
 
 /// The placement's origin, z and x axes; refused unless it is a rotation and a translation.
+///
+/// `m` is column-major: `m[0]`, `m[1]` and `m[2]` are the x, y and z axes and `m[3]` the
+/// origin, each with its homogeneous entry last. The axes must be unit length, mutually
+/// orthogonal and right-handed, and the bottom row (`m[0..3][3]`, `m[3][3]`) must be `0 0 0 1`,
+/// each within 1e-6.
 fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
     let x = [m[0][0], m[0][1], m[0][2]];
     let y = [m[1][0], m[1][1], m[1][2]];
     let z = [m[2][0], m[2][1], m[2][2]];
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     let cross = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
-    let ok = (dot(x, x) - 1.0).abs() < 1e-6 && (dot(y, y) - 1.0).abs() < 1e-6 && dot(x, y).abs() < 1e-6 && dot(cross, z) > 0.999_999;
-    if !ok || m.iter().flatten().any(|v| !v.is_finite()) {
+    let unit = |a: [f64; 3]| (dot(a, a) - 1.0).abs() < 1e-6;
+    let rotation =
+        unit(x) && unit(y) && unit(z) && dot(x, y).abs() < 1e-6 && dot(x, z).abs() < 1e-6 && dot(y, z).abs() < 1e-6 && dot(cross, z) > 0.999_999;
+    let affine = m[0][3].abs() < 1e-6 && m[1][3].abs() < 1e-6 && m[2][3].abs() < 1e-6 && (m[3][3] - 1.0).abs() < 1e-6;
+    if !rotation || !affine || m.iter().flatten().any(|v| !v.is_finite()) {
         return Err(ExportError::NotRigid);
     }
     Ok(([m[3][0], m[3][1], m[3][2]], z, x))
@@ -132,7 +144,22 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
     if products.is_empty() || root >= products.len() {
         return Err(ExportError::Nothing);
     }
-    if products.iter().all(|p| p.bodies.is_empty()) {
+    // Products reachable from the root.
+    let mut reach = vec![false; products.len()];
+    let mut todo = vec![root];
+    while let Some(p) = todo.pop() {
+        if let Some(seen) = reach.get_mut(p)
+            && !*seen
+        {
+            *seen = true;
+            if let Some(x) = products.get(p) {
+                todo.extend(x.children.iter().map(|(c, _, _)| *c));
+            }
+        }
+    }
+    let reached: Vec<(usize, &ExportProduct)> = products.iter().enumerate().filter(|(i, _)| reach.get(*i).copied().unwrap_or(false)).collect();
+    // Only these are written: bodies in products the root does not reach do not count.
+    if reached.iter().all(|(_, p)| p.bodies.is_empty()) {
         return Err(ExportError::Nothing);
     }
     for p in products {
@@ -153,20 +180,6 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
     if cyclic(products, root, &mut Vec::new()) {
         return Err(ExportError::Recursive);
     }
-    // Products reachable from the root.
-    let mut reach = vec![false; products.len()];
-    let mut todo = vec![root];
-    while let Some(p) = todo.pop() {
-        if let Some(seen) = reach.get_mut(p)
-            && !*seen
-        {
-            *seen = true;
-            if let Some(x) = products.get(p) {
-                todo.extend(x.children.iter().map(|(c, _, _)| *c));
-            }
-        }
-    }
-    let reached: Vec<(usize, &ExportProduct)> = products.iter().enumerate().filter(|(i, _)| reach.get(*i).copied().unwrap_or(false)).collect();
     // The context states the models' accuracy: the loosest tolerance of their records, edges
     // and vertices. STEP keeps no tolerance per edge, so an edge that lies off its faces (an
     // intersection curve fitted within its tolerance) is only as good as the file says (#11997).
@@ -311,15 +324,16 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
 
     let mut text = String::new();
     text.push_str("ISO-10303-21;\nHEADER;\n");
-    let description = if header.description.is_empty() { "SolidCraft model" } else { header.description.as_str() };
-    let _ = writeln!(text, "FILE_DESCRIPTION(({}),'2;1');", string(description));
+    let _ = writeln!(text, "FILE_DESCRIPTION(({}),'2;1');", string(&header.description));
     let _ = writeln!(
         text,
-        "FILE_NAME({},{},({}),({}),'SolidCraft','SolidCraft','');",
+        "FILE_NAME({},{},({}),({}),{},{},'');",
         string(&header.file_name),
         string(&header.time_stamp),
         string(&header.author),
-        string(&header.organization)
+        string(&header.organization),
+        string(&header.preprocessor_version),
+        string(&header.originating_system)
     );
     text.push_str("FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }'));\nENDSEC;\nDATA;\n");
     text.push_str(&w.data());
@@ -421,5 +435,95 @@ mod tests {
         assert!(text.contains("MANIFOLD_SOLID_BREP('Block'") && text.contains("MANIFOLD_SOLID_BREP('Pin'"));
         assert!(text.contains("PRODUCT('parts','parts'"));
         assert_eq!(solidcore_bodies(&[], &Header::default()), Err(ExportError::Nothing));
+    }
+
+    /// An assembly placing a part (a box) once by `m` in an empty root.
+    fn placed(m: [[f64; 4]; 4]) -> Result<String> {
+        let bx = solidcore_ops::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+        let (record, _) = bx.to_record().unwrap();
+        let part = ExportProduct {
+            name: "Part".into(),
+            bodies: vec![ExportBody { name: "B".into(), record: &record, color: None, faces: Vec::new() }],
+            children: vec![],
+        };
+        let root = ExportProduct { name: "Root".into(), bodies: vec![], children: vec![(1, m, String::new())] };
+        products(&[root, part], 0, &Header::default())
+    }
+
+    const IDENTITY: [[f64; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+
+    /// A rotation about z by a quarter turn and a translation is rigid and writes.
+    #[test]
+    fn a_rotation_and_translation_writes() {
+        let m = [[0.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [50.0, -3.0, 7.0, 1.0]];
+        let text = placed(m).unwrap();
+        assert!(text.contains("NEXT_ASSEMBLY_USAGE_OCCURRENCE("), "{text}");
+        assert!(placed(IDENTITY).is_ok());
+    }
+
+    /// A z axis that is not the unit x × y is refused, though x and y are a rotation's and z lies
+    /// along x × y enough for `(x × y)·z` to pass: `[100, 0, 1]` and `[0, 0, 2]` were written as
+    /// placement axes.
+    #[test]
+    fn a_z_axis_that_is_not_x_cross_y_is_not_rigid() {
+        for z in [[100.0, 0.0, 1.0], [0.0, 0.0, 2.0], [0.0, 1e-3, 1.0]] {
+            let mut m = IDENTITY;
+            m[2] = [z[0], z[1], z[2], 0.0];
+            assert_eq!(placed(m), Err(ExportError::NotRigid), "{z:?}");
+        }
+    }
+
+    /// A homogeneous bottom row other than `0 0 0 1` (column-major: `m[0..3][3]` and `m[3][3]`) is
+    /// refused: it was dropped, and the part written at an identity placement.
+    #[test]
+    fn a_non_affine_matrix_is_not_rigid() {
+        for (col, v) in [(3, 2.0), (3, 0.0), (0, 0.5), (1, -1e-3), (2, 1.0)] {
+            let mut m = IDENTITY;
+            if let Some(slot) = m.get_mut(col).and_then(|c| c.get_mut(3)) {
+                *slot = v;
+            }
+            assert_eq!(placed(m), Err(ExportError::NotRigid), "m[{col}][3] = {v}");
+        }
+    }
+
+    /// A body only in a product the root does not reach is not written, so there is nothing to
+    /// export: it wrote a file with no body.
+    #[test]
+    fn a_body_the_root_does_not_reach_is_nothing_to_export() {
+        let bx = solidcore_ops::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+        let (record, _) = bx.to_record().unwrap();
+        let root = ExportProduct { name: "Root".into(), bodies: vec![], children: vec![] };
+        let stray = ExportProduct {
+            name: "Stray".into(),
+            bodies: vec![ExportBody { name: "B".into(), record: &record, color: None, faces: Vec::new() }],
+            children: vec![],
+        };
+        let list = [root, stray];
+        let err = products(&list, 0, &Header::default()).unwrap_err();
+        assert_eq!(err, ExportError::Nothing);
+        assert_eq!(err.to_string(), "nothing to export");
+        // From the product that holds it, it writes.
+        assert!(products(&list, 1, &Header::default()).is_ok());
+    }
+
+    /// The header names no application: a default header writes empty fields, and every field is
+    /// written as the caller gives it.
+    #[test]
+    fn the_header_is_the_callers() {
+        let bx = solidcore_ops::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+        let text = solidcore_bodies(&[("Block", &bx)], &Header::default()).unwrap();
+        assert!(text.contains("FILE_DESCRIPTION((''),'2;1');\nFILE_NAME('','',(''),(''),'','','');\n"), "{text}");
+        assert!(!text.contains("SolidCraft"), "{text}");
+        let header = Header {
+            file_name: "f.step".into(),
+            time_stamp: "2026-11-12T00:00:00".into(),
+            author: "a".into(),
+            organization: "o".into(),
+            description: "d".into(),
+            preprocessor_version: "p".into(),
+            originating_system: "s".into(),
+        };
+        let text = solidcore_bodies(&[("Block", &bx)], &header).unwrap();
+        assert!(text.contains("FILE_DESCRIPTION(('d'),'2;1');\nFILE_NAME('f.step','2026-11-12T00:00:00',('a'),('o'),'p','s','');\n"), "{text}");
     }
 }
