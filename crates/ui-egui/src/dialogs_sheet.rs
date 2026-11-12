@@ -329,7 +329,7 @@ fn measure_text(app: &SolveApp, name: &str) -> Result<String, String> {
     let m = solidcraft_engine::doc::measure_sheet_body(mb, None, &[], &solidcraft_engine::doc::IDENTITY).map_err(|e| e.to_string())?;
     let radii: Vec<String> = m.radii.iter().map(|r| format!("R {r:.3}")).collect();
     let bends = if radii.is_empty() { "-".to_string() } else { radii.join(", ") };
-    Ok(crate::i18n::tr("sheet.recognize_measured").replace("{thickness}", &format!("{:.3}", m.thickness)).replace("{bends}", &bends))
+    Ok(solidcraft_ui_text::tr("sheet.recognize_measured").replace("{thickness}", &format!("{:.3}", m.thickness)).replace("{bends}", &bends))
 }
 
 /// Convert's inputs (#6748): the body (a solid or a surface body), the bend edges, the faces left
@@ -518,13 +518,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             // picked decides it again.
             let picked = inputs.get(1).is_some_and(|i| !i.items.is_empty());
             form_row(ui, "Stationary Side", |ui| {
-                ui.label(crate::i18n::tr_label(match *stays {
+                ui.label(solidcraft_ui_text::tr_label(match *stays {
                     _ if picked => "Fixed Face",
                     1 => "Left",
                     2 => "Right",
                     _ => "Automatic",
                 }));
-                if !picked && *stays > 0 && crate::ui_kit::button(ui, crate::i18n::tr_label("Swap"), crate::ui_kit::Button::Normal).clicked() {
+                if !picked && *stays > 0 && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Swap"), crate::ui_kit::Button::Normal).clicked() {
                     *stays = 3 - *stays;
                 }
             });
@@ -558,7 +558,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 *thin = Some((name, own));
             }
             if let Some((_, Some(t))) = thin.as_ref() {
-                let hint = crate::i18n::tr("sheet.convert_thin_hint").replace("{thickness}", &format!("{t:.3}"));
+                let hint = solidcraft_ui_text::tr("sheet.convert_thin_hint").replace("{thickness}", &format!("{t:.3}"));
                 crate::ui_kit::status_line(ui, &hint, crate::ui_kit::StatusTone::Dim);
             }
         }
@@ -579,7 +579,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 None => {}
             }
             rule_combo(app, ui, "sm_rec_rule", rule);
-            enter |= hint_row(ui, "New Rule", new_rule, crate::i18n::tr_label("none: the rule above"));
+            enter |= hint_row(ui, "New Rule", new_rule, solidcraft_ui_text::tr_label("none: the rule above"));
         }
         Sm::Rules { pick, name, values, relief, angles, active, loaded } => {
             let rules = rule_list(app);
@@ -1656,7 +1656,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
             pos2(rect.left() + 44.0, y),
             Align2::LEFT_TOP,
             "Roll start and end (middle dashed)",
-            FontId::proportional(crate::theme::Tokens::get().font_body),
+            FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             t.text_dim,
         );
     }
