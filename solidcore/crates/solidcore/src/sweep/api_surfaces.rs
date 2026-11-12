@@ -445,6 +445,7 @@ pub fn create_skin(k: &Kernel, profiles: &[BSplineCurve]) -> Result<BSplineSurfa
             intersections_with_rails: None,
             deriv_surfs: Some([None, None]), // derivative surfaces
             degree: 3,
+            section_params: None,
         },
     )
 }

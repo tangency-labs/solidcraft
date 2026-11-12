@@ -6181,6 +6181,7 @@ impl DerivSurfDefinition<'_> {
                 intersections_with_rails: Some(params),
                 deriv_surfs: Some([None, None]),
                 degree,
+                section_params: None,
             },
         )
     }
