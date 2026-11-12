@@ -4417,7 +4417,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-develop"
-version = "0.40.0-rc.2"
+version = "0.40.1"
 dependencies = [
  "serde",
  "solidcore-record",

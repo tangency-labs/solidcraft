@@ -441,13 +441,10 @@ pub(crate) fn extremes(s: &Seg2, ways: &[Vec2]) -> Vec<Vec2> {
     match *s {
         Seg2::Line { a, b } => vec![a, b],
         Seg2::Arc { center, radius, start, sweep } => {
-            // The way `d` from the center lies within the arc where it is at most the sweep round
-            // from the start, the way the arc turns.
-            let within = |d: Vec2| sweep.abs() >= TAU || ((d.y.atan2(d.x) - start) * sweep.signum()).rem_euclid(TAU) <= sweep.abs();
             let mut pts = vec![s.start(), s.end()];
             // Any way of some length, however small: along one of none, the ends answer.
             for w in ways.iter().filter(|w| w.len() > 0.0).map(|w| *w / w.len()) {
-                pts.extend([w, -w].into_iter().filter(|d| within(*d)).map(|d| center + d * radius));
+                pts.extend([w, -w].into_iter().filter(|d| on_arc(*d, start, sweep)).map(|d| center + d * radius));
             }
             pts
         }
@@ -455,6 +452,13 @@ pub(crate) fn extremes(s: &Seg2, ways: &[Vec2]) -> Vec<Vec2> {
         Seg2::Conic { a, apex, b, .. } => vec![a, apex, b],
         Seg2::Bezier { n, p } => p.iter().take(usize::from(n) + 1).copied().collect(),
     }
+}
+
+/// Whether the way `d` from an arc's center lies within the arc, from angle `start` round `sweep`
+/// (counter-clockwise where above 0): at most the sweep round from the start, the way the arc
+/// turns.
+fn on_arc(d: Vec2, start: f64, sweep: f64) -> bool {
+    sweep.abs() >= TAU || ((d.y.atan2(d.x) - start) * sweep.signum()).rem_euclid(TAU) <= sweep.abs()
 }
 
 /// The box of loop `l`: each of its segments' points furthest along x and along y and against
@@ -1291,29 +1295,74 @@ fn corner_cut(dev: &Development, corner: &Corner) -> Option<Region2> {
 
 /// Where along a bend a panel's outline lies inside the band from `line` to `line + depth`
 /// across it, in the flat: the least and greatest lengths along the bend, or `None` when none
-/// of it does.
+/// of it does. Read off the outline's own segments, placed in the flat: the ends of each piece of
+/// a segment inside the band (its own ends there, and where it crosses either of the band's
+/// lines), and between them an arc's points furthest along the bend and against it, within its
+/// sweep and the band (see [`extremes`]). A line's and an arc's crossings are found in closed
+/// form, any other curve's by [`crossings`], each crossing of its chords followed onto the curve.
 fn band_extent(sheet: &Sheet, panel: usize, place: &Rigid2, frame: &JointFrame, line: f64, depth: f64) -> Result<Option<(f64, f64)>, DevelopError> {
     let region = &sheet.panels.get(panel).ok_or(DevelopError::NoPanel(panel))?.region;
     let (lo, hi) = (line.min(line + depth) - EDGE_TOL, line.max(line + depth) + EDGE_TOL);
-    let pts: Vec<(f64, f64)> = (&region.outer.polyline(REACH_TOL))
-        .into_iter()
-        .map(|q| {
-            let p = place.point(*q) - frame.origin;
-            (p.dot(frame.along), p.dot(frame.toward_b))
-        })
-        .collect();
+    // A point of the flat's length along the bend and its place across it.
+    let uv = |q: Vec2| {
+        let p = q - frame.origin;
+        (p.dot(frame.along), p.dot(frame.toward_b))
+    };
     let mut extent: Option<(f64, f64)> = None;
     let mut take = |u: f64| extent = Some(extent.map_or((u, u), |(a, b)| (a.min(u), b.max(u))));
-    // Each edge of the outline, clipped to the band.
-    for (k, &(u_a, v_a)) in pts.iter().enumerate() {
-        let Some(&(u_b, v_b)) = pts.get((k + 1) % pts.len()) else { continue };
-        let at = |v: f64| if (v_b - v_a).abs() > 1e-15 { u_a + (u_b - u_a) * (v - v_a) / (v_b - v_a) } else { u_a };
-        let (t0, t1) = (v_a.min(v_b).max(lo), v_a.max(v_b).min(hi));
-        if t0 <= t1 {
-            take(at(t0));
-            take(at(t1));
-            if (lo..=hi).contains(&v_a) {
-                take(u_a);
+    for s in region.outer.segs.iter().map(|s| place.seg(s)) {
+        // Its ends, and an arc's points furthest along the bend and against it, where they lie in
+        // the band. Any other curve is read at its ends here: its control points lie off it.
+        let points = match s {
+            Seg2::Line { .. } | Seg2::Arc { .. } => extremes(&s, &[frame.along]),
+            _ => vec![s.start(), s.end()],
+        };
+        for (u, v) in points.into_iter().map(uv) {
+            if (lo..=hi).contains(&v) {
+                take(u);
+            }
+        }
+        // Where it crosses the band's lines.
+        match s {
+            Seg2::Line { a, b } => {
+                // The line clipped to the band.
+                let ((u_a, v_a), (u_b, v_b)) = (uv(a), uv(b));
+                let at = |v: f64| if (v_b - v_a).abs() > 1e-15 { u_a + (u_b - u_a) * (v - v_a) / (v_b - v_a) } else { u_a };
+                let (t0, t1) = (v_a.min(v_b).max(lo), v_a.max(v_b).min(hi));
+                if t0 <= t1 {
+                    take(at(t0));
+                    take(at(t1));
+                }
+            }
+            Seg2::Arc { center, radius, start, sweep } => {
+                // The circle meets the line `level` across the bend `half` either way along it
+                // from the center's foot there.
+                let (u_c, v_c) = uv(center);
+                for level in [lo, hi] {
+                    let off = level - v_c;
+                    if off.abs() > radius {
+                        continue;
+                    }
+                    let half = (radius * radius - off * off).sqrt();
+                    for k in [-1.0, 1.0] {
+                        if on_arc(frame.toward_b * off + frame.along * (half * k), start, sweep) {
+                            take(u_c + half * k);
+                        }
+                    }
+                }
+            }
+            _ => {
+                // A line along the bend at each of the band's lines, far enough past the curve
+                // by a box that holds it (see [`extremes`]).
+                let b: Aabb2 = extremes(&s, &[Vec2::X, Vec2::Y]).into_iter().collect();
+                let far = (b.min - frame.origin).len() + b.size().len() + 1.0;
+                for level in [lo, hi] {
+                    let o = frame.origin + frame.toward_b * level;
+                    let across = [Seg2::Line { a: o - frame.along * far, b: o + frame.along * far }];
+                    for c in crossings(&across, std::slice::from_ref(&s)) {
+                        take(uv(c.4).0);
+                    }
+                }
             }
         }
     }
@@ -1341,4 +1390,43 @@ fn panel_reach(sheet: &Sheet, panel: usize) -> Result<f64, DevelopError> {
         return Ok(0.0);
     }
     Ok(loop_box(&region.outer).size().len())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts::{FRAC_PI_2, PI};
+
+    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+
+    use super::{JointFrame, band_extent};
+    use crate::{Panel, Rigid2, Sheet};
+
+    /// Where a panel's outline lies inside a band across a bend is read off its own curves. The
+    /// bend runs along x from the origin, the other panel toward −y, so a band from `line` to
+    /// `line + depth` across holds y from −`line` − `depth` to −`line` (and a millionth past
+    /// each). The panel is a 93 × 60 rectangle above y = 0 with a bump on its right side: a half
+    /// turn of radius 3 round (93, 3), from (93, 0) out through (96, 3) to (93, 6). The band from
+    /// −4 to 2 across (y −2..4) holds the bump's furthest point (96, 3): 0 to 96 along. The band
+    /// from −6 to −5 (y 5..6) holds the left side at x 0, and the bump from its end (93, 6) to
+    /// where it crosses the band's edge a millionth below y = 5: x = 93 + √(9 − (2 − 1e-6)²), √5
+    /// (2.2360…) and 9e-7 past 93. Chords 1e-3 inside the arc would read either short.
+    #[test]
+    fn a_bands_extent_is_read_off_the_outlines_curves() {
+        let segs = vec![
+            Seg2::Line { a: Vec2::ZERO, b: Vec2::new(93.0, 0.0) },
+            Seg2::Arc { center: Vec2::new(93.0, 3.0), radius: 3.0, start: -FRAC_PI_2, sweep: PI },
+            Seg2::Line { a: Vec2::new(93.0, 6.0), b: Vec2::new(93.0, 60.0) },
+            Seg2::Line { a: Vec2::new(93.0, 60.0), b: Vec2::new(0.0, 60.0) },
+            Seg2::Line { a: Vec2::new(0.0, 60.0), b: Vec2::ZERO },
+        ];
+        let region = Region2 { outer: Loop2 { segs }, holes: Vec::new() };
+        let sheet = Sheet { panels: vec![Panel { region, ..Panel::default() }], ..Sheet::default() };
+        let frame = JointFrame { origin: Vec2::ZERO, along: Vec2::X, toward_b: Vec2::new(0.0, -1.0) };
+        let near = |a: &Option<(f64, f64)>, b: (f64, f64)| a.is_some_and(|a| (a.0 - b.0).abs() < 1e-12 && (a.1 - b.1).abs() < 1e-12);
+        let whole = band_extent(&sheet, 0, &Rigid2::IDENTITY, &frame, -4.0, 6.0);
+        assert!(whole.as_ref().is_ok_and(|e| near(e, (0.0, 96.0))), "{whole:?}");
+        let top = band_extent(&sheet, 0, &Rigid2::IDENTITY, &frame, -6.0, 1.0);
+        let reach = 93.0 + (9.0 - (2.0 - 1e-6f64).powi(2)).sqrt();
+        assert!(top.as_ref().is_ok_and(|e| near(e, (0.0, reach))), "{top:?}");
+    }
 }

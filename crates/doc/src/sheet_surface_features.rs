@@ -790,7 +790,7 @@ impl SurfaceSheet {
         let n = match self.plan_fold(f.i, at, &f.region, f.line, n, &f.bend, position)? {
             Ok(_) => n,
             Err(why) => match self.plan_fold(f.i, at, &f.region, f.line, -n, &f.bend, position) {
-                Ok(Ok(plan)) if fixed.is_none_or(|q| !plan.moves.iter().any(|m| m.region.contains(q))) => -n,
+                Ok(Ok(plan)) if fixed.is_none_or(|q| !plan.moves.iter().any(|m| crate::sheet_surface_cuts::region_holds(&m.region, q))) => -n,
                 _ => return err(why),
             },
         };
@@ -1513,21 +1513,13 @@ impl SurfaceSheet {
                     }
                 }
                 crate::sheet_surface::Piece::Zone(z) => {
-                    // The zone's outline, finely: its arc bulges between its corners.
+                    // Folded, a box round the piece of the bend's cylinders the zone lies on (see
+                    // [`bent_box`]); laid out flat, its slab's, the flat's placing an affine map.
                     let zone = dev.zones.get(z)?;
-                    let mut b = solidcraft_geom::Aabb3::EMPTY;
-                    let pts = region.outer.polyline(1e-3);
-                    for (p, q) in pts.edges() {
-                        for k in 0..=16 {
-                            let x = p.lerp(*q, k as f64 / 16.0);
-                            for depth in [0.0, t] {
-                                match fold.as_ref() {
-                                    Some(fold) => b.add(fold.bends.get(zone.joint).copied().flatten()?.point(x, depth)),
-                                    None => b.add(self.flat.point(Vec3::new(x.x, x.y, depth))),
-                                }
-                            }
-                        }
-                    }
+                    let b = match fold.as_ref() {
+                        Some(fold) => bent_box(&fold.bends.get(zone.joint).copied().flatten()?, region, t),
+                        None => slab(&self.flat, region),
+                    };
                     boxes.push((None, b));
                 }
             }
@@ -1543,7 +1535,7 @@ impl SurfaceSheet {
     /// flat panel's material through its thickness, in a bend, or in a loose piece.
     pub(crate) fn touches(&self, p: Vec3, tol: f64) -> bool {
         let near = |r: &Region2, q: Vec2| {
-            r.contains(q)
+            crate::sheet_surface_cuts::region_holds(r, q)
                 || std::iter::once(&r.outer)
                     .chain(&r.holes)
                     .flat_map(|l| &l.segs)
@@ -2309,6 +2301,55 @@ fn keeps_clear(
     Some(lines(other)?.iter().all(|(a, _)| [0.0, t].iter().all(|d| above(there.point(Vec3::new(a.x, a.y, *d))) <= 0.0)))
 }
 
+/// A box that holds a bend's zone `region` (in the flat), `t` thick, as `bent` folds it. A point
+/// of the flat goes to a length along the bend and a turn round it, both affine in the point, so
+/// over the zone each lies between its least and greatest on the zone's outline, read off the
+/// outline's points furthest along the bend and across it (see
+/// [`crate::sheet_surface_cuts::extremes`]). Folded, the zone lies on the ruled piece of the bend's
+/// cylinders between those lengths and those turns, from the inside radius to the outside; the
+/// box is that piece's own, so it holds the zone, and reaches past it where the zone is not the
+/// whole piece (a slanted end, a relief). Along each axis of space a point of the piece is
+/// `k + c·along + ρ (a cos φ + b sin φ)`: linear in the length and in the radius ρ (which is
+/// linear in the depth), so least and greatest at their ends; and round the turn least and
+/// greatest at its ends, or where the arc faces along the axis (φ = atan2(b, a)) or against it
+/// (half a turn on), where that lies within the turn.
+fn bent_box(bent: &solidcraft_develop::Bent, region: &Region2, t: f64) -> solidcraft_geom::Aabb3 {
+    use std::f64::consts::{FRAC_PI_2, PI, TAU};
+    let way = bent.flat_way();
+    let (mut along, mut turn) = ((f64::INFINITY, f64::NEG_INFINITY), (f64::INFINITY, f64::NEG_INFINITY));
+    for p in region.outer.segs.iter().flat_map(|s| crate::sheet_surface_cuts::extremes(s, &[way, way.perp()])) {
+        let (l, phi) = bent.wrapped(p);
+        along = (along.0.min(l), along.1.max(l));
+        turn = (turn.0.min(phi), turn.1.max(phi));
+    }
+    let mut out = solidcraft_geom::Aabb3::EMPTY;
+    if !(along.0 <= along.1 && turn.0 <= turn.1) {
+        return out;
+    }
+    for depth in [0.0, t] {
+        // At length 0 and this depth, the point turned φ is `c + x cos φ + y sin φ`.
+        let (p0, p_half, p_pi) = (bent.at(0.0, 0.0, depth), bent.at(0.0, FRAC_PI_2, depth), bent.at(0.0, PI, depth));
+        let c = (p0 + p_pi) * 0.5;
+        let (x, y) = (p0 - c, p_half - c);
+        let mut turns = vec![turn.0, turn.1];
+        for (a, b) in [(x.x, y.x), (x.y, y.y), (x.z, y.z)] {
+            // Furthest along the axis and against it, kept where it lies within the turn.
+            for phi in [b.atan2(a), (-b).atan2(-a)] {
+                let past = (phi - turn.0).rem_euclid(TAU);
+                if past <= turn.1 - turn.0 {
+                    turns.push(turn.0 + past);
+                }
+            }
+        }
+        for l in [along.0, along.1] {
+            for phi in &turns {
+                out.add(bent.at(l, *phi, depth));
+            }
+        }
+    }
+    out
+}
+
 /// The greatest of the linear function `f` over the straight flat edge `(p, q)` of a bend's zone,
 /// `depth` into the material, as `bent` folds it. Folded, `f` is `k + c·along + a·cos φ + b·sin φ`
 /// in the length `along` the bend and the turn `φ` round it, both linear along the edge: its
@@ -2589,7 +2630,7 @@ fn fill_bites(region: &Region2, at: Vec2, reach: f64) -> Region2 {
             let (Seg2::Line { a: a1, b: b1 }, Seg2::Line { a: a2, b: b2 }) = (*segs.get((i + n - 1) % n)?, *segs.get((i + 1) % n)?) else {
                 return None;
             };
-            if n < 4 || region.contains(center) || center.dist(at) > radius + reach {
+            if n < 4 || crate::sheet_surface_cuts::region_holds(region, center) || center.dist(at) > radius + reach {
                 return None;
             }
             let (d1, d2) = ((b1 - a1).normalized()?, (b2 - a2).normalized()?);
@@ -2781,4 +2822,61 @@ fn crossed(l: &Loop2) -> bool {
         })
     };
     pieces.iter().enumerate().any(|(i, p)| pieces.iter().enumerate().skip(i + 2).filter(|(j, _)| !(i == 0 && *j == n - 1)).any(|(_, q)| hit(p, q)))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts::PI;
+
+    use solidcore_record::{Loop2, Region2, Vec2, Vec3};
+    use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Panel, Relief, Rigid2, Rigid3, Sheet, Tail, ZoneEnds, develop, fold};
+    use solidcraft_geom::prelude::*;
+
+    use super::bent_box;
+
+    /// A 100° bend toward the material, R 2, T 2, K ½, anchored at its tangent lines along x from
+    /// 0 to 100, between a 100 × 60 base laid flat in z = 0 (its material above) and a 20 mm
+    /// flange. Folded, the zone turns round the axis along x through (y, z) = (0, 4), its outside
+    /// face at radius 4 and its inside at 2: a point turned φ at radius ρ lies at y = −ρ sin φ,
+    /// z = 4 − ρ cos φ. Its box: x 0..100; y −4..0, least where the outside faces −y at φ = 90°,
+    /// inside the turn (read at sixteenths of 100°, the nearest, 87.5°, reaches −4 sin 87.5° =
+    /// −3.9962… only); z 0..4 + 4 sin 10° (4.6945…), the outside at φ = 100°.
+    #[test]
+    fn a_folded_zones_box_reaches_round_its_turn() {
+        let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
+            let pts = [Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)];
+            Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() }
+        };
+        let bend = Bend {
+            angle: PI * 5.0 / 9.0,
+            radius: 2.0,
+            toward_material: true,
+            datum: Datum::Tangent,
+            length: 100.0,
+            ends: ZoneEnds { near: (0.0, 100.0), far: (0.0, 100.0) },
+            tails: (Tail::Keep, Tail::Keep),
+            relief: (Relief::None, Relief::None),
+        };
+        let sheet = Sheet {
+            thickness: 2.0,
+            k_factor: 0.5,
+            panels: vec![
+                Panel { name: "base".into(), region: rect(0.0, 0.0, 100.0, 60.0), ..Panel::default() },
+                Panel { name: "flange".into(), region: rect(0.0, -20.0, 100.0, 0.0), ..Panel::default() },
+            ],
+            joints: vec![Joint {
+                a: Anchor { panel: 0, origin: Vec2::ZERO, dir: Vec2::X },
+                b: Anchor { panel: 1, origin: Vec2::ZERO, dir: Vec2::X },
+                kind: JointKind::Bend(bend),
+            }],
+            ..Sheet::default()
+        };
+        let Ok(dev) = develop(&sheet, &[(0, Rigid2::IDENTITY)]) else { panic!("the bracket lays out") };
+        let Ok(folded) = fold(&sheet, &dev, &[Rigid3::IDENTITY]) else { panic!("the bracket folds") };
+        let (Some(Some(bent)), Some(zone)) = (folded.bends.first(), dev.zones.first()) else { panic!("one bend: {dev:?}") };
+        let b = bent_box(bent, &zone.region, 2.0);
+        let near = |a: Vec3, b: Vec3| a.dist(b) < 1e-9;
+        let top = 4.0 + 4.0 * (PI / 18.0).sin();
+        assert!(near(b.min, Vec3::new(0.0, -4.0, 0.0)) && near(b.max, Vec3::new(100.0, 0.0, top)), "{b:?}");
+    }
 }

@@ -12,7 +12,7 @@ use solidcraft_kernel::BoolOp;
 
 use crate::sheet::{FlatWork, SheetBody, SheetFlange, material_boolean, material_union};
 use crate::sheet_flat_lineage::{self, Resolution};
-use crate::sheet_surface_cuts::{holds, near_each_other};
+use crate::sheet_surface_cuts::{holds, near_each_other, region_holds};
 use crate::{DocError, Result};
 
 /// Bends closer to a half turn than this (radians) have no usable sharp: they are anchored at
@@ -286,7 +286,7 @@ fn cut_from(pieces: Vec<(Piece, Region2)>, cuts: &[&Region2], work: &mut FlatWor
 /// [`CLEAR`].
 pub(crate) fn holds_clear(region: &Region2, cut: &Region2) -> bool {
     let Some(start) = cut.outer.segs.first().map(Seg2::start) else { return false };
-    if !cut.holes.is_empty() || !region.contains(start) {
+    if !cut.holes.is_empty() || !region_holds(region, start) {
         return false;
     }
     // Chords this far inside the curves: two loops whose chords stay farther apart than twice
@@ -303,7 +303,7 @@ pub(crate) fn holds_clear(region: &Region2, cut: &Region2) -> bool {
     std::iter::once(&region.outer).chain(&region.holes).all(|l| {
         let other = l.polyline(sag);
         !near(&crate::sheet_surface_cuts::loop_box(l))
-            || (l.segs.first().is_none_or(|s| !cut.outer.contains(s.start()))
+            || (l.segs.first().is_none_or(|s| !holds(&cut.outer, s.start()))
                 && crossings(&cut.outer.segs, &l.segs).is_empty()
                 && gap(&ring, &other).min(gap(&other, &ring)) > 2.0 * sag + CLEAR)
     })

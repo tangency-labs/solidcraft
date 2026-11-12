@@ -370,7 +370,7 @@ fn inside_by_loops(a: &[Region2], b: &[Region2], tol: f64) -> bool {
     let holds = |x: &Region2, y: &Region2| same_loop(&x.outer, &y.outer, tol) && y.holes.iter().all(|k| x.holes.iter().any(|h| same_loop(h, k, tol)));
     let new_hole_at = |p: Vec2| {
         a.iter()
-            .any(|x| b.iter().any(|y| holds(x, y) && x.holes.iter().any(|h| h.ccw().contains(p) && !y.holes.iter().any(|k| same_loop(h, k, tol)))))
+            .any(|x| b.iter().any(|y| holds(x, y) && x.holes.iter().any(|h| self::holds(h, p) && !y.holes.iter().any(|k| same_loop(h, k, tol)))))
     };
     a.iter().all(|x| b.iter().any(|y| holds(x, y)) || x.outer.segs.first().is_some_and(|s| new_hole_at(s.start())))
 }
@@ -400,7 +400,7 @@ fn gone_by_loops(footprint: &[Region2], near: &[Region2], tol: f64) -> Option<Ve
     // Each piece left inside a new hole is a hole of what is gone there.
     for island in islands {
         let at = island.outer.segs.first()?.start();
-        let g = gone.iter_mut().find(|g| g.outer.contains(at))?;
+        let g = gone.iter_mut().find(|g| holds(&g.outer, at))?;
         g.holes.push(island.outer.ccw().reversed());
     }
     Some(gone)
@@ -831,6 +831,13 @@ pub(crate) fn holds(l: &Loop2, p: Vec2) -> bool {
     l.segs.iter().zip(ends).map(|(s, end)| ray_crossings(s, end, p)).sum::<usize>() % 2 == 1
 }
 
+/// Whether point `p` lies in region `r`'s material, exactly: inside its outline and inside none
+/// of its holes (see [`holds`]). A point on a loop of it lies inside or outside as the ray from
+/// it reads that loop.
+pub(crate) fn region_holds(r: &Region2, p: Vec2) -> bool {
+    holds(&r.outer, p) && !r.holes.iter().any(|h| holds(h, p))
+}
+
 /// How many times a ray from `p` toward +x crosses segment `s`, which ends at `end`, the start of
 /// the next segment of its loop (see [`holds`]).
 fn ray_crossings(s: &Seg2, end: Vec2, p: Vec2) -> usize {
@@ -1156,7 +1163,7 @@ fn left(region: &Region2, through: &[Region2], holders: &[Vec2], tol: f64) -> st
                 let outer = h.ccw();
                 let holes = through
                     .iter()
-                    .filter(|o| o.outer.segs.first().is_some_and(|g| outer.contains(g.start())))
+                    .filter(|o| o.outer.segs.first().is_some_and(|g| holds(&outer, g.start())))
                     .map(|o| o.outer.ccw().reversed())
                     .collect();
                 Region2 { outer, holes }
@@ -1170,7 +1177,7 @@ fn left(region: &Region2, through: &[Region2], holders: &[Vec2], tol: f64) -> st
     }
     // The piece nearest each joint's point holds it.
     let gap = |r: &Region2, p: Vec2| {
-        if r.contains(p) {
+        if region_holds(r, p) {
             return 0.0;
         }
         std::iter::once(&r.outer)
@@ -1652,7 +1659,7 @@ fn flat_gone(
 /// never from the order of the panels or the pieces. None where no panel has material left.
 fn holder(pieces: &[(Piece, Region2)], r: &Region2) -> Option<usize> {
     let x = r.interior_point();
-    let near = |g: &Region2| if g.contains(x) { 0.0 } else { outline_gap(g, x) };
+    let near = |g: &Region2| if region_holds(g, x) { 0.0 } else { outline_gap(g, x) };
     pieces
         .iter()
         .filter_map(|(p, g)| match *p {

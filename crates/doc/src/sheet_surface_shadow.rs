@@ -33,6 +33,8 @@ use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::brep::query::Query;
 use solidcraft_kernel::{Body, FaceSurface, face_surface};
 
+use crate::sheet_surface_cuts::{holds, region_holds};
+
 /// A wall leaning less than this (the cosine of its normal's angle to the fibers) is edge-on to
 /// them: above the rounding of a wall square to them.
 const EDGE_ON: f64 = 1e-12;
@@ -166,7 +168,7 @@ impl<'a> Folded<'a> {
                 Carrier::Flat(slab) => slab.depth(p),
             };
             let Some(d) = got.filter(|d| d.at.x.is_finite() && d.at.y.is_finite() && d.w.is_finite()) else { continue };
-            let off = if region.contains(d.at) { 0.0 } else { outline_distance(region, d.at) };
+            let off = if region_holds(region, d.at) { 0.0 } else { outline_distance(region, d.at) };
             let off = off + (-d.w).max(0.0) + (d.w - self.t).max(0.0);
             if best.as_ref().is_none_or(|b| off < b.0) {
                 best = Some((off, k, d));
@@ -869,7 +871,7 @@ pub(crate) fn shadow(
             for (_, p) in q.edge_points(edge.e, sag).ok_or_else(unread)? {
                 let at = slab.depth(p).ok_or_else(unread)?.at;
                 let at = Vec2::new(at.x, at.y + if slab.angular() { ((around - at.y) / TAU).round() * TAU } else { 0.0 });
-                let near = regions.iter().any(|g| g.contains(at) || outline_distance(g, at) <= tol * 100.0);
+                let near = regions.iter().any(|g| region_holds(g, at) || outline_distance(g, at) <= tol * 100.0);
                 if !near {
                     return Err(format!("its walls on {name} overlap in the flat: not supported yet"));
                 }
@@ -892,7 +894,7 @@ pub(crate) fn within(q: &Query, slab: &Slab, region: &Region2, walls: &[usize], 
     let on = |p: Vec3| {
         slab.depth(p).is_some_and(|d| {
             let at = Vec2::new(d.at.x, d.at.y + if slab.angular() { ((mid - d.at.y) / TAU).round() * TAU } else { 0.0 });
-            d.w >= -near && d.w <= slab.thickness() + near && (region.contains(at) || outline_distance(region, at) <= near)
+            d.w >= -near && d.w <= slab.thickness() + near && (region_holds(region, at) || outline_distance(region, at) <= near)
         })
     };
     let rec = q.record();
@@ -1159,8 +1161,8 @@ fn nest(loops: Vec<Loop2>) -> Vec<Region2> {
     let mut regions: Vec<Region2> = Vec::new();
     for l in loops {
         let p = l.segs[0].mid();
-        match regions.iter_mut().rev().find(|g| g.outer.contains(p)) {
-            Some(g) if !g.holes.iter().any(|h| h.contains(p)) => g.holes.push(l.reversed()),
+        match regions.iter_mut().rev().find(|g| holds(&g.outer, p)) {
+            Some(g) if !g.holes.iter().any(|h| holds(h, p)) => g.holes.push(l.reversed()),
             _ => regions.push(Region2 { outer: l, holes: Vec::new() }),
         }
     }

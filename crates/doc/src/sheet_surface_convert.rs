@@ -540,7 +540,7 @@ fn to_sharp(r: &Region2, (a, z): (Vec2, Vec2), by: f64, tol: f64) -> std::result
     let (p, q) = if ua <= uz { (a, z) } else { (z, a) };
     let d = (q - p).normalized().ok_or("meets a modelled bend along an edge with no length")?;
     let extent = crate::sheet_surface_cuts::loop_box(&r.outer).size().len().max(1e-9);
-    let out = if r.contains(p.lerp(q, 0.5) + d.perp() * (extent * 1e-4)) { -d.perp() } else { d.perp() };
+    let out = if crate::sheet_surface_cuts::region_holds(r, p.lerp(q, 0.5) + d.perp() * (extent * 1e-4)) { -d.perp() } else { d.perp() };
     // Where the edge ends at an end of the line, the line before or after it may carry on.
     let (p_end, q_end) = (p.dist(segs[k].start()) <= near, q.dist(segs[k].end()) <= near);
     // The line `s`, from `from` to the end `at`, carried on past `at` to the sharp, where it
@@ -609,24 +609,79 @@ fn on_material(s: Vec2, e: Vec2, regions: &[Region2]) -> Vec<(Vec2, Vec2)> {
         .filter(|(a, b)| a.dist(*b) > 1e-9)
         .filter(|(a, b)| {
             let mid = a.lerp(*b, 0.5);
-            [mid, mid + d.perp() * hair, mid - d.perp() * hair].iter().any(|m| regions.iter().any(|r| r.contains(*m)))
+            [mid, mid + d.perp() * hair, mid - d.perp() * hair].iter().any(|m| regions.iter().any(|r| crate::sheet_surface_cuts::region_holds(r, *m)))
         })
         .collect()
 }
 
 /// Where a region's outline crosses a line (a point and a unit direction), as lengths along the
-/// line from its point: the least and the greatest. `None` where it doesn't.
+/// line from its point: the least and the greatest. `None` where it doesn't. Read off the curves
+/// themselves: an outline crosses where it passes from the line's left to its right or back, a
+/// point on the line counted with its right, and each segment ending where the next one starts
+/// (see [`crate::sheet_surface_cuts::holds`]). A line's crossing is found in closed form, and an
+/// arc's, in pieces between its circle's points furthest to either side of the line, along each
+/// of which it only nears the line or only leaves it; any other curve's by
+/// [`solidcraft_develop::crossings`], each crossing of its chords followed onto the curve itself.
 pub(crate) fn extent_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Option<(f64, f64)> {
+    use std::f64::consts::PI;
     let n = u.perp();
+    let side = |q: Vec2| (q - p).dot(n);
     let mut out: Option<(f64, f64)> = None;
+    let mut take = |along: f64| out = Some(out.map_or((along, along), |(lo, hi)| (lo.min(along), hi.max(along))));
     for l in std::iter::once(&r.outer).chain(&r.holes) {
-        let pts: Vec<Vec2> = (&l.polyline(1e-4)).into_iter().copied().collect();
-        for (k, a) in pts.iter().enumerate() {
-            let Some(b) = pts.get((k + 1) % pts.len()) else { continue };
-            let (sa, sb) = ((*a - p).dot(n), (*b - p).dot(n));
-            if (sa > 0.0) != (sb > 0.0) {
-                let along = (*a + (*b - *a) * (sa / (sa - sb)) - p).dot(u);
-                out = Some(out.map_or((along, along), |(lo, hi)| (lo.min(along), hi.max(along))));
+        let ends = l.segs.iter().skip(1).chain(l.segs.first()).map(Seg2::start);
+        for (s, end) in l.segs.iter().zip(ends) {
+            match *s {
+                Seg2::Line { a, .. } => {
+                    let (sa, sb) = (side(a), side(end));
+                    if (sa > 0.0) != (sb > 0.0) {
+                        take((a + (end - a) * (sa / (sa - sb)) - p).dot(u));
+                    }
+                }
+                Seg2::Arc { center, radius, start, sweep } => {
+                    // Pieces between the arc's ends and its circle's points furthest along `n` and
+                    // against it.
+                    let toward = n.y.atan2(n.x);
+                    let (lo, hi) = (start.min(start + sweep), start.max(start + sweep));
+                    let mut stops = vec![0.0];
+                    let mut turn = toward + PI * ((lo - toward) / PI).ceil();
+                    while turn < hi {
+                        if turn > lo {
+                            stops.push((turn - start) / sweep);
+                        }
+                        turn += PI;
+                    }
+                    stops.push(1.0);
+                    stops.sort_by(f64::total_cmp);
+                    let at = |t: f64| match t {
+                        t if t <= 0.0 => s.start(),
+                        t if t >= 1.0 => end,
+                        t => center + Vec2::new((start + sweep * t).cos(), (start + sweep * t).sin()) * radius,
+                    };
+                    // The circle meets the line `half` either way along it from the center's foot.
+                    let h = side(center);
+                    let half = (radius * radius - h * h).max(0.0).sqrt();
+                    for w in stops.windows(2) {
+                        let &[t0, t1] = w else { continue };
+                        if (side(at(t0)) > 0.0) != (side(at(t1)) > 0.0) {
+                            // Along a piece the way from the center keeps its side along the
+                            // line: the crossing is the one on that side.
+                            let m = start + sweep * 0.5 * (t0 + t1);
+                            let way = Vec2::new(m.cos(), m.sin()).dot(u).signum();
+                            take((center - p).dot(u) + way * half);
+                        }
+                    }
+                }
+                _ => {
+                    // A line along this one, far enough past the curve, by a box that holds it
+                    // (see [`crate::sheet_surface_cuts::seg_box`]).
+                    let (lo, hi) = crate::sheet_surface_cuts::seg_box(s);
+                    let far = (lo - p).len() + (hi - lo).len() + 1.0;
+                    let line = [Seg2::Line { a: p - u * far, b: p + u * far }];
+                    for c in solidcraft_develop::crossings(&line, std::slice::from_ref(s)) {
+                        take((c.4 - p).dot(u));
+                    }
+                }
             }
         }
     }
@@ -1878,7 +1933,7 @@ fn read_surfaces(
                 (pa[k - 1], pa[k + 1], pa[k])
             };
             let extent = crate::sheet_surface_cuts::loop_box(&ra.outer).size().len().max(1e-9);
-            (q1 - q0).normalized().is_some_and(|d| ra.contains(at_k + d.perp() * (extent * 1e-4)))
+            (q1 - q0).normalized().is_some_and(|d| crate::sheet_surface_cuts::region_holds(&ra, at_k + d.perp() * (extent * 1e-4)))
         };
         if !left {
             points.reverse();
@@ -2003,7 +2058,7 @@ fn read_surfaces(
         let first = m.sides.iter().find(|(g, ..)| *g == a).and_then(|(_, es, _)| es.first());
         let beside = first.and_then(|e| middle_of(*e)).map_or(s0.lerp(s1, 0.5), on_sharp);
         let mid = pa.to_local(beside);
-        if !(c1 - c0).normalized().is_some_and(|d| ra.contains(mid + d.perp() * (extent * 1e-4))) {
+        if !(c1 - c0).normalized().is_some_and(|d| crate::sheet_surface_cuts::region_holds(&ra, mid + d.perp() * (extent * 1e-4))) {
             (s0, s1) = (s1, s0);
         }
         let (a0, a1, b0, b1) = (pa.to_local(s0), pa.to_local(s1), pb.to_local(s0), pb.to_local(s1));
@@ -3719,7 +3774,7 @@ impl SurfaceSheet {
         let mut best: Option<(f64, &Panel, Rigid2, Rigid3)> = None;
         for (i, (panel, frame)) in self.sheet.panels.iter().zip(&frames).enumerate() {
             let (Surface::Plane, Some(frame), Some(Some(at))) = (&panel.surface, frame, dev.placements.get(i)) else { continue };
-            if frame.z.cross(normal).len() > 1e-6 || !panel.region.outer.ccw().contains(chart(frame, first)) {
+            if frame.z.cross(normal).len() > 1e-6 || !crate::sheet_surface_cuts::holds(&panel.region.outer, chart(frame, first)) {
                 continue;
             }
             let d = (frame.shift - plane.origin).dot(normal).abs();
@@ -4011,7 +4066,8 @@ impl SurfaceSheet {
                 let (u0, u1) = (w[0], w[1]);
                 let (start, end) = (b.start.lerp(b.end, u0), b.start.lerp(b.end, u1));
                 let mid = start.lerp(end, 0.5);
-                if start.dist(end) <= 1e-9 || !self.regions.iter().any(|r| r.contains(mid)) || b.tabs.iter().any(|t| t.contains(mid)) {
+                let holds_mid = |r: &Region2| crate::sheet_surface_cuts::region_holds(r, mid);
+                if start.dist(end) <= 1e-9 || !self.regions.iter().any(holds_mid) || b.tabs.iter().any(holds_mid) {
                     continue;
                 }
                 out.push(crate::sheet::BendInfo {
@@ -4075,5 +4131,45 @@ impl SurfaceSheet {
             })
             .collect();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts::PI;
+
+    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+
+    use super::extent_across;
+
+    /// Where a line crosses an outline is read off its curves. A disc of radius 2 round the
+    /// origin (two half turns), crossed along x through (−5, 1): its circle meets y = 1 at
+    /// x = ±√3, so 5 − √3 (3.2679…) and 5 + √3 (6.7320…) along from (−5, 1); chords 1e-4 inside
+    /// the circle would meet it short of both. An arch from (4, 0) back to the origin, a cubic
+    /// with control points (4, 3) and (0, 3), closed by the line along y = 0: the cubic's y is
+    /// 9 t (1 − t), 1 at t = (3 ∓ √5) / 6, where its x, 4 (1 − t)² (1 + 2 t), is 2 ± 22 √5 / 27
+    /// (3.8220…, 0.1779…); crossed along x through (−1, 1), 3 − 22 √5 / 27 and 3 + 22 √5 / 27
+    /// along. A line along y = 3, above the arch's top (9/4), crosses neither.
+    #[test]
+    fn a_line_crosses_an_outline_where_its_curves_do() {
+        let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
+        let half = |start: f64| Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start, sweep: PI };
+        let disc = Region2 { outer: Loop2 { segs: vec![half(0.0), half(PI)] }, holes: Vec::new() };
+        let root3 = 3f64.sqrt();
+        let got = extent_across(&disc, (Vec2::new(-5.0, 1.0), Vec2::X));
+        assert!(got.is_some_and(|g| near(g, (5.0 - root3, 5.0 + root3))), "{got:?}");
+        let arch = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Line { a: Vec2::ZERO, b: Vec2::new(4.0, 0.0) },
+                    Seg2::Cubic { p0: Vec2::new(4.0, 0.0), p1: Vec2::new(4.0, 3.0), p2: Vec2::new(0.0, 3.0), p3: Vec2::ZERO },
+                ],
+            },
+            holes: Vec::new(),
+        };
+        let reach = 22.0 * 5f64.sqrt() / 27.0;
+        let got = extent_across(&arch, (Vec2::new(-1.0, 1.0), Vec2::X));
+        assert!(got.is_some_and(|g| near(g, (3.0 - reach, 3.0 + reach))), "{got:?}");
+        assert_eq!(extent_across(&arch, (Vec2::new(-1.0, 3.0), Vec2::X)), None);
     }
 }

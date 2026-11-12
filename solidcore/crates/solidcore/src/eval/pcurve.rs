@@ -941,7 +941,7 @@ pub fn eval_d1(c: &Curve2, t: f64) -> Option<([f64; 2], [f64; 2])> {
         Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len()),
     };
     let p = knots.len().checked_sub(count + 1)?;
-    let (first, ders) = crate::bspline::basis_derivatives(knots, p, count, t, 1)?;
+    let (first, ders) = super::plan::basis::basis_derivatives(knots, p, count, t, 1)?;
     // The homogeneous point and its derivative, then the quotient rule: C' = (A' − w′C) / w.
     let (mut a, mut d) = ([0.0; 3], [0.0; 3]);
     for (j, n) in ders.iter().enumerate() {
