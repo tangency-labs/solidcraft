@@ -123,7 +123,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.heal_stage3_failures_propagate = true;
     f.sweep_frame_on_planar_path_normal = true;
     f.cover_refuses_folded_continuation = true;
-    f.boolean_vertex_by_best_crossing = true;
     f.boolean_cleanup_removes_slits = true;
     f.classify_edge_interval = true;
     f.ellipse_trim_seam_lines_span_cone_height = true;

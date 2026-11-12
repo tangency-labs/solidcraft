@@ -16,7 +16,7 @@
 //!
 //! Deviations:
 //! - **Vertices placed by their best edge crossing** (not upstream, WR-410,
-//!   tangency-labs/solidcore#1059, opt-in `Kernel::fixes.boolean_vertex_by_best_crossing`;
+//!   tangency-labs/solidcore#1059, the default since its flag was retired;
 //!   the SolidCraft fork's `FindOrCreateProtoEdge` change): after each end's proto vertex,
 //!   [`ProtoTopologyManager::add_crossing`] with the angle at which the face pair's curve
 //!   crosses the edge its end lies on (`crossing_sine`).
@@ -406,8 +406,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 &mut ci2.start,
             ))?
             .and_then(|r| r.0);
-            // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
-            if let (Some(pv), true) = (start_pv, k.fixes.boolean_vertex_by_best_crossing) {
+            // not upstream (WR-410, #1059): placed by its best edge crossing
+            if let Some(pv) = start_pv {
                 let sine = crossing_sine(
                     k,
                     &*geometry,
@@ -428,8 +428,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 &mut ci2.end,
             ))?
             .and_then(|r| r.0);
-            // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
-            if let (Some(pv), true) = (end_pv, k.fixes.boolean_vertex_by_best_crossing) {
+            // not upstream (WR-410, #1059): placed by its best edge crossing
+            if let Some(pv) = end_pv {
                 let sine = crossing_sine(
                     k,
                     &*geometry,

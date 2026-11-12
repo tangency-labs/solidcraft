@@ -134,7 +134,6 @@
   "cover_refuses_folded_continuation",
   "cover_wraps_across_closed_seam",
   "boolean2d_plane_covers_far_faces",
-  "boolean_vertex_by_best_crossing",
   "boolean_splits_definition_across_split",
   "proto_edge_splits_at_captured_vertices",
   "proto_edge_split_upper_keeps_the_old_max",
