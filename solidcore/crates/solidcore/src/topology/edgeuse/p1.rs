@@ -2034,9 +2034,7 @@ mod tests {
         // cannot be measured is SM_BIG_DOUBLE, no closure; upstream measures it from
         // unset points.
         use crate::nurbs::b_spline_curve::BSplineCurve;
-        let off = Kernel::default();
-        let mut k = Kernel::default();
-        k.fixes.topology_failed_evaluations_propagate = true;
+        let k = Kernel::default();
         let a0 = EdgeuseId::from_index(0);
         for bad in [0, 6] {
             let mut b = square();
@@ -2048,7 +2046,6 @@ mod tests {
                 .unwrap()
                 .uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
             assert_eq!(start_point_uv_loop_gap(&k, &b, a0).unwrap(), BIG_DOUBLE);
-            assert_ne!(start_point_uv_loop_gap(&off, &b, a0).unwrap(), BIG_DOUBLE);
         }
         for bad in [0, 3] {
             let mut b = square();
@@ -2060,7 +2057,6 @@ mod tests {
             b.edge_mut(EdgeId::from_index(bad)).unwrap().curve =
                 Some(Curve::from(BSplineCurve::new(3)));
             assert_eq!(start_point_uv_loop_gap(&k, &b, a0).unwrap(), BIG_DOUBLE);
-            assert_ne!(start_point_uv_loop_gap(&off, &b, a0).unwrap(), BIG_DOUBLE);
         }
     }
 
@@ -2170,8 +2166,7 @@ mod tests {
     fn issue_521_dist_and_dev_is_none_without_surface_derivatives() {
         // tangency-labs/smlib 666242b (sm_CalcDistAndDev): no distance without the
         // derivatives (rDist stays -1); upstream measures from unset ones.
-        let mut k = Kernel::default();
-        k.fixes.topology_failed_evaluations_propagate = true;
+        let k = Kernel::default();
         let s = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::default());
         let mut sol = Solution::<H>::new();
         sol.objects[0] = Some(H(ObjectKind::Surface));
@@ -2184,35 +2179,10 @@ mod tests {
             calc_dist_and_dev(&k, Vec3::Z, &sol, |_| Some(&s), true).unwrap(),
             (-1.0, Some(-1.0))
         );
-        // coverage only: upstream reaches -1 here as well (the unset derivatives
-        // vanish and the empty surface's normal is short)
-        assert_eq!(
-            calc_dist_and_dev(&Kernel::default(), Vec3::Z, &sol, |_| Some(&s), true).ok(),
-            Some((-1.0, Some(-1.0)))
-        );
         assert_eq!(
             calc_dist_and_dev(&k, Vec3::Z, &sol, |_| Some(&s), false).unwrap(),
             (0.5, None)
         );
-    }
-
-    #[test]
-    fn failed_evaluations_are_ignored_by_default() {
-        // WR-263 / WR-264: upstream ignores the failed evaluations' statuses.
-        use crate::nurbs::b_spline_curve::BSplineCurve;
-        let k = Kernel::default();
-        let a0 = EdgeuseId::from_index(0);
-        let mut b = square();
-        b.edgeuse_mut(a0).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
-        b.edgeuse_mut(EdgeuseId::from_index(6))
-            .unwrap()
-            .uv_trim_curve = Some(uv_line([0.0, 1.0], [0.0, 0.0]));
-        assert!(start_point_uv_loop_gap(&k, &b, a0).is_ok());
-        let s = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::default());
-        let mut sol = Solution::<H>::new();
-        sol.objects[0] = Some(H(ObjectKind::Surface));
-        sol.start.solution_value = 0.5;
-        assert!(calc_dist_and_dev(&k, Vec3::Z, &sol, |_| Some(&s), true).is_ok());
     }
 
     #[test]

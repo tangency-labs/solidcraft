@@ -2064,35 +2064,11 @@ mod tests {
             }
             b.edgeuse_mut(eu(bad)).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
             let bad_edge = eu1::edge(&b, eu(bad)).unwrap();
-            let mut k = Kernel::default();
-            let off = uv_corner_boundaries(
-                &k,
-                &mut b.clone_standing_for_self().unwrap(),
-                LoopId::from_index(0),
-                &dom,
-                1e-6,
-            )
-            .unwrap();
-            k.fixes.topology_failed_evaluations_propagate = true;
+            let k = Kernel::default();
             let on = uv_corner_boundaries(&k, &mut b, LoopId::from_index(0), &dom, 1e-6).unwrap();
             assert!(!on.on_edges.contains(&bad_edge), "bad={bad}: {on:?}");
             assert_eq!(on.on_edges.len(), 6, "bad={bad}: {on:?}");
-            assert_ne!(off.on_edges, on.on_edges, "bad={bad}");
         }
-    }
-
-    #[test]
-    fn uv_corners_ignore_failed_trim_evaluation_by_default() {
-        // WR-262: upstream ignores the failed evaluation and keeps the previous ends.
-        let k = Kernel::default();
-        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let mut b = square(0.0);
-        for i in 0..4 {
-            b.edgeuse_mut(eu(2 * i)).unwrap().uv_trim_curve =
-                b.edge(EdgeId::from_index(i)).unwrap().curve.clone();
-        }
-        b.edgeuse_mut(eu(2)).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
-        assert!(uv_corner_boundaries(&k, &mut b, LoopId::from_index(0), &dom, 1e-6).is_ok());
     }
 
     #[test]
