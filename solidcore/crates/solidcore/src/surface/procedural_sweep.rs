@@ -1326,6 +1326,29 @@ impl<'a> DefinitionRef<'a> {
 mod tests {
     use super::*;
 
+    /// The certificate reads the profile, motion, stations and half angle, not the map:
+    /// after the map is reparametrized and swapped, `certify()` is the bound `create`
+    /// stored, bit for bit, so reopening a record takes that bound rather than certifying
+    /// twice ([`ProceduralSweep::from_record`]).
+    #[test]
+    fn the_certificate_does_not_read_the_map() {
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.3, 0.7, 1.2, 1.25];
+        let mut definition = ProceduralSweep::create(&profile, motion, &stations, 0.3).unwrap();
+        let stored = definition.bound.to_bits();
+        assert_eq!(definition.certify().unwrap().to_bits(), stored);
+        definition.reparametrize_map(true, 1e8, -2.0);
+        definition.reparametrize_map(false, -3.0, 0.5);
+        definition.swap_map();
+        assert_eq!(definition.certify().unwrap().to_bits(), stored);
+    }
+
     /// The alternating series forms each term once; its sums are, bit for bit, those of the
     /// loop that formed the next term twice (to test it, then to add it), for atan and for
     /// the lift's error bound over the spans' range of `tau`.
