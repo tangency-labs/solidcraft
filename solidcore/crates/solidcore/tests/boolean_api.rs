@@ -612,7 +612,7 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
             let v = brep_volume(&k, &mut brep, 1e-9, &attrs).unwrap();
             let rel = (v - want).abs() / want;
             // Written to accept: a NaN volume fails.
-            if !(rel <= 1e-3) {
+            if rel.is_nan() || rel > 1e-3 {
                 failures.push(format!(
                     "delta {delta:e} cap {cap:e} {name}: volume {v:e} vs {want:e} (rel {rel:.2e})"
                 ));
@@ -659,7 +659,7 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
                 .map(f64::abs)
                 .fold(f64::INFINITY, f64::min);
                 let on_box = outside.max(to_planes);
-                if !(on_sphere.min(on_box) <= 2e-5) {
+                if on_sphere.is_nan() || on_box.is_nan() || on_sphere.min(on_box) > 2e-5 {
                     failures.push(format!(
                         "delta {delta:e} cap {cap:e} {name}: vertex {p:?} is {on_sphere:e} off the sphere and {on_box:e} off the box"
                     ));
