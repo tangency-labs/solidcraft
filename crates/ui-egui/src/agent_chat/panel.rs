@@ -452,6 +452,11 @@ pub(crate) fn owns_keyboard_input(app: &mut SolveApp, ctx: &egui::Context) -> bo
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     poll(app, &ctx);
+    // The reply hit-region is measured again below, only while the panel is drawn (#10882).
+    app.agent_chat.sel_menu.begin_frame();
+    if !app.agent_chat.open {
+        app.agent_chat.sel_menu.close_menu();
+    }
     let mut prefs = AgentPanelPrefs::read(&app.preferences);
     let shown = shown(app);
     if begin(&mut app.agent_chat, shown, &prefs, &ctx) {
@@ -463,6 +468,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // Which chips and pills stand for things that left the design: plain state the panel reads.
         refresh_gone(app);
+        // The Copy menu goes above the reply, drawn before its labels so a Copy click lands on the
+        // selection while it is still alive this frame (#10882).
+        super::selection_menu::show(app, &ctx);
         // Read only when the panel is drawn: a hidden or closed chat costs nothing.
         let view = PanelView::of(app, &ctx);
         draw(&mut app.agent_chat, &view, &mut prefs, ui);
@@ -2382,6 +2390,12 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                         let resp = ui.interact(drawn, Id::unique(("agent_chat_msg", n)), Sense::hover());
                         copy_message_menu(ui, &resp, n, text);
                     }
+                    // Where the reply sits, so a right-click there can keep its selection (#10882).
+                    let r = egui::Rect::from_min_max(
+                        egui::pos2(ui.max_rect().left(), before.min.y),
+                        egui::pos2(ui.max_rect().right(), ui.cursor().min.y),
+                    );
+                    chat.sel_menu.note_reply(r);
                 }
             }
             Item::Tool { .. } => {
