@@ -195,6 +195,9 @@ pub struct IconSet {
     data: IconData,
     extension: IconExtension,
     table: OnceLock<Table>,
+    /// Each icon id's master and accent once resolved: every icon drawn at every frame looked
+    /// its id up along the alias and accent lists.
+    resolved: OnceLock<std::sync::Mutex<HashMap<String, Resolved>>>,
 }
 
 /// The parsed masters: full size, and the small-slot variants.
@@ -220,7 +223,7 @@ impl IconSet {
     /// The set over `data` with a host's own masters, aliases and default accents, which take
     /// precedence for a name both have. `data` is not copied: it is the same static tables.
     pub const fn extended(data: IconData, extension: IconExtension) -> Self {
-        Self { data, extension, table: OnceLock::new() }
+        Self { data, extension, table: OnceLock::new(), resolved: OnceLock::new() }
     }
 
     /// The set's data (without its extension).
@@ -381,7 +384,15 @@ impl IconSet {
     /// The master and accent for an icon id: an alias (with its accent), a master of that name,
     /// or the placeholder.
     pub fn resolve(&'static self, name: &str) -> Resolved {
-        let resolved = self.resolve_master(name);
+        let cache = self.resolved.get_or_init(Default::default);
+        let known = cache.lock().ok().and_then(|c| c.get(name).copied());
+        let resolved = known.unwrap_or_else(|| {
+            let resolved = self.resolve_master(name);
+            if let Ok(mut c) = cache.lock() {
+                c.insert(name.to_owned(), resolved);
+            }
+            resolved
+        });
         audit::record(name, resolved);
         resolved
     }

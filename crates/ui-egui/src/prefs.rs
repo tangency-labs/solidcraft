@@ -1752,6 +1752,9 @@ preference_settings! {
     move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+    /// User ceilings, not automatic increases to a package's approved execution budget.
+    plugin_max_fuel: u64 = solidcraft_engine::plugin::HostLimits::default().max_fuel, PAGE_PLUGINS;
+    plugin_max_memory_mib: usize = solidcraft_engine::plugin::HostLimits::default().max_memory_mib, PAGE_PLUGINS;
 }
 
 /// What a middle-button double-click in the view does.
@@ -1807,6 +1810,7 @@ pub struct PrefsWindow {
     font_filter: String,
     /// Search text on the Plugins page.
     pub(crate) plugin_query: String,
+    pub(crate) plugin_limit_inputs: Option<crate::plugins::LimitInputs>,
     panel_restore_details: bool,
     panel_restore_retry: bool,
     panel_popup_reset: bool,
@@ -1890,6 +1894,9 @@ fn set_theme_follow(app: &mut SolveApp, value: &serde_json::Value, available: bo
 
 /// Open the dialog at a page.
 pub fn open_at(app: &mut SolveApp, page: usize) {
+    if !app.prefs_window.shell.open {
+        app.prefs_window.plugin_limit_inputs = None;
+    }
     app.prefs_window.shell.open_at(page, PAGES.len());
 }
 
@@ -1967,6 +1974,7 @@ impl Snapshot {
         let update = std::mem::take(&mut app.preferences.update);
         let stand_up_answers = std::mem::take(&mut app.preferences.stand_up_answers);
         app.preferences = self.prefs;
+        crate::plugins::sync_policy(app);
         sync_surface_analysis(app);
         crate::render_workspace::apply_memory_policy(app);
         app.preferences.stand_up_answers = stand_up_answers;
@@ -2255,6 +2263,10 @@ fn defaults(app: &mut SolveApp, page: usize) {
     let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
     let units = app.preferences.default_units.clone();
     reset_preferences(&mut app.preferences, page);
+    if page == PAGE_PLUGINS {
+        app.prefs_window.plugin_limit_inputs = None;
+    }
+    crate::plugins::sync_policy(app);
     sync_surface_analysis(app);
     crate::render_workspace::apply_memory_policy(app);
     if app.preferences.default_units != units {
@@ -2355,6 +2367,7 @@ fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bo
 
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
+    crate::plugins::sync_policy(app);
     apply_network(&app.preferences);
     // The features computed from now on are checked as the preference says.
     app.session.set_validation(app.preferences.validation);
@@ -2906,7 +2919,7 @@ impl prefs_window::Host for SolveApp {
         Snapshot::take(self)
     }
     fn matches(&self, snapshot: &Snapshot) -> bool {
-        snapshot.matches(self)
+        snapshot.matches(self) && !crate::plugins::resource_pending(self)
     }
     /// The panel layout goes back first, through the same transaction as its commands; only when
     /// that succeeds do the other settings.
@@ -2921,6 +2934,9 @@ impl prefs_window::Host for SolveApp {
             up_axis_changed(self);
         }
         Ok(())
+    }
+    fn confirm(&mut self) -> Result<(), String> {
+        crate::plugins::commit_resource_inputs(self).inspect_err(|error| self.set_status(error.clone(), true))
     }
     /// The shared panel layout switches on or off only on Apply.
     fn apply(&mut self) -> Result<(), String> {
@@ -2942,6 +2958,7 @@ impl prefs_window::Host for SolveApp {
         }
     }
     fn closed(&mut self) {
+        self.prefs_window.plugin_limit_inputs = None;
         self.prefs_window.panel_restore_details = false;
         self.prefs_window.panel_popup_reset = true;
         self.keymap.read_only = false;
@@ -4134,6 +4151,13 @@ pub(crate) fn migrate_gruvbox(p: &mut Prefs) {
 /// so a hand-edited preferences file cannot carry a huge or nonsense list. `set` still refuses
 /// those instead of dropping them.
 fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
+    let defaults = solidcraft_engine::plugin::HostLimits::default();
+    if p.plugin_max_fuel == 0 {
+        p.plugin_max_fuel = defaults.max_fuel;
+    }
+    if !(1..=solidcraft_engine::plugin::MAX_MEMORY_MIB).contains(&p.plugin_max_memory_mib) {
+        p.plugin_max_memory_mib = defaults.max_memory_mib;
+    }
     // The file size limits, likewise, are brought into range (#4086).
     let limits = file_limits(&p);
     let mb = solidcraft_engine::io::limits::MB;
@@ -4283,6 +4307,7 @@ fn prepare_preferences(
         return Err("`dimension_text_scale` must be 0.5…2.5".into());
     }
     let new = migrate(new);
+    crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib: {e}"))?;
     if !UNITS.contains(&new.default_units.as_str()) {
         return Err(format!("units must be one of {}", UNITS.join(", ")));
     }
@@ -4413,6 +4438,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
         crate::select_other::close(app);
     }
     app.preferences = new;
+    crate::plugins::sync_policy(app);
     sync_surface_analysis(app);
     crate::render_workspace::apply_memory_policy(app);
     apply_file_limits(&app.preferences);

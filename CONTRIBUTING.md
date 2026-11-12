@@ -234,10 +234,11 @@ no LTO, and debug assertions off. It
 builds several times faster than `--release`. If a test fails only in a plain debug build, say so
 in the PR. `cargo xtask test` builds the tests with it and then runs every test binary at once
 (`cargo test` runs them one after another); arguments after `--` go to each binary, e.g.
-`cargo xtask test -- shell`. Set `SOLIDCRAFT_TEST_JOBS` to a positive integer to opt into a
-shared bound on top-level test/side commands for `cargo xtask test` and `cargo xtask ci`.
-For example, `SOLIDCRAFT_TEST_JOBS=2` allows two commands at once; the sequential wasm/doc
-worker consumes one of those slots. Every binary and side check still runs after failures.
+`cargo xtask test -- shell`. Builds and tests use all your cores by default; nothing in the
+repo limits them. Only if you want fewer (say, to keep a shared machine usable), set
+`SOLIDCRAFT_TEST_JOBS` to a positive integer: it bounds how many top-level test/side commands
+`cargo xtask test` and `cargo xtask ci` run at once, and the sequential wasm/doc worker
+consumes one of those slots. Every binary and side check still runs after failures.
 Without the variable the existing concurrency is unchanged. With it set, each test binary
 inherits `RUST_TEST_THREADS` and `ACTION_MATRIX_JOBS` of `max(1, cpus / jobs)` — the machine's
 parallelism shared between the binaries in flight — unless you set either one explicitly;

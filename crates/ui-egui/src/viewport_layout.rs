@@ -29,7 +29,35 @@ const CORNER_INSET: f32 = 8.0;
 const CORNER_GAP: f32 = 4.0;
 
 /// Enumerate rectangles whose edges meet the viewport or a bounded number of overlays.
+///
+/// The answer for the same view and overlays is remembered: the search is quartic in their
+/// edges, and it ran several times at every frame (each pointer move) with the same inputs.
 pub(crate) fn free_rect(view: Rect, obstacles: &[Rect]) -> Rect {
+    let key = |r: &Rect| [r.min.x, r.min.y, r.max.x, r.max.y].map(f32::to_bits);
+    let wanted: Vec<[u32; 4]> = std::iter::once(&view).chain(obstacles).map(key).collect();
+    if let Some(found) = FREE_RECTS.with(|c| c.borrow().iter().find(|(k, _)| *k == wanted).map(|(_, r)| *r)) {
+        return found;
+    }
+    let found = free_rect_search(view, obstacles);
+    FREE_RECTS.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= FREE_RECTS_KEPT {
+            c.remove(0);
+        }
+        c.push((wanted, found));
+    });
+    found
+}
+
+/// How many [`free_rect`] answers are remembered (a frame asks for a few).
+const FREE_RECTS_KEPT: usize = 8;
+
+thread_local! {
+    /// [`free_rect`]'s recent answers, by the bits of its view and overlays.
+    static FREE_RECTS: std::cell::RefCell<Vec<(Vec<[u32; 4]>, Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn free_rect_search(view: Rect, obstacles: &[Rect]) -> Rect {
     if !view.is_finite() || !view.is_positive() {
         return Rect::NOTHING;
     }

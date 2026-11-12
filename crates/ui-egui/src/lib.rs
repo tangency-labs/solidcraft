@@ -841,6 +841,8 @@ pub struct SolveApp {
     agent_replies: Vec<(std::sync::mpsc::Receiver<serde_json::Value>, std::sync::mpsc::Sender<serde_json::Value>)>,
     /// Agent exports computing on copies of the design.
     control_answering: Vec<control_job::ControlJob>,
+    /// Most recent completed inspection per session and package, ordered by request.
+    plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -1051,6 +1053,7 @@ impl SolveApp {
             control_job: None,
             agent_replies: Vec::new(),
             control_answering: Vec::new(),
+            plugin_inspection_versions: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1362,6 +1365,7 @@ impl SolveApp {
         }
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
+        crate::plugins::sync_policy(self);
         prefs::apply_network(&self.preferences);
         // Before a file given at start opens: the largest file it may be (#4086).
         prefs::apply_file_limits(&self.preferences);
@@ -1394,6 +1398,13 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
+        crate::plugins::sync_policy(self);
+        if id.eq_ignore_ascii_case("plugin.run")
+            || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
+        {
+            let key = if cfg!(target_arch = "wasm32") { "ui.plugins_desktop" } else { "ui.plugin_standalone" };
+            return Err(self.tr(key).into());
+        }
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
@@ -1505,6 +1516,11 @@ impl SolveApp {
             _ => r,
         };
         if let Ok(v) = &r {
+            if id.eq_ignore_ascii_case("plugin.inspect")
+                && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
+            {
+                self.plugin_inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
+            }
             match id {
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
@@ -3889,8 +3905,12 @@ impl SolveApp {
             let shot_waits = open_meshing::active(self) && self.control_held.front().is_some_and(|r| r.method == "ui.screenshot");
             // Held requests go first, in order, once nothing makes them wait.
             let held = if waits || shot_waits { None } else { self.control_held.pop_front() };
-            let Some(req) = held.or_else(|| rx.as_ref().and_then(|rx| rx.try_recv().ok())) else { break };
+            let Some(mut req) = held.or_else(|| rx.as_ref().and_then(|rx| rx.try_recv().ok())) else { break };
             if req.refuse_cancelled_chat() {
+                continue;
+            }
+            if let Err(error) = plugins::normalize_request(&self.session, &req.method, &mut req.params) {
+                let _ = req.reply.send(json!({"ok":false,"error":error}));
                 continue;
             }
             if shot_waits {
