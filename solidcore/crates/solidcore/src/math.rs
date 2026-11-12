@@ -512,6 +512,42 @@ impl Transform {
             n * (2.0 * origin.dot(n)),
         ))
     }
+
+    /// The map that undoes this one: `p = (p' - t) A⁻¹`, its linear part `A⁻¹` (the adjugate
+    /// over the determinant: with `a`, `b`, `c` the rows of `A`, row `i` holds the `i`-th
+    /// components of `b × c`, `c × a` and `a × b`, over `a · (b × c)`) and its translation
+    /// `-t A⁻¹`. A mirror in a plane through the origin square to an axis is its own inverse
+    /// exactly.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a map not proved regular ([`Transform::is_regular`] at ratio 0: an
+    /// entry not finite, a fourth column that is not `(0, 0, 0, 1)`, a determinant not
+    /// proved apart from 0).
+    pub fn inverse(&self) -> crate::error::Result<Self> {
+        if !self.is_regular(0.0).is_yes() {
+            return Err(crate::error::SolidError::invalid_input(
+                OP_MAPS,
+                "a map not proved regular has no inverse",
+            ));
+        }
+        let (a, b, c) = (self.x_axis(), self.y_axis(), self.z_axis());
+        let (bc, ca, ab) = (b.cross(c), c.cross(a), a.cross(b));
+        let s = 1.0 / a.dot(bc);
+        let linear = Self::from_axes(
+            Vec3::new(bc.x, ca.x, ab.x) * s,
+            Vec3::new(bc.y, ca.y, ab.y) * s,
+            Vec3::new(bc.z, ca.z, ab.z) * s,
+            Point3::ZERO,
+        );
+        let t = linear.transform_vector(self.translation_part());
+        Ok(Self::from_axes(
+            linear.x_axis(),
+            linear.y_axis(),
+            linear.z_axis(),
+            -t,
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -579,6 +615,39 @@ mod tests {
         assert!(mirror.transform_point(c).distance(c) <= 1e-14);
         let back = mirror.transform_point(c + n);
         assert!(back.distance(c - n) <= 1e-14, "{back:?}");
+    }
+
+    #[test]
+    fn a_map_after_its_inverse_is_the_identity_and_a_singular_one_has_none() {
+        // a turn about a line off the origin, then a move and a scale
+        let turn = Transform::rotation(Point3::new(1.0, 2.0, 3.0), Vec3::new(1.0, -2.0, 2.0), 0.7)
+            .unwrap();
+        let map = turn
+            .concat(&Transform::translation(Vec3::new(4.0, -5.0, 6.0)))
+            .concat(&Transform::uniform_scaling(Point3::new(-1.0, 0.5, 2.0), 2.5).unwrap());
+        let inv = map.inverse().unwrap();
+        let size = map.m.iter().flatten().fold(1.0_f64, |a, x| a.max(x.abs()));
+        for (p, q) in [(map, inv), (inv, map)] {
+            let back = p.concat(&q);
+            assert!(
+                apart(&back, &Transform::IDENTITY) <= 1e-15 * size,
+                "{back:?}"
+            );
+        }
+        // a mirror in a plane square to an axis is its own inverse, exactly
+        let mirror = Transform::reflection(Point3::new(7.0, 5.0, -1.0), Vec3::Y).unwrap();
+        assert_eq!(mirror.inverse().unwrap(), mirror);
+        // a flattening and a projective map have none
+        let mut flat = Transform::IDENTITY;
+        flat.m[2] = [0.0; 4];
+        let mut projective = Transform::IDENTITY;
+        projective.m[0][3] = 1.0;
+        for m in [flat, projective] {
+            assert!(matches!(
+                m.inverse(),
+                Err(crate::error::SolidError::InvalidInput { operation, .. }) if operation == OP_MAPS
+            ));
+        }
     }
 
     #[test]

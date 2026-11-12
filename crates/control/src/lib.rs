@@ -10,7 +10,6 @@
 
 pub mod auth;
 mod cancel;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod client;
 mod effect;
 mod request;

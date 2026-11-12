@@ -8,6 +8,7 @@
 //! |-------------------------|----------|
 //! | [`tangent_all_along`]   | (none)   |
 //! | [`Tangency`]            | (none)   |
+//! | [`g2_all_along`], [`G2`] | (none)   |
 //! | `bernstein_roots` (private) | (none) |
 //!
 //! **The polynomials.** Each use of the edge carries its pcurve `(u(t), v(t)) = (X, Y) / W`
@@ -115,6 +116,54 @@
 //! `MAX_UNENCLOSED_SPLITS` times; past that it is undecided. Either way nothing is decided
 //! without a bounded margin.
 
+//!
+//! **G2: the curvature across ([`g2_all_along`]).** Each use's normal curvature across the
+//! edge (in the tangent plane, square to the edge) is the shape operator's trace less the
+//! normal curvature along the pcurve's tangent, `k = 2H - II(T) / I(T)`, so no direction across
+//! is chosen. With `E, F, G` and `T = S_u u' + S_v v'`, and `|N|^2 = EG - F^2`,
+//! `k = n . V / (|N|^2 |T|^2)`, `n` the unit normal, where
+//! `V = (E S_vv - 2F S_uv + G S_uu) |T|^2 - (S_uu u'^2 + 2 S_uv u'v' + S_vv v'^2) |N|^2`.
+//! In the net's homogeneous terms (`S = A / w`): `w^2 S_u = A_u w - A w_u`,
+//! `w^3 S_uu = w^2 A_uu - w (2 w_u A_u + w_uu A) + 2 w_u^2 A`, `w^3 S_uv = w^2 A_uv -
+//! w (w_u A_v + w_v A_u + w_uv A) + 2 w_u w_v A` (one constant weight `c`: `c S_u = A_u`,
+//! `c S_uu = A_uu`); the pcurve's `u' = (X'W - XW') / W^2`. Written in those (starred) terms,
+//! `k = n . V~` with `V~ = w V* / (|N*|^2 |T*|^2)`, `T* = S*_u U* + S*_v V'*` and
+//! `U* = X'W - XW'`, `V'* = Y'W - YW'`. Along the pcurve, `P^ = W^k w V*` and
+//! `Q^ = W^k |N*|^2 |T*|^2`, `k = 6 d`, are polynomials in `t` of one degree
+//! `6 d r + 4 r - 4` (`g2_degrees`), with `d` the degree of `S*_u` in `(u, v)`: `2p + 2q - 1`
+//! for a rational net, `p + q - 1` for one weight; `V~ = P^ / Q^`. A plane's `V~` is 0.
+//!
+//! **Tangency first.** G2 is a smooth edge's: [`g2_all_along`] first decides the tangency at
+//! the angle asked ([`tangent_all_along`]). A crease is [`G2::NotTangent`] at that cost, and
+//! an edge whose tangency is undecided is never [`G2::Continuous`]: it is [`G2::Jumps`] or
+//! [`G2::Undecided`]. Its jump is still bounded as below, since a part whose bound is within
+//! `max_jump` provably holds no witness and is dropped: only the parts that may still jump
+//! are halved.
+//!
+//! **The jump.** Both curvatures are read against use a's face use normal `n_a = F_a / |F_a|`
+//! (`F` as above): `k_b = n_b . V~_b` differs from `n_a . V~_b` by at most
+//! `|n_a - n_b| |V~_b| <= theta |V~_b|`, `theta` the angle between the normals, bounded over a
+//! piece from the same points' `P` and `Q` as [`tangent_all_along`] does. So
+//! `k_a - k_b = J / G +- theta |P^_b| / Q^_b` with the polynomial
+//! `J = F_a . (P^_a Q^_b - P^_b Q^_a)` and `G = |F_a| Q^_a Q^_b`. On a piece, at the `D + 1`
+//! Chebyshev points (`D` the degree of `J`, the largest of the piece's polynomials), `|J|`,
+//! `|P^_b|` and the curvatures' numerators are bounded as `P` is above, and `|F_a|^2`, `Q^_a`
+//! and `Q^_b` from below as `Q` is (each factor of `G` on its own). Then, with the scale
+//! `max(|k_a|, |k_b|, 1 / L)` (`L` the edge's measured length, a stated scale, not a bound):
+//! - **continuous** where the jump's bound (plus a blend's margin) is within `max_jump` of the
+//!   scale's lower bound on every piece;
+//! - **jumps** where at one point the jump, each use's curvature against its own normal and
+//!   evaluated directly, exceeds `max_jump` of the scale's upper bound there (less the margin):
+//!   a witness (at a point on a knot line, on each closed cell's polynomial, the face from
+//!   that side);
+//! - otherwise halved, as above, and [`G2::Undecided`] past the splits or the budget. A point
+//!   where `|N|^2`, `|T|^2` or `cos theta` is not bounded away from 0 (a pole, an apex, a
+//!   crease) leaves its piece undecided. A piece across a knot line is bounded over its
+//!   box cell by cell: each pair of the two uses' cells it meets, each cell's polynomial
+//!   continued over the box (the point at each `t` is in one of each), the largest jump
+//!   taken. A blend's margin is `|k_def - k_net|` over the piece's box, its definition's
+//!   partials to second order by [`definition_partials_over_box`]; where they are not
+//!   enclosed the piece is undecided.
 //!
 //! Deviations: no upstream counterpart. `bernstein_roots` (used by `sweep::stations`)
 //! recurses at most `MAX_DEPTH` (48) deep and `MAX_SUBDIVISIONS` (4096) times per call; a piece
@@ -1678,11 +1727,103 @@ fn basis2(knots: &[f64], k: usize, p: usize, x: Ivl) -> Option<[Vec<Ivl>; 3]> {
     Some([n, d, d2])
 }
 
+/// The degrees along a piece of one use's `F` and of its curvature's `P^` and `Q^` (module
+/// docs, G2), for a net of degrees `(p, q)` (`rational`: weights not all one value), a pcurve
+/// of degree `r`, and a plane (0, 0).
+fn g2_degrees(p: usize, q: usize, r: usize, rational: bool, plane: bool) -> (usize, usize) {
+    if plane {
+        return (0, 0);
+    }
+    let pq = p + q;
+    // the degree d of S*_u in (u, v)
+    let d = if rational {
+        (2 * pq).saturating_sub(1)
+    } else {
+        pq.saturating_sub(1)
+    };
+    let f = (2 * d).saturating_mul(r);
+    // 6 d r + 4 r - 4
+    let bend = (6 * d)
+        .saturating_mul(r)
+        .saturating_add(4 * r)
+        .saturating_sub(4);
+    (f, bend)
+}
+
+/// One use's values for the curvature across at a point or over a box (module docs, G2): `F`,
+/// the face use normal times a positive factor, and `P^` and `Q^`, with `V~ = P^ / Q^`.
+#[derive(Clone, Copy)]
+struct Bend {
+    f: I3,
+    p: I3,
+    q: Ivl,
+}
+
 /// The net's homogeneous point `A` and its partials `A_u, A_v, A_uu, A_uv, A_vv` over the
 /// box `u x v` (each the hull over the knot cells it meets).
 type Second = [[Ivl; 4]; 6];
 
+/// `S*_u, S*_v, S*_uu, S*_uv, S*_vv` and `w` (module docs, G2).
+struct Starred {
+    s: [I3; 5],
+    w: Ivl,
+}
+
+fn add3(a: I3, b: I3) -> I3 {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+/// The curvature across's `N*`, `w V*` and `|N*|^2 |T*|^2` from the starred partials and the
+/// pcurve's `U*`, `V'*` (module docs, G2), enclosed.
+fn across(st: &Starred, du: Ivl, dv: Ivl) -> (I3, I3, Ivl) {
+    let [su, sv, suu, suv, svv] = st.s;
+    let (e, f, g) = (dot(su, su), dot(su, sv), dot(sv, sv));
+    let n = cross(su, sv);
+    let t = add3(scale(su, du), scale(sv, dv));
+    let (n2, t2) = (dot(n, n), dot(t, t));
+    let two = Ivl::from(2.0);
+    let shape = add3(
+        add3(scale(svv, e), scale(suv, Ivl::from(-2.0) * f)),
+        scale(suu, g),
+    );
+    let along = add3(
+        add3(scale(suu, du * du), scale(suv, two * du * dv)),
+        scale(svv, dv * dv),
+    );
+    let v = sub3(scale(shape, t2), scale(along, n2));
+    (n, scale(v, st.w), n2 * t2)
+}
+
 impl Use {
+    /// The pcurve's homogeneous `(X, Y, W)` over `t` and their first derivatives, enclosed.
+    fn pcurve_ders(&self, t: Ivl) -> Result<([Ivl; 3], [Ivl; 3])> {
+        let (r, n) = (self.pc_degree, self.pc_points.len());
+        let mut out: Option<([Ivl; 3], [Ivl; 3])> = None;
+        for kt in spans_meeting(&self.pc_knots, r, n, t.lo, t.hi) {
+            let (nb, db) = basis(&self.pc_knots, kt, r, t)
+                .ok_or_else(|| invalid("a pcurve's degenerate knots"))?;
+            let zero = Ivl::from(0.0);
+            let (mut h, mut hd) = ([zero; 3], [zero; 3]);
+            for (i, (bi, di)) in nb.iter().zip(&db).enumerate() {
+                let c = (kt + i)
+                    .checked_sub(r)
+                    .and_then(|j| self.pc_points.get(j))
+                    .ok_or_else(|| invalid("a pcurve's control point"))?;
+                for ((hx, hdx), cx) in h.iter_mut().zip(hd.iter_mut()).zip(c) {
+                    *hx = *hx + *bi * Ivl::from(*cx);
+                    *hdx = *hdx + *di * Ivl::from(*cx);
+                }
+            }
+            let hull =
+                |a: [Ivl; 3], b: [Ivl; 3]| [a[0].hull(b[0]), a[1].hull(b[1]), a[2].hull(b[2])];
+            out = Some(match out {
+                None => (h, hd),
+                Some((o, od)) => (hull(o, h), hull(od, hd)),
+            });
+        }
+        out.ok_or_else(|| invalid("a pcurve without a span"))
+    }
+
     /// The net's `A` and its partials to second order over the box `u x v` ([`Second`]): the
     /// hull over the knot cells it meets, or, given `cell`, that cell's polynomial continued
     /// over the whole box.
@@ -1740,6 +1881,616 @@ impl Use {
         }
         out.ok_or_else(|| invalid("a net without a cell"))
     }
+
+    /// The starred partials of the net over the box `u x v` (module docs, G2), on `cell` as
+    /// [`Use::second`] takes it.
+    fn starred(&self, u: Ivl, v: Ivl, cell: Option<(usize, usize)>) -> Result<Starred> {
+        let [a, au, av, auu, auv, avv] = self.second(u, v, cell)?;
+        let xyz = |h: [Ivl; 4]| [h[0], h[1], h[2]];
+        let (w, wu, wv) = (a[3], au[3], av[3]);
+        if !self.rational {
+            // one weight c: c S_u = A_u, c S_uu = A_uu (module docs, G2)
+            return Ok(Starred {
+                s: [xyz(au), xyz(av), xyz(auu), xyz(auv), xyz(avv)],
+                w,
+            });
+        }
+        let (a3, au3, av3) = (xyz(a), xyz(au), xyz(av));
+        let first = |d: I3, wd: Ivl| sub3(scale(d, w), scale(a3, wd));
+        let two = Ivl::from(2.0);
+        let ww = w * w;
+        // w^3 S_xy = w^2 A_xy - w (w_x A_y + w_y A_x + w_xy A) + 2 w_x w_y A
+        let second = |dxy: [Ivl; 4], wx: Ivl, wy: Ivl, ax: I3, ay: I3| {
+            let wxy = dxy[3];
+            let mid = add3(add3(scale(ay, wx), scale(ax, wy)), scale(a3, wxy));
+            add3(
+                sub3(scale(xyz(dxy), ww), scale(mid, w)),
+                scale(a3, two * wx * wy),
+            )
+        };
+        Ok(Starred {
+            s: [
+                first(au3, wu),
+                first(av3, wv),
+                second(auu, wu, wu, au3, au3),
+                second(auv, wu, wv, au3, av3),
+                second(avv, wv, wv, av3, av3),
+            ],
+            w,
+        })
+    }
+
+    /// `F`, `P^` and `Q^` over `t` (module docs, G2), enclosed; `None` where the pcurve's
+    /// box is not ([`Use::uv_box`]).
+    fn bend(&self, t: Ivl) -> Result<Option<Bend>> {
+        self.bend_on(t, None)
+    }
+
+    /// The knot cells of the net the pcurve's box over `t` meets (none where there is no box).
+    fn cells(&self, t: Ivl) -> Result<Vec<(usize, usize)>> {
+        let Some(UvBox { u, v, .. }) = self.uv_box(t)? else {
+            return Ok(Vec::new());
+        };
+        let n = &self.net;
+        let us = spans_meeting(&n.u, n.p, n.nu, u.lo, u.hi);
+        let vs = spans_meeting(&n.v, n.q, n.nv, v.lo, v.hi);
+        Ok(us
+            .iter()
+            .flat_map(|&ku| vs.iter().map(move |&kv| (ku, kv)))
+            .collect())
+    }
+
+    /// [`Use::bend`] on one knot cell's polynomial continued over the box (`cell`), or on the
+    /// hull over the cells it meets (`None`).
+    fn bend_on(&self, t: Ivl, cell: Option<(usize, usize)>) -> Result<Option<Bend>> {
+        let s = self
+            .sign
+            .ok_or_else(|| invalid("a use whose sense is not read"))?;
+        let Some(UvBox { u, v, w: big_w, .. }) = self.uv_box(t)? else {
+            return Ok(None);
+        };
+        let ([x, y, wc], [xd, yd, wd]) = self.pcurve_ders(t)?;
+        let du = xd * wc - x * wd;
+        let dv = yd * wc - y * wd;
+        let st = self.starred(u, v, cell)?;
+        let (n, wv, q) = across(&st, du, dv);
+        let pow = |k: usize| {
+            let mut out = Ivl::from(1.0);
+            for _ in 0..k {
+                out = out * big_w;
+            }
+            out
+        };
+        let f = scale(n, pow(self.uv_degree) * Ivl::from(s));
+        if self.plane {
+            // a plane bends no way: V~ = 0
+            let zero = Ivl::from(0.0);
+            return Ok(Some(Bend {
+                f,
+                p: [zero; 3],
+                q: Ivl::from(1.0),
+            }));
+        }
+        // W^(6 d), d = m / 2 the degree of S*_u
+        let wk = pow(3 * self.uv_degree);
+        Ok(Some(Bend {
+            f,
+            p: scale(wv, wk),
+            q: q * wk,
+        }))
+    }
+
+    /// The curvature across of the face's definition less that of its net, enclosed over the
+    /// piece `[s0, s1]`'s box (module docs, G2): `Some(0)` for a face that is not a blend;
+    /// `None` where it is not enclosed.
+    fn bend_margin(&self, k: &Kernel, s0: f64, s1: f64) -> Result<Option<f64>> {
+        let Some(def) = &self.definition else {
+            return Ok(Some(0.0));
+        };
+        let t = Ivl::new(s0, s1);
+        let Some(UvBox { u, v, .. }) = self.uv_box(t)? else {
+            return Ok(None);
+        };
+        let n = &self.net;
+        let ku = span(&n.u, n.p, n.nu, u.mid());
+        let kv = span(&n.v, n.q, n.nv, v.mid());
+        let keep = |e: SolidError| {
+            if e.is_unported_or_cancelled() {
+                Err(e)
+            } else {
+                Ok(None)
+            }
+        };
+        let mut d = match gn_def_face_of(k, def) {
+            Ok(d) => d,
+            Err(e) => return keep(e),
+        };
+        let parts =
+            match definition_partials_over_box(k, &mut d, n, ku, kv, u.lo, u.hi, v.lo, v.hi, 2) {
+                Ok(p) => p,
+                Err(e) => return keep(e),
+            };
+        let v3 = |a: usize, b: usize| {
+            let x = parts.at(a, b);
+            [x.x, x.y, x.z]
+        };
+        let def = Starred {
+            s: [v3(1, 0), v3(0, 1), v3(2, 0), v3(1, 1), v3(0, 2)],
+            w: Ivl::from(1.0),
+        };
+        let ([x, y, wc], [xd, yd, wd]) = self.pcurve_ders(t)?;
+        let (du, dv) = (xd * wc - x * wd, yd * wc - y * wd);
+        let natural = |st: &Starred| {
+            let (nn, wv, q) = across(st, du, dv);
+            dot(nn, wv) / (norm(nn) * q)
+        };
+        let gap = natural(&def) - natural(&self.starred(u, v, None)?);
+        let bounded = gap.lo.is_finite() && gap.hi.is_finite();
+        Ok(bounded.then_some(gap.mag()))
+    }
+}
+
+/// The answer of [`g2_all_along`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum G2 {
+    /// The faces' curvatures across the edge agree within the jump asked all along it, and
+    /// the faces are tangent within the angle asked ([`tangent_all_along`]).
+    Continuous,
+    /// The faces are not tangent within the angle asked ([`Tangency::NotTangent`]): a crease,
+    /// not G2.
+    NotTangent,
+    /// They differ by more somewhere: at the edge's parameter `at`, by `jump` (use a's less
+    /// its partner's, each against its own face use normal, 1/length), the nets' jump there
+    /// lying within `within` of it (its enclosure's half width, rounded up).
+    Jumps {
+        /// The edge's parameter there.
+        at: f64,
+        /// The jump there: its enclosure's middle.
+        jump: f64,
+        /// The enclosure's half width: the nets' jump lies in `[jump - within, jump + within]`.
+        within: f64,
+    },
+    /// A piece the bound places on neither side, even halved, past its budget of points, at
+    /// a degenerate point, or where a blend's definition is not enclosed: `at` the piece's
+    /// middle and `bound` the bound on the jump there (infinite where there is none). Also an
+    /// edge whose curvatures are proved to agree but whose tangency is undecided: `at` where
+    /// [`tangent_all_along`] left it, `bound` infinite.
+    Undecided {
+        /// The edge's parameter at the piece's middle.
+        at: f64,
+        /// The bound on the jump there.
+        bound: f64,
+    },
+}
+
+/// [`G2::Jumps`] at `at` from the jump's enclosure there.
+fn jumps(at: f64, jump: Ivl) -> G2 {
+    let mid = jump.mid();
+    // the half width's two differences rounded up, one more rounding for the larger
+    let within = (jump.hi - mid).max(mid - jump.lo) * (1.0 + gamma(2));
+    G2::Jumps {
+        at,
+        jump: mid,
+        within,
+    }
+}
+
+/// A G2 node: the values at one point (module docs, G2).
+struct G2Node {
+    /// `J`, `F_a . F_a`, `Q^_a`, `Q^_b`, `F_a . P^_a`, `F_b . F_b`, `F_b . P^_b`.
+    j: Ivl,
+    faa: Ivl,
+    qa: Ivl,
+    qb: Ivl,
+    ka: Ivl,
+    fbb: Ivl,
+    kb: Ivl,
+    /// `P^_b`.
+    pb: I3,
+    /// `F_a x F_b` and `F_a . F_b`, for the normals' angle.
+    g1: Node,
+    /// The jump and the larger curvature's size, each use against its own normal.
+    jump: Ivl,
+    larger: f64,
+}
+
+fn g2_node(a: &Bend, c: &Bend) -> G2Node {
+    let j = dot(a.f, sub3(scale(a.p, c.q), scale(c.p, a.q)));
+    let (faa, fbb) = (dot(a.f, a.f), dot(c.f, c.f));
+    let (ka, kb) = (dot(a.f, a.p), dot(c.f, c.p));
+    let kappa_a = ka / (faa.sqrt() * a.q);
+    let kappa_b = kb / (fbb.sqrt() * c.q);
+    G2Node {
+        j,
+        faa,
+        qa: a.q,
+        qb: c.q,
+        ka,
+        fbb,
+        kb,
+        pb: c.p,
+        g1: Node {
+            p: cross(a.f, c.f),
+            q: dot(a.f, c.f),
+            angle_lo: None,
+        },
+        jump: kappa_a - kappa_b,
+        larger: kappa_a.mag().max(kappa_b.mag()),
+    }
+}
+
+/// The range `[lo, hi]` of a polynomial of degree at most `D` over a piece from its values
+/// enclosed at the piece's rounded Chebyshev points (module docs: the floor of `Q`, and its
+/// ceiling the same way); `None` where `L eta >= 1`.
+fn poly_range(values: &[Ivl], lebesgue: f64, eta: f64) -> Option<Ivl> {
+    let lo = values.iter().map(|x| x.lo).fold(f64::INFINITY, f64::min);
+    let hi = values
+        .iter()
+        .map(|x| x.hi)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let abs = values.iter().map(|x| x.mag()).fold(0.0, f64::max);
+    if !(lo.is_finite() && hi.is_finite()) {
+        return None;
+    }
+    let lam = Ivl::from(lebesgue);
+    let room = Ivl::from(1.0) - lam * Ivl::from(eta);
+    if !room.is_positive() {
+        return None;
+    }
+    let size = lam * Ivl::from(abs) / room;
+    let (l, h) = (Ivl::from(lo), Ivl::from(hi));
+    let half = Ivl::from(0.5);
+    let mid = (l + h) * half;
+    let reach = lam * ((h - l) * half + Ivl::from(eta) * size);
+    Some(Ivl::new((mid - reach).lo, (mid + reach).hi))
+}
+
+/// The bound `L M / (1 - L eta)` on `|V(t)|` over a piece, `M` the largest `|V(t_j)|`
+/// enclosed (module docs).
+fn vec_norm_bound(values: impl Iterator<Item = I3>, lebesgue: f64, eta: f64) -> Option<f64> {
+    let big_m = values.map(|v| norm(v).hi).fold(0.0, f64::max);
+    let lam = Ivl::from(lebesgue);
+    let room = Ivl::from(1.0) - lam * Ivl::from(eta);
+    if !room.is_positive() || !big_m.is_finite() {
+        return None;
+    }
+    Some((lam * Ivl::from(big_m) / room).hi)
+}
+
+/// What one piece of [`g2_all_along`] proves.
+enum G2Piece {
+    /// The bound on the jump over it and the scale's lower bound there.
+    Bound { jump: f64, scale: f64 },
+    /// Nothing bounded.
+    Unbounded,
+}
+
+/// A piece's bound from its nodes (module docs, G2).
+fn g2_bound(nodes: &[G2Node], lebesgue: f64, eta: f64, floor: f64) -> G2Piece {
+    let range = |f: &dyn Fn(&G2Node) -> Ivl| {
+        let v: Vec<Ivl> = nodes.iter().map(f).collect();
+        poly_range(&v, lebesgue, eta)
+    };
+    let g1: Vec<Node> = nodes
+        .iter()
+        .map(|n| Node {
+            p: n.g1.p,
+            q: n.g1.q,
+            angle_lo: None,
+        })
+        .collect();
+    let (Some(j), Some(faa), Some(qa), Some(qb), Some(ka), Some(fbb), Some(kb)) = (
+        range(&|n| n.j),
+        range(&|n| n.faa),
+        range(&|n| n.qa),
+        range(&|n| n.qb),
+        range(&|n| n.ka),
+        range(&|n| n.fbb),
+        range(&|n| n.kb),
+    ) else {
+        return G2Piece::Unbounded;
+    };
+    let (Some(theta), Some(pb)) = (
+        piece_bound(&g1, lebesgue, eta),
+        vec_norm_bound(nodes.iter().map(|n| n.pb), lebesgue, eta),
+    ) else {
+        return G2Piece::Unbounded;
+    };
+    let floors = [faa.lo, qa.lo, qb.lo, fbb.lo];
+    if !floors.iter().all(|&x| x > 0.0) {
+        return G2Piece::Unbounded;
+    }
+    let lower = |x: Ivl| Ivl::from(x.lo);
+    let jmax = Ivl::from(j.mag());
+    let bound = jmax / (lower(faa).sqrt() * lower(qa) * lower(qb))
+        + Ivl::from(theta) * Ivl::from(pb) / lower(qb);
+    // the larger curvature's lower bound: |F . P^| from below over |F| Q^ from above
+    let upper = |x: Ivl| Ivl::from(x.hi);
+    let kappa_a = Ivl::from(ka.mig()) / (upper(faa).sqrt() * upper(qa));
+    let kappa_b = Ivl::from(kb.mig()) / (upper(fbb).sqrt() * upper(qb));
+    let scale = floor.max(kappa_a.lo.max(0.0)).max(kappa_b.lo.max(0.0));
+    G2Piece::Bound {
+        jump: bound.hi,
+        scale,
+    }
+}
+
+/// A piece's bound across a knot line, directly over its box `t` (module docs, G2), adding
+/// the points it evaluates to `pair`'s; unbounded where they would pass `max_points`.
+fn g2_cells_bound(pair: &mut Pair, t: Ivl, floor: f64, max_points: usize) -> Result<G2Piece> {
+    // each cell's polynomial continued over the box, every pair of the two uses'
+    // cells: the point at each t lies in some cell of each, whose pair holds its
+    // values (a hull of the cells' partials, mixed, would not shrink with the box
+    // where the net is only C0 across a knot line, as a rational circle's is)
+    let (ca, cc) = (pair.a.cells(t)?, pair.c.cells(t)?);
+    let mut worst: Option<(f64, f64)> = None;
+    let mut unbounded = ca.is_empty() || cc.is_empty();
+    'cells: for &x in &ca {
+        for &y in &cc {
+            if pair.points >= max_points {
+                unbounded = true;
+                break 'cells;
+            }
+            pair.points += 1;
+            let (Some(a), Some(c)) = (pair.a.bend_on(t, Some(x))?, pair.c.bend_on(t, Some(y))?)
+            else {
+                unbounded = true;
+                break 'cells;
+            };
+            let n = g2_node(&a, &c);
+            let kappa = |kx: Ivl, fxx: Ivl, qx: Ivl| {
+                (Ivl::from(kx.mig()) / (Ivl::from(fxx.hi).sqrt() * Ivl::from(qx.hi))).lo
+            };
+            let scale = floor
+                .max(kappa(n.ka, n.faa, n.qa).max(0.0))
+                .max(kappa(n.kb, n.fbb, n.qb).max(0.0));
+            let jump = n.jump.mag();
+            if !jump.is_finite() {
+                unbounded = true;
+                break 'cells;
+            }
+            worst = Some(match worst {
+                None => (jump, scale),
+                Some((j, s)) => (j.max(jump), s.min(scale)),
+            });
+        }
+    }
+    Ok(match worst {
+        Some((jump, scale)) if !unbounded => G2Piece::Bound { jump, scale },
+        _ => G2Piece::Unbounded,
+    })
+}
+
+/// Whether edge `e`'s two face uses bend alike across it all along it (G2): their normal
+/// curvatures across the edge within `max_jump` of the larger, or of `1 / L` where both are
+/// flatter (`L` the edge's measured length: a stated scale, not a bound), SolidCraft's
+/// `same_bend` rule, and their normals within `max_angle` of each other all along it
+/// ([`tangent_all_along`], decided first: a crease is [`G2::NotTangent`] at its cost). `None`
+/// for an edge not between two face uses. See the module documentation (G2).
+///
+/// # Errors
+///
+/// As [`tangent_all_along`] for `max_angle`; [`SolidError::InvalidInput`] for a `max_jump` not
+/// finite and non-negative, an edge whose
+/// length is not positive, or whose faces' normals are not proved non-zero anywhere along it;
+/// [`SolidError::Unsupported`] as [`tangent_all_along`], or for a curvature of a degree past
+/// `MAX_DEGREE`; those of the evaluations.
+pub fn g2_all_along(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    max_angle: f64,
+    max_jump: f64,
+) -> Result<Option<G2>> {
+    Ok(g2_within(k, b, e, max_angle, max_jump, MAX_POINTS)?.0)
+}
+
+/// [`g2_all_along`] within `max_points` on each piece between the pcurves' knots (each point
+/// checked against it before it is evaluated), and the points it evaluated.
+fn g2_within(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    max_angle: f64,
+    max_jump: f64,
+    max_points: usize,
+) -> Result<(Option<G2>, usize)> {
+    if !(max_jump.is_finite() && max_jump >= 0.0) {
+        return Err(invalid("a curvature jump finite and not negative"));
+    }
+    let length = crate::mass::integrator::properties::edge_length(k, b, e, 1e-6)?;
+    if !(length.is_finite() && length > 0.0) {
+        return Err(invalid("an edge of some length"));
+    }
+    let floor = 1.0 / length;
+    // G2 is a smooth edge's: first the tangency, at `max_angle` ([`tangent_all_along`]); a
+    // crease is not G2 (and its normals' angle would leave every piece's jump unbounded)
+    let unproved_at = match tangent_all_along(k, b, e, max_angle)? {
+        None => return Ok((None, 0)),
+        Some(Tangency::NotTangent) => return Ok((Some(G2::NotTangent), 0)),
+        Some(Tangency::Tangent) => None,
+        Some(Tangency::Undecided { at, .. }) => Some(at),
+    };
+    let Some(mut pair) = Pair::of(k, b, e)? else {
+        return Ok((None, 0));
+    };
+    let degrees = |u: &Use| g2_degrees(u.net.p, u.net.q, u.pc_degree, u.rational, u.plane);
+    let ((fa, pa), (fc, pc)) = (degrees(&pair.a), degrees(&pair.c));
+    // the largest degree of the piece's polynomials: J, F . F and F . P^ of each use, F_a x F_b
+    let degree = [
+        fa.saturating_add(pa).saturating_add(pc),
+        fc.saturating_add(pc),
+        fa.saturating_add(pa),
+        fa.saturating_mul(2),
+        fc.saturating_mul(2),
+        fa.saturating_add(fc),
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(0);
+    if degree > MAX_DEGREE {
+        return Err(unsupported(
+            "an edge whose faces' curvatures are of too high a degree along it",
+        ));
+    }
+    let nodes_n = degree + 1;
+    let lam = lebesgue(nodes_n);
+    let mut undecided: Option<G2> = None;
+    let mut note = |at: f64, bound: f64| {
+        if undecided.is_none() {
+            undecided = Some(G2::Undecided { at, bound });
+        }
+    };
+    let mut total = 0_usize;
+    for (r0, r1) in pieces(&pair.breaks) {
+        total = total.saturating_add(pair.points);
+        pair.points = 0;
+        let mut stack: Vec<Part> = vec![Part {
+            unenclosed: 0,
+            s0: r0,
+            s1: r1,
+            depth: 0,
+            splits: 0,
+        }];
+        while let Some(part) = stack.pop() {
+            let Part { s0, s1, .. } = part;
+            let mid = 0.5 * (s0 + s1);
+            if pair.points >= max_points {
+                note(mid, f64::INFINITY);
+                break;
+            }
+            let margin = match (
+                pair.a.bend_margin(k, s0, s1)?,
+                pair.c.bend_margin(k, s0, s1)?,
+            ) {
+                (Some(a), Some(c)) => Some((a + c) * (1.0 + gamma(1))),
+                _ => None,
+            };
+            let m = margin.unwrap_or(f64::INFINITY);
+            let t = Ivl::new(s0, s1);
+            let one_cell = pair.a.one_cell(t)? && pair.c.one_cell(t)?;
+            let witness = |n: &G2Node| {
+                let scale = floor.max(n.larger);
+                n.jump.mig() - m > max_jump * scale * (1.0 + gamma(2))
+            };
+            let decided = if one_cell {
+                let mut nodes = Vec::new();
+                let mut missing = false;
+                let mut spent = false;
+                for t in chebyshev(s0, s1, nodes_n) {
+                    if pair.points >= max_points {
+                        spent = true;
+                        break;
+                    }
+                    pair.points += 1;
+                    let at = Ivl::from(t);
+                    match (pair.a.bend(at)?, pair.c.bend(at)?) {
+                        (Some(a), Some(c)) => {
+                            let n = g2_node(&a, &c);
+                            if witness(&n) {
+                                let points = total.saturating_add(pair.points);
+                                return Ok((Some(jumps(t, n.jump)), points));
+                            }
+                            nodes.push(n);
+                        }
+                        _ => missing = true,
+                    }
+                }
+                if spent {
+                    note(mid, f64::INFINITY);
+                    break;
+                }
+                if missing {
+                    G2Piece::Unbounded
+                } else {
+                    let d = degree as f64;
+                    let eta = node_error(s0, s1) * d * d * (1.0 + gamma(2));
+                    g2_bound(&nodes, lam, eta, floor)
+                }
+            } else {
+                // across a knot line: bounded directly over the piece's box
+                // a witness at the middle, cell by cell: a point on a knot line lies in the
+                // closed cells on both sides, each cell's polynomial the face there from that
+                // side (a hull of the two, mixed, proves nothing where the net is only C0)
+                let at = Ivl::from(mid);
+                let (wa, wc) = (pair.a.cells(at)?, pair.c.cells(at)?);
+                let mut spent = false;
+                'witness: for &x in &wa {
+                    for &y in &wc {
+                        if pair.points >= max_points {
+                            spent = true;
+                            break 'witness;
+                        }
+                        pair.points += 1;
+                        if let (Some(a), Some(c)) =
+                            (pair.a.bend_on(at, Some(x))?, pair.c.bend_on(at, Some(y))?)
+                        {
+                            let n = g2_node(&a, &c);
+                            if witness(&n) {
+                                let points = total.saturating_add(pair.points);
+                                return Ok((Some(jumps(mid, n.jump)), points));
+                            }
+                        }
+                    }
+                }
+                if spent {
+                    note(mid, f64::INFINITY);
+                    break;
+                }
+                g2_cells_bound(&mut pair, t, floor, max_points)?
+            };
+            let bound = match decided {
+                G2Piece::Bound { jump, scale } => {
+                    let sum = (jump + m) * (1.0 + gamma(1));
+                    if sum <= max_jump * scale * (1.0 - gamma(2)) {
+                        continue;
+                    }
+                    sum
+                }
+                G2Piece::Unbounded => f64::INFINITY,
+            };
+            let can_split = if one_cell {
+                part.splits < MAX_SPLITS
+            } else {
+                part.depth < MAX_CELL_DEPTH
+            };
+            if can_split && mid > s0 && mid < s1 {
+                let (depth, splits) = if one_cell {
+                    (part.depth, part.splits + 1)
+                } else {
+                    (part.depth + 1, part.splits)
+                };
+                let unenclosed = part.unenclosed;
+                stack.push(Part {
+                    s0: mid,
+                    s1,
+                    depth,
+                    splits,
+                    unenclosed,
+                });
+                stack.push(Part {
+                    s0,
+                    s1: mid,
+                    depth,
+                    splits,
+                    unenclosed,
+                });
+            } else {
+                note(mid, bound);
+            }
+        }
+    }
+    let points = total.saturating_add(pair.points);
+    // continuous curvature on an edge whose tangency is undecided is not G2 proved
+    let verdict = match (undecided, unproved_at) {
+        (Some(u), _) => u,
+        (None, Some(at)) => G2::Undecided {
+            at,
+            bound: f64::INFINITY,
+        },
+        (None, None) => G2::Continuous,
+    };
+    Ok((Some(verdict), points))
 }
 
 #[cfg(test)]
@@ -1884,19 +2635,21 @@ mod tests {
 
     /// `wr698`'s `circle_root` (a pipe's root on a plate rounded r 2 by the ball's exact
     /// circle, a procedural blend whose definition is enclosed): on its edges along the root,
-    /// each piece's margin is bounded wherever the definition is enclosed, halved where it is
-    /// too loose; and the verdict is today's, exactly: Undecided with no bound (pi, pi) at
-    /// `s` = 87.04, where the pipe's foot crosses its net's C1 quarter knot (u = 15.708,
-    /// multiplicity 2) and `definition_partials_over_box` refuses the feet's box
-    /// (`FEET_BOX_CONTINUITY`), 3 parts there left not enclosed on each edge. w2949's C1-knot
-    /// follow-up encloses that box: then this test fails, and is to say Tangent.
+    /// each piece's margin is bounded, halved where it is too loose, and both edges are
+    /// Tangent. Where the pipe's foot crosses its net's C1 quarter knot (u = 15.708,
+    /// multiplicity 2, near `s` = 87.22) the definition's feet box is taken cell by cell (the
+    /// C1-knot follow-up to tangency-labs/solidcraft#14284, a use of order 1), also where the
+    /// foot sits on the knot just outside the guesses' box and the one solve's contraction
+    /// reaches the line (tangency-labs/solidcraft#15183, edge 46 at `s` = 87.2234). Before
+    /// them, both edges were Undecided (pi, pi) at 87.04 with 3 parts not enclosed (#15005).
     #[test]
     #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn a_procedural_round_s_edges_carry_its_margin() {
         let mut k = Kernel::default();
         let (mut b, edges) = circle_root_round(&mut k);
         let half = 0.5_f64.to_radians();
-        let mut decided = 0;
+        // every edge measured before anything is asserted, so a failure names them all
+        let mut seen = Vec::new();
         for e in edges {
             let Some(pair) = Pair::of(&k, &mut b, e).unwrap() else {
                 continue;
@@ -1904,10 +2657,9 @@ mod tests {
             if pair.a.definition.is_none() && pair.c.definition.is_none() {
                 continue;
             }
-            decided += 1;
-            // a piece's margin, halved where it is too loose; where the definition is not
-            // enclosed, the place must be the knot's (s in [86.9, 87.4]) and the reason the
-            // definition's partials
+            let mut left = Vec::new();
+            // a piece's margin, halved where it is too loose; the definition is enclosed on
+            // every piece, the pipe's quarter knot included
             let mut stack: Vec<(f64, f64, u32)> = pieces(&pair.breaks)
                 .into_iter()
                 .map(|(a, b)| (a, b, 0))
@@ -1918,21 +2670,7 @@ mod tests {
                 match kind {
                     Margin::Bounded(m) if m < half => assert!(m > 0.0, "{e:?} [{s0}, {s1}]: {m}"),
                     Margin::NotEnclosed if depth >= MAX_UNENCLOSED_SPLITS => {
-                        // the window is read off a run, not derived: the pipe's foot crosses
-                        // u = 15.708 at s = 87.2234 (its seed foot over the not-enclosed box,
-                        // probe 14611p-1), and the parts left after the four halvings lie
-                        // within [86.9, 87.4]; the foot's map s -> u is the definition's
-                        // solve, which this test does not redo
-                        let at_knot = s0 >= 86.9 && s1 <= 87.4;
-                        // the definition's partials refused, exactly: definition_box's typed
-                        // refusal (#14932), its operation and its reason
-                        let refused = concat!(
-                            ": partials Failed(Failure { operation: ",
-                            "\"blend::fillet_section::definition_box\", entity: None, ",
-                            "reason: Blend(Failed(\"the enclosure is not proved\"))"
-                        );
-                        let partials = why.iter().any(|w| w.contains(refused));
-                        assert!(at_knot && partials, "{e:?} [{s0}, {s1}]: {why:?}");
+                        left.push((s0, s1, why));
                     }
                     // halved as the decision halves a piece (to MAX_CELL_DEPTH on the box path;
                     // the margin falls with the part's width)
@@ -1946,20 +2684,13 @@ mod tests {
             }
             let mut counts = Counts::default();
             let verdict = decide(&k, &mut b, e, half, &mut counts).unwrap();
-            let Some(Tangency::Undecided { angle, margin, at }) = verdict else {
-                panic!(
-                    "{e:?}: {verdict:?} (the C1 knot enclosed? then this test is to say Tangent)"
-                );
-            };
-            let pi = std::f64::consts::PI;
-            let unbounded = angle.to_bits() == pi.to_bits() && margin.to_bits() == pi.to_bits();
-            assert!(unbounded, "{e:?}: {verdict:?}");
-            // 87.04: the middle of the first part noted undecided, read off a run (as the window
-            // above); a change of the halving order or of the knot's place moves it
-            assert!((at - 87.04).abs() < 0.01, "{e:?}: {verdict:?}");
-            assert_eq!(counts.not_enclosed, 3, "{e:?}: {counts:?}");
+            seen.push((e, verdict, counts.not_enclosed, left));
         }
-        assert!(decided >= 2, "{decided}");
+        eprintln!("circle_root edges: {seen:?}");
+        let all = seen.iter().all(|(_, verdict, not_enclosed, left)| {
+            *verdict == Some(Tangency::Tangent) && *not_enclosed == 0 && left.is_empty()
+        });
+        assert!(seen.len() == 2 && all, "{seen:?}");
     }
 
     /// Which step of [`Use::margin`] leaves a piece's margin unbounded (a test's diagnosis).
@@ -2291,5 +3022,136 @@ mod tests {
             vec![0.5]
         );
         assert!(knot_lines(&[0.0, 0.0, 1.0, 1.0], 1).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod g2_tests {
+    use super::*;
+
+    #[test]
+    fn g2_degrees_follow_the_module_docs() {
+        // a bicubic polynomial net, a cubic pcurve: d = 5, F 2 d r = 30, P^ 6 d r + 4 r - 4 = 98
+        assert_eq!(g2_degrees(3, 3, 3, false, false), (30, 98));
+        // a rational net of degrees (2, 1), a line pcurve: d = 5, F 10, P^ 30
+        assert_eq!(g2_degrees(2, 1, 1, true, false), (10, 30));
+        // a plane bends no way
+        assert_eq!(g2_degrees(1, 1, 3, false, true), (0, 0));
+    }
+
+    /// A cylinder `S = (R cos u, R sin u, v)` with the edge along v: across it (along u) its
+    /// curvature against the natural (outward) normal is `-1 / R`.
+    #[test]
+    fn a_cylinder_bends_one_over_its_radius_across_a_ruling() {
+        let (r, u) = (3.0_f64, 0.7_f64);
+        let i3 = |v: [f64; 3]| v.map(Ivl::from);
+        let st = Starred {
+            s: [
+                i3([-r * u.sin(), r * u.cos(), 0.0]),
+                i3([0.0, 0.0, 1.0]),
+                i3([-r * u.cos(), -r * u.sin(), 0.0]),
+                i3([0.0; 3]),
+                i3([0.0; 3]),
+            ],
+            w: Ivl::from(1.0),
+        };
+        let (n, wv, q) = across(&st, Ivl::from(0.0), Ivl::from(1.0));
+        let kappa = dot(n, wv) / (norm(n) * q);
+        assert!(kappa.lo <= -1.0 / r && -1.0 / r <= kappa.hi, "{kappa:?}");
+    }
+
+    /// The box and cylinder of the test below, and the edge along their tangent line.
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    fn wall_into_cylinder() -> (Kernel, Brep, EdgeId) {
+        use crate::boolean::api_brep::boolean_union;
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::query::api_queries::{edge_closest_point, get_edges};
+        let mut k = Kernel::default();
+        let block = create_box(&mut k, Point3::new(0.0, -5.0, 0.0), 20.0, 10.0, 4.0).unwrap();
+        let drum = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 4.0).unwrap();
+        let b = boolean_union(&mut k, block, drum).unwrap();
+        let q = Point3::new(0.0, -5.0, 2.0);
+        let e = get_edges(&b)
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| {
+                edge_closest_point(&k, &b, e, q)
+                    .ok()
+                    .map(|c| (e, c.closest.distance))
+            })
+            .filter(|&(_, d)| d <= 1e-6)
+            .min_by(|a, c| a.1.total_cmp(&c.1))
+            .expect("the tangent line's edge")
+            .0;
+        (k, b, e)
+    }
+
+    /// A 20 x 10 x 4 box from (0, -5, 0) united with a cylinder of radius 5, 4 high, about the
+    /// z axis: the box's side y = -5 runs tangentially into the cylinder along the vertical
+    /// line at (0, -5). The cylinder face is asserted exact (the cone class, a cylinder: its net
+    /// the circle's exact rational form), so the jump is the closed form `1 / r`, `r` its
+    /// radius, and the nets' certified enclosure at the witness holds it (`1 / r` itself
+    /// rounded once: `u / r` more).
+    #[test]
+    #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    fn a_wall_jumps_one_over_the_radius_into_its_tangent_cylinder() {
+        use crate::query::edge::edge_faces;
+        use crate::topology::face;
+        let (k, mut b, e) = wall_into_cylinder();
+        let mut planes = 0;
+        let mut radius = None;
+        for f in edge_faces(&b, e).unwrap() {
+            match face::p2::surface(&b, f).unwrap().map(Surface::kind) {
+                Some(SurfaceKind::Plane(_)) => planes += 1,
+                Some(SurfaceKind::Cone(c)) => {
+                    assert!(c.is_cylinder(), "the cone class face is a cylinder");
+                    radius = Some(c.radius(0.0));
+                }
+                other => panic!("an unexpected face: {}", other.is_some()),
+            }
+        }
+        let r = radius.expect("the cylinder");
+        assert_eq!(planes, 1);
+        let want = 1.0 / r;
+        match g2_all_along(&k, &mut b, e, 0.5_f64.to_radians(), 0.5_f64.to_radians()).unwrap() {
+            Some(G2::Jumps { jump, within, .. }) => {
+                let off = (jump.abs() - want).abs();
+                assert!(
+                    off <= within + UNIT * want,
+                    "{jump} +- {within} against {want}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        // the scale is max(1 / r, 1 / L) = 1 / 4 (the edge 4 long): the jump 1 / 5 is within
+        // twice it, so continuous where 2 is asked (as the jump's bound proves)
+        assert_eq!(
+            g2_all_along(&k, &mut b, e, 0.5_f64.to_radians(), 2.0).unwrap(),
+            Some(G2::Continuous)
+        );
+    }
+
+    /// The search keeps to its budget: none spent at a budget of 0 (each point is checked
+    /// against it before it is evaluated), so undecided; at the budget the whole search took,
+    /// per piece no more than that, the same verdict at the same count.
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn the_search_keeps_to_its_point_budget() {
+        let (k, mut b, e) = wall_into_cylinder();
+        let half = 0.5_f64.to_radians();
+        let (full, n) = g2_within(&k, &mut b, e, half, 2.0, MAX_POINTS).unwrap();
+        assert_eq!(full, Some(G2::Continuous));
+        assert!(n > 0);
+        let (none, zero) = g2_within(&k, &mut b, e, half, 2.0, 0).unwrap();
+        assert_eq!(zero, 0);
+        assert!(
+            matches!(none, Some(G2::Undecided { bound, .. }) if bound.is_infinite()),
+            "{none:?}"
+        );
+        assert_eq!(
+            g2_within(&k, &mut b, e, half, 2.0, n).unwrap(),
+            (Some(G2::Continuous), n)
+        );
     }
 }

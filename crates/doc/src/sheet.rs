@@ -45,6 +45,11 @@ const TOUCH_AREA: f64 = 1e-6;
 const FOLD_TABS_REJOIN: &str = "not supported yet: folding tabs that join again beyond the bend";
 pub const FOLD_FIXED_OFF_SHEET: &str = "the fold's fixed point is not on the sheet";
 
+/// A bend radius below this (mm), the sheet model's outline tolerance, is a sharp bend. Its inner
+/// face has collapsed to the bend's inner edge, so the folded solid has only the outer cylindrical
+/// face there, as a press brake makes it with a sharp punch: no inner cylinder.
+const SHARP_BEND: f64 = 1e-3;
+
 /// The most bores one sheet keeps.
 const MAX_BORES: usize = 1000;
 
@@ -2310,6 +2315,13 @@ impl SheetBody {
         };
         let mut faces = Vec::new();
         for (ci, c) in cells.iter().enumerate() {
+            // A sharp bend's inner surface has no area: it is the line where the base's and the
+            // flange's inner faces meet. The outer surface and the zone's end walls close the
+            // solid; the end walls lose their collapsed inner edge below.
+            let inner_sharp = match c.piece {
+                Piece::Zone(i) => self.flanges.get(i).filter(|f| f.radius <= SHARP_BEND).map(|f| if f.angle >= 0.0 { z1 } else { z0 }),
+                Piece::Panel(_) => None,
+            };
             // Top (z1, outward +z) and bottom (z0, outward −z, loops reversed).
             let loops = |z: f64, rev: bool| -> Result<Vec<Vec<EdgeSpec>>> {
                 std::iter::once(&c.outer)
@@ -2325,6 +2337,9 @@ impl SheetBody {
             };
             let centre = c.outer.iter().map(Seg2::start).fold(Vec2::default(), |a, b| a + b) * (1.0 / c.outer.len().max(1) as f64);
             for (z, rev, sign) in [(z1, false, 1.0), (z0, true, -1.0)] {
+                if inner_sharp == Some(z) {
+                    continue;
+                }
                 let surface = match c.piece {
                     Piece::Panel(_) => SurfSpec::Plane,
                     Piece::Zone(i) => {
@@ -2381,13 +2396,30 @@ impl SheetBody {
                     (Piece::Zone(_), _) if matches!(bottom, EdgeSpec::Chain { .. }) => SurfSpec::Ruled { a: bottom.clone(), b: top_ab.clone() },
                     _ => SurfSpec::Plane,
                 };
-                let top = rev_edge(top_ab);
+                // A sharp bend's inner edge is a point on the zone's end wall: drop that
+                // collapsed edge and let the wall end at the point (a three-edge loop). The inner
+                // face is z1 when the bend turns up and z0 when it turns down.
+                let collapsed = |e: &EdgeSpec| match e {
+                    EdgeSpec::Arc { a, b, .. } | EdgeSpec::Line { a, b } => a.dist(*b) < LINEAR_TOL,
+                    EdgeSpec::Chain { .. } => false,
+                };
+                let inner_bottom = inner_sharp == Some(z0) && collapsed(&bottom);
+                let inner_top = inner_sharp == Some(z1) && collapsed(&top_ab);
+                let mut edges = Vec::new();
+                if !inner_bottom {
+                    edges.push(bottom);
+                }
+                edges.push(up_b);
+                if !inner_top {
+                    edges.push(rev_edge(top_ab));
+                }
+                edges.push(down_a);
                 let mid = e.point_at(0.5);
                 let tdir = e.point_at(0.51) - e.point_at(0.49);
                 let right = Vec2::new(tdir.y, -tdir.x);
                 let pm = self.map3(c.piece, mid, (z0 + z1) / 2.0);
                 let outward = self.map3(c.piece, mid + right * 1e-3, (z0 + z1) / 2.0) - pm;
-                faces.push(FaceSpec { loops: vec![vec![bottom, up_b, top, down_a]], surface, probe: Some((pm, outward)) });
+                faces.push(FaceSpec { loops: vec![edges], surface, probe: Some((pm, outward)) });
             }
         }
         Ok(faces)
@@ -3018,7 +3050,10 @@ impl SheetBody {
         if self.flanges.len().saturating_mul(2).saturating_add(1) > MAX_FLAT_PIECES {
             return Err(flat_budget_error());
         }
-        let mut polys: Vec<Vec<Vec2>> = vec![dedup(&flat_polyline(&self.base.outer.ccw())?).into_vec()];
+        let mut polys: Vec<Vec<Vec2>> = Vec::new();
+        if encloses_area(&self.base) {
+            polys.push(dedup(&flat_polyline(&self.base.outer.ccw())?).into_vec());
+        }
         for f in &self.flanges {
             polys.push(dedup(&flat_polyline(&self.zone(f).outer.ccw())?).into_vec());
             if f.leg > 1e-9 {
@@ -3351,9 +3386,13 @@ impl SheetBody {
         Ok((size.x, size.y))
     }
 
-    /// Panels with their regions and world placements: (flange index or None, region).
+    /// Panels with their regions and world placements: (flange index or None, region). A
+    /// profile that starts with an arc has no base panel.
     fn panels(&self) -> Vec<(Option<usize>, Region2)> {
-        let mut v = vec![(None, self.base.clone())];
+        let mut v = Vec::new();
+        if encloses_area(&self.base) {
+            v.push((None, self.base.clone()));
+        }
         for (i, f) in self.flanges.iter().enumerate() {
             if f.leg > 1e-9 {
                 v.push((Some(i), self.panel(f)));
@@ -6590,36 +6629,115 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
     if pts.len() < 2 {
         return Err(DocError::Invalid("a contour flange needs an open chain of lines".into()));
     }
+    let segs: Vec<Seg2> = pts.windows(2).map(|w| Seg2::Line { a: w[0], b: w[1] }).collect();
+    contour_flange_path(body, rule, rv, plane, &segs, width, flip)
+}
+
+/// A sheet from an open chain of lines and circular arcs (contour flange): `segs` in `plane`,
+/// the material on the right of the travel (or the left when `flip`), `width` along the plane
+/// normal. A line is a flat panel; an arc is a bend of its own radius. The arc is the profile
+/// surface: when the bend turns toward the material the sheet is outside that surface, so the
+/// bend's inner radius is the arc's less the thickness; when it turns away the arc is the inner
+/// surface and its radius is the bend's. A line-line corner is a sharp corner and gets a bend of
+/// the rule's radius, as a chain of lines always did.
+pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, segs: &[Seg2], width: f64, flip: bool) -> Result<SheetBody> {
+    if segs.is_empty() {
+        return Err(DocError::Invalid("a contour flange needs an open profile".into()));
+    }
+    if !(width.is_finite() && width > 0.0) {
+        return Err(DocError::Invalid("the contour flange distance must be positive".into()));
+    }
     let (t, r) = (rv.thickness, rv.bend_radius);
-    let seg_dir = |i: usize| -> Result<(Vec2, f64)> {
-        let (Some(a), Some(b)) = (pts.get(i), pts.get(i + 1)) else { return Err(DocError::Invalid("chain".into())) };
-        let l = a.dist(*b);
-        Ok(((*b - *a).normalized().ok_or_else(|| DocError::Invalid("zero-length line in the contour".into()))?, l))
-    };
+    // Material side in the sketch: right of travel, or left when flipped.
     let side = if flip { -1.0 } else { 1.0 };
-    // Material side in the sketch: right of travel.
-    let (d0, _) = seg_dir(0)?;
+    let first = segs.first().copied().ok_or_else(|| DocError::Invalid("a contour flange needs an open profile".into()))?;
+    let start = first.start();
+    let d0 = first.start_tangent();
+    let l0 = d0.len();
+    if !(l0.is_finite() && l0 > 1e-12) {
+        return Err(DocError::Invalid("the contour starts with a curve of no direction".into()));
+    }
+    let d0 = d0 / l0;
     let m0 = Vec2::new(d0.y, -d0.x) * side;
-    let start = pts.first().copied().unwrap_or_default();
     let (x, z) = (plane.dir_to_world(d0), plane.dir_to_world(m0));
     let frame = Plane::new(plane.to_world(start), x, z.cross(x)).ok_or_else(|| DocError::Invalid("contour frame".into()))?;
-    // Width along the sketch normal: +y or −y of the frame.
     let ysign = if frame.y.dot(plane.normal()) >= 0.0 { 1.0 } else { -1.0 };
-    let n = pts.len() - 1;
-    // Turn at each corner: angle and whether it bends toward the material (up).
-    let mut corners = Vec::new();
-    for i in 0..n.saturating_sub(1) {
-        let (da, _) = seg_dir(i)?;
-        let (db, _) = seg_dir(i + 1)?;
-        let cross = da.cross(db) * side;
-        let ang = da.dot(db).clamp(-1.0, 1.0).acos();
-        if ang < 1e-9 {
-            return Err(DocError::Invalid("straight corners in a contour flange".into()));
-        }
-        // Right-hand material: turning right (negative cross) bends toward it.
-        corners.push((ang, cross < 0.0));
-    }
+    let (y0, y1) = if ysign > 0.0 { (0.0, width) } else { (-width, 0.0) };
     let setback = |ang: f64, up: bool| if up { (r + t) * (ang / 2.0).tan() } else { r * (ang / 2.0).tan() };
+    // The junction after each segment: a sharp line-line corner (its unsigned turn and whether
+    // it bends toward the material), or none where a line meets an arc tangentially.
+    let mut sharp: Vec<Option<(f64, bool)>> = Vec::with_capacity(segs.len().saturating_sub(1));
+    for i in 0..segs.len().saturating_sub(1) {
+        let (Some(a), Some(b)) = (segs.get(i), segs.get(i + 1)) else { continue };
+        if a.end().dist(b.start()) > 1e-5 {
+            return Err(DocError::Invalid("the contour curves are not connected end to end".into()));
+        }
+        if matches!(a, Seg2::Line { .. }) && matches!(b, Seg2::Line { .. }) {
+            let (Some(da), Some(db)) = (a.end_tangent().normalized(), b.start_tangent().normalized()) else {
+                return Err(DocError::Invalid("zero-length line in the contour".into()));
+            };
+            let ang = da.dot(db).clamp(-1.0, 1.0).acos();
+            if ang < 1e-9 {
+                return Err(DocError::Invalid("straight corners in a contour flange".into()));
+            }
+            sharp.push(Some((ang, da.cross(db) * side < 0.0)));
+        } else {
+            let (Some(ta), Some(tb)) = (a.end_tangent().normalized(), b.start_tangent().normalized()) else {
+                return Err(DocError::Invalid("zero-length curve in the contour".into()));
+            };
+            if ta.dot(tb) < 1.0 - 1e-6 {
+                return Err(DocError::Invalid(
+                    "the contour arcs must be tangent to the curves beside them; a sharp corner beside an arc is not a bend of that arc's radius"
+                        .into(),
+                ));
+            }
+            sharp.push(None);
+        }
+    }
+    // Panels and bends in path order: every line is a panel, every arc a bend, every sharp
+    // line-line corner a bend of the rule's radius. A panel loses the tangent setback at each
+    // sharp corner it ends on.
+    enum Piece {
+        Panel { len: f64 },
+        Bend { angle: f64, radius: f64 },
+    }
+    let mut pieces: Vec<Piece> = Vec::with_capacity(segs.len().saturating_mul(2));
+    for (i, s) in segs.iter().enumerate() {
+        match *s {
+            Seg2::Line { a, b } => {
+                let l = a.dist(b);
+                if !(l.is_finite() && l > 1e-12) {
+                    return Err(DocError::Invalid("zero-length line in the contour".into()));
+                }
+                let before = if i == 0 { 0.0 } else { sharp.get(i - 1).copied().flatten().map(|(ang, up)| setback(ang, up)).unwrap_or(0.0) };
+                let after = sharp.get(i).copied().flatten().map(|(ang, up)| setback(ang, up)).unwrap_or(0.0);
+                let len = l - before - after;
+                if !len.is_finite() || len < -1e-9 {
+                    return Err(DocError::Invalid("a contour line is shorter than its bends".into()));
+                }
+                pieces.push(Piece::Panel { len: len.max(0.0) });
+            }
+            Seg2::Arc { center: _, radius, start: _, sweep } => {
+                if !(radius.is_finite() && radius > 0.0) {
+                    return Err(DocError::Invalid("a contour arc has no radius".into()));
+                }
+                if !(sweep.is_finite() && sweep.abs() > 1e-9 && sweep.abs() < std::f64::consts::TAU - 1e-9) {
+                    return Err(DocError::Invalid("a contour arc must be shorter than a full turn".into()));
+                }
+                let angle = -sweep * side;
+                let up = angle >= 0.0;
+                let inner = if up { radius - t } else { radius };
+                if !(inner.is_finite() && inner > 1e-9) {
+                    return Err(DocError::Invalid("a contour arc's radius is no larger than the sheet is thick".into()));
+                }
+                pieces.push(Piece::Bend { angle, radius: inner });
+            }
+            _ => return Err(DocError::Invalid("not supported yet: a contour flange profile is lines and circular arcs".into())),
+        }
+        if let Some((ang, up)) = sharp.get(i).copied().flatten() {
+            pieces.push(Piece::Bend { angle: if up { ang } else { -ang }, radius: r });
+        }
+    }
     let mut sheet = SheetBody {
         body: body.into(),
         rule: rule.into(),
@@ -6642,48 +6760,54 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
         base_curves: Vec::new(),
         altered_by: None,
     };
-    let (y0, y1) = if ysign > 0.0 { (0.0, width) } else { (-width, 0.0) };
-    // First segment: the base panel.
-    let (_, l0) = seg_dir(0)?;
-    let end0 = l0 - corners.first().map(|(a, u)| setback(*a, *u)).unwrap_or(0.0);
-    if end0 <= 0.0 {
-        return Err(DocError::Invalid("a contour line is shorter than its bends".into()));
-    }
-    sheet.base = rect(Vec2::new(0.0, y0), Vec2::new(end0, y0), Vec2::new(end0, y1), Vec2::new(0.0, y1));
-    let mut parent: Option<usize> = None;
-    let mut at = end0;
-    for (i, (ang, up)) in corners.iter().enumerate() {
-        let (_, l) = seg_dir(i + 1)?;
-        let before = setback(*ang, *up);
-        let after = corners.get(i + 1).map(|(a, u)| setback(*a, *u)).unwrap_or(0.0);
-        let leg = l - before - after;
-        if leg < -1e-9 {
+    // The first panel is the base; a profile that starts with an arc has no base panel.
+    let first_is_panel = matches!(pieces.first(), Some(Piece::Panel { .. }));
+    let mut at = 0.0;
+    if let Some(Piece::Panel { len }) = pieces.first() {
+        if *len <= 1e-9 {
             return Err(DocError::Invalid("a contour line is shorter than its bends".into()));
         }
-        // The material flips sides relative to the panel when the bend goes down.
-        let f = SheetFlange {
-            parent,
-            p: Vec2::new(at, y0),
-            d: Vec2::new(0.0, 1.0),
-            len: y1 - y0,
-            n: Vec2::new(1.0, 0.0),
-            angle: if *up { *ang } else { -*ang },
-            radius: r,
-            leg: leg.max(0.0),
-            ext: (0.0, 0.0),
-            slope: (0.0, 0.0),
-            tear: (false, false),
-            tear_curved: (false, false),
-            tear_ease: (0.0, 0.0),
-            shape: None,
-            exact: None,
-            zone_shape: None,
-            tag: String::new(),
-        };
-        let ba = sheet.allowance(&f);
-        sheet.flanges.push(f);
-        parent = Some(sheet.flanges.len() - 1);
-        at += ba + leg.max(0.0);
+        sheet.base = rect(Vec2::new(0.0, y0), Vec2::new(*len, y0), Vec2::new(*len, y1), Vec2::new(0.0, y1));
+        at = *len;
+    }
+    let mut parent: Option<usize> = None;
+    let mut pending: Option<usize> = None;
+    for piece in pieces.iter().skip(usize::from(first_is_panel)) {
+        match piece {
+            Piece::Panel { len } => {
+                let Some(i) = pending.take() else {
+                    return Err(DocError::Invalid("a contour panel has no bend before it".into()));
+                };
+                let Some(f) = sheet.flanges.get_mut(i) else { return Err(DocError::Invalid("contour bend".into())) };
+                f.leg = *len;
+                at += *len;
+            }
+            Piece::Bend { angle, radius } => {
+                let f = SheetFlange {
+                    parent,
+                    p: Vec2::new(at, y0),
+                    d: Vec2::new(0.0, 1.0),
+                    len: y1 - y0,
+                    n: Vec2::new(1.0, 0.0),
+                    angle: *angle,
+                    radius: *radius,
+                    leg: 0.0,
+                    ext: (0.0, 0.0),
+                    slope: (0.0, 0.0),
+                    tear: (false, false),
+                    tear_curved: (false, false),
+                    tear_ease: (0.0, 0.0),
+                    shape: None,
+                    exact: None,
+                    zone_shape: None,
+                    tag: String::new(),
+                };
+                at += sheet.allowance(&f);
+                sheet.flanges.push(f);
+                parent = Some(sheet.flanges.len() - 1);
+                pending = parent;
+            }
+        }
     }
     Ok(sheet)
 }

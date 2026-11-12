@@ -25,6 +25,7 @@ mod boolean_tests;
 mod convert;
 #[cfg(test)]
 mod convert_tests;
+pub(crate) mod definition;
 pub(crate) mod dump;
 pub(crate) mod file;
 pub(crate) mod history;
@@ -53,7 +54,9 @@ pub(crate) mod trim;
 mod trim_tests;
 
 pub(crate) use convert::{from_arrays, to_arrays};
-pub(crate) use measure::{area, bounds, check, check_with, classify_point, edge_face_distance, is_manifold_solid, mass_properties, solid_count};
+pub(crate) use measure::{
+    area, bounds, check, check_with, classify_point, classify_points, edge_face_distance, is_manifold_solid, mass_properties, solid_count,
+};
 
 /// A solidcore body. Its own lock: solidcore's operations take `&mut Brep`, even to measure.
 pub(crate) struct Body(pub(crate) Mutex<solidcore::topology::Brep>);
@@ -102,7 +105,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.nurb_cylinder_inside_out_frame = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
-    f.fillet_corner_sphere_from_four_arcs = true;
     f.fillet_nx1_opposite_continuation_side_edge = true;
     f.torus_iso_circle_axis_from_midpoint = true;
     f.torus_keeps_inside_out = true;
@@ -254,12 +256,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
     f.fillet_exact_round_classes = true;
-    f.curve_check_zero_speed_tangent_end = true;
     f.cpoly_remove_poly_face_check_member = true;
     f.check_seam_crossing_unclosed = true;
     f.ascii_doubles_round_trip = true;
     f.transform_aligned_bbox_image = true;
-    f.bspline_simple_offset_matches_parameterization = true;
     f.offset_edges_keep_source_tolerance = true;
     f.circle_silhouette_perspective_center = true;
     f.ellipse_convert_to_2d_uses_both_axes = true;
@@ -291,7 +291,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.database_io_byte_swaps_read_boolean_and_u16 = true;
-    f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.offset_updates_result_tolerances = true;
@@ -309,7 +308,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
     f.approximate_surface_checks_every_row = true;
-    f.topological_vertex_has_only_edge_uses = true;
     f.planar_section_face_tolerance = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;

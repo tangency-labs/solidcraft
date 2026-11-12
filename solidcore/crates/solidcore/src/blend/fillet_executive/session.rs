@@ -333,6 +333,11 @@ struct SessionObjects<'target> {
     /// Read only with `Kernel::fixes.fillet_chamfer_corner`.
     chamfer_corner: crate::blend::blend_corner::BlendChamferCorner,
     band_cut_cache: Option<band_cuts::BandCutCache>,
+    /// (not upstream) The edges `prepare_chamfers_along` chamfered as knife edges: equal
+    /// distances, the chord between the contacts of the ball of that radius, kept as the
+    /// linear section on offsets equal to the distance. Their solvers keep no chamfer
+    /// definition (there is no wedge), so [`FilletSession::chamfer_fit`] reads them here.
+    knife_chamfers: Vec<EdgeId>,
 }
 
 impl SessionObjects<'_> {
@@ -1546,6 +1551,7 @@ impl<'target> FilletSession<'target> {
                 blend_face_marks: Vec::new(),
                 chamfer_corner: crate::blend::blend_corner::BlendChamferCorner::Mitre,
                 band_cut_cache: None,
+                knife_chamfers: Vec::new(),
             },
             _gn_scope: gn_scope,
         })
@@ -2832,9 +2838,12 @@ impl<'target> FilletSession<'target> {
     /// ([`ChamferDefinition::scaled`]): exact in the maps, the distance named to the rounding
     /// of the fit and of the offset and distance conversions. A fit of a radius
     /// (`FitKind::Radius`, an equal chamfer's one offset) is `lambda = fit / r_1`; a fit of a
-    /// scale on two unequal offsets (`FitKind::Scale`) is `lambda` itself. `None` for a fit on
-    /// no edge or a chord, an edge whose solver keeps no chamfer, or a radius fit of a chamfer
-    /// whose two offsets differ (the fit is then a scale).
+    /// scale on two unequal offsets (`FitKind::Scale`) is `lambda` itself. A knife edge's
+    /// chamfer (equal distances, the chord between the contacts of the ball of that radius)
+    /// has offsets equal to its distance and no definition: a radius fit is its distance.
+    /// `None` for a fit on no edge or a chord, an edge whose solver keeps no chamfer and is no
+    /// knife edge chamfered, a scale fit of a knife edge, or a radius fit of a chamfer whose
+    /// two offsets differ (the fit is then a scale).
     ///
     /// [`FilletSolver::chamfer`]: crate::blend::fillet_solver::p1::FilletSolver::chamfer
     /// [`ChamferDefinition`]: crate::surface::procedural_blend::chamfer::ChamferDefinition
@@ -2849,7 +2858,17 @@ impl<'target> FilletSession<'target> {
             let eu = base.edgeuse(0).ok()??;
             (crate::topology::edgeuse::p1::edge(target, eu).ok()? == Some(edge))
                 .then_some(base.chamfer)?
-        })?;
+        });
+        let Some(chamfer) = chamfer else {
+            // a knife edge: its offsets are its distance, so the radius that fits is the
+            // distance that fits
+            let knife = self.objects.knife_chamfers.contains(&edge);
+            return (knife
+                && fit.kind == FitKind::Radius
+                && fit.size.is_finite()
+                && fit.size > 0.0)
+                .then_some(fit.size);
+        };
         let [r1, _] = chamfer.offsets().ok()?;
         let lambda = match fit.kind {
             // an equal chamfer's one offset: both offsets are r_1, to the conversion's rounding

@@ -315,15 +315,16 @@ fn a_dome_1e_8_off_its_circle_joins_to_its_mirror() {
 
 /// Cancel stops the full check of a long coil cut (solidcore#3247): a 20-turn square coil cut
 /// from a cylinder, the case of tangency-labs/solidcraft#3962, whose check takes seconds (most
-/// of the cut's time, in the edges' curve analyses). Cancelled from another thread part way,
-/// the check returns `Cancelled` within 500 ms (a few ms on a desktop; the bound leaves room
-/// for shared CI runners). nextest runs each test in a process of its own, so no other test's
-/// call holds the session's kernel meanwhile.
+/// of the cut's time, in the edges' curve analyses). Measured in the token's polls, not in
+/// time: a counting token (`CancelToken::after_polls`) first counts the polls of the whole
+/// check, `whole`; a token cancelled from a quarter of them then stops a second check there.
+/// It returns `Cancelled`, and the token is polled exactly once after the poll that cancelled
+/// it: by the session as the call returns, asking whether it was cancelled (`run_with`, after
+/// the kernel's call). Any further poll would be work done after the cancel.
 #[test]
 fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    use std::time::{Duration, Instant};
     let corners = [
         [19.0, 0.0, 12.0],
         [32.0, 0.0, 12.0],
@@ -348,23 +349,20 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     .unwrap();
     let stock = solidcore_ops::make_cylinder([0.0; 3], 20.0, 304.5).unwrap();
     let cut = boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap();
-    let token = CancelToken::new();
-    let watched = token.clone();
-    let worker = std::thread::spawn(move || {
-        let r = within(&watched, || cut.check(CheckLevel::All));
-        (r.map(|_| ()), Instant::now())
-    });
-    std::thread::sleep(Duration::from_millis(300));
-    let cancelled = Instant::now();
-    token.cancel();
-    let (r, returned) = worker.join().unwrap();
-    let took = returned.saturating_duration_since(cancelled);
-    eprintln!("the check returned {took:?} after Cancel");
-    assert_eq!(r, Err(Error::Cancelled));
-    assert!(
-        took < Duration::from_millis(500),
-        "returned {took:?} after Cancel"
+    let probe = CancelToken::after_polls(u64::MAX);
+    within(&probe, || cut.check(CheckLevel::All)).unwrap();
+    let whole = probe.polls().unwrap();
+    let n = whole / 4;
+    // cancelled well inside the check, not at its last poll
+    assert!(n >= 1 && whole >= 2 * n, "the check polls {whole} times");
+    let token = CancelToken::after_polls(n);
+    let r = within(&token, || cut.check(CheckLevel::All));
+    eprintln!(
+        "the check polls {whole} times; cancelled at {n}, polled {:?}",
+        token.polls()
     );
+    assert_eq!(r.map(|_| ()), Err(Error::Cancelled));
+    assert_eq!(token.polls(), Some(n + 1));
 }
 
 /// #13295: a bar of L section (100 long; its step's top edge along x at y 12.527, z 19.567)

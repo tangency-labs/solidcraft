@@ -1,13 +1,16 @@
 //! Affine maps from an application's numbers, as the matrices [`crate::Body::transform`] and
 //! [`crate::curve::transform`] take: rows 0-2 the images of x, y and z, row 3 the translation
 //! (`p' = p·A + t`), the fourth column `(0, 0, 0, 1)`. A move, a turn about a line, a scale
-//! about a point, a mirror in a plane, and one map after another. The maps are the kernel's
+//! about a point, a mirror in a plane, one map after another, and the map that undoes one. The maps are the kernel's
 //! ([`solidcore::Transform::translation`], [`solidcore::Transform::rotation`],
 //! [`solidcore::Transform::uniform_scaling`], [`solidcore::Transform::reflection`],
-//! [`solidcore::Transform::concat`]); ops checks the numbers and passes them on.
+//! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
+//! numbers and passes them on.
 
+use solidcore::geom::certified::Verdict;
 use solidcore::{Transform, Vec3};
 
+use crate::body::REGULAR_RATIO;
 use crate::{Error, Result};
 
 /// An affine map in the row-vector convention of [`crate::Body::transform`].
@@ -83,11 +86,23 @@ pub fn then(first: &Matrix, second: &Matrix) -> Result<Matrix> {
     Ok(both)
 }
 
+/// The map that undoes `matrix` (same convention): `then(matrix, inverse(matrix))` is the
+/// identity to rounding.
+///
+/// # Errors
+/// [`Error::Argument`] for a matrix [`solidcore::Transform::is_regular`] does not prove regular at
+/// [`REGULAR_RATIO`] (as [`crate::Body::transform`] refuses it).
+pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
+    let map = Transform { m: *matrix };
+    if map.is_regular(REGULAR_RATIO) != Verdict::Yes {
+        return Err(Error::Argument);
+    }
+    taken(map.inverse())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::body::REGULAR_RATIO;
-    use solidcore::geom::certified::Verdict;
 
     /// The mirror in the plane y = 0.
     const MIRROR_Y: Matrix = [
@@ -158,6 +173,37 @@ mod tests {
         let stacked = then(&translation(a).unwrap(), &translation(b).unwrap()).unwrap();
         assert_eq!(stacked, translation(sum).unwrap());
         assert!(regular(&stacked));
+    }
+
+    #[test]
+    fn a_map_then_its_inverse_is_the_identity_and_a_mirror_is_its_own() {
+        let turn = rotation([1.0, 2.0, 3.0], [1.0, -2.0, 2.0], 0.7).unwrap();
+        let map = then(&turn, &translation([4.0, -5.0, 6.0]).unwrap()).unwrap();
+        let size = map.iter().flatten().fold(1.0_f64, |a, x| a.max(x.abs()));
+        for m in [
+            map,
+            then(&map, &scaling([-1.0, 0.5, 2.0], 2.5).unwrap()).unwrap(),
+            reflection([0.5, -1.0, 3.0], [1.0, 1.0, 1.0]).unwrap(),
+        ] {
+            let inv = inverse(&m).unwrap();
+            assert!(regular(&inv));
+            for back in [then(&m, &inv).unwrap(), then(&inv, &m).unwrap()] {
+                let off = back
+                    .iter()
+                    .flatten()
+                    .zip(IDENTITY.iter().flatten())
+                    .fold(0.0_f64, |a, (x, y)| a.max((x - y).abs()));
+                assert!(off <= 1e-15 * size * 4.0, "{back:?}");
+            }
+        }
+        let mirror = reflection([3.0, 5.0, -2.0], [0.0, 4.0, 0.0]).unwrap();
+        assert_eq!(inverse(&mirror).unwrap(), mirror);
+        let mut flat = IDENTITY;
+        flat[1] = [0.0; 4];
+        assert_eq!(inverse(&flat), Err(Error::Argument));
+        let mut nan = IDENTITY;
+        nan[3][0] = f64::NAN;
+        assert_eq!(inverse(&nan), Err(Error::Argument));
     }
 
     #[test]

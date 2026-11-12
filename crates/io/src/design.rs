@@ -70,10 +70,19 @@ fn invalid(message: impl std::fmt::Display) -> IoError {
     IoError::Invalid(format!("design container: {message}"))
 }
 
-/// The shared container's refusals are a design container's.
+/// What building a container a watched save cancelled returns.
+fn cancelled() -> IoError {
+    IoError::Invalid("save cancelled".into())
+}
+
+/// The shared container's refusals are a design container's; a cancelled build is a cancelled
+/// save.
 impl From<solidcraft_format::FormatError> for IoError {
     fn from(e: solidcraft_format::FormatError) -> Self {
-        invalid(e)
+        match e {
+            solidcraft_format::FormatError::Cancelled => cancelled(),
+            e => invalid(e),
+        }
     }
 }
 
@@ -93,6 +102,7 @@ const LIMITS: Limits = Limits {
     part_limit,
     level: part_level,
     check_size: |length| crate::limits::check(crate::limits::Kind::Design, length),
+    cancelled: Some(crate::safe_write::cancelled),
 };
 
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
@@ -294,7 +304,10 @@ fn write_container(
         writer.part(name, bytes, true)?;
     }
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
-    // left out, never a failed save.
+    // left out, never a failed save. Encoding it is a save's longest step: not begun once cancelled.
+    if crate::safe_write::cancelled() {
+        return Err(cancelled());
+    }
     let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
     if let Some((manifest, data)) = cache {
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
@@ -1164,6 +1177,26 @@ fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut 
 mod tests {
     use super::*;
     use solidcore_record::Vec2;
+
+    /// Building a design file under a watch that asks to stop (a cancelled save) stops with
+    /// "save cancelled", before the next part; unwatched, it is built as ever.
+    #[test]
+    fn a_watched_container_stops_when_its_save_is_cancelled() {
+        struct Stop;
+        impl solidcraft_kernel::watch::Watch for Stop {
+            fn cancelled(&self) -> bool {
+                true
+            }
+            fn progress(&self, _: &'static str, _: usize, _: usize) {}
+        }
+        let doc = Document::new("Cancelled");
+        let e = solidcraft_kernel::watch::watching(std::sync::Arc::new(Stop), || {
+            write_design_container_with_thumbnail(&doc, DesignCompression::Fast, None, None, None)
+        })
+        .unwrap_err();
+        assert_eq!(e.to_string(), "save cancelled");
+        assert!(write_design_container_with_thumbnail(&doc, DesignCompression::Fast, None, None, None).is_ok());
+    }
 
     struct CountingReader {
         source: Cursor<Vec<u8>>,

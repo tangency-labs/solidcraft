@@ -24,7 +24,7 @@ use crate::error::{Result, SolidError};
 use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO_DEG, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
-use crate::primitive::primitive_creation::p3::skin_sources::SkinTrace;
+use crate::primitive::primitive_creation::p3::skin_sources::{LoopSpans, Segment, SkinTrace};
 use crate::sweep::topology_sweep::access::FaceRef;
 use crate::topology::{BrepId, FaceId};
 
@@ -322,18 +322,28 @@ fn skin_with_scratch(
                 ));
             }
             // build a B-spline curve for the composite curve
+            let from = built.sources.into_iter().next().unwrap_or_default();
             let mut composite = built.composites.into_iter().next().ok_or_else(|| {
                 SolidError::primitive_failed(OP, "an open profile makes no composite curve")
             })?;
-            nurbs.push(composite.make_composite_nurb()?);
+            if let Some(t) = trace.as_deref_mut() {
+                // (the trace: the composite's breaks, and each segment's curve among all the
+                // curves, or none for a gap line; the curve is the one made untraced)
+                let (joined, breaks) = composite.make_composite_nurb_with_breaks()?;
+                let segments = from
+                    .into_iter()
+                    .map(|i| i.map_or(Segment::GapLine, |i| Segment::Curve(profile_start + i)))
+                    .collect();
+                t.open_loops.push(LoopSpans { breaks, segments });
+                nurbs.push(joined);
+            } else {
+                nurbs.push(composite.make_composite_nurb()?);
+            }
         }
     }
 
     // when data was found to be a sequence of loft curves
     if open_profiles {
-        if let Some(t) = trace.as_deref_mut() {
-            t.open_profiles = true;
-        }
         // don't make cap faces
         cap_ends = false;
         // clear out the stale input pointers
