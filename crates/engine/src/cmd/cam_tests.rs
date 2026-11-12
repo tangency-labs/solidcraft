@@ -2796,3 +2796,250 @@ fn hostile_stock_and_face_jobs_are_refused_without_panics() {
     let r = run(&mut s, "cam.job", face(json!({"top": 9, "bottom": 7.5})));
     assert_eq!(r["passed"], true, "{r}");
 }
+
+const VIEW_MODEL: &str = r#"{"format": "solidcraft.machine_model", "version": 1, "name": "test mill",
+    "rates": {"rapid_xyz_mm_min": 6000, "accel_mm_s2": 1500, "tool_change_seconds": 20},
+    "spindle": {"nose_gap": 5, "nose_max_above_table": 400},
+    "table": {"size": [300, 200, 15], "cut_allowance": 0.1},
+    "parts": [{"name": "the Z plate", "code": "z-plate", "mount": "spindle", "shape": {"box": {"min": [-40, 30, -1], "max": [40, 45, 200]}}}]}"#;
+
+const VIEW_VISE: &str = r#"{"format": "solidcraft.workholding", "version": 1, "holding": "vise",
+    "vise": {"model": {"length": 175, "width": 64, "height": 64, "floor": 32, "fixed_jaw": 35.6, "moving_jaw": 50, "max_opening": 85},
+             "center": [150, 100]},
+    "parallels": {"height": 10, "thickness": 3, "length": 150}}"#;
+
+/// A folder with the test mill's machine model (its spindle nose reaching `nose_max` above the
+/// table) and a vise on parallels: the folder, the model's path and the vise's.
+fn vise_dir(tag: &str, nose_max: f64) -> (Dir, String, String) {
+    let dir = Dir::new(tag);
+    let (model, vise) = (dir.file("m.machine-model.json"), dir.file("v.workholding.json"));
+    std::fs::write(&model, VIEW_MODEL.replace("\"nose_max_above_table\": 400", &format!("\"nose_max_above_table\": {nose_max}"))).unwrap();
+    std::fs::write(&vise, VIEW_VISE).unwrap();
+    (dir, model, vise)
+}
+
+/// A cut-out round the dome's block whose cutter runs 1 to 7 mm outside the block in Y, into
+/// the vise's jaws below their tops (work Z 2).
+fn cut_out_job(model: &str, vise: &str) -> Value {
+    json!({
+        "name": "cut out", "machine": "3axis", "post": "linuxcnc_4axis", "tools": [flat(1, 6.0)],
+        "stock": {"box": {"min": [-20, -20, -20], "max": [20, 20, 8]}},
+        "machine_model_path": model, "workholding_path": vise,
+        "operations": [{
+            "name": "outline", "type": "contour", "tool": 1, "side": "outside", "polygon": [[-21, -21], [21, -21], [21, 21], [-21, 21]],
+            "heights": {"clearance": 30, "retract": 15, "top": 0, "bottom": -5}, "stepdown": 5
+        }]
+    })
+}
+
+/// A cut-out running into the vise's fixed jaw fails the job with the operation, the line, the
+/// place and a fix; without the workholding the same job passes; `allow_unsafe` writes it and
+/// its first line says so.
+#[test]
+fn a_cut_into_the_vise_fails_the_job() {
+    let mut s = dome();
+    let (dir, model, vise) = vise_dir("hold-vise", 400.0);
+    let job = cut_out_job(&model, &vise);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    let w = &r["workholding"];
+    assert_eq!((w["holding"].as_str(), w["pass"].as_bool(), w["machine_model"].as_str()), (Some("vise"), Some(false), Some("test mill")), "{w}");
+    let hit =
+        w["hits"].as_array().unwrap().iter().find(|h| h["code"].as_str().is_some_and(|c| c.ends_with("-hits-vise"))).unwrap_or_else(|| panic!("{w}"));
+    assert_eq!((hit["operation"].as_str(), hit["error"].as_bool()), (Some("outline"), Some(true)), "{hit}");
+    assert!(hit["line"].as_u64().unwrap() > 5 && hit["moves"].as_u64().unwrap() >= 1, "{hit}");
+    let at = hit["at"].as_array().unwrap();
+    assert!(at[1].as_f64().unwrap().abs() > 20.0 && at[2].as_f64().unwrap() < 2.0, "in the jaw: {hit}");
+    assert!(hit["fix"].as_str().unwrap().contains("parallels"), "{hit}");
+    let f = r["failures"].as_array().unwrap().iter().filter_map(Value::as_str).find(|f| f.starts_with("workholding: operation `outline`"));
+    assert!(f.is_some_and(|f| f.contains(&format!("G-code line {}", hit["line"]))), "{r}");
+    // Refused when it is to be written.
+    let out = dir.file("cut.ngc");
+    let e = s.execute("cam.job", &json!({"job": job, "output": out})).unwrap_err().to_string();
+    assert!(e.contains("workholding") && !std::path::Path::new(&out).exists(), "{e}");
+    // Without the workholding the same job passes.
+    let mut free = job.clone();
+    let o = free.as_object_mut().unwrap();
+    o.remove("workholding_path");
+    o.remove("machine_model_path");
+    let r = run(&mut s, "cam.job", json!({"job": free, "dry_run": true}));
+    assert_eq!(r["passed"], true, "{r}");
+    assert!(r.get("workholding").is_none(), "{r}");
+    // allow_unsafe writes it, and says so in its first line, every line where the failures say.
+    let r = run(&mut s, "cam.job", json!({"job": job, "output": out, "allow_unsafe": true}));
+    assert_eq!(r["passed"], false);
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(text.lines().next().unwrap().contains("WRITTEN WITH FAILED CHECKS"), "{}", &text[..200.min(text.len())]);
+    assert_eq!(text.lines().count(), r["program_lines"].as_u64().unwrap() as usize);
+    // The same workholding written into the job reports the same.
+    let mut inline = job.clone();
+    inline.as_object_mut().unwrap().remove("workholding_path");
+    inline["workholding"] = serde_json::from_str(VIEW_VISE).unwrap();
+    let r2 = run(&mut s, "cam.job", json!({"job": inline, "dry_run": true}));
+    let r1 = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r2["workholding"], r1["workholding"]);
+    inline["workholding_path"] = json!(vise);
+    let e = s.execute("cam.job", &json!({"job": inline, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("not both"), "{e}");
+}
+
+/// The 34 mm holder over a ball finishing a bar runs into a rotary unit's chuck jaws: the job
+/// fails, its fix saying to stick the tool out further; stuck out far enough it passes, and the
+/// reply says how the bar sits in the chuck.
+#[test]
+fn a_holder_into_the_chuck_jaws_fails_the_job() {
+    let mut s = bar();
+    let dir = Dir::new("hold-rotary");
+    let (model, rotary) = (dir.file("m.machine-model.json"), dir.file("r.workholding.json"));
+    std::fs::write(&model, VIEW_MODEL).unwrap();
+    std::fs::write(
+        &rotary,
+        r#"{"format": "solidcraft.workholding", "version": 1, "name": "test rotary", "holding": "rotary",
+            "rotary": {"axis": [100, 60], "headstock": {"min": [222, 70, 0], "max": [290, 130, 120]},
+                       "chuck": {"diameter": 80, "length": 45, "face_x": 177, "side": "plus_x", "jaws": {"count": 4, "radial": 20, "axial": 14}}}}"#,
+    )
+    .unwrap();
+    let mut job = barrel_job();
+    // The bar held 14 mm in the chuck: the jaws reach from work X 18 to 32, out to radius 31, clear
+    // of the ball (to X 17) but not of the 34 mm holder over it.
+    job["stock"] = json!({"cylinder": {"radius": 11, "x_min": -20, "x_max": 32}});
+    job["tools"] = json!([{"number": 3, "kind": "ball_endmill", "diameter": 4, "flute_length": 12, "stickout": 15, "spindle_rpm": 12000,
+                           "feed": 900, "plunge_feed": 250, "holder": [{"diameter": 34, "length": 30}]}]);
+    job["machine_model_path"] = json!(model);
+    job["workholding_path"] = json!(rotary);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    let w = &r["workholding"];
+    assert_eq!(w["holding"], "rotary", "{w}");
+    let hit = w["hits"].as_array().unwrap().iter().find(|h| h["code"] == "holder-hits-rotary").unwrap_or_else(|| panic!("{w}"));
+    assert_eq!(hit["operation"], "barrel", "{hit}");
+    assert!(hit["fix"].as_str().unwrap().contains("stick the tool out further"), "{hit}");
+    // Stuck out far enough, the holder clears the jaws.
+    job["tools"][0]["stickout"] = json!(30);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["workholding"]["pass"], true, "{r}");
+    assert_eq!(r["passed"], true, "{r}");
+    // How the bar goes in the chuck: its +X end at the face, 14 mm in the jaws (X 18 to 32), 38 mm
+    // standing out of them to X -20.
+    let g = &r["workholding"]["bar_grip"];
+    for (k, want) in [("face_x", 32.0), ("held_end_x", 32.0), ("free_end_x", -20.0), ("in_jaws", 14.0), ("stands_out", 38.0), ("zero_out", 32.0)] {
+        assert!((g[k].as_f64().unwrap_or(f64::NAN) - want).abs() < 1e-9, "{k}: {g}");
+    }
+    // A rotary unit needs a machine with a rotary axis.
+    job["machine"] = json!("3axis");
+    job["operations"] = dome_job()["operations"].clone();
+    job["tools"] = json!([ball(2, 6.0)]);
+    let e = s.execute("cam.job", &json!({"job": job, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("rotary axis"), "{e}");
+}
+
+/// The travel is checked in machine coordinates from where the workholding puts the work on the
+/// table: soft limits that leave the vise's place room pass, ones that do not fail with a fix.
+#[test]
+fn the_travel_is_checked_from_where_the_workholding_puts_the_work() {
+    let mut s = dome();
+    let (dir, _, vise) = vise_dir("hold-travel", 400.0);
+    let model = dir.file("t.machine-model.json");
+    let with =
+        |x: f64| VIEW_MODEL.replace(r#""table": {"#, &format!(r#""soft_limits": {{"min": [0, 0, -1000], "max": [{x}, 300, 0]}}, "table": {{"#));
+    let mut job = dome_job();
+    job["stock"] = json!({"box": {"min": [-20, -20, -20], "max": [20, 20, 8]}});
+    job["machine_model_path"] = json!(model);
+    job["workholding_path"] = json!(vise);
+    std::fs::write(&model, with(100.0)).unwrap();
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], true, "{r}");
+    std::fs::write(&model, with(20.0)).unwrap();
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    let f = r["failures"].as_array().unwrap().iter().filter_map(|f| f.as_str()).find(|f| f.starts_with("travel:")).unwrap_or_else(|| panic!("{r}"));
+    assert!(f.contains("X would be at") && f.contains("travel centred on the table") && f.contains("work_zero_machine"), "{f}");
+}
+
+/// The spindle head's body (the machine model's exact parts) is checked against the part as the
+/// holder is: an arm hanging down beside the spindle into the block fails; a spindle that cannot
+/// rise to a clearance fails its Z travel.
+#[test]
+fn the_spindle_head_and_its_travel_are_checked() {
+    let mut s = dome();
+    let (dir, _, vise) = vise_dir("hold-head", 400.0);
+    let model = dir.file("arm.machine-model.json");
+    let arm = r#"{"name": "the arm", "code": "arm", "mount": "spindle", "shape": {"box": {"min": [-100, -100, -50], "max": [100, 100, -30]}}}, "#;
+    std::fs::write(&model, VIEW_MODEL.replace(r#""parts": ["#, &format!(r#""parts": [{arm}"#))).unwrap();
+    let mut job = dome_job();
+    job["stock"] = json!({"box": {"min": [-20, -20, -20], "max": [20, 20, 8]}});
+    job["machine_model_path"] = json!(model);
+    job["workholding_path"] = json!(vise);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    let f = r["failures"].as_array().unwrap().iter().filter_map(|f| f.as_str()).find(|f| f.starts_with("head:")).unwrap_or_else(|| panic!("{r}"));
+    assert!(f.contains("the arm runs into the part") && f.contains("stick tool 2 out further"), "{f}");
+    // A spindle whose nose rises only 60 mm over the table cannot reach the clearance of 30 over
+    // the vise.
+    let (_dir, low, vise) = vise_dir("hold-low", 60.0);
+    job["machine_model_path"] = json!(low);
+    job["workholding_path"] = json!(vise);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["workholding"]["hits"].as_array().unwrap().iter().any(|h| h["code"] == "z-travel"), "{r}");
+    assert!(r["failures"].as_array().unwrap().iter().any(|f| f.as_str().is_some_and(|f| f.starts_with("z_travel:"))), "{r}");
+}
+
+/// A deep side cut over a vise gripping little of the stock is warned about, not failed.
+#[test]
+fn a_deep_side_cut_over_a_short_grip_warns() {
+    let warned = |parallels: &str, name: &str| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "corner": [-20, -15, 0]}));
+        let dir = Dir::new(name);
+        let (vise, model) = (dir.file("vise.workholding.json"), dir.file("m.machine-model.json"));
+        std::fs::write(&vise, VIEW_VISE.replace(r#""height": 10,"#, &format!(r#""height": {parallels},"#))).unwrap();
+        std::fs::write(&model, VIEW_MODEL).unwrap();
+        let job = json!({
+            "machine": "3axis", "post": "linuxcnc_4axis", "tools": [flat(1, 6.0)], "origin": [0, 0, 20],
+            "stock": {"box": {"min": [-22, -17, -24], "max": [22, 17, 1]}}, "workholding_path": vise, "machine_model_path": model,
+            "operations": [{"name": "outline", "type": "contour", "tool": 1, "polygon": [[-20, -15], [20, -15], [20, 15], [-20, 15]],
+                            "heights": {"clearance": 30, "retract": 5, "top": 1, "bottom": -19}, "stepdown": 5}]
+        });
+        let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+        let w = r["workholding"]["setup_warnings"].as_array().cloned().unwrap_or_default();
+        let in_notes = r["notes"].as_array().map_or(0, |n| n.iter().filter(|n| n.to_string().contains("grip")).count());
+        assert_eq!(w.len(), in_notes, "{r}");
+        w
+    };
+    let short = warned("29", "grip-short");
+    assert_eq!(short.len(), 1, "{short:?}");
+    assert!(short[0].as_str().is_some_and(|m| m.contains("grip")), "{short:?}");
+    assert!(warned("15", "grip-deep").is_empty());
+}
+
+#[test]
+fn hostile_workholdings_are_refused_without_panics() {
+    let mut s = dome();
+    let (dir, model, vise) = vise_dir("hold-hostile", 400.0);
+    let bad = dir.file("bad.workholding.json");
+    let mut job = dome_job();
+    job["stock"] = json!({"box": {"min": [-20, -20, -20], "max": [20, 20, 8]}});
+    let cases = [
+        // A workholding needs a machine model.
+        json!({"workholding_path": vise}),
+        json!({"machine_model_path": dir.file("missing.json"), "workholding_path": vise}),
+        json!({"machine_model_path": model, "workholding_path": dir.file("missing.json")}),
+        json!({"machine_model_path": model, "workholding_path": bad}),
+        json!({"machine_model_path": model, "workholding": {"holding": "vise"}}),
+        json!({"machine_model_path": model, "workholding": {"format": "solidcraft.workholding", "version": 1, "holding": "glue"}}),
+        json!({"machine_model_path": model, "workholding": 5}),
+    ];
+    std::fs::write(&bad, "{not json").unwrap();
+    for extra in cases {
+        let mut j = job.clone();
+        for (k, v) in extra.as_object().unwrap() {
+            j[k] = v.clone();
+        }
+        match s.execute("cam.job", &json!({"job": j, "dry_run": true})) {
+            Err(EngineError::Internal(_, msg)) => panic!("{extra}: panicked: {msg}"),
+            Err(_) => {}
+            Ok(v) => panic!("{extra}: accepted: {v}"),
+        }
+    }
+}

@@ -128,9 +128,25 @@ pub struct CamJob {
     pub stock: Option<StockSpec>,
     /// How far below the stock's bottom a cut through the stock (a cut-out, a through drill or
     /// bore) may go, mm, 0 to 25: the room a spoil board, or parallels clear of the cut, leave
-    /// under it. Default: 0 (no cut below the stock's bottom).
+    /// under it. With a workholding the cut is still checked against the parallels and the
+    /// table. Default: 0 (no cut below the stock's bottom).
     #[serde(default)]
     pub breakthrough: Option<f64>,
+    /// A machine model file (`solidcraft.machine_model`: the table, the spindle's nose and the
+    /// machine's parts), read from the job file's folder when relative: where the workholding
+    /// stands and how high the spindle goes. Default: none.
+    #[serde(default)]
+    pub machine_model_path: Option<String>,
+    /// A workholding file (`solidcraft.workholding`: a vise, clamps, the table or a rotary unit),
+    /// read from the job file's folder when relative. With a machine model, `cam.job` checks every
+    /// move of the program against both: the cutter, shank, holder or a machine part running into
+    /// it, and the spindle nose past the top of its travel, fail the job. Default: none.
+    #[serde(default)]
+    pub workholding_path: Option<String>,
+    /// The workholding written into the job (the same object as a workholding file), instead of
+    /// `workholding_path`. Default: none.
+    #[serde(default)]
+    pub workholding: Option<Map<String, Value>>,
     /// The operations, run and written in this order.
     pub operations: Vec<OperationSpec>,
 }
@@ -798,6 +814,10 @@ pub struct CamJobReply {
     pub travel: Option<TravelReport>,
     /// The job's stock as checked against; `null` without one.
     pub stock: Option<StockReport>,
+    /// The program checked against the job's workholding and machine model; absent without a
+    /// workholding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workholding: Option<HoldingReport>,
     /// Time at feed of the whole program, dwells included, minutes, as written.
     pub cut_minutes: f64,
     /// Whether every check passed.
@@ -905,6 +925,76 @@ pub struct GougeAt {
     pub line: Option<usize>,
     /// The tool tip at the deepest point, work coordinates, mm.
     pub xyz: [f64; 3],
+}
+
+/// The program checked against the workholding and the machine model.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct HoldingReport {
+    /// The workholding's name (its file's `name`, else its kind).
+    pub name: String,
+    /// `vise`, `clamps`, `table` or `rotary`.
+    pub holding: String,
+    /// The machine model's name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub machine_model: Option<String>,
+    /// Moves checked.
+    pub checked_moves: usize,
+    /// What was found, each kind once per tool and operation (at most 20).
+    pub hits: Vec<HoldingHitReport>,
+    /// In a vise: how far the stock's top stands above the jaws, mm.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stock_above_jaws: Option<f64>,
+    /// In a rotary unit: how the bar sits in the chuck, along work X.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bar_grip: Option<BarGripReport>,
+    pub pass: bool,
+    /// What is wrong with the setup itself (the stock wider than the vise opens, not gripped):
+    /// each fails the job.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub setup: Vec<String>,
+    /// What is doubtful about the setup for this job without failing it (the vise gripping too
+    /// little of the stock for the job's deepest side cut), each with what to change; each is in
+    /// the reply's `notes` too.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub setup_warnings: Vec<String>,
+}
+
+/// How a bar sits in a rotary unit's chuck, along work X (mm).
+#[derive(Clone, Copy, Debug, Default, Serialize, JsonSchema)]
+pub struct BarGripReport {
+    /// The chuck's face.
+    pub face_x: f64,
+    /// The bar's end towards the chuck.
+    pub held_end_x: f64,
+    /// The bar's free end.
+    pub free_end_x: f64,
+    /// How much of the bar the jaws grip.
+    pub in_jaws: f64,
+    /// How far the bar stands out of the jaws to its free end.
+    pub stands_out: f64,
+    /// How far work zero (X0) is out from the chuck's face, towards the free end.
+    pub zero_out: f64,
+}
+
+/// One kind of collision with the workholding, the table or the spindle's travel.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct HoldingHitReport {
+    /// `cutter-hits-vise`, `holder-hits-rotary`, `cutter-into-table`, `z-travel`, ...
+    pub code: String,
+    /// Whether it fails the job.
+    pub error: bool,
+    pub tool: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    /// The G-code line it first happens at.
+    pub line: usize,
+    /// Moves that have it.
+    pub moves: usize,
+    /// Where, work coordinates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<[f64; 3]>,
+    pub message: String,
+    pub fix: String,
 }
 
 /// The files `cam.job` wrote.

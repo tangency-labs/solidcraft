@@ -27,6 +27,7 @@ use solidcraft_cam::gcode5::{JointWords, MachineOperation, MachineProgram, Post5
 use solidcraft_cam::indexed::{IndexedOperation, frame_for_index};
 use solidcraft_cam::kinematics::{AxisLetter, Carrier, Machine, RotaryAxis};
 use solidcraft_cam::readback5::readback_program;
+use solidcraft_cam::sim::StockShape;
 use solidcraft_cam::stock::Stock;
 use solidcraft_cam::surface_ops::{Boundary, ParallelParams, RoughingParams, WaterlineParams, parallel, roughing, waterline};
 use solidcraft_cam::{
@@ -58,6 +59,8 @@ mod drill;
 mod finish3d;
 #[path = "cam_helical.rs"]
 mod helical;
+#[path = "cam_hold.rs"]
+mod hold;
 #[path = "cam_leads.rs"]
 mod leads;
 #[path = "cam_xrotary.rs"]
@@ -80,7 +83,9 @@ pub static COMMANDS: &[CommandSpec] = &[
              origin?: [x,y,z] (the design point that is work zero; on a 4th axis the A axis is work X through it), orientation?: \
              \"flip_x\" | \"flip_y\" | {axis, angle_deg} | {sketch} (the part turned for this setup, 3-axis), stock?: {box: {min, \
              max}} | {cylinder: {radius, x_min, x_max}} | {around_part: {margin: [x,y,z], top?, bottom?}} (work coordinates; no rapid \
-             may pass through it), breakthrough?: mm a through cut may go below the stock's bottom (0-25), bodies?: [names] (the part: what 3D operations follow and every \
+             may pass through it), breakthrough?: mm a through cut may go below the stock's bottom (0-25), \
+             machine_model_path? + workholding_path? | workholding? (every move is then checked against the vise, clamps, parallels, \
+             table or rotary unit, the spindle head against the part, and the spindle against its Z travel), bodies?: [names] (the part: what 3D operations follow and every \
              cut is checked for gouges against, drawn in the preview; default every visible body), fixtures?: [names] (checked \
              against, never cut), tolerance?: mm (default 0.01; 3D operations plan on the bodies tessellated within a \
              quarter of it), tools: [Tool JSON] | tool_library_path, operations: [{name, type: contour | pocket (sketch + profiles? | \
@@ -105,7 +110,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              max_axis_deviation_deg, allowed_tip, allowed_axis_deg, cut_minutes, pass}, gouge: {worst, tolerance, tessellation, \
              allowed, hits, at?: {operation, move_index, line?, xyz}, skipped, pass}, holder_collisions, rapids: {checked, hits, \
              worst, pass, from_unknown, first: [{line, operation?, kind, depth, at}]}, travel: {checked, violation?, pass} | null, \
-             stock, cut_minutes, passed, failures, dry_run, outputs: \
+             stock, workholding?: {name, holding, machine_model?, checked_moves, hits: [{code, error, tool, operation?, line, moves, \
+             at?, message, fix}], stock_above_jaws?, bar_grip?, pass, setup?, setup_warnings?}, cut_minutes, passed, failures, dry_run, outputs: \
              {gcode?, preview?}, notes. Without dry_run or allow_unsafe a failed check refuses and nothing is written",
         ),
     CommandSpec::new("cam.post.list", "List CAM Posts", crate::checked!("cam.post.list", post_list))
@@ -1577,6 +1583,56 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     let written = cam_stock::Written { text: &text, program: &program, post: &post, machine: &machine };
     let (rapids, travel) = cam_stock::check_motion(cmd, &job, &written, &surfaces, stock.as_ref(), &unchecked, tol, &mut failures)?;
     drop(span);
+    // Every move of the program against the job's workholding and machine model.
+    let span = solidcraft_profile::span("cam", "job.holding");
+    let workholding = if job.workholding.is_some() || job.workholding_path.is_some() || job.machine_model_path.is_some() {
+        let shape = stock_shape(cmd, s, stock.as_ref(), &bodies, &place, &machine)?;
+        let mut warnings = Vec::new();
+        let holding = hold::holding_of(cmd, &job, base, &shape, &machine, &mut notes, &mut warnings)?;
+        notes.extend(warnings);
+        let blocks = parse5(&text, &machine.letters()).map_err(|e| cam_err(cmd, "reading the program back", e))?;
+        let lines: Vec<(usize, usize)> = solidcraft_cam::rapids::owners(&program, &post, &machine, &blocks)
+            .map(|o| blocks.iter().zip(o).map(|(b, k)| (b.line(), k)).collect())
+            .unwrap_or_default();
+        let op_at_line = |l: usize| -> Option<(usize, String)> {
+            let at = lines.partition_point(|(bl, _)| *bl <= l).checked_sub(1)?;
+            let k = lines.get(at)?.1;
+            Some((k, planned.get(k)?.report.name.clone()))
+        };
+        let mut report = hold::check_holding(
+            cmd,
+            &text,
+            &machine,
+            &tools,
+            &shape,
+            &holding,
+            tol,
+            &op_at_line,
+            &rises_of(&planned, &post),
+            &head_bodies(&surfaces),
+            &mut failures,
+        )?;
+        // The vise's grip weighed against the job's deepest side cut (a warning: a rule of thumb).
+        if let (Some(r), Some(sc)) = (report.as_mut(), holding.scene.as_deref())
+            && let (Some(grip), Some(above), Some(cut)) = (sc.stock_grip, sc.stock_above_jaws, deepest_side_cut(&planned, &shape))
+            && let Some(w) = solidcraft_cam::workholding::grip_for_cut(grip, above, &cut, false)
+        {
+            r.setup_warnings.push(w.message.clone());
+            notes.push(format!("workholding: {}", w.message));
+        }
+        // Every move against the machine model's soft limits, in machine coordinates, from where
+        // the workholding puts work zero on the machine (or, without it, with the travel centred
+        // on the table).
+        if let (Some(m), Some(sc)) = (&holding.model, &holding.scene)
+            && let Some(l) = &m.soft_limits
+        {
+            soft_limits(cmd, &text, &machine, m, sc, l, &op_at_line, &mut failures)?;
+        }
+        report
+    } else {
+        None
+    };
+    drop(span);
     if !readback.pass {
         failures.push(format!(
             "read-back: the written program is up to {} mm and {}° from its toolpaths (the post's precision allows {} mm and {}°)",
@@ -1634,6 +1690,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         rapids,
         travel,
         stock: stock.as_ref().map(cam_stock::stock_report),
+        workholding,
         passed,
         failures,
         dry_run,
@@ -1705,6 +1762,148 @@ fn file_key(path: &str) -> String {
 /// Whether two paths name the same file ([`file_key`]).
 fn same_file(a: &str, b: &str) -> bool {
     file_key(a) == file_key(b)
+}
+
+/// The job's stock as the workholding is placed with it: its own, else the box round the part's
+/// exact bodies (on a rotary machine, the round bar round them about work X).
+fn stock_shape(cmd: &str, s: &Session, stock: Option<&Stock>, part: &[String], place: &Placement, machine: &Machine) -> Result<StockShape> {
+    Ok(match stock {
+        Some(&Stock::Box { min, max }) => StockShape::Box { min, max },
+        Some(&Stock::Cylinder { radius, x_min, x_max }) => StockShape::Cylinder { x_min, x_max, radius },
+        None => {
+            let Some(b) = cam_stock::work_bounds(s, part, place)? else {
+                return Err(bad(cmd, "the workholding is placed with the stock: give the job a `stock` (the part has no extent to take it from)"));
+            };
+            if machine.rotaries.is_empty() {
+                StockShape::Box { min: b.min, max: b.max }
+            } else {
+                let radius = b.min.y.abs().max(b.max.y.abs()).hypot(b.min.z.abs().max(b.max.z.abs()));
+                StockShape::Cylinder { x_min: b.min.x, x_max: b.max.x, radius }
+            }
+        }
+    })
+}
+
+/// What sets how high the tool goes in a program of `planned` for `post`: each operation's
+/// highest rapid (its clearance, in program Z: along the tool from the A axis on a 4th axis)
+/// and the post's `clearance`, for the fix of a move too high for the spindle.
+fn rises_of(planned: &[Planned], post: &Post5) -> hold::Rises {
+    let ops = planned
+        .iter()
+        .filter_map(|p| {
+            let top = p
+                .poses
+                .moves
+                .iter()
+                .filter_map(|m| match m {
+                    solidcraft_cam::Move5::Rapid { to } => Some(to.tip.y * to.axis.y + to.tip.z * to.axis.z),
+                    _ => None,
+                })
+                .reduce(f64::max)?;
+            Some((p.report.name.clone(), top))
+        })
+        .collect();
+    hold::Rises { ops, post: post.clearance.filter(|_| post.clearance_retract) }
+}
+
+/// The bodies the spindle head is checked against: the part, and the design's fixtures.
+fn head_bodies(s: &Surfaces) -> Vec<solidcraft_cam::playback::HeadBody<'_>> {
+    let mut out = vec![solidcraft_cam::playback::HeadBody { surface: &s.part, code: "part", noun: "the part" }];
+    if let Some(f) = &s.fixtures {
+        out.push(solidcraft_cam::playback::HeadBody { surface: f, code: "fixture-body", noun: "a fixture of the design" });
+    }
+    out
+}
+
+/// The job's deepest side cut ([`solidcraft_cam::workholding::grip_for_cut`]): the operation
+/// whose cutting moves, square to work Z, go furthest below the stock's top, and how far. A
+/// drill, bore, thread mill or chamfer pushes along the tool or cuts lightly near the top, and is
+/// left out; so is a move tilted off work Z (a rotary or indexed cut, not across the jaws).
+fn deepest_side_cut(planned: &[Planned], stock: &StockShape) -> Option<solidcraft_cam::workholding::SideCut> {
+    let StockShape::Box { max, .. } = *stock else { return None };
+    let mut deepest: Option<solidcraft_cam::workholding::SideCut> = None;
+    for p in planned {
+        if matches!(p.report.kind.trim_start_matches("indexed "), "drill" | "bore" | "thread_mill" | "chamfer") {
+            continue;
+        }
+        let low = p
+            .poses
+            .moves
+            .iter()
+            .filter_map(|m| match m {
+                solidcraft_cam::Move5::Feed { to, .. } if to.axis.z > 1.0 - 1e-6 => Some(to.tip.z),
+                _ => None,
+            })
+            .filter(|z| z.is_finite())
+            .fold(f64::INFINITY, f64::min);
+        let depth = max.z - low;
+        if depth.is_finite() && depth > deepest.as_ref().map_or(0.0, |d| d.depth) {
+            deepest = Some(solidcraft_cam::workholding::SideCut { operation: p.report.name.clone(), depth });
+        }
+    }
+    deepest
+}
+
+/// Every move of the program `text` against the machine model `m`'s soft limits `l`, in machine
+/// coordinates, from where the workholding scene `sc` puts work zero on the machine; without its
+/// `work_zero_machine`, X and Y with work zero where the workholding stands on the table and the
+/// travel centred on the table (Z is the spindle's own travel, checked per tool with the
+/// workholding). The first move beyond them is a failure, with its operation and a fix.
+#[allow(clippy::too_many_arguments)]
+fn soft_limits(
+    cmd: &str,
+    text: &str,
+    machine: &Machine,
+    m: &solidcraft_cam::machine_model::MachineModel,
+    sc: &solidcraft_cam::workholding::HoldScene,
+    l: &solidcraft_cam::machine_model::SoftLimits,
+    op_at_line: &dyn Fn(usize) -> Option<(usize, String)>,
+    failures: &mut Vec<String>,
+) -> Result<()> {
+    let given = sc.work_zero_machine.map(|z| (z, v3(l.min), v3(l.max)));
+    let derived = || {
+        solidcraft_cam::machine_model::work_zero_machine_xy(m, &sc.table)
+            .map(|[x, y]| (Vec3::new(x, y, 0.0), Vec3::new(l.min[0], l.min[1], f64::MIN), Vec3::new(l.max[0], l.max[1], f64::MAX)))
+    };
+    let Some((zero, lo, hi)) = given.or_else(derived) else { return Ok(()) };
+    let t = solidcraft_cam::rapids::check_travel_within(text, machine, lo, hi, zero)
+        .map_err(|e| cam_err(cmd, "checking the machine's soft limits", e))?;
+    let Some(v) = t.violation else { return Ok(()) };
+    let at = if sc.work_zero_machine.is_some() {
+        format!("work zero at machine {}, {}, {}", num(zero.x), num(zero.y), num(zero.z))
+    } else {
+        format!(
+            "work zero at machine X{} Y{}, from where the workholding puts it on the table with the travel centred on the table: give the \
+             workholding `work_zero_machine` if it is elsewhere",
+            num(zero.x),
+            num(zero.y)
+        )
+    };
+    // The operation the move is in, and how far the part must move for it to fit: towards the
+    // travel's other end by what the move is beyond it.
+    let op = op_at_line(v.line).map_or(String::new(), |(_, n)| format!("operation `{n}`: "));
+    let (over, towards) = if v.value > v.high { (v.value - v.high, '-') } else { (v.low - v.value, '+') };
+    let fix = if v.axis == 'Z' {
+        "move work zero, or lower the clearance heights".to_string()
+    } else {
+        let other = if v.axis == 'X' { "Y (`angle_deg` 90)" } else { "X (`angle_deg` 0)" };
+        format!(
+            "move the part {} mm or more towards {towards}{} on the table (the workholding's vise `center`, the stock's `offset` along \
+             the jaws or `stock_at`), or keep the operation's moves beyond the stock shorter (a face's passes along {other}, a smaller \
+             `overhang`)",
+            num((over - 1e-6).ceil().max(1.0)),
+            v.axis
+        )
+    };
+    failures.push(format!(
+        "travel: {op}line {}: {} would be at {} in machine coordinates, beyond the machine's soft limits {} to {} ({at}): {fix}",
+        v.line,
+        v.axis,
+        num(v.value),
+        num(v.low),
+        num(v.high),
+    ));
+    Ok(())
 }
 
 /// The gouges along the moves of `p`, a chamfer mill told to cut `band` up its axis: into the part

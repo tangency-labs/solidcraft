@@ -96,6 +96,18 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
         "crates/engine/src/cmd/cam.rs:surfaces_of",
         "CAM toolpaths: the part and fixtures merged into the surface the toolpaths are planned and gouge-checked on (not yet on exact geometry)",
     ),
+    (
+        "crates/engine/src/cmd/cam_hold.rs:hold_meshes",
+        "CAM workholding: a fixture's mesh files, checked against the program as the fixtures' surface is (not yet on exact geometry)",
+    ),
+    (
+        "crates/engine/src/cmd/cam_hold.rs:mesh_file",
+        "CAM workholding: an STL fixture (a mesh body), or a STEP fixture tessellated at 0.05 mm (not yet on exact geometry)",
+    ),
+    (
+        "crates/engine/src/cmd/cam_hold.rs:model_of",
+        "CAM machine model: its mesh files on the table marked `check`, checked against the program as the fixtures are (mesh bodies)",
+    ),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
     ("crates/kernel/src/body.rs:Body::classify_point", "mesh bodies: its mesh-body branch (a B-rep is classified by SMLib)"),
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),

@@ -68,6 +68,9 @@ The command never writes a program that fails one of these unless `allow_unsafe`
   included (see [The rapid check](#the-rapid-check)).
 - **Travel.** With a machine whose JSON has `linear_limits`, every position is within them.
 - **Below the stock.** No cut below a box stock's bottom, but by the job's `breakthrough`.
+- **Workholding and Z travel.** With a workholding and a machine model, every move against the
+  vise, clamps, parallels, rotary unit and table, the spindle head against the part, and the
+  spindle nose against its travel (see [Workholding and the machine model](#workholding-and-the-machine-model)).
 - **The 4th-axis setup check** (see [The setup check](#the-setup-check)).
 - **Operation checks** that are part of planning, each refusing the job with a message that
   names the operation: a tool that cannot cut the operation (below), heights out of order, a
@@ -84,7 +87,7 @@ message. With `dry_run`, the reply carries `passed: false` and `failures`.
 `readback` (`max_tip_deviation`, `max_axis_deviation_deg`, `allowed_tip`, `allowed_axis_deg`,
 `cut_minutes`, `pass`), `rapids` (`checked`, `hits`, `worst`, `pass`, `from_unknown`, `first`),
 `travel` (`checked`, `violation`, `pass`; `null` without `linear_limits`), `stock` (as checked
-against; `null` without one), `gouge` (`worst`, `tolerance`, `tessellation`, `allowed`, `hits`,
+against; `null` without one), `workholding` (with a workholding), `gouge` (`worst`, `tolerance`, `tessellation`, `allowed`, `hits`,
 `at: {operation, move_index, line?, xyz}` for the deepest, `skipped`, `pass`),
 `holder_collisions` (`null` when no tool has holder data), `cut_minutes` (the program's time at
 feed as written), `passed`,
@@ -131,6 +134,8 @@ silently left at its default. That holds for the tools, the machine and the post
 | `orientation` | How the part is turned for this setup, about `origin`: `"flip_x"`, `"flip_y"`, `{"axis": [x, y, z], "angle_deg": a}` or `{"sketch": name}` (see Coordinates). Default: none. |
 | `stock` | The raw material in work coordinates: `{"box": {"min", "max"}}`, `{"cylinder": {"radius", "x_min", "x_max"}}` (a bar about work X) or `{"around_part": {"margin": [x, y, z], "top"?, "bottom"?}}`. See [Stock, facing and rapid safety](#stock-facing-and-rapid-safety). Default: none. |
 | `breakthrough` | How far below a box stock's bottom a through cut may go, 0 to 25 mm. Default: 0. |
+| `machine_model_path` | A machine model file (the table, the spindle's nose and the machine's parts). See [Workholding and the machine model](#workholding-and-the-machine-model). Default: none. |
+| `workholding_path` / `workholding` | A workholding file, or the same object written into the job: a vise, clamps, the table or a rotary unit. With a machine model every move of the program is checked against it. Default: none. |
 | `bodies` | The part's bodies by name: the surface the 3D operations follow and every cut is checked for gouges against, drawn in the preview. Default: every visible body not in `fixtures`. |
 | `fixtures` | Bodies the tool must stay clear of (vises, clamps, a fixture plate modelled in the design): checked for gouges and holder collisions, never machined. Default: none. |
 | `tolerance` | 0.0001 to 1 mm (default 0.01): how far a toolpath may be from the profiles and surfaces it follows, and how deep a cut into the part counts as a gouge. |
@@ -460,6 +465,85 @@ unless `dry_run` or `allow_unsafe` is given.
 A machine given as JSON with `linear_limits: [[x, y, z], [x, y, z]]` (the lowest and highest
 position of the linear axes, as written in the program) has every block's end, and points along
 every arc, held against them. The first position beyond them fails the job, by line and axis.
+
+## Workholding and the machine model
+
+A job that names a workholding (`workholding_path`, or `workholding` written into the job) and
+a machine model (`machine_model_path`) has every move of its program as written checked
+against them: the cutter, the shank, every holder section and the machine model's parts
+against the vise's jaws and body, the parallels, clamps, a rotary unit's headstock, chuck, jaws
+and tailstock, and the table (the cutter may go the model's `table.cut_allowance` into it); the
+spindle head's own parts against the part and the design's fixtures; and the spindle nose
+against the top and the bottom of its travel (`spindle.nose_max_above_table`: the tool's
+stickout, its holder and the nose gap above the tip). Each kind of collision is a failure once
+per tool and operation (every operation that has it is named), with the G-code line where it
+first happens, how many moves have it, the place in work coordinates and a fix; a nose past its
+travel names the highest clearance that fits that tool, or says that no clearance above the
+stock's top does (the tool is too long for the setup). The setup's own errors (the stock wider
+than the vise opens, not gripped) fail it too. With the model's `soft_limits`, every move is
+also held against them in machine coordinates, from where the workholding puts work zero on
+the table (its `work_zero_machine`, else the travel centred on the table, which the failure
+says). The workholding is placed with the job's stock (without one, the box round the part's
+exact bodies; on a 4th axis the bar round them).
+
+The reply's `workholding` carries the result: `name`, `holding`, `machine_model`,
+`checked_moves`, `hits` (each with `code`, `error`, `tool`, `operation`, `line`, `moves`, `at`,
+`message`, `fix`; at most 20), `pass`, `stock_above_jaws`, `bar_grip`, `setup` and
+`setup_warnings`. In a rotary unit `bar_grip` says how the bar sits in the chuck along work X:
+`face_x` (the chuck's face), `held_end_x` and `free_end_x` (the bar's ends), `in_jaws` (mm the
+jaws grip), `stands_out` (mm from the jaws to the free end) and `zero_out` (how far X0 is out
+from the face). In a vise, a job whose deepest side cut is deep for how little of the stock the
+jaws grip is warned about in `setup_warnings` and the notes (a rule of thumb, not a failure). A
+workholding without a machine model is refused, since the table places it.
+
+### Machine model
+
+A machine model file (`"format": "solidcraft.machine_model", "version": 1`) gives the table,
+the spindle and the machine's parts. Every number must be finite. Keys this build does not know
+(a file a newer build wrote) are left out, and the reply's `notes` name them with their path
+(`machine_model_path m.json: this build does not know the key `paint` and left it out`).
+
+| Key | Meaning |
+| --- | --- |
+| `name` | Shown in the reply. |
+| `spindle` | `nose_gap` (the top of the tool's holder to the spindle nose, mm), `nose_max_above_table?` (the highest the nose gets above the table: the Z-travel check), `rpm?`. |
+| `table` | `size` `[x, y, thickness]`, `corner_radius?`, `cut_allowance?` (how deep the cutter may go into the table top), `holes?: [{x, y, d, depth, label?}]` in the table frame. |
+| `parts` | Up to 1000 of `{name, code, mount, shape}`: `mount` `spindle` (moves with X, Y and Z; Z from the spindle nose), `carriage` (X and Y; Z from the table top), `frame` (Y only; X from the table's centre) or `table` (fixed); `shape` `{"cylinder": {"diameter", "z": [low, high], "center?"}}` or `{"box": {"min", "max"}}`. `code` (kebab-case) is the findings' stem. |
+| `display_meshes` | Up to 64 `{path, mount?, color?, name?, transform?, check?}`: a mesh-parts JSON file (`{"parts": [{"name", "mount", "color", "tris": [x, y, z, ...]}]}`), an STL file or a STEP file (its solids meshed through the import at 0.05 mm). `transform` is three rows of four numbers (rotation and shift) from the file's coordinates to its mount's frame. Pictures only (a later view draws them), unless an STL or STEP on `mount: table` gives `check: true`: then the tool and the machine are checked against its triangles too (findings `...-hits-machine`). A mesh that is checked and cannot be read refuses the job. A checked mesh needs a workholding (it places the table): without one the reply's notes say it is not checked. At most 2 million triangles checked by the machine model and the workholding together. |
+| `soft_limits` | `{min: [x, y, z], max: [x, y, z]}`, the machine's travel in machine coordinates: every move is held against them. |
+| `kinematics` / `kinematics_path` | Kept with the model; the job's machine gives the axes. |
+
+The **table frame** has its origin at the table's front-left top corner, X to the right, Y to
+the back, Z up.
+
+### Workholding
+
+A workholding file (`"format": "solidcraft.workholding", "version": 1`) says how the stock is
+held; the job's stock is placed in it, and work zero follows.
+
+| `holding` | Needs | |
+| --- | --- | --- |
+| `vise` | `vise: {model: {length, width, height, floor, fixed_jaw, moving_jaw, max_opening}, center, quarter_turns?, offset?, grip?}` | The stock against the fixed jaw, on the parallels (or the floor), centred along the jaws at `offset`. `quarter_turns` counter-clockwise from the jaws along X with the fixed jaw at the back. `grip` is a box (work coordinates) the jaws close on instead of the stock. |
+| `clamps` | `stock_at: [x, y]` (its front-left corner on the table), `clamps: [{center, size, height}]` | On the parallels or the table; each clamp a box on the stock's top. |
+| `table` | `table_zero: [x, y, z]` | The program machines the table itself. |
+| `rotary` | `rotary: {axis: [y, z], headstock?: {min, max}, chuck: {diameter, length, face_x, side?, jaws?: {radial, axial, count?, width?, angle_deg?}}, parts?, rings?, tailstock?, plate?, zero_x?}` | A bar on the A axis; work zero on the axis at `zero_x`. `side` is the end of the bar the chuck holds: `plus_x` (the default: the unit at the table's +X end, +X pointing into the axis, the bar standing out towards -X, its +X end at the chuck's face unless `zero_x` is given) or `minus_x` (the mirror image: the bar's -X end at the face). The chuck (a cylinder about the axis) reaches back from its face away from the bar; the jaws stand `axial` out of the face towards the bar and `radial` beyond its surface. Without `width` they are checked as the ring they sweep as A turns; with `width`, as `count` (default 3) blocks that wide, spaced evenly, the first pointing straight up (+Z) at A 0 turned `angle_deg` about +X, turning with A: the gaps between them are free, and each move is checked with the jaws at its own A (where A is not known, as the ring). `parts` (up to 1000) are the unit's own parts instead of one `headstock` box, each named in the findings: `{name, box: {min, max}}` or `{name, cylinder: {diameter, x: [x0, x1], center?: [y, z]}}` (along X, about the A axis unless `center`), fixed to the table unless `turns: true` (fixed to the work: it turns with A). `rings` (up to 100) are `{name?, diameter, x: [x0, x1]}` about the A axis that turn with A (a home flag, a back plate). A bar that does not reach into the jaws is `stock-not-gripped`, one held by less than 3 mm `shallow-grip`. |
+
+`parallels: {height, thickness, length, inset?, offset?}` go under the stock (along the jaws in a
+vise, under the long edges with clamps).
+
+`meshes` (up to 64, any `holding`) are mesh files of the workholding, read beside the workholding
+file (or the job's folder for a workholding written into the job): `{path, name?, frame?, check?,
+color?, transform?}`, an STL or a STEP file (meshed through the import). `frame: table` (the
+default) is the table frame: checked triangle by triangle unless `check: false` (the
+findings name it, `...-hits-vise`, `-clamp`, `-rotary`, or `-fixture` when the table itself is
+machined). `frame: rotary` is the table frame at A 0, turning with A: a picture only (`check: true` is
+refused; give what turns as the rotary unit's `rings`, `parts` with `turns` and `chuck.jaws`).
+`transform` is three rows of four numbers from the file's coordinates to the frame. A checked
+mesh that cannot be read refuses the job; one only drawn is a note.
+
+A workholding file, like a machine model, leaves out keys this build does not know and names them
+in the reply's notes; a workholding written into the job (`workholding`) refuses them, as
+every key of a job does.
 
 ## Adaptive clearing
 
