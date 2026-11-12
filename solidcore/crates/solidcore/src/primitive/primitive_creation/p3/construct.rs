@@ -106,8 +106,7 @@ impl SectionPlanes {
         }
         let mut planes = Vec::new();
         for &face in faces {
-            let k = a.kernel(face.0)?;
-            match face_surface(a, face)?.kind_with_nurb(k)? {
+            match face_surface(a, face)?.kind() {
                 SurfaceKind::Plane(p) => {
                     let (point, normal, _) = p.is_planar();
                     planes.push((point, normal));
@@ -436,18 +435,30 @@ impl PrimitiveCreation {
         // Not upstream: sections on parallel planes whose chord-length skin leaves the slab
         // between the first and last planes are skinned at their planes' distances, every
         // layer alike (`SectionPlanes`).
-        if let Some(planes) = SectionPlanes::of(&*a, faces)? {
+        // A failure of the check or of the second build keeps the chord-length skins, as
+        // upstream builds them; only cancellation and unported calls stop the loft.
+        let replanned = (|| -> Result<Option<Vec<BSplineSurface>>> {
+            let Some(planes) = SectionPlanes::of(&*a, faces)? else {
+                return Ok(None);
+            };
             let tol = a.brep(brep)?.tolerance();
             let mut leaves = false;
             for s in &surfaces {
                 leaves = leaves || planes.leaves(s, tol)?;
             }
-            if leaves {
-                surfaces.clear();
-                for curves in &layer_curves {
-                    surfaces.push(skin(a.kernel(brep)?, curves, Some(planes.params()))?);
-                }
+            if !leaves {
+                return Ok(None);
             }
+            let mut again = Vec::new();
+            for curves in &layer_curves {
+                again.push(skin(a.kernel(brep)?, curves, Some(planes.params()))?);
+            }
+            Ok(Some(again))
+        })();
+        match replanned {
+            Ok(Some(again)) => surfaces = again,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Ok(None) | Err(_) => {}
         }
         let mut traced: Vec<(FaceId, Vec<usize>)> = Vec::new();
         let mut made = Vec::new();
