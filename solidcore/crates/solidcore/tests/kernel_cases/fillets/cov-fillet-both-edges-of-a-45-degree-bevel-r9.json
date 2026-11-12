@@ -1,0 +1,280 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                60.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                60.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                60.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                40.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                60.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                50.0,
+                0.0
+              ],
+              "start": [
+                20.0,
+                30.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                50.0,
+                0.0
+              ],
+              "start": [
+                20.0,
+                50.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                50.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  40.0,
+                  10.0,
+                  0.0
+                ],
+                [
+                  40.0,
+                  10.0,
+                  20.0
+                ]
+              ],
+              "index": 17
+            },
+            {
+              "at": [
+                [
+                  20.0,
+                  30.0,
+                  0.0
+                ],
+                [
+                  19.999999999999996,
+                  30.000000000000004,
+                  20.0
+                ]
+              ],
+              "index": 19
+            }
+          ],
+          "points": [
+            [
+              40.0,
+              10.0,
+              10.0
+            ],
+            [
+              20.0,
+              30.0,
+              10.0
+            ]
+          ],
+          "tolerance": 4.032128874149275
+        },
+        "kind": "round",
+        "sizes": [
+          9.0,
+          9.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "cov-fillet-both-edges-of-a-45-degree-bevel-r9",
+  "expected": {
+    "body_count": 1,
+    "method": "Plan area 1600 mm2 (shoelace on the outline), extruded 20: base volume 32000 mm3. A round of radius R on a concave edge of deviation angle phi adds R^2 (tan(phi/2) - phi/2) per mm of edge length. Each edge runs the full 20 mm extrusion depth and turns the profile by a deviation angle of 45 degrees (phi = pi/4). Added = 2 * 20 * 81 * (tan(pi/8) - pi/8) = 3240 * 0.02151448 ≈ 69.706917 mm3, so V = 32069.706917384963 mm3.",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 32069.706917384963,
+    "what": "R9 round on both concave edges of a 45 degree bevel in a profile 60x50 in plan extruded 20 mm (plan outline (0,0) (60,0) (60,10) (40,10) (20,30) (20,50) (0,50), picked at (40,10,10) and (20,30,10))."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 27,
+      "faces": 11,
+      "vertices": 18
+    }
+  },
+  "records": "cov-fillet-both-edges-of-a-45-degree-bevel-r9.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7357.165690619435,
+      "body_count": 1,
+      "edges": 27,
+      "faces": 11,
+      "vertices": 18,
+      "volume_mm3": 32069.70691754818
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "R9 round on both concave edges of a 45 degree bevel in a profile 60x50 in plan extruded 20 mm (plan outline (0,0) (60,0) (60,10) (40,10) (20,30) (20,50) (0,50), picked at (40,10,10) and (20,30,10)).",
+  "why_not": []
+}
