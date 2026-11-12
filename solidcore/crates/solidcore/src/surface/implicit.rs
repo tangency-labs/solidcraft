@@ -1241,19 +1241,22 @@ impl AnalyticSupport {
     fn on_form(&self, k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
         let form = form.copy();
         let mut surface = recognise(k, self.kind(), &form)?.ok_or_else(not_form)?;
-        // the recognised surface must be of this support's kind; the numbers recognition
-        // recomputed are not compared with the support's, because it recomputes them from
-        // the control points and so reproduces a support's own numbers only to rounding
-        // (#2554) -- `lies_on` above and `evaluates_as` below are what prove the two agree
-        if Self::of(&surface).map(|a| a.kind()) != Some(self.kind()) {
-            return Err(not_form());
-        }
+        // the recognised surface gives its conventions only (its frame turn, sweep, generator
+        // range and swap), as in `derive`: the kind and the numbers are this support's. The
+        // numbers recognition recomputed are not compared with the support's, because it
+        // recomputes them from the control points and so reproduces a support's own numbers
+        // only to rounding (#2554), and far from the world origin it reads a cylinder as a cone
+        // of an angle of rounding -- `lies_on` above and `evaluates_as` below are what prove
+        // the two agree. A cylinder or cone takes a recognised cone's, a sphere a sphere's, a
+        // torus a torus's.
         // this support's own numbers on the recognised parametrisation, which the generator
         // and the sweep converter carry, so that `of` reads the support back unchanged
         match (surface.kind_mut(), *self) {
             (SurfaceKind::Cone(c), Self::Cylinder { placement, radius }) => {
                 on_axis_from(&mut c.rev, placement)?;
                 c.base_radius = radius;
+                c.semi_angle_deg = 0.0;
+                c.cylinder = true;
                 c.rev.base = form.copy();
             }
             (
