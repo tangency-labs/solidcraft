@@ -6,7 +6,7 @@
 use solidcore_record::{Vec3, brep};
 
 use crate::hash::BitsMap;
-use crate::mesher::{Purpose, Shape, plan_at};
+use crate::mesher::{Purpose, Shape, Sides, plan_at};
 use crate::{MeshTolerance, PlanStats, RefusedFace, Result, TessError, TessPlan};
 
 /// The smallest angle the mesh path aims for unless asked otherwise (degrees).
@@ -60,7 +60,9 @@ impl MeshSpec {
 /// `size_at` asks for less at a point (a value that is not finite and positive asks for nothing
 /// there). Every edge is sampled once, its segments no longer than the side of either face it
 /// bounds or than `size_at` asks at their middles, and both faces take its nodes, so the mesh
-/// is closed wherever the B-rep is. A bound that stops a face's refinement with work left names
+/// is closed wherever the B-rep is. Where shaping would split a boundary side (Ruppert's rule
+/// for a side a new point encroaches on), the point is put on the side's edge as a node, and
+/// every face of the edge is planned again with it, until no face splits one. A bound that stops a face's refinement with work left names
 /// the face in [`PlanStats::over_tolerance`] ([`crate::Cap::Shape`]); an edge a bound stopped,
 /// in [`PlanStats::edges_capped`]. Faces are planned in parallel where there are several, each
 /// on its own, and collected in the record's order: the plan is the same for any number of
@@ -100,6 +102,7 @@ pub fn mesh(
     let shape = Shape {
         min_angle: spec.min_angle,
         side: spec.size,
+        sides: Sides::Split,
         size_at: field
             .as_ref()
             .map(|f| f as &(dyn Fn(solidcore::Vec3) -> f64 + Sync)),

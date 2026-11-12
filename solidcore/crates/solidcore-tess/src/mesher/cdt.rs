@@ -90,7 +90,7 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
         _ => [1.0, 1.0],
     };
     let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
-    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, fill.lenient)?;
+    let Bounded { mut cdt, index, slits, .. } = bounded(boundary, loops, scale, fill.lenient)?;
     for s in fill.seeds {
         if s.iter().all(|x| x.is_finite()) {
             let _ = cdt.insert(to(s, scale));
@@ -142,6 +142,17 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
 const MESH_ROUNDS: usize = 8;
 
 /// What [`mesh`] made of a face.
+pub(crate) enum Filled {
+    /// Its triangles, its boundary whole.
+    Done(Meshed),
+    /// The boundary sides its shaping split (only where it may): each as the indices of its two
+    /// boundary points, in loop order, and the fractions along it, in the triangulation's
+    /// metric, where it was split. Nothing else is kept: the face is planned again once its
+    /// edges have the points.
+    Split(Vec<(usize, usize, Vec<f64>)>),
+}
+
+/// A face's triangles as [`mesh`] made them.
 pub(crate) struct Meshed {
     /// The points it added, after the boundary's.
     pub extra: Vec<[f64; 2]>,
@@ -160,9 +171,14 @@ pub(crate) struct Meshed {
 /// less where `size_at` asks for less) or turns more than the facet angle, then shaped by
 /// Ruppert refinement to `min_angle` (degrees), the two in turn until neither adds a point:
 /// shaping flips sides and adds points of its own, which refinement may then split. Every pass
-/// takes from one bound of `budget` points. Constraint edges are never split, so the boundary
-/// stays the shared edge nodes. `None` when a loop cannot be kept as constraints. Nothing is
-/// filled leniently.
+/// takes from one bound of `budget` points. Nothing is filled leniently; `None` when a loop
+/// cannot be kept as constraints.
+///
+/// Ruppert refinement reaches its angle by splitting a boundary side a new point would encroach
+/// on (lie within its diametral circle). With `split`, shaping may, and the first pass that does
+/// ends the fill: the sides it split are returned ([`Filled::Split`]), to be put on the edges
+/// both faces share. Without it, boundary sides are never split, so the boundary stays the
+/// shared edge nodes, and a triangle whose shaping would split one keeps its shape.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn mesh(
     boundary: &[[f64; 2]],
@@ -172,13 +188,14 @@ pub(crate) fn mesh(
     size_at: Option<SizeAt<'_>>,
     budget: usize,
     min_angle: f64,
-) -> Option<Meshed> {
+    split: bool,
+) -> Option<Filled> {
     if boundary.iter().flatten().any(|x| !x.is_finite()) {
         return None;
     }
     let scale = if sag.scale.iter().all(|k| k.is_finite() && *k > 0.0) { sag.scale } else { [1.0, 1.0] };
     let from = |p: Point2<f64>| [p.x / scale[0], p.y / scale[1]];
-    let Bounded { mut cdt, index, slits } = bounded(boundary, loops, scale, false)?;
+    let Bounded { mut cdt, index, handles, slits } = bounded(boundary, loops, scale, false)?;
     for s in seeds {
         if s.iter().all(|x| x.is_finite()) {
             let _ = cdt.insert(to(s, scale));
@@ -190,16 +207,19 @@ pub(crate) fn mesh(
     let mut done = false;
     for _ in 0..MESH_ROUNDS {
         let params = RefinementParameters::<f64>::new()
-            .keep_constraint_edges()
             .exclude_outer_faces(true)
             .with_angle_limit(AngleLimit::from_deg(min_angle))
             // As in `triangulate`: no point crowded into a corner sharper than the angle.
             .with_min_required_area(smallest_area(sag.tol))
             .with_max_additional_vertices(budget.saturating_sub(added));
+        let params = if split { params } else { params.keep_constraint_edges() };
         let before = cdt.num_vertices();
         let shaping = cdt.refine(params);
         let shaped = cdt.num_vertices().saturating_sub(before);
         added += shaped;
+        if split && cdt.num_constraints() != constraints {
+            return split_sides(&cdt, &index, &handles, loops).map(Filled::Split);
+        }
         if !shaping.refinement_complete {
             capped = true;
             break;
@@ -224,7 +244,51 @@ pub(crate) fn mesh(
         return None;
     }
     let (extra, triangles) = collect(&cdt, index, boundary, &slits, &from)?;
-    Some(Meshed { extra, triangles, capped: capped || !done })
+    Some(Filled::Done(Meshed { extra, triangles, capped: capped || !done }))
+}
+
+/// The boundary sides of `loops` shaping split in `cdt` (no longer one constraint edge), each
+/// with the fractions along it of the points put on it: the new vertices on a constraint edge
+/// that lie on the side (to rounding: spade splits a side at its middle). `index`: each boundary
+/// vertex's index, by its handle's; `handles`: each boundary point's handle. `None` when no side
+/// was split.
+fn split_sides(cdt: &Cdt, index: &[Option<u32>], handles: &[FixedVertexHandle], loops: &[std::ops::Range<usize>]) -> Option<Vec<(usize, usize, Vec<f64>)>> {
+    let on: Vec<Point2<f64>> = cdt
+        .vertices()
+        .filter(|v| index.get(v.fix().index()).copied().flatten().is_none() && v.out_edges().any(|e| e.is_constraint_edge()))
+        .map(|v| v.position())
+        .collect();
+    let mut out = Vec::new();
+    for r in loops {
+        let n = r.len();
+        for k in 0..n {
+            let (i, j) = (r.start + k, r.start + (k + 1) % n);
+            let (a, b) = (*handles.get(i)?, *handles.get(j)?);
+            if a == b || cdt.exists_constraint(a, b) {
+                continue;
+            }
+            let (pa, pb) = (cdt.vertex(a).position(), cdt.vertex(b).position());
+            let (dx, dy) = (pb.x - pa.x, pb.y - pa.y);
+            let l2 = dx * dx + dy * dy;
+            if !(l2 > 0.0) {
+                continue;
+            }
+            let mut at: Vec<f64> = on
+                .iter()
+                .filter_map(|p| {
+                    let f = ((p.x - pa.x) * dx + (p.y - pa.y) * dy) / l2;
+                    let off = (p.x - pa.x - f * dx).hypot(p.y - pa.y - f * dy);
+                    (f > 0.0 && f < 1.0 && off <= 1e-9 * l2.sqrt()).then_some(f)
+                })
+                .collect();
+            at.sort_by(f64::total_cmp);
+            at.dedup();
+            if !at.is_empty() {
+                out.push((i, j, at));
+            }
+        }
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 /// A point of (u, v) in the triangulation's metric `scale`.
@@ -239,6 +303,8 @@ struct Bounded {
     cdt: Cdt,
     /// Each vertex's index in the output, by its handle's index (dense in spade).
     index: Vec<Option<u32>>,
+    /// Each boundary point's vertex.
+    handles: Vec<FixedVertexHandle>,
     /// The sides the loops run along both ways ([`slits`]).
     slits: std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>,
 }
@@ -286,7 +352,7 @@ fn bounded(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale: [f64;
             cdt.add_constraint(a, b);
         }
     }
-    Some(Bounded { cdt, index, slits })
+    Some(Bounded { cdt, index, handles, slits })
 }
 
 /// The triangles of `cdt` inside the region its constraints bound (see [`region`]), with the

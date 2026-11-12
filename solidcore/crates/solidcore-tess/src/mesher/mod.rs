@@ -142,6 +142,43 @@ pub(crate) struct Shape<'a> {
     pub(crate) side: Option<f64>,
     /// The caller's size function, where it gives one.
     pub(crate) size_at: Option<size::SizeAt<'a>>,
+    /// Whether the face's shaping may split its boundary sides.
+    pub(crate) sides: Sides,
+}
+
+/// Whether the mesh path's shaping of a face may split its boundary sides ([`cdt::mesh`]).
+/// Ruppert refinement reaches its angle by splitting the sides a new point would encroach on;
+/// a side is an edge's segment, which the faces either side share, so a split is not kept in
+/// the face: it is put on the edge, as a node both faces take, and they are planned again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Sides {
+    /// It may: the sides it splits are returned ([`Planned::Split`]).
+    Split,
+    /// It may not: its shaping split only sides on no edge (a pole's collapsed side, the line a
+    /// seamless face is cut along), which no node can be put on.
+    Kept,
+    /// It may not: the rounds of splitting ran out ([`MAX_SPLIT_ROUNDS`]); the face is named
+    /// with [`crate::Cap::Shape`].
+    Exhausted,
+}
+
+/// Rounds of putting the boundary sides the mesh path's shaping splits on their edges and
+/// planning the faces of those edges again.
+const MAX_SPLIT_ROUNDS: usize = 16;
+
+/// A face planned: its plan, or on the mesh path the boundary sides its shaping split.
+pub(crate) enum Planned {
+    Face(FacePlan),
+    Split(Vec<SplitSide>),
+}
+
+/// A boundary side the mesh path's shaping split: its two end points (the shared edge nodes, in
+/// the face's loop order) and the fractions along it, in the triangulation's metric, where it
+/// was split.
+pub(crate) struct SplitSide {
+    from: Vec3,
+    to: Vec3,
+    at: Vec<f64>,
 }
 
 /// Most rounds of splitting the edge segments where a face's sampled boundary crosses itself:
@@ -227,6 +264,8 @@ pub(crate) struct Prepared {
     /// The edges kept to the strict rules though their faces are crowded.
     pub(crate) kept_strict: Vec<crate::RefusedEdge>,
     boundaries: Vec<Boundary>,
+    /// How each face's pcurves map to its surface's parameters.
+    params: Vec<surface::Params>,
     /// Why each face is left out, where it is.
     pub(crate) why: Vec<Option<TessError>>,
     /// The faces whose boundary still crosses itself, and why.
@@ -238,10 +277,12 @@ pub(crate) struct Prepared {
 /// edges are the record's, in its order.
 pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<(TessPlan, PlanStats)> {
     let faces = &b.faces;
-    let Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled } = prepare(b, tol, turn, purpose)?;
+    let Prepared { rules, forward, edge_faces, evals, sizes, mut nodes, unsampled_edges, kept_strict, mut boundaries, params, why, tangled } =
+        prepare(b, tol, turn, purpose)?;
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
-    let indexed: Vec<usize> = (0..faces.len()).collect();
-    let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
+    // One face for `purpose`: its plan, oriented, with its poles of higher order; or the boundary
+    // sides the mesh path's shaping split.
+    let plan_one = |fi: usize, purpose, boundaries: &[Boundary]| -> Result<(Planned, PlanStats)> {
         if let Some(Some(e)) = why.get(fi) {
             return Err(e.clone());
         }
@@ -255,7 +296,10 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         if let Some(why) = eval.refusal() {
             return Err(unsupported(format!("face {fi} ({}): {why}", kind(&face.surface))));
         }
-        let (fp, stats) = result?;
+        let (fp, stats) = match result? {
+            (Planned::Face(fp), stats) => (fp, stats),
+            split => return Ok(split),
+        };
         let fwd = forward.get(fi).copied().unwrap_or(true);
         let fp =
             FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };
@@ -264,8 +308,109 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         let (poles, averaged) = crate::pole::plan_poles(fi, eval.kernel(), &fp, fb.reach);
         let mut stats = stats;
         stats.averaged_poles = averaged;
-        Ok((FacePlan { poles, ..fp }, stats))
-    });
+        Ok((Planned::Face(FacePlan { poles, ..fp }), stats))
+    };
+    // Every face once; on the mesh path, the boundary sides a face's shaping splits are put on
+    // their edges as nodes, and every face of those edges is planned again, until none splits
+    // one (or the rounds run out, when the faces left keep their sides whole and are named).
+    let shape = match purpose {
+        Purpose::Mesh(shape) => Some(shape),
+        Purpose::Display => None,
+    };
+    let mut slots: Vec<Option<Result<(FacePlan, PlanStats)>>> = faces.iter().map(|_| None).collect();
+    // The faces whose shaping split only sides on no edge: planned with their sides whole.
+    let mut kept = vec![false; faces.len()];
+    let mut todo: Vec<usize> = (0..faces.len()).collect();
+    for round in 0..=MAX_SPLIT_ROUNDS {
+        let last = round == MAX_SPLIT_ROUNDS;
+        let done = crate::par::map("face tessellation", &todo, curved >= PARALLEL_FACES, |&fi| {
+            let purpose = match shape {
+                Some(shape) => {
+                    let sides = if last { Sides::Exhausted } else if kept.get(fi).copied().unwrap_or(true) { Sides::Kept } else { Sides::Split };
+                    Purpose::Mesh(Shape { sides, ..shape })
+                }
+                None => Purpose::Display,
+            };
+            plan_one(fi, purpose, &boundaries)
+        });
+        // The new nodes of each edge (curve parameters), in edge order.
+        let mut split: std::collections::BTreeMap<usize, Vec<f64>> = std::collections::BTreeMap::new();
+        let mut again: Vec<usize> = Vec::new();
+        for (&fi, r) in todo.iter().zip(done) {
+            let r = match r {
+                Ok((Planned::Face(fp), s)) => Ok((fp, s)),
+                Ok((Planned::Split(sides), _)) => {
+                    let on = faces.get(fi).map_or_else(Vec::new, |f| on_edges(f, &nodes, &sides));
+                    if on.is_empty() {
+                        if let Some(k) = kept.get_mut(fi) {
+                            *k = true;
+                        }
+                        again.push(fi);
+                    }
+                    for (e, t) in on {
+                        split.entry(e).or_default().push(t);
+                    }
+                    continue;
+                }
+                Err(e) => Err(e),
+            };
+            if let Some(slot) = slots.get_mut(fi) {
+                *slot = Some(r);
+            }
+        }
+        let (mut moved, mut lost): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
+        for (e, ts) in &split {
+            let fs = edge_faces.get(*e).map_or(&[][..], Vec::as_slice);
+            let inserted = nodes.get_mut(*e).map_or(Ok(()), |n| edges::insert_at(b, *e, n, ts));
+            match inserted {
+                Ok(()) => moved.extend(fs),
+                // An edge that cannot take the nodes leaves out the faces it bounds, naming it.
+                Err(why) => {
+                    for &fi in fs {
+                        if let (Some(slot), Some(f)) = (slots.get_mut(fi), faces.get(fi)) {
+                            *slot = Some(Err(unsupported(format!("face {fi} ({}): {}", kind(&f.surface), detail(&why)))));
+                        }
+                    }
+                    lost.extend(fs);
+                }
+            }
+        }
+        moved.sort_unstable();
+        moved.dedup();
+        // The faces of an edge that has new nodes read their boundary again, and may split once more.
+        for &fi in &moved {
+            if let Some(k) = kept.get_mut(fi) {
+                *k = false;
+            }
+            let rebuilt = match (faces.get(fi), evals.get(fi), params.get(fi)) {
+                (Some(face), Some(eval), Some(map)) => boundary(b, fi, face, eval, map, &nodes, &rules),
+                _ => Err(unsupported(format!("face {fi}: missing"))),
+            };
+            match rebuilt {
+                Ok(fb) => {
+                    if let Some(slot) = boundaries.get_mut(fi) {
+                        *slot = fb;
+                    }
+                    again.push(fi);
+                }
+                Err(e) => {
+                    if let Some(slot) = slots.get_mut(fi) {
+                        *slot = Some(Err(e));
+                    }
+                }
+            }
+        }
+        // A face whose edge could not take its nodes stays left out.
+        again.retain(|fi| !lost.contains(fi));
+        again.sort_unstable();
+        again.dedup();
+        if again.is_empty() {
+            break;
+        }
+        todo = again;
+    }
+    let planned: Vec<Result<(FacePlan, PlanStats)>> =
+        slots.into_iter().enumerate().map(|(fi, s)| s.unwrap_or_else(|| Err(unsupported(format!("face {fi}: not planned"))))).collect();
     let mut plan = TessPlan::default();
     let mut stats = PlanStats { unsampled_edges, kept_strict, ..PlanStats::default() };
     // A face no method plans is left out, named in the stats, and the rest of the body is
@@ -304,6 +449,29 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
     plan.edges = nodes.into_iter().map(|n| n.points.into_iter().map(kernel::record_vec3).collect()).collect();
     plan.edge_faces = edge_faces.into_iter().map(|fs| fs.into_iter().map(|f| u32::try_from(f).unwrap_or(u32::MAX)).collect()).collect();
     Ok((plan, stats))
+}
+
+/// The curve parameters on face `f`'s edges where its shaping split boundary sides `sides`:
+/// each side is found as a segment of one of its edges (its two end nodes, either way round),
+/// each fraction along it taken to the same fraction of the segment's parameters. A side on no
+/// edge (a pole's collapsed side, a seam cut's line) has none.
+fn on_edges(f: &brep::Face, nodes: &[edges::Nodes], sides: &[SplitSide]) -> Vec<(usize, f64)> {
+    let mut out = Vec::new();
+    for side in sides.iter().filter(|s| s.from != s.to) {
+        let found = face_edges(f).find_map(|oe| {
+            let e = oe.edge as usize;
+            let n = nodes.get(e)?;
+            n.points.windows(2).zip(n.params.windows(2)).find_map(|(p, t)| match (p, t) {
+                ([a, b], [ta, tb]) if *a == side.from && *b == side.to => Some((e, *ta, *tb, false)),
+                ([a, b], [ta, tb]) if *a == side.to && *b == side.from => Some((e, *ta, *tb, true)),
+                _ => None,
+            })
+        });
+        if let Some((e, ta, tb, reversed)) = found {
+            out.extend(side.at.iter().map(|&f| (e, ta + (if reversed { 1.0 - f } else { f }) * (tb - ta))));
+        }
+    }
+    out
 }
 
 /// Every face's surface, size and boundary and every edge's nodes, as [`plan_at`] reads them
@@ -445,7 +613,7 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         });
     }
     let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why)?;
-    Ok(Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled })
+    Ok(Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, params, why, tangled })
 }
 
 /// Face `fi`'s boundary, loop by loop: the shared edge nodes (each edge's last node is the next
@@ -1191,14 +1359,14 @@ fn plan_or_fill(
     reach: f64,
     refused: Option<&str>,
     purpose: Purpose<'_>,
-) -> Result<(FacePlan, PlanStats)> {
+) -> Result<(Planned, PlanStats)> {
     let mut stats = PlanStats::default();
     let strict = match refused {
         Some(why) => Err(unsupported(why.to_string())),
         None => plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::No, purpose),
     };
     if let Purpose::Mesh(_) = purpose {
-        return strict.map(|fp| (fp, stats));
+        return strict.map(|planned| (planned, stats));
     }
     match strict {
         Ok(fp) => Ok((fp, stats)),
@@ -1342,7 +1510,7 @@ fn plan_face(
     stats: &mut PlanStats,
     lenient: Lenient,
     purpose: Purpose<'_>,
-) -> Result<FacePlan> {
+) -> Result<Planned> {
     let tol = rules.tol;
     let (h, speed) = size;
     // The memory bounds that limit this face, if any ([`crate::Cap`]).
@@ -1393,9 +1561,17 @@ fn plan_face(
         let seeds = cdt::lattice_scanned(bbox, step, &polys, speed);
         let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
         let sag = cdt::Sag { eval: &eval, tol, h, turn: rules.turn, scale: speed };
-        let meshed = cdt::mesh(&uvs, &ranges, (seeds.0.as_slice(), seeds.1), &sag, shape.size_at, MAX_MESH_REFINE, shape.min_angle)
+        let filled = cdt::mesh(&uvs, &ranges, (seeds.0.as_slice(), seeds.1), &sag, shape.size_at, MAX_MESH_REFINE, shape.min_angle, shape.sides == Sides::Split)
             .ok_or_else(|| fail("boundary crosses itself"))?;
-        if meshed.capped {
+        let meshed = match filled {
+            cdt::Filled::Done(meshed) => meshed,
+            // The sides its shaping split go on their edges first ([`plan_at`]).
+            cdt::Filled::Split(split) => {
+                let sides = split.into_iter().filter_map(|(i, j, at)| Some(SplitSide { from: *fixed.get(i)?, to: *fixed.get(j)?, at })).collect();
+                return Ok(Planned::Split(sides));
+            }
+        };
+        if meshed.capped || shape.sides == Sides::Exhausted {
             caps.push(crate::Cap::Shape);
         }
         (meshed.extra, meshed.triangles)
@@ -1534,7 +1710,7 @@ fn plan_face(
     for q in &mut all {
         *q = s.wrap(*q);
     }
-    Ok(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), surface: None, uv: all, fixed: fixed.into_iter().map(kernel::record_vec3).collect(), normals: Vec::new(), flip: false, triangles, poles: Vec::new() })
+    Ok(Planned::Face(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), surface: None, uv: all, fixed: fixed.into_iter().map(kernel::record_vec3).collect(), normals: Vec::new(), flip: false, triangles, poles: Vec::new() }))
 }
 
 /// A face's (u, v) region and what meshing it needs.

@@ -122,7 +122,9 @@ pub enum Cap {
     /// bound with work left: it added all the points it may (`MAX_MESH_REFINE`), or ran all its
     /// rounds, with a triangle still off the surface, longer than the side asked or sharper than
     /// the spec's angle; or the face's lattice had more seeds than a face may have (`MAX_SEEDS`,
-    /// 200 000), and it was refined from its boundary alone.
+    /// 200 000), and it was refined from its boundary alone; or the rounds of putting the
+    /// boundary sides its shaping splits on their edges (`MAX_SPLIT_ROUNDS`, 16) ran out, and it
+    /// was shaped with its sides whole.
     Shape,
 }
 

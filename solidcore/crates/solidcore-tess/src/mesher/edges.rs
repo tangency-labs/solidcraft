@@ -235,6 +235,49 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
     Ok(())
 }
 
+/// Edge `ei`'s nodes with a node put in at each of the curve parameters `ts` that lies strictly
+/// inside a segment, on the curve (on a line, along its segment, as [`split_segments`] puts a
+/// line's), in order: where the mesh path's shaping split a boundary side of a face of the edge,
+/// so every face of it takes the node. The nodes are unchanged on an error: more than
+/// [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, naming the edge.
+pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]) -> Result<()> {
+    let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
+    let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
+    let mut ts: Vec<f64> = ts.iter().copied().filter(|t| t.is_finite()).collect();
+    ts.sort_by(f64::total_cmp);
+    ts.dedup();
+    if nodes.points.len() + ts.len() > MAX_EDGE_NODES {
+        return Err(fail(format!("more than {MAX_EDGE_NODES} nodes")));
+    }
+    let curve = match edge.curve {
+        Curve::Line { .. } => None,
+        _ => Some(CurveEval::new(&kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?).map_err(|e| fail(crate::eval_message(e)))?),
+    };
+    let n = nodes.points.len().min(nodes.params.len());
+    let (mut points, mut params) = (Vec::new(), Vec::new());
+    let mut next = ts.into_iter().peekable();
+    for k in 0..n {
+        let (Some(&p), Some(&t)) = (nodes.points.get(k), nodes.params.get(k)) else { continue };
+        points.push(p);
+        params.push(t);
+        let (Some(&q), Some(&u)) = (nodes.points.get(k + 1), nodes.params.get(k + 1)) else { continue };
+        while let Some(m) = next.next_if(|m| *m < u) {
+            if !(m > t) {
+                continue;
+            }
+            let pm = match &curve {
+                None => p + (q - p) * ((m - t) / (u - t)),
+                Some(c) => c.point(m).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {m}")))?,
+            };
+            points.push(pm);
+            params.push(m);
+        }
+    }
+    nodes.points = points;
+    nodes.params = params;
+    Ok(())
+}
+
 /// Edge `ei`'s nodes with `add` (each a parameter strictly inside a segment and the point there)
 /// put in, in order, each marked as snapped: the point is another edge's node within the chord
 /// tolerance of this edge's chord there (the edges touch), so the two edges share it. A parameter
