@@ -3308,8 +3308,7 @@ fn fold_across_two_rounded_tabs_keeps_one_face_per_arc() {
         run(s, "sheet.flange", json!({"sketch": "Blank"}));
     };
     let sharp = |s: &mut Session| outline_blank(s, json!([[0, -30], [15, -30], [15, 0], [85, 0], [85, -30], [100, -30], [100, 40], [0, 40]]));
-    let mut counts = Vec::new();
-    for blank in [&rounded as &dyn Fn(&mut Session), &sharp] {
+    let folded = |blank: &dyn Fn(&mut Session)| {
         let mut s = Session::default();
         blank(&mut s);
         let flat = volume(&mut s);
@@ -3318,9 +3317,10 @@ fn fold_across_two_rounded_tabs_keeps_one_face_per_arc() {
         assert!(rel(volume(&mut s), flat) < 1e-3, "a fold keeps the material");
         let bb = &run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"];
         assert!(bb["max"][2].as_f64().unwrap() > 7.0, "both tabs stand up: {bb}");
-        counts.push(faces(&mut s));
-    }
-    let [(rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)] = counts[..] else { unreachable!() };
+        faces(&mut s)
+    };
+    let ((rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)) = (folded(&rounded), folded(&sharp));
+    let counts = [(rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)];
     assert_eq!((sharp_faces, sharp_cylinders), (26, 4), "sharp: {counts:?}");
     assert_eq!((rounded_faces, rounded_cylinders), (sharp_faces + 4, sharp_cylinders + 6), "rounded, sharp: {counts:?}");
 }
