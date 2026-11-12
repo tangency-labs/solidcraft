@@ -8,14 +8,14 @@
 //!
 //! The fork's test checked a ratio of times (`t256 <= 8 t64 + 0.1`), which tripped under
 //! load. It now counts the work (`SmWorkCounters`, here [`Kernel::work_counters`]) and
-//! prints the time without checking it. With `boolean_skips_faces_apart` the holes' boxes
+//! prints the time without checking it. With WR-527's box tests the holes' boxes
 //! lie apart, so the unions pair no faces, and the cut pairs the plate's one face with each
 //! hole: k^2 face pairs, 64 and 256, four times the pairs for four times the holes. Each
 //! hole imprinted in the plate lies outside the other holes' boxes, so no inner loop is
-//! classified: 0 and 0. With that box test switched off the same run classifies
-//! 4032 = 64 x 63 and 65280 = 256 x 255 loops, the n^2 the count is there to catch (the
-//! fork's numbers and the port's). With the flag off (upstream) the port also pairs every
-//! face, 2080 = 64 x 65 / 2 and 32896 = 256 x 257 / 2 pairs, so the test fails. The plate
+//! classified: 0 and 0. Without that box test (the fork before edf7414, and this port
+//! before it became the only path) the same run classified 4032 = 64 x 63 and
+//! 65280 = 256 x 255 loops, the n^2 the count is there to catch. Upstream also pairs every face, 2080 = 64 x 65 / 2 and
+//! 32896 = 256 x 257 / 2 pairs, which this test refuses. The plate
 //! keeps its exact area either way.
 #![allow(
     clippy::unwrap_used,
@@ -78,7 +78,6 @@ fn plate(k: &mut Kernel, w: f64) -> Brep {
 /// and its inner loops classified (none), and returns the face pairs.
 fn plate_pairs(n: u32) -> u64 {
     let mut k = Kernel::default();
-    k.fixes.boolean_skips_faces_apart = true;
     let t0 = Instant::now();
     k.work_counters.reset();
     let mut holes = Vec::new();
@@ -171,7 +170,6 @@ fn plate_and_hole_curves(k: &mut Kernel, n: u32) -> (Vec<Curve>, f64) {
 fn plate_in_one_call_walks(n: u32) -> u64 {
     let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
     k.memoize_curve_caches = true; // the count is the shortcut's, whatever `curve-memo-off` says
-    k.fixes.boolean_skips_faces_apart = true;
     let (curves, w) = plate_and_hole_curves(&mut k, n);
     let t0 = Instant::now();
     k.work_counters.reset();

@@ -158,7 +158,6 @@
   "point_class_gap_3d_propagates_no_drop_error",
   "fillet_variable_span_follows_fillet",
   "face_tight_box_searches_trim",
-  "boolean_skips_faces_apart",
   "delete_vertex_joins_seam_iso_curve",
   "boolean_new_face_closure_both_sides",
   "glue_vertices_joins_every_region",
