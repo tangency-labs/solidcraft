@@ -3,10 +3,10 @@ use solidcore_record::Vec3;
 use solidcraft_doc::joints::JointKind;
 
 use super::{
-    AsBuiltJointParams, CamParams, CamResult, CouplingResult, CreateJointParams, DeleteJointParams, DeleteJointResult, DriveJointParams,
-    DriveJointResult, EditJointParams, GearParams, InspectJointParams, InspectJointResult, JointAddedResult, JointKindName, JointLimitsParams,
-    ListJointsParams, ListJointsResult, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams, RackPinionParams, ReachParams, ReachResult,
-    RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveResult,
+    AsBuiltJointParams, CamParams, CamResult, CouplingResult, CreateConstraintParams, CreateJointParams, DeleteJointParams, DeleteJointResult,
+    DriveJointParams, DriveJointResult, EditConstraintParams, EditJointParams, EditJointResult, GearParams, InspectJointParams, InspectJointResult,
+    JointAddedResult, JointKindName, JointLimitsParams, ListJointsParams, ListJointsResult, MakeJointOriginParams, MakeJointOriginResult,
+    MotionLinkParams, RackPinionParams, ReachParams, ReachResult, RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -19,6 +19,8 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<CreateJointParams>(),
         &["a", "angle", "b", "flip", "limits", "name", "offset", "quiet", "type", "value", "values"],
     );
+    assert_keys(input_schema_for::<EditConstraintParams>(), &["angle", "constraint", "flip", "name", "offset", "quiet", "suppressed", "type"]);
+    assert_keys(input_schema_for::<CreateConstraintParams>(), &["a", "angle", "b", "flip", "name", "offset", "quiet", "type"]);
     assert_keys(input_schema_for::<AsBuiltJointParams>(), &["a", "at", "b", "limits", "name", "quiet", "type", "value", "values"]);
     assert_keys(input_schema_for::<DriveJointParams>(), &["continuous", "index", "joint", "quiet", "stop_at_budget", "value", "values"]);
     assert_keys(input_schema_for::<JointLimitsParams>(), &["index", "joint", "max", "min", "quiet"]);
@@ -42,6 +44,8 @@ fn schemas_and_the_key_check_agree() {
 #[test]
 fn the_commands_publish_their_schemas() {
     for id in [
+        "assembly.constraint.create",
+        "assembly.constraint.edit",
         "joint.create",
         "joint.as_built",
         "joint.drive",
@@ -204,6 +208,17 @@ fn strict_keeps_todays_errors() {
         ("joint.screw", json!({"a": true, "b": 1, "pitch": 1})),
         ("joint.cam", json!({})),
         ("joint.cam", json!({"a": false, "b": 1})),
+        ("assembly.constraint.edit", json!({})),
+        ("assembly.constraint.edit", json!({"constraint": true})),
+        ("assembly.constraint.edit", json!({"constraint": null})),
+        ("assembly.constraint.edit", json!({"constraint": [1]})),
+        ("assembly.constraint.create", json!({})),
+        ("assembly.constraint.create", json!({"type": "weld"})),
+        ("assembly.constraint.create", json!({"type": 5})),
+        ("assembly.constraint.create", json!({"type": "mate"})),
+        ("assembly.constraint.create", json!({"type": "mate", "a": 5, "b": at(0, 1.0)})),
+        ("assembly.constraint.create", json!({"type": "mate", "a": {}, "b": at(0, 1.0)})),
+        ("assembly.constraint.create", json!({"type": "mate", "a": at(0, 0.0), "b": at(0, 1.0), "offset": true})),
     ]);
 }
 
@@ -510,6 +525,30 @@ fn the_schemas_take_what_the_handlers_read() {
         input_schema_for::<InspectJointParams>(),
         &[(json!({}), true), (json!({"joint": "J"}), true), (json!({"joint": 4}), true), (json!({"joint": true}), false)],
     );
+    takes(
+        input_schema_for::<CreateConstraintParams>(),
+        &[
+            (json!({"type": "mate", "a": {"face": [0, 0, 0]}, "b": "Origin"}), true),
+            (json!({"type": "distance", "a": {"face": [0, 0, 0]}, "b": {"point": [1, 2, 3]}, "offset": "gap"}), true),
+            (json!({"type": "angle", "a": "A", "b": "B", "angle": 30}), true),
+            (json!({"a": "A", "b": "B"}), false),
+            (json!({"type": 5, "a": "A", "b": "B"}), false),
+            (json!({"type": "mate", "a": "A", "b": "B", "flip": 1}), false),
+            (json!({"type": "mate", "a": "A", "b": "B", "values": [1]}), false),
+        ],
+    );
+    takes(
+        input_schema_for::<EditConstraintParams>(),
+        &[
+            (json!({"constraint": "Mate1"}), true),
+            (json!({"constraint": 4, "type": "flush", "offset": "gap", "flip": true}), true),
+            (json!({"constraint": "Mate1", "angle": 30, "name": "M", "suppressed": false, "quiet": true}), true),
+            (json!({}), false),
+            (json!({"constraint": "Mate1", "type": 5}), false),
+            (json!({"constraint": "Mate1", "flip": 1}), false),
+            (json!({"constraint": "Mate1", "joint": "Mate1"}), false),
+        ],
+    );
     takes(input_schema_for::<ListJointsParams>(), &[(json!({}), true), (json!({"quiet": false}), true), (json!({"quiet": 1}), false)]);
     takes(input_schema_for::<SolveJointsParams>(), &[(json!({}), true), (json!({"quiet": false}), true), (json!({"quiet": 1}), false)]);
 }
@@ -555,6 +594,25 @@ fn replies_match_the_output_schema() {
         json!({"type": "rigid", "a": "Top", "b": {"occurrence": "LeafC", "face": [20, 15, 0]}, "name": "Stack", "offset": "0 mm", "angle": 0}),
     );
     matches(output_schema_for::<JointAddedResult>(), "joint.create", &by_origin);
+    // assembly.constraint.create answers as joint.create does.
+    let rule = run(
+        "assembly.constraint.create",
+        json!({"type": "parallel", "a": {"occurrence": "LeafA", "face": [20, 15, 3]}, "b": {"occurrence": "LeafE", "face": [20, 15, 3]}, "name": "Rule"}),
+    );
+    matches(output_schema_for::<JointAddedResult>(), "assembly.constraint.create", &rule);
+    // Listed and inspected with the rule it was made as.
+    let list = run("joint.list", json!({}));
+    matches(output_schema_for::<ListJointsResult>(), "joint.list", &list);
+    assert!(list["joints"].as_array().is_some_and(|j| j.iter().any(|j| j["constraint"] == "parallel")), "{list}");
+    let inspected = run("joint.inspect", json!({"joint": "Rule"}));
+    matches(output_schema_for::<InspectJointResult>(), "joint.inspect", &inspected);
+    assert_eq!(inspected["joints"][0]["constraint"], "parallel", "{inspected}");
+    // assembly.constraint.edit answers as joint.edit does.
+    let edited = run("assembly.constraint.edit", json!({"constraint": "Rule", "type": "perpendicular"}));
+    matches(output_schema_for::<EditJointResult>(), "assembly.constraint.edit", &edited);
+    let edited = run("assembly.constraint.edit", json!({"constraint": "Rule", "suppressed": true, "quiet": true}));
+    matches(output_schema_for::<EditJointResult>(), "assembly.constraint.edit", &edited);
+    run("joint.delete", json!({"joint": "Rule"}));
     let built = run("joint.as_built", json!({"type": "slider", "a": "LeafB", "b": "LeafC", "name": "Slide", "limits": [[0, 10]], "quiet": false}));
     matches(output_schema_for::<JointAddedResult>(), "joint.as_built", &built);
     let at = run("joint.as_built", json!({"type": "rigid", "a": "LeafA", "b": "LeafD", "at": {"point": [0, 0, 0]}, "values": [1]}));

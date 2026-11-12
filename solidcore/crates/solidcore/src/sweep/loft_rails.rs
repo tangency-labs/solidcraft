@@ -44,9 +44,10 @@
 //! terminates by construction: each round adds a station, and past the caller's
 //! [`RailLoftOptions::max_wires`] the loft is refused, naming the bound reached, the tolerance
 //! asked and the stations used ([`crate::error::sweep::SweepFailure::RailPastStationCap`]). No
-//! tolerance is loosened and no uncertified loft is returned. Where a rail's points are found on
-//! the skin (by projection, not trusted: the bound holds for any correspondence) a span's two
-//! ends lie on one skin surface; ends on two surfaces are refused.
+//! tolerance is loosened and no uncertified loft is returned. A span's rail ends are found on
+//! the skin's surfaces by projection (not trusted: the bound holds for any correspondence), and
+//! the span is bounded on the surface both lie nearest at once (a rail along an edge between two
+//! faces lies on both).
 //!
 //! **Refused**, naming why: no section or one, no rail or more than two; sections whose curves
 //! do not pair (counts, degrees, knots or weights differing by more than `1e-9` relative,
@@ -168,9 +169,14 @@ struct Plain {
 
 impl Plain {
     fn of(c: &Curve) -> Result<Self> {
-        let base = c
-            .b_spline_base()
-            .ok_or_else(|| unsupported("a section curve with no NURBS form"))?;
+        // a line keeps its B-spline part's NURB unmade until asked: made on a copy here
+        let base = match c.kind() {
+            crate::curve::curve::CurveKind::Line(l) => l.base_with_nurb()?,
+            _ => std::borrow::Cow::Borrowed(
+                c.b_spline_base()
+                    .ok_or_else(|| unsupported("a section curve with no NURBS form"))?,
+            ),
+        };
         let degree = base.degree()?;
         let (unique, mult) = base.knots(None)?;
         let mut knots = Vec::new();
@@ -842,36 +848,44 @@ fn certify(
         .collect();
     for (r, rail) in rails.iter().enumerate() {
         let nurb = Plain::of(rail)?.nurb()?;
-        // each wire's node: the rail's point there found on the skin
-        let mut nodes = Vec::with_capacity(wires.len());
+        // each wire's rail point found on every skin surface: (surface, parameters, distance)
+        let mut feet: Vec<Vec<Option<(Point2, f64)>>> = Vec::with_capacity(wires.len());
+        let mut hits = Vec::with_capacity(wires.len());
         for w in wires {
             let (t, q) = *w
                 .hits
                 .get(r)
                 .ok_or_else(|| invalid("a wire's rail crossing"))?;
-            let mut best: Option<(usize, Point2, f64)> = None;
-            for (si, s) in surfaces.iter().enumerate() {
-                if let Ok((uv, d)) = certificate::node_on(k, s, q) {
-                    if best.is_none_or(|b| d < b.2) {
-                        best = Some((si, uv, d));
+            feet.push(
+                surfaces
+                    .iter()
+                    .map(|s| certificate::node_on(k, s, q).ok())
+                    .collect(),
+            );
+            hits.push((t, q));
+        }
+        let mut worst = 0.0_f64;
+        for j in 0..wires.len().saturating_sub(1) {
+            let (Some(&(ta, qa)), Some(&(tb, _)), Some(fa), Some(fb)) =
+                (hits.get(j), hits.get(j + 1), feet.get(j), feet.get(j + 1))
+            else {
+                continue;
+            };
+            // the span's surface: the one both ends lie nearest at once (the least of the larger
+            // of their two distances; a rail along an edge between two faces lies on both, and
+            // either serves: the bound holds on any)
+            let mut pick: Option<(usize, Point2, Point2, f64)> = None;
+            for (si, (a, b)) in fa.iter().zip(fb).enumerate() {
+                if let (Some((uva, da)), Some((uvb, db))) = (a, b) {
+                    let far = da.max(*db);
+                    if pick.is_none_or(|p| far < p.3) {
+                        pick = Some((si, *uva, *uvb, far));
                     }
                 }
             }
-            let (si, uv, _) =
-                best.ok_or_else(|| unsupported("a rail point with no foot on the loft"))?;
-            nodes.push((si, uv, t, q));
-        }
-        let mut worst = 0.0_f64;
-        for (j, pair) in nodes.windows(2).enumerate() {
-            let [(sa, uva, ta, qa), (sb, uvb, tb, _)] = *pair else {
-                continue;
-            };
-            if sa != sb {
-                return Err(unsupported(
-                    "a guide rail crossing between the loft's faces between two stations",
-                ));
-            }
-            let surf = surfaces.get(sa).ok_or_else(|| invalid("a skin surface"))?;
+            let (si, uva, uvb, _) =
+                pick.ok_or_else(|| unsupported("a rail point with no foot on the loft"))?;
+            let surf = surfaces.get(si).ok_or_else(|| invalid("a skin surface"))?;
             let spans = certificate::RailSpans::about(&nurb, qa)?;
             let bound = certificate::span_bound(
                 k,

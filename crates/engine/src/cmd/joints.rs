@@ -47,6 +47,9 @@ const CAM_CONTRACT: TypedContract<CamParams> = TypedContract::new();
 #[path = "joints_inspect.rs"]
 mod inspect;
 
+#[path = "assembly_constraint.rs"]
+pub(crate) mod constraint;
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("joint.origin", "Joint Origin", crate::checked!("joint.origin", joint_origin))
         .at("SOLID", "CREATE")
@@ -236,9 +239,12 @@ pub fn place(s: &mut Session) -> joints::Solution {
 
 /// Work out the offsets, angles and values joints were given as expressions again (a parameter
 /// may have changed). One that can't be worked out (its parameter gone) keeps its numbers; the
-/// solve leaves that joint out and says why.
+/// solve leaves that joint out and says why. A tangent constraint's offset is its gap plus the
+/// radius of its round face as the face is now, so the part keeps resting on the plane when the
+/// radius changes; a face that can't be found keeps the numbers it has.
 fn reexpress(s: &mut Session) {
     let params = joints::Params::new(&s.doc);
+    let st = s.model.state();
     let changed: Vec<(usize, (f64, f64, Vec<f64>))> = s
         .doc
         .assembly
@@ -247,7 +253,10 @@ fn reexpress(s: &mut Session) {
         .enumerate()
         .filter(|(_, j)| !j.exprs.is_empty())
         .filter_map(|(i, j)| {
-            let (o, a, mut q) = joints::expressed(&params, j).ok()?;
+            let (mut o, a, mut q) = joints::expressed(&params, j).ok()?;
+            if j.constraint == Some(joints::Constraint::Tangent) {
+                o += s.doc.origin_radius(&st, &j.b).ok()?;
+            }
             joints::clamp(j, &mut q);
             ((o, a) != (j.offset, j.angle) || q != j.values).then_some((i, (o, a, q)))
         })
@@ -1152,14 +1161,14 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
         return Err(EngineError::Other("too many joints".into()));
     }
     check_sides(&j.a, &j.b, "joint.create")?;
-    // Relations and loop-closing typed joints start where their parts are. A typed joint in
+    // Relations, constraints and loop-closing typed joints start where their parts are. A typed joint in
     // an open chain keeps its usual initial values; explicitly supplied values also keep theirs.
     // A joint on a plane or axis side anchors its part to that geometry: it starts where its
     // parts are too, so the part keeps its place on the plane (or along the axis) instead of
     // jumping to the geometry's origin.
     if p.get("values").is_none()
         && p.get("value").is_none()
-        && (j.kind.is_relation() || closes_loop(s, &j) || datum_sided(&j))
+        && (j.starts_where_it_is() || closes_loop(s, &j) || datum_sided(&j))
         && let Some(q) = joints::relation_values(&s.doc, &s.model.state(), &j)
     {
         j.values = q;
@@ -1345,6 +1354,13 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let kind = kind_param(p, cmd)?;
     let a = origin_param(s, p.get("a"), cmd)?;
     let b = origin_param(s, p.get("b"), cmd)?;
+    let j = new_joint(s, p, kind, a, b, cmd)?;
+    add_joint(s, j, p)
+}
+
+/// A joint of `kind` between origins `a` and `b`, with the values, limits, flip, offset, angle and
+/// name `p` gives (as joint.create reads them), not yet added.
+fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: JointOrigin, cmd: &str) -> Result<Joint> {
     let id = s.doc_mut().allocate_id()?;
     let name = new_joint_name(s, p, kind);
     let offset = match p.get("offset") {
@@ -1368,13 +1384,15 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
         angle: angle.unwrap_or(0.0),
         suppressed: false,
         exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
+        captured: None,
+        constraint: None,
     };
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
     if angle.is_none() && !j.kind.is_relation() {
         j.angle = joints::least_turn_angle(&s.doc, &s.model.state(), &j);
     }
-    add_joint(s, j, p)
+    Ok(j)
 }
 
 fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1413,6 +1431,8 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         angle: 0.0,
         suppressed: false,
         exprs: Default::default(),
+        captured: None,
+        constraint: None,
     };
     add_joint(s, j, p)
 }
@@ -1634,9 +1654,26 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     let before = super::motion::positions(s);
     let st = s.model.state();
     let r = joints::reach(&s.doc, &st, &joints::Reach { occurrence: occ, point: at, to, axis, joints: only });
+    let mut stopped_by_contact = None;
     let reached = match &r {
+        // Only a reach that moves something touches the design (and so adds an undo step).
+        Ok(x) if !x.values.is_empty() && s.doc.assembly.contact_enabled => {
+            // With contact sets on, the joints go toward the values found as joint.drive moves
+            // them, stopping where two parts of a set would pass into each other (#14682). No
+            // value is held on the way: the loops close from each step, so a loop the values
+            // close at both ends doesn't stop the drag in between.
+            let want: Vec<(u64, Vec<f64>)> = x.values.iter().map(|(id, q)| (*id, q.clone())).collect();
+            let (out, _) = super::motion::drive_with_contact(s, &want, &BTreeSet::new())?;
+            stopped_by_contact = out
+                .get("stopped_by_contact")
+                .filter(|v| v.is_object())
+                .cloned()
+                .map(serde_json::from_value::<ContactStop>)
+                .transpose()
+                .map_err(|e| bad(cmd, e.to_string()))?;
+            x.clone()
+        }
         Ok(x) => {
-            // Only a reach that moves something touches the design (and so adds an undo step).
             if !x.values.is_empty() {
                 let doc = s.doc_mut();
                 for (id, q) in &x.values {
@@ -1671,7 +1708,10 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         .filter_map(|id| name(*id))
         .map(|j| ReachedJoint { joint: j.id, name: j.name.clone(), values: named_value_list(j, effective.get(&j.id).unwrap_or(&j.values)) })
         .collect();
-    let stopped_by_limit = (!reached.limits.is_empty()).then(|| {
+    // A contact that stopped it came first: the limits and loop the reach found further on are
+    // not where it rests.
+    let contact_stopped = stopped_by_contact.is_some();
+    let stopped_by_limit = (!contact_stopped && !reached.limits.is_empty()).then(|| {
         reached
             .limits
             .iter()
@@ -1695,7 +1735,8 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         values,
         moved: super::motion::moved(&before, &super::motion::positions(s)).next().is_some(),
         stopped_by_limit,
-        stopped_by_loop: reached.stopped_by_loop.and_then(name).map(|j| ReachLoopStop { joint: j.name.clone() }),
+        stopped_by_loop: reached.stopped_by_loop.filter(|_| !contact_stopped).and_then(name).map(|j| ReachLoopStop { joint: j.name.clone() }),
+        stopped_by_contact,
         reason: r.err(),
         continuous: (bool_(p, "continuous") == Some(true)).then_some(true),
         param_warnings: Vec::new(),
@@ -2030,6 +2071,12 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
+    edit_joint(s, p, true)
+}
+
+/// joint.edit's change, also run by `assembly.constraint.edit`. `plain`: a change of kind makes a
+/// constraint a plain joint (joint.edit); the constraint command keeps the rule it has just set.
+pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Value> {
     let cmd = "joint.edit";
     let id = joint_id(s, p.get("joint"), cmd)?;
     let kind = match str_(p, "type") {
@@ -2067,6 +2114,14 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(k) = kind {
         let was = j.kind;
         j.kind = k;
+        // A constraint changed to another kind of joint is a plain joint now: its tag would keep
+        // restarting it, and a tangent's gap expression would leave the radius out of its offset.
+        if k != was && plain {
+            if j.constraint == Some(joints::Constraint::Tangent) {
+                j.exprs.offset = None;
+            }
+            j.constraint = None;
+        }
         j.values.resize(k.dofs().len(), 0.0);
         j.limits.resize(k.dofs().len(), None);
         j.exprs.values.truncate(k.dofs().len());
@@ -2081,6 +2136,10 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(o) = offset {
         j.offset = o;
         j.exprs.offset = typed(p.get("offset"));
+        // A tangent constraint's offset is its gap: the radius is added when it is solved.
+        if j.constraint == Some(joints::Constraint::Tangent) {
+            j.exprs.offset.get_or_insert_with(|| format!("{o} mm"));
+        }
     }
     if let Some(a) = angle {
         j.angle = a;
@@ -2118,11 +2177,11 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         && kind.is_none_or(|k| k == was_kind)
         && offset.is_none_or(|o| (o - was_offset).abs() <= 1e-9)
         && bool_(p, "flip").is_none_or(|f| f == was_flip);
-    // Otherwise a relation whose type, offset, tilt or flip changes, or whose sides move, starts
-    // again from where its parts are.
+    // Otherwise a relation or a constraint whose type, offset, tilt or flip changes, or whose
+    // sides move, starts again from where its parts are.
     let reseat = !tilt_only && (kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some() || sides);
     if reseat {
-        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.kind.is_relation()).cloned();
+        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.starts_where_it_is()).cloned();
         if let Some(q) = edited.and_then(|j| joints::relation_values(&s.doc, &s.model.state(), &j))
             && let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == id)
         {
@@ -2216,6 +2275,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
                 frame_a: world(&j.a),
                 frame_b: world(&j.b),
                 expressions: (!j.exprs.is_empty()).then(|| j.exprs.clone()),
+                constraint: j.constraint,
             }
         })
         .collect();
@@ -2315,6 +2375,45 @@ mod reach_tests;
 #[cfg(test)]
 #[path = "joints_relations_tests.rs"]
 mod relations_tests;
+/// Capture Position: every moving joint keeps its current values (as the solver places them) as
+/// its captured position. Returns how many joints were captured.
+pub(in crate::cmd) fn capture_values(s: &mut Session) -> usize {
+    let current = joints::joint_values(&s.doc.assembly);
+    if s.doc.assembly.joints.iter().all(|j| j.kind == JointKind::Rigid) {
+        return 0;
+    }
+    let mut n = 0;
+    for j in s.doc_mut().assembly.joints.iter_mut().filter(|j| j.kind != JointKind::Rigid) {
+        let mut q = current.get(&j.id).cloned().unwrap_or_else(|| j.values.clone());
+        q.resize(j.kind.dofs().len(), 0.0);
+        j.captured = Some(q);
+        n += 1;
+    }
+    n
+}
+
+/// Revert Position: every joint with a captured position goes back to it, clamped to its limits.
+/// A joint with none (a design from before captured joint values) keeps its values. The values
+/// put back drop their expressions, as `joint.drive` does. Returns how many joints went back.
+pub(in crate::cmd) fn revert_values(s: &mut Session) -> usize {
+    if !s.doc.assembly.joints.iter().any(|j| j.captured.is_some() && j.kind != JointKind::Rigid) {
+        return 0;
+    }
+    let mut n = 0;
+    for j in s.doc_mut().assembly.joints.iter_mut().filter(|j| j.kind != JointKind::Rigid) {
+        let Some(mut q) = j.captured.clone() else { continue };
+        q.resize(j.kind.dofs().len(), 0.0);
+        joints::clamp(j, &mut q);
+        j.values = q;
+        for i in 0..j.kind.dofs().len() {
+            j.exprs.set_value(i, None);
+        }
+        n += 1;
+    }
+    resolve(s);
+    n
+}
+
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;

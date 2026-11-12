@@ -59,6 +59,8 @@ mod issue_1038_tests;
 #[cfg(test)]
 mod issue_1080_tests;
 #[cfg(test)]
+mod issue_12126_tests;
+#[cfg(test)]
 mod issue_1510_tests;
 #[cfg(test)]
 mod issue_2005_tests;
@@ -159,13 +161,13 @@ pub mod watch;
 pub use blend::{
     ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_max, chamfer_max_why, chamfer_sides, fillet, fillet_each,
     fillet_g2, fillet_g2_corners, fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing,
-    fillet_setback, largest_fit_note, names_largest_fit, tangent_chain, with_fit_note, without_fit_note,
+    fillet_setback, largest_fit_note, named_fit, names_largest_fit, tangent_chain, tangent_chain_edges, with_fit_note, without_fit_note,
 };
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
-    Body, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint, PointClass, Refusal,
-    SurfaceKind,
+    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint, PointClass,
+    Refusal, SurfaceKind, colour_name,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};

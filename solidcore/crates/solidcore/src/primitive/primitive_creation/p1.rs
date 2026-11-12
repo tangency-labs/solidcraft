@@ -501,7 +501,6 @@ mod tests {
         assert_eq!(output[0].evaluate_point(&k, 0.0).unwrap(), Vec3::ZERO);
     }
 
-    use crate::error::SolidError;
     use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
 
     type PlacementCase = (f64, [f64; 3], [f64; 3], [f64; 3], f64);
@@ -637,8 +636,11 @@ mod tests {
             let error = position_profile_curves(&k, &profiles, tol, &path, &mut output)
                 .expect_err("opt-in reports the failed placement");
             assert_eq!(
-                error,
-                SolidError::sm_err("geom::vector3d::Vec3::make_unit_ortho_vectors"),
+                (error.operation(), error.sm_status()),
+                (
+                    "geom::vector3d::Vec3::make_unit_ortho_vectors",
+                    Some(crate::error::SM_ERR)
+                ),
                 "unexpected first error for {start:?} -> {end:?}"
             );
 

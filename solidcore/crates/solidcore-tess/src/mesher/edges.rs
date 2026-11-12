@@ -51,7 +51,6 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         Ok::<Vec3, TessError>(Vec3::new(v.point[0], v.point[1], v.point[2]))
     };
     let (front, back) = (vertex(0)?, vertex(1)?);
-    let tol = rules.tol;
     let [t0, t1] = edge.interval;
     if !(t0.is_finite() && t1.is_finite() && t1 > t0) {
         return Err(fail(format!("interval [{t0}, {t1}]")));
@@ -80,6 +79,15 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
     // A closed curve's chord between its ends is empty: start it from a few segments. An open
     // one starts whole, so an arc the tolerance leaves flat stays one segment.
     let initial: u32 = if edge.vertices[0] == edge.vertices[1] { 4 } else { 1 };
+    bisect(&at, [t0, t1], [front, back], initial, rules, h)
+}
+
+/// The nodes of a curve over `[t0, t1]` by bisection: from `initial` even segments, each split
+/// until its chord is within the tolerance of the curve (checked at the quarter points), at most
+/// `h` long, within the rules' facet angle and spanning at most a quarter turn. The end nodes
+/// are `ends` themselves, not the curve's points there. `at` evaluates the curve.
+pub(crate) fn bisect(at: &impl Fn(f64) -> Result<Vec3>, [t0, t1]: [f64; 2], [front, back]: [Vec3; 2], initial: u32, rules: &Rules, h: f64) -> Result<Nodes> {
+    let tol = rules.tol;
     let t_at = |i: u32| t0 + (t1 - t0) * f64::from(i) / f64::from(initial);
     let ends: Vec<Vec3> = (0..=initial).map(|i| at(t_at(i))).collect::<Result<_>>()?;
     // Depth-first bisection, segment by segment, keeping the output ordered. Each segment

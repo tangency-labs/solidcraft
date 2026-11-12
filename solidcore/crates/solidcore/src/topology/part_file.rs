@@ -135,7 +135,7 @@ pub struct PartEnv<'a> {
 /// `*rDB.GetInStreamPtr()` (upstream dereferences `NULL` without a stream).
 fn stream(db: &mut DatabaseReader) -> Result<&mut InputStream> {
     db.in_stream_mut()
-        .ok_or_else(|| SolidError::null_pointer(OP_PART))
+        .ok_or_else(|| SolidError::topology_missing(OP_PART, "the database's input stream"))
 }
 
 /// `fin.getline(sBuff, MAXSIZE)`.

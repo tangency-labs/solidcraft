@@ -457,13 +457,25 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     wait_for(&mut cdp, &state_js, "v4's worker keeps v4, v3's copy retired", |s| {
         s["kept"].as_object().is_some_and(|k| k.len() == 1 && k.contains_key(&name4))
             && s["retired"].as_array().is_some_and(|r| r.contains(&json!(name3)))
+            && s["settled"] == true
     })?;
     step("update in another tab: the kept v3 still starts; its copy is retired, not deleted", t);
     // The page still open is v3's: a file it asks for now comes from v3's copy, not from v4 which the
     // worker has taken over with (nor from the network, which serves v4).
     let shared = cdp.eval("fetch('shared.js?later', { cache: 'no-store' }).then((r) => r.text())")?;
     if !shared.as_str().is_some_and(|text| text.contains("\"v3\"")) {
-        return Err(format!("the open v3 page was given another build's file after the update: {shared}"));
+        let records = cdp
+            .eval(
+                "caches.keys().then(async (ks) => { const out = {}; for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) out[r.url] = await (await c.match(r)).text(); } return out; })",
+            )
+            .unwrap_or_default();
+        // Whether the request went through the worker at all (workerStart is 0 when it did not).
+        let how = cdp
+            .eval(
+                "(async () => { const e = performance.getEntriesByType('resource').filter((r) => r.name.includes('shared.js?later')).pop(); const reg = await navigator.serviceWorker.getRegistration(); return { workerStart: e ? e.workerStart : null, controller: navigator.serviceWorker.controller ? navigator.serviceWorker.controller.state : null, active: reg && reg.active ? reg.active.state : null, installing: Boolean(reg && reg.installing), waiting: Boolean(reg && reg.waiting) }; })()",
+            )
+            .unwrap_or_default();
+        return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}; request: {how}"));
     }
     // A page whose record is lost never gets the worker's build instead: its request fails visibly.
     let lost = cdp.eval(
@@ -571,7 +583,10 @@ const STATE_JS: &str = "(async () => {
     scriptStartedBuild: document.documentElement.dataset.started ?? null,
     scriptSharedBuild: document.documentElement.dataset.shared ?? null,
     started: STARTED, controlled: !!navigator.serviceWorker.controller, caches: caches_, kept, retired, complete, filling,
-    registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length };
+    registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length,
+    // The newest worker is active and controls this page (not still taking over from an older one).
+    settled: await navigator.serviceWorker.getRegistration(scope).then((r) => Boolean(r && r.active && r.active.state === 'activated'
+      && !r.installing && !r.waiting && navigator.serviceWorker.controller && navigator.serviceWorker.controller.state === 'activated')) };
 })()";
 
 /// Every file this build downloads, including names shared with the next build.

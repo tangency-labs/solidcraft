@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::cam::MAX_PROFILE_EDGES;
-use solidcraft_doc::joints::{Coupling, JointExprs, JointKind, Snap};
+use solidcraft_doc::joints::{Constraint, Coupling, JointExprs, JointKind, Snap};
 use solidcraft_geom::Vec3Geom;
 
 use super::check::whole;
@@ -413,7 +413,7 @@ macro_rules! read_with {
     )*};
 }
 
-read_with!(JointKey, OccurrenceKey, JointTypeParam, JointValue, JointValues, JointLimits, JointOriginArg);
+read_with!(JointKey, OccurrenceKey, JointTypeParam, ConstraintTypeParam, JointValue, JointValues, JointLimits, JointOriginArg);
 
 /// The call's keys as an object. (`TypedContract::check` has refused anything else already.)
 fn keys<'de, D: Deserializer<'de>>(d: D) -> Result<Map<String, Value>, D::Error> {
@@ -557,6 +557,119 @@ impl<'de> Deserialize<'de> for CreateJointParams {
             quiet: flag(&m, "quiet")?,
         })
     }
+}
+
+/// An assembly constraint's type, as `assembly.constraint.create` takes it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConstraintTypeParam(pub Constraint);
+
+const CONSTRAINT_MESSAGE: &str = "`type` must be mate, flush, distance, concentric, insert, parallel, perpendicular, angle, tangent or point_on_axis";
+
+impl ConstraintTypeParam {
+    fn read(v: &Value) -> Result<Self, String> {
+        v.as_str().and_then(Constraint::parse).map(ConstraintTypeParam).ok_or_else(|| CONSTRAINT_MESSAGE.to_string())
+    }
+}
+
+impl JsonSchema for ConstraintTypeParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ConstraintType".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The rule: mate (two planes against each other), flush (two planes facing the same way), distance (a plane or a point `offset` from a plane), concentric (two round faces on one axis), insert (two round edges at one centre: only a turn is left), parallel, perpendicular, angle (two planes or axes), tangent (a cylinder resting on a plane) or point_on_axis. Case, spaces, `_` and `-` are ignored; coincident and axis are also taken.",
+            "type": "string",
+            "minLength": 1
+        })
+    }
+}
+
+/// Constrain two parts by a geometric rule between a reference on each: the rule is kept as a
+/// joint of the kind it needs (a mate is planar), made where the parts are, so b moves no further
+/// than the rule needs and keeps every motion it leaves free. Several constraints between one pair
+/// add up. One undo step.
+#[derive(Debug, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = create_required)]
+pub struct CreateConstraintParams {
+    /// The rule.
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ConstraintTypeParam")]
+    pub kind: Option<ConstraintTypeParam>,
+    /// Side a's reference: a joint origin, as joint.create takes it (a face for a plane, a circle
+    /// for an axis, a point).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointOriginArg")]
+    pub a: Option<JointOriginArg>,
+    /// Side b's reference, as `a`; b is the part that moves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointOriginArg")]
+    pub b: Option<JointOriginArg>,
+    /// The gap from a's reference to b's, in mm or an expression (a mate's or flush's gap, a
+    /// distance; needed for distance). Default: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointValue")]
+    pub offset: Option<JointValue>,
+    /// An angle constraint's angle, in degrees or an expression (needed for angle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointValue")]
+    pub angle: Option<JointValue>,
+    /// Turn b over: its reference along a's instead of the way the rule puts it. Default: a mate
+    /// is against, a flush along, the others as the parts face now.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The constraint's name. Default: the rule and the first free number (Mate1).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Leave out `dof` and `fixed` in the reply. Default: false.
+    #[serde(default)]
+    pub quiet: Option<bool>,
+}
+
+impl<'de> Deserialize<'de> for CreateConstraintParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let m = keys(d)?;
+        Ok(CreateConstraintParams {
+            kind: given(&m, "type", ConstraintTypeParam::read)?,
+            a: given(&m, "a", JointOriginArg::read)?,
+            b: given(&m, "b", JointOriginArg::read)?,
+            offset: given(&m, "offset", JointValue::read)?,
+            angle: given(&m, "angle", JointValue::read)?,
+            flip: flag(&m, "flip")?,
+            name: text(&m, "name")?,
+            quiet: flag(&m, "quiet")?,
+        })
+    }
+}
+
+/// Change a constraint (a joint made with `assembly.constraint.create`) in place: its rule, gap,
+/// angle, facing, name or suppression. A new rule must fit the references the constraint has; the gap
+/// carries over. The change goes through joint.edit: the values start again where the parts are.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct EditConstraintParams {
+    /// The constraint, by id or name.
+    pub constraint: IdOrName,
+    /// The new rule, as assembly.constraint.create takes it. Default: the rule it has.
+    #[serde(default, rename = "type", deserialize_with = "present")]
+    pub kind: Option<ConstraintTypeParam>,
+    /// The gap: a length, or an expression the constraint follows. Default: the gap it has.
+    #[serde(default, deserialize_with = "present")]
+    pub offset: Option<LengthExpr>,
+    /// An angle rule's angle: an angle, or an expression. Needed to change to angle.
+    #[serde(default, deserialize_with = "present")]
+    pub angle: Option<AngleExpr>,
+    /// True turns b over: from the new rule's way after a type change, else from how it faces now.
+    #[serde(default, deserialize_with = "present")]
+    pub flip: Option<bool>,
+    /// The constraint's new name.
+    #[serde(default, deserialize_with = "present")]
+    pub name: Option<String>,
+    /// Suppress the constraint (true) or bring it back (false).
+    #[serde(default, deserialize_with = "present")]
+    pub suppressed: Option<bool>,
+    /// Leave out the degrees of freedom and the fixed occurrences in the reply.
+    #[serde(default, deserialize_with = "present")]
+    pub quiet: Option<bool>,
 }
 
 /// Add a joint between two occurrences that stay where they are: its frame is a joint origin
@@ -1034,6 +1147,11 @@ pub struct ListedJoint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointExpressions")]
     pub expressions: Option<JointExprs>,
+    /// The assembly constraint the joint was made as (mate, flush…). Left out for a joint made
+    /// as a joint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub constraint: Option<Constraint>,
 }
 
 /// A named joint origin.
@@ -1318,6 +1436,10 @@ pub struct InspectedJoint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointExpressions")]
     pub expressions: Option<JointExprs>,
+    /// The assembly constraint it was made as (mate, flush…). Left out for a joint made as a joint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub constraint: Option<Constraint>,
 }
 
 /// What `joint.inspect` returns.
@@ -2269,6 +2391,9 @@ pub struct ReachResult {
     pub stopped_by_limit: Option<Vec<LimitStop>>,
     /// The closed loop that stopped it (its chain alone gets closer); `null` when none.
     pub stopped_by_loop: Option<ReachLoopStop>,
+    /// With contact sets on: the pair of a set that stopped it where they touch, as `joint.drive`
+    /// says; `null` when none.
+    pub stopped_by_contact: Option<ContactStop>,
     /// Why nothing can move. Left out when the reach worked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,

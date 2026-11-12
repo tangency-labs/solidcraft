@@ -128,6 +128,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 ui_kit::help_icon(ui, &tip);
             });
+            ui.horizontal(|ui| {
+                let (keep, tip) = (app.tr("prefs.keep_print_faces").to_string(), app.tr("prefs.keep_print_faces_tip").to_string());
+                let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
+                ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let response = ui_kit::checkbox(ui, &keep, &mut app.preferences.keep_print_faces).backing_on_hover_text(&tip);
+                    crate::scenario::publish_target("prefs:keep_print_faces", response.rect);
+                });
+                ui_kit::help_icon(ui, &tip);
+            });
             ui_kit::settings_form(ui, labels, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("prefs.print_face_highlight"), app.tr("prefs.print_face_highlight_tip"), |ui| {
                     ui_kit::settings_control_width(ui, t.space_24 * 10.0, |ui| {
@@ -147,6 +156,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
             let right_click = setting::right_click_confirms(app, ui);
             crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
+            let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
+            crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
         });
         ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
             crate::update::prefs_rows(app, ui);

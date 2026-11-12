@@ -33,6 +33,7 @@ mod component;
 mod component_clone;
 mod component_clone_assembly;
 mod construct;
+mod construct_auto;
 mod delete;
 pub(crate) mod diagnostics;
 mod edit;
@@ -40,7 +41,10 @@ mod face;
 mod features;
 mod features_more;
 mod join_pieces;
-pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, plane_axis_point_kind};
+pub use construct::picked_plane_refs;
+pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, picked_plane};
+pub use construct_auto::{construct_method, construct_methods, is_construct_tool};
+pub use design_link::{LinkProblem, LinkState};
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
@@ -85,6 +89,7 @@ mod measure_shape;
 mod mesh;
 mod metadata;
 pub(crate) mod motion;
+mod notes;
 mod parts;
 mod point_cloud;
 mod script;
@@ -105,7 +110,10 @@ mod parameters;
 mod plastic;
 mod print_face;
 mod render;
-pub(crate) use render::{PreparedCapture, prepare_capture_with_metadata, render_cancel_params};
+pub(crate) use render::{
+    PreparedCapture, prepare_capture_with_metadata, read_render_request, render_cancel_params, render_form_refusal, render_saved_job_refusal,
+    render_started,
+};
 pub(crate) use render_ui::batch_request;
 mod render_ui;
 #[cfg(test)]
@@ -347,6 +355,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
+    v.extend(construct_auto::COMMANDS.iter());
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
@@ -355,6 +364,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
+    v.extend(joints::constraint::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
     v.extend(panels::COMMANDS.iter());
@@ -363,6 +373,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
+    v.extend(notes::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
     v.extend(selection::COMMANDS.iter());

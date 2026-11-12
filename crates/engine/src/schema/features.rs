@@ -37,7 +37,8 @@ pub struct BoxParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub corner: Option<PointExpr3>,
-    /// The box's centre, instead of `corner`.
+    /// The box's centre, instead of `corner`. The box stays centred there when its length, width
+    /// or height changes later.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub center: Option<PointExpr3>,
@@ -453,10 +454,21 @@ pub struct SweepParams {
     /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
     #[serde(default)]
     pub exact_regions: Option<bool>,
-    /// The sketch holding the path, by id or name.
-    pub path_sketch: SketchRef,
-    /// The path's curve ids, in order along the path.
-    pub path: StringList,
+    /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub path_sketch: Option<SketchRef>,
+    /// The path's curve ids, in order along the path. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub path: Option<StringList>,
+    /// The name of the body whose edges are the path, instead of a sketch's curves.
+    #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
+    pub path_body: Option<String>,
+    /// The points on that body's edges that are the path, 1 to 1000.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathEdgePoints")]
+    pub path_edges: Option<PathEdgePoints>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub shape: SweepShape,
     /// How the sweep combines with existing bodies. Default: new.
@@ -499,10 +511,22 @@ pub struct SurfaceSweepParams {
     /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
     #[serde(default)]
     pub exact_regions: Option<bool>,
-    /// The sketch holding the path, by id or name.
-    pub path_sketch: SketchRef,
-    /// The path's curve ids, in order along the path: 1 to 1000.
-    pub path: StringList,
+    /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub path_sketch: Option<SketchRef>,
+    /// The path's curve ids, in order along the path: 1 to 1000. Not needed when the path is a
+    /// body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub path: Option<StringList>,
+    /// The name of the body whose edges are the path, instead of a sketch's curves.
+    #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
+    pub path_body: Option<String>,
+    /// The points on that body's edges that are the path, 1 to 1000.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathEdgePoints")]
+    pub path_edges: Option<PathEdgePoints>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub shape: SweepShape,
     #[serde(flatten, deserialize_with = "feature_common")]
@@ -617,6 +641,53 @@ fn target_body<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     match Value::deserialize(d)? {
         Value::String(name) => Ok(name),
         _ => Err(D::Error::custom(whole("`target` must be a body name"))),
+    }
+}
+
+/// `path_body`: the name of the body whose edges are the path, as the handler's `sweep_path`
+/// reads it: a body name, or `null` (which the handler reads as absent). Anything else is
+/// refused with the handler's message.
+fn path_body_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(name) => Ok(Some(name)),
+        _ => Err(D::Error::custom(whole("`path_body` must be a body name"))),
+    }
+}
+
+/// `path_edges`: the points on the edges of the path, as the handler's `path_edge_points` reads
+/// them: 1 to 1000 points, each `[x, y, z]` or `{x, y, z}` of finite numbers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PathEdgePoints(pub Vec<Point3>);
+
+impl<'de> Deserialize<'de> for PathEdgePoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let items = v.as_array().ok_or_else(|| D::Error::custom(whole("`path_edges` must be a list of points")))?;
+        if items.is_empty() || items.len() > 1000 {
+            return Err(D::Error::custom(whole("the path needs 1…1000 edges")));
+        }
+        items
+            .iter()
+            .map(|item| Point3::deserialize(item).map_err(|_| D::Error::custom(whole("each `path_edges` entry must be a point [x,y,z]"))))
+            .collect::<Result<_, _>>()
+            .map(PathEdgePoints)
+    }
+}
+
+impl JsonSchema for PathEdgePoints {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PathEdgePoints".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let item = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "The points on the body's edges that are the path, one on each edge of the chain: 1 to 1000.",
+            "type": "array",
+            "items": item,
+            "minItems": 1,
+            "maxItems": 1000
+        })
     }
 }
 

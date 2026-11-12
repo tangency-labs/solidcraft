@@ -13402,16 +13402,68 @@ fn production_render_browser_reuses_real_lens_search_and_retains_explicit_layout
 }
 
 #[test]
+fn production_render_panels_reopen_independently_with_existing_controls() {
+    let mut h = production_content_harness(false, false);
+    // Restore a layout saved before the three Render panels were registered.
+    let names = ["render-library", "render-inspector", "render-shots"];
+    let mut old = h.app.panel_runtime().unwrap().layout().layout().clone();
+    old.instances.retain(|instance| !names.contains(&instance.id.0.as_str()));
+    old.sections.retain(|section| !names.contains(&section.active.0.as_str()));
+    old.columns.retain(|column| old.sections.iter().any(|section| section.column.as_ref() == Some(&column.id)));
+    h.app.dispatch_panel_layout(LayoutAction::Replace { expected_revision: None, layout: old }).unwrap();
+
+    let document = h.app.session.doc.clone();
+    h.app.ui.tab = "RENDER".into();
+    h.frames(12);
+    let presented = |app: &crate::SolveApp, name| {
+        app.universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .any(|card| card.instance == id(name) && (card.body.is_some() || card.inline_content.is_some()))
+    };
+    for name in ["render-browser", "render-library", "render-inspector", "render-shots"] {
+        assert!(presented(&h.app, name), "old layout should present {name}");
+    }
+    let frame = h.app.universal_panel_frame().unwrap();
+    let shots = frame.layout.sections.iter().find(|card| card.instance == id("render-shots")).unwrap();
+    assert_eq!(shots.zone, Zone::Bottom, "older layouts gain Shots in the Bottom dock");
+    assert!(shots.inline && shots.body.is_none(), "Bottom Shots fits in one shared row");
+    assert!(crate::scenario::rect_of("render:editor:scene").is_some());
+    assert!(crate::scenario::rect_of("render:shots:status").is_some());
+    assert!(!h.app.shell.workspace_panels.contains_key("render:appearances"));
+    assert!(!h.app.shell.workspace_panels.contains_key("render:inspector"));
+    assert!(!h.app.shell.workspace_panels.contains_key("render:shots_strip"));
+
+    h.app
+        .dispatch_panel_layout(transaction(vec![
+            Mutation::Close { instance: id("render-library") },
+            Mutation::Close { instance: id("render-browser") },
+        ]))
+        .unwrap();
+    h.frames(3);
+    assert!(!presented(&h.app, "render-library"));
+    assert!(presented(&h.app, "render-inspector"));
+    assert!(presented(&h.app, "render-shots"));
+    assert!(super::production::reveal_render_library(&mut h.app));
+    h.frames(3);
+    assert!(presented(&h.app, "render-library"));
+    assert!(!presented(&h.app, "render-browser"));
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+}
+
+#[test]
 fn production_short_render_assistant_keeps_conversation_above_the_pinned_composer() {
     let mut h = production_content_harness(false, true);
-    h.call("ui.resize", serde_json::json!({"width":1600,"height":720}));
+    h.call("ui.resize", serde_json::json!({"width":1600,"height":480}));
     h.app.ui.tab = "RENDER".into();
     for draft in [String::new(), "Retained panel draft\n".repeat(40)] {
         h.app.agent_chat.input = draft.clone();
         h.frames(8);
         let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
         let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
-        assert!(conversation.height() < 64.0, "exercise the short viewport that formerly expanded over the composer");
+        assert!(conversation.height() < 64.0, "exercise the short viewport that formerly expanded over the composer: {conversation:?}");
         assert!(
             !conversation.is_positive() || conversation.bottom() <= composer.top() + 1.0,
             "a short transcript viewport must not paint or scroll over the composer: draft bytes={}, conversation={conversation:?}, composer={composer:?}",

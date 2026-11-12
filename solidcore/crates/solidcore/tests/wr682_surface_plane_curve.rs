@@ -278,10 +278,9 @@ fn curves(
 /// give where the plane's domain or an end off a surface stops them.
 fn assert_not_found(a: &Surface, b: &Surface, from: Point3, to: Point3) {
     let r = curves(&Kernel::default(), a, b, from, to);
-    assert!(
-        matches!(r, Err(solidcore::SolidError::Upstream { code: 1001, .. })),
-        "{r:?}"
-    );
+    // a typed blend failure keeps the status of the bare `Upstream` (#13790)
+    let e = r.unwrap_err();
+    assert_eq!(solidcore::error::upstream_status(&e), Some(1001), "{e:?}");
 }
 
 /// Not traced on the plane's equation: the intersectors' exact line from `from` to `to`

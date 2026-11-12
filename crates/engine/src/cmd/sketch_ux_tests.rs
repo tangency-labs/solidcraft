@@ -2504,7 +2504,9 @@ fn editing_a_mid_timeline_sketch_rebuilds_later_features_once_at_finish() {
     run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": false}));
     assert_eq!(s.doc.marker, None);
     run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
-    assert!(s.model.last_recomputed > 1, "in place, the later features are rebuilt");
+    // Rebuilt, or made again from what they changed when what they read is as it was (#6183).
+    let evaluated = s.model.last_recomputed + s.model.last_restored;
+    assert!(evaluated > 1, "in place, the later features are evaluated: {evaluated}");
     run(&mut s, "sketch.finish", json!({}));
     assert_eq!(s.doc.marker, None);
     assert!(s.execute("sketch.edit", &json!({"sketch": id, "restore_marker": true})).is_err());

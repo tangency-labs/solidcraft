@@ -9,10 +9,10 @@
 //! The line type is also a drawing mode: with nothing selected, Construction (or X) makes what
 //! is drawn next construction geometry until it is switched back.
 //!
-//! The palette docks at the right edge but its header drags it, like a command dialog's title:
-//! it then stays where it was put for the rest of the session (#8923).
+//! The shared host owns panel placement. In Classic, the palette docks at the right edge and its
+//! header drags it, like a command dialog's title (#8923).
 
-use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::{BackingTooltipExt as _, Part};
 use std::cell::Cell;
 
 use serde_json::{Value, json};
@@ -20,6 +20,8 @@ use solidcraft_engine::Sel;
 
 use crate::SolveApp;
 use solidcraft_theme::Tokens;
+
+pub(crate) const INSTANCE_ID: &str = "sketch-options";
 
 thread_local! {
     /// The drawing line type (0 normal, 1 construction, 2 centerline) and the sketch it is for.
@@ -264,6 +266,10 @@ pub fn editing(app: &SolveApp) -> bool {
 /// not, and there the dialog keeps the right edge on its own.
 pub fn fits_beside_a_dialog(app: &SolveApp, ctx: &egui::Context) -> bool {
     let vp = viewport(app, ctx);
+    if crate::panel_runtime::production_active(app) {
+        let space = Tokens::get().space_8;
+        return app.viewport.palette_rect.is_some_and(|rect| rect.left() - vp.left() - space >= crate::frame::DIALOG_MIN_W);
+    }
     vp.width() >= width(vp) + crate::frame::DIALOG_MIN_W + 40.0
 }
 
@@ -281,7 +287,9 @@ pub fn docked(ctx: &egui::Context) -> bool {
 pub fn room_left_of(app: &SolveApp, ctx: &egui::Context, vp: egui::Rect) -> f32 {
     let space = Tokens::get().space_8;
     match app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive()) {
-        Some(r) if docked(ctx) || r.left() - vp.left() - space >= crate::frame::DIALOG_MIN_W => (r.left() - vp.left() - space).max(0.0),
+        Some(r) if !crate::panel_runtime::production_active(app) && docked(ctx) || r.left() - vp.left() - space >= crate::frame::DIALOG_MIN_W => {
+            (r.left() - vp.left() - space).max(0.0)
+        }
         _ => vp.width(),
     }
 }
@@ -344,30 +352,35 @@ fn constrained_fraction(remaining: usize, total: usize, solved: bool) -> f32 {
     }
 }
 
-/// Draw the sketch options card, retaining the command paths used by the original palette.
-pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    app.viewport.palette_rect = None;
-    let _language = solidcraft_ui_text::scope(&app.preferences.language);
-    if !visible(app, ctx) {
-        return;
+fn constraint_status(remaining: usize, solved: bool, geometry: bool) -> String {
+    if !solved || !geometry || remaining == 0 {
+        crate::i18n::tr_dyn(&dof_text(remaining, solved, geometry))
+    } else {
+        solidcraft_ui_text::format(if remaining == 1 { "sketch.dof_left_one" } else { "sketch.dof_left" }, &[("count", &remaining.to_string())])
     }
-    let (opts, name, remaining, solved, total, geometry, open_ends, untied_ends) = {
-        let st = crate::open_meshing::session_world(&app.session);
-        let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
-        (
-            ss.sketch.view.clone(),
-            ss.name.clone(),
-            ss.report.dof,
-            ss.report.ok(),
-            unconstrained_total(&ss.sketch),
-            has_geometry(&ss.sketch),
-            ss.ends.open.len(),
-            ss.ends.untied.len(),
-        )
-    };
+}
+
+/// The active sketch supplies presentation while the host retains placement.
+pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime::PanelPresentation> {
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    let world = crate::open_meshing::session_world(&app.session);
+    let sketch = world.sketch(app.session.active_sketch?)?;
+    let solved = sketch.report.ok();
+    let title =
+        if sketch.name.trim().is_empty() || sketch.name.len() > 256 { app.tr("ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
+    Some(crate::panel_runtime::PanelPresentation {
+        title,
+        icon: "sketch".into(),
+        status: Some(constraint_status(sketch.report.dof, solved, has_geometry(&sketch.sketch))),
+        attention: !solved,
+        actions: Vec::new(),
+    })
+}
+
+fn classic_palette(app: &SolveApp, ctx: &egui::Context, mut contents: impl FnMut(&mut egui::Ui, Part) -> Option<f32>) -> Option<egui::Rect> {
     let vp = viewport(app, ctx);
     if !vp.is_finite() || !vp.is_positive() {
-        return;
+        return None;
     }
     let gap = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Palette).gap();
     let bottom = vp.bottom().min(ctx.content_rect().bottom()) - gap;
@@ -386,6 +399,84 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         anchor.y = anchor.y.min((bottom - 360.0).max(docked.y));
         (anchor, bounds)
     };
+    let panel = crate::ui_kit::Panel::new(
+        app.tr_label("ui.palette_sketch_options"),
+        egui::Id::unique("sc_sketch_palette"),
+        anchor,
+        bounds,
+        crate::frame::Side::Right,
+        frame,
+    )
+    .width(width(vp));
+    let mut painted = false;
+    let placed = panel.bounded_anchor(ctx);
+    let top = placed.y - frame.stroke.width;
+    let header_height = egui::Id::unique("sc_sketch_palette_header_height");
+    let response = panel.window(ctx).show(ctx, |ui| {
+        painted = ui.is_visible() && !ui.is_sizing_pass();
+        panel.palette(ui, bottom, top, |ui, part| {
+            if matches!(part, Part::Header) {
+                // The header is the drag handle. It is laid down before the header's labels, as
+                // a dialog's title band is, so their tooltips stay; last frame's height sizes it.
+                if let Some(height) = ui.ctx().data(|d| d.get_temp::<f32>(header_height)).filter(|h| h.is_finite() && *h > 0.0) {
+                    let band = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), height));
+                    // Undragged, it is docked even where a short view squeezes it: that is no move.
+                    let applied = if moved == egui::Vec2::ZERO { moved } else { placed - docked };
+                    crate::frame::drag_dock_named(ui, "sketch_palette:title", band, DRAG_KEY, moved, applied);
+                }
+                // Selectable text would take the drag from the band beneath it.
+                let header = ui
+                    .scope(|ui| {
+                        ui.style_mut().interaction.selectable_labels = false;
+                        contents(ui, part)
+                    })
+                    .inner;
+                if let Some(height) = header {
+                    ui.ctx().data_mut(|d| d.insert_temp(header_height, height));
+                }
+            } else {
+                contents(ui, part);
+            }
+        });
+    });
+    response.filter(|_| !app.universal_panel_host_enabled() || painted).map(|r| r.response.rect.expand(frame.stroke.width))
+}
+
+/// Draw the Classic options card while it still owns the palette.
+pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    app.viewport.palette_rect = None;
+    if visible(app, ctx) {
+        draw_options(app, ctx, None);
+    }
+}
+
+pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
+    draw_options(app, &ctx, Some(ui));
+}
+
+fn draw_options(app: &mut SolveApp, ctx: &egui::Context, shared: Option<&mut egui::Ui>) {
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    let (opts, name, remaining, solved, total, geometry, open_ends, untied_ends) = {
+        let st = crate::open_meshing::session_world(&app.session);
+        let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
+        (
+            ss.sketch.view.clone(),
+            ss.name.clone(),
+            ss.report.dof,
+            ss.report.ok(),
+            unconstrained_total(&ss.sketch),
+            has_geometry(&ss.sketch),
+            ss.ends.open.len(),
+            ss.ends.untied.len(),
+        )
+    };
+    let status = constraint_status(remaining, solved, geometry);
+    let fraction = constrained_fraction(remaining, total, solved && geometry);
+    let in_shared_host = shared.is_some();
+    let option_label =
+        |label: &'static str| if matches!(label, "ui.profile" | "ui.points") { solidcraft_ui_text::tr(label) } else { app.tr_label(label) };
+    let more = solidcraft_ui_text::tr("ui.palette_more");
     let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,
         "snap" => !opts.no_snap,
@@ -409,166 +500,152 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let feature = active_feature(app);
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
-    let panel = crate::ui_kit::Panel::new(
-        app.tr_label("ui.palette_sketch_options"),
-        egui::Id::unique("sc_sketch_palette"),
-        anchor,
-        bounds,
-        crate::frame::Side::Right,
-        frame,
-    )
-    .width(width(vp));
-    let mut painted = false;
-    let placed = panel.bounded_anchor(ctx);
-    let top = placed.y - frame.stroke.width;
-    let header_height = egui::Id::unique("sc_sketch_palette_header_height");
-    let response = panel.window(ctx).show(ctx, |ui| {
-        painted = ui.is_visible() && !ui.is_sizing_pass();
-        panel.palette(ui, bottom, top, |ui, part| match part {
-            crate::ui_kit::Part::Header => {
-                // The header is the drag handle. It is laid down before the header's labels, as
-                // a dialog's title band is, so their tooltips stay; last frame's height sizes it.
-                if let Some(height) = ui.ctx().data(|d| d.get_temp::<f32>(header_height)).filter(|h| h.is_finite() && *h > 0.0) {
-                    let band = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), height));
-                    // Undragged, it is docked even where a short view squeezes it: that is no move.
-                    let applied = if moved == egui::Vec2::ZERO { moved } else { placed - docked };
-                    crate::frame::drag_dock_named(ui, "sketch_palette:title", band, DRAG_KEY, moved, applied);
-                }
-                let status = if !solved || !geometry || remaining == 0 {
-                    crate::i18n::tr_dyn(&dof_text(remaining, solved, geometry))
-                } else {
-                    solidcraft_ui_text::format(
-                        if remaining == 1 { "sketch.dof_left_one" } else { "sketch.dof_left" },
-                        &[("count", &remaining.to_string())],
-                    )
-                };
-                // Selectable text would take the drag from the band beneath it.
-                let header = ui
-                    .scope(|ui| {
-                        ui.style_mut().interaction.selectable_labels = false;
-                        crate::ui_kit::status_header(
-                            ui,
-                            "sketch_palette",
-                            &name,
-                            crate::ui_kit::StatusHeader {
-                                icon: "sketch",
-                                text: &status,
-                                complete: solved && remaining == 0 && geometry,
-                                fraction: constrained_fraction(remaining, total, solved && geometry),
-                            },
-                        )
-                    })
-                    .inner;
-                ui.ctx().data_mut(|d| d.insert_temp(header_height, header.rect.height()));
+    let mut contents = |ui: &mut egui::Ui, part| match part {
+        Part::Header => Some(
+            crate::ui_kit::status_header(
+                ui,
+                "sketch_palette",
+                &name,
+                crate::ui_kit::StatusHeader { icon: "sketch", text: &status, complete: solved && remaining == 0 && geometry, fraction },
+            )
+            .rect
+            .height(),
+        ),
+        Part::Body => {
+            let t = Tokens::get();
+            if in_shared_host {
+                crate::ui_kit::text(ui, &status, crate::ui_kit::Text::Report("sketch_constraints", !solved));
+                let meter = crate::ui_kit::progress(ui, "sketch_palette", fraction);
+                crate::scenario::publish_rect("sketch_palette:meter", meter.rect);
+                crate::scenario::publish_count("sketch_palette:constrained_fraction", f64::from(fraction));
             }
-            crate::ui_kit::Part::Body => {
-                let t = solidcraft_theme::Tokens::get();
-                if open_ends > 0 {
-                    let text = solidcraft_ui_text::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
-                    ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.open_ends_tip"));
-                }
-                if untied_ends > 0 {
-                    ui.horizontal(|ui| {
-                        let text = solidcraft_ui_text::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
-                        ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.untied_ends_tip"));
-                        let button = crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal)
-                            .backing_on_hover_text(app.tr("ui.tie_ends_tip"));
-                        crate::scenario::publish_handle("sketch_palette:tie_ends", button.rect.center());
-                        tie = button.clicked();
-                    });
-                }
-
-                if let Some((family, current)) = feature {
-                    let section = crate::ui_kit::section(ui, "feature", "Feature Options", true, |ui| {
-                        let choices: Vec<_> = family
-                            .commands
-                            .iter()
-                            .filter_map(|id| solidcraft_engine::find_command(id))
-                            .map(|spec| crate::ui_kit::ToolChoice {
-                                key: spec.id,
-                                icon: spec.icon,
-                                label: app.tr_label(spec.label),
-                                enabled: spec.info(&app.session).enabled,
-                            })
-                            .collect();
-                        let section = ui.vertical(|ui| crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices));
-                        crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
-                        section.inner
-                    });
-                    start = section.flatten();
-                    section_alias("sketch_palette:feature_fold", "Feature Options");
-                }
-                crate::ui_kit::row(ui, "Line Type", |ui| {
-                    // Normal, Construction, Centerline and the Infinite line, as icons. With a
-                    // selection a click converts it; without, it picks the mode new curves use.
-                    let segments = LINE_TYPES.map(|(key, icon, name)| {
-                        let name = app.tr_label(name);
-                        let tip = if has_curves {
-                            solidcraft_ui_text::format("sketch.make_selection", &[("linetype", name)])
-                        } else {
-                            solidcraft_ui_text::format("sketch.draw_curves", &[("linetype", name)])
-                        };
-                        crate::ui_kit::IconSegment { key, icon, tip }
-                    });
-                    let mut selected = selected_types.iter().position(|on| *on).unwrap_or(usize::MAX);
-                    if crate::ui_kit::segmented_icons(ui, &mut selected, &segments, &selected_types) {
-                        linetype = u8::try_from(selected).ok();
-                    }
+            if open_ends > 0 {
+                let text = solidcraft_ui_text::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
+                ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.open_ends_tip"));
+            }
+            if untied_ends > 0 {
+                ui.horizontal(|ui| {
+                    let text = solidcraft_ui_text::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
+                    ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.untied_ends_tip"));
+                    let button = crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal)
+                        .backing_on_hover_text(app.tr("ui.tie_ends_tip"));
+                    crate::panel_runtime::register_content_focus(ui.ctx(), &button);
+                    crate::scenario::publish_handle("sketch_palette:tie_ends", button.rect.center());
+                    tie = button.clicked();
                 });
-                // In words: the selection's line types (several for a mixed selection), or the
-                // mode new curves are drawn in.
-                let names: Vec<&str> =
-                    LINE_TYPES.iter().zip(selected_types).filter(|(_, on)| *on).map(|((_, _, name), _)| app.tr_label(name)).collect();
-                crate::ui_kit::caption(ui, "Line Type", &names.join(", "));
-                for key in ["show_constraints", "show_dimensions", "show_points", "snap"] {
-                    if let Some((_, label)) = TOGGLES.iter().find(|(k, _)| *k == key)
-                        && crate::ui_kit::checkbox_row(ui, key, label, shown(key))
+            }
+
+            if let Some((family, current)) = feature {
+                let section = crate::ui_kit::section(ui, "feature", "Feature Options", true, |ui| {
+                    let choices: Vec<_> = family
+                        .commands
+                        .iter()
+                        .filter_map(|id| solidcraft_engine::find_command(id))
+                        .map(|spec| crate::ui_kit::ToolChoice {
+                            key: spec.id,
+                            icon: spec.icon,
+                            label: app.tr_label(spec.label),
+                            enabled: spec.info(&app.session).enabled,
+                        })
+                        .collect();
+                    let section = ui.vertical(|ui| crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices));
+                    crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
+                    section.inner
+                });
+                start = section.flatten();
+                section_alias("sketch_palette:feature_fold", "Feature Options");
+            }
+            crate::ui_kit::row(ui, "Line Type", |ui| {
+                // Normal, Construction, Centerline and the Infinite line, as icons. With a
+                // selection a click converts it; without, it picks the mode new curves use.
+                let segments = LINE_TYPES.map(|(key, icon, name)| {
+                    let name = app.tr_label(name);
+                    let tip = if has_curves {
+                        solidcraft_ui_text::format("sketch.make_selection", &[("linetype", name)])
+                    } else {
+                        solidcraft_ui_text::format("sketch.draw_curves", &[("linetype", name)])
+                    };
+                    crate::ui_kit::IconSegment { key, icon, tip }
+                });
+                let mut selected = selected_types.iter().position(|on| *on).unwrap_or(usize::MAX);
+                if crate::ui_kit::segmented_icons(ui, &mut selected, &segments, &selected_types) {
+                    linetype = u8::try_from(selected).ok();
+                }
+            });
+            // In words: the selection's line types (several for a mixed selection), or the
+            // mode new curves are drawn in.
+            let names: Vec<&str> = LINE_TYPES.iter().zip(selected_types).filter(|(_, on)| *on).map(|((_, _, name), _)| app.tr_label(name)).collect();
+            crate::ui_kit::caption(ui, "Line Type", &names.join(", "));
+            for key in ["show_constraints", "show_dimensions", "show_points", "snap"] {
+                if let Some((_, label)) = TOGGLES.iter().find(|(k, _)| *k == key)
+                    && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
+                {
+                    set = Some((key.to_string(), !shown(key)));
+                }
+            }
+            construction = crate::ui_kit::checkbox_row(
+                ui,
+                "construction_mode",
+                solidcraft_ui_text::tr("ui.palette_construction_mode"),
+                selected_types.get(1).copied().unwrap_or(false),
+            );
+            crate::ui_kit::section(ui, "more", more, false, |ui| {
+                for (key, label) in TOGGLES {
+                    if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
+                        && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
                     {
                         set = Some((key.to_string(), !shown(key)));
                     }
                 }
-                construction = crate::ui_kit::checkbox_row(
-                    ui,
-                    "construction_mode",
-                    "ui.palette_construction_mode",
-                    selected_types.get(1).copied().unwrap_or(false),
-                );
-                crate::ui_kit::section(ui, "more", "ui.palette_more", false, |ui| {
-                    for (key, label) in TOGGLES {
-                        if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
-                            && crate::ui_kit::checkbox_row(ui, key, label, shown(key))
-                        {
-                            set = Some((key.to_string(), !shown(key)));
-                        }
-                    }
-                });
-                section_alias("sketch_palette:options_fold", "ui.palette_more");
+            });
+            section_alias("sketch_palette:options_fold", more);
+            None
+        }
+        Part::Footer => {
+            let button = crate::ui_kit::wide_primary_button(ui, "Finish Sketch");
+            crate::panel_runtime::register_content_focus(ui.ctx(), &button);
+            crate::scenario::publish_rect("sketch_palette:finish", button.rect);
+            crate::scenario::publish_handle("sketch_palette:finish", button.rect.center());
+            finish = button.clicked();
+            let (at, slice) = crate::ui_kit::button_pair(
+                ui,
+                "sketch_palette",
+                [false, opts.slice],
+                [
+                    crate::ui_kit::PairButton { key: "look_at", label: solidcraft_ui_text::tr("ui.look_at"), icon: Some("lookat") },
+                    crate::ui_kit::PairButton { key: "slice", label: "Slice", icon: None },
+                ],
+            );
+            look = at;
+            if slice {
+                set = Some(("slice".into(), !opts.slice));
             }
-            crate::ui_kit::Part::Footer => {
-                let button = crate::ui_kit::wide_primary_button(ui, "Finish Sketch");
-                crate::scenario::publish_rect("sketch_palette:finish", button.rect);
-                crate::scenario::publish_handle("sketch_palette:finish", button.rect.center());
-                finish = button.clicked();
-                let (at, slice) = crate::ui_kit::button_pair(
-                    ui,
-                    "sketch_palette",
-                    [false, opts.slice],
-                    [
-                        crate::ui_kit::PairButton { key: "look_at", label: "ui.look_at", icon: Some("lookat") },
-                        crate::ui_kit::PairButton { key: "slice", label: "Slice", icon: None },
-                    ],
-                );
-                look = at;
-                if slice {
-                    set = Some(("slice".into(), !opts.slice));
-                }
-            }
+            None
+        }
+    };
+    if let Some(ui) = shared {
+        let at_top = crate::ui_kit::DialogButtons::current(ctx) == crate::ui_kit::DialogButtons::Top;
+        crate::ui_kit::scope(ui, |ui| {
+            let footer_height = if at_top {
+                contents(ui, Part::Footer);
+                0.0
+            } else {
+                crate::ui_kit::Panel::pinned_footer(ui, "shared_sketch_palette_footer", 2, |ui| contents(ui, Part::Footer)).response.rect.height()
+            };
+            let top = ui.cursor().top();
+            let options = egui::ScrollArea::vertical()
+                .id_salt("sc_palette_options")
+                .min_scrolled_height(0.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| contents(ui, Part::Body));
+            crate::scenario::publish_rect("sketch_palette:options", options.inner_rect);
+            crate::panel_runtime::report_content_extent(ui, top, options.content_size.y + footer_height, false);
         });
-    });
-    app.viewport.palette_rect =
-        response.filter(|_| !app.universal_panel_host_enabled() || painted).map(|r| r.response.rect.expand(frame.stroke.width));
-    if let Some(rect) = app.viewport.palette_rect {
-        crate::scenario::publish_rect("sketch_palette:outer", rect);
+    } else {
+        app.viewport.palette_rect = classic_palette(app, ctx, contents);
+        if let Some(rect) = app.viewport.palette_rect {
+            crate::scenario::publish_rect("sketch_palette:outer", rect);
+        }
     }
     if let Some((key, on)) = set {
         let mut params = serde_json::Map::new();
