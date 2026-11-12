@@ -1145,7 +1145,12 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<Planned3> {
                 SideSpec::Inside => Side::Inside,
                 SideSpec::On => Side::On,
             };
-            let regions = two.regions;
+            // Inside a step's walls: past its open sides too, so the wall pass reaches the open
+            // end (it turned a radius short of it, leaving the corner there).
+            let open = (side == Side::Inside && o.polygon.is_none())
+                .then(|| o.feature.as_deref().and_then(|id| features::walled_open_region(ctx, c.name, id, frame, r.tool.radius() + 1.0)))
+                .flatten();
+            let regions = open.map_or(two.regions, |o| vec![o]);
             let cut = Cut { heights: two.heights, feeds: r.feeds, stepdown: or_tool(o.stepdown, r.tool.stepdown, r.tool.diameter * 0.5) };
             let params = ContourParams {
                 side,
@@ -1507,7 +1512,7 @@ fn plan_job(cmd: &str, s: &Session, job: &CamJob, base: Option<&Path>) -> Result
 
     // Every operation planned, in order, then the program written in memory.
     let span = solidcraft_profile::span("cam", "job.plan");
-    let features = features::Lazy::new(job.bodies.clone(), place.origin, tol);
+    let features = features::Lazy::new(job.bodies.clone(), place.origin, tol, &machine);
     let ctx = Ctx {
         cmd,
         s,

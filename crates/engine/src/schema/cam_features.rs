@@ -4,9 +4,22 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// The direction(s) the tool comes from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisSpec {
+    /// A 3-axis mill: the tool comes down along work -Z only.
+    #[default]
+    Z,
+    /// A 4th axis about work X (the A axis): every face square to X can be turned up under the
+    /// tool, each at the A angle that brings its normal up.
+    A,
+}
+
 /// List the machinable features of a part, found on the exact B-rep of its bodies: holes,
-/// pockets and the planar faces facing the tool, each with a stable id (`hole:0`, `pocket:1`…)
-/// a `cam.job` operation can name instead of a sketch or polygon.
+/// pockets, planar faces facing the tool, outer profiles, fillets and chamfers on top edges,
+/// other 3D surfaces and (with `axis: "a"`) turned diameters, each with a stable id
+/// (`hole:0`, `pocket:1`…) a `cam.job` operation can name instead of a sketch or polygon.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CamFeaturesParams {
@@ -17,22 +30,28 @@ pub struct CamFeaturesParams {
     /// design's origin.
     #[serde(default)]
     pub origin: Option<[f64; 3]>,
+    /// `z` (3-axis) or `a` (a 4th axis about work X). Default: `z`.
+    #[serde(default)]
+    pub axis: Option<AxisSpec>,
     /// How close two sizes or positions must be to count as equal, mm, 0.0001 to 1 (as a job's
     /// `tolerance`). Default: 0.01.
     #[serde(default)]
     pub tolerance: Option<f64>,
 }
 
-/// What `cam.features` returns. Every coordinate of a feature is in work coordinates (the
-/// design less `origin`), Z the tool axis, so its numbers go straight into an operation.
+/// What `cam.features` returns. Every coordinate of a feature is in its setup's frame: work
+/// coordinates (the design less `origin`) turned by the setup's A angle, so its Z is the tool
+/// axis and its numbers go straight into an operation of that setup.
 #[derive(Clone, Debug, Default, Serialize, JsonSchema)]
 pub struct CamFeaturesReply {
+    /// `z` or `a`.
+    pub axis: AxisSpec,
     /// Work zero in design coordinates.
     pub origin: [f64; 3],
     /// The bodies looked at.
     pub bodies: Vec<String>,
     pub tolerance: f64,
-    /// The setup: the tool coming down work Z.
+    /// One setup per tool direction: `a_deg` 0 first (with `axis: "z"` the only one).
     pub setups: Vec<SetupReport>,
     pub holes: Vec<HoleReport>,
     /// Holes of the same diameter, depth and kind, for one drilling operation each.
@@ -40,7 +59,20 @@ pub struct CamFeaturesReply {
     pub pockets: Vec<PocketReport>,
     /// Planar faces facing the tool.
     pub faces: Vec<FaceReport>,
-    /// What was not recognised.
+    /// Outer profiles to contour round.
+    pub profiles: Vec<ProfileReport>,
+    /// Rounds on top edges.
+    pub fillets: Vec<EdgeBreakReport>,
+    /// Chamfers on top edges.
+    pub chamfers: Vec<EdgeBreakReport>,
+    /// Other curved areas the tool reaches from above (3D finishing).
+    pub surfaces: Vec<SurfaceReport>,
+    /// Diameters turned about the A axis (`axis: "a"` only).
+    pub turned: Vec<TurnedReport>,
+    /// Pockets wrapped round the A axis (`axis: "a"` only): a floor on a cylinder about X,
+    /// below the part's surface over part of a turn, its walls radial or square to X.
+    pub wrapped: Vec<WrappedReport>,
+    /// What was not recognised, or not reachable along the axis.
     pub notes: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -50,6 +82,8 @@ pub struct CamFeaturesReply {
 /// One tool direction.
 #[derive(Clone, Debug, Default, Serialize, JsonSchema)]
 pub struct SetupReport {
+    /// The A angle that brings this side up, degrees (0 with `axis: "z"`).
+    pub a_deg: f64,
     /// The tool axis (pointing from the part to the spindle) in work coordinates.
     pub tool_axis: [f64; 3],
     /// The part's highest Z in this setup's frame (an upper bound on curved surfaces).
@@ -58,6 +92,9 @@ pub struct SetupReport {
     pub bottom_z: f64,
     /// The part's extent in this frame's XY: [[low x, low y], [high x, high y]].
     pub bounds: [[f64; 2]; 2],
+    /// With `axis: "a"`: the largest distance of the part from the A axis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub swing_radius: Option<f64>,
     /// The ids of the features machined from this side.
     pub features: Vec<String>,
 }
@@ -66,6 +103,9 @@ pub struct SetupReport {
 #[derive(Clone, Debug, Default, Serialize, JsonSchema)]
 pub struct HoleReport {
     pub id: String,
+    /// The setup's A angle (with `axis: "a"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub a_deg: Option<f64>,
     pub body: String,
     /// The axis's position in the setup's XY.
     pub center: [f64; 2],
@@ -141,6 +181,8 @@ pub struct HoleGroup {
     pub diameter: f64,
     pub depth: f64,
     pub through: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub a_deg: Option<f64>,
     pub count: usize,
     pub ids: Vec<String>,
 }
@@ -149,6 +191,8 @@ pub struct HoleGroup {
 #[derive(Clone, Debug, Default, Serialize, JsonSchema)]
 pub struct PocketReport {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub a_deg: Option<f64>,
     pub body: String,
     /// The floor's face (as `model.faces` numbers it), also listed under `faces` as `face_id`.
     pub floor_face: usize,
@@ -189,6 +233,8 @@ pub struct IslandReport {
 #[derive(Clone, Debug, Default, Serialize, JsonSchema)]
 pub struct FaceReport {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub a_deg: Option<f64>,
     pub body: String,
     /// The face (as `model.faces` numbers it).
     pub face: usize,
@@ -196,14 +242,131 @@ pub struct FaceReport {
     pub area: f64,
     pub bounds: [[f64; 2]; 2],
     /// `top` (the highest), `plateau` (everything round it falls away), `step` (open on some
-    /// sides), `island_top` (the top of a boss standing in a pocket), `pocket_floor`,
-    /// `hole_floor` (a blind hole's floor or a counterbore's step).
+    /// sides), `island_top` (the top of a boss standing in a pocket), `pocket_floor`, `hole_floor`
+    /// (a blind hole's floor or a counterbore's step),
+    /// `wrapped_wall` (a wall of a pocket wrapped round the A axis, which `pocket` names).
     pub role: String,
     /// The pocket whose floor it is.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pocket: Option<String>,
     /// The face's outward normal in work coordinates.
     pub normal_work: [f64; 3],
+}
+
+/// The outline of a face whose walls fall straight away all round: what a contour runs
+/// outside of, from `top_z` down to `bottom_z`.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct ProfileReport {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub a_deg: Option<f64>,
+    pub body: String,
+    pub top_z: f64,
+    pub bottom_z: f64,
+    pub depth: f64,
+    pub outline: Vec<[f64; 2]>,
+    pub area: f64,
+    pub bounds: [[f64; 2]; 2],
+    /// The smallest radius of the outline's notches (where a tool running outside must fit);
+    /// absent when it has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_concave_radius: Option<f64>,
+    /// The face it is the outline of (`face:k`).
+    pub face_id: String,
+}
+
+/// A fillet or chamfer on top edges.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct EdgeBreakReport {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub a_deg: Option<f64>,
+    pub body: String,
+    pub faces: Vec<usize>,
+    /// A fillet's radius.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f64>,
+    /// A chamfer's angle from the tool axis, degrees.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub angle_deg: Option<f64>,
+    pub top_z: f64,
+    pub bottom_z: f64,
+    pub bounds: [[f64; 2]; 2],
+}
+
+/// Curved faces for 3D finishing.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct SurfaceReport {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub a_deg: Option<f64>,
+    pub body: String,
+    pub faces: Vec<usize>,
+    /// The kinds of surface: `sphere`, `torus`, `cylinder`, `cone`, `freeform`, `plane`
+    /// (sloped).
+    pub kinds: Vec<String>,
+    /// The smallest radius of curvature of its analytic faces (a ball's radius should not
+    /// exceed it in the concave ones); absent for free-form faces only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_radius: Option<f64>,
+    pub top_z: f64,
+    pub bottom_z: f64,
+    pub bounds: [[f64; 2]; 2],
+    /// Its faces the tool axis cannot see all of (undercuts): a face facing down with material
+    /// under it, or a face the part overhangs. A 3D finish from above leaves them; cut them from
+    /// an index on the 4th axis, a side setup, or with a tool that reaches under.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub undercut_faces: Vec<usize>,
+}
+
+/// A diameter turned about the A axis.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct TurnedReport {
+    pub id: String,
+    pub body: String,
+    pub diameter: f64,
+    pub x_min: f64,
+    pub x_max: f64,
+    pub faces: Vec<usize>,
+    /// A lobe (a cam's) on this diameter: the sides at A angles (`face:k`, `fillet:k`...) that
+    /// stand out of it within its X range. One rotary feature: its turning and finishing name this
+    /// id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lobe: Vec<String>,
+    /// With a lobe: its largest radius from the A axis, the largest of `profile`'s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius_max: Option<f64>,
+    /// With a lobe: `[a_deg, radius]` every 15 degrees of A, at the middle of its sides along X:
+    /// turned to A `a_deg` the part's top there is at Z `radius`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profile: Vec<[f64; 2]>,
+}
+
+/// A pocket wrapped round the A axis: its floor a cylinder about X below the part's surface,
+/// over part of a turn, cut with `wrap_pocket` (and its walls with `wrap_contour`).
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct WrappedReport {
+    pub id: String,
+    pub body: String,
+    /// The floor's face.
+    pub floor_face: usize,
+    /// The walls' faces: their face reports (role `wrapped_wall`) name this pocket.
+    pub walls: Vec<usize>,
+    /// The radius of the part's surface the pocket is cut into: the wrap's `radius`.
+    pub radius: f64,
+    /// The floor's radius.
+    pub floor_radius: f64,
+    /// `radius - floor_radius`: the wrap's `bottom` is its negative.
+    pub depth: f64,
+    pub x_min: f64,
+    pub x_max: f64,
+    /// The angles (A, degrees) the pocket runs between, `a_min_deg < a_max_deg`.
+    pub a_min_deg: f64,
+    pub a_max_deg: f64,
+    pub span_deg: f64,
+    /// The floor's outline unrolled at `radius`: [x, arc length round it] (y = radius × A in
+    /// radians), the wrap's `polygon`; counter-clockwise.
+    pub outline: Vec<[f64; 2]>,
 }
 
 #[cfg(test)]

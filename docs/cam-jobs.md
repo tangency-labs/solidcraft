@@ -13,7 +13,7 @@ commands work with jobs, from scripts, the CLI and MCP alike:
 | `cam.simulate` | Runs a written program through a model of the stock and holds what it leaves against the part: gouges, rapids through material, material left |
 | `cam.view.*` | The simulation view: a job's program played move by move on the simulated stock (see [Simulation view](#simulation-view)) |
 | `cam.view` | A PNG of the part with the job's toolpaths drawn over it, for an agent to look at (see [Pictures and extents for agents](#pictures-and-extents-for-agents)) |
-| `cam.features` | Lists the part's machinable features (holes, pockets, faces) with stable ids and their exact geometry, for an operation to name |
+| `cam.features` | Lists the part's machinable features (holes, pockets, faces, profiles, rounds, chamfers, curved areas, and on a 4th axis turned diameters) with stable ids and their exact geometry, for an operation to name |
 
 Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`, …).
 
@@ -1268,33 +1268,46 @@ job's operation names). It returns `path`, `image` (as above), `operations` (eac
 ## Machinable features
 
 `cam.features` lists what there is to machine on a modelled part, so an operation can name a
-pocket or a hole instead of a sketch drawn for every cut, and take its heights from the part.
+pocket, a hole or an outline instead of a sketch drawn for every cut, and take its heights from
+the part.
 
 ```json
-{"bodies": ["Plate"], "origin": [0, 0, 0], "tolerance": 0.01}
+{"bodies": ["Plate"], "origin": [0, 0, 0], "axis": "z", "tolerance": 0.01}
 ```
 
 Every key is optional: the bodies default to every visible body, `origin` to the design's origin
-(the job's work zero) and `tolerance` to 0.01 mm (how close two sizes or positions must be to
-count as equal).
+(the job's work zero), `axis` to `"z"` and `tolerance` to 0.01 mm (how close two sizes or
+positions must be to count as equal). With `axis: "a"` (a 4th axis about work X) every side whose
+normal is square to X is a setup of its own, at the A angle the machine turns to bring that side
+up, so A = 0 is the 3-axis setup and the other sides follow it round.
 
 Features are read from the exact B-rep, never from a mesh: the faces' analytic surfaces, their
 loops of edges and the faces on the other side of each edge, lines and arcs read exactly in the
-plane square to the tool. Every coordinate of a feature is in work coordinates (the design less
-`origin`), with Z the tool axis, so its numbers go straight into an operation.
+plane square to the tool. Every coordinate of a feature is in its setup's frame (work
+coordinates turned by the setup's A angle: its Z is the tool axis), so its numbers go straight
+into an operation of that setup.
 
 | List | Each feature |
 | --- | --- |
-| `setups` | `tool_axis` (work), `top_z`, `bottom_z`, `bounds`, `features` (the ids machined from that side) |
+| `setups` | `a_deg`, `tool_axis` (work), `top_z`, `bottom_z`, `bounds`, `swing_radius` (axis `a`), `features` (the ids machined from that side) |
 | `holes` | `hole:k`: `center`, `center_work`, `diameter`, `top_z`, `bottom_z`, `depth`, `through`, `floor` (`through`, `flat`, `cone` with `tip_z`, or `round`: the wall runs on into a curved floor within its radius, below `bottom_z`), `counterbore` / `counterbore_of` (the hole above or below it on the same axis), `countersink` (`diameter`, `angle_deg`), `breaks_out` (`[low, high]` Z over which the wall does not close all the way round), `thread` (the thread the design taps in it), `faces` |
 | `hole_groups` | holes of one diameter, depth and kind: `diameter`, `depth`, `through`, `count`, `ids` |
 | `pockets` | `pocket:k`: a planar floor walled all round. `floor_z`, `top_z` (the top of its walls, followed up past a round or chamfer at their foot), `depth`, `outline` (counter-clockwise), `area` (less its islands), `bounds`, `min_corner_radius` (the smallest inside corner; 0 when one is sharp), `sharp_corners`, `walls_vertical` (false when the walls are rounded, chamfered or drafted at the floor: the outline is then the floor's, inside the walls), `islands` (`outline`, `top_z` the top of the island, past a round at its foot, `area`), `face_id`; or an opening through the part (`through`: a slot, an obround, a window), cut a little past the foot of its walls |
-| `faces` | `face:k`: every planar face facing the tool that a tool coming down Z reaches (one with the part's material over all of it is left out), with `z`, `area`, `bounds`, `normal_work` and `role`: `top`, `plateau` (everything round it falls away), `step` (open on some sides), `island_top`, `pocket_floor` (with `pocket`), `hole_floor` (a blind hole's floor or a counterbore's step) |
+| `faces` | `face:k`: every planar face facing the tool that a tool coming down the setup's axis reaches (one with the part's material over all of it, such as the end wall of a pocket cut in a bar's side seen through the bar, is left out), with `z`, `area`, `bounds`, `normal_work` and `role`: `top`, `plateau` (everything round it falls away), `step` (open on some sides), `island_top`, `pocket_floor` (with `pocket`), `hole_floor` (a blind hole's floor or a counterbore's step), `wrapped_wall` (a wall of a pocket wrapped round the A axis, which `pocket` names) |
+| `profiles` | `profile:k`: the outline of a face whose walls fall straight away all round, and the part's silhouette seen from below when no face above gives the same: the outline of every face facing down (the bottom, and the ceiling of a slot or recess cut from below) seen together, so a slot across the underside that splits the bottom face in two does not split the outline: `top_z`, `bottom_z`, `outline`, `min_concave_radius` (its notches, where a tool running outside must fit), `face_id` |
+| `fillets`, `chamfers` | `fillet:k`, `chamfer:k`: rounds and chamfers falling away from the edges of faces facing the tool, `radius` or `angle_deg` (from the tool axis), `top_z`, `bottom_z`, `bounds`, `faces` |
+| `surfaces` | `surface:k`: other curved faces, joined where they touch: `kinds`, `min_radius`, `top_z`, `bottom_z`, `bounds`, `undercut_faces` (faces the tool axis cannot see all of) |
+| `turned` | `turned:k` (axis `a`): a diameter turned about the A axis, `diameter`, `x_min`, `x_max`; a lobe standing out of it (a cam's) names its sides (`lobe`) with `radius_max` and its `profile` of `[a_deg, radius]` every 15 degrees |
+| `wrapped` | `wrapped:k` (axis `a`): a pocket wrapped round the A axis, its floor on a cylinder about X: `radius`, `floor_radius`, `depth`, `x_min`, `x_max`, `a_min_deg`, `a_max_deg`, `span_deg`, `outline` (the floor unrolled at `radius`: `[x, arc length]`), `walls` |
 
-Ids are numbered per kind in a fixed order: from the top down, then by position (Y, then X). The
-same bodies, origin and tolerance give the same ids. `notes` says what was left out, such as
-mesh bodies (they have no exact faces) and whole holes running square to Z, which a 3-axis mill
-does not reach from above.
+Ids are numbered per kind in a fixed order: the A = 0 setup first, then from the top down, then by
+position (Y, then X). The same bodies, origin, axis and tolerance give the same ids, and the A = 0
+features have the same ids with `axis: "z"` and `axis: "a"`. `notes` says what was left out: mesh
+bodies, holes square to the tool axis on a 3-axis mill, bores along the A axis, sides a 4th axis
+cannot reach. A curved face's `top_z` and `bottom_z` are how high and low the face itself goes: a
+sphere's or torus's farthest point along the tool axis counts only where the face holds it (read
+from the exact solid), so a dome's cap goes down to where it meets the block, not to its whole
+sphere's bottom.
 
 A hole is a whole round wall along the tool axis with material outside it, open at its top (the
 part of a round wall that is a pocket's corner or a slot's end is a wall, not a hole). Whether a
@@ -1303,7 +1316,12 @@ inner loop of a face into the material, or rising from a floor's outer loop), el
 classifying a point just outside it on the exact solid; only the ends where the wall closes all
 the way round are read, so a hole that breaks partly into another feature (a slot across the
 part's underside cutting into its foot) is still a hole, with the stretch where it is open as
-`breaks_out`. A hole whose ends meet curved faces (through a domed handle) runs from the highest point of its mouth to the lowest of the other. A counterbore is a larger hole on the same axis whose bottom is a smaller one's top.
+`breaks_out`. A hole straight through a part whose mouths are on curved faces (curves, not
+circles) is a hole from the top. With `axis: "a"`, a hole drilled across a turned part (a round
+wall square to X entered from the turned surface) is a hole too, at the A angle its axis comes up
+at: from the highest point of its opening (`top_z`) to its other end, `through` when it comes out
+on the far side. Its wall must close all the way round: the rounded end or corner of a pocket cut
+in the bar's side is part of a cylinder and is not a hole. A counterbore is a larger hole on the same axis whose bottom is a smaller one's top.
 
 ### Operations on features
 
@@ -1317,12 +1335,19 @@ A `pocket` or `contour` operation takes `feature` in place of `sketch` or `polyg
 | --- | --- | --- | --- |
 | `pocket:k` | its outline, with every island that rises above the operation's bottom | its highest wall, its floor | inside |
 | `hole:k` | its circle | its top, its bottom | inside |
-| `face:k` | its outline, with what stands on it (a pocket on a face at the part's top covers the face's extent grown by the tool's radius and 1 mm, so it faces to the edges) | the walls round it (a top face: none, so give `heights.top`), the face | inside |
+| `face:k` | its outline, with what stands on it (a pocket on a face at the setup's top covers the face's extent grown by the tool's radius and 1 mm, so it faces to the edges; a contour inside a step's walls runs on past its open sides) | the walls round it (a top face: none, so give `heights.top`), the face | inside |
+| `profile:k` | its outline | its face, the foot of its walls | outside |
 
 `heights` may then be left out or given in part (`{"bottom": -3}`): what is left out comes from
-the feature and from the heights given: `retract` 3 mm above the material (the part's top, or
-the `top` given when higher), `clearance` 10 mm above the material and at least 5 mm above the
-`retract` given. Heights out of order are refused with each value and whether it was given or a
-default. Without a feature all four heights are still required. The job finds features as
-`cam.features` does with the job's `bodies` (else every visible body), `origin` and
-`tolerance`. A feature id the part does not have is refused with the ids it does have.
+the feature and from the heights given: `retract` 3 mm above the material (the part's top in the
+feature's setup, or the `top` given when higher), `clearance` 10 mm above the material, at least
+5 mm above the `retract` given and 5 mm past the part's swing radius on a 4th axis. Heights out of
+order are refused with each value and whether it was given or a default. Without a feature all
+four heights are still required. The job finds features as `cam.features` does with the job's
+`bodies` (else every visible body), `origin` and `tolerance`, along `a` when the machine has one
+rotary about X, else `z`. A feature id the part does not have is refused with the ids it does
+have, and says which axis the features were found along.
+
+An operation here runs with every rotary at 0, so a feature on another side of a 4th-axis part
+(its `a_deg` not 0) is refused with its A angle. Fillets, chamfers, surfaces and turned diameters
+have no outline: a 2D operation on one is refused, saying where the area is.

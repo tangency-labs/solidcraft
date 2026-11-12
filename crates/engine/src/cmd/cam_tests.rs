@@ -4096,7 +4096,7 @@ fn hostile_feature_calls_are_refused_without_panics() {
         json!({"tolerance": 0}),
         json!({"tolerance": 2}),
         json!({"tolerance": "fine"}),
-        json!({"axis": "a"}),
+        json!({"axis": "q"}),
         json!({"surprise": 1}),
     ] {
         match s.execute("cam.features", &p) {
@@ -4360,4 +4360,311 @@ fn hostile_feature_names_are_refused_without_panics() {
         let ops = json!([{"name": "p", "type": "pocket", "feature": feature, "tool": 6}]);
         assert!(s.execute("cam.job", &feature_job(ops)).is_err(), "{feature}");
     }
+}
+
+fn f(v: &Value) -> f64 {
+    v.as_f64().unwrap_or_else(|| panic!("not a number: {v}"))
+}
+
+/// A bar 60 × 20 × 20 along X about the X axis with a 12 × 8 pocket 4 deep in each of its
+/// +Z, +Y, -Z and -Y faces, at different places along X.
+fn pocketed_bar() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 20, "height": 20, "corner": [-30, -10, -10], "body_name": "Bar"}));
+    for (corner, size) in [
+        ([-26.0, -4.0, 6.0], [12.0, 8.0, 5.0]),
+        ([-12.0, 6.0, -4.0], [12.0, 5.0, 8.0]),
+        ([2.0, -4.0, -11.0], [12.0, 8.0, 5.0]),
+        ([16.0, -11.0, -4.0], [12.0, 5.0, 8.0]),
+    ] {
+        run(&mut s, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "corner": corner, "operation": "cut"}));
+    }
+    s
+}
+
+/// A bar along X about the X axis: 14 mm across from X -20 to 0, 20 mm across from 0 to 20.
+fn turned_bar() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, 0], [-20, 7], [0, 7], [0, 10], [20, 10], [20, 0]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": "X", "body_name": "Shaft"}));
+    s
+}
+
+/// The stepped bar with a flat on the large diameter's top (Z 8, X 5 to 15) and a 4 mm hole
+/// drilled across the small one at X -10, along Z through the bar.
+fn shaft() -> Session {
+    let mut s = turned_bar();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 24, "height": 6, "corner": [5, -12, 8], "operation": "cut"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 30, "axis": "Z", "base": [-10, 0, -15], "operation": "cut"}));
+    s
+}
+
+/// A clamp 70 × 40 × 18 (its bottom at Z 0) with its upright corners rounded to 6 mm, a step
+/// 6 mm down at X 20 to 35, a 6 mm through hole and a slot 10 mm wide and 3 mm deep across its
+/// underside at X -15 to -5, which splits its bottom face in two.
+fn underside_slot_clamp() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 70, "width": 40, "height": 18, "corner": [-35, -20, 0], "body_name": "Clamp"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[35, 20, 9], [-35, 20, 9], [-35, -20, 9], [35, -20, 9]], "radius": 6}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 50, "height": 7, "corner": [20, -25, 12], "operation": "cut"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 20, "base": [-29, 13, -1], "operation": "cut"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 50, "height": 4, "corner": [-15, -25, -1], "operation": "cut"}));
+    s
+}
+
+#[test]
+fn a_plate_has_one_outer_profile_and_no_rounds_or_curved_areas() {
+    let mut s = feature_plate();
+    let f = run(&mut s, "cam.features", json!({}));
+    // The one outer profile (the island's top is not one).
+    let profiles = f["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 1, "{f}");
+    assert!(near(&profiles[0]["top_z"], 0.0) && near(&profiles[0]["bottom_z"], -10.0), "{f}");
+    assert_eq!(profiles[0]["bounds"], json!([[-40.0, -30.0], [40.0, 30.0]]), "{f}");
+    assert!(profiles[0].get("min_concave_radius").is_none(), "a rectangle has no notches: {f}");
+    assert!(f["fillets"].as_array().unwrap().is_empty() && f["surfaces"].as_array().unwrap().is_empty(), "{f}");
+    assert!(near(&f["setups"][0]["a_deg"], 0.0) && f["holes"][0].get("a_deg").is_none(), "{f}");
+    // A contour on the profile runs outside it, a tool radius past the plate's edges.
+    let dir = Dir::new("profile");
+    let out = dir.file("outline.ngc");
+    let job = json!({"machine": "3axis", "post": "linuxcnc_4axis", "tools": feature_tools(),
+        "operations": [{"name": "outline", "type": "contour", "feature": "profile:0", "tool": 6}]});
+    let r = run(&mut s, "cam.job", json!({"job": job, "output": out}));
+    assert_clean(&r);
+    let c = run(&mut s, "cam.gcode.check", json!({"path": out}));
+    let b = &c["bounds"];
+    assert!(near(&b[0][0], -43.0) && near(&b[1][1], 33.0) && near(&b[0][2], -10.0), "{c}");
+}
+
+/// A domed knob: a block with rounded corners cut by a large sphere, its faces free-form.
+#[test]
+fn features_of_a_domed_knob_read_few_points_against_the_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 70, "width": 50, "height": 26, "corner": [-35, -25, 0], "name": "Knob"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[-35, -25, 3], [35, -25, 3], [-35, 25, 3], [35, 25, 3]], "radius": 8}));
+    run(&mut s, "solid.sphere", json!({"radius": 60, "center": [8, 0, -35], "operation": "intersect"}));
+    let before = super::features::trim_reads();
+    let found = run(&mut s, "cam.features", json!({}));
+    let reads = super::features::trim_reads() - before;
+    // Each read classifies a point against the whole body; thousands made this take minutes.
+    assert!(reads <= 400, "{reads} classifications against the body");
+    // Still read exactly: the outline is the block's, its depth the dome's top.
+    let p = &found["profiles"][0];
+    assert!((f(&p["depth"]) - 25.0).abs() < 0.05, "{p}");
+    assert_eq!(p["bounds"], json!([[-35.0, -25.0], [35.0, 25.0]]), "{p}");
+}
+
+#[test]
+fn features_of_a_bar_on_a_4th_axis_carry_the_a_angle_that_brings_them_up() {
+    let mut s = pocketed_bar();
+    let f = run(&mut s, "cam.features", json!({"axis": "a"}));
+    let pockets = f["pockets"].as_array().unwrap();
+    assert_eq!(pockets.len(), 4, "{f}");
+    // Each pocket's floor is 6 from the axis in its own setup, 4 below the face round it.
+    let mut by_x: Vec<(f64, f64)> = Vec::new();
+    for p in pockets {
+        assert!(near(&p["floor_z"], 6.0) && near(&p["top_z"], 10.0) && near(&p["depth"], 4.0), "{p}");
+        assert!(near(&p["min_corner_radius"], 0.0) && p["sharp_corners"] == 4, "{p}");
+        let x = (p["bounds"][0][0].as_f64().unwrap() + p["bounds"][1][0].as_f64().unwrap()) * 0.5;
+        by_x.push((x, p["a_deg"].as_f64().unwrap()));
+    }
+    by_x.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let angles: Vec<f64> = by_x.iter().map(|(_, a)| *a).collect();
+    assert!(angles[0].abs() < 1e-6, "+Z: {by_x:?}");
+    assert!((angles[1] - 90.0).abs() < 1e-6, "+Y: {by_x:?}");
+    assert!((angles[2].abs() - 180.0).abs() < 1e-6, "-Z: {by_x:?}");
+    assert!((angles[3] + 90.0).abs() < 1e-6, "-Y: {by_x:?}");
+    // The A = 0 setup is first; every setup lists its pocket.
+    let setups = f["setups"].as_array().unwrap();
+    assert!(near(&setups[0]["a_deg"], 0.0), "{f}");
+    for p in pockets {
+        let a = p["a_deg"].as_f64().unwrap();
+        let su = setups.iter().find(|su| near(&su["a_deg"], a)).unwrap();
+        assert!(su["features"].as_array().unwrap().contains(&p["id"]), "{su}");
+        assert!(near(&su["top_z"], 10.0) && (su["swing_radius"].as_f64().unwrap() - 200f64.sqrt()).abs() < 1e-6, "{su}");
+    }
+    // A 3-axis look sees the +Z pocket only, with the id it has on the 4th axis.
+    let z = run(&mut s, "cam.features", json!({}));
+    assert_eq!(ids(&z["pockets"]), ["pocket:0"]);
+    assert_eq!(z["pockets"][0]["bounds"], pockets[0]["bounds"]);
+    assert_eq!(f, run(&mut s, "cam.features", json!({"axis": "a"})));
+    // A job on the 4th axis finds them too; a pocket on another side is refused with its angle,
+    // as this job's operations run with A at 0.
+    let side = pockets.iter().find(|p| near(&p["a_deg"], 90.0)).unwrap()["id"].as_str().unwrap().to_string();
+    let job4 =
+        |ops: Value| json!({"job": {"machine": "4axis_a", "post": "linuxcnc_4axis", "tools": feature_tools(), "operations": ops}, "dry_run": true});
+    let r = run(&mut s, "cam.job", job4(json!([{"name": "top", "type": "pocket", "feature": "pocket:0", "tool": 4}])));
+    assert_clean(&r);
+    let e = s.execute("cam.job", &job4(json!([{"name": "side", "type": "pocket", "feature": side, "tool": 4}]))).unwrap_err().to_string();
+    assert!(e.contains("A = 90°") && e.contains("A = 0 setup"), "{e}");
+}
+
+#[test]
+fn a_feature_id_from_another_axis_says_which_axis_the_job_uses() {
+    let mut s = pocketed_bar();
+    let job = json!({"job": {"machine": "3axis", "post": "linuxcnc_4axis", "tools": feature_tools(),
+        "operations": [{"name": "p", "type": "pocket", "feature": "pocket:2", "tool": 4}]}, "dry_run": true});
+    let e = s.execute("cam.job", &job).unwrap_err().to_string();
+    assert!(e.contains("along Z") && e.contains("4axis_a"), "{e}");
+}
+
+#[test]
+fn an_underside_slot_does_not_split_the_outline_into_profiles() {
+    // The slot cuts the bottom face in two: the outline is still the part's silhouette, one
+    // profile 18 deep round all of it, not two profiles round the halves that cut into it.
+    let mut s = underside_slot_clamp();
+    let feats = run(&mut s, "cam.features", json!({}));
+    let profiles = feats["profiles"].as_array().unwrap();
+    let deep: Vec<&Value> = profiles.iter().filter(|p| near(&p["depth"], 18.0)).collect();
+    assert_eq!(deep.len(), 1, "{profiles:?}");
+    let b = &deep[0]["bounds"];
+    assert!(near(&b[0][0], -35.0) && near(&b[0][1], -20.0) && near(&b[1][0], 35.0) && near(&b[1][1], 20.0), "{b}");
+    // Its area is the rounded rectangle's, slot and all.
+    let area = 70.0 * 40.0 - (4.0 - std::f64::consts::PI) * 36.0;
+    assert!((f(&deep[0]["area"]) - area).abs() < 1e-3, "{}", deep[0]);
+    assert_eq!(deep[0]["min_concave_radius"], Value::Null, "{}", deep[0]);
+    // No profile ends inside the part's outline.
+    for p in profiles {
+        let b = &p["bounds"];
+        assert!(near(&b[0][0], -35.0) && near(&b[0][1], -20.0), "{p}");
+    }
+}
+
+/// A block chamfered all round with a slot across its top from end to end: the top is split in
+/// two and no face's walls fall straight away, yet the outline is the part's silhouette, read
+/// from its outermost upright walls: one profile round all of it, down to the part's bottom.
+#[test]
+fn a_slot_across_a_chamfered_top_does_not_lose_the_outline() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 20, "corner": [-30, -20, 0], "body_name": "Block"}));
+    let edges = json!([
+        [0, 20, 20],
+        [0, -20, 20],
+        [30, 0, 20],
+        [-30, 0, 20],
+        [0, 20, 0],
+        [0, -20, 0],
+        [30, 0, 0],
+        [-30, 0, 0],
+        [30, 20, 10],
+        [-30, 20, 10],
+        [30, -20, 10],
+        [-30, -20, 10]
+    ]);
+    run(&mut s, "solid.chamfer", json!({"edges": edges, "distance": 0.5}));
+    run(&mut s, "solid.box", json!({"length": 70, "width": 6, "height": 15, "corner": [-35, -3, 12], "operation": "cut"}));
+    let feats = run(&mut s, "cam.features", json!({}));
+    let profiles = feats["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 1, "{feats}");
+    let p = &profiles[0];
+    let b = &p["bounds"];
+    assert!(near(&b[0][0], -30.0) && near(&b[0][1], -20.0) && near(&b[1][0], 30.0) && near(&b[1][1], 20.0), "{p}");
+    assert!(near(&p["bottom_z"], 0.0) && near(&p["top_z"], 20.0), "{p}");
+    // The rectangle less its four corner chamfers.
+    assert!((f(&p["area"]) - (60.0 * 40.0 - 4.0 * 0.125)).abs() < 1e-3, "{p}");
+    // The chamfers along the top edges are listed, at 45 degrees.
+    let chamfers = feats["chamfers"].as_array().unwrap();
+    assert!(!chamfers.is_empty() && chamfers.iter().all(|c| near(&c["angle_deg"], 45.0)), "{feats}");
+}
+
+#[test]
+fn walls_of_holes_from_the_side_are_not_surfaces() {
+    // A block with a counterbored port from the side meeting a port from the top, and a drilled
+    // cross passage from the end meeting a hole from the top: the side port's and the passage's
+    // walls (and the passage's drill point) run square to Z, hidden from the tool there. They are
+    // holes for another setup, not curved areas to rough and finish from the top.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 40, "corner": [-30, -20, 0], "body_name": "Block"}));
+    for h in [
+        json!({"position": [-15, 0, 40], "type": "counterbore", "diameter": 8, "depth": 25, "cb_diameter": 14, "cb_depth": 2}),
+        json!({"position": [-15, -20, 22], "type": "counterbore", "diameter": 8, "depth": 25, "cb_diameter": 14, "cb_depth": 2}),
+        json!({"position": [5, 0, 40], "type": "drilled", "diameter": 6, "depth": 30}),
+        json!({"position": [30, 0, 12], "type": "drilled", "diameter": 5, "depth": 35}),
+    ] {
+        run(&mut s, "solid.hole", h);
+    }
+    let f = run(&mut s, "cam.features", json!({}));
+    assert_eq!(f["surfaces"].as_array().unwrap().len(), 0, "{}", f["surfaces"]);
+    // The top's holes are still found (the port, its counterbore and the drilled hole), and the
+    // side ones are said to need another setup.
+    assert_eq!(f["holes"].as_array().unwrap().len(), 3, "{}", f["holes"]);
+    assert!(f["notes"].as_array().unwrap().iter().any(|n| n.as_str().is_some_and(|n| n.starts_with("3 holes run square to Z"))), "{}", f["notes"]);
+}
+
+/// A curved face is reported as deep as it goes, not as deep as its whole sphere or torus: the
+/// dome's cap from the block's top (0) to its crown (7), where the sphere's bottom (-17) was
+/// given; a fillet round a pocket's floor from the floor up.
+#[test]
+fn curved_faces_are_reported_at_their_true_depth() {
+    let mut s = dome();
+    let feats = run(&mut s, "cam.features", json!({}));
+    let surfaces = feats["surfaces"].as_array().unwrap();
+    assert_eq!(surfaces.len(), 1, "{feats}");
+    let d = &surfaces[0];
+    assert!(f64::abs(f(&d["bottom_z"])) < 1e-6 && (f(&d["top_z"]) - 7.0).abs() < 1e-6, "{d}");
+    // A 2D operation on a curved area has no outline to cut, and says where the area is.
+    let job = json!({"job": {"machine": "3axis", "post": "linuxcnc_4axis", "tools": feature_tools(),
+        "operations": [{"name": "dome", "type": "pocket", "feature": d["id"], "tool": 6}]}, "dry_run": true});
+    let e = s.execute("cam.job", &job).unwrap_err().to_string();
+    assert!(e.contains("no outline for a 2D operation"), "{e}");
+    // A bowl: the sphere's bottom is on the face (read as a round).
+    let mut bowl = Session::default();
+    run(&mut bowl, "solid.box", json!({"length": 40, "width": 40, "height": 20, "corner": [-20, -20, -20], "body_name": "Block"}));
+    run(&mut bowl, "solid.sphere", json!({"radius": 10, "center": [0, 0, 2], "operation": "cut"}));
+    let feats = run(&mut bowl, "cam.features", json!({}));
+    let b = &feats["fillets"][0];
+    assert!((f(&b["bottom_z"]) + 8.0).abs() < 1e-6 && f64::abs(f(&b["top_z"])) < 1e-6, "{feats}");
+    // The part's setup is as deep as the block, not the sphere's whole extent.
+    assert!((f(&feats["setups"][0]["bottom_z"]) + 20.0).abs() < 1e-6, "{feats}");
+}
+
+/// A hole straight through a handle domed top and underside (its mouths on spheres, curves rather
+/// than circles) is a through hole from the top.
+#[test]
+fn a_through_hole_opening_on_curved_faces_is_a_hole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 120, "width": 30, "height": 20, "corner": [-60, -15, -10], "body_name": "Handle"}));
+    run(&mut s, "solid.sphere", json!({"radius": 300, "center": [0, 0, -290], "operation": "intersect"}));
+    run(&mut s, "solid.sphere", json!({"radius": 300, "center": [0, 0, 290], "operation": "intersect"}));
+    for x in [-50.0, 50.0] {
+        run(&mut s, "solid.cylinder", json!({"diameter": 5, "height": 40, "base": [x, 0, -20], "operation": "cut"}));
+    }
+    let feats = run(&mut s, "cam.features", json!({}));
+    let holes = feats["holes"].as_array().unwrap();
+    assert_eq!(holes.len(), 2, "{feats}");
+    for h in holes {
+        assert_eq!(h["floor"], "through", "{h}");
+        assert!((f(&h["diameter"]) - 5.0).abs() < 1e-6, "{h}");
+        // From the highest point of its mouth on the dome down past the lowest of the other.
+        let (top, bottom) = (f(&h["top_z"]), f(&h["bottom_z"]));
+        assert!(top > 5.0 && top < 10.0 && bottom < -5.0 && bottom > -10.0, "{h}");
+    }
+}
+
+/// A hole drilled across a round bar (its ends where it meets the turned surface, curves rather
+/// than circles) is a hole on the 4th axis: through, at the A angle its axis comes up at, from
+/// the bar's top. The diameters turned about the A axis are listed with their X ranges.
+#[test]
+fn a_hole_drilled_across_a_round_bar_is_found_on_the_4th_axis() {
+    let mut s = shaft();
+    let f = run(&mut s, "cam.features", json!({"axis": "a"}));
+    let holes = f["holes"].as_array().unwrap();
+    assert_eq!(holes.len(), 1, "{f}");
+    let h = &holes[0];
+    assert!(near(&h["diameter"], 4.0) && h["through"] == true && h["floor"] == "through", "{h}");
+    assert!(near(&h["center_work"][0], -10.0) && near(&h["center"][0], -10.0), "{h}");
+    let a = h["a_deg"].as_f64().unwrap_or(0.0).abs();
+    assert!(a < 1e-6 || (a - 180.0).abs() < 1e-6, "{h}");
+    // From the bar's top (7, the small diameter's radius) through to its bottom.
+    assert!((h["top_z"].as_f64().unwrap() - 7.0).abs() < 1e-3 && (h["bottom_z"].as_f64().unwrap() + 7.0).abs() < 1e-3, "{h}");
+    // The flat is a step on the A = 0 side; the 3-axis look still finds no hole across the bar.
+    assert!(f["faces"].as_array().unwrap().iter().any(|x| x["role"] == "step"), "{f}");
+    assert!(run(&mut s, "cam.features", json!({}))["holes"].as_array().unwrap().is_empty());
+    // The two turned diameters, each with its X range.
+    let turned = f["turned"].as_array().unwrap();
+    let d = |dia: f64| turned.iter().find(|t| near(&t["diameter"], dia)).unwrap_or_else(|| panic!("{f}"));
+    assert!(near(&d(14.0)["x_min"], -20.0) && near(&d(14.0)["x_max"], 0.0), "{f}");
+    assert!(near(&d(20.0)["x_min"], 0.0) && near(&d(20.0)["x_max"], 20.0), "{f}");
 }

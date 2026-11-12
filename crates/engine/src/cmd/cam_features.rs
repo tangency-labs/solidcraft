@@ -1,8 +1,9 @@
 //! `cam.features`: the machinable features of a part, found on the exact B-rep of its bodies
 //! (never on a mesh): round holes along the tool axis (through or blind, counterbores and
 //! countersinks), closed pockets (a planar floor walled all round, its islands and the smallest
-//! radius of its inside corners; or none, an opening through the part) and the planar faces
-//! facing the tool, the pockets' floors among them.
+//! radius of its inside corners; or none, an opening through the part), planar faces facing the
+//! tool, outer profiles, fillets and chamfers on top edges, other curved areas, and on a 4th
+//! axis the A angle that brings each side up and the diameters turned about the A axis.
 //!
 //! Everything is read from the record: a face's analytic surface (`face_surface`), its loops of
 //! oriented edges and the faces on the other side of each edge, the edges' exact curves (lines,
@@ -11,10 +12,11 @@
 //! boss is read from the planar faces at its ends (in an inner loop with the wall going into the
 //! material, or a floor's outer loop), else by classifying a point beside it.
 //!
-//! Each feature gets an id (`hole:0`, `pocket:1`, `face:2`…), numbered per kind in a fixed order
-//! (from the top down, then by position), so the same part and the same parameters give the same
-//! ids. `cam.job` operations name them through [`Lazy`], which finds the features the way
-//! `cam.features` does with the job's bodies, origin and tolerance.
+//! Each feature gets an id (`hole:0`, `pocket:1`, `face:2`, `profile:0`…), numbered per kind in
+//! a fixed order (setup, then from the top down, then by position), so the same part and the
+//! same parameters give the same ids. `cam.job` operations name them through [`Lazy`], which
+//! finds the features the way `cam.features` does with the job's bodies, origin, tolerance and
+//! machine.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::{PI, TAU};
@@ -23,6 +25,8 @@ use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use serde_json::Value;
 use solidcore_record::brep::{Brep, Curve, Loop as BrepLoop};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_cam::indexed::{frame_for_index, index_for_axis};
+use solidcraft_cam::kinematics::Machine;
 use solidcraft_cam::{Frame, Heights};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::{Body, EdgeCircle, FaceSurface, PlanarPiece, PointClass, edge_circle, face_surface};
@@ -32,7 +36,8 @@ use crate::cmd::CommandSpec;
 use crate::params::bad;
 use crate::schema::cam::{HeightsPartial, SideSpec};
 use crate::schema::cam_features::{
-    CamFeaturesParams, CamFeaturesReply, Countersink, FaceReport, HoleGroup, HoleReport, HoleThread, IslandReport, PocketReport, SetupReport,
+    AxisSpec, CamFeaturesParams, CamFeaturesReply, Countersink, EdgeBreakReport, FaceReport, HoleGroup, HoleReport, HoleThread, IslandReport,
+    PocketReport, ProfileReport, SetupReport, SurfaceReport, TurnedReport, WrappedReport,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -45,15 +50,31 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("cam.features", "CAM Fe
     .contract(&FEATURES_CONTRACT)
     .output(output_schema_for::<CamFeaturesReply>)
     .params(
-        "bodies?: [names] (default every visible body); origin?: [x,y,z] (work zero, as a job's); tolerance?: mm (default 0.01) →          setups: [{tool_axis, top_z, bottom_z, bounds, features}], holes: [{id: \"hole:k\", center, center_work, diameter, top_z,          bottom_z, depth, through, floor: through|flat|cone|round, tip_z?, counterbore?, counterbore_of?, countersink?}], hole_groups,          pockets: [{id: \"pocket:k\", floor_z, top_z, depth, outline, area, min_corner_radius, sharp_corners, walls_vertical, islands,          through? (an opening through the part: a slot, a window)}], faces: [{id: \"face:k\", z, area, role:          top|plateau|step|island_top|pocket_floor|hole_floor}], notes. Read from the exact B-rep, in work coordinates (Z the tool          axis). A cam.job pocket or contour takes `feature: \"pocket:0\"` (heights default from the feature); the ids are the same          for the same bodies, origin and tolerance",
+        "bodies?: [names] (default every visible body); origin?: [x,y,z] (work zero, as a job's); axis?: \"z\" | \"a\" (a 4th axis about \
+         work X: every side square to X, at the A angle that brings it up; default z); tolerance?: mm (default 0.01) → setups: [{a_deg, \
+         tool_axis, top_z, bottom_z, bounds, swing_radius?, features}], holes: [{id: \"hole:k\", a_deg?, center, center_work, diameter, \
+         top_z, bottom_z, depth, through, floor: through|flat|cone|round, tip_z?, counterbore?, counterbore_of?, countersink?}], hole_groups, \
+         pockets: [{id: \"pocket:k\", floor_z, top_z, depth, outline, area, min_corner_radius, sharp_corners, walls_vertical, islands, \
+         through? (an opening through the part: a slot, a window)}], faces: [{id: \"face:k\", z, area, role: \
+         top|plateau|step|island_top|pocket_floor|hole_floor|wrapped_wall}], profiles: [{id: \"profile:k\", top_z, bottom_z, outline, \
+         min_concave_radius?}], fillets, chamfers, surfaces, turned (axis a: [{id: \"turned:k\", diameter, x_min, x_max, lobe?: [ids of \
+         the sides standing out of it], radius_max?, profile?: [[a_deg, radius]]}]), wrapped (axis a: [{id: \"wrapped:k\", radius, \
+         floor_radius, depth, x_min, x_max, a_min_deg, a_max_deg, span_deg, outline unrolled at radius}]), notes. Read from the exact \
+         B-rep, in each setup's frame (its Z the tool axis). A cam.job pocket or contour takes `feature: \"pocket:0\"` (heights default \
+         from the feature); the ids are the same for the same bodies, origin and axis",
     )];
 
+/// Most setups (A angles) looked at.
+const MAX_SETUPS: usize = 360;
 /// Most faces a body may have to be looked at.
 const MAX_FACES: usize = 20_000;
 /// Directions within this of each other (as 1 - cos) are the same.
 const PARALLEL: f64 = 1e-9;
 /// A face whose normal's Z is within this of 0 is a wall.
 const SQUARE: f64 = 1e-7;
+/// Faces sloping less than this from the tool axis, degrees, falling from a top face, are drafted
+/// walls rather than chamfers.
+const DRAFT_MAX_DEG: f64 = 20.0;
 /// Turning more than this (radians) where two pieces of an outline meet is a corner.
 const CORNER: f64 = 0.02;
 /// Most points of a curve sampled into an outline.
@@ -68,9 +89,101 @@ fn features(s: &mut Session, p: &Value) -> Result<Value> {
     let tol = tolerance(cmd, params.tolerance)?;
     let origin = params.origin.unwrap_or([0.0; 3]);
     finite_point(&origin, "`origin`").map_err(|e| bad(cmd, e))?;
+    let axis = params.axis.unwrap_or_default();
+    let machine = match axis {
+        AxisSpec::Z => Machine::three_axis(),
+        AxisSpec::A => Machine::four_axis_a(),
+    };
     let names = part_names(cmd, s, params.bodies.as_deref())?;
-    let set = recognize(cmd, s, &names, v3(origin), tol)?;
+    let mut set = recognize(cmd, s, &names, v3(origin), axis, tol, &machine)?;
+    if axis == AxisSpec::A {
+        let st = s.world_state()?;
+        lobes(&mut set.reply, &st, v3(origin), tol);
+    }
     serde_json::to_value(&set.reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// Degrees of A between the radii of a lobe's `profile`.
+const LOBE_STEP_DEG: f64 = 15.0;
+
+/// Each turned diameter that sides at A angles (faces, edge breaks, curved areas) stand out of
+/// within its X range, as a cam's lobe stands out of its base circle: named with those sides, its
+/// radius every [`LOBE_STEP_DEG`] of A at the middle of the sides along X and the largest of
+/// them, each found by classifying points on the exact body along the ray up at that angle.
+fn lobes(reply: &mut CamFeaturesReply, st: &solidcraft_doc::ModelState, origin: Vec3, tol: f64) {
+    let swing = reply.setups.iter().filter_map(|su| su.swing_radius).fold(0.0, f64::max);
+    let mut sides: Vec<(String, String, f64, f64)> = Vec::new();
+    for f in reply.faces.iter().filter(|f| f.a_deg.is_some()) {
+        sides.push((f.id.clone(), f.body.clone(), f.bounds[0][0], f.bounds[1][0]));
+    }
+    for r in reply.fillets.iter().chain(&reply.chamfers).filter(|r| r.a_deg.is_some()) {
+        sides.push((r.id.clone(), r.body.clone(), r.bounds[0][0], r.bounds[1][0]));
+    }
+    for f in reply.surfaces.iter().filter(|f| f.a_deg.is_some()) {
+        sides.push((f.id.clone(), f.body.clone(), f.bounds[0][0], f.bounds[1][0]));
+    }
+    // Each side on the narrowest turned diameter of its body whose X range holds it.
+    let mut on: Vec<Vec<(String, f64, f64)>> = vec![Vec::new(); reply.turned.len()];
+    for (id, body, x0, x1) in sides {
+        let best = reply
+            .turned
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.body == body && t.x_min <= x0 + tol && t.x_max >= x1 - tol)
+            .min_by(|a, b| (a.1.x_max - a.1.x_min).total_cmp(&(b.1.x_max - b.1.x_min)));
+        if let Some(list) = best.and_then(|(k, _)| on.get_mut(k)) {
+            list.push((id, x0, x1));
+        }
+    }
+    let steps = (360.0 / LOBE_STEP_DEG).round() as usize;
+    for (t, list) in reply.turned.iter_mut().zip(on) {
+        if list.is_empty() || swing <= 0.0 {
+            continue;
+        }
+        let Some(b) = st.bodies.iter().find(|b| b.name == t.body).filter(|b| !b.body.is_mesh()) else { continue };
+        let lo_x = list.iter().map(|s| s.1).fold(t.x_min, f64::max);
+        let hi_x = list.iter().map(|s| s.2).fold(t.x_max, f64::min);
+        let x = if lo_x <= hi_x { 0.5 * (lo_x + hi_x) } else { 0.5 * (t.x_min + t.x_max) };
+        let r0 = t.diameter * 0.5;
+        let mut profile = Vec::with_capacity(steps);
+        for k in 0..steps {
+            let a_deg = k as f64 * LOBE_STEP_DEG;
+            let a = a_deg.to_radians();
+            let inside = |r: f64| {
+                let p = origin + Vec3::new(x, r * a.sin(), r * a.cos());
+                matches!(b.body.classify_point(p), Ok(PointClass::Inside))
+            };
+            let (mut lo, mut hi) = (r0 + tol, swing + 1.0);
+            let r = if !inside(lo) {
+                r0
+            } else if inside(hi) {
+                continue;
+            } else {
+                // Halved down to a tenth of the tolerance: some 20 steps over a lobe's height.
+                for _ in 0..64 {
+                    if hi - lo <= tol * 0.1 {
+                        break;
+                    }
+                    let mid = 0.5 * (lo + hi);
+                    if inside(mid) {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                0.5 * (lo + hi)
+            };
+            profile.push([a_deg, r9((r / tol).round() * tol)]);
+        }
+        let top = profile.iter().map(|p| p[1]).fold(r0, f64::max);
+        if top <= r0 + tol {
+            // Sides cut into the diameter (a flat), not standing out of it.
+            continue;
+        }
+        t.lobe = list.into_iter().map(|s| s.0).collect();
+        t.radius_max = Some(top);
+        t.profile = profile;
+    }
 }
 
 fn tolerance(cmd: &str, t: Option<f64>) -> Result<f64> {
@@ -110,9 +223,11 @@ pub(super) fn part_names(cmd: &str, s: &Session, given: Option<&[String]>) -> Re
 /// One tool direction, as recognised.
 #[derive(Clone, Debug)]
 pub(crate) struct Setup {
+    pub a_deg: f64,
     pub frame: Frame,
     pub top: f64,
     pub bottom: f64,
+    pub swing: Option<f64>,
 }
 
 /// What kind of outline a feature gives a 2D operation.
@@ -121,6 +236,9 @@ pub(crate) enum Kind {
     Hole,
     Pocket,
     Face,
+    Profile,
+    /// No outline: fillets, chamfers, surfaces, turned diameters.
+    Area,
 }
 
 /// A feature's exact geometry, in its setup's frame.
@@ -138,6 +256,9 @@ pub(crate) struct Geo {
     pub hole: Option<(Vec2, f64, bool)>,
     /// What a 2D operation on it is told when its depth is zero.
     pub flat_top: bool,
+    /// For a face, one per segment of `outer`: whether the part falls away below the face past
+    /// that edge (an open side of a step or plateau) rather than a wall rising from it.
+    pub open: Vec<bool>,
 }
 
 /// The features of a part.
@@ -169,10 +290,15 @@ impl FeatureSet {
                 }
             }
         };
+        let along = match self.reply.axis {
+            AxisSpec::Z => {
+                "found along Z only, as the job's machine has no A axis about X (with `machine: \"4axis_a\"` the sides are found too; \
+                 `cam.features {axis: \"z\"}` gives these ids)"
+            }
+            AxisSpec::A => "found on every side about X, as the job's machine has an A axis (`cam.features {axis: \"a\"}` gives these ids)",
+        };
         let shown: String = if id.chars().count() > 40 { format!("{}…", id.chars().take(40).collect::<String>()) } else { id.to_string() };
-        Err(format!(
-            "no feature `{shown}`: {known}; features are found along Z with the job's bodies, origin and tolerance (`cam.features` gives these ids)"
-        ))
+        Err(format!("no feature `{shown}`: {known}; features are {along}, with the job's bodies and origin"))
     }
 
     pub fn setup(&self, g: &Geo) -> Option<&Setup> {
@@ -185,19 +311,28 @@ pub(crate) struct Lazy {
     bodies: Option<Vec<String>>,
     origin: Vec3,
     tol: f64,
+    machine: Machine,
     cell: std::sync::OnceLock<std::result::Result<FeatureSet, String>>,
 }
 
 impl Lazy {
-    pub fn new(bodies: Option<Vec<String>>, origin: Vec3, tol: f64) -> Lazy {
-        Lazy { bodies, origin, tol, cell: std::sync::OnceLock::new() }
+    pub fn new(bodies: Option<Vec<String>>, origin: Vec3, tol: f64, machine: &Machine) -> Lazy {
+        Lazy { bodies, origin, tol, machine: machine.clone(), cell: std::sync::OnceLock::new() }
+    }
+
+    /// The axis features are found along for `machine`: `a` with one rotary about X, else `z`.
+    pub fn axis_of(machine: &Machine) -> AxisSpec {
+        match machine.rotaries.as_slice() {
+            [one] if one.direction.normalized().is_some_and(|d| d.x.abs() > 1.0 - PARALLEL) => AxisSpec::A,
+            _ => AxisSpec::Z,
+        }
     }
 
     pub fn get(&self, cmd: &str, s: &Session) -> Result<&FeatureSet> {
         let found = self.cell.get_or_init(|| {
             let run = || -> Result<FeatureSet> {
                 let names = part_names(cmd, s, self.bodies.as_deref())?;
-                recognize(cmd, s, &names, self.origin, self.tol)
+                recognize(cmd, s, &names, self.origin, Lazy::axis_of(&self.machine), self.tol, &self.machine)
             };
             run().map_err(|e| match e {
                 EngineError::BadParams { msg, .. } => msg,
@@ -218,15 +353,19 @@ pub(crate) struct FeatureCut {
 /// The heights of an operation on a feature of `setup` whose material runs from `top` down to
 /// `bottom`, `given` laid over them. Those left out are worked out from those given: the retract
 /// 3 mm above the material (the setup's top or the `top` given, the higher), the clearance 10 mm
-/// above it and 5 mm above the retract given. Out of order, the refusal names each height and
-/// where it came from.
+/// above it, 5 mm above the retract given and 5 mm past the swing on a 4th axis. Out of order,
+/// the refusal names each height and where it came from.
 pub(super) fn feature_heights(setup: &Setup, top: f64, bottom: f64, given: Option<&HeightsPartial>) -> std::result::Result<Heights, String> {
     let g = given.copied().unwrap_or_default();
     let top_v = g.top.unwrap_or(top);
     let bottom_v = g.bottom.unwrap_or(bottom);
     let material = setup.top.max(top_v);
     let retract = g.retract.unwrap_or(material + 3.0);
-    let clearance = g.clearance.unwrap_or((material + 10.0).max(retract + 5.0));
+    let mut clearance = (material + 10.0).max(retract + 5.0);
+    if let Some(sw) = setup.swing {
+        clearance = clearance.max(sw + 5.0);
+    }
+    let clearance = g.clearance.unwrap_or(clearance);
     let h = Heights { clearance, retract, top: top_v, bottom: bottom_v };
     if h.clearance < h.retract || h.retract < h.top || h.top < h.bottom {
         let from = |v: Option<f64>, x: f64, k: &str, d: &str| format!("{k} {} ({})", num(x), if v.is_some() { "given" } else { d });
@@ -241,25 +380,72 @@ pub(super) fn feature_heights(setup: &Setup, top: f64, bottom: f64, given: Optio
     Ok(h)
 }
 
-/// The regions, heights and contour side of a 2D operation on feature `id`. A pocket
+/// The feature `id` checked against the frame the operation runs in.
+fn in_frame<'s>(ctx: &Ctx<'_>, set: &'s FeatureSet, op: &str, id: &str, frame: &Frame) -> Result<&'s Geo> {
+    let g = set.get(id).map_err(|e| ctx.bad(op, e))?;
+    let Some(setup) = set.setup(g) else { return Err(ctx.bad(op, format!("feature `{id}` has no setup"))) };
+    let same = frame.z.dot(setup.frame.z) > 1.0 - PARALLEL && frame.origin.dist(setup.frame.origin) <= 1e-6;
+    if !same {
+        let a = num(setup.a_deg);
+        return Err(ctx.bad(
+            op,
+            format!(
+                "feature `{id}` is machined at A = {a}° (its tool axis is work [{}, {}, {}]) but this operation runs with its tool along work \
+                 [{}, {}, {}]: name a feature of the A = 0 setup",
+                num(setup.frame.z.x),
+                num(setup.frame.z.y),
+                num(setup.frame.z.z),
+                num(frame.z.x),
+                num(frame.z.y),
+                num(frame.z.z)
+            ),
+        ));
+    }
+    Ok(g)
+}
+
+/// The regions, heights and contour side of a 2D operation on feature `id`, in `frame`. A pocket
 /// passes its tool's radius as `facing`: on a face at the setup's top (nothing of the part above
 /// it) the pocket then covers the face's extent grown by the radius and 1 mm, so the tool's edge
 /// passes the face's edges instead of stopping a radius inside them.
-pub(super) fn feature_cut(ctx: &Ctx<'_>, op: &str, id: &str, given: Option<&HeightsPartial>, facing: Option<f64>) -> Result<FeatureCut> {
+pub(super) fn feature_cut(
+    ctx: &Ctx<'_>,
+    op: &str,
+    id: &str,
+    frame: &Frame,
+    given: Option<&HeightsPartial>,
+    facing: Option<f64>,
+) -> Result<FeatureCut> {
     let set = ctx.features.get(ctx.cmd, ctx.s)?;
-    let g = set.get(id).map_err(|e| ctx.bad(op, e))?;
+    let g = in_frame(ctx, set, op, id, frame)?;
     let Some(setup) = set.setup(g) else { return Err(ctx.bad(op, format!("feature `{id}` has no setup"))) };
-    let outer = match (g.kind, &g.outer, g.hole) {
-        (Kind::Hole, _, Some((center, diameter, _))) => Loop2::circle(center, diameter * 0.5),
-        (_, Some(o), _) => o.clone(),
-        _ => return Err(ctx.bad(op, format!("`{id}` has no outline for a 2D operation"))),
+    let outer = match (g.kind, &g.outer) {
+        (Kind::Hole, _) => {
+            let Some((center, diameter, _)) = g.hole else { return Err(ctx.bad(op, format!("`{id}` is not a hole"))) };
+            Loop2::circle(center, diameter * 0.5)
+        }
+        (Kind::Area, _) | (_, None) => {
+            let [lo, hi] = g.bounds;
+            return Err(ctx.bad(
+                op,
+                format!(
+                    "`{id}` has no outline for a 2D operation: it is a curved area from X {} Y {} to X {} Y {}, down to Z {}",
+                    num(lo[0]),
+                    num(lo[1]),
+                    num(hi[0]),
+                    num(hi[1]),
+                    num(g.bottom)
+                ),
+            ));
+        }
+        (_, Some(o)) => o.clone(),
     };
     let heights = feature_heights(setup, g.top, g.bottom, given).map_err(|e| ctx.bad(op, e))?;
     if !(heights.top > heights.bottom + 1e-9) {
         let why = if g.flat_top {
             format!(
                 "`{id}` is a face at Z {} with nothing above it in the model: give `heights.top` (the stock's top) to face it, or use its \
-                 pocket",
+                 pocket or the profile round it",
                 num(g.bottom)
             )
         } else {
@@ -282,7 +468,625 @@ pub(super) fn feature_cut(ctx: &Ctx<'_>, op: &str, id: &str, given: Option<&Heig
         }
         _ => outer,
     };
-    Ok(FeatureCut { regions: vec![Region2 { outer, holes }], heights, side: SideSpec::Inside })
+    let side = match g.kind {
+        Kind::Profile => SideSpec::Outside,
+        _ => SideSpec::Inside,
+    };
+    Ok(FeatureCut { regions: vec![Region2 { outer, holes }], heights, side })
+}
+
+/// For a clearing on face `id` (a step or plateau the part falls away from on some sides): its
+/// outline with each open side pushed out past the stock's box `stock` (else the face's own
+/// extent) grown by `margin`, then cut back to that grown box, so the clearing takes the material
+/// above the face out past the open sides as well as inside them. `None` for a face closed all
+/// round (or not a face). A side pushed out across another (a notch sharper than a right angle
+/// between two open sides) is refused, naming the face.
+pub(super) fn open_region(ctx: &Ctx<'_>, op: &str, id: &str, frame: &Frame, stock: Option<[Vec2; 2]>, margin: f64) -> Result<Option<Region2>> {
+    let set = ctx.features.get(ctx.cmd, ctx.s)?;
+    let g = in_frame(ctx, set, op, id, frame)?;
+    let [lo, hi] = stock.unwrap_or([Vec2::new(g.bounds[0][0], g.bounds[0][1]), Vec2::new(g.bounds[1][0], g.bounds[1][1])]);
+    let Some(outer) = g.outer.as_ref() else { return Ok(None) };
+    if g.kind != Kind::Face || g.open.len() != outer.segs.len() || !g.open.iter().any(|o| *o) {
+        return Ok(None);
+    }
+    let tol = set.reply.tolerance.max(1e-4);
+    // The outline as a polygon, each edge flagged open or not (counter-clockwise).
+    let mut pts: Vec<Vec2> = Vec::new();
+    let mut open: Vec<bool> = Vec::new();
+    for (seg, o) in outer.segs.iter().zip(&g.open) {
+        for p in loop_points(std::slice::from_ref(seg), tol) {
+            if pts.last().is_none_or(|l: &Vec2| l.dist(p) > 1e-9) {
+                pts.push(p);
+                open.push(*o);
+            }
+        }
+    }
+    if pts.first().zip(pts.last()).is_some_and(|(a, b)| pts.len() > 1 && a.dist(*b) <= 1e-9) {
+        pts.pop();
+        open.pop();
+    }
+    let (pts, open, chords) = bridge_notches(pts, open, tol);
+    let n = pts.len();
+    if n < 3 || !open.iter().any(|o| *o) {
+        return Ok(None);
+    }
+    let m = margin.max(0.0);
+    let (blo, bhi) = (Vec2::new(lo.x - m, lo.y - m), Vec2::new(hi.x + m, hi.y + m));
+    let [flo, fhi] = g.bounds;
+    let reach = (Vec2::new(bhi.x.max(fhi[0]), bhi.y.max(fhi[1])) - Vec2::new(blo.x.min(flo[0]), blo.y.min(flo[1]))).len() + 1.0;
+    let at = |i: usize| pts.get(i % n).copied().unwrap_or(Vec2::ZERO);
+    let normal = |i: usize| {
+        let d = at(i + 1) - at(i);
+        Vec2::new(d.y, -d.x).normalized()
+    };
+    let refuse = || {
+        ctx.bad(
+            op,
+            format!(
+                "`{id}` is open on sides that meet at a notch sharper than a right angle, so its outline cannot be carried out past them to the stock's edge: give a `polygon` round the face and past its open sides instead"
+            ),
+        )
+    };
+    // The outline with the sides flagged in `open` pushed out and cut back to the grown box,
+    // `None` where it cannot be (a notch sharper than a right angle between open sides). A side
+    // flagged in `near` is pushed out by `margin` only (the tool over it, not on to the stock's
+    // edge); the sides of one run of open sides are flagged alike.
+    let grow = |open: &[bool], near: &[bool]| -> Option<Vec<Vec2>> {
+        let reach_of = |k: usize| if near.get(k).copied().unwrap_or(false) { m.max(tol) } else { reach };
+        let mut out: Vec<Vec2> = Vec::with_capacity(n + 8);
+        for i in 0..n {
+            let prev = (i + n - 1) % n;
+            let (o_prev, o_here) = (open.get(prev).copied().unwrap_or(false), open.get(i).copied().unwrap_or(false));
+            let v = at(i);
+            match (o_prev, o_here) {
+                (false, false) => out.push(v),
+                (false, true) => {
+                    let ni = normal(i)?;
+                    out.push(v);
+                    out.push(v + ni * reach_of(i));
+                }
+                (true, false) => {
+                    let np = normal(prev)?;
+                    out.push(v + np * reach_of(prev));
+                    out.push(v);
+                }
+                (true, true) => {
+                    let (Some(np), Some(ni)) = (normal(prev), normal(i)) else { return None };
+                    let reach = reach_of(i);
+                    let k = 1.0 + np.dot(ni);
+                    if !(k > 1.0) {
+                        // A right angle or sharper between two open sides (outside corner or notch):
+                        // both pushed out separately, joined round the corner.
+                        if np.cross(ni) < 0.0 {
+                            return None;
+                        }
+                        out.push(v + np * reach);
+                        out.push(v + (np + ni).normalized().unwrap_or(np) * (reach * std::f64::consts::SQRT_2));
+                        out.push(v + ni * reach);
+                    } else {
+                        out.push(v + (np + ni) * (reach / k));
+                    }
+                }
+            }
+        }
+        // Cut back to the grown box (a convex window: Sutherland-Hodgman).
+        for (axis, bound, keep_above) in [(0, blo.x, true), (0, bhi.x, false), (1, blo.y, true), (1, bhi.y, false)] {
+            let coord = |p: Vec2| if axis == 0 { p.x } else { p.y };
+            let inside = |p: Vec2| if keep_above { coord(p) >= bound } else { coord(p) <= bound };
+            let cross = |a: Vec2, b: Vec2| {
+                let t = (bound - coord(a)) / (coord(b) - coord(a));
+                a.lerp(b, t.clamp(0.0, 1.0))
+            };
+            let src = std::mem::take(&mut out);
+            for (j, b) in src.iter().enumerate() {
+                let a = src.get((j + src.len() - 1) % src.len().max(1)).copied().unwrap_or(*b);
+                match (inside(a), inside(*b)) {
+                    (true, true) => out.push(*b),
+                    (true, false) => out.push(cross(a, *b)),
+                    (false, true) => {
+                        out.push(cross(a, *b));
+                        out.push(*b);
+                    }
+                    (false, false) => {}
+                }
+            }
+        }
+        out.dedup_by(|a, b| a.dist(*b) <= 1e-9);
+        (out.len() >= 3 && polygon_area(&out) > tol * tol && !self_crossing(&out)).then_some(out)
+    };
+    let far = vec![false; n];
+    let mut out = grow(&open, &far).ok_or_else(refuse)?;
+    // The sides pushed out.
+    let mut keep = open.clone();
+    // Past the open sides the part must not rise above the face (a boss beyond a lower area, the
+    // far side of a pocket seen from a side setup): read from the exact solid at points over what
+    // the open sides add, within the stock, from just above the face up to the setup's top.
+    if part_above(ctx, ctx.features, set, g, frame, &pts, &out, (blo, bhi))?.is_some() {
+        // Past some open sides only (a notch open to the stock's edge at one end and into a
+        // deeper cut at the other, past which the part rises): each run of open sides pushed out
+        // on its own, kept open where the part does not rise past it; the others are cut to as
+        // the face's own edge, the clearing staying inside them.
+        keep = vec![false; n];
+        for run in open_runs(&open) {
+            let mut one = vec![false; n];
+            for &i in &run {
+                if let Some(o) = one.get_mut(i) {
+                    *o = true;
+                }
+            }
+            let Some(grown) = grow(&one, &far) else { continue };
+            if part_above(ctx, ctx.features, set, g, frame, &pts, &grown, (blo, bhi))?.is_none() {
+                for &i in &run {
+                    if let Some(o) = keep.get_mut(i) {
+                        *o = true;
+                    }
+                }
+            }
+        }
+        if keep.iter().any(|o| *o)
+            && let Some(grown) = grow(&keep, &far)
+        {
+            out = grown;
+        }
+    }
+    if let Some(at) = part_above(ctx, ctx.features, set, g, frame, &pts, &out, (blo, bhi))? {
+        return Err(ctx.bad(
+            op,
+            format!(
+                "`{id}` is open on some sides, but past them the part rises above it (at X {} Y {}): give a `polygon` round the face that stops short of it",
+                num(at.x),
+                num(at.y)
+            ),
+        ));
+    }
+    // A line bridging a round notch (a round hole that breaks into the face) is open into the hole
+    // by `margin` where all that lies within the hole's circle and the part does not rise there:
+    // the clearing goes over the hole and into the corners the line makes with the walls, which a
+    // closed line would leave.
+    let mut near = far.clone();
+    for (c, circle) in chords.iter().enumerate() {
+        let Some((centre, r)) = *circle else { continue };
+        let Some(nc) = normal(c) else { continue };
+        let (a, b) = (at(c), at(c + 1));
+        if [a, b, a.lerp(b, 0.5)].iter().any(|p| (*p + nc * m).dist(centre) > r - tol) {
+            continue;
+        }
+        let (mut k2, mut n2) = (keep.clone(), near.clone());
+        if let (Some(k), Some(nr)) = (k2.get_mut(c), n2.get_mut(c)) {
+            *k = true;
+            *nr = true;
+        }
+        if let Some(grown) = grow(&k2, &n2)
+            && part_above(ctx, ctx.features, set, g, frame, &pts, &grown, (blo, bhi))?.is_none()
+        {
+            (keep, near, out) = (k2, n2, grown);
+        }
+    }
+    // An island is in the way only where the cut goes below its top: the face's own.
+    let holes: Vec<Loop2> = g.islands.iter().filter(|(_, top)| *top > g.bottom + ctx.tol).map(|(l, _)| l.clone()).collect();
+    Ok(Some(Region2 { outer: Loop2::polygon(&out), holes }))
+}
+
+/// For a contour inside face `id` with walls on some sides and open on others (a step, a slot's
+/// floor): its outline with the open sides carried out by `margin` past the face ([`open_region`]
+/// with no stock), so the pass along a wall goes on past the face's open end instead of turning
+/// a tool's radius short of it and leaving the corner there. `None` for a face open all round or
+/// closed all round, for any other feature, and where the outline cannot be carried out (the
+/// part rising past an open side): the face's own outline then serves.
+pub(super) fn walled_open_region(ctx: &Ctx<'_>, op: &str, id: &str, frame: &Frame, margin: f64) -> Option<Region2> {
+    let set = ctx.features.get(ctx.cmd, ctx.s).ok()?;
+    let g = in_frame(ctx, set, op, id, frame).ok()?;
+    if g.kind != Kind::Face || !g.open.iter().any(|o| *o) || g.open.iter().all(|o| *o) {
+        return None;
+    }
+    open_region(ctx, op, id, frame, None, margin).ok().flatten()
+}
+
+/// The runs of consecutive open sides of an outline (`open`, one flag per side, round the
+/// outline): the indices of each, in order, a run across the end joined to the one at the start.
+pub(super) fn open_runs(open: &[bool]) -> Vec<Vec<usize>> {
+    let n = open.len();
+    let is_open = |i: usize| open.get(i % n.max(1)).copied().unwrap_or(false);
+    let Some(start) = (0..n).find(|&i| !is_open(i)) else {
+        return if n > 0 { vec![(0..n).collect()] } else { Vec::new() };
+    };
+    let mut runs: Vec<Vec<usize>> = Vec::new();
+    let mut cur: Vec<usize> = Vec::new();
+    for k in 1..=n {
+        let i = (start + k) % n;
+        if is_open(i) {
+            cur.push(i);
+        } else if !cur.is_empty() {
+            runs.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        runs.push(cur);
+    }
+    runs
+}
+
+/// A face's outline `pts` (counter-clockwise, each edge flagged open where the part falls away
+/// past it) with every notch where the part falls away into the face bridged: a run of open
+/// edges between two closed ones, all of it on the face's side of the straight line between its
+/// ends (a hole or a slot that breaks into the face, seen from above), becomes that line, closed.
+/// Clearing over the notch cuts air above what falls away there, and the outline then has no
+/// notch an open side could not be carried out past.
+///
+/// With each edge of the outline, where it is such a line over a round notch (a round hole that
+/// breaks into the face), the circle of that notch: its centre and radius.
+pub(super) fn bridge_notches(pts: Vec<Vec2>, open: Vec<bool>, tol: f64) -> (Vec<Vec2>, Vec<bool>, Vec<Option<(Vec2, f64)>>) {
+    let n = pts.len();
+    if n < 4 || open.len() != n || open.iter().all(|o| *o) || !open.iter().any(|o| *o) {
+        let none = vec![None; n];
+        return (pts, open, none);
+    }
+    let at = |i: usize| pts.get(i % n).copied().unwrap_or(Vec2::ZERO);
+    let is_open = |i: usize| open.get(i % n).copied().unwrap_or(false);
+    // Start after a closed edge, so that no run wraps round the end.
+    let Some(start) = (0..n).find(|i| !is_open(*i) && is_open(i + 1)) else {
+        let none = vec![None; n];
+        return (pts, open, none);
+    };
+    let mut out_pts: Vec<Vec2> = Vec::with_capacity(n);
+    let mut out_open: Vec<bool> = Vec::with_capacity(n);
+    let mut out_chord: Vec<Option<(Vec2, f64)>> = Vec::with_capacity(n);
+    let mut k = 0;
+    while k < n {
+        let i = start + 1 + k;
+        if !is_open(i) {
+            out_pts.push(at(i));
+            out_open.push(false);
+            out_chord.push(None);
+            k += 1;
+            continue;
+        }
+        // The run of open edges from vertex i to vertex j (edge i joins i and i + 1).
+        let mut len = 0;
+        while len < n && is_open(i + len) {
+            len += 1;
+        }
+        let (a, b) = (at(i), at(i + len));
+        let chord = b - a;
+        let inward = len >= 2
+            && chord.len() > tol
+            && (1..len).all(|q| {
+                let v = at(i + q) - a;
+                chord.x * v.y - chord.y * v.x >= -tol * chord.len()
+            })
+            && (1..len).any(|q| {
+                let v = at(i + q) - a;
+                chord.x * v.y - chord.y * v.x > tol * chord.len()
+            });
+        if inward {
+            // The circle through its ends and its middle point, where every point of it is on it.
+            let circle = circle_through(a, at(i + len / 2), b).filter(|(c, r)| (1..len).all(|q| (at(i + q).dist(*c) - r).abs() <= 10.0 * tol));
+            out_pts.push(a);
+            out_open.push(false);
+            out_chord.push(circle);
+        } else {
+            for q in 0..len {
+                out_pts.push(at(i + q));
+                out_open.push(true);
+                out_chord.push(None);
+            }
+        }
+        k += len;
+    }
+    if out_pts.len() < 3 {
+        let none = vec![None; n];
+        (pts, open, none)
+    } else {
+        (out_pts, out_open, out_chord)
+    }
+}
+
+/// The circle through `a`, `b` and `c` (centre and radius), `None` when they are in a line.
+fn circle_through(a: Vec2, b: Vec2, c: Vec2) -> Option<(Vec2, f64)> {
+    let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    if !(d.abs() > 1e-12) {
+        return None;
+    }
+    let (a2, b2, c2) = (a.x * a.x + a.y * a.y, b.x * b.x + b.y * b.y, c.x * c.x + c.y * c.y);
+    let centre =
+        Vec2::new((a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d, (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d);
+    let r = centre.dist(a);
+    (centre.x.is_finite() && centre.y.is_finite() && r.is_finite()).then_some((centre, r))
+}
+
+/// A point over `grown` but outside `face` (both polygons in `frame`'s XY), within the stock's
+/// box `stock`, where the job's part has material above face `g` (from just above it up to its
+/// setup's top); `None` when there is none. Read from the exact solid: first its edges (every
+/// straight edge exactly, arcs at points 0.05 mm apart), which a fin, a rib or a boss however
+/// thin has over the area; then, for a face rising over it with its edges outside it, points
+/// about 1 mm apart (at most some 4000) classified against the solid.
+fn part_above(
+    ctx: &Ctx<'_>,
+    lazy: &Lazy,
+    set: &FeatureSet,
+    g: &Geo,
+    frame: &Frame,
+    face: &[Vec2],
+    grown: &[Vec2],
+    stock: (Vec2, Vec2),
+) -> Result<Option<Vec2>> {
+    let names = part_names(ctx.cmd, ctx.s, lazy.bodies.as_deref())?;
+    let st = ctx.s.world_state()?;
+    let bodies: Vec<&Body> = st.bodies.iter().filter(|b| names.contains(&b.name) && !b.body.is_mesh()).map(|b| &b.body).collect();
+    let top = set.setup(g).map_or(g.top, |su| su.top.max(g.top));
+    let eps = (set.reply.tolerance * 4.0).max(1e-3);
+    let heights = [g.bottom + eps, 0.5 * (g.bottom + top), top - eps];
+    let (lo, hi) = stock;
+    let (blo, bhi) = (
+        Vec2::new(
+            grown.iter().map(|p| p.x).fold(f64::INFINITY, f64::min).max(lo.x),
+            grown.iter().map(|p| p.y).fold(f64::INFINITY, f64::min).max(lo.y),
+        ),
+        Vec2::new(
+            grown.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max).min(hi.x),
+            grown.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max).min(hi.y),
+        ),
+    );
+    if !(bhi.x > blo.x && bhi.y > blo.y) {
+        return Ok(None);
+    }
+    Ok(part_above_read(&bodies, lazy.origin, frame, face, grown, (blo, bhi), heights, g.bottom, top, eps))
+}
+
+/// [`part_above`]'s reading of the exact solid, over box `(blo, bhi)`.
+#[allow(clippy::too_many_arguments)]
+fn part_above_read(
+    bodies: &[&Body],
+    origin: Vec3,
+    frame: &Frame,
+    face: &[Vec2],
+    grown: &[Vec2],
+    (blo, bhi): (Vec2, Vec2),
+    heights: [f64; 3],
+    bottom: f64,
+    top: f64,
+    eps: f64,
+) -> Option<Vec2> {
+    if let Some(q) = edges_above(bodies, origin, frame, face, grown, (bottom + eps, top), eps) {
+        return Some(q);
+    }
+    // A point inside the part above the floor has a face of it straight above (where the
+    // part ends going up), over the same point: only points over a face rising above the floor
+    // are read, none when no such face is over the box.
+    let floor = heights.iter().copied().filter(|z| *z > bottom).fold(f64::INFINITY, f64::min);
+    let rising = faces_rising(bodies, origin, frame, (blo, bhi), floor);
+    if rising.as_ref().is_some_and(Vec::is_empty) {
+        return None;
+    }
+    let over = |q: Vec2| rising.as_ref().is_none_or(|r| r.iter().any(|(lo, hi)| !(q.x < lo.x || q.x > hi.x || q.y < lo.y || q.y > hi.y)));
+    let step = ((bhi.x - blo.x) * (bhi.y - blo.y) / 4000.0).sqrt().max(1.0);
+    let (nx, ny) = (((bhi.x - blo.x) / step).ceil() as usize + 1, ((bhi.y - blo.y) / step).ceil() as usize + 1);
+    for j in 0..ny.min(4000) {
+        for i in 0..nx.min(4000) {
+            let q = Vec2::new((blo.x + i as f64 * step).min(bhi.x), (blo.y + j as f64 * step).min(bhi.y));
+            if !inside_polygon(grown, q) || inside_polygon(face, q) || !over(q) {
+                continue;
+            }
+            for z in heights.iter().filter(|z| **z > bottom) {
+                let p = frame.to_world(Vec3::new(q.x, q.y, *z)) + origin;
+                if bodies.iter().any(|b| matches!(b.classify_point(p), Ok(PointClass::Inside))) {
+                    return Some(q);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The boxes (in `frame`'s XY) of the faces of `bodies` that overlap box `(blo, bhi)` there and
+/// may reach height `floor` or above it, each from the face's exact form ([`face_bound`]);
+/// `None` when some face has no known bound (then every point is to be read).
+fn faces_rising(bodies: &[&Body], origin: Vec3, frame: &Frame, (blo, bhi): (Vec2, Vec2), floor: f64) -> Option<Vec<(Vec2, Vec2)>> {
+    // Wider by a little more than rounding, so a face meeting the floor or the box counts.
+    let slack = 1e-9 * (1.0 + floor.abs() + blo.len() + bhi.len());
+    let mut out = Vec::new();
+    for b in bodies {
+        let t = Topo::new("", b, origin);
+        for f in 0..t.record.faces.len() {
+            let range = |d: Vec3| face_bound(&t, f, d).map(|(lo, hi)| (lo - frame.origin.dot(d), hi - frame.origin.dot(d)));
+            let (_, ztop) = range(frame.z)?;
+            if ztop < floor - slack {
+                continue;
+            }
+            let ((x0, x1), (y0, y1)) = (range(frame.x)?, range(frame.y)?);
+            if x1 < blo.x - slack || x0 > bhi.x + slack || y1 < blo.y - slack || y0 > bhi.y + slack {
+                continue;
+            }
+            out.push((Vec2::new(x0 - slack, y0 - slack), Vec2::new(x1 + slack, y1 + slack)));
+        }
+    }
+    Some(out)
+}
+
+/// The range of `p · dir` (for a unit `dir`, `p` less `t`'s origin) over face `f` of `t`, from
+/// its exact form, never narrower: a plane's over its edges (a linear function on a flat region
+/// is extreme on its edge), a cylinder's or cone's over the piece of it between its edges' range
+/// along its axis (its rims, and a cone's apex), a sphere's or torus's over the whole of it.
+/// `None` when it has no known bound (a free-form face, a face with a lone vertex for a loop).
+fn face_bound(t: &Topo<'_>, f: usize, dir: Vec3) -> Option<(f64, f64)> {
+    let face = t.record.faces.get(f)?;
+    if face.loops.is_empty() || face.loops.iter().any(|l| !matches!(l, BrepLoop::Edges { .. })) {
+        return None;
+    }
+    // How far a circle round axis `k` reaches along `dir` per unit of its radius.
+    let side = |k: Vec3| (1.0 - k.dot(dir).powi(2)).max(0.0).sqrt();
+    let rim = |c: Vec3, r: f64, k: Vec3| (c.dot(dir) - r.abs() * side(k), c.dot(dir) + r.abs() * side(k));
+    let out = match t.surface(f)? {
+        FaceSurface::Plane { .. } => t.face_range(f, dir, false)?,
+        FaceSurface::Cylinder { origin, axis, radius } => {
+            let k = axis.vec();
+            let (a0, a1) = t.face_range(f, k, false)?;
+            let at = |a: f64| *origin + k * (a - origin.dot(k));
+            let ((l0, h0), (l1, h1)) = (rim(at(a0), *radius, k), rim(at(a1), *radius, k));
+            (l0.min(l1), h0.max(h1))
+        }
+        FaceSurface::Cone { apex, axis, half_angle } => {
+            let k = axis.vec();
+            let (a0, a1) = t.face_range(f, k, false)?;
+            let tan = half_angle.tan();
+            let at = |a: f64| rim(*apex + k * (a - apex.dot(k)), (a - apex.dot(k)) * tan, k);
+            let ((l0, h0), (l1, h1)) = (at(a0), at(a1));
+            let v = apex.dot(dir);
+            (l0.min(l1).min(v), h0.max(h1).max(v))
+        }
+        FaceSurface::Sphere { center, radius } => (center.dot(dir) - radius.abs(), center.dot(dir) + radius.abs()),
+        FaceSurface::Torus { center, axis, major, minor } => {
+            let reach = major.abs() * side(axis.vec()) + minor.abs();
+            (center.dot(dir) - reach, center.dot(dir) + reach)
+        }
+    };
+    (out.0.is_finite() && out.1.is_finite()).then_some(out)
+}
+
+/// A point (in `frame`'s XY) of an edge of `bodies` that lies over `grown` but not over `face`,
+/// each by more than `margin`, between heights `zs` (exclusive below, inclusive above): straight
+/// edges exactly (split where they cross either outline, each piece's middle tested), circular
+/// ones at points 0.05 mm apart (at most 20000 an edge). Other curves are left to the caller.
+fn edges_above(bodies: &[&Body], origin: Vec3, frame: &Frame, face: &[Vec2], grown: &[Vec2], zs: (f64, f64), margin: f64) -> Option<Vec2> {
+    let (z0, z1) = zs;
+    // No height is above `z0` and at or below `z1` (a face at its setup's top, nothing of the
+    // part rising past it): nothing to find, and no band to hold a point to.
+    if !(z0 < z1) {
+        return None;
+    }
+    let within = |p: Vec3| {
+        let q = Vec2::new(p.x, p.y);
+        p.z > z0
+            && p.z <= z1
+            && inside_polygon(grown, q)
+            && boundary_dist(grown, q) > margin
+            && !inside_polygon(face, q)
+            && boundary_dist(face, q) > margin
+    };
+    let local = |p: Vec3| frame.to_local(p - origin);
+    let glo = Vec2::new(grown.iter().map(|p| p.x).fold(f64::INFINITY, f64::min), grown.iter().map(|p| p.y).fold(f64::INFINITY, f64::min));
+    let ghi = Vec2::new(grown.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max), grown.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max));
+    for b in bodies {
+        let rec = b.record();
+        let vertex = |v: u32| rec.vertices.get(v as usize).map(|v| local(p3(v.point)));
+        for (i, e) in rec.edges.iter().enumerate() {
+            if let Some(c) = edge_circle(b, i) {
+                let (center, start, k) = (local(c.center), local(c.start), frame.dir_to_local(c.axis.vec()));
+                // An arc wholly below or above the heights, or beside the outline, is passed by.
+                let r = c.radius;
+                if center.z + r <= z0
+                    || center.z - r > z1
+                    || center.x + r < glo.x
+                    || center.x - r > ghi.x
+                    || center.y + r < glo.y
+                    || center.y - r > ghi.y
+                {
+                    continue;
+                }
+                let v = start - center;
+                let n = ((c.radius * c.angle.abs() / 0.05).ceil() as usize).clamp(16, 20_000);
+                for j in 0..=n {
+                    let t = c.angle * j as f64 / n as f64;
+                    let p = center + v * t.cos() + k.cross(v) * t.sin() + k * (k.dot(v) * (1.0 - t.cos()));
+                    if within(p) {
+                        return Some(Vec2::new(p.x, p.y));
+                    }
+                }
+                continue;
+            }
+            if !matches!(e.curve, Curve::Line { .. }) {
+                continue;
+            }
+            let (Some(a), Some(b2)) = (vertex(e.vertices[0]), vertex(e.vertices[1])) else { continue };
+            // The part of the segment between the heights.
+            let d = b2 - a;
+            let (mut lo, mut hi) = (0.0f64, 1.0f64);
+            if d.z.abs() > 1e-12 {
+                let (t0, t1) = ((z0 - a.z) / d.z, (z1 - a.z) / d.z);
+                lo = lo.max(t0.min(t1));
+                hi = hi.min(t0.max(t1));
+            } else if !(a.z > z0 && a.z <= z1) {
+                continue;
+            }
+            if !(hi >= lo) {
+                continue;
+            }
+            // Split where it crosses either outline; the middle of each piece tells.
+            let (a2, d2) = (Vec2::new(a.x, a.y), Vec2::new(d.x, d.y));
+            let mut ts = vec![lo, hi];
+            if d2.len() > 1e-12 {
+                for poly in [grown, face] {
+                    for (c, f) in poly.iter().zip(poly.iter().cycle().skip(1)) {
+                        let w = *f - *c;
+                        let den = d2.cross(w);
+                        if den.abs() <= 1e-15 {
+                            continue;
+                        }
+                        let t = (*c - a2).cross(w) / den;
+                        let u = (*c - a2).cross(d2) / den;
+                        if t > lo && t < hi && (-1e-12..=1.0 + 1e-12).contains(&u) {
+                            ts.push(t);
+                        }
+                    }
+                }
+            }
+            ts.sort_by(f64::total_cmp);
+            for w in ts.windows(2) {
+                let t = 0.5 * (w[0] + w[1]);
+                let p = a + d * t;
+                // Within the heights: the ends of the piece are its limits, not past them.
+                let p = Vec3::new(p.x, p.y, p.z.clamp(z0 + 1e-12, z1));
+                if within(p) {
+                    return Some(Vec2::new(p.x, p.y));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The distance from `q` to the outline of the closed polygon `pts`.
+fn boundary_dist(pts: &[Vec2], q: Vec2) -> f64 {
+    pts.iter()
+        .zip(pts.iter().cycle().skip(1))
+        .map(|(a, b)| {
+            let d = *b - *a;
+            let t = if d.len2() > 0.0 { ((q - *a).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+            q.dist(*a + d * t)
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// Whether `q` is inside the closed polygon `pts` (even-odd).
+fn inside_polygon(pts: &[Vec2], q: Vec2) -> bool {
+    let mut odd = false;
+    for (a, b) in pts.iter().zip(pts.iter().cycle().skip(1)) {
+        if (a.y > q.y) != (b.y > q.y) && q.x < a.x + (q.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+            odd = !odd;
+        }
+    }
+    odd
+}
+
+/// Whether two edges of the closed polygon `pts` that do not share a corner cross.
+fn self_crossing(pts: &[Vec2]) -> bool {
+    let n = pts.len();
+    let edge = |i: usize| (pts.get(i).copied().unwrap_or(Vec2::ZERO), pts.get((i + 1) % n).copied().unwrap_or(Vec2::ZERO));
+    let orient = |a: Vec2, b: Vec2, c: Vec2| (b - a).cross(c - a);
+    for i in 0..n {
+        let (a, b) = edge(i);
+        for j in i + 2..n {
+            if i == 0 && j == n - 1 {
+                continue;
+            }
+            let (c, d) = edge(j);
+            let (d1, d2, d3, d4) = (orient(a, b, c), orient(a, b, d), orient(c, d, a), orient(c, d, b));
+            if d1 * d2 < -1e-12 && d3 * d4 < -1e-12 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// The regions and heights of a contour or pocket, and the side a contour takes by default:
@@ -307,7 +1111,7 @@ pub(super) fn op_cut(
                 ctx.bad(op, "a `feature` is found along the design's own Z: name it in a job without `orientation`, or give a `sketch` or `polygon`")
             );
         }
-        let cut = feature_cut(ctx, op, id, heights, facing)?;
+        let cut = feature_cut(ctx, op, id, frame, heights, facing)?;
         return Ok(OpCut { regions: cut.regions, heights: cut.heights, side: Some(cut.side) });
     }
     let regions = ctx.regions(op, sketch, profiles, polygon, frame)?;
@@ -889,6 +1693,41 @@ impl<'a> Topo<'a> {
         out
     }
 
+    /// The largest distance of face `f` from the work X axis (an upper bound).
+    fn face_swing(&self, f: usize) -> f64 {
+        let yz = |p: Vec3| p.y.hypot(p.z);
+        let mut out: f64 = 0.0;
+        for e in self.face_edges(f) {
+            match self.shapes.get(e) {
+                Some(EdgeShape::Circle(c)) => out = out.max(yz(c.center) + c.radius),
+                Some(EdgeShape::Hull(pts)) => out = pts.iter().fold(out, |m, p| m.max(yz(*p))),
+                Some(EdgeShape::Sampled(s)) => out = out.max(s.max_of(yz)),
+                None => {}
+            }
+        }
+        match self.surface(f) {
+            Some(FaceSurface::Sphere { center, radius }) => out = out.max(yz(*center) + radius),
+            Some(FaceSurface::Torus { center, major, minor, .. }) => out = out.max(yz(*center) + major + minor),
+            Some(_) => {}
+            None => match self.freeform(f) {
+                Some(ff) => {
+                    let m = ff.s.margin;
+                    let read = self.freeform_max(ff, yz, out + m).unwrap_or(out) + m;
+                    let net = ff.s.hull.iter().map(|p| yz(*p)).fold(None, |acc: Option<f64>, v| Some(acc.map_or(v, |a| a.max(v))));
+                    out = out.max(net.map_or(read, |h| read.min(h)));
+                }
+                None => {
+                    if let Some(face) = self.record.faces.get(f) {
+                        let mut pts = Vec::new();
+                        surface_hull(face.parameters(), self.origin, &mut pts);
+                        out = pts.iter().fold(out, |m, p| m.max(yz(*p)));
+                    }
+                }
+            },
+        }
+        out
+    }
+
     /// Face `f`'s loops read in the plane at height `z` of `frame` (square to its Z).
     fn face_loops(&self, f: usize, frame: &Frame, z: f64, tol: f64) -> Vec<LoopGeo> {
         let Some(loops) = self.loops.get(f) else { return Vec::new() };
@@ -1045,6 +1884,284 @@ fn reversed(s: &Seg2) -> Seg2 {
             Seg2::Bezier { n, p: q }
         }
     }
+}
+
+/// Where `a` and `b` run along the same line or circle the opposite ways over more than `tol`,
+/// what is left of each once that shared stretch is taken out of both (the edge two faces seen
+/// side by side share); `None` where they share no stretch. Lines and arcs are compared exactly;
+/// other curves only when one is the other reversed.
+fn cancel(a: &Seg2, b: &Seg2, tol: f64) -> Option<(Vec<Seg2>, Vec<Seg2>)> {
+    match (*a, *b) {
+        (Seg2::Line { a: p, b: q }, Seg2::Line { a: r, b: s }) => {
+            let la = p.dist(q);
+            let u = unit2(q - p)?;
+            let v = unit2(s - r)?;
+            if u.dot(v) > -1.0 + 1e-9 {
+                return None;
+            }
+            let off = |x: Vec2| ((x - p).x * u.y - (x - p).y * u.x).abs();
+            if off(r) > tol || off(s) > tol {
+                return None;
+            }
+            let at = |x: Vec2| (x - p).dot(u);
+            let (tr, ts) = (at(r), at(s));
+            let (lo, hi) = (ts.max(0.0), tr.min(la));
+            if hi - lo <= tol {
+                return None;
+            }
+            let pt = |t: f64| p + u * t;
+            let mut left_a = Vec::new();
+            if lo > tol {
+                left_a.push(Seg2::Line { a: p, b: pt(lo) });
+            }
+            if la - hi > tol {
+                left_a.push(Seg2::Line { a: pt(hi), b: q });
+            }
+            let mut left_b = Vec::new();
+            if tr - hi > tol {
+                left_b.push(Seg2::Line { a: r, b: pt(hi) });
+            }
+            if lo - ts > tol {
+                left_b.push(Seg2::Line { a: pt(lo), b: s });
+            }
+            Some((left_a, left_b))
+        }
+        (Seg2::Arc { center: ca, radius: ra, start: sa, sweep: wa }, Seg2::Arc { center: cb, radius: rb, start: sb, sweep: wb }) => {
+            if ca.dist(cb) > tol || (ra - rb).abs() > tol || wa * wb >= 0.0 || !(ra > tol) {
+                return None;
+            }
+            // Each as the angles it covers counter-clockwise.
+            let span = |s: f64, w: f64| if w > 0.0 { (s, s + w) } else { (s + w, s) };
+            let (a0, a1) = span(sa, wa);
+            let (b0, b1) = span(sb, wb);
+            let (k, lo, hi) = (-2..=2)
+                .map(|k| {
+                    let shift = std::f64::consts::TAU * f64::from(k);
+                    (shift, a0.max(b0 + shift), a1.min(b1 + shift))
+                })
+                .max_by(|x, y| (x.2 - x.1).total_cmp(&(y.2 - y.1)))?;
+            if (hi - lo) * ra <= tol {
+                return None;
+            }
+            let arc = |center: Vec2, radius: f64, from: f64, to: f64, ccw: bool| {
+                if ccw {
+                    Seg2::Arc { center, radius, start: from, sweep: to - from }
+                } else {
+                    Seg2::Arc { center, radius, start: to, sweep: from - to }
+                }
+            };
+            let mut left_a = Vec::new();
+            if (lo - a0) * ra > tol {
+                left_a.push(arc(ca, ra, a0, lo, wa > 0.0));
+            }
+            if (a1 - hi) * ra > tol {
+                left_a.push(arc(ca, ra, hi, a1, wa > 0.0));
+            }
+            let mut left_b = Vec::new();
+            if (lo - (b0 + k)) * rb > tol {
+                left_b.push(arc(cb, rb, b0 + k, lo, wb > 0.0));
+            }
+            if ((b1 + k) - hi) * rb > tol {
+                left_b.push(arc(cb, rb, hi, b1 + k, wb > 0.0));
+            }
+            // Each piece in the order its curve runs.
+            if wa < 0.0 {
+                left_a.reverse();
+            }
+            if wb < 0.0 {
+                left_b.reverse();
+            }
+            Some((left_a, left_b))
+        }
+        (Seg2::Line { .. } | Seg2::Arc { .. }, _) | (_, Seg2::Line { .. } | Seg2::Arc { .. }) => None,
+        _ => {
+            let back = reversed(b);
+            [0.0, 0.25, 0.5, 0.75, 1.0].iter().all(|t| seg_point(a, *t).dist(seg_point(&back, *t)) <= tol).then(|| (Vec::new(), Vec::new()))
+        }
+    }
+}
+
+/// Most upright faces [`wall_outline`] reads.
+const MAX_WALL_FACES: usize = 2000;
+
+/// The part's outline seen along the setup's axis (`fr.z`) from its outermost upright flat walls,
+/// for a part whose top and bottom do not give it (a slot or notch splitting the top, chamfered or
+/// rounded edges all round): each upright plane's footprint (its exact extent along the wall),
+/// kept where nowhere along the setup's height (`lo` to `hi`, every level a vertex of the part is
+/// at and between) the part is just outside it, chained into loops; the largest, counter-
+/// clockwise, with the first wall's face. `None` where the footprints do not close up (an outline
+/// with round corners or drafted walls).
+fn wall_outline(t: &Topo<'_>, fr: &Frame, lo: f64, hi: f64, tol: f64) -> Option<(usize, Vec<Seg2>)> {
+    if !(hi > lo + tol) {
+        return None;
+    }
+    let eps = (tol * 5.0).max(1e-3);
+    // The levels to read at: between every two heights a vertex of the part is at, and evenly.
+    let mut zs: Vec<f64> = t.record.vertices.iter().map(|v| fr.to_local(p3(v.point) - t.origin).z).filter(|z| *z > lo && *z < hi).collect();
+    zs.extend([lo, hi]);
+    zs.sort_by(f64::total_cmp);
+    zs.dedup_by(|a, b| (*a - *b).abs() <= tol);
+    let mut levels: Vec<f64> = zs.windows(2).filter_map(|w| Some(0.5 * (w.first()? + w.get(1)?))).collect();
+    levels.extend((1..16).map(|i| lo + (hi - lo) * f64::from(i) / 16.0));
+    levels.truncate(512);
+    let solid_at = |q: Vec2, z: f64| matches!(t.body.classify_point(fr.to_world(Vec3::new(q.x, q.y, z)) + t.origin), Ok(PointClass::Inside));
+    let mut walls: Vec<(usize, Seg2)> = Vec::new();
+    let mut read = 0usize;
+    for f in 0..t.record.faces.len() {
+        let Some(FaceSurface::Plane { normal, point }) = t.surface(f) else { continue };
+        let n = normal.vec();
+        if fr.dir_to_local(n).z.abs() > SQUARE {
+            continue;
+        }
+        read += 1;
+        if read > MAX_WALL_FACES {
+            return None;
+        }
+        let d = n.cross(fr.z);
+        let dl = d.len();
+        if !(dl > 1e-9) {
+            continue;
+        }
+        let d = d * (1.0 / dl);
+        let Some((a, b)) = t.face_range(f, d, false) else { continue };
+        let at = point.dot(d);
+        let (pa, pb) = (fr.to_local(*point + d * (a - at)), fr.to_local(*point + d * (b - at)));
+        let (pa, pb) = (Vec2::new(pa.x, pa.y), Vec2::new(pb.x, pb.y));
+        if pa.dist(pb) <= tol {
+            continue;
+        }
+        let nl = fr.dir_to_local(n);
+        let Some(n2) = Vec2::new(nl.x, nl.y).normalized() else { continue };
+        // Outermost: on one side of it the part is nowhere, at its middle and near both ends,
+        // and that side is the outside.
+        let along = pb - pa;
+        let clear = |o: Vec2| [0.5, 0.05, 0.95].iter().all(|k| levels.iter().all(|z| !solid_at(pa + along * *k + o * eps, *z)));
+        let Some(out) = [n2, n2 * -1.0].into_iter().find(|o| clear(*o)) else { continue };
+        let seg = if along.cross(out) < 0.0 { Seg2::Line { a: pa, b: pb } } else { Seg2::Line { a: pb, b: pa } };
+        walls.push((f, seg));
+    }
+    // Footprints along one line, one inside another, are one wall (a wall split by a slot above
+    // its foot): the longest kept.
+    let len = |s: &Seg2| seg_point(s, 0.0).dist(seg_point(s, 1.0));
+    let mut keep: Vec<(usize, Seg2)> = Vec::new();
+    let mut order: Vec<&(usize, Seg2)> = walls.iter().collect();
+    order.sort_by(|x, y| len(&y.1).total_cmp(&len(&x.1)));
+    for w in order {
+        let (a, b) = (seg_point(&w.1, 0.0), seg_point(&w.1, 1.0));
+        let inside = keep.iter().any(|(_, k)| {
+            let (ka, kb) = (seg_point(k, 0.0), seg_point(k, 1.0));
+            let dir = kb - ka;
+            let l = dir.len();
+            l > tol
+                && [a, b]
+                    .iter()
+                    .all(|p| (dir.cross(*p - ka) / l).abs() <= tol && (*p - ka).dot(dir) >= -tol * l && (*p - ka).dot(dir) <= l * l + tol * l)
+        });
+        if !inside {
+            keep.push(*w);
+        }
+    }
+    let first = keep.iter().map(|(f, _)| *f).min()?;
+    let segs: Vec<Seg2> = keep.iter().map(|(_, s)| *s).collect();
+    let join = (tol * 10.0).max(1e-6);
+    // Chained end to start; every footprint must be used in one loop or another.
+    let mut used = vec![false; segs.len()];
+    let mut loops: Vec<Vec<Seg2>> = Vec::new();
+    while let Some(i0) = used.iter().position(|u| !*u) {
+        let s0 = *segs.get(i0)?;
+        if let Some(u) = used.get_mut(i0) {
+            *u = true;
+        }
+        let start = seg_point(&s0, 0.0);
+        let mut end = seg_point(&s0, 1.0);
+        let mut chain = vec![s0];
+        while end.dist(start) > join {
+            let k = (0..segs.len())
+                .filter(|k| !used.get(*k).copied().unwrap_or(true))
+                .filter_map(|k| Some((k, seg_point(segs.get(k)?, 0.0).dist(end))))
+                .filter(|(_, d)| *d <= join)
+                .min_by(|x, y| x.1.total_cmp(&y.1))?
+                .0;
+            if let Some(u) = used.get_mut(k) {
+                *u = true;
+            }
+            let s = *segs.get(k)?;
+            end = seg_point(&s, 1.0);
+            chain.push(s);
+        }
+        loops.push(chain);
+    }
+    let best = loops.into_iter().max_by(|a, b| loop_area(a, tol).abs().total_cmp(&loop_area(b, tol).abs()))?;
+    let area = loop_area(&best, tol);
+    (area.abs() > tol * tol).then(|| (first, oriented(&best, area, true)))
+}
+
+/// Most segments [`union_outline`] takes.
+const MAX_UNION_SEGS: usize = 4000;
+
+/// The outline of the faces whose outer loops (each counter-clockwise in one plane) are `loops`,
+/// seen together: the stretches two of them share (running opposite ways) taken out, the rest
+/// chained into loops. The largest loop is returned, counter-clockwise; `None` when the pieces
+/// do not close up (faces that overlap rather than meet).
+fn union_outline(loops: &[Vec<Seg2>], tol: f64) -> Option<Vec<Seg2>> {
+    let mut segs: Vec<Seg2> = loops.iter().flatten().copied().collect();
+    if segs.is_empty() || segs.len() > MAX_UNION_SEGS {
+        return None;
+    }
+    // Take out every shared stretch.
+    let mut i = 0;
+    while i < segs.len() {
+        let mut j = i + 1;
+        let mut changed = false;
+        while j < segs.len() {
+            let (Some(a), Some(b)) = (segs.get(i), segs.get(j)) else { break };
+            if let Some((left_a, left_b)) = cancel(a, b, tol) {
+                segs.remove(j);
+                segs.remove(i);
+                segs.extend(left_a);
+                segs.extend(left_b);
+                changed = true;
+                break;
+            }
+            j += 1;
+        }
+        if !changed {
+            i += 1;
+        } else {
+            i = 0;
+        }
+        if segs.len() > MAX_UNION_SEGS {
+            return None;
+        }
+    }
+    // Chain what is left into loops.
+    let join = (tol * 10.0).max(1e-6);
+    let mut used = vec![false; segs.len()];
+    let mut out: Vec<Vec<Seg2>> = Vec::new();
+    while let Some(first) = used.iter().position(|u| !*u) {
+        let Some(s0) = segs.get(first).copied() else { break };
+        used[first] = true;
+        let start = seg_point(&s0, 0.0);
+        let mut chain = vec![s0];
+        let mut end = seg_point(&s0, 1.0);
+        while end.dist(start) > join {
+            let next = segs
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| !used.get(*k).copied().unwrap_or(true))
+                .map(|(k, s)| (k, seg_point(s, 0.0).dist(end)))
+                .filter(|(_, d)| *d <= join)
+                .min_by(|x, y| x.1.total_cmp(&y.1))?;
+            used[next.0] = true;
+            let s = segs.get(next.0).copied()?;
+            end = seg_point(&s, 1.0);
+            chain.push(s);
+        }
+        out.push(chain);
+    }
+    let best = out.into_iter().max_by(|a, b| loop_area(a, tol).abs().total_cmp(&loop_area(b, tol).abs()))?;
+    let area = loop_area(&best, tol);
+    Some(oriented(&best, area, true))
 }
 
 /// A piece read in a plane as segments: a spline as lines within `tol`.
@@ -1341,8 +2458,44 @@ fn cyl_circles<'t>(t: &'t Topo<'_>, c: &Cyl, up: Vec3, tol: f64) -> Vec<(usize, 
     out
 }
 
-/// Points round a hole across a turned part, halfway along it, that must all be in material.
-const CROSS_HOLE_SAMPLES: usize = 24;
+/// For a cylinder square to X on a 4th-axis part, entered from the turned surface (an edge of
+/// its faces runs along a surface of revolution about X) with material just outside its wall
+/// halfway along it: a hole drilled across the bar. Its extent along `up` from its origin.
+fn cross_hole(t: &Topo<'_>, c: &Cyl, up: Vec3, tol: f64) -> Option<(f64, f64)> {
+    if c.axis.x.abs() > SQUARE {
+        return None;
+    }
+    let about_x = |a: Vec3| a.x.abs() > 1.0 - PARALLEL;
+    let entered = c.faces.iter().flat_map(|f| t.face_edges(*f)).any(|e| {
+        t.edge_faces.get(e).into_iter().flatten().any(|g| {
+            !c.faces.contains(g)
+                && matches!(t.surface(*g), Some(FaceSurface::Cylinder { axis, .. } | FaceSurface::Cone { axis, .. }) if about_x(axis.vec()))
+        })
+    });
+    if !entered {
+        return None;
+    }
+    let base = c.origin.dot(up);
+    let (lo, hi) =
+        c.faces.iter().flat_map(|f| t.face_edges(*f)).filter_map(|e| t.edge_range(e, up)).fold(None, |acc, (a, b)| Some(widen(acc, a, b)))?;
+    let (lo, hi) = (lo - base, hi - base);
+    if !(hi - lo > tol) {
+        return None;
+    }
+    // Material just outside the wall halfway along it, all the way round: a hole's wall closes
+    // round its axis, where a pocket's rounded end or corner (a part of a cylinder) has the
+    // pocket's air on one side.
+    let side = up.cross(Vec3::X).normalized()?;
+    let other = up.cross(side).normalized()?;
+    let mid = c.origin + up * ((lo + hi) * 0.5);
+    let eps = (tol * 2.0).max(c.radius * 1e-3);
+    let round = (0..CROSS_HOLE_SAMPLES).all(|k| {
+        let a = std::f64::consts::TAU * k as f64 / CROSS_HOLE_SAMPLES as f64;
+        let p = mid + (side * a.cos() + other * a.sin()) * (c.radius + eps) + t.origin;
+        matches!(t.body.classify_point(p), Ok(PointClass::Inside))
+    });
+    round.then_some((lo, hi))
+}
 
 /// For a cylinder whose two ends are curves where it meets curved faces (a hole straight through
 /// a domed or saddled part, its mouths on spheres or free-form faces), read from the exact B-rep:
@@ -1418,33 +2571,149 @@ fn down_past(t: &Topo<'_>, c: &Cyl, circles: &[(usize, f64, &EdgeCircle)], up: V
     round.then_some(bottom)
 }
 
+/// The angle round the A axis of a point in work coordinates: 0 at +Z, positive towards +Y,
+/// as [`solidcraft_cam::rotary`] has it.
+fn a_angle(p: Vec3) -> f64 {
+    p.y.atan2(p.z)
+}
+
+/// The pockets wrapped round the A axis on body `bi` ([`WrappedReport`]): a face on a cylinder
+/// about work X through work zero that covers part of a turn, with the void above it, material
+/// under it and material round the rest of the turn at its radius, its plane walls radial or
+/// square to X. Read from the exact faces: the floor's boundary (its vertices, and points along
+/// curves), and points classified against the body.
+fn wrapped_pockets(t: &Topo<'_>, bi: usize, tol: f64, out: &mut Vec<(Vec<i64>, WrappedReport, usize)>) {
+    for f in 0..t.record.faces.len() {
+        let Some(FaceSurface::Cylinder { origin, axis, radius }) = t.surface(f) else { continue };
+        let off = *origin - Vec3::X * origin.x;
+        if axis.vec().x.abs() < 1.0 - PARALLEL || off.len() > tol || *radius <= tol {
+            continue;
+        }
+        let rf = *radius;
+        // One loop only: a floor with islands is left to the other features.
+        let Some([lp]) = t.loops.get(f).map(Vec::as_slice) else { continue };
+        let vertex = |v: u32| t.record.vertices.get(v as usize).map(|v| p3(v.point) - t.origin);
+        let mut pts: Vec<Vec3> = Vec::new();
+        for (e, forward) in lp {
+            let Some(edge) = t.record.edges.get(*e) else { continue };
+            if let Some(p) = vertex(if *forward { edge.vertices[0] } else { edge.vertices[1] }) {
+                pts.push(p);
+            }
+            if let Some(EdgeShape::Sampled(sm)) = t.shapes.get(*e)
+                && sm.pts.len() > 2
+            {
+                let inner = &sm.pts[1..sm.pts.len() - 1];
+                if *forward {
+                    pts.extend_from_slice(inner);
+                } else {
+                    pts.extend(inner.iter().rev());
+                }
+            }
+        }
+        if pts.len() < 3 {
+            continue;
+        }
+        // The walls: every face next to the floor; planes must be radial or square to X.
+        let mut walls: Vec<usize> = Vec::new();
+        let mut plain = true;
+        for e in t.face_edges(f) {
+            for g in t.edge_faces.get(e).into_iter().flatten() {
+                if *g == f || walls.contains(g) {
+                    continue;
+                }
+                match t.surface(*g) {
+                    Some(FaceSurface::Plane { normal, point }) => {
+                        let n = normal.vec();
+                        let radial = n.x.abs() <= SQUARE && point.dot(n).abs() <= tol;
+                        plain &= radial || n.x.abs() >= 1.0 - PARALLEL;
+                    }
+                    // Another diameter about X: a step or a groove, turned.
+                    Some(FaceSurface::Cylinder { axis, .. }) if axis.vec().x.abs() >= 1.0 - PARALLEL => plain = false,
+                    _ => {}
+                }
+                walls.push(*g);
+            }
+        }
+        if !plain || walls.is_empty() {
+            continue;
+        }
+        // The part's surface the pocket is cut into: the walls reach out to it.
+        let outer = walls
+            .iter()
+            .flat_map(|g| t.face_edges(*g))
+            .filter_map(|e| t.record.edges.get(e))
+            .flat_map(|e| e.vertices)
+            .filter_map(vertex)
+            .map(|p| p.y.hypot(p.z))
+            .fold(0.0f64, f64::max);
+        if outer <= rf + tol {
+            continue;
+        }
+        // The turn the floor leaves out: the widest gap between its points' angles.
+        let mut angles: Vec<f64> = pts.iter().map(|p| a_angle(*p)).collect();
+        angles.sort_by(f64::total_cmp);
+        let Some(first) = angles.first().copied() else { continue };
+        let Some((gap_start, gap)) =
+            angles.iter().enumerate().map(|(i, a)| (*a, angles.get(i + 1).copied().unwrap_or(first + TAU) - a)).max_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            continue;
+        };
+        let span = TAU - gap;
+        if gap <= tol / rf || span <= tol / rf {
+            continue;
+        }
+        // Its start, within a half turn of A 0.
+        let a0 = (gap_start + gap + PI).rem_euclid(TAU) - PI;
+        let (x_min, x_max) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p.x), hi.max(p.x)));
+        let xm = (x_min + x_max) * 0.5;
+        let eps = (tol * 2.0).max(rf * 1e-3);
+        let class = |a: f64, r: f64| t.body.classify_point(Vec3::new(xm, r * a.sin(), r * a.cos()) + t.origin).ok();
+        // Material round the rest of the turn, the void over the floor and material under it.
+        if class(gap_start + gap * 0.5, rf + eps) != Some(PointClass::Inside)
+            || class(a0 + span * 0.5, rf + eps) != Some(PointClass::Outside)
+            || class(a0 + span * 0.5, rf - eps) != Some(PointClass::Inside)
+        {
+            continue;
+        }
+        // Unrolled at the outer radius, angles from the start of the pocket's turn.
+        let unroll = |p: &Vec3| {
+            let mut d = (a_angle(*p) - a0).rem_euclid(TAU);
+            if d > span + gap * 0.5 {
+                d -= TAU;
+            }
+            Vec2::new(p.x, outer * (a0 + d))
+        };
+        let mut outline: Vec<Vec2> = pts.iter().map(unroll).collect();
+        if polygon_area(&outline) < 0.0 {
+            outline.reverse();
+        }
+        walls.sort_unstable();
+        let report = WrappedReport {
+            id: String::new(),
+            body: t.name.clone(),
+            floor_face: f,
+            walls,
+            radius: r9(outer),
+            floor_radius: r9(rf),
+            depth: r9(outer - rf),
+            x_min: r9(x_min),
+            x_max: r9(x_max),
+            a_min_deg: r9(a0.to_degrees()),
+            a_max_deg: r9((a0 + span).to_degrees()),
+            span_deg: r9(span.to_degrees()),
+            outline: outline.into_iter().map(r2).collect(),
+        };
+        out.push((vec![q(x_min, tol), q(a0, tol), bi as i64, f as i64], report, bi));
+    }
+}
+
+/// Points round a hole across a turned part, halfway along it, that must all be in material.
+const CROSS_HOLE_SAMPLES: usize = 24;
+
 /// Points across a flat face tested for material over them (a grid of this many a side).
 const COVER_GRID: usize = 5;
 /// Points up a column over a flat face classified against a curved face that may hang over it.
 const COVER_COLUMN: usize = 64;
-
-/// The distance from `q` to the outline of the closed polygon `pts`.
-fn boundary_dist(pts: &[Vec2], q: Vec2) -> f64 {
-    pts.iter()
-        .zip(pts.iter().cycle().skip(1))
-        .map(|(a, b)| {
-            let d = *b - *a;
-            let t = if d.len2() > 0.0 { ((q - *a).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
-            q.dist(*a + d * t)
-        })
-        .fold(f64::INFINITY, f64::min)
-}
-
-/// Whether `q` is inside the closed polygon `pts` (even-odd).
-fn inside_polygon(pts: &[Vec2], q: Vec2) -> bool {
-    let mut odd = false;
-    for (a, b) in pts.iter().zip(pts.iter().cycle().skip(1)) {
-        if (a.y > q.y) != (b.y > q.y) && q.x < a.x + (q.y - a.y) / (b.y - a.y) * (b.x - a.x) {
-            odd = !odd;
-        }
-    }
-    odd
-}
 
 /// Whether the part has material over the whole of flat face `f` (its loops `loops` read at
 /// height `z` in `fr`, `oi` the outer one) along `fr`'s Z: a tool coming down that axis cannot
@@ -1539,6 +2808,115 @@ fn covered(t: &Topo<'_>, fr: &Frame, f: usize, loops: &[LoopGeo], oi: usize, z: 
     pts.iter().all(|q| over(*q))
 }
 
+/// Points across a face read for [`undercut_faces`], along each side.
+const UNDERCUT_GRID: usize = 8;
+
+/// The faces of `faces` a tool coming down `fr`'s Z cannot see all of (undercuts), read on the
+/// exact body: a flat face facing down with material under it (an overhanging wall: the tool
+/// reaches it neither from above nor turned over), and a flat face facing up with a face facing
+/// down over some of it (the part overhangs it there). Curved faces are not read.
+fn undercut_faces(t: &Topo<'_>, fr: &Frame, faces: &[usize], bottom: f64, tol: f64) -> Vec<usize> {
+    let lz = |n: Vec3| fr.dir_to_local(n).z;
+    let eps = (tol * 4.0).max(1e-3);
+    // A flat face's outline seen along Z and its height at a point of it.
+    let shape = |g: usize| -> Option<(Vec<Vec2>, Vec3, Vec3)> {
+        let Some(FaceSurface::Plane { normal, point }) = t.surface(g) else { return None };
+        let (n, p) = (fr.dir_to_local(normal.vec()), fr.to_local(*point));
+        let ls = t.face_loops(g, fr, p.z, tol);
+        let oi = ls.iter().enumerate().max_by(|a, b| a.1.area.abs().total_cmp(&b.1.area.abs())).map(|(i, _)| i)?;
+        let outer = loop_points(&ls.get(oi)?.segs, tol);
+        (outer.len() >= 3).then_some((outer, n, p))
+    };
+    let z_at = |n: Vec3, p: Vec3, q: Vec2| p.z - (n.x * (q.x - p.x) + n.y * (q.y - p.y)) / n.z;
+    let samples = |poly: &[Vec2]| -> Vec<Vec2> {
+        let b = bounds2(poly);
+        let mut out = Vec::new();
+        for i in 0..UNDERCUT_GRID {
+            for j in 0..UNDERCUT_GRID {
+                let u = (i as f64 + 0.5) / UNDERCUT_GRID as f64;
+                let v = (j as f64 + 0.5) / UNDERCUT_GRID as f64;
+                let q = Vec2::new(b[0][0] + (b[1][0] - b[0][0]) * u, b[0][1] + (b[1][1] - b[0][1]) * v);
+                if inside_polygon(poly, q) && boundary_dist(poly, q) > eps {
+                    out.push(q);
+                }
+            }
+        }
+        out
+    };
+    let down: Vec<(usize, Vec<Vec2>, Vec3, Vec3)> = (0..t.record.faces.len())
+        .filter(|g| matches!(t.surface(*g), Some(FaceSurface::Plane { normal, .. }) if lz(normal.vec()) < -SQUARE))
+        .filter_map(|g| shape(g).map(|(o, n, p)| (g, o, n, p)))
+        .collect();
+    let mut out = Vec::new();
+    for &f in faces {
+        if cancelled() {
+            break;
+        }
+        let Some(FaceSurface::Plane { normal, .. }) = t.surface(f) else { continue };
+        let up = lz(normal.vec());
+        if up < -SQUARE {
+            let Some((_, poly, n, p)) = down.iter().find(|d| d.0 == f) else { continue };
+            let under = samples(poly).into_iter().any(|q| {
+                let z = z_at(*n, *p, q) - eps;
+                (1..=COVER_COLUMN).any(|k| {
+                    let h = z - (z - bottom) * k as f64 / COVER_COLUMN as f64;
+                    matches!(t.body.classify_point(fr.to_world(Vec3::new(q.x, q.y, h)) + t.origin), Ok(PointClass::Inside))
+                })
+            });
+            if under {
+                out.push(f);
+            }
+        } else if up > SQUARE {
+            let Some((poly, n, p)) = shape(f) else { continue };
+            let over = samples(&poly).into_iter().any(|q| {
+                let z = z_at(n, p, q);
+                down.iter().any(|(g, o, dn, dp)| *g != f && inside_polygon(o, q) && boundary_dist(o, q) > eps && z_at(*dn, *dp, q) > z + eps)
+            });
+            if over {
+                out.push(f);
+            }
+        }
+    }
+    out
+}
+
+/// Points round a cone face, at the middle of its height, tested for which side the material is.
+const CONE_SAMPLES: usize = 16;
+
+/// Whether cone face `f`, its axis along `fr`'s Z, faces down: read from the exact solid at
+/// points round it at the middle of its height, material just above and none just below. Points
+/// of the cone off the face (material on neither side, or both) say nothing; one facing up, or
+/// none read, and it does not face down.
+fn cone_faces_down(t: &Topo<'_>, fr: &Frame, f: usize, tol: f64) -> bool {
+    let Some(FaceSurface::Cone { apex, axis, half_angle }) = t.surface(f) else { return false };
+    let a = fr.dir_to_local(axis.vec());
+    if !(a.z.abs() > 1.0 - PARALLEL) || !half_angle.is_finite() {
+        return false;
+    }
+    let Some((lo, hi)) = t.face_range(f, fr.z, true) else { return false };
+    let o = fr.origin.dot(fr.z);
+    let mid = 0.5 * (lo + hi) - o;
+    let c = fr.to_local(*apex);
+    let along = (mid - c.z) / a.z;
+    let r = along * half_angle.tan();
+    if !(along > tol && r > tol && r.is_finite()) {
+        return false;
+    }
+    let eps = (tol * 4.0).max(1e-3);
+    let inside = |x: f64, y: f64, z: f64| matches!(t.body.classify_point(fr.to_world(Vec3::new(x, y, z)) + t.origin), Ok(PointClass::Inside));
+    let (mut down, mut up) = (0, 0);
+    for k in 0..CONE_SAMPLES {
+        let th = std::f64::consts::TAU * k as f64 / CONE_SAMPLES as f64;
+        let (x, y) = (c.x + r * th.cos(), c.y + r * th.sin());
+        match (inside(x, y, mid + eps), inside(x, y, mid - eps)) {
+            (true, false) => down += 1,
+            (false, true) => up += 1,
+            _ => {}
+        }
+    }
+    down > 0 && up == 0
+}
+
 /// Whether the cylinder is a hole (material outside it): read from the planar faces at its
 /// ends, else by classifying a point just outside it. Only the ends where the wall closes all the
 /// way round are read: where a hole breaks into another feature (a slot across its foot) its
@@ -1589,6 +2967,14 @@ fn concave(t: &Topo<'_>, c: &Cyl, circles: &[(usize, f64, &EdgeCircle)], up: Vec
     }
 }
 
+/// A face as one setup sees it.
+#[derive(Clone)]
+struct Seen {
+    body: usize,
+    face: usize,
+    setup: usize,
+}
+
 struct Found {
     reply: CamFeaturesReply,
     geo: Vec<(String, Geo)>,
@@ -1598,19 +2984,34 @@ struct Found {
 struct Lists {
     holes: Vec<(Vec<i64>, HoleReport, Geo)>,
     pockets: Vec<(Vec<i64>, PocketReport, Geo, usize)>,
-    faces: Vec<(Vec<i64>, FaceReport, Geo)>,
+    faces: Vec<(Vec<i64>, FaceReport, Geo, Seen)>,
+    profiles: Vec<(Vec<i64>, ProfileReport, Geo, Seen)>,
+    fillets: Vec<(Vec<i64>, EdgeBreakReport, Geo)>,
+    chamfers: Vec<(Vec<i64>, EdgeBreakReport, Geo)>,
+    surfaces: Vec<(Vec<i64>, SurfaceReport, Geo)>,
+    turned: Vec<(Vec<i64>, TurnedReport)>,
+    /// Wrapped pockets, each with its body.
+    wrapped: Vec<(Vec<i64>, WrappedReport, usize)>,
     /// Counterbore pairs: (larger hole, smaller hole) as indices into `holes`.
     counterbores: Vec<(usize, usize)>,
 }
 
-/// Every feature of the bodies `names` of the design, seen down work Z.
-pub(crate) fn recognize(cmd: &str, s: &Session, names: &[String], origin: Vec3, tol: f64) -> Result<FeatureSet> {
+/// Every feature of the bodies `names`, along `axis`, on `machine`.
+pub(crate) fn recognize(cmd: &str, s: &Session, names: &[String], origin: Vec3, axis: AxisSpec, tol: f64, machine: &Machine) -> Result<FeatureSet> {
     let st = s.world_state()?;
-    recognize_in(cmd, &st, names, origin, tol)
+    recognize_in(cmd, &st, names, origin, axis, tol, machine)
 }
 
 /// [`recognize`] on the bodies of `st`.
-pub(crate) fn recognize_in(cmd: &str, st: &solidcraft_doc::ModelState, names: &[String], origin: Vec3, tol: f64) -> Result<FeatureSet> {
+pub(crate) fn recognize_in(
+    cmd: &str,
+    st: &solidcraft_doc::ModelState,
+    names: &[String],
+    origin: Vec3,
+    axis: AxisSpec,
+    tol: f64,
+    machine: &Machine,
+) -> Result<FeatureSet> {
     let mut bodies: Vec<&solidcraft_doc::ModelBody> = Vec::with_capacity(names.len());
     let mut notes: Vec<String> = Vec::new();
     for n in names {
@@ -1626,11 +3027,58 @@ pub(crate) fn recognize_in(cmd: &str, st: &solidcraft_doc::ModelState, names: &[
     }
     let topos: Vec<Topo<'_>> = bodies.iter().map(|b| Topo::new(&b.name, &b.body, origin)).collect();
 
-    // The setup: the tool down work Z, and the part's extent in it.
-    let mut setups = vec![Setup { frame: Frame::IDENTITY, top: 0.0, bottom: 0.0 }];
+    // The setups: +Z, and with a 4th axis every direction square to X a face or hole faces.
+    let mut dirs: Vec<Vec3> = vec![Vec3::Z];
+    if axis == AxisSpec::A {
+        for t in &topos {
+            for s in t.surfaces.iter().flatten() {
+                match s {
+                    FaceSurface::Plane { normal, .. } if normal.vec().x.abs() <= SQUARE => dirs.push(normal.vec()),
+                    FaceSurface::Cylinder { axis, .. } if axis.vec().x.abs() <= SQUARE => {
+                        dirs.push(axis.vec());
+                        dirs.push(-axis.vec());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let mut setups: Vec<Setup> = Vec::new();
+    let mut unreachable = 0usize;
+    for d in dirs {
+        let Some(d) = d.normalized() else { continue };
+        if setups.iter().any(|s| s.frame.z.dot(d) > 1.0 - PARALLEL) {
+            continue;
+        }
+        let Ok(rotary) = index_for_axis(machine, d) else {
+            unreachable += 1;
+            continue;
+        };
+        let Ok(frame) = frame_for_index(machine, &rotary) else { continue };
+        if frame.z.dot(d) < 1.0 - 1e-6 {
+            continue;
+        }
+        let a_deg = rotary.first().map_or(0.0, |a| r9(a.to_degrees()));
+        if setups.len() >= MAX_SETUPS {
+            notes.push(format!("more than {MAX_SETUPS} sides face square to X: only the first {MAX_SETUPS} are looked at"));
+            break;
+        }
+        setups.push(Setup { a_deg, frame, top: 0.0, bottom: 0.0, swing: None });
+    }
+    if unreachable > 0 {
+        notes.push(format!("{unreachable} directions faces look along cannot be reached by the machine's rotary axis"));
+    }
+    // A = 0 first, then going round.
+    setups.sort_by(|a, b| {
+        let key = |s: &Setup| (s.a_deg.rem_euclid(360.0) > 1e-9, s.a_deg.rem_euclid(360.0));
+        key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Each setup's extent.
     let mut setup_bounds: Vec<[[f64; 2]; 2]> = Vec::with_capacity(setups.len());
     for su in &mut setups {
         let (mut zr, mut xr, mut yr) = (None, None, None);
+        let mut swing: f64 = 0.0;
         for t in &topos {
             for f in 0..t.record.faces.len() {
                 let o = su.frame.origin;
@@ -1643,16 +3091,22 @@ pub(crate) fn recognize_in(cmd: &str, st: &solidcraft_doc::ModelState, names: &[
                 if let Some((lo, hi)) = t.face_range(f, su.frame.y, true) {
                     yr = Some(widen(yr, lo - o.dot(su.frame.y), hi - o.dot(su.frame.y)));
                 }
+                if axis == AxisSpec::A {
+                    swing = swing.max(t.face_swing(f));
+                }
             }
         }
         let (zlo, zhi) = zr.unwrap_or((0.0, 0.0));
         su.top = r9(zhi);
         su.bottom = r9(zlo);
+        if axis == AxisSpec::A {
+            su.swing = Some(r9(swing));
+        }
         let ((xl, xh), (yl, yh)) = (xr.unwrap_or_default(), yr.unwrap_or_default());
         setup_bounds.push([[xl, yl], [xh, yh]]);
     }
 
-    let found = find(&topos, &setups, tol);
+    let found = find(&topos, &setups, axis, tol, &mut notes);
     if cancelled() {
         return Err(bad(cmd, "cancelled"));
     }
@@ -1680,6 +3134,7 @@ pub(crate) fn recognize_in(cmd: &str, st: &solidcraft_doc::ModelState, names: &[
     }
     let mut reply = found.reply;
     tapped(&mut reply.holes, &st.threads, origin, tol);
+    reply.axis = axis;
     reply.origin = r3(origin);
     reply.bodies = names.to_vec();
     reply.tolerance = tol;
@@ -1689,10 +3144,12 @@ pub(crate) fn recognize_in(cmd: &str, st: &solidcraft_doc::ModelState, names: &[
         .zip(&setup_bounds)
         .enumerate()
         .map(|(i, (su, b))| SetupReport {
+            a_deg: su.a_deg,
             tool_axis: r3(su.frame.z),
             top_z: su.top,
             bottom_z: su.bottom,
             bounds: rb(*b),
+            swing_radius: su.swing,
             features: found.geo.iter().filter(|(_, g)| g.setup == i).map(|(id, _)| id.clone()).collect(),
         })
         .collect();
@@ -1745,10 +3202,15 @@ fn q(v: f64, tol: f64) -> i64 {
     if k.is_finite() { k.clamp(-9e15, 9e15) as i64 } else { 0 }
 }
 
-fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
+fn find(topos: &[Topo<'_>], setups: &[Setup], axis: AxisSpec, tol: f64, notes: &mut Vec<String>) -> Found {
     let mut l = Lists::default();
-    // Faces claimed by a feature (body, face), so they are listed once.
+    let a_of = |s: usize| if axis == AxisSpec::A { setups.get(s).map(|x| x.a_deg) } else { None };
+    // Faces claimed by a feature (body, face), so a later setup does not list them again.
     let mut claimed: BTreeSet<(usize, usize)> = BTreeSet::new();
+    let mut side_holes = 0usize;
+    // Bores on the A axis: (diameter, x_min, x_max, chamfers at its ends, the most its faces
+    // stand off the axis).
+    let mut a_bores: Vec<(f64, f64, f64, usize, f64)> = Vec::new();
     for (bi, t) in topos.iter().enumerate() {
         let cyls = cylinders(t, tol);
         let mut cyl_done: BTreeSet<usize> = BTreeSet::new();
@@ -1796,6 +3258,15 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                             if let Some((lo, hi)) = zrange(h)
                                 && lo >= z - tol
                             {
+                                // Turned to an index, the part's own faces slope: one sloping
+                                // up from a wall's top is no wall, and the wall ends where it
+                                // meets it.
+                                if si != 0 && matches!(t.surface(h), Some(FaceSurface::Plane { normal, .. }) if lz(normal.vec()) > SQUARE) {
+                                    if let Some((_, eh)) = t.edge_range(e, fr.z) {
+                                        top = top.max(eh - fr.origin.dot(fr.z));
+                                    }
+                                    continue;
+                                }
                                 top = top.max(hi);
                                 todo.push(h);
                             }
@@ -1814,11 +3285,29 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                 }
                 let along = lz(c.axis);
                 if along.abs() < 1.0 - PARALLEL {
+                    if si == 0 && axis == AxisSpec::Z && along.abs() <= SQUARE {
+                        // Counted once below, if it is a whole hole.
+                        let circles = cyl_circles(t, c, c.axis, tol);
+                        if full(&circles, tol) && concave(t, c, &circles, c.axis, tol) == Some(true) {
+                            side_holes += 1;
+                        }
+                    }
                     continue;
                 }
                 let up = if along > 0.0 { c.axis } else { -c.axis };
                 let circles = cyl_circles(t, c, up, tol);
-                let across = if full(&circles, tol) || !circles.is_empty() { None } else { curved_through(t, c, up, tol) };
+                // A hole drilled across a turned part (a 4th-axis bar): its ends are where it
+                // meets the turned surface, curves rather than circles. Its extent along its axis
+                // is its faces', and it is a hole when material is just outside its wall.
+                let across = if full(&circles, tol) {
+                    None
+                } else if axis == AxisSpec::A {
+                    cross_hole(t, c, up, tol)
+                } else if circles.is_empty() {
+                    curved_through(t, c, up, tol)
+                } else {
+                    None
+                };
                 if !full(&circles, tol) && across.is_none() {
                     continue;
                 }
@@ -1946,6 +3435,7 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                 let d = c.radius * 2.0;
                 let hole = HoleReport {
                     id: String::new(),
+                    a_deg: a_of(si),
                     body: t.name.clone(),
                     center: r2(center),
                     center_work: r3(top_pt),
@@ -1982,6 +3472,7 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                     bounds: [[center.x - r, center.y - r], [center.x + r, center.y + r]],
                     hole: Some((center, d, through)),
                     flat_top: false,
+                    open: Vec::new(),
                 };
                 let key = vec![si as i64, q(-top_z, tol), q(center.y, tol), q(center.x, tol), q(d, tol), bi as i64];
                 setup_holes.push(l.holes.len());
@@ -2001,6 +3492,7 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
             // Planar faces facing the tool.
             let mut island_walls: BTreeSet<usize> = BTreeSet::new();
             let mut setup_faces: Vec<(usize, Vec<usize>)> = Vec::new();
+            let mut candidates: Vec<(Vec<i64>, ProfileReport, Geo, Seen, Vec<usize>)> = Vec::new();
             for f in 0..t.record.faces.len() {
                 let Some(FaceSurface::Plane { normal, point }) = t.surface(f) else { continue };
                 if lz(normal.vec()) < 1.0 - PARALLEL {
@@ -2058,7 +3550,7 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                 let rises = |k: usize| {
                     outer.seg_beside.get(k).is_some_and(|gs| gs.iter().any(|g| matches!(zrange(*g), Some((lo, hi)) if hi > z + tol && lo > z - tol)))
                 };
-                let open_flags: Vec<bool> = if outer_lie == Lie::Up {
+                let mut open_flags: Vec<bool> = if outer_lie == Lie::Up {
                     Vec::new()
                 } else {
                     outer
@@ -2081,6 +3573,12 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                 // The faces rising from a side of it that is not open (in `outer.segs`' order).
                 let closed_side: BTreeSet<usize> =
                     outer.seg_beside.iter().zip(&open_flags).filter(|(_, open)| !**open).flat_map(|(g, _)| g.iter().copied()).collect();
+                if !(outer.area > 0.0) {
+                    open_flags.reverse();
+                }
+                if open_flags.len() != outer_ccw.len() || outer_lie != Lie::Mixed && outer_lie != Lie::Down {
+                    open_flags.clear();
+                }
                 let top = match outer_lie {
                     Lie::Up => wall_top(outer, z),
                     // Only the walls rising from it: a face that also reaches below it past an
@@ -2113,9 +3611,11 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                     bounds: b,
                     hole: None,
                     flat_top: outer_lie == Lie::Down,
+                    open: open_flags,
                 };
                 let face = FaceReport {
                     id: String::new(),
+                    a_deg: a_of(si),
                     body: t.name.clone(),
                     face: f,
                     z: r9(z),
@@ -2129,7 +3629,7 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                 let cy = (b[0][1] + b[1][1]) * 0.5;
                 let key = vec![si as i64, q(-z, tol), q(cy, tol), q(cx, tol), bi as i64, f as i64];
                 let face_index = l.faces.len();
-                l.faces.push((key.clone(), face, geo.clone()));
+                l.faces.push((key.clone(), face, geo.clone(), Seen { body: bi, face: f, setup: si }));
                 if role == "pocket_floor" {
                     // The walls' inside corners: free space (the pocket) on the left.
                     let (mut radius, mut sharp) = corner_limits(&outer_ccw);
@@ -2146,6 +3646,7 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                     let walls_vertical = outer.beside.iter().all(|g| vertical(*g));
                     let pocket = PocketReport {
                         id: String::new(),
+                        a_deg: a_of(si),
                         body: t.name.clone(),
                         floor_face: f,
                         face_id: String::new(),
@@ -2221,6 +3722,7 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                     let min_corner = if sharp > 0 { 0.0 } else { radius.unwrap_or(half) };
                     let pocket = PocketReport {
                         id: String::new(),
+                        a_deg: a_of(si),
                         body: t.name.clone(),
                         floor_face: lp.beside.first().copied().unwrap_or(f),
                         face_id: String::new(),
@@ -2246,6 +3748,7 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                         bounds: bb,
                         hole: None,
                         flat_top: false,
+                        open: Vec::new(),
                     };
                     claimed.extend(lp.beside.iter().map(|g| (bi, *g)));
                     let (cx, cy) = ((bb[0][0] + bb[1][0]) * 0.5, (bb[0][1] + bb[1][1]) * 0.5);
@@ -2254,6 +3757,110 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                     l.pockets.push((key, pocket, g, usize::MAX));
                 }
                 setup_faces.push((face_index, outer.beside.clone()));
+                // An outline whose walls fall straight away all round is a profile (unless it is
+                // an island's top, found once every pocket of the setup is).
+                if outer_lie == Lie::Down && outer.beside.iter().all(|g| vertical(*g)) {
+                    let foot = wall_foot(outer);
+                    if foot.is_finite() && foot < z - tol {
+                        let (rad, sharp) = corner_limits(&oriented(&outer.segs, outer.area, false));
+                        let notch = if sharp > 0 { Some(0.0) } else { rad.map(r9) };
+                        let profile = ProfileReport {
+                            id: String::new(),
+                            a_deg: a_of(si),
+                            body: t.name.clone(),
+                            top_z: r9(z),
+                            bottom_z: r9(foot),
+                            depth: r9(z - foot),
+                            outline: pts.clone(),
+                            area,
+                            bounds: b,
+                            min_concave_radius: notch,
+                            face_id: String::new(),
+                        };
+                        let pg = Geo { kind: Kind::Profile, islands: Vec::new(), top: r9(z), bottom: r9(foot), flat_top: false, ..geo.clone() };
+                        candidates.push((
+                            vec![si as i64, q(-z, tol), q(-area, tol), bi as i64, f as i64],
+                            profile,
+                            pg,
+                            Seen { body: bi, face: f, setup: si },
+                            outer.beside.clone(),
+                        ));
+                    }
+                }
+                // Faces falling away from its edges that are not walls: rounds and chamfers.
+                for lp in &loops {
+                    for g in &lp.beside {
+                        let g = *g;
+                        if claimed.contains(&(bi, g)) || vertical(g) {
+                            continue;
+                        }
+                        let Some((lo, hi)) = zrange(g) else { continue };
+                        if !(lo < z - tol && hi < z + tol) {
+                            continue;
+                        }
+                        let kind = match t.surface(g) {
+                            Some(FaceSurface::Cylinder { axis, radius, .. }) if lz(axis.vec()).abs() <= SQUARE => Some((true, *radius)),
+                            Some(FaceSurface::Torus { minor, .. }) => Some((true, *minor)),
+                            Some(FaceSurface::Sphere { radius, .. }) => Some((true, *radius)),
+                            // The face's angle from the tool axis, as a cone's half angle is.
+                            Some(FaceSurface::Plane { normal, .. }) if lz(normal.vec()) > SQUARE => {
+                                Some((false, lz(normal.vec()).clamp(-1.0, 1.0).asin().to_degrees()))
+                            }
+                            Some(FaceSurface::Cone { half_angle, axis, .. }) if lz(axis.vec()).abs() > 1.0 - PARALLEL => {
+                                Some((false, half_angle.to_degrees()))
+                            }
+                            _ => None,
+                        };
+                        let Some((round, value)) = kind else { continue };
+                        // A face this close to upright is a drafted wall (a pocket's or a
+                        // profile's), not a narrow bevel along an edge: the walls are finished
+                        // with them.
+                        if !round && value < DRAFT_MAX_DEG {
+                            continue;
+                        }
+                        // A flat facing another setup's tool (a hex bar's next flat, sloping
+                        // from this index) is that setup's flat, cut there: not a chamfer here.
+                        let facing_other = |n: Vec3| setups.iter().enumerate().any(|(k, o)| k != si && o.frame.dir_to_local(n).z > 1.0 - PARALLEL);
+                        if matches!(t.surface(g), Some(FaceSurface::Plane { normal, .. }) if facing_other(normal.vec())) {
+                            continue;
+                        }
+                        claimed.insert((bi, g));
+                        let (xl, xh) = t.face_range(g, fr.x, true).unwrap_or_default();
+                        let (yl, yh) = t.face_range(g, fr.y, true).unwrap_or_default();
+                        let (ox, oy) = (fr.origin.dot(fr.x), fr.origin.dot(fr.y));
+                        let b = [[xl - ox, yl - oy], [xh - ox, yh - oy]];
+                        let report = EdgeBreakReport {
+                            id: String::new(),
+                            a_deg: a_of(si),
+                            body: t.name.clone(),
+                            faces: vec![g],
+                            radius: round.then_some(r9(value)),
+                            angle_deg: (!round).then_some(r9(value)),
+                            top_z: r9(hi),
+                            bottom_z: r9(lo),
+                            bounds: rb(b),
+                        };
+                        let geo = Geo {
+                            kind: Kind::Area,
+                            setup: si,
+                            outer: None,
+                            islands: Vec::new(),
+                            top: r9(hi),
+                            bottom: r9(lo),
+                            bounds: rb(b),
+                            hole: None,
+                            flat_top: false,
+                            open: Vec::new(),
+                        };
+                        let key =
+                            vec![si as i64, q(-hi, tol), q((b[0][1] + b[1][1]) * 0.5, tol), q((b[0][0] + b[1][0]) * 0.5, tol), bi as i64, g as i64];
+                        if round {
+                            merge_break(&mut l.fillets, t, key, report, geo, tol);
+                        } else {
+                            merge_break(&mut l.chamfers, t, key, report, geo, tol);
+                        }
+                    }
+                }
             }
             // An island's top: every wall round it rises from a pocket's floor.
             let island = |beside: &[usize]| !beside.is_empty() && beside.iter().all(|g| island_walls.contains(g));
@@ -2264,7 +3871,335 @@ fn find(topos: &[Topo<'_>], setups: &[Setup], tol: f64) -> Found {
                     entry.1.role = "island_top".into();
                 }
             }
+            // The part's silhouette seen from below is a profile too, when every face facing down
+            // (the bottom, and the ceiling of a slot or recess cut from below) has walls rising
+            // straight all round it: the outline of those faces seen together, so a slot across
+            // the underside that splits the bottom face does not split the outline. Unless a
+            // face above gave the same.
+            let mut tiles: Vec<Vec<Seg2>> = Vec::new();
+            let mut first_bottom: Option<usize> = None;
+            let mut straight = true;
+            for f in 0..t.record.faces.len() {
+                let Some(FaceSurface::Plane { normal, point }) = t.surface(f) else { continue };
+                if lz(normal.vec()) > -1.0 + PARALLEL {
+                    continue;
+                }
+                let z = z_of(*point);
+                let loops = t.face_loops(f, fr, z, tol);
+                let Some(outer) = loops.iter().max_by(|a, b| a.area.abs().total_cmp(&b.area.abs())) else { continue };
+                let walls = outer.beside.iter().all(|g| vertical(*g));
+                if (z - su.bottom).abs() <= tol {
+                    straight &= walls && lie(outer, z) == Lie::Up;
+                    first_bottom = first_bottom.or(Some(f));
+                }
+                // A face whose walls are not upright (a recess rounded at its ceiling) is left out:
+                // the outline is then checked against the part's extent below.
+                if walls {
+                    tiles.push(oriented(&outer.segs, outer.area, true));
+                }
+            }
+            // The part's extent across this setup, from its faces.
+            let extent = |d: Vec3| {
+                (0..t.record.faces.len())
+                    .filter_map(|g| t.face_range(g, d, false))
+                    .fold(None, |acc, (lo, hi)| Some(widen(acc, lo - fr.origin.dot(d), hi - fr.origin.dot(d))))
+            };
+            let whole = |b: [[f64; 2]; 2]| match (extent(fr.x), extent(fr.y)) {
+                (Some((x0, x1)), Some((y0, y1))) => {
+                    let near = |a: f64, c: f64| (a - c).abs() <= tol * 10.0;
+                    near(b[0][0], x0) && near(b[1][0], x1) && near(b[0][1], y0) && near(b[1][1], y1)
+                }
+                _ => false,
+            };
+            // A face's outline that is the rectangle round the whole part (its bounds the part's
+            // extent, its area theirs) has every step of the part inside it: on a part with a flat
+            // bottom whose walls rise straight from it, its walls are cut down to that bottom,
+            // past the foot of its own walls (the side of an L turned on its back, its foot
+            // standing below it), where nothing of the part stands out. (A part rounded below
+            // keeps its outline at its walls' foot: what is under it a later setup cuts.)
+            let flat_bottom = first_bottom.is_some() && straight;
+            for c in candidates.iter_mut().filter(|_| flat_bottom) {
+                let (p, g) = (&mut c.1, &mut c.2);
+                let span = (p.bounds[1][0] - p.bounds[0][0]) * (p.bounds[1][1] - p.bounds[0][1]);
+                let rim = 2.0 * ((p.bounds[1][0] - p.bounds[0][0]) + (p.bounds[1][1] - p.bounds[0][1]));
+                if p.bottom_z > su.bottom + tol && (span - p.area.abs()).abs() <= rim * tol && whole(p.bounds) {
+                    p.bottom_z = r9(su.bottom);
+                    p.depth = r9(p.top_z - su.bottom);
+                    g.bottom = r9(su.bottom);
+                }
+            }
+            l.profiles.extend(candidates.into_iter().filter(|c| !island(&c.4)).map(|(k, p, g, seen, _)| (k, p, g, seen)));
+            // The outline from below only where it is the whole part's: a bottom narrower than a
+            // step above it (the foot of an L turned on its side) has the step standing out over
+            // its walls, and a contour round it from the setup's top cuts through the step.
+            let silhouette = match first_bottom {
+                Some(f) if straight => union_outline(&tiles, tol).filter(|segs| whole(loop_bounds(segs, tol))).map(|segs| (f, segs)),
+                _ => None,
+            };
+            // Else, where no profile was found for this body in this setup (a slot or notch
+            // splitting its top, its edges chamfered all round): its outermost upright walls.
+            let silhouette = silhouette.or_else(|| {
+                let found = l.profiles.iter().any(|(k, ..)| k.first() == Some(&(si as i64)) && k.get(3) == Some(&(bi as i64)));
+                if found {
+                    return None;
+                }
+                wall_outline(t, fr, su.bottom, su.top, tol).filter(|(_, segs)| whole(loop_bounds(segs, tol)))
+            });
+            if let Some((f, segs)) = silhouette {
+                let z = su.bottom;
+                let (pts, area, b) = outline(&segs, tol);
+                let dup = l.profiles.iter().any(|(_, p, ..)| {
+                    p.a_deg == a_of(si)
+                        && (p.bottom_z - r9(z)).abs() <= tol
+                        && (p.area - area).abs() <= area * 1e-6 + tol * tol
+                        && p.bounds.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= tol)
+                });
+                let (rad, sharp) = corner_limits(&oriented(&segs, area, false));
+                let profile = ProfileReport {
+                    id: String::new(),
+                    a_deg: a_of(si),
+                    body: t.name.clone(),
+                    top_z: su.top,
+                    bottom_z: r9(z),
+                    depth: r9(su.top - z),
+                    outline: pts,
+                    area,
+                    bounds: b,
+                    min_concave_radius: if sharp > 0 { Some(0.0) } else { rad.map(r9) },
+                    face_id: String::new(),
+                };
+                let pg = Geo {
+                    kind: Kind::Profile,
+                    setup: si,
+                    outer: Some(Loop2 { segs: segs.clone() }),
+                    islands: Vec::new(),
+                    top: su.top,
+                    bottom: r9(z),
+                    bounds: b,
+                    hole: None,
+                    flat_top: false,
+                    open: Vec::new(),
+                };
+                if !dup {
+                    l.profiles.push((
+                        vec![si as i64, q(-su.top, tol), q(-area, tol), bi as i64, f as i64],
+                        profile,
+                        pg,
+                        Seen { body: bi, face: f, setup: si },
+                    ));
+                }
+            }
+            for f in 0..t.record.faces.len() {
+                if let Some(FaceSurface::Plane { normal, .. }) = t.surface(f)
+                    && lz(normal.vec()) < -1.0 + PARALLEL
+                {
+                    claimed.insert((bi, f));
+                }
+            }
         }
+        // Diameters turned about the A axis.
+        if axis == AxisSpec::A {
+            for (ci, c) in cyls.iter().enumerate() {
+                if cyl_done.contains(&ci) || c.axis.x.abs() < 1.0 - PARALLEL {
+                    continue;
+                }
+                let off = c.origin - Vec3::X * c.origin.x;
+                if off.len() > tol {
+                    continue;
+                }
+                let circles = cyl_circles(t, c, Vec3::X, tol);
+                match concave(t, c, &circles, Vec3::X, tol) {
+                    Some(false) => {}
+                    // A bore on the A axis (a ring's or a sleeve's): no tool along Z on this
+                    // setup reaches it. Said, with its extent and the chamfers at its ends.
+                    Some(true) if full(&circles, tol) => {
+                        let ends: Vec<usize> = (0..t.record.faces.len())
+                            .filter(|g| matches!(t.surface(*g), Some(FaceSurface::Cone { axis, .. }) if axis.vec().x.abs() > 1.0 - PARALLEL))
+                            .filter(|g| c.faces.iter().any(|h| shares_edge(t, *h, *g)))
+                            .collect();
+                        // Its extent with the chamfers at its ends, from their exact faces.
+                        let Some((x0, x1)) = c
+                            .faces
+                            .iter()
+                            .chain(&ends)
+                            .filter_map(|g| t.face_range(*g, Vec3::X, false))
+                            .fold(None, |acc, (lo, hi)| Some(widen(acc, lo, hi)))
+                        else {
+                            continue;
+                        };
+                        // The most its faces stand off the axis (the chamfers' wide ends), from
+                        // their exact faces: the axis is work X.
+                        let off = c
+                            .faces
+                            .iter()
+                            .chain(&ends)
+                            .flat_map(|g| [t.face_range(*g, Vec3::Y, false), t.face_range(*g, Vec3::Z, false)])
+                            .flatten()
+                            .fold(c.radius, |r, (lo, hi)| r.max(lo.abs()).max(hi.abs()));
+                        a_bores.push((r9(c.radius * 2.0), r9(x0), r9(x1), ends.len(), r9(off)));
+                        continue;
+                    }
+                    _ => continue,
+                }
+                let xs: Vec<f64> = circles.iter().map(|(_, _, k)| k.center.x).collect();
+                let (Some(x0), Some(x1)) = (xs.iter().copied().reduce(f64::min), xs.iter().copied().reduce(f64::max)) else { continue };
+                for f in &c.faces {
+                    claimed.insert((bi, *f));
+                }
+                let report = TurnedReport {
+                    id: String::new(),
+                    body: t.name.clone(),
+                    diameter: r9(c.radius * 2.0),
+                    x_min: r9(x0),
+                    x_max: r9(x1),
+                    faces: c.faces.clone(),
+                    ..TurnedReport::default()
+                };
+                l.turned.push((vec![q(x0, tol), q(c.radius, tol), bi as i64], report));
+            }
+        }
+        // Pockets wrapped round the A axis.
+        if axis == AxisSpec::A {
+            wrapped_pockets(t, bi, tol, &mut l.wrapped);
+        }
+        // What is left that is not a wall: curved areas, reached from the first setup.
+        if let Some(su) = setups.first() {
+            let fr = &su.frame;
+            let lz = |n: Vec3| fr.dir_to_local(n).z;
+            // A cylinder about any setup's tool axis is a wall there (a hole's, a pocket's corner
+            // on an indexed side), cut by that setup's features: not a curved area, and on a 4th
+            // axis not a turned face (its own axis is not A's).
+            // A hole running across the setups' axes (a side port, a cross passage) is a hole
+            // for another setup: its wall, closed all the way round with material outside it, is
+            // hidden from the tool here, and so is its drill point (a cone on its axis touching
+            // it). A drill point at the foot of a hole along a setup's axis is the drill's too.
+            // Read from the exact faces, not as a curved area.
+            let mut side_hole: BTreeSet<usize> = BTreeSet::new();
+            // Each whole hole with the direction its tool comes from (`None` across every setup).
+            let mut holes: Vec<(&Cyl, Option<Vec3>)> = Vec::new();
+            for c in &cyls {
+                let circles = cyl_circles(t, c, c.axis, tol);
+                if !(full(&circles, tol) && concave(t, c, &circles, c.axis, tol) == Some(true)) {
+                    continue;
+                }
+                let from = setups.iter().find(|x| x.frame.dir_to_local(c.axis).z.abs() > 1.0 - PARALLEL).map(|x| x.frame.z);
+                if from.is_none() {
+                    side_hole.extend(c.faces.iter().copied());
+                }
+                holes.push((c, from));
+            }
+            for g in 0..t.record.faces.len() {
+                let Some(FaceSurface::Cone { apex, axis, .. }) = t.surface(g) else { continue };
+                let tip = |(c, from): &(&Cyl, Option<Vec3>)| {
+                    let off = (*apex - c.origin) - c.axis * (*apex - c.origin).dot(c.axis);
+                    if axis.vec().dot(c.axis).abs() <= 1.0 - PARALLEL || off.len() > tol || !c.faces.iter().any(|h| shares_edge(t, *h, g)) {
+                        return false;
+                    }
+                    let Some(up) = from else { return true };
+                    let wall_lo = c.faces.iter().filter_map(|h| t.face_range(*h, *up, false)).map(|r| r.0).fold(f64::INFINITY, f64::min);
+                    t.face_range(g, *up, false).is_some_and(|(_, hi)| hi <= wall_lo + tol)
+                };
+                if holes.iter().any(tip) {
+                    side_hole.insert(g);
+                }
+            }
+            let wall = |g: usize| match t.surface(g) {
+                _ if side_hole.contains(&g) => true,
+                Some(FaceSurface::Plane { normal, .. }) => lz(normal.vec()) <= SQUARE,
+                Some(FaceSurface::Cylinder { axis, .. }) => setups.iter().any(|x| x.frame.dir_to_local(axis.vec()).z.abs() > 1.0 - PARALLEL),
+                // A cone facing down (a chamfer the other side's setup cut, seen after the part is
+                // turned over): no tool coming down reaches it, as a flat face facing down.
+                Some(FaceSurface::Cone { .. }) => cone_faces_down(t, fr, g, tol),
+                _ => false,
+            };
+            let left: Vec<usize> = (0..t.record.faces.len()).filter(|f| !claimed.contains(&(bi, *f)) && !wall(*f)).collect();
+            let mut groups: Vec<Vec<usize>> = Vec::new();
+            for f in left {
+                let touching: Vec<usize> =
+                    groups.iter().enumerate().filter(|(_, g)| g.iter().any(|h| shares_edge(t, *h, f))).map(|(i, _)| i).collect();
+                let mut merged = vec![f];
+                for i in touching.iter().rev() {
+                    if *i < groups.len() {
+                        merged.extend(groups.remove(*i));
+                    }
+                }
+                merged.sort_unstable();
+                groups.push(merged);
+            }
+            groups.sort();
+            for faces in groups {
+                let o = fr.origin;
+                let range = |d: Vec3| {
+                    faces.iter().filter_map(|f| t.face_range(*f, d, true)).fold(None, |acc, (a, b)| Some(widen(acc, a - o.dot(d), b - o.dot(d))))
+                };
+                let (Some((zl, zh)), Some((xl, xh)), Some((yl, yh))) = (range(fr.z), range(fr.x), range(fr.y)) else { continue };
+                if zh <= su.bottom + tol {
+                    continue;
+                }
+                let mut kinds: BTreeSet<&str> = BTreeSet::new();
+                let mut min_radius: Option<f64> = None;
+                for f in &faces {
+                    let (k, r) = match t.surface(*f) {
+                        Some(FaceSurface::Sphere { radius, .. }) => ("sphere", Some(*radius)),
+                        Some(FaceSurface::Torus { minor, .. }) => ("torus", Some(*minor)),
+                        Some(FaceSurface::Cylinder { radius, .. }) => ("cylinder", Some(*radius)),
+                        Some(FaceSurface::Cone { .. }) => ("cone", None),
+                        Some(FaceSurface::Plane { .. }) => ("plane", None),
+                        None => ("freeform", None),
+                    };
+                    kinds.insert(k);
+                    if let Some(r) = r {
+                        min_radius = Some(min_radius.map_or(r, |m: f64| m.min(r)));
+                    }
+                }
+                let b = rb([[xl, yl], [xh, yh]]);
+                let report = SurfaceReport {
+                    id: String::new(),
+                    a_deg: a_of(0),
+                    body: t.name.clone(),
+                    faces: faces.clone(),
+                    kinds: kinds.into_iter().map(str::to_string).collect(),
+                    min_radius: min_radius.map(r9),
+                    top_z: r9(zh),
+                    bottom_z: r9(zl.max(su.bottom)),
+                    bounds: b,
+                    undercut_faces: undercut_faces(t, fr, &faces, su.bottom, tol),
+                };
+                let geo = Geo {
+                    kind: Kind::Area,
+                    setup: 0,
+                    outer: None,
+                    islands: Vec::new(),
+                    top: r9(zh),
+                    bottom: r9(zl.max(su.bottom)),
+                    bounds: b,
+                    hole: None,
+                    flat_top: false,
+                    open: Vec::new(),
+                };
+                let key =
+                    vec![0, q(-zh, tol), q((yl + yh) * 0.5, tol), q((xl + xh) * 0.5, tol), bi as i64, faces.first().copied().unwrap_or(0) as i64];
+                l.surfaces.push((key, report, geo));
+            }
+        }
+    }
+    if side_holes > 0 {
+        notes.push(format!("{side_holes} holes run square to Z, not reachable on a 3-axis mill: find them with `axis: \"a\"` or another setup"));
+    }
+    a_bores.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.total_cmp(&b.0)));
+    for (k, (d, x0, x1, ends, _)) in a_bores.iter().enumerate() {
+        let id = format!("bore:{k}");
+        let chamfers = match ends {
+            0 => String::new(),
+            1 => " and the chamfer at its end".to_string(),
+            n => format!(" and the {n} chamfers at its ends"),
+        };
+        notes.push(format!(
+            "{id}: a {} mm bore along the A axis, X {} to {}{chamfers}: no tool along Z reaches it on the A axis; cut it in another setup, with the part standing on its end",
+            num(*d),
+            num(*x0),
+            num(*x1)
+        ));
     }
     number(l, tol)
 }
@@ -2284,6 +4219,42 @@ fn full_at(circles: &[(usize, f64, &EdgeCircle)], h: f64, tol: f64) -> bool {
 fn broken_span(circles: &[(usize, f64, &EdgeCircle)], tol: f64) -> Option<(f64, f64)> {
     let open = circles.iter().filter(|x| !full_at(circles, x.1, tol)).map(|x| x.1);
     open.fold(None, |acc, h| Some(widen(acc, h, h)))
+}
+
+fn shares_edge(t: &Topo<'_>, a: usize, b: usize) -> bool {
+    t.face_edges(a).any(|e| t.edge_faces.get(e).is_some_and(|fs| fs.contains(&b)))
+}
+
+/// A round or chamfer face added to the feature it touches with the same size, else a new one.
+fn merge_break(list: &mut Vec<(Vec<i64>, EdgeBreakReport, Geo)>, t: &Topo<'_>, key: Vec<i64>, report: EdgeBreakReport, geo: Geo, tol: f64) {
+    let size = report.radius.or(report.angle_deg).unwrap_or(0.0);
+    let Some(face) = report.faces.first().copied() else { return };
+    let near = list.iter_mut().find(|(_, r, g)| {
+        r.body == report.body
+            && g.setup == geo.setup
+            && (r.radius.or(r.angle_deg).unwrap_or(0.0) - size).abs() <= tol
+            && r.faces.iter().any(|h| shares_edge(t, *h, face))
+    });
+    match near {
+        Some((k, r, g)) => {
+            r.faces.push(face);
+            r.faces.sort_unstable();
+            r.top_z = r.top_z.max(report.top_z);
+            r.bottom_z = r.bottom_z.min(report.bottom_z);
+            let b = [
+                [r.bounds[0][0].min(report.bounds[0][0]), r.bounds[0][1].min(report.bounds[0][1])],
+                [r.bounds[1][0].max(report.bounds[1][0]), r.bounds[1][1].max(report.bounds[1][1])],
+            ];
+            r.bounds = b;
+            g.bounds = b;
+            g.top = r.top_z;
+            g.bottom = r.bottom_z;
+            if key < *k {
+                *k = key;
+            }
+        }
+        None => list.push((key, report, geo)),
+    }
 }
 
 /// Sorts every list and numbers the features.
@@ -2316,20 +4287,29 @@ fn number(mut l: Lists, tol: f64) -> Found {
     }
     // Groups of equal holes.
     for h in &reply.holes {
-        let same = reply
-            .hole_groups
-            .iter_mut()
-            .find(|g| (g.diameter - h.diameter).abs() <= tol.max(1e-9) && (g.depth - h.depth).abs() <= tol.max(1e-9) && g.through == h.through);
+        let same = reply.hole_groups.iter_mut().find(|g| {
+            (g.diameter - h.diameter).abs() <= tol.max(1e-9)
+                && (g.depth - h.depth).abs() <= tol.max(1e-9)
+                && g.through == h.through
+                && g.a_deg == h.a_deg
+        });
         match same {
             Some(g) => {
                 g.count += 1;
                 g.ids.push(h.id.clone());
             }
-            None => reply.hole_groups.push(HoleGroup { diameter: h.diameter, depth: h.depth, through: h.through, count: 1, ids: vec![h.id.clone()] }),
+            None => reply.hole_groups.push(HoleGroup {
+                diameter: h.diameter,
+                depth: h.depth,
+                through: h.through,
+                a_deg: h.a_deg,
+                count: 1,
+                ids: vec![h.id.clone()],
+            }),
         }
     }
 
-    // Faces first, so pockets can name them.
+    // Faces first, so pockets and profiles can name them.
     let mut face_order: Vec<usize> = (0..l.faces.len()).collect();
     face_order.sort_by(|a, b| l.faces.get(*a).map(|x| &x.0).cmp(&l.faces.get(*b).map(|x| &x.0)));
     let mut face_id: BTreeMap<usize, String> = BTreeMap::new();
@@ -2345,13 +4325,84 @@ fn number(mut l: Lists, tol: f64) -> Found {
         geo.push((p.id.clone(), g.clone()));
     }
     reply.pockets = l.pockets.into_iter().map(|(_, p, ..)| p).collect();
-    let mut faces: Vec<Option<(Vec<i64>, FaceReport, Geo)>> = l.faces.into_iter().map(Some).collect();
+    // Wrapped pockets, so their walls' faces can name them.
+    l.wrapped.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut wall_of: BTreeMap<(usize, usize), String> = BTreeMap::new();
+    for (k, (_, r, bi)) in l.wrapped.iter_mut().enumerate() {
+        r.id = format!("wrapped:{k}");
+        for w in &r.walls {
+            wall_of.insert((*bi, *w), r.id.clone());
+        }
+    }
+    let mut faces: Vec<Option<(Vec<i64>, FaceReport, Geo, Seen)>> = l.faces.into_iter().map(Some).collect();
+    let mut seen_face: BTreeMap<(usize, usize, usize), String> = BTreeMap::new();
     for (k, i) in face_order.iter().enumerate() {
-        let Some(Some((_, mut f, g))) = faces.get_mut(*i).map(Option::take) else { continue };
+        let Some(Some((_, mut f, g, seen))) = faces.get_mut(*i).map(Option::take) else { continue };
         f.id = format!("face:{k}");
         f.pocket = pocket_of_face.get(i).cloned();
+        if let Some(w) = wall_of.get(&(seen.body, seen.face)) {
+            f.role = "wrapped_wall".into();
+            f.pocket = Some(w.clone());
+        }
+        seen_face.insert((seen.body, seen.face, seen.setup), f.id.clone());
         geo.push((f.id.clone(), g));
         reply.faces.push(f);
+    }
+    l.profiles.sort_by(|a, b| a.0.cmp(&b.0));
+    for (k, (_, mut p, g, seen)) in l.profiles.into_iter().enumerate() {
+        p.id = format!("profile:{k}");
+        p.face_id = seen_face.get(&(seen.body, seen.face, seen.setup)).cloned().unwrap_or_default();
+        geo.push((p.id.clone(), g));
+        reply.profiles.push(p);
+    }
+    for (list, kind, out) in [(l.fillets, "fillet", &mut reply.fillets), (l.chamfers, "chamfer", &mut reply.chamfers)] {
+        let mut list = list;
+        list.sort_by(|a, b| a.0.cmp(&b.0));
+        for (k, (_, mut r, g)) in list.into_iter().enumerate() {
+            r.id = format!("{kind}:{k}");
+            geo.push((r.id.clone(), g));
+            out.push(r);
+        }
+    }
+    l.surfaces.sort_by(|a, b| a.0.cmp(&b.0));
+    for (k, (_, mut r, g)) in l.surfaces.into_iter().enumerate() {
+        r.id = format!("surface:{k}");
+        geo.push((r.id.clone(), g));
+        reply.surfaces.push(r);
+    }
+    l.turned.sort_by(|a, b| a.0.cmp(&b.0));
+    for (k, (_, mut r)) in l.turned.into_iter().enumerate() {
+        r.id = format!("turned:{k}");
+        let g = Geo {
+            kind: Kind::Area,
+            setup: 0,
+            outer: None,
+            islands: Vec::new(),
+            top: r.diameter * 0.5,
+            bottom: 0.0,
+            bounds: [[r.x_min, -r.diameter * 0.5], [r.x_max, r.diameter * 0.5]],
+            hole: None,
+            flat_top: false,
+            open: Vec::new(),
+        };
+        geo.push((r.id.clone(), g));
+        reply.turned.push(r);
+    }
+    for (_, r, _) in l.wrapped {
+        let g = Geo {
+            kind: Kind::Area,
+            setup: 0,
+            outer: None,
+            islands: Vec::new(),
+            top: r.radius,
+            bottom: r.floor_radius,
+            bounds: [[r.x_min, -r.radius], [r.x_max, r.radius]],
+            hole: None,
+            flat_top: false,
+            open: Vec::new(),
+        };
+        geo.push((r.id.clone(), g));
+        reply.wrapped.push(r);
     }
     Found { reply, geo }
 }
