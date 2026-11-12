@@ -12,7 +12,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
-use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, MAX_CHAIN_POINTS, TextPlace};
+use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, MAX_CHAIN_POINTS, MAX_SET_TARGETS, TextPlace};
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
 
 use super::drawing_view::ViewIdParam;
@@ -25,7 +25,9 @@ const EDGE: &str = "an edge is a point on it [x, y, z], or {point} or {body, ind
 const FACE: &str = "a face is a point on it [x, y, z], or {point} or {body, index}, with path?";
 const CORNER: &str = "a corner is a point [x, y, z], or {point} or {edges: [edges]} or {centre: a circle or an arc}, with path?";
 const PICK: &str = "a pick is {edge: an edge}, {corner: a corner} or {face: a face}; a candidate of the slot's kind passes as it stands";
-const SLOT: &str = "a slot is `a`, `b`, `edge`, `face`, or a chain's point by its number from 0";
+const SLOT: &str = "a slot is `a`, `b`, `edge`, `face`, `origin`, or a chain's point or a set's target by its number from 0";
+/// The most numbered slots a dimension has: a chain's points or a set's targets.
+const NUMBERED_SLOTS: usize = if MAX_CHAIN_POINTS > MAX_SET_TARGETS { MAX_CHAIN_POINTS } else { MAX_SET_TARGETS };
 
 /// An edge to measure: what picks it, and the occurrences its body is placed through.
 #[derive(Clone, Debug, PartialEq)]
@@ -65,7 +67,9 @@ pub enum SlotParam {
     B,
     Edge,
     Face,
-    /// A chain's point, from 0.
+    /// A set's origin.
+    Origin,
+    /// A chain's point or a set's target, from 0.
     Point(usize),
 }
 
@@ -166,9 +170,10 @@ fn slot_param(v: &Value) -> Result<SlotParam, String> {
             "b" => Ok(SlotParam::B),
             "edge" => Ok(SlotParam::Edge),
             "face" => Ok(SlotParam::Face),
+            "origin" => Ok(SlotParam::Origin),
             _ => Err(SLOT.to_string()),
         },
-        _ => v.as_u64().and_then(|k| usize::try_from(k).ok()).filter(|k| *k < MAX_CHAIN_POINTS).map(SlotParam::Point).ok_or_else(|| SLOT.to_string()),
+        _ => v.as_u64().and_then(|k| usize::try_from(k).ok()).filter(|k| *k < NUMBERED_SLOTS).map(SlotParam::Point).ok_or_else(|| SLOT.to_string()),
     }
 }
 
@@ -258,8 +263,8 @@ impl JsonSchema for SlotParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Which of a dimension's references: `a` or `b` (a linear dimension's corners, an angle's edges, or the faces of silhouettes or of faces), `edge` (a length's or a radial dimension's), `face` (a cylinder's or a sphere's), or a chain's point by its number from 0.",
-            "anyOf": [{"type": "string", "enum": ["a", "b", "edge", "face"]}, {"type": "integer", "minimum": 0, "maximum": MAX_CHAIN_POINTS - 1}]
+            "description": "Which of a dimension's references: `a` or `b` (a linear dimension's corners, an angle's edges, or the faces of silhouettes or of faces), `edge` (a length's or a radial dimension's), `face` (a cylinder's or a sphere's), `origin` (a set's), or a chain's point or a set's target by its number from 0.",
+            "anyOf": [{"type": "string", "enum": ["a", "b", "edge", "face", "origin"]}, {"type": "integer", "minimum": 0, "maximum": NUMBERED_SLOTS - 1}]
         })
     }
 }
@@ -380,6 +385,30 @@ pub enum KindParam {
         #[schemars(with = "Value")]
         direction: Option<LinearDirection>,
     },
+    /// The distances from one origin to each target, in any order, along one line as the view shows
+    /// them: a dimension each, stacked.
+    Baseline {
+        /// A corner or a hole's centre to measure from.
+        origin: CornerParam,
+        /// 2 to 64 corners.
+        targets: Vec<CornerParam>,
+        /// As a linear dimension's; `aligned` (the default) is from the origin to the last target.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+    },
+    /// A baseline set's distances, each shown at the end of a leader from its target, the origin's
+    /// as 0.
+    Ordinate {
+        /// A corner or a hole's centre to measure from.
+        origin: CornerParam,
+        /// 1 to 64 corners.
+        targets: Vec<CornerParam>,
+        /// As a linear dimension's; `aligned` (the default) is from the origin to the last target.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+    },
 }
 
 /// What `drawing.dimension.add` takes.
@@ -427,7 +456,7 @@ pub struct EditParams {
 }
 
 /// What `drawing.dimension.edit` changes, each only when given. What a dimension measures isn't
-/// one of them: to measure something else, add a new one.
+/// one of them, a set's targets aside: to measure something else, add a new one.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
@@ -444,7 +473,7 @@ pub struct DimensionSet {
     /// Text shown instead of the number, or `null` to show the number again.
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     pub override_text: Option<Option<String>>,
-    /// A linear, length or chain dimension's.
+    /// A linear, length, chain or set dimension's.
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Value")]
     pub direction: Option<LinearDirection>,
@@ -459,6 +488,21 @@ pub struct DimensionSet {
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub diameter: Option<bool>,
+    /// A set's targets: some taken out by number, then some added after the rest. It stays the
+    /// one dimension.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    pub targets: Option<TargetsSet>,
+}
+
+/// The targets a set's edit takes out and adds.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct TargetsSet {
+    /// Targets taken out, by their numbers from 0 in the set as it is; each once.
+    pub remove: Vec<usize>,
+    /// Corners added after the targets that stay.
+    pub add: Vec<CornerParam>,
 }
 
 /// What `drawing.dimension.repair` takes: the dimension, which of its references, and what that
@@ -495,7 +539,7 @@ pub enum CandidateResult {
     Face { body: String, index: usize },
 }
 
-/// One of a chain's members as the model has it now.
+/// One of a chain's or a set's members as the model has it now.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct MemberResult {
     /// Model millimetres.
@@ -515,17 +559,17 @@ pub struct DimensionResult {
     /// Why it failed, is lost or is unmeasurable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
-    /// What it reads: model millimetres, or degrees for an angle; a chain's overall.
+    /// What it reads: model millimetres, or degrees for an angle; a chain's overall, a set's farthest target.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<f64>,
     /// Whether a measured line leaves the view's plane, so the view shows it shorter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub foreshortened: Option<bool>,
-    /// What it shows: the text given, else the number in the drawing's units; none for a chain,
-    /// which shows its members'.
+    /// What it shows: the text given, else the number in the drawing's units; none for a chain or a
+    /// set, which show their members'.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
-    /// A chain's members, from its first point to its last.
+    /// A chain's members, from its first point to its last, or a set's, one for each target in its order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<MemberResult>,
     /// When it has no value now: the last one it read, kept when the design is saved, as `value` gives it.

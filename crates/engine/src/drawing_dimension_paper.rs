@@ -4,7 +4,8 @@
 //! centred on its view, as a view's lines are, so moving the view moves it unchanged.
 //!
 //! Its text is set in the drawing font ([`paper_text`]) and measured there, so the arrows go inside
-//! or outside by its real length. A text the font can't set leaves the lines and says why.
+//! or outside by its real length. A text the font can't set leaves the lines and says why. An
+//! ordinate set has no dimension lines: [`ordinate`] lays out its leaders and numbers itself.
 
 use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
@@ -27,8 +28,14 @@ pub(crate) const ARROW: Terminator = Terminator::Arrow { shape: ArrowShape::Fill
 pub(crate) const TEXT_MM: f64 = 3.5;
 /// How close two points of a layout are when they are one point.
 const SAME_POINT_MM: f64 = 1e-6;
+/// How far apart a baseline set's dimension lines stand on paper: room for a 3.5 mm text and its
+/// gaps. Until the drafting profile (#4896, W09d) gives it.
+const STACK_MM: f64 = 7.0;
+/// How far short of the common line an ordinate leader whose number was moved turns towards it.
+const JOG_MM: f64 = 2.0;
 
-/// One laid-out piece of a dimension: a chain has one for each of its members.
+/// One laid-out piece of a dimension: a chain and a baseline set have one for each of their members.
+/// An ordinate set has none ([`ordinate`]).
 struct Piece {
     frame: DimFrame,
     /// Where the layout puts its text, from the frame's own origin.
@@ -67,6 +74,37 @@ impl Text {
     }
 }
 
+/// A dimension's lines, arrowheads and texts as its layout gives them, before its lines are stroked.
+#[derive(Default)]
+struct Drawn {
+    lines: Vec<Vec<Vec2>>,
+    /// Each one's tip and the unit direction it points in.
+    arrows: Vec<(Vec2, Vec2)>,
+    texts: Vec<Item>,
+    fonts: Vec<Font>,
+    why: Option<String>,
+    pending: bool,
+}
+
+impl Drawn {
+    /// `line`, unless a line already drawn covers it; a line it covers goes. A chain's neighbours
+    /// share an extension line, and a set's lines from its origin lie along each other.
+    fn line(&mut self, line: Vec<Vec2>) {
+        if !self.lines.iter().any(|other| covered(&line, other)) {
+            self.lines.retain(|other| !covered(other, &line));
+            self.lines.push(line);
+        }
+    }
+
+    /// `text` centred on `centre`, running along `dir`.
+    fn text(&mut self, text: Text, centre: Vec2, dir: Vec2) {
+        self.texts.extend(placed(text.runs, text.half, TEXT_MM, centre, dir));
+        self.fonts.extend(text.fonts);
+        self.why = self.why.take().or(text.why);
+        self.pending |= text.pending;
+    }
+}
+
 /// A dimension on paper.
 pub struct OnPaper {
     pub group: Group,
@@ -84,24 +122,19 @@ pub struct OnPaper {
 pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame, group: LineGroup, lettering: &PaperFonts) -> Option<OnPaper> {
     let line_mm = LineKind::Thin.width_mm(group);
     let on: Vec<Vec2> = resolved.points.iter().map(|p| frame.to_paper(*p)).collect();
-    let mut lines: Vec<Vec<Vec2>> = Vec::new();
-    let mut arrows = Vec::new();
-    let (mut texts, mut fonts, mut why, mut pending) = (Vec::new(), Vec::new(), None, false);
     let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering);
-    for piece in pieces(dimension, resolved, &on, &set)? {
-        let layout = dim_layout_sized(&piece.frame, Some(piece.at), &SIZES, piece.text.half, [None, None]);
-        texts.extend(placed(piece.text.runs, piece.text.half, TEXT_MM, layout.text, layout.text_dir));
-        fonts.extend(piece.text.fonts);
-        why = why.or(piece.text.why);
-        pending |= piece.text.pending;
-        // A chain's neighbours share an extension line.
-        for line in layout.lines {
-            if !lines.iter().any(|other| same_line(other, &line)) {
-                lines.push(line);
-            }
+    let mut drawn = Drawn::default();
+    if let DimensionKind::Ordinate { direction, .. } = &dimension.kind {
+        ordinate(&on, *direction, dimension.offset_mm, resolved, &set, &mut drawn)?;
+    } else {
+        for piece in pieces(dimension, resolved, &on, &set)? {
+            let layout = dim_layout_sized(&piece.frame, Some(piece.at), &SIZES, piece.text.half, [None, None]);
+            drawn.text(piece.text, layout.text, layout.text_dir);
+            layout.lines.into_iter().for_each(|line| drawn.line(line));
+            drawn.arrows.extend(layout.arrows);
         }
-        arrows.extend(layout.arrows);
     }
+    let Drawn { mut lines, arrows, texts, fonts, why, pending } = drawn;
     for (tip, dir) in &arrows {
         lines.iter_mut().for_each(|line| stop_at_base(line, *tip, *dir));
     }
@@ -141,6 +174,7 @@ fn pieces(dimension: &Dimension, resolved: &Resolved, on: &[Vec2], set: &impl Fn
             Some(vec![radial(centre, [start, mid, end], *diameter, offset, place, text())?])
         }
         (DimensionKind::Chain { direction, .. }, points) => chain(points, *direction, offset, resolved, set),
+        (DimensionKind::Baseline { direction, .. }, points) => baseline(points, *direction, offset, resolved, set),
         // As a circle's or an arc's, on the arc of its contour it reads on.
         (DimensionKind::Sphere { .. }, &[centre, start, mid, end]) => {
             let diameter = resolved.label == Some(LabelKind::SphericalDiameter);
@@ -186,6 +220,91 @@ fn chain(points: &[Vec2], direction: LinearDirection, offset: f64, resolved: &Re
         linear(*a, *b, dir, line - ((*a + *b) * 0.5).dot(n), &TextPlace::Centred, set(text))
     };
     Some(points.iter().zip(points.iter().skip(1)).enumerate().map(member).collect())
+}
+
+/// A baseline set's members, each a line from the origin (`points`' first) to one target, stacked
+/// [`STACK_MM`] apart, nearest target first, from `offset` past the outermost point on its side, so
+/// every line clears what it measures. Targets that read the same keep their order.
+fn baseline(
+    points: &[Vec2],
+    direction: LinearDirection,
+    offset: f64,
+    resolved: &Resolved,
+    set: &impl Fn(Option<&str>) -> Text,
+) -> Option<Vec<Piece>> {
+    let (origin, targets) = points.split_first()?;
+    let dir = line_direction(direction, *targets.last()? - *origin)?;
+    let n = dir.perp();
+    let side = if offset < 0.0 { -1.0 } else { 1.0 };
+    let outer = side * points.iter().map(|p| side * p.dot(n)).fold(f64::NEG_INFINITY, f64::max);
+    let value = |i: usize| resolved.members.get(i).map_or(0.0, |m| m.measured.value);
+    let mut nearest_first: Vec<usize> = (0..targets.len()).collect();
+    nearest_first.sort_by(|a, b| value(*a).total_cmp(&value(*b)));
+    let member = |(k, i): (usize, usize)| {
+        let target = *targets.get(i)?;
+        let line = outer + offset + side * STACK_MM * k as f64;
+        let text = resolved.members.get(i).map(|m| m.text.as_str());
+        Some(linear(*origin, target, dir, line - ((*origin + target) * 0.5).dot(n), &TextPlace::Centred, set(text)))
+    };
+    nearest_first.into_iter().enumerate().map(member).collect()
+}
+
+/// An ordinate set: the origin (the first of `points`), shown as 0, and each target, each with a
+/// leader from a gap off its point out to one line `offset` past the outermost point on its side,
+/// and its number past the leader's end, reading along it. Numbers that would overlap along the
+/// set's line are moved apart as little as can be ([`spread`]); the leader of one that moved runs
+/// straight to [`JOG_MM`] short of the line, then on a slant to its number.
+fn ordinate(
+    points: &[Vec2],
+    direction: LinearDirection,
+    offset: f64,
+    resolved: &Resolved,
+    set: &impl Fn(Option<&str>) -> Text,
+    out: &mut Drawn,
+) -> Option<()> {
+    let (origin, targets) = points.split_first()?;
+    let dir = line_direction(direction, *targets.last()? - *origin)?;
+    let n = dir.perp();
+    let side = if offset < 0.0 { -1.0 } else { 1.0 };
+    let end = side * points.iter().map(|p| side * p.dot(n)).fold(f64::NEG_INFINITY, f64::max) + offset;
+    let numbers = std::iter::once(Some("0")).chain((0..targets.len()).map(|i| resolved.members.get(i).map(|m| m.text.as_str())));
+    let mut places: Vec<(Vec2, Text)> = points.iter().copied().zip(numbers.map(set)).collect();
+    places.sort_by(|(p, _), (q, _)| p.dot(dir).total_cmp(&q.dot(dir)));
+    // Each number's height lies along the set's line: the tallest one's, and a gap, apart.
+    let pitch = places.iter().map(|(_, text)| text.half.y * 2.0).fold(0.0, f64::max) + SIZES.gap;
+    let ideal: Vec<f64> = places.iter().map(|(p, _)| p.dot(dir)).collect();
+    let reading = line_direction(LinearDirection::Aligned, n)?;
+    let at = |along: f64, across: f64| dir * along + n * across;
+    for ((p, text), (&want, got)) in places.into_iter().zip(ideal.iter().zip(spread(&ideal, pitch))) {
+        let start = p + n * (side * SIZES.gap);
+        let leader =
+            if (got - want).abs() <= SAME_POINT_MM { vec![start, at(want, end)] } else { vec![start, at(want, end - side * JOG_MM), at(got, end)] };
+        out.line(leader);
+        let centre = at(got, end + side * (SIZES.gap + text.half.x));
+        out.text(text, centre, reading);
+    }
+    Some(())
+}
+
+/// Places along one line for texts whose ideal places are `ideal` (least first), at least `pitch`
+/// apart and moved as little as can be in all (least squares). Pool-adjacent-violators on the places
+/// less their spacing: texts that would overlap pool into blocks, each centred on its members' ideal
+/// places, and every other text stays where it is.
+fn spread(ideal: &[f64], pitch: f64) -> Vec<f64> {
+    // Each block: the sum of its members' places less their spacing, and how many they are.
+    let mut blocks: Vec<(f64, usize)> = Vec::with_capacity(ideal.len());
+    for (i, x) in ideal.iter().enumerate() {
+        blocks.push((x - pitch * i as f64, 1));
+        while let [.., (a, m), (b, k)] = blocks[..] {
+            if a / m as f64 <= b / k as f64 {
+                break;
+            }
+            blocks.truncate(blocks.len() - 2);
+            blocks.push((a + b, m + k));
+        }
+    }
+    let shifted = blocks.into_iter().flat_map(|(sum, k)| std::iter::repeat_n(sum / k as f64, k));
+    shifted.enumerate().map(|(i, place)| place + pitch * i as f64).collect()
 }
 
 /// A line between two silhouettes or faces, each from one end to the other, at the ends on the side `offset`
@@ -252,6 +371,18 @@ fn at_of(place: &TextPlace) -> Option<Vec2> {
 
 fn same_line(a: &[Vec2], b: &[Vec2]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.dist(*q) <= SAME_POINT_MM)
+}
+
+/// Whether `by` already draws `line`: the same line, or for two straight lines, `line` lies along
+/// `by` within its ends. Only one dimension's own lines are weighed, so no other's change.
+fn covered(line: &[Vec2], by: &[Vec2]) -> bool {
+    let (&[p, q], &[a, b]) = (line, by) else { return same_line(line, by) };
+    let Some(u) = (b - a).normalized() else { return same_line(line, by) };
+    let within = |x: Vec2| {
+        let along = (x - a).dot(u);
+        (x - a).dot(u.perp()).abs() <= SAME_POINT_MM && (-SAME_POINT_MM..=a.dist(b) + SAME_POINT_MM).contains(&along)
+    };
+    within(p) && within(q)
 }
 
 /// Ends `line` at the base of the arrowhead on its end, if it runs into one there, so no line shows

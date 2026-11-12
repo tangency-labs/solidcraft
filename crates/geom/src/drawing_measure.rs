@@ -102,15 +102,9 @@ pub struct Chain {
 pub fn chain(basis: &Plane, points: &[Vec3], direction: LinearDirection) -> Result<Chain> {
     let (Some(first), Some(last)) = (points.first(), points.last()) else { return Err(Invalid("a chain has no points")) };
     require(points.len() >= 3, "a chain is at least 3 points: 2 make one linear dimension")?;
-    let whole = segment(basis, *first, *last)?;
+    let line = line_of(basis, *first, *last, direction)?;
     let shown = |d: Vec3| Vec2::new(d.dot(basis.x), d.dot(basis.y));
-    let line = match direction {
-        LinearDirection::Horizontal => Vec2::new(1.0, 0.0),
-        LinearDirection::Vertical => Vec2::new(0.0, 1.0),
-        LinearDirection::Aligned => shown(whole).normalized().ok_or(Invalid("the chain's first and last points are one point in this view"))?,
-        LinearDirection::Along(along) => along.normalized().ok_or(Invalid("the direction to measure along is zero or not finite"))?,
-    };
-    let line = if shown(whole).dot(line) < 0.0 { -line } else { line };
+    let whole = segment(basis, *first, *last)?;
     let members = points
         .iter()
         .zip(points.iter().skip(1))
@@ -123,6 +117,74 @@ pub fn chain(basis: &Plane, points: &[Vec3], direction: LinearDirection) -> Resu
         .collect::<Result<Vec<_>>>()?;
     let overall = Measured { value: shown(whole).dot(line), foreshortened: members.iter().any(|m| m.foreshortened) };
     Ok(Chain { members, overall })
+}
+
+/// What a set of dimensions from one origin reads: each target's distance from the origin along one
+/// line, in the targets' order, and the farthest of them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FromOrigin {
+    pub members: Vec<Measured>,
+    pub farthest: Measured,
+}
+
+/// The distances from `origin` to each of `targets` (model points) on the view through `basis`,
+/// along one line as the view shows it, as a baseline or an ordinate set reads them. Projected, as
+/// a chain reads. The line is `direction` as [`linear`] takes it: aligned runs from the origin to
+/// the last target, and the others run toward the target farthest from the origin along them, so
+/// the targets' order doesn't change what the set reads. Targets come in any order and two may
+/// read the same; one before the origin along the line is refused, one in line with it reads 0,
+/// and a set whose targets are all in line with its origin is refused.
+pub fn from_origin(basis: &Plane, origin: Vec3, targets: &[Vec3], direction: LinearDirection) -> Result<FromOrigin> {
+    let Some(last) = targets.last() else { return Err(Invalid("a set has no targets")) };
+    validate_plane(basis).map_err(|_| Invalid("a view's basis is finite and orthonormal"))?;
+    let points = std::iter::once(&origin).chain(targets);
+    require(points.copied().all(model_point), "a model point is finite and within 1e12 mm of the origin")?;
+    let shown = |target: Vec3| {
+        let d = target - origin;
+        Vec2::new(d.dot(basis.x), d.dot(basis.y))
+    };
+    let axis = axis(direction, shown(*last))?;
+    let line = match direction {
+        LinearDirection::Aligned => axis,
+        _ => {
+            let far = targets.iter().map(|t| shown(*t).dot(axis)).fold(0.0, |a: f64, b| if b.abs() > a.abs() { b } else { a });
+            require(far.abs() > EPS, "a set's targets all lie in line with its origin along the line")?;
+            if far < 0.0 { -axis } else { axis }
+        }
+    };
+    let members = targets
+        .iter()
+        .map(|target| {
+            let d = *target - origin;
+            let value = shown(*target).dot(line);
+            require(value >= -EPS, "a target lies before its origin along the line")?;
+            Ok(Measured { value: value.max(0.0), foreshortened: out_of_plane(basis, d) })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let farthest = members.iter().copied().reduce(|a, b| if b.value > a.value { b } else { a }).ok_or(Invalid("a set has no targets"))?;
+    Ok(FromOrigin { members, farthest })
+}
+
+/// The unit direction, on the view through `basis`, of the line a set of dimensions from `first` to
+/// `last` (model points) measures along: `direction` as [`linear`] takes it, aligned being from
+/// `first` to `last`, and turned to run the way `first` to `last` goes. One rule for a chain and a
+/// set measured from one origin.
+pub fn line_of(basis: &Plane, first: Vec3, last: Vec3, direction: LinearDirection) -> Result<Vec2> {
+    let whole = segment(basis, first, last)?;
+    let shown = Vec2::new(whole.dot(basis.x), whole.dot(basis.y));
+    let line = axis(direction, shown)?;
+    Ok(if shown.dot(line) < 0.0 { -line } else { line })
+}
+
+/// The unit direction `direction` measures along on a view, either way round: aligned being along
+/// `shown`, the line from first to last as the view shows it.
+fn axis(direction: LinearDirection, shown: Vec2) -> Result<Vec2> {
+    match direction {
+        LinearDirection::Horizontal => Ok(Vec2::new(1.0, 0.0)),
+        LinearDirection::Vertical => Ok(Vec2::new(0.0, 1.0)),
+        LinearDirection::Aligned => shown.normalized().ok_or(Invalid("the line's first and last points are one point in this view")),
+        LinearDirection::Along(along) => along.normalized().ok_or(Invalid("the direction to measure along is zero or not finite")),
+    }
 }
 
 /// The way from a cylinder's axis to its silhouette on one side, on the view through `basis` (the

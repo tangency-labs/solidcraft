@@ -810,6 +810,41 @@ fn require(ok: bool, broken: impl FnOnce() -> String) -> Result<()> {
     if ok { Ok(()) } else { Err(DocError::Invalid(broken())) }
 }
 
+/// Why [`kept_by_number`] refuses an edit: a number past the list's end (`last`, its last number;
+/// none when it is empty), a number given twice, or a count the record's own rule refuses.
+#[derive(Debug)]
+pub enum ByNumber {
+    Past { last: Option<usize> },
+    Twice,
+    Count(DocError),
+}
+
+/// `list` edited by number, judged before anything it adds is looked up: the items it keeps, in
+/// order, without those numbered in `remove` (each once, numbered as the list is now), or why not.
+/// `added` more follow them, and `count`, the record's rule for how many it holds, judges the number
+/// in all. A refusal's words are the caller's, as they name its list.
+pub fn kept_by_number<T: Clone>(
+    list: &[T],
+    remove: &[usize],
+    added: usize,
+    count: impl FnOnce(usize) -> Result<()>,
+) -> std::result::Result<Vec<T>, ByNumber> {
+    if remove.iter().any(|at| *at >= list.len()) {
+        return Err(ByNumber::Past { last: list.len().checked_sub(1) });
+    }
+    // Every number is in range here, so more numbers than items must repeat one: no sort needed.
+    if remove.len() > list.len() {
+        return Err(ByNumber::Twice);
+    }
+    let mut gone = remove.to_vec();
+    gone.sort_unstable();
+    if gone.windows(2).any(|pair| pair.first() == pair.get(1)) {
+        return Err(ByNumber::Twice);
+    }
+    count(list.len().saturating_sub(gone.len()).saturating_add(added)).map_err(ByNumber::Count)?;
+    Ok(list.iter().enumerate().filter(|(at, _)| gone.binary_search(at).is_err()).map(|(_, item)| item.clone()).collect())
+}
+
 /// A name: 1 to [`MAX_NAME_BYTES`] bytes, not only spaces, without control characters.
 fn check_name(name: &str, whose: &str) -> Result<()> {
     require(!name.trim().is_empty() && name.len() <= MAX_NAME_BYTES && !name.chars().any(char::is_control), || {
