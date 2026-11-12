@@ -631,11 +631,12 @@ pub fn is_literal(s: &str) -> bool {
     }
 }
 
-/// Is the expression a bare number without a unit, like `20` or `-1.5`? A leading `=` only marks
+/// Is the expression a bare number without a unit, like `20`, `-1.5` or `2,5`? A leading `=` only marks
 /// a formula (#4681), so `=20` is the same bare number.
 pub fn is_bare_number(s: &str) -> bool {
-    let number = s.trim().strip_prefix('=').unwrap_or(s);
-    is_literal(s) && number.trim().trim_start_matches(['-', '+']).trim().parse::<f64>().is_ok()
+    // One number token, as the lexer reads it, so a decimal comma (`2,5`) and a mixed number
+    // (`2 1/8`) count like `2.5` and `2.125`.
+    is_literal(s) && lex(s).is_ok_and(|toks| matches!(toks.as_slice(), [Tok::Num(_)] | [Tok::Op('-' | '+'), Tok::Num(_)]))
 }
 
 /// Is `s` shaped like a parameter name: a letter or `_`, then letters, digits and `_`? The shape
