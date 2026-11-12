@@ -1705,6 +1705,51 @@ pub(super) enum PrimitivePrism {
 const MAX_TEXT_CURVES: usize = 20_000;
 const MAX_LABELS: usize = 1000;
 
+/// Refuses an extrude drawn on `plane` over `interval` (along the plane's normal) that would leave,
+/// in a flat panel it reaches (`reach`: the tools' boxes) of a sheet made from surfaces, a layer
+/// thinner than the extrusion resolution: the material it keeps or takes, or what it leaves
+/// beside either face. Past a rounding of the numbers its depths come from, a cap within a few
+/// units in the last place of a face is on it. The boolean doesn't resolve such a layer, so the
+/// sheet would keep what the cut took or lose what it kept; the extrude's own interval shows it.
+pub(super) fn surface_thin_layer_refused(
+    st: &ModelState,
+    reach: &[Option<Aabb3>],
+    plane: &Plane,
+    interval: (f64, f64),
+    targets: &[String],
+) -> Result<()> {
+    let n = plane.normal();
+    let (lo, hi) = (interval.0.min(interval.1), interval.0.max(interval.1));
+    let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
+    for sk in st.surface_sheets.iter().filter(|sk| all || targets.is_empty() || targets.contains(&sk.body)) {
+        let Some((panels, boxes)) = sk.pieces_in_space() else { continue };
+        let t = sk.thickness;
+        for (p, frame, _) in &panels {
+            if frame.z.cross(n).len() > 1e-9 {
+                continue;
+            }
+            // The panel's faces along the normal, and the part of them the extrude spans.
+            let s0 = (frame.shift - plane.origin).dot(n);
+            let s1 = s0 + t * frame.z.dot(n);
+            let (p0, p1) = (s0.min(s1), s0.max(s1));
+            let (z0, z1) = (lo.max(p0), hi.min(p1));
+            if z1 <= z0 {
+                continue;
+            }
+            let ulps = 4.0 * f64::EPSILON * (frame.shift.len() + plane.origin.len() + lo.abs() + hi.abs() + t);
+            if ![z0 - p0, p1 - z1, z1 - z0].into_iter().any(|d| d > ulps && d < 1e-6) {
+                continue;
+            }
+            if boxes.iter().any(|(k, b)| *k == Some(*p) && reach.iter().any(|r| !boxes_apart(r, &Some(*b)))) {
+                return Err(DocError::Invalid(
+                    "sheet machining depth is below the supported 0.000001 mm extrusion resolution; increase the layer depth".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The exact box of `body`, grown by twice its tolerance: bodies whose boxes are apart do not
 /// meet. None when it can't be worked out.
 pub(super) fn exact_box(body: &Body) -> Option<Aabb3> {

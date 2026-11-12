@@ -3944,7 +3944,9 @@ impl SurfaceSheet {
             .iter()
             .filter_map(|r| {
                 let place = dev.placements.get(r.panel).copied().flatten()?;
-                let (z0, z1) = if r.far { (t - r.depth, t) } else { (0.0, r.depth) };
+                // The sheet's surface is its top (z t), the face one thickness into the material
+                // its bottom (z 0), folded or flat: a pocket's side is the face it is on.
+                let (z0, z1) = if r.far { (0.0, r.depth) } else { (t - r.depth, t) };
                 Some(crate::sheet::SheetPocket { region: place.region(&r.region), z0, z1 })
             })
             .collect();

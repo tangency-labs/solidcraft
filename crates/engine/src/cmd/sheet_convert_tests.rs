@@ -1145,12 +1145,13 @@ fn lines_on(dxf: &str, layer: &str) -> usize {
 
 /// A plate with an engraving is recognized: the engraving is a pocket of the sheet, so the sheet
 /// keeps the plate's shape, and its outline is the flat pattern's pocket, on the DXF's pocket
-/// layer. Picked on the engraved face, the pocket starts from the sheet's z = 0 (the face picked);
-/// picked on the other face, it ends at z = T. (Convert keeps it only where its faces are picked
-/// to engrave: see `an_engraving_is_converted_only_where_its_faces_are_picked`.)
+/// layer. Picked on the engraved face, the pocket ends at the sheet's z = T (the face picked, the
+/// sheet's surface and its top); picked on the other face, it starts from z = 0. (Convert keeps
+/// it only where its faces are picked to engrave: see
+/// `an_engraving_is_converted_only_where_its_faces_are_picked`.)
 #[test]
 fn a_plate_with_an_engraving_converts_with_the_engraving_as_a_pocket() {
-    for (pick, layer) in [([45.0, 30.0, 1.0], "POCKET_BOTTOM_Z0.000000_TO_0.100000_MM"), ([45.0, 30.0, 0.0], "POCKET_TOP_Z0.900000_TO_1.000000_MM")] {
+    for (pick, layer) in [([45.0, 30.0, 1.0], "POCKET_TOP_Z0.900000_TO_1.000000_MM"), ([45.0, 30.0, 0.0], "POCKET_BOTTOM_Z0.000000_TO_0.100000_MM")] {
         let mut s = Session::default();
         engraved_plate(&mut s, 0.1, label_rectangle, &[]);
         run(&mut s, "sheet.recognize", json!({"body": "Plate", "face": pick}));
@@ -1301,7 +1302,7 @@ fn a_plates_recesses_are_the_sheets_at_any_depth_from_either_face() {
     engraved_plate(&mut s, 0.6, label_rectangle, &[]);
     convert(&mut s, [45.0, 30.0, 1.0]);
     let d = depths(&mut s);
-    assert!(d.len() == 1 && d[0].0 == 0.0 && (d[0].1 - 0.6).abs() < 1e-9, "{d:?}");
+    assert!(d.len() == 1 && (d[0].0 - 0.4).abs() < 1e-9 && d[0].1 == 1.0, "{d:?}");
     let mut s = Session::default();
     engraved_plate(&mut s, 0.1, label_rectangle, &[]);
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Under"}));
@@ -1542,7 +1543,7 @@ fn a_channel_with_its_bends_modelled_keeps_its_hole_and_engravings_on_either_fac
     assert!(!contains(&s, [40.0, 0.25, 40.0]) && contains(&s, [40.0, 0.75, 40.0]));
     assert!(!contains(&s, [1.75, 17.0, 20.0]) && contains(&s, [1.25, 17.0, 20.0]));
     // The flat: the hole, and a pocket per label, 0.5 deep from the web's face on the sheet's
-    // surface (z 0) and from the other one (z T). Along the outside from the web label's middle (40 in, 40 along) to the
+    // surface (z T, its top) and from the other one (z 0). Along the outside from the web label's middle (40 in, 40 along) to the
     // hole's: 40 to the sharp and 18 up the leg, less a deduction, and 20 back along; to the leg
     // label's middle, 40 and 17 the other way.
     let circles = flat_circles(&mut s);
@@ -1553,8 +1554,8 @@ fn a_channel_with_its_bends_modelled_keeps_its_hole_and_engravings_on_either_fac
     let from = |p: &Value, z0: f64, z1: f64| {
         (p["z0_mm"].as_f64().unwrap_or(f64::NAN) - z0).abs() < 1e-9 && (p["z1_mm"].as_f64().unwrap_or(f64::NAN) - z1).abs() < 1e-9
     };
-    let web = pockets.iter().find(|p| from(p, 0.0, 0.5)).expect("the web's label, from z 0");
-    let leg = pockets.iter().find(|p| from(p, 1.5, 2.0)).expect("the leg's label, from z T");
+    let web = pockets.iter().find(|p| from(p, 1.5, 2.0)).expect("the web's label, to z T");
+    let leg = pockets.iter().find(|p| from(p, 0.0, 0.5)).expect("the leg's label, from z 0");
     let middle = |p: &Value| {
         let (lo, hi) = pocket_box(p);
         ([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0], (hi[0] - lo[0], hi[1] - lo[1]))

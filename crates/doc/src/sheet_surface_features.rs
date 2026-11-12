@@ -1054,7 +1054,7 @@ impl SurfaceSheet {
         };
         let starts = |mine: bool, l: &Loop2| mine.then(|| l.segs.iter().map(|g| g.start()).collect::<Vec<Vec2>>());
         let moved_cuts = beyond(self.sheet.cuts.iter().map(|c| starts(c.panel == i, &c.region.outer)).collect(), None)?;
-        let recesses = beyond(self.recesses.iter().map(|r| starts(r.panel == i, &r.region.outer)).collect(), Some("a recess"))?;
+        let recesses = beyond(self.recesses.iter().map(|r| starts(r.panel == i, &r.region.outer)).collect(), Some("a pocket"))?;
         let loose = beyond(self.loose.iter().map(|l| starts(l.panel == i, &l.region.outer)).collect(), Some("a loose piece of the sheet"))?;
         Ok(Ok(FoldPlan { n, u, s0, ba, stays, moves, cuts, anchors, rips, moved_cuts, recesses, loose }))
     }
@@ -1142,10 +1142,13 @@ impl SurfaceSheet {
     }
 
     /// The sheet of a copy of its body, named `body`, by `m`: moved, or mirrored into the opposite
-    /// hand. A mirror turns each panel's chart over (v → −v) so that its frame stays
-    /// right-handed with the material where it was: every outline, anchor, cut and record in the
-    /// charts and the flat is mirrored with it, and each joint runs the other way. None for a
-    /// transform that is no rigid motion or mirror, and for a mirror of a sheet with a roll.
+    /// hand. A mirror turns each panel's chart over (u → −u), so that its frame stays
+    /// right-handed with the material where it was and the copy's flat is its source's mirrored
+    /// across the flat's y axis (x → −x). Every outline, anchor, cut and record in the charts and
+    /// the flat is mirrored with it, each joint and bend line runs the other way, each
+    /// perforation field counts its grid from the other side, and its rims and faces are named as
+    /// its own layout names them. None for a transform that is no rigid motion or mirror, and for
+    /// a mirror of a sheet with a roll.
     pub fn copied(&self, body: &str, m: &crate::Mat) -> Option<SurfaceSheet> {
         let axis = |i: usize| m.get(i).map(|c| Vec3::new(c[0], c[1], c[2]));
         let (x, y, z) = (axis(0)?, axis(1)?, axis(2)?);
@@ -1166,7 +1169,7 @@ impl SurfaceSheet {
         }
         let place = |r: Rigid3| {
             let (x, y, z) = (crate::apply_vector(m, r.x), crate::apply_vector(m, r.y), crate::apply_vector(m, r.z));
-            Rigid3 { x, y: if mirror { y * -1.0 } else { y }, z, shift: crate::apply_point(m, r.shift) }
+            Rigid3 { x: if mirror { x * -1.0 } else { x }, y, z, shift: crate::apply_point(m, r.shift) }
         };
         let mut out = self.clone();
         out.body = body.to_string();
@@ -1178,9 +1181,9 @@ impl SurfaceSheet {
         Some(out)
     }
 
-    /// Every chart and the flat turned over (v → −v): see [`Self::copied`].
+    /// Every chart and the flat turned over (u → −u): see [`Self::copied`].
     fn turn_charts_over(&mut self) {
-        let f = |p: Vec2| Vec2::new(p.x, -p.y);
+        let f = |p: Vec2| Vec2::new(-p.x, p.y);
         let r = |g: &Region2| crate::sheet_surface_convert::rigid_region(g, f);
         let seg =
             |s: &Seg2| crate::sheet_surface_convert::rigid_region(&Region2 { outer: Loop2 { segs: vec![*s] }, holes: Vec::new() }, f).outer.segs;
@@ -1192,7 +1195,7 @@ impl SurfaceSheet {
             // its side of it.
             let turn = |a: &mut Anchor, length: f64| {
                 a.origin = f(a.origin + a.dir * length);
-                a.dir = Vec2::new(-a.dir.x, a.dir.y);
+                a.dir = f(a.dir) * -1.0;
             };
             match &mut j.kind {
                 JointKind::Bend(b) => {
@@ -1235,7 +1238,8 @@ impl SurfaceSheet {
         self.regions = self.regions.iter().map(r).collect();
         for b in &mut self.bends {
             b.zone = r(&b.zone);
-            (b.start, b.end) = (f(b.start), f(b.end));
+            // It runs the other way, as its joint does, with the same panel on each side of it.
+            (b.start, b.end) = (f(b.end), f(b.start));
             b.tabs = b.tabs.iter().map(r).collect();
         }
         for l in &mut self.roll_lines {
@@ -1246,8 +1250,33 @@ impl SurfaceSheet {
         }
         self.labels = self.labels.iter().map(r).collect();
         for p in &mut self.perforations {
+            // Its rows stay; along each, the holes count from the other side.
+            p.from_right = !p.from_right;
             if let Some(o) = &mut p.outline {
                 *o = o.iter().map(r).collect();
+            }
+        }
+        for b in &mut self.bores {
+            b.base.x = -b.base.x;
+            b.axis.x = -b.axis.x;
+        }
+        // Each panel's own sketch lines and its rims as its own layout would keep them: each edge
+        // where its chart turned it, the material still on its left.
+        for (_, _, a, b) in &mut self.sketch_curves {
+            (*a, *b) = (f(*b), f(*a));
+        }
+        for (_, a, b, _) in &mut self.rims {
+            (*a, *b) = (f(*b), f(*a));
+        }
+        // The holes' loops and their sketch curves as drawn, where the chart turned them: each
+        // drawn curve keeps its way, so a wall's pieces rank along it as on the source.
+        let turned = crate::sheet_surface_convert::rigid_seg(f);
+        for h in &mut self.holes {
+            for (seg, _, drawn) in &mut h.segs {
+                *seg = turned(seg);
+                if let Some(d) = drawn {
+                    *d = turned(d);
+                }
             }
         }
     }
