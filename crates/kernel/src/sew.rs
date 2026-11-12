@@ -235,6 +235,14 @@ fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
 
+/// The working tolerance (mm) of the record [`sew`] builds a solid `size` mm across (the diagonal
+/// of its box): 10⁻⁶ of its size, at least 10⁻⁵ mm (the tolerance of a fitted face,
+/// `fill::face_tolerance`). SMLib refuses an edge shorter than about this, so a caller drawing
+/// faces from outlines leaves no edge that short.
+pub fn sew_tolerance(size: f64) -> f64 {
+    (size * 1e-6).max(1e-5)
+}
+
 /// The vertices and edges of the faces being sewn, shared by key.
 #[derive(Default)]
 struct Builder {
@@ -1163,9 +1171,7 @@ fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::
             }
         }
     }
-    // The record's working tolerance: 10⁻⁶ of the solid's size, at least 10⁻⁵ mm (the tolerance
-    // of a fitted face, `fill::face_tolerance`).
-    let tol = (lo.dist(hi) * 1e-6).max(1e-5);
+    let tol = sew_tolerance(lo.dist(hi));
     guard("sew", || {
         // Separate fans at a point only where contact is expected (as for edge sheets); a plain
         // sew refuses bodies touching at a vertex.

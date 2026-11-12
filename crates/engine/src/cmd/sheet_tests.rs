@@ -7681,3 +7681,58 @@ fn flange_segments_stored_bounds_outside_the_partition_are_refused() {
         assert!(errors.iter().any(|e| e == want), "{what}: {errors:?}");
     }
 }
+
+/// A through-all cut that passes a hair off the top corner of a flange where it meets the mitre
+/// of the next flange (#15269). A 60 × 100 plate (2 mm sheet, R 2) gets 30 mm flanges on its
+/// x = 0 and y = 100 edges; a cut in the YZ plane tapers the first flange from its mitre corner,
+/// y = 98 − √2 at z = 30, down to z = 10 at y = 0. With the cut's corner 0.00001 to 0.0001 mm
+/// along the top edge from the flange's corner, or its taper passing that close to the corner,
+/// SMLib's 2D boolean took the two for one point and the flange's outline came back open ("sew:
+/// the faces do not close"), or with an edge that short, which SMLib refused. Every offset builds,
+/// and the flange loses its part above the taper.
+#[test]
+fn a_cut_passing_a_hair_off_a_flange_corner_builds() {
+    // The flange's flat panel runs 26 from its bend (z = 4) to its top (z = 30) and c along y. The
+    // taper runs from (y 0, z 10) at slope k; the flange loses what lies above it.
+    let c = 98.0 - 2f64.sqrt();
+    let removed = |k: f64, end: f64| {
+        let y = (20.0 / k).min(end);
+        20.0 * y - k * y * y / 2.0
+    };
+    let mut failed = Vec::new();
+    for d in [0.0, 1e-5, -1e-5, 3e-5, -3e-5, 1e-4, -1e-4, 1.2e-4, -1.2e-4, 1e-3, -1e-3, 96.5858 - c] {
+        for along in [true, false] {
+            let mut s = Session::default();
+            run(
+                &mut s,
+                "sheet.manage_rules",
+                json!({"name": "Steel 2mm", "thickness": "2 mm", "bend_radius": "2 mm", "k_factor": "0.4", "active": true}),
+            );
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 100]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Part"}));
+            run(&mut s, "sheet.flange", json!({"edges": [[0, 50, 2], [30, 100, 2]], "height": 30}));
+            let before = volume(&mut s);
+            // Along: the cut's corner on the flange's top edge, d from its corner. Past: the taper
+            // runs on 1 mm past the mitre, d above the corner there.
+            let (corner, k) = if along { ([c + d, 30.0], 20.0 / (c + d)) } else { ([c + 1.0, 10.0 + (c + 1.0) * (20.0 + d) / c], (20.0 + d) / c) };
+            run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Cut"}));
+            run(&mut s, "sketch.line", json!({"points": [corner, [0, 10], [-5, 10], [-5, 35], [corner[0], 35]], "closed": true}));
+            run(&mut s, "sketch.finish", json!({}));
+            let what = format!("{d:e}, {}", if along { "corner along the top edge" } else { "taper past the corner" });
+            let cut = json!({"sketch": "Cut", "profiles": "all", "through_all": true, "direction": "symmetric", "operation": "cut"});
+            if let Err(e) = s.execute("solid.extrude", &cut) {
+                failed.push(format!("{what}: {e}"));
+                continue;
+            }
+            // The cut passes through the corner when it passes within the sew's tolerance of it
+            // (under 0.00016 mm here). The taper then turns about its far end by that much at
+            // most, which moves the volume by under 2 mm × c × 0.00016 / 2 = 0.016 mm³.
+            let want = before - 2.0 * removed(k, c.min(corner[0]));
+            let got = volume(&mut s);
+            assert!((got - want).abs() < 0.016, "{what}: {got} vs {want}");
+        }
+    }
+    assert!(failed.is_empty(), "{failed:?}");
+}
