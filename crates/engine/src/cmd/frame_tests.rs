@@ -242,6 +242,73 @@ fn members_follow_every_line_of_a_rectangle() {
 }
 
 #[test]
+fn members_are_made_of_a_standard_size_by_name() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": {"size": "RSC 203x89"}}));
+    let bs = bodies(&mut s);
+    let names: Vec<&str> = bs.iter().map(|b| b.0.as_str()).collect();
+    assert_eq!(names, ["RSC 203x89", "RSC 203x89 (2)", "RSC 203x89 (3)", "RSC 203x89 (4)"]);
+    // Each member is the size's section, 37.9 cm² in the BS 4 table, the length of its line.
+    let props = run(&mut s, "frame.profile.properties", json!({"profile": {"size": "RSC 203x89"}}));
+    let area = f(&props["area"]);
+    assert!(rel(area, 3790.0) < 0.005, "{props}");
+    assert_eq!(props["size"], json!("RSC 203x89"));
+    assert_eq!(props["profile"]["flange_slope"], json!(5.0), "{props}");
+    let v = total_volume(&mut s);
+    assert!(rel(v, area * 2000.0) < MEASURED, "{v} vs {}", area * 2000.0);
+    // The bottom line runs along +X: the channel, 88.9 wide and 203.2 deep, is centred on it.
+    assert!(bs.iter().any(|b| near3(b.2, [0.0, -44.45, -101.6]) && near3(b.3, [600.0, 44.45, 101.6])), "{bs:?}");
+    // The design keeps the size's name and dimensions, and reopens to the same members.
+    let saved = s.doc.to_json();
+    assert!(saved.contains("RSC 203x89") && saved.contains("5 deg"), "{saved}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let after = bodies(&mut reopened);
+    assert_eq!(after.iter().map(|b| b.0.as_str()).collect::<Vec<_>>(), names);
+    assert!(rel(total_volume(&mut reopened), v) < 1e-9);
+    // The reported profile, slope in degrees, is the same section given by its dimensions.
+    let again = run(&mut s, "frame.profile.properties", json!({"profile": props["profile"]}));
+    assert!(rel(f(&again["area"]), area) < 1e-12 && rel(f(&again["iyy"]), f(&props["iyy"])) < 1e-12, "{again}");
+    // In an inch design the size is still in millimetres.
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let inch = run(&mut s, "frame.profile.properties", json!({"profile": {"size": "SHS 100x100x5"}}));
+    assert!((f(&inch["width"]) - 100.0).abs() < 1e-9, "{inch}");
+}
+
+#[test]
+fn standard_sizes_are_listed_and_refused_with_the_reason() {
+    let mut s = Session::default();
+    let out = run(&mut s, "frame.profile.list", json!({}));
+    let sizes = out["sizes"].as_array().unwrap();
+    for family in sizes {
+        let names = family["names"].as_array().unwrap();
+        assert!(!names.is_empty() && !family["source"].as_str().unwrap_or_default().is_empty(), "{family}");
+        // The first and last size of each family make a section of their kind.
+        for name in [&names[0], &names[names.len() - 1]] {
+            let r = run(&mut s, "frame.profile.properties", json!({"profile": {"size": name}}));
+            assert_eq!(r["profile"]["kind"], family["kind"], "{r}");
+        }
+    }
+    let rsc = sizes.iter().find(|f| f["family"] == "RSC").unwrap();
+    for name in ["RSC 203x89", "RSC 152x76"] {
+        assert!(rsc["names"].as_array().unwrap().contains(&json!(name)), "{rsc}");
+    }
+    let only = run(&mut s, "frame.profile.list", json!({"family": "SHS"}));
+    assert_eq!(only["sizes"].as_array().map(Vec::len), Some(1));
+    assert!(s.execute("frame.profile.list", &json!({"family": "XYZ"})).unwrap_err().to_string().contains("`family`"));
+    rectangle_frame(&mut s);
+    for (profile, why) in [
+        (json!({"size": "RSC 203x89", "height": 200}), "brings its own dimensions"),
+        (json!({"size": "RSC 999x99"}), "unknown size"),
+        (json!({"size": "RSC 203x89", "kind": "rect_tube"}), "is a channel profile"),
+    ] {
+        let err = s.execute("frame.member", &json!({"sketch": "Frame", "profile": profile})).unwrap_err().to_string();
+        assert!(err.contains(why), "{profile}: {err}");
+    }
+    assert!(bodies(&mut s).is_empty());
+}
+
+#[test]
 fn members_follow_a_parameter_edit() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "W", "expression": "600 mm"}));

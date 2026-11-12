@@ -232,8 +232,8 @@ fn straight(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
 fn profile_regions(vals: &BTreeMap<String, Value>, st: &ModelState, profile: &MemberProfile) -> Result<(Vec<Region2>, String)> {
     let (regions, description) = match profile {
         MemberProfile::Library { profile } => {
-            let p = profile.resolve(|name, e| val(vals, e, Kind::Length).map_err(|err| DocError::Invalid(format!("profile `{name}`: {err}"))))?;
-            (vec![p.region()?], p.description())
+            let p = profile.resolve(|name, e, kind| val(vals, e, kind).map_err(|err| DocError::Invalid(format!("profile `{name}`: {err}"))))?;
+            (vec![p.region()?], profile.size.clone().unwrap_or_else(|| p.description()))
         }
         MemberProfile::Sketch { sketch, profiles } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
