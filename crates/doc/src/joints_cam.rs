@@ -772,7 +772,9 @@ pub fn default_reverse(doc: &Document, st: &ModelState, l: &MotionLink, c: &Cam)
         return Ok(off < 0.0);
     }
     let comp = component_of(doc, s.moving)?;
-    let bb = component_bodies(doc, st, comp).iter().fold(solidcraft_geom::Aabb3::EMPTY, |bb, b| bb.union(&b.mesh().bounds()));
+    let bb = component_bodies(doc, st, comp)
+        .iter()
+        .fold(solidcraft_geom::Aabb3::EMPTY, |bb, b| bb.union(&b.body.exact_bounds().unwrap_or(solidcraft_geom::Aabb3::EMPTY)));
     if bb.min.x > bb.max.x {
         return Ok(false);
     }
