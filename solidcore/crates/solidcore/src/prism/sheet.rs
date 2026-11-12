@@ -14,6 +14,7 @@ use super::read::{planar_pieces, Run};
 use crate::error::{Result, SolidError};
 use crate::eval::Frame;
 use crate::kernel::Kernel;
+use crate::math::Point2;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::api_queries::{face_get_boundary_loops, get_faces};
 use crate::surface::surface::SurfaceKind;
@@ -102,7 +103,9 @@ pub fn region_loops(region: &Region2, tol: f64) -> Result<RegionLoops> {
 /// vertex twice (a cut-out touching the outline, material meeting at a corner), seen from the
 /// face's normal turned to run counter-clockwise in the frame; counter-clockwise pieces are
 /// material, the others holes of the smallest material piece of the face holding them
-/// ([`Loop2::holds`]). `tol` (mm, at least the sheet's edges') is how far an edge's curve may end
+/// ([`Loop2::holds`]). The regions come in a canonical order: each loop starts at its smallest
+/// start point (x, then y), and holes and regions are sorted by that point, the larger first
+/// where two share it. `tol` (mm, at least the sheet's edges') is how far an edge's curve may end
 /// from its vertices.
 ///
 /// # Errors
@@ -207,5 +210,54 @@ pub fn sheet_regions(k: &Kernel, b: &Brep, frame: &Frame, tol: f64) -> Result<Sh
                 .push(hole);
         }
     }
+    canonical(&mut out.regions)?;
     Ok(out)
+}
+
+/// `regions` in their canonical order, whatever order the sheet's faces, loops and edges came in:
+/// each loop starts at its lexicographically smallest start point (x, then y), the holes of a
+/// region and the regions sorted by that point, the larger loop first where two share it.
+fn canonical(regions: &mut Vec<Region2>) -> Result<()> {
+    let mut keyed = Vec::new();
+    for mut r in std::mem::take(regions) {
+        let key = start_at_smallest(&mut r.outer)?;
+        let mut holes = Vec::new();
+        for mut h in std::mem::take(&mut r.holes) {
+            let k = start_at_smallest(&mut h)?;
+            holes.push((k, h));
+        }
+        holes.sort_by(|a, b| by_key(&a.0, &b.0));
+        r.holes = holes.into_iter().map(|(_, h)| h).collect();
+        keyed.push((key, r));
+    }
+    keyed.sort_by(|a, b| by_key(&a.0, &b.0));
+    regions.extend(keyed.into_iter().map(|(_, r)| r));
+    Ok(())
+}
+
+/// A loop's sort key: its first start point and the size of its area.
+type Key = (Point2, f64);
+
+fn by_key(a: &Key, b: &Key) -> std::cmp::Ordering {
+    a.0.x
+        .total_cmp(&b.0.x)
+        .then(a.0.y.total_cmp(&b.0.y))
+        .then(b.1.total_cmp(&a.1))
+}
+
+/// Turns `lp` to start at the segment whose start point is the smallest (x, then y; the first
+/// such), and returns that point with the size of the loop's area.
+fn start_at_smallest(lp: &mut Loop2) -> Result<Key> {
+    let starts: Vec<Point2> = lp.segs.iter().map(Seg2::start).collect();
+    let mut best: Option<(usize, Point2)> = None;
+    for (i, p) in starts.into_iter().enumerate() {
+        if best.is_none_or(|(_, q)| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).is_lt()) {
+            best = Some((i, p));
+        }
+    }
+    let (i, p) = best.ok_or_else(|| refused("an empty loop"))?;
+    let segs = std::mem::take(&mut lp.segs);
+    let (before, after): (Vec<_>, Vec<_>) = segs.into_iter().enumerate().partition(|(j, _)| *j < i);
+    lp.segs = after.into_iter().chain(before).map(|(_, s)| s).collect();
+    Ok((p, lp.signed_area()?.value.abs()))
 }

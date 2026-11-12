@@ -1052,6 +1052,125 @@ fn disjoint_squares_intersect_in_nothing() {
     assert!(union.iter().all(|r| (area(r) - 100.0).abs() < 1e-9));
 }
 
+/// Whether `a` and `b` are the same regions in the same order: loop for loop, segment for
+/// segment of the same kind, every number within 1e-12.
+fn same_regions(a: &[Region2], b: &[Region2]) -> bool {
+    let near = |x: f64, y: f64| (x - y).abs() <= 1e-12;
+    let pt = |p: Vec2, q: Vec2| near(p.x, q.x) && near(p.y, q.y);
+    let seg = |s: &Seg2, t: &Seg2| match (*s, *t) {
+        (Seg2::Line { a, b }, Seg2::Line { a: c, b: d }) => pt(a, c) && pt(b, d),
+        (
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            },
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start: s0,
+                sweep: w,
+            },
+        ) => pt(center, c) && near(radius, r) && near(start, s0) && near(sweep, w),
+        _ => same_seg(s, t),
+    };
+    let lp = |l: &Loop2, m: &Loop2| {
+        l.segs.len() == m.segs.len() && l.segs.iter().zip(&m.segs).all(|(s, t)| seg(s, t))
+    };
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(r, q)| {
+            lp(&r.outer, &q.outer)
+                && r.holes.len() == q.holes.len()
+                && r.holes.iter().zip(&q.holes).all(|(h, g)| lp(h, g))
+        })
+}
+
+/// The result of a planar boolean comes in one canonical order whatever order its operands came
+/// in: each loop starts at its smallest start point (x, then y), holes and regions sorted by that
+/// point, and every arc starts at an angle in (-π, π].
+#[test]
+fn shuffled_operands_give_the_same_regions() {
+    let circle = |c: Vec2, r: f64, start: f64| Loop2 {
+        segs: vec![
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start,
+                sweep: PI,
+            },
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start: start + PI,
+                sweep: PI,
+            },
+        ],
+    };
+    let mut ring = rectangle(v(0., 0.), v(20., 20.));
+    ring.holes = vec![circle(v(6., 6.), 2., PI), circle(v(14., 14.), 3., 0.5)];
+    let a = vec![
+        ring,
+        rectangle(v(30., 0.), v(40., 10.)),
+        Region2 {
+            outer: circle(v(60., 5.), 5., -PI),
+            holes: vec![],
+        },
+    ];
+    let b = vec![rectangle(v(15., -5.), v(65., 3.))];
+    // the same regions: in another order, each loop turned to start elsewhere, holes swapped
+    let turned = |l: &Loop2, n: usize| {
+        let mut segs = l.segs.clone();
+        let len = segs.len();
+        segs.rotate_left(n % len);
+        Loop2 { segs }
+    };
+    let shuffled: Vec<Region2> = a
+        .iter()
+        .rev()
+        .map(|r| Region2 {
+            outer: turned(&r.outer, 1),
+            holes: r.holes.iter().rev().map(|h| turned(h, 1)).collect(),
+        })
+        .collect();
+    for op in [BooleanOp::Union, BooleanOp::Subtract, BooleanOp::Intersect] {
+        let one = planar_regions_boolean(&a, &b, op, 1e-7).unwrap();
+        let two = planar_regions_boolean(&shuffled, &b, op, 1e-7).unwrap();
+        let three = planar_regions_boolean(&b, &shuffled, op, 1e-7).unwrap();
+        assert!(!one.is_empty());
+        // the same regions, loops and segments in the same order; the numbers differ only by
+        // the rounding of the operands' other order (well under 1e-12 here)
+        assert!(same_regions(&one, &two), "{op:?}: {one:?} {two:?}");
+        if op != BooleanOp::Subtract {
+            assert!(same_regions(&one, &three), "{op:?}: {one:?} {three:?}");
+        }
+        let loops: Vec<&Loop2> = one
+            .iter()
+            .flat_map(|r| std::iter::once(&r.outer).chain(&r.holes))
+            .collect();
+        for l in &loops {
+            let first = start(&l.segs[0]);
+            assert!(l.segs.iter().all(|s| {
+                let p = start(s);
+                (first.x, first.y) <= (p.x, p.y)
+            }));
+            for s in &l.segs {
+                if let Seg2::Arc { start, .. } = *s {
+                    assert!(start > -PI && start <= PI, "{start}");
+                }
+            }
+        }
+        let firsts: Vec<(f64, f64)> = one
+            .iter()
+            .map(|r| {
+                let p = start(&r.outer.segs[0]);
+                (p.x, p.y)
+            })
+            .collect();
+        assert!(firsts.windows(2).all(|w| w[0] <= w[1]), "{firsts:?}");
+    }
+}
+
 /// Planar booleans SolidCraft's sheet tests make (a channel engraved, a sheet with small bends
 /// and holes, a sheet perforated with a thousand round holes: each operand pair recorded from the
 /// call), where a face of one operand lies far from the other's plane face. The 2D boolean

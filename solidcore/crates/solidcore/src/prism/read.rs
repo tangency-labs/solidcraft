@@ -504,13 +504,13 @@ fn arc(
             Seg2::Arc {
                 center,
                 radius,
-                start,
+                start: principal(start),
                 sweep: h,
             },
             Seg2::Arc {
                 center,
                 radius,
-                start: start + h,
+                start: principal(start + h),
                 sweep: h,
             },
         ]);
@@ -518,9 +518,24 @@ fn arc(
     Some(vec![Seg2::Arc {
         center,
         radius,
-        start,
+        start: principal(start),
         sweep,
     }])
+}
+
+/// The angle `a` in (-π, π]: unchanged when it is already (so an angle in range keeps its bits),
+/// else turned by whole turns (`atan2` answers -π for a point on the negative x axis at y = -0,
+/// and a whole turn's second half starts past π).
+fn principal(a: f64) -> f64 {
+    if a > -PI && a <= PI {
+        return a;
+    }
+    let r = a.rem_euclid(TAU);
+    if r > PI {
+        r - TAU
+    } else {
+        r
+    }
 }
 
 /// Several spans end to end from `a` to `b`, each the segment it is: a polynomial span along its
