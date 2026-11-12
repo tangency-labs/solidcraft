@@ -2551,8 +2551,6 @@ impl OffsetGeometryCreation {
         uv_curve_other_base: Option<O>,
         mark: MarkType,
     ) -> Result<Option<Extent1d>> {
-        let _ = (offset_edgeuse, other_offset_edgeuse);
-
         // locals
         let mut trim_ivl = Extent1d::new();
         let tan_tol_deg = self.tangency_tol_degrees();
@@ -2880,6 +2878,8 @@ impl OffsetGeometryCreation {
             let mut last_face: Option<O> = None;
             // (WR-666) each adjacent face's candidates in `solutions`
             let mut face_solutions: Vec<(usize, usize)> = Vec::new();
+            // (not upstream) the extended surface and domain behind each such range
+            let mut neighbour_surfaces: Vec<(usize, usize, O, Extent2d)> = Vec::new();
             for &off_adj_eu in &off_adj_eus {
                 let f = brep
                     .edgeuse_face(off_adj_eu)?
@@ -2969,6 +2969,9 @@ impl OffsetGeometryCreation {
                         }
                     }
                 }
+                if let Some(&(first, last)) = face_solutions.last() {
+                    neighbour_surfaces.push((first, last, ext_surface, ext_domain));
+                }
             } // end iter every sOffAdjEU
 
             // Not upstream: beside an edge tangent in the input whose new surfaces cross
@@ -2986,6 +2989,7 @@ impl OffsetGeometryCreation {
                 }
                 solutions = ends;
                 face_solutions.clear();
+                neighbour_surfaces.clear();
             }
 
             let mut found = false;
@@ -3085,6 +3089,25 @@ impl OffsetGeometryCreation {
                 return Ok(None);
             }
 
+            // (not upstream) beside a screw wall, an end at a neighbour's crossing ends
+            // where the curve passes nearest the three surfaces' corner instead
+            // ([`crate::offset::procedural_screw::corner`])
+            if let Some(param) = Self::screw_corner_end(
+                k,
+                brep,
+                executive,
+                [offset_edgeuse, other_offset_edgeuse],
+                base_edge,
+                curve_3d,
+                found_param,
+                &solutions,
+                &neighbour_surfaces,
+            )? {
+                if !are_same(param, trim_ivl.min()) {
+                    found_param = param;
+                }
+            }
+
             // else set Interval
             trim_ivl.add_value(found_param);
         } // end iter twice
@@ -3138,6 +3161,101 @@ impl OffsetGeometryCreation {
         } else {
             Ok(None)
         }
+    }
+
+    /// (not upstream) The end of an extended intersection curve beside a screw wall:
+    /// where `found` (the parameter of a crossing of the neighbour's extended surface, one
+    /// of `solutions`, from the neighbour of `neighbours` whose range holds it) ends an
+    /// edge between the extended surfaces of `offset_edgeuses`' faces, and one of the
+    /// three surfaces is a screw wall ([`corner::is_screw_wall`]), the parameter where
+    /// the curve passes nearest the corner of the three surfaces ([`corner::corner`] on
+    /// their definitions, sought within ten B-rep tolerances of the crossing: the trim's
+    /// own reach for a mated vertex). A crossing at a shallow angle moves along the curve
+    /// by the curve's deviation over the sine of that angle; the nearest point stays
+    /// within the deviation. It is taken only within a quarter of the B-rep tolerance τ
+    /// of the corner (the intersection's own tolerance here), so every edge ending there
+    /// ends within τ/4 of the corner, any two ends within τ/2 of each other, and the
+    /// vertex, at one of them, within the half of its tolerance (at least τ) that the
+    /// check allows its edges' ends, with the corner inside its ball: no tolerance is
+    /// raised for it. `None` (the crossing stays) for any other end, where the corner
+    /// is not a regular root near the crossing, or where the curve passes further from it.
+    ///
+    /// # Errors
+    ///
+    /// Those of the extended surfaces, the corner's drops and the point solve.
+    #[allow(clippy::too_many_arguments)]
+    fn screw_corner_end<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        offset_edgeuses: [Option<O>; 2],
+        base_edge: O,
+        curve_3d: O,
+        found: f64,
+        solutions: &SolutionArray<O>,
+        neighbours: &[(usize, usize, O, Extent2d)],
+    ) -> Result<Option<f64>> {
+        use crate::offset::procedural_screw::corner;
+        let mut chosen = None;
+        for (index, sol) in solutions.as_slice().iter().enumerate() {
+            if sol.solution_type != SolutionType::RangeOfValues && sol.start.param(0)? == found {
+                chosen = neighbours
+                    .iter()
+                    .find(|(first, last, _, _)| (*first..*last).contains(&index));
+                break;
+            }
+        }
+        let (Some(&(_, _, neighbour, neighbour_domain)), [Some(eu1), Some(eu2)]) =
+            (chosen, offset_edgeuses)
+        else {
+            return Ok(None);
+        };
+        let mut own = [None, None];
+        for (eu, slot) in [eu1, eu2].into_iter().zip(own.iter_mut()) {
+            let face = brep
+                .edgeuse_face(eu)?
+                .ok_or(dangling("edge use without face"))?;
+            let surface = brep
+                .face_surface(face)?
+                .ok_or(dangling("face without surface"))?;
+            *slot = Some(executive.get_create_extended_surface(k, brep, surface)?);
+        }
+        let [Some((s1, d1)), Some((s2, d2))] = own else {
+            return Ok(None);
+        };
+        let surfaces = [
+            (surface_of(brep, s1)?, &d1),
+            (surface_of(brep, s2)?, &d2),
+            (surface_of(brep, neighbour)?, &neighbour_domain),
+        ];
+        if !surfaces.iter().any(|(s, _)| corner::is_screw_wall(s)) {
+            return Ok(None);
+        }
+        let tol = brep.brep_tolerance(base_edge)?;
+        let crossing = curve_of(brep, curve_3d)?.evaluate_point(k, found)?;
+        let Some(at) = corner::corner(k, surfaces, crossing, 10.0 * tol)? else {
+            return Ok(None);
+        };
+        let feet = Self::point_solve(
+            k,
+            brep,
+            curve_3d,
+            SolverOperation::Minimize,
+            at,
+            tol,
+            None,
+            SolutionRequested::All,
+        )?;
+        let mut best: Option<(f64, f64)> = None;
+        for sol in feet.as_slice() {
+            let t = sol.start.param(0)?;
+            let foot = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
+            let (off, along) = (distance(foot, at), distance(foot, crossing));
+            if off <= tol / 4.0 && best.is_none_or(|(_, b)| along < b) {
+                best = Some((t, along));
+            }
+        }
+        Ok(best.map(|(t, _)| t))
     }
 
     /// `TrimExtendedEdge`'s choice at a vertex of more than three faces under WR-666

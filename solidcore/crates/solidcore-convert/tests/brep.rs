@@ -1462,6 +1462,87 @@ m20_one_flank_case!(
     -0.1
 );
 
+/// SolidCraft #11582: an M10x1.5 thread on a 6 mm shaft (a cylinder of radius 5 and height 6),
+/// its flanks one continuous face each, as SolidCraft's record holds it. Either flank moved in
+/// 0.05 builds a strict closed solid. The moved flank's section by an end cap crosses the root
+/// cylinder 3° off its tangent, so that section's own crossing ended 1.7e-5 along the circle
+/// from the corner where the cap, the root cylinder and the flank meet, past the half vertex
+/// tolerance the check allows an edge's end: the second flank was refused as unsound. Every
+/// edge there now ends where its curve passes nearest that corner.
+#[test]
+fn either_flank_of_a_continuous_m10_thread_moves_in() {
+    use solidcore::eval::geometry::sweep::SweepDefinitionRecord;
+    use solidcore::mass::integrator::properties::face_area;
+    use solidcore::offset::offset_faces::OffsetFacesExecutive;
+
+    let gz = format!(
+        "{}/tests/data/m10x1.5_continuous_thread_on_6mm_shaft.record.json.gz",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let record: Record = serde_json::from_reader(flate2::read::GzDecoder::new(
+        std::fs::File::open(&gz).unwrap(),
+    ))
+    .unwrap();
+    let strict = |k: &mut Kernel, body: &mut Brep| {
+        assert!(is_manifold_solid(body).unwrap());
+        let check = check_brep(k, body, CheckLevel::Level2).unwrap();
+        assert_eq!(check.assert_valid, Some(true), "{:?}", check.reports);
+        assert_eq!(check.failures().count(), 0, "{:?}", check.reports);
+    };
+    let mut k = kernel();
+    let (mut shaft, _) = to_kernel(&mut k, &record, true).unwrap();
+    strict(&mut k, &mut shaft);
+    let before = volume(&k, &mut shaft);
+    let flanks: Vec<_> = shaft
+        .faces()
+        .ids()
+        .filter(|&id| {
+            let surface = shaft.face(id).unwrap().surface.as_ref().unwrap();
+            surface.procedural_sweep().is_some()
+        })
+        .collect();
+    assert_eq!(flanks.len(), 2, "one continuous face per flank");
+    let distance = -0.05;
+    for flank in flanks {
+        let mut body = solidcore::topology::brep::p3::brep_copy(&mut k, &shaft).unwrap();
+        OffsetFacesExecutive::new()
+            .offset_faces(&mut k, &mut body, &[flank], distance)
+            .unwrap_or_else(|e| panic!("flank {flank:?}: {e:?}"));
+        strict(&mut k, &mut body);
+        // The material behind the flank moved |d| along its normal: its area times |d|, to
+        // the first order (the flank's curvature and its ends change it by far less than 5%).
+        let area = face_area(&k, &mut shaft, flank, 1e-9).unwrap();
+        let lost = before - volume(&k, &mut body);
+        let swept = distance.abs() * area;
+        assert!(
+            (lost - swept).abs() < 0.05 * swept,
+            "flank {flank:?}: {lost} mm³ lost, {swept} mm³ swept"
+        );
+        let moved: Vec<_> = body
+            .faces()
+            .iter()
+            .filter_map(|(_, face)| face.surface.as_ref()?.procedural_sweep())
+            .filter(|sweep| sweep.definition().is_normal_offset())
+            .map(|sweep| {
+                sweep
+                    .definition()
+                    .to_record(sweep.net())
+                    .unwrap()
+                    .definition
+            })
+            .collect();
+        assert_eq!(moved.len(), 1, "flank {flank:?}: one moved wall");
+        let SweepDefinitionRecord::Screw {
+            offset: Some(offset),
+            ..
+        } = &moved[0]
+        else {
+            panic!("the moved wall keeps its exact source");
+        };
+        assert!((offset.signed_distance.abs() - distance.abs()).abs() < 1e-14);
+    }
+}
+
 fn boxed(k: &mut Kernel, o: [f64; 3], s: f64) -> Brep {
     primitives::create_box(k, Vec3::new(o[0], o[1], o[2]), s, s, s).unwrap()
 }
