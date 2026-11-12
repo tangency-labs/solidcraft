@@ -1495,6 +1495,13 @@ impl Session {
             if links != self.doc.links {
                 design.to_mut().links = links;
             }
+            // A geometry copy keeps its file as a link does, so it follows the same Save As rule.
+            let rebase = |c: &solidcraft_doc::GeometryCopy| super::design_link::rebase(&c.file, self.path.as_deref(), path);
+            if self.doc.geometry_copies.iter().any(|c| rebase(c) != c.file) {
+                for copy in &mut design.to_mut().geometry_copies {
+                    copy.file = rebase(copy);
+                }
+            }
         }
         if !self.visibility.is_empty() {
             design.to_mut().visibility = self.visibility.clone();
