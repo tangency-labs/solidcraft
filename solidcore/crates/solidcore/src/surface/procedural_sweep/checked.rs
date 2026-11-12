@@ -217,6 +217,63 @@ fn atan_point_halved(v: f64) -> Ivl {
     }
 }
 
+/// The atan nodes split `[-1/2, 1/2]` at `k / ATAN_NODE_SCALE`, `|k| <= ATAN_NODE_LAST`.
+const ATAN_NODE_SCALE: f64 = 128.0;
+/// The largest node index: `ATAN_NODE_LAST / ATAN_NODE_SCALE = 1/2`.
+const ATAN_NODE_LAST: usize = 64;
+
+/// The enclosures of `atan(k / 128)`, `k = -64..=64` (index `k + 64`), each from the
+/// whole-angle series ([`atan_point_enclosure`]), formed once: a function of constants,
+/// so a kept node is the enclosure formed afresh.
+fn atan_nodes() -> &'static [Ivl; 2 * ATAN_NODE_LAST + 1] {
+    static NODES: OnceLock<[Ivl; 2 * ATAN_NODE_LAST + 1]> = OnceLock::new();
+    NODES.get_or_init(|| {
+        std::array::from_fn(|i| {
+            let k = i as f64 - ATAN_NODE_LAST as f64;
+            atan_point_enclosure(k / ATAN_NODE_SCALE)
+        })
+    })
+}
+
+/// The enclosure of `atan` at the point `v`, either sign, from the node `x_k = k / 128`
+/// nearest it: `atan v = atan x_k + atan d`, `d = (v - x_k) / (1 + v x_k)`, for every
+/// `v x_k > -1`, here `|v x_k| <= 1/4`. Then `|d| <= (1/256) / (3/4) < 0.0053`, so the
+/// series of `atan d` ([`super::alternating`], its terms falling) stops after about four
+/// terms where the half-angle one ([`atan_point_halved`]) takes about fourteen. The
+/// enclosure of `d` is not a point: `atan d` is taken at the double `d_m` in it and
+/// widened by the enclosure's distance from `d_m` (`|atan'| <= 1`); for `|d_m| < 1e-100`,
+/// `atan d_m` is `d_m` within `|d_m|^3 / 3 < 1e-300`. Outside `|v| <= 1/2` (a NaN
+/// included) it is the whole-angle enclosure.
+fn atan_point_noded(v: f64) -> Ivl {
+    if !(v.abs() <= 0.5) {
+        return atan_point_enclosure(v);
+    }
+    let k = (v * ATAN_NODE_SCALE).round();
+    let Some(&node) = atan_nodes().get((k + ATAN_NODE_LAST as f64) as usize) else {
+        return atan_point_enclosure(v);
+    };
+    let x_k = Ivl::from(k / ATAN_NODE_SCALE);
+    let x = Ivl::from(v);
+    let d = (x - x_k) / (Ivl::from(1.0) + x * x_k);
+    let d_m = d.mid();
+    if !(d_m.abs() <= 0.01) {
+        return atan_point_enclosure(v);
+    }
+    let a = Ivl::from(d_m.abs());
+    let small = if d_m.abs() < 1.0e-100 {
+        a + Ivl::new(-1.0e-300, 1.0e-300)
+    } else {
+        super::alternating(a, a * a, |n| super::reciprocal(2 * n + 1))
+    };
+    let small = if d_m < 0.0 {
+        Ivl::new(-small.hi, -small.lo)
+    } else {
+        small
+    };
+    let off = (d - Ivl::from(d_m)).mag();
+    node + small + Ivl::new(-off, off)
+}
+
 fn atan_enclosure(x: Ivl) -> Ivl {
     Ivl::new(atan_point_enclosure(x.lo).lo, atan_point_enclosure(x.hi).hi)
 }
@@ -485,14 +542,19 @@ impl ProceduralSweep {
         let width = b - a;
         let tau = self.span_tau_at(index, a, b)?;
         let x = tau * (2.0 * (t - a) / width - 1.0);
-        // the half-angle series first; where it cannot prove the candidate, the
-        // whole-angle one (either proves it)
-        let halved = atan_point_halved(x);
-        let (atan, atan_x) = if let Ok(atan) = verify(x.atan(), halved, x) {
-            (atan, halved)
+        // the series from the nearest node first; where it cannot prove the candidate,
+        // the half-angle one, then the whole-angle one (any of them proves it)
+        let noded = atan_point_noded(x);
+        let (atan, atan_x) = if let Ok(atan) = verify(x.atan(), noded, x) {
+            (atan, noded)
         } else {
-            let whole = atan_point_enclosure(x);
-            (verify(x.atan(), whole, x)?, whole)
+            let halved = atan_point_halved(x);
+            if let Ok(atan) = verify(x.atan(), halved, x) {
+                (atan, halved)
+            } else {
+                let whole = atan_point_enclosure(x);
+                (verify(x.atan(), whole, x)?, whole)
+            }
         };
         let theta = 0.5 * (a + b) + 2.0 * atan;
         let rate = 2.0 * tau / (1.0 + x * x) * (2.0 / width);
@@ -1030,6 +1092,41 @@ mod tests {
             let (h, w) = (atan_point_halved(v), atan_point_enclosure(v));
             assert_eq!(
                 [h.lo, h.hi].map(f64::to_bits),
+                [w.lo, w.hi].map(f64::to_bits)
+            );
+        }
+    }
+
+    /// The atan from the nearest node meets the whole-angle one, within some roundings,
+    /// on both signs, at and between the nodes, and is the whole-angle one outside
+    /// `|v| <= 1/2`.
+    #[test]
+    fn the_noded_atan_meets_the_whole_angle_one() {
+        for i in -5000..=5000 {
+            let v = f64::from(i) * 1.0e-4;
+            for v in [v, v * 1.0e-90, v * 1.0e-200, v + 3.3e-5, v + 1.0 / 256.0] {
+                if v.abs() > 0.5 {
+                    continue;
+                }
+                let (n, w) = (atan_point_noded(v), atan_point_enclosure(v));
+                let slack = 1.0e-14 * v.abs() + 1.0e-299;
+                assert!(n.lo <= w.hi && w.lo <= n.hi, "{v}: {n:?} {w:?}");
+                assert!(
+                    (n.lo - w.lo).abs() <= slack && (n.hi - w.hi).abs() <= slack,
+                    "{v}: {n:?} {w:?}"
+                );
+                // it proves the candidate wherever the whole-angle one does
+                assert_eq!(
+                    verify(v.atan(), n, v).is_ok(),
+                    verify(v.atan(), w, v).is_ok(),
+                    "{v}"
+                );
+            }
+        }
+        for v in [0.6, -0.7, 3.0, f64::NAN, f64::INFINITY] {
+            let (n, w) = (atan_point_noded(v), atan_point_enclosure(v));
+            assert_eq!(
+                [n.lo, n.hi].map(f64::to_bits),
                 [w.lo, w.hi].map(f64::to_bits)
             );
         }
