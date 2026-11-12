@@ -273,14 +273,20 @@ fn quarter_turn_x() -> solidcraft_doc::Mat {
 }
 
 /// Add an Import feature for a STEP file to the session's design, in a new component named
-/// after the file (#1386).
+/// after the file (#1386). `bytes` are the file's bytes already read (an Inventor part's,
+/// kept from its refused editable history); else the file is read here.
 ///
 /// While the profiler records, the reply's `profile` is the import's share of it (reading,
 /// building the solids in SMLib, placing, meshing and evaluating them), as
 /// `diagnostics.profile` reports it.
-fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
+fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions, bytes: Option<Vec<u8>>) -> Result<Value> {
     let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
-    let sf = read_step(path, options.names)?;
+    let sf = match bytes {
+        Some(bytes) => {
+            solidcraft_io::step_import_feature_named(&bytes, path, options.names).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
+        }
+        None => read_step(path, options.names)?,
+    };
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
     let cname = import::component_name(path, name);
     let (id, placed) = import::add_in_component(s, sf.kind, &fname, sf.body_names, &cname, import::Tree::Step(&sf.import))?;
@@ -506,14 +512,17 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.insert_step";
     let path = path_arg(p, cmd)?;
     if !solidcraft_io::is_step_path(path) {
-        return Err(bad(cmd, "only STEP, IGES, FreeCAD and Rhino files (.step, .stp, .igs, .iges, .fcstd, .3dm) can be inserted"));
+        return Err(bad(
+            cmd,
+            "only STEP, IGES, FreeCAD, Rhino and Inventor files (.step, .stp, .igs, .iges, .fcstd, .3dm, .ipt, .iam) can be inserted",
+        ));
     }
     let options = step_options(p, cmd)?;
     let placement = match p.get("matrix") {
         None | Some(Value::Null) => None,
         Some(m) => Some(super::component::matrix::rigid(m, super::component::matrix::tolerance(p, cmd)?, cmd)?),
     };
-    let mut out = add_step(s, path, str_(p, "name"), &options)?;
+    let mut out = add_step(s, path, str_(p, "name"), &options, None)?;
     if let Some(m) = placement {
         let occ = out["occurrence"].as_u64().ok_or_else(|| EngineError::Other("the import has no placement to move".into()))?;
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
@@ -539,6 +548,39 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if !solidcraft_io::is_mesh_path(path) && p.get("origin").is_some_and(|v| !v.is_null()) {
         return Err(bad("doc.open", "`origin` applies to 3MF, STL, OBJ and glTF files only"));
+    }
+    // Editable history for Inventor parts, when no explicit STEP option (names/up) was given;
+    // a refusal here never fails the open: the geometry import below follows, with a warning.
+    // The bytes are kept for that fallback, so the file is read once.
+    let mut inventor_warning = None;
+    let mut inventor_bytes = None;
+    if solidcraft_io::is_inventor_part_path(path) && p.get("names").is_none_or(Value::is_null) && p.get("up").is_none_or(Value::is_null) {
+        match solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step) {
+            Ok(bytes) => {
+                match solidcraft_io::import_inventor(&bytes, path) {
+                    Ok((doc, warnings)) => {
+                        let mut fresh = Session::new(doc);
+                        if fresh.model.results.iter().all(|r| r.error.is_none()) && !fresh.model.state().bodies.is_empty() {
+                            fresh.undo.clear();
+                            let component = fresh.doc.components.first().map(|c| c.id).unwrap_or(0);
+                            let component_name = fresh.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_else(|| fresh.doc.name.clone());
+                            fresh.active_component = component;
+                            fresh.active_occurrence_path = Some(fresh.doc.first_path(component));
+                            s.replace_design(fresh);
+                            // As every import: an unsaved design, so Save offers a name instead
+                            // of overwriting the source file.
+                            return Ok(json!({"path":path, "features":s.doc.features.len(), "errors":0,
+                                "bodies":s.model.state().bodies.len(), "warnings":warnings,
+                                "component":component, "component_name":component_name, "editable_history_imported":true}));
+                        }
+                        inventor_warning = Some("Inventor history did not regenerate; imported the available geometry instead".to_string());
+                    }
+                    Err(e) => inventor_warning = Some(format!("{e}; imported the available geometry instead")),
+                }
+                inventor_bytes = Some(bytes);
+            }
+            Err(e) => inventor_warning = Some(format!("{path}: {e}; imported the available geometry instead")),
+        }
     }
     if let Some(command) = super::drawing_import_command(path) {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
@@ -591,11 +633,16 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
         fresh.set_validation(s.validation());
-        let r = if solidcraft_io::is_step_path(path) {
-            add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
+        let mut r = if solidcraft_io::is_step_path(path) {
+            add_step(&mut fresh, path, None, &step_options(p, "doc.open")?, inventor_bytes.take())?
         } else {
             add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_units(p, path, "doc.open")?, mesh_origin(p, "doc.open")?, None)?
         };
+        if let Some(warning) = inventor_warning
+            && let Some(warnings) = r.get_mut("warnings").and_then(Value::as_array_mut)
+        {
+            warnings.push(json!(warning));
+        }
         // The design is the file: its component is the one being worked in.
         if let Some(c) = r["component"].as_u64() {
             fresh.active_component = c;
