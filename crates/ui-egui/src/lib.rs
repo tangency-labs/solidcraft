@@ -2935,7 +2935,26 @@ impl SolveApp {
             })
             .unwrap_or_default();
         let text = match status {
-            "valid" => solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)]),
+            "valid" => {
+                let fingerprint = signature
+                    .get("records")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|records| records.last())
+                    .and_then(|record| record.get("key_id"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let trusted = self
+                    .preferences
+                    .trusted_signing_keys
+                    .split(|c: char| c == ',' || c.is_ascii_whitespace())
+                    .filter(|entry| !entry.is_empty())
+                    .any(|entry| entry.eq_ignore_ascii_case(fingerprint));
+                if trusted {
+                    solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
+                } else {
+                    solidcraft_ui_text::format("ui.open_signature_valid_untrusted", &[("key", fingerprint)])
+                }
+            }
             "not_covered" => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
             "invalid" => {
                 let reason = signature.get("reason").and_then(serde_json::Value::as_str).unwrap_or("");

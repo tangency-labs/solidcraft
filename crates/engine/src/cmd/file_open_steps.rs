@@ -55,6 +55,9 @@ impl OpenSteps {
         // Stamped before it is read, as `doc.open` does.
         let disk = solidcraft_io::design_lock::stamp(path);
         let (mut doc, saved) = read_design(&mut Session::default(), path)?;
+        // A file with provenance must not adopt its excluded cache: the shield would then vouch
+        // for geometry the signature does not cover.
+        let signed = solidcraft_io::has_design_provenance(path);
         let checked = verify.then(|| solidcraft_io::read_design_provenance_file(path));
         super::super::component_link::resolve_design_links(&mut doc, Some(path));
         // What `Session::opened` does before it evaluates.
@@ -64,7 +67,7 @@ impl OpenSteps {
         let marker = doc.marker;
         let stop = marker.unwrap_or(usize::MAX).min(doc.features.len());
         // A model saved under another check mode holds that mode's results: evaluated again.
-        let adopted = Session::saved_model(&doc, saved.as_ref()).filter(|model| model.validation() == validation);
+        let adopted = if signed { None } else { Session::saved_model(&doc, saved.as_ref()).filter(|model| model.validation() == validation) };
         let steps = OpenSteps {
             path: path.to_string(),
             read_only,

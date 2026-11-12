@@ -66,6 +66,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             setting::verify_opened_designs(app, ui);
+            ui_kit::settings_form(ui, labels, |ui| {
+                let tip = app.tr("prefs.security.trusted_keys_help").to_string();
+                ui_kit::settings_row_help(ui, app.tr("prefs.security.trusted_keys"), &tip, |ui| {
+                    let hint = app.tr("prefs.security.trusted_keys_hint").to_string();
+                    let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.trusted_signing_keys, &hint, 0.0);
+                    crate::scenario::publish_target("prefs:trusted_signing_keys", response.rect);
+                    response
+                });
+            });
         });
         ui_kit::settings_section(ui, "encryption", app.tr("prefs.security.encryption"), |ui| {
             ui_kit::settings_inline_note(ui, app.tr("prefs.security.encryption_note"));

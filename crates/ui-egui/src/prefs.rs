@@ -1080,6 +1080,9 @@ preference_settings! {
     sign_saved_designs: bool = false, PAGE_SECURITY => check_id_help("prefs.security.sign_saved", "prefs.security.sign_saved_help");
     /// The GnuPG key to sign with: a fingerprint or user id. Empty: GnuPG's default signing key.
     signing_key: String = String::new(), PAGE_SECURITY;
+    /// Fingerprints of signing keys the user trusts, separated by commas or spaces. Only a
+    /// signature from one of these is shown as verified; the user ids in a file are not proof.
+    trusted_signing_keys: String = String::new(), PAGE_SECURITY;
     /// Verify a design's signature when it opens. Off: opening reads no payload twice.
     verify_opened_designs: bool = false, PAGE_SECURITY => check_id_help("prefs.security.verify_opened", "prefs.security.verify_opened_help");
     /// With a dialog open, typing the first letter of a button's label presses it: O for OK,
@@ -6856,6 +6859,7 @@ mod tests {
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
             ("sign_saved_designs", json!(true), PAGE_SECURITY),
             ("signing_key", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
+            ("trusted_signing_keys", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("verify_opened_designs", json!(true), PAGE_SECURITY),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();

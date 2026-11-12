@@ -75,14 +75,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SAVE_CONTRACT)
         .output(output_schema_for::<SaveResult>)
-        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (default false: sign the save with GnuPG, appending a provenance record; container only); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
+        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
     CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as))
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
         .contract(&SAVE_AS_CONTRACT)
         .output(output_schema_for::<SaveResult>)
-        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file); sign?: bool and signing_key? (as file.save)"),
+        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file); sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)"),
     CommandSpec::new("file.verify", "Verify Signature", crate::checked!("file.verify", verify))
         .icon("shield")
         .noundo()
@@ -887,6 +887,9 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
     let (doc, saved) = read_design(s, path)?;
+    // A file with provenance is evaluated from its timeline, never from a cache the signature
+    // does not cover.
+    let saved = if solidcraft_io::has_design_provenance(path) { None } else { saved };
     let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
     opened_design(s, opened, path, read_only, disk, verify, None)
 }
@@ -1199,6 +1202,12 @@ fn write_bytes(
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
     let bytes = if sign {
+        if !s.signing_allowed {
+            return Err(bad(
+                "file.save",
+                "signing is only available from the app's Save, with the key chosen in Preferences; a script or agent cannot sign",
+            ));
+        }
         if format != "container" {
             return Err(bad("file.save", "only a container can carry a signature: save as .sc (format container), not json"));
         }

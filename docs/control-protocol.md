@@ -1034,7 +1034,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in Shaded with hidden edges, including Fillet inputs; hidden bodies and section-clipped edges stay excluded)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)
 - `show_frame_rate` (default false: frames per second in the view's bottom-right corner, counting the frames the view draws anyway; it reads 0 FPS once the view is idle)
-- `sign_saved_designs` (default false: every save adds a GnuPG OpenPGP signature to the design's provenance; `file.save`'s `sign`; the key may be on a smartcard, where GnuPG uses it and asks for its PIN; [signing](formats/cose-provenance.md))
+- `sign_saved_designs` (default false: every save from the app adds a GnuPG OpenPGP signature to the design's provenance; `file.save`'s `sign` is accepted only from the app's own Save, because a script or agent must not make GnuPG sign with the user's keyring; the key may be on a smartcard, where GnuPG uses it and asks for its PIN; [signing](formats/cose-provenance.md))
 - `signing_key` (string, default empty: the GnuPG key a signed save uses, a fingerprint or user id; empty asks GnuPG for its default signing key)
 - `sketch_auto_dimensions` (default false: each shape drawn in a sketch gets all its dimensions at the sizes drawn, as `sketch.draw.dimensioned` with `as_drawn`; typed values win)
 - `sketch_auto_locate` (default false; with `sketch_auto_dimensions`, new shapes are also placed from the sketch origin until fully constrained, as `sketch.draw.dimensioned` with `locate`)
@@ -1064,6 +1064,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `toast_place` (`corner` (default: notices and offers stack in one column in the view's bottom-right corner, each 360 points wide, buttons right-aligned with the main action right-most, #7893), `centre` (at the bottom centre above the view toolbar, each as wide as its text, as before))
 - `trackpad_pan` (default true: two-finger scroll pans, except Touchpad always zooms; pinch zooms)
 - `trackpad_zoom_modifier` (`off` default, `cmd`, `alt`, or `ctrl`: hold this key alone for vertical scroll to zoom)
+- `trusted_signing_keys` (string, default empty: fingerprints of signing keys whose signatures the app shows as verified, separated by commas or spaces; any other valid signature is shown in grey with its fingerprint and names no user id; a user id inside a file is not proof)
 - `ui_font` (an installed font family or a font file for the interface; empty for the built-in font; a `Family-Weight.ttf` file also takes its heavier sibling files for bold text, see [interface fonts](fonts.md))
 - `ui_scale`
 - `up_axis` (`z`, `y`)

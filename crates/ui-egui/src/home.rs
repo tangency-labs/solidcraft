@@ -932,9 +932,14 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     let mut security = None;
     if let Some(Some(summary)) = app.home.signed.get(path) {
         kind = format!("{kind} · {}", app.tr("home.signed"));
-        security = Some(match &summary.signer {
-            Some(signer) => app.tr("home.signed_by").replace("{key}", signer),
-            None => app.tr("home.signed_unchecked").to_string(),
+        let trusted = summary
+            .fingerprint
+            .as_deref()
+            .is_some_and(|fingerprint| crate::documents::trusted_fingerprint(&app.preferences.trusted_signing_keys, fingerprint));
+        security = Some(match (trusted, &summary.signer, &summary.fingerprint) {
+            (true, Some(signer), _) => app.tr("home.signed_by").replace("{key}", signer),
+            (_, _, Some(fingerprint)) => app.tr("home.signed_by").replace("{key}", fingerprint),
+            _ => app.tr("home.signed_unchecked").to_string(),
         });
     }
     start_page::Recent {
@@ -1177,9 +1182,15 @@ mod tests {
         let mut app = crate::test_support::sample_app();
         let index = app.home.recent.len();
         app.home.recent.push("/disk/Plate.sc".into());
-        app.home
-            .signed
-            .insert("/disk/Plate.sc".into(), Some(solidcraft_engine::io::ProvenanceSummary { records: 1, signer: Some("Ada Lovelace".into()) }));
+        app.home.signed.insert(
+            "/disk/Plate.sc".into(),
+            Some(solidcraft_engine::io::ProvenanceSummary {
+                records: 1,
+                signer: Some("Ada Lovelace".into()),
+                fingerprint: Some("0123456789ABCDEF".into()),
+            }),
+        );
+        app.preferences.trusted_signing_keys = "0123456789ABCDEF".into();
         let entry = recent_entry(&app, index, "/disk/Plate.sc");
         assert!(entry.kind.contains("signed"), "{}", entry.kind);
         assert!(entry.security.as_deref().is_some_and(|security| security.contains("Ada Lovelace")), "{:?}", entry.security);

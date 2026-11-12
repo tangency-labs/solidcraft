@@ -229,12 +229,8 @@ fn signing_error(output: &std::process::Output) -> String {
 /// `PATH`).
 fn candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    if let Some(path) = std::env::var_os("PATH") {
-        for directory in std::env::split_paths(&path) {
-            candidates.push(directory.join("gpg"));
-            candidates.push(directory.join("gpg2"));
-        }
-    }
+    // Standard install locations first: a relative or unexpected PATH entry must not decide
+    // which GnuPG runs. Only absolute PATH entries are considered, and duplicates are dropped.
     #[cfg(target_os = "macos")]
     {
         candidates.push(PathBuf::from("/opt/homebrew/bin/gpg"));
@@ -256,6 +252,14 @@ fn candidates() -> Vec<PathBuf> {
         candidates.push(PathBuf::from("/usr/local/bin/gpg"));
         candidates.push(PathBuf::from("/usr/local/bin/gpg2"));
     }
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path).filter(|directory| directory.is_absolute()) {
+            candidates.push(directory.join("gpg"));
+            candidates.push(directory.join("gpg2"));
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    candidates.retain(|program| seen.insert(program.clone()));
     candidates
 }
 

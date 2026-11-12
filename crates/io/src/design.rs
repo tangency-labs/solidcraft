@@ -648,6 +648,16 @@ pub fn read_design_provenance_summary_file(path: &str) -> Option<ProvenanceSumma
     provenance::summarize_chain(&chain)
 }
 
+/// Whether a design file carries a provenance entry, without verifying it. Cheap: it reads the
+/// container directory, not the payloads.
+pub fn has_design_provenance(path: &str) -> bool {
+    let Ok(mut source) = open_regular_file(path) else { return false };
+    if !is_container_source(&mut source).unwrap_or(false) {
+        return false;
+    }
+    DesignContainerReader::new(source).is_ok_and(|reader| reader.has_provenance())
+}
+
 /// [`read_design_provenance_chain`] for a file on disk (or the browser's storage).
 pub fn read_design_provenance_chain_file(path: &str) -> Option<ProvenanceChain> {
     let mut source = open_regular_file(path).ok()?;
@@ -752,6 +762,12 @@ impl<R: Read + Seek> DesignContainerReader<R> {
     /// design still opens. The verification reads and hashes every authoritative part.
     pub fn provenance(&mut self) -> Option<ProvenanceReport> {
         provenance::verify(&mut self.reader)
+    }
+
+    /// Whether the container carries a provenance entry, read or not: a file with one must not
+    /// adopt its excluded model cache, even when the entry is malformed.
+    pub fn has_provenance(&self) -> bool {
+        self.reader.has_part(provenance::ENTRY)
     }
 
     /// The provenance records, unverified: what a save appends to.

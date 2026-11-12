@@ -104,7 +104,8 @@ fn apply(
     app.session.provenance = report.clone();
     match report {
         Some(report) => {
-            let text = crate::documents::signature_line(&report);
+            let trusted = report.newest().is_some_and(|record| crate::documents::signer_trusted(app, record));
+            let text = crate::documents::signature_line(&report, trusted);
             let invalid = matches!(report.status, solidcraft_engine::io::ProvenanceStatus::Invalid(_));
             app.set_status(text, invalid);
         }

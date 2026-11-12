@@ -41,6 +41,8 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         let mut copy = app.session.scratch();
         // The copy has no file: the command saves to this session's (and names the design after it).
         copy.path.clone_from(&app.session.path);
+        // This is the user's own Save: only this path may sign with the keyring.
+        copy.signing_allowed = true;
         let (tx, rx) = std::sync::mpsc::channel();
         let given = params.clone();
         let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());

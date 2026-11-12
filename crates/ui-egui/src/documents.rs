@@ -1142,12 +1142,28 @@ fn tab_security(app: &SolveApp) -> Vec<Option<String>> {
         .into_iter()
         .map(|session| {
             if let Some(report) = &session.provenance {
-                return Some(signature_line(report));
+                let trusted = report.newest().is_some_and(|record| signer_trusted(app, record));
+                return Some(signature_line(report, trusted));
             }
             let signed = session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
             signed.then(|| solidcraft_ui_text::tr("ui.open_signature_unverified").to_string())
         })
         .collect()
+}
+
+/// Whether a record's key is in the user's trusted-fingerprint list. The embedded user id is not
+/// proof of anything; this is the app's one trust decision.
+pub(crate) fn signer_trusted(app: &SolveApp, record: &solidcraft_engine::io::ProvenanceRecord) -> bool {
+    trusted_fingerprint(&app.preferences.trusted_signing_keys, &record.signer.fingerprint())
+}
+
+/// Whether `fingerprint` is one of the comma/space separated fingerprints in `trusted`.
+pub(crate) fn trusted_fingerprint(trusted: &str, fingerprint: &str) -> bool {
+    !fingerprint.is_empty()
+        && trusted
+            .split(|c: char| c == ',' || c.is_ascii_whitespace())
+            .filter(|entry| !entry.is_empty())
+            .any(|entry| entry.eq_ignore_ascii_case(fingerprint))
 }
 
 /// The shield each design tab shows, from the same last check as its tooltip.
@@ -1158,7 +1174,13 @@ fn tab_badges(app: &SolveApp) -> Vec<Option<crate::app_bar::TabBadge>> {
         .map(|session| {
             if let Some(report) = &session.provenance {
                 return Some(match &report.status {
-                    solidcraft_engine::io::ProvenanceStatus::Valid => TabBadge::Verified,
+                    solidcraft_engine::io::ProvenanceStatus::Valid => {
+                        if report.newest().is_some_and(|record| signer_trusted(app, record)) {
+                            TabBadge::Verified
+                        } else {
+                            TabBadge::Signed
+                        }
+                    }
                     solidcraft_engine::io::ProvenanceStatus::NotCovered => TabBadge::NotCovered,
                     solidcraft_engine::io::ProvenanceStatus::Invalid(_) => TabBadge::Invalid,
                     solidcraft_engine::io::ProvenanceStatus::Unsupported(_) => TabBadge::Unsupported,
@@ -1171,12 +1193,19 @@ fn tab_badges(app: &SolveApp) -> Vec<Option<crate::app_bar::TabBadge>> {
 }
 
 /// A verification report as one line for a tab tooltip.
-pub(crate) fn signature_line(report: &solidcraft_engine::io::ProvenanceReport) -> String {
+pub(crate) fn signature_line(report: &solidcraft_engine::io::ProvenanceReport, trusted: bool) -> String {
     match &report.status {
-        solidcraft_engine::io::ProvenanceStatus::Valid => {
-            let key = report.newest().map(signer_name).unwrap_or_default();
-            solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
-        }
+        solidcraft_engine::io::ProvenanceStatus::Valid => match (trusted, report.newest()) {
+            (true, Some(record)) => {
+                let key = signer_name(record);
+                solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
+            }
+            (_, Some(record)) => {
+                let fingerprint = record.signer.fingerprint();
+                solidcraft_ui_text::format("ui.open_signature_valid_untrusted", &[("key", &fingerprint)])
+            }
+            _ => solidcraft_ui_text::tr("ui.open_signature_unverified").to_string(),
+        },
         solidcraft_engine::io::ProvenanceStatus::NotCovered => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
         solidcraft_engine::io::ProvenanceStatus::Invalid(why) => solidcraft_ui_text::format("ui.open_signature_invalid", &[("reason", why)]),
         solidcraft_engine::io::ProvenanceStatus::Unsupported(_) => solidcraft_ui_text::tr("ui.open_signature_unsupported").to_string(),
@@ -1777,6 +1806,15 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn only_a_listed_fingerprint_is_trusted() {
+        assert!(trusted_fingerprint("0123456789ABCDEF, fedcba9876543210", "0123456789abcdef"));
+        assert!(trusted_fingerprint("0123456789ABCDEF fedcba9876543210", "FEDCBA9876543210"));
+        assert!(!trusted_fingerprint("", "0123456789ABCDEF"));
+        assert!(!trusted_fingerprint("1111111111111111", "0123456789ABCDEF"));
+        assert!(!trusted_fingerprint("0123456789ABCDEF", ""));
     }
 
     #[test]

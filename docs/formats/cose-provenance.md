@@ -27,6 +27,11 @@ starts a new log when it signs a later save. It never guesses how to read it. A 
 change is separate: provenance changes what a container carries beside the design, not what the
 design means.
 
+The entry is additive and does not change `document.json`, so it is not a design-format change
+under `crates/doc/src/format/pending/`: the document's meaning is the same with or without it.
+A build that does not know the entry drops it when it saves (older releases), which loses the
+signing history; the design itself opens as before.
+
 The envelope's size is bounded: at most 8 MiB, at most 64 records of at most 4 MiB each, at most
 10,000 signed parts, and text fields of at most 4 KiB. These bounds are checked while decoding, so
 a crafted item count cannot allocate first and fail afterwards. A writer that would exceed the
@@ -101,6 +106,11 @@ openpgp-record = {
   where the key lives, and only the signature and the public key are copied out.
 - The key's fingerprint and user id are derived from the embedded key when the record is read;
   Neither the fingerprint nor the user id is stored in the record: both are read from the key.
+  The embedded transferable public key carries every user id and email address on the signer's
+  key, not just the one shown; anyone who receives the design sees them.
+- A signing subkey is accepted only when its binding to the primary key and its back-signature
+  verify; the signature is then reported under the primary key's fingerprint, so trusting that
+  fingerprint covers its bound subkeys. Expiry and revocation are not evaluated by this profile.
 
 Manifest, CBOR map, no unknown keys. A COSE record's manifest requires `public_key`, the Ed25519
 key; an OpenPGP record's manifest omits it, because the record wrapper carries the transferable
@@ -146,7 +156,9 @@ Not covered, by design:
 - `cache/…` — the evaluated model cache, provisional display meshes and thumbnails. They are
   derived and rebuilt from the document; a signature should not pretend to authenticate a
   shortcut. A recipient that trusts a signature should evaluate from the timeline rather than
-  adopt a cache from the file.
+  adopt a cache from the file. SolidCraft itself does not adopt a model cache from a file that
+  carries provenance, even when opening it without asking for a check: the displayed and exported
+  geometry is then evaluated from the signed timeline.
 - `provenance/…` itself. The record chain is the signature; earlier records are bound by `prev`,
   and the newest record's `oldest` names the first record of the file it was written into, so
   removing the start of a truncated log is detected.
@@ -207,9 +219,19 @@ and small parts are hashed while writing.
 ## Using it
 
 - **Preferences › Security**: *Sign saved designs with GnuPG* (off by default), the signing key
-  (empty: GnuPG's default key; *Choose…* lists the keys GnuPG can sign with, on a smartcard or not)
-  and *Check signatures when opening designs* (off by default; the tab tooltip and the status line
-  then name the signer, and *File › Verify Signature* checks on request).
+  (empty: GnuPG's default key; *Choose…* lists the keys GnuPG can sign with, on a smartcard or not),
+  *Check signatures when opening designs* (off by default; the tab tooltip and the status line then
+  name the signer, and *File › Verify Signature* checks on request), and *Trusted signing keys*
+  (fingerprints, comma or space separated; empty by default).
+- **Trust:** a signature only proves that a key signed something. The app shows the green shield
+  and a user id only for a fingerprint the user listed under *Trusted signing keys*; any other
+  valid signature is shown in grey with its fingerprint and *key not trusted*. The user id inside a
+  file is not trusted on its own. The trusted list is local to this app; it is not a public key
+  infrastructure or a pin-on-first-use record.
+- **Signing is a user Save:** only the app's own Save action carries the user's signing choice.
+  `file.save`/`file.save_as` still take `sign` and `signing_key`, but a command from a script, an
+  agent or the control channel is refused: it cannot make GnuPG sign with a keyring key on the
+  user's behalf. The command line cannot sign in this version; it can still verify.
 - **File › Verify Signature**: checks the open design's saved file in the background and says what
   it found in the status line; it is disabled for a design that has no file yet. `file.verify`
   reports the same through the control channel, and `file.gpg_keys` lists the secret keys GnuPG can
@@ -219,8 +241,8 @@ and small parts are hashed while writing.
   failed). Home's recent list adds *signed* to a design that carries records and, on hover, who
   signed it (not checked); it reads only the provenance entry, never the payloads. The native Open
   dialog lists file names only and cannot show this.
-- **Commands**: `file.save`/`file.save_as` take `sign: true` and `signing_key` (a fingerprint or
-  user id, empty for GnuPG's default).
+- **Commands**: `file.save`/`file.save_as` accept `sign: true` and `signing_key` (a fingerprint or
+  user id, empty for GnuPG's default), but only the app's own Save may use them; see above.
 - **Insert and export**: inserting a design as a linked component says when that linked file is
   signed (not checked). Exports (STEP, mesh, DXF, JSON) are new files and carry no provenance; only
   a saved `.sc` container has the entry. A host design's record covers its own contents, not the

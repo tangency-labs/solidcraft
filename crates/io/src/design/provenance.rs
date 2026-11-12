@@ -170,6 +170,23 @@ pub enum ProvenanceSigner {
 }
 
 impl ProvenanceSigner {
+    /// The key's fingerprint, for a local trust decision: an OpenPGP fingerprint, or the Ed25519
+    /// key id in hex.
+    pub fn fingerprint(&self) -> String {
+        match self {
+            Self::OpenPgp { fingerprint, .. } => fingerprint.clone(),
+            Self::Ed25519 { key_id, .. } => {
+                use std::fmt::Write as _;
+                let mut hex = String::with_capacity(64);
+                for byte in key_id {
+                    // Writing to a `String` cannot fail.
+                    let _ = write!(&mut hex, "{byte:02x}");
+                }
+                hex
+            }
+        }
+    }
+
     /// The name to show for this signer: the OpenPGP user id where there is one, else its
     /// fingerprint, or the first eight bytes of an Ed25519 key id in hex.
     pub fn label(&self) -> String {
@@ -234,7 +251,10 @@ impl ProvenanceReport {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProvenanceSummary {
     pub records: usize,
+    /// The newest signer's display name, when its record can be read.
     pub signer: Option<String>,
+    /// The newest signer's key fingerprint, for a caller's own trust decision.
+    pub fingerprint: Option<String>,
 }
 
 /// The summary of an entry already read, without verifying it.
@@ -243,7 +263,8 @@ pub(super) fn summarize_chain(chain: &ProvenanceChain) -> Option<ProvenanceSumma
         return None;
     }
     let signer = parse_chain(&chain.records).ok().and_then(|parsed| parsed.last().map(|(record, _)| record.signer.label()));
-    Some(ProvenanceSummary { records: chain.records.len(), signer })
+    let fingerprint = parse_chain(&chain.records).ok().and_then(|parsed| parsed.last().map(|(record, _)| record.signer.fingerprint()));
+    Some(ProvenanceSummary { records: chain.records.len(), signer, fingerprint })
 }
 
 /// The entries a signature binds: the design itself, its payloads and anything a newer build kept
@@ -829,18 +850,24 @@ fn read_openpgp_record(bytes: &[u8]) -> std::result::Result<(ProvenanceRecord, M
 fn verify_openpgp(key: &[u8], signature: &[u8], message: &[u8]) -> std::result::Result<(String, Option<String>), String> {
     let (key, _) = SignedPublicKey::from_reader_single(Cursor::new(key)).map_err(|error| format!("public key: {error}"))?;
     let (signature, _) = DetachedSignature::from_reader_single(Cursor::new(signature)).map_err(|error| format!("signature: {error}"))?;
-    // A signature names its issuer; `SignedPublicKey` verifies with the primary key, so a signing
-    // subkey (the usual slot on a YubiKey) has to be tried explicitly.
-    let mut fingerprint = signature.verify(&key, message).ok().map(|()| format!("{:X}", key.fingerprint()));
-    if fingerprint.is_none() {
+    // The embedded key must be internally coherent: its self-signatures, and a signing subkey's
+    // binding to the primary key (and back-signature), have to verify. A signature is reported
+    // under the primary key's fingerprint, so trusting the primary covers its bound subkeys.
+    key.verify_bindings().map_err(|error| format!("the OpenPGP key bindings do not verify: {error}"))?;
+    let mut verified = signature.verify(&key, message).is_ok();
+    if !verified {
         for subkey in &key.public_subkeys {
             if signature.verify(subkey, message).is_ok() {
-                fingerprint = Some(format!("{:X}", subkey.fingerprint()));
+                subkey.verify_bindings(&key.primary_key).map_err(|error| format!("the OpenPGP subkey binding does not verify: {error}"))?;
+                verified = true;
                 break;
             }
         }
     }
-    let fingerprint = fingerprint.ok_or("the OpenPGP signature does not verify")?;
+    if !verified {
+        return Err("the OpenPGP signature does not verify".into());
+    }
+    let fingerprint = format!("{:X}", key.fingerprint());
     let user_id = key.details.users.first().and_then(|user| user.id.as_str()).map(str::to_owned);
     Ok((fingerprint, user_id))
 }
@@ -1110,6 +1137,18 @@ mod tests {
         let broken = replace_entry(&second, ENTRY, &raw_envelope(vec![env.records[1].to_vec()], VERSION));
         let mut reader = crate::DesignContainerReader::new(Cursor::new(broken)).unwrap();
         assert!(reader.provenance_chain().is_none(), "a chain that cannot validate must not be appended to");
+    }
+
+    #[test]
+    fn a_signed_container_reports_its_provenance_entry_without_reading_it() {
+        let path = std::env::temp_dir().join(format!("solidcraft-signed-entry-{}.sc", std::process::id()));
+        std::fs::write(&path, signed(&Document::new("Plate"), &TestSigner::new(7), &ProvenanceChain::default())).unwrap();
+        assert!(crate::has_design_provenance(&path.to_string_lossy()));
+        let _ = std::fs::remove_file(&path);
+        let unsigned = std::env::temp_dir().join(format!("solidcraft-unsigned-entry-{}.sc", std::process::id()));
+        std::fs::write(&unsigned, write_design_container(&Document::new("Plate")).unwrap()).unwrap();
+        assert!(!crate::has_design_provenance(&unsigned.to_string_lossy()));
+        let _ = std::fs::remove_file(&unsigned);
     }
 
     #[test]

@@ -518,6 +518,10 @@ pub struct Session {
     pub provenance_chain: Option<solidcraft_io::ProvenanceChain>,
     /// The last provenance verification of this design, when one was asked for.
     pub provenance: Option<solidcraft_io::ProvenanceReport>,
+    /// Set only by the app's own Save, after the user chose the key in Preferences: a script,
+    /// agent or control-channel caller cannot make the engine sign with a keyring key on its own.
+    /// Not saved and not copied by [`Session::scratch`].
+    pub signing_allowed: bool,
     /// Whether the design's name is one its user chose for it (`file.new {name}`) rather than
     /// one it borrowed — from a file's name, a sample's name, or a file that stored another
     /// design's name. A borrowed name follows Save As to the new file's name (#4907); a name
@@ -869,6 +873,7 @@ impl Session {
             read_only: false,
             provenance_chain: None,
             provenance: None,
+            signing_allowed: false,
             user_named: false,
             open_preview: None,
             log: Vec::new(),
@@ -2042,6 +2047,7 @@ impl Session {
             read_only: self.read_only,
             provenance_chain: self.provenance_chain.clone(),
             provenance: self.provenance.clone(),
+            signing_allowed: false,
             user_named: self.user_named,
             open_preview: None,
             saved: self.saved.clone(),

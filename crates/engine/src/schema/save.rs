@@ -76,6 +76,8 @@ pub struct SaveParams {
     #[serde(default)]
     pub overwrite: Option<bool>,
     /// Sign the saved design with GnuPG, appending one record to its provenance. Default: false.
+    /// Accepted only from the app's own Save (the user chose the key); a script or agent is
+    /// refused.
     #[serde(default)]
     pub sign: Option<bool>,
     /// The GnuPG key to sign with: a fingerprint or user id. Default, or a blank value: GnuPG's
@@ -117,6 +119,8 @@ pub struct SaveAsParams {
     #[serde(default)]
     pub overwrite: Option<bool>,
     /// Sign the saved design with GnuPG, appending one record to its provenance. Default: false.
+    /// Accepted only from the app's own Save (the user chose the key); a script or agent is
+    /// refused.
     #[serde(default)]
     pub sign: Option<bool>,
     /// The GnuPG key to sign with: a fingerprint or user id. Default, or a blank value: GnuPG's

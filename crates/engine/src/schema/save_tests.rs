@@ -218,3 +218,11 @@ fn a_newer_files_reply_matches_the_output_schema() {
     matches("file.save", &lost);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_script_or_agent_cannot_sign_a_save() {
+    let mut s = Session::default();
+    let path = std::env::temp_dir().join(format!("solidcraft-script-sign-{}.sc", std::process::id()));
+    let error = s.execute("file.save", &json!({"path": path, "sign": true})).expect_err("signing needs the app's Save");
+    assert!(error.to_string().contains("only available from the app's Save"), "{error}");
+}
