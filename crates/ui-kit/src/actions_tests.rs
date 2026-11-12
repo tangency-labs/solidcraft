@@ -73,6 +73,95 @@ fn enabled_buttons_show_the_pointing_hand_and_disabled_ones_do_not() {
     }
 }
 
+#[test]
+fn bounded_text_button_is_plain_truncates_and_keeps_its_full_accessible_name() {
+    let label = "A design with a very long name that cannot fit in its row";
+    for enabled in [false, true] {
+        let ctx = crate::test_support::context();
+        ctx.enable_accesskit();
+        let response = std::cell::RefCell::new(None);
+        let run = |events: Vec<egui::Event>| {
+            raw_frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0))),
+                    events,
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    scope(ui, |ui| {
+                        *response.borrow_mut() = Some(text_button_bounded(ui, label, enabled, 120.0));
+                    });
+                },
+            )
+        };
+        let output = run(vec![]);
+        let rect = response.borrow().as_ref().unwrap().rect;
+        assert!(rect.width() <= 120.0, "the name stays inside its column");
+        assert!((rect.height() - solidcraft_theme::Tokens::get().control_height).abs() < 1.0, "the name shares the row's control height");
+        let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+        let node = tree.nodes.iter().find(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(label)).unwrap();
+        assert_eq!(node.1.is_disabled(), !enabled);
+        let mut elided = false;
+        let mut idle_frame = false;
+        for clipped in &output.shapes {
+            each_shape(&clipped.shape, &mut |shape| match shape {
+                egui::Shape::Text(text) => elided |= text.galley.elided,
+                egui::Shape::Rect(shape) if shape.rect == rect => {
+                    idle_frame |= shape.stroke.width > 0.0 || shape.fill != egui::Color32::TRANSPARENT;
+                }
+                _ => {}
+            });
+        }
+        assert!(elided, "a long name is truncated");
+        assert!(!idle_frame, "a name has no idle button border or fill");
+        run(vec![egui::Event::PointerMoved(rect.center())]);
+        let hover = run(vec![egui::Event::PointerMoved(rect.center())]);
+        assert_eq!(hover.platform_output.cursor_icon, if enabled { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Default });
+        run(pointer(rect.center(), true));
+        run(pointer(rect.center(), false));
+        assert_eq!(response.borrow().as_ref().unwrap().clicked(), enabled);
+        assert!(!response.borrow().as_ref().unwrap().has_focus(), "pointer clicks leave no focus ring");
+        run(vec![egui::Event::PointerGone]);
+        run(key(egui::Key::Tab));
+        assert_eq!(response.borrow().as_ref().unwrap().has_focus(), enabled, "keyboard focus remains available");
+    }
+}
+
+#[test]
+fn bounded_text_button_aligns_short_and_long_names_with_the_column_start() {
+    let ctx = crate::test_support::context();
+    let names = ["Bracket", "A design with a very long name that cannot fit in its row"];
+    let mut rows = Vec::new();
+    let output = raw_frame(
+        &ctx,
+        egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0))), ..Default::default() },
+        |ui| {
+            scope(ui, |ui| {
+                for name in names {
+                    let response = text_button_bounded(ui, name, true, 120.0);
+                    rows.push((name, response.rect));
+                }
+            });
+        },
+    );
+    for (name, rect) in rows {
+        assert!((rect.width() - 120.0).abs() < 1.0, "the name keeps the full column width");
+        let mut text_left = None;
+        for clipped in &output.shapes {
+            each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape
+                    && text.galley.job.text == name
+                {
+                    text_left = Some(text.pos.x);
+                }
+            });
+        }
+        assert!((text_left.unwrap() - rect.left()).abs() < 1.0, "{name}: names start at the same left edge as their paths");
+    }
+}
+
 /// With nothing to apply (#8561), Apply is disabled for the pointer, the keyboard and
 /// accessibility, and drawn with the theme's dim ink; with a change it works as before. OK and
 /// Cancel are not affected. The same holds for a confirmation's third action on the left.

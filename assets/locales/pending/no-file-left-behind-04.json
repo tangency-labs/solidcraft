@@ -1,0 +1,90 @@
+{
+  "en": {
+    "document.discard_named": "Discard {name}",
+    "document.original_unavailable": "The original file is read-only or no longer available. Choose a new location.",
+    "document.picker_cancelled": "No location was chosen. The design is still open.",
+    "document.row_saved": "Saved",
+    "document.row_saving": "Saving…",
+    "document.save_incomplete": "The design could not be saved. Try again or choose another location.",
+    "document.save_named": "Save {name}",
+    "document.save_one_in_list": "Save changes to 1 design?",
+    "document.ticks_mean": "Ticked designs are saved; the rest close without saving."
+  },
+  "ar": {
+    "document.discard_named": "تجاهل {name}",
+    "document.original_unavailable": "الملف الأصلي للقراءة فقط أو لم يعد متاحًا. اختر موقعًا جديدًا.",
+    "document.picker_cancelled": "لم يُختر أي موقع. لا يزال التصميم مفتوحًا.",
+    "document.row_saved": "تم الحفظ",
+    "document.row_saving": "جارٍ الحفظ…",
+    "document.save_incomplete": "تعذّر حفظ التصميم. حاول مرة أخرى أو اختر موقعًا آخر.",
+    "document.save_named": "حفظ {name}",
+    "document.save_one_in_list": "حفظ التغييرات في تصميم واحد؟",
+    "document.ticks_mean": "تُحفظ التصاميم المحدّدة، وتُغلق البقية دون حفظ."
+  },
+  "de": {
+    "document.discard_named": "{name} verwerfen",
+    "document.original_unavailable": "Die Originaldatei ist schreibgeschützt oder nicht mehr verfügbar. Wählen Sie einen neuen Speicherort.",
+    "document.picker_cancelled": "Es wurde kein Speicherort gewählt. Der Entwurf ist weiterhin geöffnet.",
+    "document.row_saved": "Gespeichert",
+    "document.row_saving": "Wird gespeichert…",
+    "document.save_incomplete": "Der Entwurf konnte nicht gespeichert werden. Versuchen Sie es erneut oder wählen Sie einen anderen Speicherort.",
+    "document.save_named": "{name} speichern",
+    "document.save_one_in_list": "Änderungen an 1 Entwurf speichern?",
+    "document.ticks_mean": "Markierte Entwürfe werden gespeichert; die übrigen werden ohne Speichern geschlossen."
+  },
+  "he": {
+    "document.discard_named": "ביטול השינויים ב־{name}",
+    "document.original_unavailable": "הקובץ המקורי לקריאה בלבד או שאינו זמין עוד. יש לבחור מיקום חדש.",
+    "document.picker_cancelled": "לא נבחר מיקום. התכן עדיין פתוח.",
+    "document.row_saved": "נשמר",
+    "document.row_saving": "שומר…",
+    "document.save_incomplete": "לא ניתן היה לשמור את התכן. יש לנסות שוב או לבחור מיקום אחר.",
+    "document.save_named": "שמירת {name}",
+    "document.save_one_in_list": "לשמור שינויים בתכן אחד?",
+    "document.ticks_mean": "התכנים המסומנים נשמרים; השאר נסגרים בלי שמירה."
+  },
+  "ja": {
+    "document.discard_named": "{name} を破棄",
+    "document.original_unavailable": "元のファイルは読み取り専用か、利用できなくなっています。新しい保存先を選んでください。",
+    "document.picker_cancelled": "保存先が選ばれませんでした。デザインは開いたままです。",
+    "document.row_saved": "保存済み",
+    "document.row_saving": "保存中…",
+    "document.save_incomplete": "デザインを保存できませんでした。もう一度試すか、別の保存先を選んでください。",
+    "document.save_named": "{name} を保存",
+    "document.save_one_in_list": "1 件のデザインの変更を保存しますか？",
+    "document.ticks_mean": "チェックしたデザインは保存され、それ以外は保存せずに閉じます。"
+  },
+  "ko": {
+    "document.discard_named": "{name} 버리기",
+    "document.original_unavailable": "원본 파일이 읽기 전용이거나 더 이상 사용할 수 없습니다. 새 위치를 선택하세요.",
+    "document.picker_cancelled": "위치를 선택하지 않았습니다. 디자인은 계속 열려 있습니다.",
+    "document.row_saved": "저장됨",
+    "document.row_saving": "저장 중…",
+    "document.save_incomplete": "디자인을 저장할 수 없습니다. 다시 시도하거나 다른 위치를 선택하세요.",
+    "document.save_named": "{name} 저장",
+    "document.save_one_in_list": "디자인 1개의 변경 사항을 저장하시겠습니까?",
+    "document.ticks_mean": "선택한 디자인은 저장되고, 나머지는 저장하지 않고 닫힙니다."
+  },
+  "vi": {
+    "document.discard_named": "Bỏ thay đổi {name}",
+    "document.original_unavailable": "Tệp gốc chỉ đọc hoặc không còn khả dụng. Hãy chọn vị trí mới.",
+    "document.picker_cancelled": "Chưa chọn vị trí nào. Thiết kế vẫn đang mở.",
+    "document.row_saved": "Đã lưu",
+    "document.row_saving": "Đang lưu…",
+    "document.save_incomplete": "Không thể lưu thiết kế. Hãy thử lại hoặc chọn vị trí khác.",
+    "document.save_named": "Lưu {name}",
+    "document.save_one_in_list": "Lưu thay đổi cho 1 thiết kế?",
+    "document.ticks_mean": "Các thiết kế được đánh dấu sẽ được lưu; số còn lại đóng mà không lưu."
+  },
+  "zh": {
+    "document.discard_named": "放弃 {name}",
+    "document.original_unavailable": "原始文件为只读或已不可用。请选择新位置。",
+    "document.picker_cancelled": "未选择位置。设计仍处于打开状态。",
+    "document.row_saved": "已保存",
+    "document.row_saving": "正在保存…",
+    "document.save_incomplete": "无法保存设计。请重试或选择其他位置。",
+    "document.save_named": "保存 {name}",
+    "document.save_one_in_list": "保存 1 个设计的更改？",
+    "document.ticks_mean": "已勾选的设计将被保存；其余设计关闭且不保存。"
+  }
+}
