@@ -641,6 +641,25 @@ and paint nothing (no text layout, icons or eye/fold buttons), so the cost follo
 screen rather than the rows in the tree. Scrolling, Find in Browser and drag and drop still see
 every row's place.
 
+## The active placement's bodies: one name index for the listing (2026-11-12)
+
+With a component active (a STEP assembly opens with its top component active), the model scene
+asks for the active placement's bodies at every build. Listing them named each placement's
+bodies with a fresh index of every occurrence and body in the design (`WorldNames::new`), once for
+every placement in the subtree: the subtree times the design. On a 561-body STEP printer
+assembly that was about 70 ms of each model scene build, so every appearance or visibility edit
+cost a frame of over 100 ms. The listing now makes the index once, when a placement first needs
+it.
+
+Measured on that assembly (NVIDIA GB10, release build, `SOLIDCRAFT_PROFILE_FRAMES=1`, two runs
+each, alternating): eight colour changes of 20 bodies, and the model scene of the frame that
+finishes the open.
+
+| | each colour change | model scene, finishing the open |
+|---|---|---|
+| before (`main`) | 111–202 ms | 136–188 ms |
+| after | under 50 ms (no slow frame) | 7–8 ms |
+
 # Recompute performance
 
 `solidcraft-cli bench-edit <script> <param> "(<old>) * 1.02"` builds a design from its script
