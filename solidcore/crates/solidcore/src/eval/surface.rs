@@ -119,6 +119,16 @@ impl ProceduralSweepEval {
         &self.approximation
     }
 
+    /// The net's certified distance from the exact sweep, as the definition rebuilt from
+    /// the record proved it ([`ProceduralSweep::from_record`]: the larger of the stated
+    /// bound and the recertified one), never the record's stated bound alone; NaN when the
+    /// surface carries no sweep definition, which no caller accepts.
+    pub(crate) fn certified_bound(&self) -> f64 {
+        self.surface
+            .procedural_sweep()
+            .map_or(f64::NAN, |sweep| sweep.bound())
+    }
+
     fn derivatives(&self, u: f64, v: f64, order: usize) -> Option<Vec<Vec<Vec3>>> {
         self.surface
             .procedural_sweep()?
@@ -646,7 +656,8 @@ impl SurfaceEval {
             // collapsed within `reach + 2 bound`, the sweep's is not within `reach`. Where the
             // net cannot rule a collapse out, it is not decided.
             SurfaceEval::ProceduralSweep(s) => {
-                let bound = s.record.bound;
+                // the recertified bound: nothing a record states is trusted
+                let bound = s.certified_bound();
                 let wide = reach + 2.0 * bound;
                 if !(bound.is_finite() && bound >= 0.0 && wide.is_finite()) {
                     return Err(unsupported(
