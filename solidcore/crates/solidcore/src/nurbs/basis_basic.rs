@@ -20,7 +20,7 @@
 //! - Out-params become return values. Knot vectors that upstream rescales or adjusts
 //!   in place are `&mut [f64]` (`U[0..=m]`, `m = len - 1`); the new-knot vectors that
 //!   upstream allocates (or expects the caller to allocate) are returned as `Vec`s.
-//! - Errors are [`SolidError::Nlib`] values carrying the upstream `NL_*_ERR` number. On
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) carrying the upstream `NL_*_ERR` number. On
 //!   error only the error is returned (upstream may leave outputs partly written; the
 //!   in-place knot edits made before an error are kept, as upstream).
 //! - Every array access is bounds checked. Where upstream would read or write outside
@@ -44,7 +44,7 @@
 
 use std::collections::TryReserveError;
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::nurbs::geom::Interval;
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{float_op_is_bad, FloatOp};
@@ -71,10 +71,6 @@ fn endless(operation: &'static str) -> SolidError {
     }
 }
 
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
-
 /// Combined heap-storage ceiling for a single basis evaluation, not a degree limit.
 const BASIS_DERIVS_MAX_BYTES: usize = 8 * 1024 * 1024;
 
@@ -90,7 +86,7 @@ fn check_derivs_allocation(rows: usize, w: usize, op: &'static str) -> Result<()
     });
     match bytes {
         Some(bytes) if bytes <= BASIS_DERIVS_MAX_BYTES => Ok(()),
-        _ => Err(nlib(op, NlibCode::Memory)),
+        _ => Err(SolidError::nurbs(op, NurbsFailure::Memory)),
     }
 }
 
@@ -111,7 +107,7 @@ fn zeros2_with(
     op: &'static str,
     mut reserve: impl FnMut(&mut Vec<f64>, usize) -> std::result::Result<(), TryReserveError>,
 ) -> Result<Vec<Vec<f64>>> {
-    let mem = |_| nlib(op, NlibCode::Memory);
+    let mem = |_| SolidError::nurbs(op, NurbsFailure::Memory);
     let mut a: Vec<Vec<f64>> = Vec::new();
     a.try_reserve_exact(rows).map_err(mem)?;
     for _ in 0..rows {
@@ -177,7 +173,7 @@ fn last_index(knots: &[f64], op: &'static str) -> Result<usize> {
 fn check_index(m: usize, i: usize, p: usize, op: &'static str) -> Result<()> {
     match p.checked_add(1).and_then(|p1| m.checked_sub(p1)) {
         Some(n) if i <= n => Ok(()),
-        _ => Err(nlib(op, NlibCode::Index)),
+        _ => Err(SolidError::nurbs(op, NurbsFailure::Index)),
     }
 }
 
@@ -208,8 +204,8 @@ fn i_derivs(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Index`] when `i > m - p - 1`; [`NlibCode::Numerical`] when the
-/// Newton step would overflow; [`NlibCode::Convergence`] after 20 re-brackets; errors
+/// [`NurbsFailure::Index`] when `i > m - p - 1`; [`NurbsFailure::Numerical`] when the
+/// Newton step would overflow; [`NurbsFailure::NotConverged`] after 20 re-brackets; errors
 /// of [`KnotVector::basis_i_derivs`]; `InvalidInput` where upstream would index out of
 /// bounds or loop forever.
 pub fn find_global_max(knt: &KnotVector<'_>, i: usize, p: usize, tol: f64) -> Result<(f64, f64)> {
@@ -278,7 +274,7 @@ pub fn find_global_max(knt: &KnotVector<'_>, i: usize, p: usize, tol: f64) -> Re
                 break;
             }
             if float_op_is_bad(nd[1], nd[2], FloatOp::Division) {
-                return Err(nlib(OP, NlibCode::Numerical));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
             }
             u0 -= nd[1] / nd[2];
             if u0 <= ui || u0 >= ue {
@@ -306,7 +302,7 @@ pub fn find_global_max(knt: &KnotVector<'_>, i: usize, p: usize, tol: f64) -> Re
 
     // If no convergence, quit.
     if it >= ITL {
-        return Err(nlib(OP, NlibCode::Convergence));
+        return Err(SolidError::nurbs(OP, NurbsFailure::NotConverged));
     }
 
     // Convergence reached -> get maximum.
@@ -330,7 +326,7 @@ pub struct SpanMaxima {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Index`] when `i > m - p - 1`; [`NlibCode::Convergence`] when
+/// [`NurbsFailure::Index`] when `i > m - p - 1`; [`NurbsFailure::NotConverged`] when
 /// the global maximum lies in no span of the function's support; errors of
 /// [`find_global_max`] and [`KnotVector::basis_i_eval`].
 pub fn find_all_span_maxima(
@@ -394,7 +390,7 @@ pub fn find_all_span_maxima(
             break;
         }
     }
-    let spn = spn.ok_or_else(|| nlib(OP, NlibCode::Convergence))?;
+    let spn = spn.ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::NotConverged))?;
     let off = spn - i;
 
     let n_at = |x: f64| knt.basis_i_eval(i, p, x, Side::Left);
@@ -483,7 +479,7 @@ fn not_done(knot_indices: &[i64], knots: &[Vec<f64>]) -> bool {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when a knot index runs past a vector's end (malformed
+/// [`NurbsFailure::Input`] when a knot index runs past a vector's end (malformed
 /// input); `InvalidInput` for an empty set or an empty vector, where upstream would
 /// write more new knots than it allocated, or would loop forever (an iteration that
 /// matches no knot: `tol <= 0` or NaN knots).
@@ -522,7 +518,7 @@ pub fn compatible_knot_vectors_to_tol(knots: &mut [Vec<f64>], tol: f64) -> Resul
             .enumerate()
         {
             if ki > m {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
             let uki = rdi(u, ki, OP)?;
             if r == 0 || uki < us {
@@ -629,8 +625,8 @@ pub struct BasisDerivs {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Numerical`] when a knot difference is below `1e-24` (more than
-/// `p + 1` equal knots); [`NlibCode::Memory`] when the `(der + 1) x (p + 1)` or
+/// [`NurbsFailure::Numerical`] when a knot difference is below `1e-24` (more than
+/// `p + 1` equal knots); [`NurbsFailure::Memory`] when the `(der + 1) x (p + 1)` or
 /// `(p + 1) x (p + 1)` arrays cannot be allocated, their sizes overflow, or combined
 /// output/workspace storage (values and row headers) exceeds the practical 8 MiB
 /// budget, even if the allocator could reserve it; errors of
@@ -659,13 +655,15 @@ pub fn basis_derivs(
     let mder = sgn(p.min(der), OP)?;
     let rows = der
         .checked_add(1)
-        .ok_or_else(|| nlib(OP, NlibCode::Memory))?;
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Memory))?;
     let w = p.checked_add(1).ok_or_else(|| out_of_range(OP))?;
     check_derivs_allocation(rows, w, OP)?;
     let mut nd = zeros2(rows, w, OP)?;
 
-    let mut left = crate::limits::try_filled(w, 0.0).ok_or_else(|| nlib(OP, NlibCode::Memory))?;
-    let mut right = crate::limits::try_filled(w, 0.0).ok_or_else(|| nlib(OP, NlibCode::Memory))?;
+    let mut left = crate::limits::try_filled(w, 0.0)
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Memory))?;
+    let mut right = crate::limits::try_filled(w, 0.0)
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Memory))?;
     let mut ndu = zeros2(w, w, OP)?;
     let mut a = zeros2(2, w, OP)?;
 
@@ -684,7 +682,7 @@ pub fn basis_derivs(
             let delta = rr + ll;
             wr2(&mut ndu, j, r, delta, OP)?;
             if delta < d_zero_tol {
-                return Err(nlib(OP, NlibCode::Numerical));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
             }
             // Keep the divisions inside the parentheses: dividing ndu[][] by the knot
             // difference can be huge.
@@ -926,10 +924,7 @@ mod tests {
             assert!(
                 matches!(
                     basis_derivs(&kv(&k), 3, 0.5, Side::Left, der),
-                    Err(SolidError::Nlib {
-                        code: NlibCode::Memory,
-                        ..
-                    })
+                    Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
                 ),
                 "der = {der}"
             );
@@ -942,27 +937,18 @@ mod tests {
         // Previously each reservation could succeed under overcommit (>100 GiB).
         assert!(matches!(
             basis_derivs(&kv(&cubic), 3, 0.5, Side::Left, 2_147_483_648),
-            Err(SolidError::Nlib {
-                code: NlibCode::Memory,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
         ));
         assert!(matches!(
             basis_derivs(&kv(&cubic), 3, 0.5, Side::Left, usize::MAX),
-            Err(SolidError::Nlib {
-                code: NlibCode::Memory,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
         ));
         let mut square = vec![0.0; 1024];
         square.extend(vec![1.0; 1024]);
         // A tiny output does not excuse the square workspace from the budget.
         assert!(matches!(
             basis_derivs(&kv(&square), 1023, 0.5, Side::Left, 0),
-            Err(SolidError::Nlib {
-                code: NlibCode::Memory,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
         ));
     }
 
@@ -983,10 +969,7 @@ mod tests {
             assert!(
                 matches!(
                     check_derivs_allocation(rows, w, "test"),
-                    Err(SolidError::Nlib {
-                        code: NlibCode::Memory,
-                        ..
-                    })
+                    Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
                 ),
                 "rows={rows}, w={w}"
             );
@@ -1025,10 +1008,7 @@ mod tests {
             assert!(
                 matches!(
                     got,
-                    Err(SolidError::Nlib {
-                        code: NlibCode::Memory,
-                        ..
-                    })
+                    Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
                 ),
                 "fail_at = {fail_at}"
             );
@@ -1047,10 +1027,7 @@ mod tests {
         // Index out of range.
         assert!(matches!(
             find_global_max(&kv(&k), 4, 3, 1e-12),
-            Err(SolidError::Nlib {
-                code: NlibCode::Index,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Index))
         ));
         // Linear and p-fold knots.
         assert_eq!(find_global_max(&kv(&k), 0, 1, 1e-9).unwrap(), (1.0, 0.0));
@@ -1145,10 +1122,7 @@ mod tests {
         let mut k = vec![vec![0., 0., 1., 1.], vec![0., 0., 0.5, 2., 2.]];
         assert!(matches!(
             compatible_knot_array(&mut k),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 

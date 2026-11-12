@@ -44,6 +44,7 @@ use crate::curve::curve::Curve;
 use crate::curve::curve::CurveKind;
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{ignore_status, ignored, passed_on, EntityRef, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::geom_utility::{
@@ -92,7 +93,9 @@ impl Default for RepeatedSweepOptions {
 fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -> Result<()> {
     let mut index = 0;
     while let Some(slot) = curves.get(index) {
-        let curve = slot.as_ref().ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve = slot
+            .as_ref()
+            .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?;
         let curve = bspline(curve)
             .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline continuity input"))?;
         // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
@@ -126,7 +129,7 @@ fn piece_as_bspline(curve: Curve) -> Result<BSplineCurve> {
         CurveKind::Parabola(p) => Ok(p.base().clone()),
         _ => Err(SolidError::invalid_input(
             OP_SPLIT_ON_AXIS,
-            "split piece is not an SmBSplineCurve",
+            "split piece is not a B-spline curve",
         )),
     }
 }
@@ -183,13 +186,13 @@ pub fn split_curves_on_axis(
         if closed {
             // the last piece runs on to the curve's start: it and the first are one piece
             let mut rest = pieces.into_iter();
-            let head = rest
-                .next()
-                .ok_or_else(|| SolidError::null_pointer(OP_SPLIT_ON_AXIS))?;
+            let head = rest.next().ok_or_else(|| {
+                SolidError::primitive_missing(OP_SPLIT_ON_AXIS, "the first split piece")
+            })?;
             let mut middle: Vec<Curve> = rest.collect();
-            let last = middle
-                .pop()
-                .ok_or_else(|| SolidError::null_pointer(OP_SPLIT_ON_AXIS))?;
+            let last = middle.pop().ok_or_else(|| {
+                SolidError::primitive_missing(OP_SPLIT_ON_AXIS, "the last split piece")
+            })?;
             let mut join = [piece_as_bspline(last)?, piece_as_bspline(head)?];
             let joined = Curve::from(BSplineCurve::create_by_joining(&mut join, None)?);
             pieces = Vec::with_capacity(middle.len() + 1);
@@ -315,7 +318,10 @@ impl PrimitiveCreation {
     ) -> Result<()> {
         self.init_entity_maps();
         if options.cap_ends && options.repetitions == 0 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "a capped repeated sweep needs at least one repetition",
+            ));
         }
         let region = target(self, brep)?;
         let tolerance = a.brep(brep)?.tolerance();
@@ -348,10 +354,16 @@ impl PrimitiveCreation {
             } else {
                 for slot in curves.iter_mut() {
                     if slot.is_none() {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::primitive_failed(
+                            OP,
+                            "a profile curve slot is empty",
+                        ));
                     }
                     let Some(edge) = ignored(a.wire(brep, slot))? else {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::primitive_failed(
+                            OP,
+                            "a profile curve makes no wire",
+                        ));
                     };
                     edges.push(edge);
                 }
@@ -455,7 +467,9 @@ impl PrimitiveCreation {
             }
         }
         for slot in curves.iter_mut() {
-            let curve = slot.as_ref().ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curve = slot
+                .as_ref()
+                .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?;
             // fork c8f6a31 (WR-662): SER(Length(..)), SER(SetCanonical(..)).
             let k = a.kernel(brep)?;
             let p = k.fixes.sweep_statuses_pass_on;
@@ -507,10 +521,9 @@ impl PrimitiveCreation {
                             None,
                         )?));
                     }
-                    let infinite = a
-                        .brep(brep)?
-                        .infinite_region()
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let infinite = a.brep(brep)?.infinite_region().ok_or_else(|| {
+                        SolidError::primitive_missing(OP, "the B-rep's infinite region")
+                    })?;
                     let tolerance = a.brep(brep)?.tolerance();
                     ignore_status(a.planar_face((brep, infinite), circles, tolerance, &mut face))?;
                     *slot = None;
@@ -594,7 +607,10 @@ impl PrimitiveCreation {
                 return self.create_rotational_sweep(a, brep, curves, axis_base, axis);
             }
             if options.cap_ends && options.repetitions != 1 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::primitive_failed(
+                    OP,
+                    "a capped revolution repeats once",
+                ));
             }
             let tolerance = a.brep(brep)?.tolerance();
             // Not upstream (WR-590, opt-in): no curve meets the axis inside itself
@@ -608,7 +624,10 @@ impl PrimitiveCreation {
             if ignored(a.planar_faces(region, curves, tolerance, &mut faces))?.is_none() {
                 for slot in curves.iter_mut() {
                     let Some(edge) = ignored(a.wire(brep, slot))? else {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::primitive_failed(
+                            OP,
+                            "a profile curve makes no wire",
+                        ));
                     };
                     edges.push(edge);
                 }
@@ -630,11 +649,7 @@ impl PrimitiveCreation {
                 let axis_curve = Curve::from(BSplineCurve::create_line_segment(3, start, end)?);
                 if a.axis_inside_face((brep, face), &axis_curve)? {
                     a.delete_primitive_faces(brep, &[face])?;
-                    return Err(SolidError::Upstream {
-                        operation: OP,
-                        code: 1025,
-                        entity: None,
-                    });
+                    return Err(SolidError::primitive(OP, PrimitiveFailure::AxisInsideFace));
                 }
             } else {
                 cap = false;
@@ -686,6 +701,69 @@ mod tests {
             api_curves::create_line_segment(Point3::new(ax, ay, az), Point3::new(bx, by, bz))
                 .expect("segment"),
         )
+    }
+
+    /// WR-776: a line skew to the axis sweeps a hyperboloid of one sheet. Every point of
+    /// the result is as far from the axis as the profile's point at the same axial
+    /// coordinate, both measured here from the profile's and the axis's own numbers.
+    /// Upstream's one-curve special case made the cone through the end circles, 3.85 mm
+    /// off its hyperboloid half way along this line; with the analytic-faces fix or
+    /// without, the line is its surface of revolution.
+    #[test]
+    fn a_line_skew_to_the_axis_revolves_onto_its_hyperboloid() {
+        let (p0, p1) = ([600.0, 0.0, 0.0], [700.0, 0.0, 200.0]);
+        let o = [500.0, -50.0, 0.0];
+        let n = (40.0_f64 * 40.0 + 80.0 * 80.0 + 300.0 * 300.0).sqrt();
+        let a = [40.0 / n, 80.0 / n, 300.0 / n];
+        let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        // the axial coordinate of p and its distance from the axis
+        let polar = |p: [f64; 3]| {
+            let q = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+            let h = dot(q, a);
+            (h, (dot(q, q) - h * h).max(0.0).sqrt())
+        };
+        let ((h0, _), (h1, _)) = (polar(p0), polar(p1));
+        let profile = segment(p0, p1);
+        for analytic in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.revolve_analytic_profile_faces = analytic;
+            let sheet = create_rotational_sweep(
+                &mut k,
+                &[Some(&profile)],
+                Point3::new(o[0], o[1], o[2]),
+                Vec3::new(a[0], a[1], a[2]),
+                360.0,
+                false,
+            )
+            .unwrap();
+            let faces = crate::topology::brep::p1::faces(&sheet, None).unwrap();
+            assert!(!faces.is_empty());
+            let mut worst = 0.0_f64;
+            for f in faces {
+                let surface = crate::topology::face::p2::surface(&sheet, f)
+                    .unwrap()
+                    .expect("a surface");
+                let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
+                for i in 0..=24 {
+                    for j in 0..=24 {
+                        let uv = crate::geom::vector2d::Point2::new(
+                            d.u_min() + (d.u_max() - d.u_min()) * f64::from(i) / 24.0,
+                            d.v_min() + (d.v_max() - d.v_min()) * f64::from(j) / 24.0,
+                        );
+                        let x = surface.evaluate_point(&k, uv).unwrap();
+                        let (h, r) = polar([x.x, x.y, x.z]);
+                        let t = (h - h0) / (h1 - h0);
+                        assert!((-1e-9..=1.0 + 1e-9).contains(&t), "past the profile: {x:?}");
+                        let on = [0, 1, 2].map(|c| p0[c] + t * (p1[c] - p0[c]));
+                        worst = worst.max((r - polar(on).1).abs());
+                    }
+                }
+            }
+            assert!(
+                worst <= 1e-6,
+                "{worst} mm off the hyperboloid (fix {analytic})"
+            );
+        }
     }
 
     /// A full turn of a half annulus about its diameter is a hollow ball with the

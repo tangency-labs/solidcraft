@@ -21,6 +21,8 @@
 #![allow(clippy::field_reassign_with_default)]
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
+use std::collections::BTreeMap;
+
 use solidcore::curve::curve::Curve as KernelCurve;
 use solidcore::curve::from_parameters::{
     self as curves, approx_tolerance, zone_tolerance, MAX_TOLERANCE,
@@ -29,6 +31,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::face_surface;
+use solidcore::surface::procedural_blend::convert::adopt_definitions;
 use solidcore::topology::brep::enclosing::put_enclosing_shells_first;
 use solidcore::topology::brep::p10::{
     heal_made, make_topology_from_data, MakeTopologyOptions, TopologyEnv, HEALER_VERSION,
@@ -91,6 +94,86 @@ pub struct Order {
     pub edges: Vec<EdgeId>,
     /// Record vertex `i`'s kernel vertex.
     pub vertices: Vec<VertexId>,
+}
+
+/// A kernel edge solids touch along, as [`to_record`] writes it: one record edge per pair of
+/// faces it separates (SolidCraft's `history::Piece`). An edge with uses on three or more faces
+/// has one [`Piece`] per record edge [`to_record`] copied it into, each with the faces of that
+/// copy's own uses (two, for the sector pairs the radial order gives); none is merged or split
+/// here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Piece {
+    /// The kernel edge.
+    pub kernel: EdgeId,
+    /// One of its record edges.
+    pub edge: u32,
+    /// The record faces that record edge bounds, ascending.
+    pub faces: Vec<u32>,
+}
+
+impl Order {
+    /// Each kernel face's record face (the inverse of [`Order::faces`]).
+    #[must_use]
+    pub fn record_faces(&self) -> BTreeMap<FaceId, u32> {
+        inverse(&self.faces)
+    }
+
+    /// Each kernel edge's first record edge (the inverse of [`Order::edges`]; a kernel edge
+    /// solids touch along has more, its [`Order::pieces`]).
+    #[must_use]
+    pub fn record_edges(&self) -> BTreeMap<EdgeId, u32> {
+        inverse(&self.edges)
+    }
+
+    /// Each kernel vertex's first record vertex (the inverse of [`Order::vertices`]).
+    #[must_use]
+    pub fn record_vertices(&self) -> BTreeMap<VertexId, u32> {
+        inverse(&self.vertices)
+    }
+
+    /// Every record edge of each kernel edge that has more than one, in record order, with the
+    /// record faces it bounds (`record` is the record this order came with): the faces of that
+    /// record edge's uses, sorted and without repeats.
+    ///
+    /// # Errors
+    ///
+    /// [`Unsupported::Invalid`] for a record whose edges are not this order's.
+    pub fn pieces(&self, record: &r::Brep) -> R<Vec<Piece>> {
+        if record.edges.len() != self.edges.len() {
+            return Err(Unsupported::Invalid("a record not of this order"));
+        }
+        let mut count: BTreeMap<EdgeId, usize> = BTreeMap::new();
+        for &e in &self.edges {
+            *count.entry(e).or_default() += 1;
+        }
+        let mut out = Vec::new();
+        for (i, (&kernel, e)) in self.edges.iter().zip(&record.edges).enumerate() {
+            if count.get(&kernel).copied().unwrap_or(0) < 2 {
+                continue;
+            }
+            let mut faces: Vec<u32> = e.uses.iter().map(|u| u.face).collect();
+            faces.sort_unstable();
+            faces.dedup();
+            out.push(Piece {
+                kernel,
+                edge: u32::try_from(i).map_err(|_| Unsupported::Invalid("index"))?,
+                faces,
+            });
+        }
+        Ok(out)
+    }
+}
+
+/// Each entity's first index in `list`. An index past `u32` is left out: unreachable, since
+/// every list is an [`Order`]'s, indexed by a record's `u32` indices.
+fn inverse<T: Copy + Ord>(list: &[T]) -> BTreeMap<T, u32> {
+    let mut out = BTreeMap::new();
+    for (i, &x) in list.iter().enumerate() {
+        if let Ok(i) = u32::try_from(i) {
+            out.entry(x).or_insert(i);
+        }
+    }
+    out
 }
 
 fn int(n: usize) -> R<u64> {
@@ -207,6 +290,7 @@ fn build(
         edges: b.edge_list().to_vec(),
         vertices: b.vertex_list().to_vec(),
     };
+    adopt(k, &mut b, record, &order.faces)?;
     if (order.faces.len(), order.edges.len(), order.vertices.len())
         != (
             record.faces.len(),
@@ -231,8 +315,8 @@ fn build(
 }
 
 /// The record as the kernel's B-rep data: edgeuses face by face, loop by loop, in loop order;
-/// edges and vertices in the record's order. Each edge and vertex keeps its own tolerance (at
-/// least the body's); the body and every face take the body's. The record has no face
+/// edges and vertices in the record's order. Each edge and vertex keeps its own tolerance; the
+/// body's and each face's are the least of theirs ([`own_tolerances`]). The record has no face
 /// tolerance: a face's own crosses as its edges' (`to_record` puts it into them).
 fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     let zone = zone_tolerance(rec.tolerance);
@@ -318,7 +402,7 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     // Edges first (their kernel intervals are the trims' parameter), in the record's order.
     let mut intervals = Vec::new();
     for e in &rec.edges {
-        let tolerance = e.tolerance.max(rec.tolerance);
+        let tolerance = e.tolerance;
         if !(tolerance <= MAX_TOLERANCE) {
             return Err(Unsupported::NotYet(
                 "an edge tolerance over the kernel's limit",
@@ -401,13 +485,20 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
     // Faces, their loops and edgeuses.
     let mut eu = 0u64;
     for (fi, f) in rec.faces.iter().enumerate() {
-        let made = face_surface(
-            k,
-            &crate::surface(&f.surface)?,
-            f.nurbs.as_ref().map(crate::surface).transpose()?.as_ref(),
-            f.domain,
-            &boundary(rec, f)?,
-        )?;
+        // A blend face is built on its net, its NURBS form; its definition is given back once
+        // the body is built ([`adopt`]).
+        let made = match (&f.surface, &f.nurbs) {
+            (r::Surface::Blend { .. }, Some(net)) => {
+                face_surface(k, &crate::surface(net)?, None, f.domain, &[])?
+            }
+            _ => face_surface(
+                k,
+                &crate::surface(&f.surface)?,
+                f.nurbs.as_ref().map(crate::surface).transpose()?.as_ref(),
+                f.domain,
+                &boundary(rec, f)?,
+            )?,
+        };
         let mut fd = FaceData::default();
         fd.zone_tol_3d = zone;
         fd.surface = int(d.surfaces.len())?;
@@ -475,9 +566,18 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
                             let interval = intervals
                                 .get(u.edge as usize)
                                 .ok_or(Unsupported::Invalid("edge"))?;
+                            let source_interval = rec
+                                .edges
+                                .get(u.edge as usize)
+                                .ok_or(Unsupported::Invalid("edge"))?
+                                .interval;
                             ud.uv_curve = int(d.uv_curves.len())?;
-                            let trim =
-                                curves::uv_trim(&crate::curve2(&u.pcurve), interval, made.scale)?;
+                            let trim = curves::uv_trim_on_edge(
+                                &crate::curve2(&u.pcurve),
+                                source_interval,
+                                interval,
+                                made.scale,
+                            )?;
                             d.uv_curves.push(Keyed {
                                 key: key(),
                                 object: trim,
@@ -500,9 +600,9 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
         }
     }
 
-    // Vertices, each with its own tolerance, never below the body's.
+    // Vertices, each with its own tolerance.
     for v in &rec.vertices {
-        let tolerance = v.tolerance.max(rec.tolerance);
+        let tolerance = v.tolerance;
         if !(tolerance <= MAX_TOLERANCE) {
             return Err(Unsupported::NotYet(
                 "a vertex tolerance over the kernel's limit",
@@ -514,7 +614,80 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
         vd.point = Vec3::new(v.point[0], v.point[1], v.point[2]);
         d.vertices.push(vd);
     }
+    own_tolerances(&mut d, rec, zone)?;
     Ok(d)
+}
+
+/// The body's and each face's tolerance from the edges' and vertices' own, as SolidCraft's
+/// flat import took them (`own_tolerances`, after the capi's): the kernel's build raises every
+/// entity to the body's, so the body's is the least of the record's and its edges' and
+/// vertices', and a face's the least of its loops' edges' and vertices', at most the record's.
+/// Each entity keeps its own across the crossing, none raised to the body's.
+///
+/// This keeps invariant 5 of `docs/validity-and-tolerances.md` §10 (every local tolerance at
+/// least the body's) by the other route from raising each entity to the body's (8252ae3e93,
+/// "never below the body's"): the body comes down to the least of them instead, so no entity
+/// is below it and none is changed. A face's is at least the body's (both are minima, the
+/// body's over more) and at most its loops' edges' and vertices'.
+///
+/// # Errors
+///
+/// [`Unsupported::Invalid`] when the least zone is not positive and finite: a tolerance so
+/// small that its zone (half of it) underflows to zero passes the record's validation.
+fn own_tolerances(d: &mut BrepData, rec: &r::Brep, zone: f64) -> R<()> {
+    let edge_zone = |e: u32| -> R<f64> { Ok(at(&d.edges, e)?.zone_tol_3d) };
+    let vertex_zone = |v: u32| -> R<f64> { Ok(at(&d.vertices, v)?.zone_tol_3d) };
+    let mut faces = Vec::with_capacity(rec.faces.len());
+    for f in &rec.faces {
+        let mut t = f64::INFINITY;
+        for l in &f.loops {
+            match l {
+                r::Loop::Edges { edges } => {
+                    for oe in edges {
+                        t = t.min(edge_zone(oe.edge)?);
+                    }
+                }
+                r::Loop::Vertex { vertex } => t = t.min(vertex_zone(*vertex)?),
+            }
+        }
+        faces.push(if t.is_finite() { t.min(zone) } else { zone });
+    }
+    let least = d
+        .edges
+        .iter()
+        .map(|e| e.zone_tol_3d)
+        .chain(d.vertices.iter().map(|v| v.zone_tol_3d))
+        .fold(zone, f64::min);
+    if !(least.is_finite() && least > 0.0) {
+        return Err(Unsupported::Invalid(
+            "a tolerance whose zone (half of it) is zero or not finite",
+        ));
+    }
+    d.zone_tol_3d = least;
+    for (fd, t) in d.faces.iter_mut().zip(faces) {
+        fd.zone_tol_3d = t;
+    }
+    Ok(())
+}
+
+/// Give the record's blend faces their definitions back on the body built from it: each face's
+/// surface, its net, becomes the blend its definition makes, the net certified against it again
+/// ([`adopt_definitions`]); a net its definition does not certify refuses the record. `faces` are
+/// the body's faces in the record's order.
+fn adopt(k: &Kernel, b: &mut Brep, record: &r::Brep, faces: &[FaceId]) -> R<()> {
+    let mut definitions = Vec::new();
+    for (i, f) in record.faces.iter().enumerate() {
+        if let r::Surface::Blend { definition } = &f.surface {
+            let face = *faces
+                .get(i)
+                .ok_or(Unsupported::Invalid("a face the body does not have"))?;
+            definitions.push((face, crate::blend::blend(definition)));
+        }
+    }
+    if !definitions.is_empty() {
+        adopt_definitions(k, b, &notify_ref, &definitions)?;
+    }
+    Ok(())
 }
 
 /// The curves of a ball patch face's loops, for [`face_surface`] to certify on its sphere:

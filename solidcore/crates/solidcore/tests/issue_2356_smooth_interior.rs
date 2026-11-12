@@ -53,7 +53,6 @@ fn fixture(curved: bool) -> (Kernel, ProceduralBlend) {
 
 fn fixture_order(curved: bool, order: u32) -> (Kernel, ProceduralBlend) {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = true;
     let wall = Surface::from(
         BSplineSurface::create_bilinear_surface(

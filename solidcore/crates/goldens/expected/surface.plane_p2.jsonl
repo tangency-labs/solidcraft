@@ -62,7 +62,7 @@
 {"case":"adv_pp_scaled_uv","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"adv_pp_use_default_tol","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":44}}}
 {"case":"adv_pp_zero_tol","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":44}}}
-{"case":"adv_tc_big_tol","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":68}}}
+{"case":"adv_tc_big_tol","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":58}}}
 {"case":"adv_tc_bspline_c0_corner","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":30}}}
 {"case":"adv_tc_bspline_dim2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":31}}}
 {"case":"adv_tc_bspline_rational_huge","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0]}}
@@ -74,7 +74,7 @@
 {"case":"adv_tc_segment_along_edge_part","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
 {"case":"adv_tc_segment_diag_corner_touch","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":25}}}
 {"case":"adv_tc_segment_end_on_edge","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
-{"case":"adv_tc_segment_inside_tiny","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
+{"case":"adv_tc_segment_inside_tiny","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":25}}}
 {"case":"adv_tc_segment_on_edge_exact","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
 {"case":"adv_tc_zero_tol","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
 {"case":"adv_tc_zero_tol_circle","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14438.828427124747,14477.45584412272,64161.26955262169]],"n":75}}}
@@ -534,7 +534,7 @@
 {"case":"gen0408","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
 {"case":"gen0409","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":54}}}
 {"case":"gen0410","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[29175.492296197146,29186.358032300137,1065969.512160808]],"n":108}}}
-{"case":"gen0411","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
+{"case":"gen0411","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":25}}}
 {"case":"gen0412","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":54}}}
 {"case":"gen0413","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":56}}}
 {"case":"gen0414","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":54}}}
@@ -1074,7 +1074,7 @@
 {"case":"gen0948","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0]}}
 {"case":"gen0949","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":54}}}
 {"case":"gen0950","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":54}}}
-{"case":"gen0951","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
+{"case":"gen0951","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":25}}}
 {"case":"gen0952","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
 {"case":"gen0953","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen0954","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0]}}
@@ -1831,7 +1831,7 @@
 {"case":"gen1705","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0]}}
 {"case":"gen1706","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen1707","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,1.0,0.0,0.0,0.0,0.0,0.0]}}
-{"case":"gen1708","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
+{"case":"gen1708","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":25}}}
 {"case":"gen1709","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0]}}
 {"case":"gen1710","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"gen1711","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":56}}}
@@ -2200,7 +2200,7 @@
 {"case":"trim_circle_reversed_domain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14083.454157922033,14083.454157922033,57473.38889061367]],"n":45}}}
 {"case":"trim_circle_tangent_inside","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14435.828427124747,14464.798989873227,64126.896969619665]],"n":75}}}
 {"case":"trim_circle_tangent_outside","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0]}}
-{"case":"trim_circle_tiny","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14470.970562748482,14470.970562748485,65697.74891681032]],"n":75}}}
+{"case":"trim_circle_tiny","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":25}}}
 {"case":"trim_circle_zero_axis","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14459.313708498987,14478.627416997973,65102.90620433565]],"n":75}}}
 {"case":"trim_ellipse_arc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14450.501728902433,14459.798966462204,64410.94775035284]],"n":65}}}
 {"case":"trim_ellipse_big_tol","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[14465.894336937534,14479.8415054063,65111.072629091555]],"n":75}}}

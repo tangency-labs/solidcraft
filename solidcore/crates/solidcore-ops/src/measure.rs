@@ -5,6 +5,7 @@
 
 use solidcore::error::EntityRef;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::object::Shape;
 use solidcore::geom::tol::{brep_zone_tol_3d, SmallTopoType};
 use solidcore::intersect::point_class::PointClassType;
 use solidcore::mass::integrator::properties::{
@@ -15,23 +16,25 @@ use solidcore::query::api_queries::{
     self as q, brep_bounding_box, brep_is_manifold_solid, brep_material_census,
     edge_face_gap_samples, face_normal_at_edge,
 };
-use solidcore::query::brep::BrepClassifier;
+use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects};
+use solidcore::topology::brep::outward_solid_failure;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::{edge, face};
-use solidcore::topology::{Brep, FaceId, FaceuseId, RegionId};
+use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId, RegionId};
 use solidcore::{Point3, Vec3};
 
 use crate::blend::middle;
 use crate::body::Body;
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{answer, with_body, Answer};
+use crate::session::{answer, measure_body, with_body, Answer};
 use crate::{Error, Result};
 
 impl Answer for Vec<q::EdgeFaceGapSample> {}
 impl Answer for Distance {}
 impl Answer for solidcore::geom::extent3d::Extent3d {}
 impl Answer for [f64; 3] {}
+impl Answer for Vec<Option<f64>> {}
 
 fn array(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
@@ -186,9 +189,7 @@ impl Body {
     /// area, or a result that is not finite; [`Error::Status`] `SM_ERR_NOT_CONVERGING` when the
     /// integration does not converge (the kernel's `NotConverged`); [`Error::Degenerate`] for
     /// an integrand that is not finite; [`Error::Unsupported`] for a span the integrator took
-    /// no step over, or a body with a partition while the session's
-    /// `brep_area_between_solid_and_void` fix is off (its area would count the partition from
-    /// both sides); [`Error::UnsureRegion`] for a region the kernel is unsure is material.
+    /// no step over; [`Error::UnsureRegion`] for a region the kernel is unsure is material.
     pub fn mass_properties(&self, relative_accuracy: f64) -> Result<MassPropertiesEstimate> {
         with_body("mass_properties", self, |k, b| {
             let store = AttributeStore::default();
@@ -331,6 +332,23 @@ impl Body {
         with_body("is_manifold_solid", self, |_, b| brep_is_manifold_solid(b))
     }
 
+    /// Whether the body is a closed solid facing out, as an operation's result must be when its
+    /// input is one (one closed manifold solid, valid, its volume proved positive): `Ok` where
+    /// it is, else [`Error::NotSolidBecause`] with the first test it fails
+    /// (`solidcore::topology::brep::outward_solid_failure`). The tests run on a copy, so the
+    /// body is unchanged.
+    ///
+    /// # Errors
+    /// [`Error::NotSolidBecause`]; the kernel's error from the tests.
+    pub fn check_solid(&self) -> Result<()> {
+        measure_body("check_solid", self, |k, b| {
+            Ok(match outward_solid_failure(k, b)? {
+                None => Ok(()),
+                Some(test) => Err(Error::NotSolidBecause(test)),
+            })
+        })?
+    }
+
     /// How many solids the body has (`SmApiBrepMaterialCensus`, its voids dropped).
     ///
     /// # Errors
@@ -362,6 +380,48 @@ impl Body {
             parameter: c.parameter,
             distance: c.closest.distance,
         }))
+    }
+
+    /// The distance from each of `points` to record face `face` as it is trimmed
+    /// (`SmApiFaceClosestPoint`), or `None` for a point the kernel's solve answers with a status
+    /// (no point found). The face's shape is made once for all the points.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or a coordinate that is not finite; any
+    /// other kernel error.
+    pub fn face_distances(
+        &self,
+        order: &Order,
+        face: usize,
+        points: &[[f64; 3]],
+    ) -> Result<Vec<Option<f64>>> {
+        let f = order::face(order, face)?;
+        let points = points
+            .iter()
+            .map(|p| point(*p))
+            .collect::<Result<Vec<_>>>()?;
+        with_body("face_distances", self, |k, b| {
+            let id = BrepId::from_index(0);
+            let Some(shape) = answer(Shape::new(k, &(id, &*b), &[], &[(id, f)], &[], &[]))? else {
+                return Ok(points.iter().map(|_| None).collect());
+            };
+            let query = BrepQuery::of_brep(b);
+            let identity = query.effective_identity();
+            let objects = LiveBrepObjects::new(b, &identity, None)?;
+            points
+                .iter()
+                .map(|p| {
+                    let c = answer(q::face_closest_point_in_shape(
+                        k,
+                        &shape,
+                        &objects,
+                        (id, f),
+                        *p,
+                    ))?;
+                    Ok(c.map(|c| c.distance))
+                })
+                .collect()
+        })
     }
 
     /// The distance from record vertex `vertex`'s point to `p`, with its proved rounding bound.
@@ -651,6 +711,32 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(normals, 24);
+    }
+
+    /// A face's distance is to the face as trimmed, not to its whole surface: from above the
+    /// middle of a 1 x 2 x 3 box's top, the top is 7 away and each side face reaches only to the
+    /// top's edge.
+    #[test]
+    fn a_face_distance_is_to_the_trimmed_face() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+        let index = kernel_order(&b);
+        let above = [0.5, 1.0, 10.0];
+        let mut got: Vec<f64> = (0..index.faces.len())
+            .map(|f| b.face_distances(&index, f, &[above]).unwrap()[0].unwrap())
+            .collect();
+        got.sort_by(f64::total_cmp);
+        // squared: 7 x 7, then 0.5 or 1 across with 7 up, then 10 x 10
+        let want = [49.0, 49.25, 49.25, 50.0, 50.0, 100.0];
+        for (g, w) in got.iter().zip(want) {
+            assert!((g * g - w).abs() <= 1e-9 * w, "{got:?}");
+        }
+        assert!(b
+            .face_distances(&index, index.faces.len(), &[above])
+            .is_err());
+        assert!(b
+            .face_distances(&index, 0, &[[f64::NAN, 0.0, 0.0]])
+            .is_err());
     }
 
     /// Picks are record indices: the same face and edge named through an order that is not the

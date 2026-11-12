@@ -25,6 +25,7 @@
 //! | `FilletBrep::calc_join_section` | `SmFilletVertex::CalcJoinSection` (543d25a) |
 //! | `FilletBrep::calc_rail_int_end_surface` | `SmFilletVertex::CalcRailIntEndSurface` (`SmBlendCornerEnd.cpp`, 3e26f76) |
 //! | [`mixed`]                    | the Mixed corner (`ClassifyMixed`, `MakeMixedTopology`, `CalcMixedVertGeom`, `CalcMixedEdgeGeom`, `CreateMixedPatches`; 6fd0411, 6e79de5, e1a2153) |
+//! | [`on_face`]                  | none: a Setback's spring curve kept inside its trimmed face (solidcore#2343 (d)) |
 //! | [`setback`]                  | the Setback (`ClassifySetBack`, `MakeSetBackTopology`, `BuildSetBackFill`, `CreateSetBackPatches`; 61547af, 1506e2f, f1d81f4) |
 //! | [`swept`]                    | the Swept turn (`Classify`'s Swept part, `BuildSweptSurface`, `CreateSweptPatch`) |
 //! | [`BlendChamferCorner`], [`chamfer`] | not the fork's: chamfers meeting at a vertex, closed by their planes (WR-716, #2345) |
@@ -69,6 +70,7 @@ pub mod ball;
 pub mod chamfer;
 pub mod end;
 pub mod mixed;
+pub mod on_face;
 pub mod setback;
 pub mod swept;
 
@@ -261,12 +263,16 @@ pub fn classify(
     tangency_tol_deg: f64,
 ) -> Result<BlendCorner> {
     let mut out = BlendCorner::default();
-    let vertex = vertex.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+    let vertex =
+        vertex.ok_or_else(|| SolidError::blend_missing(OP_CLASSIFY, "the corner's vertex"))?;
     if solver_eus.len() != 2 || (all_eus.len() != 3 && all_eus.len() != 4) {
         return Ok(out);
     }
     let (Some(&eu1_), Some(&eu2_)) = (solver_eus.first(), solver_eus.get(1)) else {
-        return Err(SolidError::null_pointer(OP_CLASSIFY));
+        return Err(SolidError::blend_missing(
+            OP_CLASSIFY,
+            "the corner's two blended edge uses",
+        ));
     };
     // a Join: the blends continue each other, or, at a face corner of the other
     // convexity, meet at 5 degrees or less (they blend there: no mitre so thin)
@@ -314,7 +320,9 @@ fn side_edges_tangent(
         if blended.contains(&e) {
             continue;
         }
-        let e = e.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+        let e = e.ok_or_else(|| {
+            SolidError::blend_missing(OP_CLASSIFY, "an unblended edge use's edge")
+        })?;
         if !edge::is_tangent_edge(k, b, e, tol_deg, false)? {
             return Ok(false);
         }
@@ -351,10 +359,9 @@ fn foot_on_surface(
     for _ in 0..40 {
         let d = surface.evaluate(k, uv, 1, 1, flags)?;
         let at = |i: usize, j: usize| {
-            d.get(i)
-                .and_then(|row| row.get(j))
-                .copied()
-                .ok_or_else(|| SolidError::null_pointer(OP_EXACT))
+            d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
+                SolidError::blend_missing(OP_EXACT, "a derivative of the surface's evaluation")
+            })
         };
         let r = point - at(0, 0)?;
         let su = at(1, 0)?;
@@ -447,7 +454,12 @@ pub fn exact_mitre_curve(
     mitre: EdgeId,
     solvers: &mut dyn MitreSolvers,
 ) -> Result<bool> {
-    let nul = || SolidError::null_pointer(OP_EXACT);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_EXACT,
+            "topology or geometry the mitre curve is built from",
+        )
+    };
     let start = edge::vertex(pseudo.brep(), mitre)?.ok_or_else(nul)?;
     let end = edge::other_vertex(pseudo.brep(), mitre, Some(start))?.ok_or_else(nul)?;
     let from_s = pseudo.fillet_vertex(start)?.vertex_type == FilletVertexType::RailXEdgeuse;
@@ -828,6 +840,26 @@ pub fn exact_mitre_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A classification without a vertex is a typed `Missing` failure, with the null-pointer
+    /// status the bare status had.
+    #[test]
+    fn a_corner_without_a_vertex_is_a_typed_missing_failure() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0)
+            .unwrap();
+        let err = classify(&k, &mut b, None, &[], &[], 1.0).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the corner's vertex"
+            ))
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
+    }
 
     #[test]
     fn bernstein_product_is_the_cubic() {

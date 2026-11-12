@@ -83,10 +83,13 @@
 //!   or past the end of the caller's array (undefined; [`SolidError::InvalidInput`]
 //!   here). Never-assigned locals that upstream reads in those cases (`Cv`, `Nv`, ...)
 //!   are [`Vec3::UNDEF`], as the default `SmVector3d`.
-//! - **Upstream bugs kept** (`plan/upstream-issues.md`): the third derivatives `Cuuv` and
-//!   `Cuvv` of the normal's numerator use the coefficient `3.0` for `Buuv x Buv` and
-//!   `Buvv x Buv` (the derivative of `Cuu` / `Cvv` gives `1` and `-1`); the outputs
-//!   `Duvv` and `Dvvv` add `Buuv` instead of `Buvv` / `Bvvv`; `SplitAt` with an extended
+//! - **Third-derivative corrections.** `Cuuv` and `Cuvv` use coefficients `1` and `-1`
+//!   for `Buuv x Buv` and `Buvv x Buv`, not upstream's `3.0`; `Duvv` and `Dvvv`
+//!   add `Buvv` and `Bvvv`, not `Buuv` (WR-160, WR-161; PR #1914). These corrections
+//!   are unconditional. The arithmetic for orders 0..2 and `Duuu` is unchanged;
+//!   regression tests retain pre-fix bits at four samples.
+//! - **Other upstream bugs kept.** `WR-162` (the upper-half, unequal-order second-
+//!   derivative slot write) is still unfixed. `SplitAt` with an extended
 //!   surface splits the base surface a second time for the extended halves; `SwapUV`
 //!   with an extended surface negates the offset distance twice (kept unless
 //!   `fixes.offset_swap_uv_extended_distance`, WR-164); `STEPInversion`
@@ -804,7 +807,10 @@ impl OffsetSurface {
         hi: Point2,
     ) -> Result<Surface> {
         if !Self::continues_as_itself(surface) {
-            return Err(SolidError::sm_err(OP_EXTEND));
+            return Err(SolidError::surface_failed(
+                OP_EXTEND,
+                "the surface does not continue as itself",
+            ));
         }
         let domain = surface.natural_uv_domain_with_nurb(k)?;
         if domain.contains_point(lo, 0.0) && domain.contains_point(hi, 0.0) {
@@ -1275,7 +1281,10 @@ impl OffsetSurface {
             surface = &off.surface;
             if matches!(surface.kind(), SurfaceKind::OffsetSurface(_)) {
                 // Should not be nesting offset surfaces
-                return Err(SolidError::sm_err(operation));
+                return Err(SolidError::surface_failed(
+                    operation,
+                    "the base of the offset surface is itself an offset surface",
+                ));
             }
             offset_distance += off.offset_distance.get();
         }
@@ -1320,7 +1329,9 @@ impl OffsetSurface {
                 } else {
                     Some(base)
                 };
-                let original = original.ok_or_else(|| SolidError::null_pointer(OP_EXTEND))?;
+                let original = original.ok_or_else(|| {
+                    SolidError::surface_missing(OP_EXTEND, "the extended base surface")
+                })?;
                 // (kernel-free: an extension is a B-spline made from its NURB, never lazy)
                 let current = ext.current().map(Surface::natural_uv_domain_if_built);
                 let extended = extend_surface(
@@ -1353,7 +1364,7 @@ impl OffsetSurface {
         let (use_ext, uv, _domain) = self.select_surface(k, ext, base, uv)?;
         let surface = if use_ext {
             ext.current()
-                .ok_or_else(|| SolidError::null_pointer(OP_POINT))?
+                .ok_or_else(|| SolidError::surface_missing(OP_POINT, "the extended base surface"))?
         } else {
             base
         };
@@ -1390,7 +1401,12 @@ impl OffsetSurface {
         // (checked before the array is sized)
         match highest_offset_deriv(hu, hv, flags.only_upper_half) {
             Some(d) if d <= MAX_DERIVS => {}
-            _ => return Err(SolidError::sm_err(OP_EVAL)),
+            _ => {
+                return Err(SolidError::surface_failed(
+                    OP_EVAL,
+                    "the derivative order is past the most the offset surface evaluates",
+                ))
+            }
         }
         let mut out = vec![Vec3::UNDEF; (hu + 1) * (hv + 1)];
         self.plain_or_simple(
@@ -1424,7 +1440,12 @@ impl OffsetSurface {
         // locals
         let hod = match highest_offset_deriv(hu, hv, only_upper_half) {
             Some(d) if d <= MAX_DERIVS => d,
-            _ => return Err(SolidError::sm_err(OP_EVAL)),
+            _ => {
+                return Err(SolidError::surface_failed(
+                    OP_EVAL,
+                    "the derivative order is past the most the offset surface evaluates",
+                ))
+            }
         };
         let hb = hod + 1;
 
@@ -1433,7 +1454,7 @@ impl OffsetSurface {
         let (use_ext, uv, domain) = self.select_surface(k, ext, base, cr_uv)?;
         let surface = if use_ext {
             ext.current()
-                .ok_or_else(|| SolidError::null_pointer(OP_EVAL))?
+                .ok_or_else(|| SolidError::surface_missing(OP_EVAL, "the extended base surface"))?
         } else {
             base
         };
@@ -1476,7 +1497,10 @@ impl OffsetSurface {
         // the base derivative `i` times in u and `j` times in v (NULL upstream above hb)
         let d = |i: usize, j: usize| -> Result<Vec3> {
             if i + j > hb {
-                return Err(SolidError::null_pointer(OP_EVAL));
+                return Err(SolidError::surface_missing(
+                    OP_EVAL,
+                    "the base derivative past the order evaluated",
+                ));
             }
             at(&m, i, j)
         };
@@ -1630,7 +1654,10 @@ impl OffsetSurface {
 
         // Leave this tol at SM_EFF_ZERO: that's where output becomes invalid.
         if l < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_EVAL));
+            return Err(SolidError::surface_failed(
+                OP_EVAL,
+                "the base surface's normal is degenerate",
+            ));
         }
 
         // never-assigned upstream locals are default SmVector3d values (UNDEF)
@@ -1685,10 +1712,9 @@ impl OffsetSurface {
             put(out, 3 * (hv + 1), d(3, 0)? + offset_distance * nuuu)?;
         }
         if cond_uuv {
-            // (upstream's 3.0 for Buuv x Buv; the derivative of Cuu gives 1)
             let cuuv = d(3, 1)?.cross(bv)
                 + d(3, 0)?.cross(d(0, 2)?)
-                + (3.0 * d(2, 1)?).cross(d(1, 1)?)
+                + d(2, 1)?.cross(d(1, 1)?)
                 + (2.0 * d(2, 0)?).cross(d(1, 2)?)
                 + bu.cross(d(2, 2)?);
             let muuv =
@@ -1698,28 +1724,25 @@ impl OffsetSurface {
             put(out, 2 * (hv + 1) + 1, d(2, 1)? + offset_distance * nuuv)?;
         }
         if cond_uvv {
-            // (upstream's 3.0 for Buvv x Buv, -1 by the derivative of Cvv; and Buuv in
-            // the output where Buvv belongs)
             let cuvv = d(2, 2)?.cross(bv)
                 + (2.0 * d(2, 1)?).cross(d(0, 2)?)
-                + (3.0 * d(1, 2)?).cross(d(1, 1)?)
+                + (-1.0 * d(1, 2)?).cross(d(1, 1)?)
                 + d(2, 0)?.cross(d(0, 3)?)
                 + bu.cross(d(1, 3)?);
             let muvv =
                 (cvv.dot(cu) + 2.0 * cv.dot(cuv) + c.dot(cuvv) - mvv * mu - 2.0 * mv * muv) / m_len;
             let nuvv =
                 (cuvv - mu * nvv - 2.0 * muv * nv - 2.0 * mv * nuv - mvv * nu - muvv * n) / m_len;
-            put(out, (hv + 1) + 2, d(2, 1)? + offset_distance * nuvv)?;
+            put(out, (hv + 1) + 2, d(1, 2)? + offset_distance * nuvv)?;
         }
         if hv >= 3 {
-            // (upstream adds Buuv where Bvvv belongs)
             let cvvv = d(1, 3)?.cross(bv)
                 + (3.0 * d(1, 2)?).cross(d(0, 2)?)
                 + (3.0 * d(1, 1)?).cross(d(0, 3)?)
                 + bu.cross(d(0, 4)?);
             let mvvv = (3.0 * cv.dot(cvv) + c.dot(cvvv) - 3.0 * mv * mvv) / m_len;
             let nvvv = (cvvv - 3.0 * mv * nvv - 3.0 * mvv * nv - mvvv * n) / m_len;
-            put(out, 3, d(2, 1)? + offset_distance * nvvv)?;
+            put(out, 3, d(0, 3)? + offset_distance * nvvv)?;
         }
 
         if !do_eval_simple {
@@ -1838,7 +1861,10 @@ impl OffsetSurface {
         let (uv, location) = result?;
         let pt = self.point_with(k, ext, uv)?;
         if pt.distance(point_on_surf) > tol_3d {
-            return Err(SolidError::sm_err(OP_INV));
+            return Err(SolidError::surface_failed(
+                OP_INV,
+                "the inverted point is farther from the offset surface than the tolerance",
+            ));
         }
         Ok((uv, location))
     }
@@ -1900,7 +1926,10 @@ impl OffsetSurface {
             }
         } else {
             // Can not swap UV if I do not own the surface
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(SolidError::surface_failed(
+                OP_EDIT,
+                "the offset surface does not own its base, so cannot swap its UV",
+            ));
         }
         Ok(())
     }
@@ -1942,7 +1971,10 @@ impl OffsetSurface {
                 self.offset_distance.set(self.offset_distance.get() * s.x);
             } else {
                 // OffsetSurface NonUniform scaling not supported
-                return Err(SolidError::sm_err(OP_EDIT));
+                return Err(SolidError::surface_failed(
+                    OP_EDIT,
+                    "an offset surface cannot be scaled non-uniformly",
+                ));
             }
         }
         if let Some(e) = self.extended_surface.as_deref_mut() {
@@ -1953,7 +1985,10 @@ impl OffsetSurface {
                 .transform_at_depth(k, rotate_n_move, scale, depth + 1)?;
         } else {
             // Can not transform if I do not own the surface
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(SolidError::surface_failed(
+                OP_EDIT,
+                "the offset surface does not own its base, so cannot transform it",
+            ));
         }
         Ok(())
     }
@@ -1986,7 +2021,10 @@ impl OffsetSurface {
             self.surface.trim_with_domain(k, trim_domain)?;
         }
         if !self.owns_surface {
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(SolidError::surface_failed(
+                OP_EDIT,
+                "the offset surface does not own its base, so cannot trim it",
+            ));
         }
         Ok(())
     }
@@ -2183,7 +2221,7 @@ fn read_body(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Offset
 /// ([`Surface::kind_with_nurb`], as its evaluations make it); a make that leaves none
 /// (a failing `MakeNurb`, whose status upstream ignores) is `SM_ERR_NULL_POINTER`.
 fn nurb_of(k: &Kernel, surface: &Surface) -> Result<crate::nurbs::srf_basic::Surface> {
-    let missing = || SolidError::null_pointer(OP_EXTEND);
+    let missing = || SolidError::surface_missing(OP_EXTEND, "the surface's NURB");
     match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => b.gw_nurb().cloned().ok_or_else(missing),
         SurfaceKind::Plane(p) => p.base_with_nurb()?.gw_nurb().cloned().ok_or_else(missing),
@@ -2206,7 +2244,12 @@ fn extend_toward(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Surface> {
     let mut esur: Option<UnboundedExtension> = None;
     match eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur) {
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => return Err(SolidError::sm_err(OP_EXTEND)),
+        Err(_) => {
+            return Err(SolidError::surface_failed(
+                OP_EXTEND,
+                "the G1R extension toward the point failed",
+            ))
+        }
         Ok(_) => {}
     }
     let ext = esur.ok_or_else(|| {
@@ -2351,9 +2394,15 @@ fn revolution_of<'a>(
         )),
         SurfaceKind::SurfOfRevolution(r) => match generator_is_circle(r) {
             Some((centre, angle)) => Ok((r, Generator::Circle { centre, angle })),
-            None => Err(SolidError::sm_err(OP_EXTEND)),
+            None => Err(SolidError::surface_failed(
+                OP_EXTEND,
+                "the generator of the surface of revolution is not a circle",
+            )),
         },
-        _ => Err(SolidError::sm_err(OP_EXTEND)),
+        _ => Err(SolidError::surface_failed(
+            OP_EXTEND,
+            "the surface is not a kind of surface of revolution",
+        )),
     }
 }
 
@@ -2379,6 +2428,67 @@ pub(crate) fn offset_continues_as_itself(k: &Kernel, surface: &Surface) -> bool 
     k.fixes.offset_extension_from_base
         && k.fixes.offset_extension_as_itself
         && extends_as_itself(k, surface)
+}
+
+/// One parameter direction of [`closed_turn`]: its interval, and whether it wraps there.
+pub(crate) type ClosedDirection = (Extent1d, bool);
+
+/// The parameters a surface whose offset continues as itself ([`offset_continues_as_itself`])
+/// holds each of its points at once, in `(u, v)`: each direction's interval and whether it
+/// wraps there.
+/// - Round the axis, the closed turn ([`RotTurn`]): past it the extension wraps like a
+///   periodic direction (WR-650).
+/// - Along a generator that is an arc of a circle (a torus's, or a revolved circle's), the
+///   circle closed the same way: half the gap past either end, in the quarter-turn spans the
+///   extension continues it by. The extension carries those spans on without end, so a
+///   parameter past the closure names a point the closed circle already holds; that
+///   direction is bounded there, not wrapped (its spans past the base are quarter turns, the
+///   base's need not be). A line, a sphere's generator (ending in its poles) and a whole
+///   circle keep their direction as it is (`None`).
+///
+/// `None` for a surface whose offset does not continue as itself.
+///
+/// # Errors
+///
+/// Those of reading the surface of revolution and its turn.
+pub(crate) fn closed_turn(
+    k: &Kernel,
+    surface: &Surface,
+) -> Result<Option<[Option<ClosedDirection>; 2]>> {
+    if !offset_continues_as_itself(k, surface) {
+        return Ok(None);
+    }
+    let (rev, generator) = revolution_of(k, surface)?;
+    let turn = rot_turn(rev)?;
+    let mut out = [None, None];
+    if let Some(slot) = out.get_mut(turn.rot) {
+        *slot = Some((Extent1d::from_min_max(turn.lo, turn.hi), true));
+    }
+    let gen_angle = match generator {
+        Generator::Circle { angle, .. } => Some(angle),
+        Generator::Torus { .. } => Some(rev.step_uv_domain().size().y * (PI / 180.0)),
+        Generator::Line | Generator::Sphere => None,
+    };
+    let domain = rev.base().natural_uv_domain();
+    let gen_dir = 1 - turn.rot;
+    let gen_ivl = if gen_dir == 0 {
+        domain.u_interval()
+    } else {
+        domain.v_interval()
+    };
+    if let Some(angle) = gen_angle {
+        let length = gen_ivl.max() - gen_ivl.min();
+        if gt(angle, 0.0) && gt(2.0 * PI, angle) && gt(length, 0.0) {
+            let half_gap = (2.0 * PI - angle) * 0.5 * (length / angle);
+            if let Some(slot) = out.get_mut(gen_dir) {
+                *slot = Some((
+                    Extent1d::from_min_max(gen_ivl.min() - half_gap, gen_ivl.max() + half_gap),
+                    false,
+                ));
+            }
+        }
+    }
+    Ok(Some(out))
 }
 
 /// The fork's `sm_GeneratorIsCircle` (tangency-labs/smlib@43fd6b6): whether a surface of
@@ -2499,7 +2609,10 @@ fn rot_turn(rev: &SurfOfRevolution) -> Result<RotTurn> {
     let arc = (rev.end_angle_deg() - rev.start_angle_deg()) * (PI / 180.0);
     let length = ivl.max() - ivl.min();
     if !gt(arc, 0.0) || !le(arc, 2.0 * PI) || !gt(length, 0.0) {
-        return Err(SolidError::sm_err(OP_EXTEND));
+        return Err(SolidError::surface_failed(
+            OP_EXTEND,
+            "the arc or the parameter length of the revolution is out of range",
+        ));
     }
     let half_gap = PI - 0.5 * arc;
     let close = (half_gap / (0.5 * PI)).ceil() as usize;
@@ -2584,12 +2697,18 @@ const AS_ITSELF_MAX_SPANS: usize = 4096;
 /// (the fork's `Spans`).
 fn as_itself_spans(span: f64, from: f64, goal: f64, sign: f64, knots: &mut Vec<f64>) -> Result<()> {
     if !gt(span, 0.0) {
-        return Err(SolidError::sm_err(OP_EXTEND));
+        return Err(SolidError::surface_failed(
+            OP_EXTEND,
+            "the span length is not positive",
+        ));
     }
     // (ULONG)ceil(...): saturating, so a reach past the bound fails below
     let n = ((goal - from) * sign / span).ceil() as usize;
     if n > AS_ITSELF_MAX_SPANS {
-        return Err(SolidError::sm_err(OP_EXTEND));
+        return Err(SolidError::surface_failed(
+            OP_EXTEND,
+            "the extension needs more spans than its bound",
+        ));
     }
     for k in 1..=n {
         knots.push(from + sign * (k as f64 * span));
@@ -2599,10 +2718,9 @@ fn as_itself_spans(span: f64, from: f64, goal: f64, sign: f64, knots: &mut Vec<f
 
 /// The point `i` of row `r` of the net `g` (`SM_ERR` past its end; never reached).
 fn net_at(g: &[Vec<WeightedPoint>], r: usize, i: usize) -> Result<WeightedPoint> {
-    g.get(r)
-        .and_then(|row| row.get(i))
-        .copied()
-        .ok_or_else(|| SolidError::sm_err(OP_EXTEND))
+    g.get(r).and_then(|row| row.get(i)).copied().ok_or_else(|| {
+        SolidError::surface_failed(OP_EXTEND, "the net point is past the end of the net")
+    })
 }
 
 /// The fork's `sm_ExtendAsItself` (`fixes.offset_extension_as_itself`, WR-633 and WR-650;
@@ -2635,7 +2753,12 @@ fn extend_as_itself(
     hi: Point2,
     close_turn: bool,
 ) -> Result<Surface> {
-    let err = || SolidError::sm_err(OP_EXTEND);
+    let err = || {
+        SolidError::surface_failed(
+            OP_EXTEND,
+            "the surface of revolution cannot extend as itself",
+        )
+    };
     let (rev, generator) = revolution_of(k, surface)?;
     let gen_circle = !matches!(generator, Generator::Line);
     let turn = rot_turn(rev)?;
@@ -3087,7 +3210,10 @@ fn extend_surface(
 ) -> Result<Option<Surface>> {
     // SM_CAST_PTR(SmBSplineSurface, pSurface); NER(pOriginal) (in the caller)
     if !is_b_spline_kind(surface) {
-        return Err(SolidError::null_pointer(OP_EXTEND));
+        return Err(SolidError::surface_missing(
+            OP_EXTEND,
+            "the B-spline kind surface",
+        ));
     }
 
     // locals
@@ -3123,7 +3249,10 @@ fn extend_surface(
         return Ok(None);
     }
     if !surface.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
-        return Err(SolidError::sm_err(OP_EXTEND));
+        return Err(SolidError::surface_failed(
+            OP_EXTEND,
+            "the surface is not a B-spline surface",
+        ));
     }
 
     // `fixes.offset_extension_from_base`: `fixed` holds the current extension's domain
@@ -3157,7 +3286,12 @@ fn extend_surface(
             eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur);
         match second {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_EXTEND)),
+            Err(_) => {
+                return Err(SolidError::surface_failed(
+                    OP_EXTEND,
+                    "the G1R extension toward the point failed",
+                ))
+            }
             Ok(_) => {}
         }
     }
@@ -3237,7 +3371,10 @@ fn find_nonsingular_stepoff(
     }
 
     // Neither direction worked.  We can't get an offset direction.
-    Err(SolidError::sm_err(OP_STEPOFF))
+    Err(SolidError::surface_failed(
+        OP_STEPOFF,
+        "neither direction gives a nonsingular stepoff",
+    ))
 }
 
 // ---- the offset seen through the generic surface interface ------------------------------
@@ -3721,6 +3858,349 @@ mod tests {
         assert!(fixed < 1e-9, "fixed copies disagree by {fixed}");
     }
 
+    // ---- WR-160 / WR-161: corrected third-derivative terms --------------------------------
+
+    /// The biquadratic Bezier base `B(u, v) = (u + u^2 v, v + u v^2, u v)` over
+    /// `[0, 1]^2`. Its `Bu x Bv = (1 + uv) * q` with `q = (-v, -u, 1 + 3uv)`, so on the
+    /// positive domain the unit normal is `q / sqrt(L)` and both `Buuv x Buv` and
+    /// `Buvv x Buv` are non-zero (a torus alone cannot reach the `Cuvv` coefficient).
+    fn biquadratic_base() -> Surface {
+        use crate::nurbs::math::{CPoint, NOW};
+        let mut net = Vec::new();
+        for i in 0..3 {
+            let mut row = Vec::new();
+            for j in 0..3 {
+                let fi = f64::from(i) / 2.0;
+                let fj = f64::from(j) / 2.0;
+                let x = fi + if i == 2 { fj } else { 0.0 };
+                let y = fj + if j == 2 { fi } else { 0.0 };
+                row.push(CPoint::new(x, y, fi * fj, NOW));
+            }
+            net.push(row);
+        }
+        let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        Surface::from(BSplineSurface::from_data(2, 2, 2, 2, 5, 5, &net, &knots, &knots).unwrap())
+    }
+
+    /// The closed-form derivatives of `B + d * (q / sqrt(L))`, derived independently of
+    /// the kernel's cross-product/quotient recurrence.
+    #[derive(Clone, Copy)]
+    struct ClosedForm {
+        s: Vec3,
+        su: Vec3,
+        sv: Vec3,
+        suu: Vec3,
+        suv: Vec3,
+        svv: Vec3,
+        suuu: Vec3,
+        suuv: Vec3,
+        suvv: Vec3,
+        svvv: Vec3,
+    }
+
+    fn closed_form(u: f64, v: f64, d: f64) -> ClosedForm {
+        let q = Vec3::new(-v, -u, 1.0 + 3.0 * u * v);
+        let qu = Vec3::new(0.0, -1.0, 3.0 * v);
+        let qv = Vec3::new(-1.0, 0.0, 3.0 * u);
+        let quv = Vec3::new(0.0, 0.0, 3.0);
+        let l = 1.0 + u * u + v * v + 6.0 * u * v + 9.0 * u * u * v * v;
+        let lu = 2.0 * u + 6.0 * v + 18.0 * u * v * v;
+        let lv = 2.0 * v + 6.0 * u + 18.0 * u * u * v;
+        let luu = 2.0 + 18.0 * v * v;
+        let lvv = 2.0 + 18.0 * u * u;
+        let luv = 6.0 + 36.0 * u * v;
+        let luuv = 36.0 * v;
+        let luvv = 36.0 * u;
+        let w = l.powf(-0.5);
+        let a = -0.5 * l.powf(-1.5);
+        let b = 0.75 * l.powf(-2.5);
+        let c = -1.875 * l.powf(-3.5);
+        let w_u = a * lu;
+        let w_v = a * lv;
+        let w_uu = b * lu * lu + a * luu;
+        let w_uv = b * lu * lv + a * luv;
+        let w_vv = b * lv * lv + a * lvv;
+        let w_uuu = c * lu * lu * lu + 3.0 * b * lu * luu;
+        let w_uuv = c * lu * lu * lv + b * (2.0 * lu * luv + lv * luu) + a * luuv;
+        let w_uvv = c * lu * lv * lv + b * (lu * lvv + 2.0 * lv * luv) + a * luvv;
+        let w_vvv = c * lv * lv * lv + 3.0 * b * lv * lvv;
+
+        let n = q * w;
+        let n_u = qu * w + q * w_u;
+        let n_v = qv * w + q * w_v;
+        let n_uu = 2.0 * (qu * w_u) + q * w_uu;
+        let n_uv = quv * w + qu * w_v + qv * w_u + q * w_uv;
+        let n_vv = 2.0 * (qv * w_v) + q * w_vv;
+        let n_uuu = q * w_uuu + 3.0 * (qu * w_uu);
+        let n_uuv = q * w_uuv + 2.0 * (qu * w_uv) + qv * w_uu + 2.0 * (quv * w_u);
+        let n_uvv = q * w_uvv + qu * w_vv + 2.0 * (qv * w_uv) + 2.0 * (quv * w_v);
+        let n_vvv = q * w_vvv + 3.0 * (qv * w_vv);
+
+        let b0 = Vec3::new(u + u * u * v, v + u * v * v, u * v);
+        let bu = Vec3::new(1.0 + 2.0 * u * v, v * v, v);
+        let bv = Vec3::new(u * u, 1.0 + 2.0 * u * v, u);
+        let buu = Vec3::new(2.0 * v, 0.0, 0.0);
+        let buv = Vec3::new(2.0 * u, 2.0 * v, 1.0);
+        let buvv = Vec3::new(0.0, 2.0, 0.0);
+        let bvv = Vec3::new(0.0, 2.0 * u, 0.0);
+        let buuv = Vec3::new(2.0, 0.0, 0.0);
+        let buuu = Vec3::ZERO;
+        let bvvv = Vec3::ZERO;
+
+        ClosedForm {
+            s: b0 + d * n,
+            su: bu + d * n_u,
+            sv: bv + d * n_v,
+            suu: buu + d * n_uu,
+            suv: buv + d * n_uv,
+            svv: bvv + d * n_vv,
+            suuu: buuu + d * n_uuu,
+            suuv: buuv + d * n_uuv,
+            suvv: buvv + d * n_uvv,
+            svvv: bvvv + d * n_vvv,
+        }
+    }
+
+    fn assert_component_close(got: Vec3, want: Vec3, tol: f64, what: &str) {
+        for (axis, g, w) in [
+            ("x", got.x, want.x),
+            ("y", got.y, want.y),
+            ("z", got.z, want.z),
+        ] {
+            let scale = g.abs().max(w.abs());
+            assert!(
+                (g - w).abs() <= tol * scale,
+                "{what}.{axis}: got {g:?}, want {w:?}"
+            );
+        }
+    }
+
+    fn offset_evaluates(d: f64) -> (Kernel, OffsetSurface) {
+        let k = Kernel::default();
+        let off = OffsetSurface::new(&k, d, biquadratic_base(), true, SS_UNKNOWN).unwrap();
+        (k, off)
+    }
+
+    #[test]
+    fn biquadratic_base_matches_its_closed_form() {
+        let k = &Kernel::default();
+        let base = biquadratic_base();
+        for (u, v) in [(0.25, 0.5), (0.5, 0.25)] {
+            let m = base
+                .evaluate(k, Point2::new(u, v), 2, 2, flags(true, false))
+                .unwrap();
+            let cf = closed_form(u, v, 0.0);
+            assert_component_close(m[0][0], cf.s, 1e-12, "B");
+            assert_component_close(m[1][0], cf.su, 1e-12, "Bu");
+            assert_component_close(m[0][1], cf.sv, 1e-12, "Bv");
+            assert_component_close(m[2][0], cf.suu, 1e-12, "Buu");
+            assert_component_close(m[1][1], cf.suv, 1e-12, "Buv");
+            assert_component_close(m[0][2], cf.svv, 1e-12, "Bvv");
+        }
+    }
+
+    #[test]
+    fn offset_third_derivatives_match_closed_form_by_default() {
+        // The public bound permits total order 3: equal highest orders with
+        // `only_upper_half = true` fill the i + j <= 3 entries of the 4x4 matrix.
+        // A full rectangular (3, 3) request exceeds MAX_DERIVS and is not this test.
+        for d in [0.125, -0.125] {
+            for (u, v) in [(0.25, 0.5), (0.5, 0.25)] {
+                let (k, off) = offset_evaluates(d);
+                let m = off
+                    .evaluate(&k, Point2::new(u, v), 3, 3, flags(true, true))
+                    .unwrap();
+                let cf = closed_form(u, v, d);
+                assert_component_close(m[0][0], cf.s, 1e-10, "S");
+                assert_component_close(m[1][0], cf.su, 1e-10, "Su");
+                assert_component_close(m[0][1], cf.sv, 1e-10, "Sv");
+                assert_component_close(m[2][0], cf.suu, 1e-10, "Suu");
+                assert_component_close(m[1][1], cf.suv, 1e-10, "Suv");
+                assert_component_close(m[0][2], cf.svv, 1e-10, "Svv");
+                assert_component_close(m[3][0], cf.suuu, 1e-10, "Suuu");
+                assert_component_close(m[2][1], cf.suuv, 1e-10, "Suuv");
+                assert_component_close(m[1][2], cf.suvv, 1e-10, "Suvv");
+                assert_component_close(m[0][3], cf.svvv, 1e-10, "Svvv");
+            }
+        }
+    }
+
+    #[test]
+    fn offset_unchanged_partials_default_bits() {
+        // Sampled pre-fix bits, not a universal bit-identity proof.
+        let expected: [[[u64; 3]; 7]; 4] = [
+            [
+                [
+                    4597784033420957231,
+                    4603052133372172998,
+                    4597843606503600894,
+                ],
+                [
+                    4608507369001728780,
+                    4595937248662427790,
+                    4602721857074240154,
+                ],
+                [
+                    4575355825046357480,
+                    4608374220493674685,
+                    4597551169972174395,
+                ],
+                [
+                    4606488318174322130,
+                    4594149428474944805,
+                    13811210086974777617,
+                ],
+                [
+                    4603548734204850756,
+                    4607464454410458233,
+                    4607524890612695553,
+                ],
+                [
+                    4590854552892320701,
+                    4602398157112256935,
+                    13790382657961158572,
+                ],
+                [
+                    4594342907449483204,
+                    13824079142491288122,
+                    4599049961336867727,
+                ],
+            ],
+            [
+                [
+                    4603052133372172998,
+                    4597784033420957231,
+                    4597843606503600894,
+                ],
+                [
+                    4608374220493674685,
+                    4575355825046357480,
+                    4597551169972174395,
+                ],
+                [
+                    4595937248662427790,
+                    4608507369001728780,
+                    4602721857074240154,
+                ],
+                [
+                    4602398157112256935,
+                    4590854552892320701,
+                    13790382657961158572,
+                ],
+                [
+                    4607464454410458233,
+                    4603548734204850756,
+                    4607524890612695553,
+                ],
+                [
+                    4594149428474944805,
+                    4606488318174322130,
+                    13811210086974777617,
+                ],
+                [
+                    4578434541086050647,
+                    13818365831681546033,
+                    4589762622815018533,
+                ],
+            ],
+            [
+                [
+                    4599496712514278632,
+                    4603431404879963450,
+                    4576459430447861784,
+                ],
+                [
+                    4608109268411991284,
+                    4599294204986700729,
+                    4602592743369460427,
+                ],
+                [
+                    4593127507237113762,
+                    4608242416920045379,
+                    4598487244331827426,
+                ],
+                [
+                    4607529469112865047,
+                    13817521465329720613,
+                    4587838050120001809,
+                ],
+                [
+                    4600938989108239225,
+                    4606618347579135758,
+                    4606497475174661117,
+                ],
+                [
+                    13814226589747096509,
+                    4602819150202841901,
+                    4567010621106382764,
+                ],
+                [
+                    13817714944304259012,
+                    4600707105636512314,
+                    13822421998191643535,
+                ],
+            ],
+            [
+                [
+                    4603431404879963450,
+                    4599496712514278632,
+                    4576459430447861784,
+                ],
+                [
+                    4608242416920045379,
+                    4593127507237113762,
+                    4598487244331827426,
+                ],
+                [
+                    4599294204986700729,
+                    4608109268411991284,
+                    4602592743369460427,
+                ],
+                [
+                    4602819150202841901,
+                    13814226589747096509,
+                    4567010621106382764,
+                ],
+                [
+                    4606618347579135758,
+                    4600938989108239224,
+                    4606497475174661117,
+                ],
+                [
+                    13817521465329720613,
+                    4607529469112865047,
+                    4587838050120001809,
+                ],
+                [
+                    13801806577940826455,
+                    4594993794826770225,
+                    13813134659669794341,
+                ],
+            ],
+        ];
+        let mut sample = 0;
+        for d in [0.125, -0.125] {
+            for (u, v) in [(0.25, 0.5), (0.5, 0.25)] {
+                let (k, off) = offset_evaluates(d);
+                let m = off
+                    .evaluate(&k, Point2::new(u, v), 3, 3, flags(true, true))
+                    .unwrap();
+                for (n, (i, j)) in [(0, 0), (1, 0), (0, 1), (2, 0), (1, 1), (0, 2), (3, 0)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let p = m[i][j];
+                    assert_eq!(
+                        [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()],
+                        expected[sample][n],
+                        "sample {sample}, D[{i}][{j}]"
+                    );
+                }
+                sample += 1;
+            }
+        }
+    }
+
     /// The B-spline base of the `extension_sequence` fixture (WR-164): degree 3 x 3,
     /// a 5 x 5 net of non-rational (`NOW`) control points and knots
     /// `[0,0,0,0,.5,1,1,1,1]`, built through the public `from_data`.
@@ -3900,7 +4380,18 @@ mod tests {
             wr_164_extend(&off, &k);
             let err = off.swap_uv(&k).unwrap_err();
             assert_eq!(err.operation(), OP_EDIT);
-            assert_eq!(err, SolidError::sm_err(OP_EDIT), "fixed {fixed}");
+            assert_eq!(
+                err.upstream_status(),
+                Some(crate::error::SM_ERR),
+                "fixed {fixed}"
+            );
+            assert_eq!(
+                err.surface_failure(),
+                Some(&crate::error::surface::SurfaceFailure::Failed(
+                    "the offset surface does not own its base, so cannot swap its UV"
+                )),
+                "fixed {fixed}"
+            );
             assert_eq!(off.offset_distance(), -0.4, "fixed {fixed}");
             assert!(off.extended_base_surface().is_some(), "fixed {fixed}");
         }
@@ -4293,5 +4784,45 @@ mod tests {
             upstream > 1e-3,
             "the tangent extension stays on the tube: {upstream}"
         );
+    }
+
+    /// The offset surface's failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+            (
+                OP_EXTEND,
+                SurfaceFailure::Failed("the surface does not continue as itself"),
+                crate::error::SM_ERR,
+            ),
+            (
+                OP_EVAL,
+                SurfaceFailure::Missing("the extended base surface"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                OP_STEPOFF,
+                SurfaceFailure::Failed("neither direction gives a nonsingular stepoff"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }

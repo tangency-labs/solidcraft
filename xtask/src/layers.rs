@@ -74,12 +74,24 @@ pub const TABLE: &[(&str, Class)] = &[
     ("ui-text", Class::Shared),
     // the MCP server machinery: JSON-RPC over stdio, lifecycle, tool schemas and argument checks; apps register their tools (#12947)
     ("mcp-server", Class::Shared),
+    // versioned file formats: the format tag, the version registry and its upgrade, a newer file told; apps register their versions
+    ("format", Class::Shared),
     // the token contract UI components draw with: light and dark tokens, colour vision, tab accents, theme state (#13304)
     ("theme", Class::Shared),
+    // the UI kit and its components (ribbon, app bar, history and navigation bars, view compass, window chrome, theme files), drawn from host data (#14251)
+    ("ui-kit", Class::Shared),
+    // SolidCraft's look, ready to install into the kit: icon masters and roles, code-drawn glyphs, IBM Plex faces, built-in themes
+    ("look", Class::Shared),
     // the control channel: the per-launch token and its files, what a request still running does (#12946)
     ("control", Class::Shared),
     // the window's own control requests over egui: ui.screenshot and ui.resize (#12946)
     ("control-egui", Class::Shared),
+    // the viewport renderer: camera, picture description and CPU rasterizer, shading models, hatches (#12943)
+    ("viewport", Class::Shared),
+    // its GPU work on wgpu: pipelines, offscreen pictures, adapter selection, plan evaluation (#12943)
+    ("viewport-gpu", Class::Shared),
+    // the viewport in an egui window: egui-wgpu paint callbacks and install (#12943)
+    ("viewport-egui", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
@@ -151,12 +163,40 @@ pub struct Crate {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Violation {
-    Unregistered { krate: String },
-    Upward { krate: String, dep: String, from: u8, to: u8, kind: DepKind },
-    StandaloneHasWorkspaceDep { krate: String, dep: String },
-    TestkitAsNormalDep { krate: String },
-    UiBelowL5 { krate: String, dep: String, layer: u8 },
-    SharedDependsOnApp { krate: String, dep: String },
+    Unregistered {
+        krate: String,
+    },
+    Upward {
+        krate: String,
+        dep: String,
+        from: u8,
+        to: u8,
+        kind: DepKind,
+    },
+    StandaloneHasWorkspaceDep {
+        krate: String,
+        dep: String,
+    },
+    TestkitAsNormalDep {
+        krate: String,
+    },
+    UiBelowL5 {
+        krate: String,
+        dep: String,
+        layer: u8,
+    },
+    /// A UI crate reached below L5 through a workspace crate on the way (a Shared one: those may
+    /// use UI toolkits), which [`Violation::UiBelowL5`] does not see.
+    UiReachedBelowL5 {
+        krate: String,
+        via: String,
+        dep: String,
+        layer: u8,
+    },
+    SharedDependsOnApp {
+        krate: String,
+        dep: String,
+    },
 }
 
 impl std::fmt::Display for Violation {
@@ -176,6 +216,9 @@ impl std::fmt::Display for Violation {
             }
             Violation::UiBelowL5 { krate, dep, layer } => {
                 write!(f, "{krate} (L{layer}) depends on UI crate `{dep}`; UI toolkits are only allowed in L5+")
+            }
+            Violation::UiReachedBelowL5 { krate, via, dep, layer } => {
+                write!(f, "{krate} (L{layer}) reaches UI crate `{dep}` through {via}; UI toolkits are only allowed in L5+, directly or not")
             }
             Violation::SharedDependsOnApp { krate, dep } => {
                 write!(f, "{krate}: shared crate must depend only on other shared crates, solidcore and external crates, not workspace crate {dep}")
@@ -246,8 +289,41 @@ fn check_with(crates: &[Crate], classify: impl Fn(&str) -> Option<Class>) -> Vec
             }
         }
     }
+    out.extend(ui_reached_below_l5(crates, &classify));
     out.sort_by_key(|v| v.to_string());
     out.dedup();
+    out
+}
+
+/// The dependencies `c` builds with (normal and build, not dev), itself left out.
+fn built_with(c: &Crate) -> impl Iterator<Item = &Dep> {
+    c.deps.iter().filter(move |d| d.kind != DepKind::Dev && d.name != c.name)
+}
+
+/// Every UI crate a crate below L5 reaches through the workspace crates it builds with (normal
+/// and build dependencies, any depth): egui or wgpu must not come in through a Shared crate either.
+fn ui_reached_below_l5(crates: &[Crate], classify: &impl Fn(&str) -> Option<Class>) -> Vec<Violation> {
+    let by_name: std::collections::HashMap<&str, &Crate> = crates.iter().map(|c| (c.name.as_str(), c)).collect();
+    let mut out = Vec::new();
+    for c in crates {
+        let Some(Class::Layer(layer)) = classify(&c.name) else { continue };
+        if layer >= UI_MIN_LAYER {
+            continue;
+        }
+        let (mut seen, mut todo) = (std::collections::BTreeSet::new(), vec![c.name.as_str()]);
+        while let Some(name) = todo.pop() {
+            let Some(k) = by_name.get(name) else { continue };
+            for d in built_with(k) {
+                if d.workspace {
+                    if seen.insert(d.name.as_str()) {
+                        todo.push(d.name.as_str());
+                    }
+                } else if name != c.name && is_ui_crate(&d.name) {
+                    out.push(Violation::UiReachedBelowL5 { krate: c.name.clone(), via: name.to_owned(), dep: d.name.clone(), layer });
+                }
+            }
+        }
+    }
     out
 }
 
@@ -294,7 +370,7 @@ pub const SEAM_LIST: &str = "xtask/solidcore-seam.txt";
 pub const SEAM_PUBLIC: &[&str] = &["solidcore/public-crates.txt", "xtask/solidcore-public.txt"];
 
 /// The crate names in a public-crates file (`#` comments, blank lines skipped).
-fn parse_public(text: &str) -> Vec<String> {
+pub fn parse_public(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
@@ -540,6 +616,41 @@ mod tests {
     fn upward_dev_dependency_flagged() {
         let v = check(&[c("solidcraft-geom", &[("solidcraft-doc", Dev, true)])]);
         assert!(matches!(v[..], [Violation::Upward { kind: Dev, .. }]));
+    }
+
+    /// egui or wgpu that a Shared crate brings in is caught below L5 too, at any depth, naming the
+    /// crate it comes through; dev-dependencies and L5 crates are not.
+    #[test]
+    fn ui_crates_reached_through_a_shared_crate_below_l5_flagged() {
+        let classes = |pkg: &str| if short_name(pkg).starts_with("view") { Some(Class::Shared) } else { classify(pkg) };
+        let g = [
+            c("solidcraft-engine", &[("solidcraft-doc", Normal, true), ("solidcraft-viewtest", Dev, true)]),
+            c("solidcraft-doc", &[("solidcraft-viewbase", Normal, true)]),
+            c("solidcraft-viewbase", &[("solidcraft-viewgpu", Normal, true), ("serde", Normal, false)]),
+            c("solidcraft-viewgpu", &[("wgpu", Normal, false), ("egui", Normal, false)]),
+            c("solidcraft-viewtest", &[("egui-wgpu", Normal, false)]),
+            c("solidcraft-ui-egui", &[("solidcraft-viewgpu", Normal, true)]),
+        ];
+        let v = check_with(&g, classes);
+        let reached: Vec<(&str, &str, &str)> = v
+            .iter()
+            .filter_map(|v| match v {
+                Violation::UiReachedBelowL5 { krate, via, dep, .. } => Some((krate.as_str(), via.as_str(), dep.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            reached,
+            [
+                ("solidcraft-doc", "solidcraft-viewgpu", "egui"),
+                ("solidcraft-doc", "solidcraft-viewgpu", "wgpu"),
+                ("solidcraft-engine", "solidcraft-viewgpu", "egui"),
+                ("solidcraft-engine", "solidcraft-viewgpu", "wgpu"),
+            ]
+        );
+        assert!(v[0].to_string().contains("reaches UI crate `egui` through solidcraft-viewgpu"), "{}", v[0]);
+        let clean = [c("solidcraft-engine", &[("solidcraft-viewbase", Normal, true)]), c("solidcraft-viewbase", &[("serde", Normal, false)])];
+        assert!(check_with(&clean, classes).is_empty());
     }
 
     #[test]

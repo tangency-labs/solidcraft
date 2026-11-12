@@ -1,7 +1,7 @@
 //! S1 of the one shell construction: each face's offset sheet, exact or certified.
 //!
 //! Upstream: none (not upstream; solidcore-native, tangency-labs/solidcore#2350 §1.1 and
-//! §6 step 1; opt-in `UpstreamFixes::shell_one_construction`, WR-718).
+//! §6 step 1; WR-718).
 //!
 //! | Rust                         | Upstream                                              |
 //! |------------------------------|-------------------------------------------------------|

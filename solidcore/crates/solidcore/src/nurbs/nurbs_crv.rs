@@ -32,8 +32,12 @@
 //! | [`basis_find_global_max`]          | `sm_BasisFindGlobalMax`                     |
 //! | [`is_ncrv_degenerate`]             | `sm_IsNCrvDegenerate`                       |
 //! | [`MAX_DEGREE`], [`MAX_DERIV`]      | `GW_MAX_DEGREE`, `GW_MAX_DERIV`             |
+//! | [`crv_span_boxes`]                 | none (not upstream)                         |
 //!
 //! Deviations:
+//! - [`crv_span_boxes`] and its helpers are not upstream: the boxes of the control
+//!   points of every knot span, a certified cover of the curve used to prune coincidence
+//!   queries.
 //! - Out-params become return values. Routines that fill caller-allocated curves
 //!   (`sm_CreateBezSegments`, `sm_CrvSplit`, `sm_CrvTrim` with `pExisting*`) allocate
 //!   their outputs with exactly the sizes upstream checks for, so the size-mismatch
@@ -44,18 +48,18 @@
 //!   storage. [`allocate_nurb_curve`] returns a zero-filled curve (upstream
 //!   `smos_Calloc`); [`copy_nurb_curve`] returns a compact copy.
 //! - Errors: where upstream returns its error flag after `N_ErrSet` or
-//!   `smos_ErrorMessage(NL_*_ERR, ..)` the port returns [`SolidError::Nlib`] with that
+//!   `smos_ErrorMessage(NL_*_ERR, ..)` the port returns [`SolidError::Failed`] with that
 //!   number. Where it returns the flag without a number (near-zero basis
 //!   denominators, an empty trim interval) the port returns
 //!   [`SolidError::Degenerate`]; for `sm_BasisFindGlobalMax`'s exhausted Newton
 //!   restarts, [`SolidError::NotConverged`]. `sm_CrvTrim` returns the flag value
-//!   `NL_INP_ERR` (14) for `ur <= ul`: [`NlibCode::Input`]. `sm_BasisEval` returns
+//!   `NL_INP_ERR` (14) for `ur <= ul`: [`NurbsFailure::Input`]. `sm_BasisEval` returns
 //!   its flag at the domain ends after filling `N` (so `sm_CrvEval` fails there):
 //!   [`SolidError::Unsupported`].
 //! - `sm_CrvEval` reads `Pw[spn - p + i]` unchecked. At a NaN parameter on a curve
 //!   with fewer than `p + 1` control points (an edge whose limits were never set)
 //!   `N_BasisFindSpan` returns a span below `p` and upstream reads before `Pw`
-//!   (UB-288): [`crv_eval`] returns [`SolidError::Upstream`] `SM_ERR` there, and past
+//!   (UB-288): [`crv_eval`] returns a [`BSplineFailure`] with status `SM_ERR` there, and past
 //!   the end of `Pw`, instead of reading.
 //! - Arrays sized by a caller count (the rows of [`basis_derivs`],
 //!   [`crv_rational_basis_derivs`] and [`basis_i_derivs`] for `der`, the storage of
@@ -66,7 +70,7 @@
 //!   `GW_MAX_DERIV` rows (UB-33: the last row is written past them). The port holds
 //!   `MAX_DERIV + 1` rows (as the fork, smlib#79 2391302) and so evaluates `der ==
 //!   MAX_DERIV`; [`crv_derivs`] rejects `der > MAX_DERIV` with
-//!   [`NlibCode::MaxDerivative`] (upstream's own check returns the plain flag).
+//!   [`NurbsFailure::DerivativeOrder`] (upstream's own check returns the plain flag).
 //! - Every array access is bounds checked. Where upstream would index outside its
 //!   arrays (degrees of `GW_MAX_DEGREE` or more, malformed curves, indices the
 //!   routines do not check) the port returns [`SolidError::InvalidInput`]; for every
@@ -90,7 +94,8 @@
 // Branches keep upstream's `if( x NEQ NL_NOZ ) ... else ...` order for traceability.
 #![allow(clippy::if_not_else)]
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::nurbs::BSplineFailure;
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -141,10 +146,6 @@ const OP_MAXERR: &str = "nurbs::nurbs_crv::crv_remove_knot_max_err";
 const OP_IDERIVS: &str = "nurbs::nurbs_crv::basis_i_derivs";
 const OP_GMAX: &str = "nurbs::nurbs_crv::basis_find_global_max";
 const OP_ALLOC: &str = "nurbs::nurbs_crv::allocate_nurb_curve";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 fn degenerate(operation: &'static str) -> SolidError {
     SolidError::Degenerate {
@@ -230,7 +231,7 @@ fn check_degree(p: usize, op: &'static str) -> Result<()> {
     if p >= MAX_DEGREE {
         return Err(SolidError::InvalidInput {
             operation: op,
-            reason: "degree at or above GW_MAX_DEGREE (upstream scratch array size)",
+            reason: "degree at or above the largest degree a curve evaluation holds",
         });
     }
     Ok(())
@@ -535,7 +536,7 @@ pub fn create_bez_segments(cur: &Curve) -> Result<Vec<Curve>> {
 /// Splits a curve at `u` into the pieces over `[U[0], u]` and `[u, U[m]]`
 /// (`sm_CrvSplit`).
 ///
-/// Errors with [`NlibCode::Parameter`] when `u <= U[0]` or `u >= U[m]`.
+/// Errors with [`NurbsFailure::Parameter`] when `u <= U[0]` or `u >= U[m]`.
 pub fn crv_split(cur: &Curve, u: f64) -> Result<(Curve, Curve)> {
     const OP: &str = OP_SPLIT;
     let pu = cur.degree();
@@ -549,7 +550,7 @@ pub fn crv_split(cur: &Curve, u: f64) -> Result<(Curve, Curve)> {
 
     // Check parameter.
     if knt.is_end_param(u) {
-        return Err(nlib(OP, NlibCode::Parameter));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
     }
 
     // Get span and knot multiplicity.
@@ -615,7 +616,7 @@ pub fn crv_split(cur: &Curve, u: f64) -> Result<(Curve, Curve)> {
 /// The piece of a curve over `[ul, ur]` (`sm_CrvTrim`): the control points of the
 /// spans covering the interval, with `ul` and `ur` inserted `p` times.
 ///
-/// Errors with [`NlibCode::Input`] when `ur <= ul` (upstream returns the flag
+/// Errors with [`NurbsFailure::Input`] when `ur <= ul` (upstream returns the flag
 /// `NL_INP_ERR`), with [`SolidError::Degenerate`] when the interval covers no
 /// control point, and with the errors of
 /// [`KnotVector::find_span_and_mult`](crate::nurbs::knots::KnotVector::find_span_and_mult).
@@ -630,7 +631,7 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
 
     // Check parameters.
     if ur <= ul {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Find knot spans and set new indexes (exact checks, no tolerances).
@@ -713,7 +714,7 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
 
 /// The Euclidean images of control points `k..=l` (`sm_CrvGetEPolygon`).
 ///
-/// Errors with [`NlibCode::Index`] when `k > l` or `l > n`.
+/// Errors with [`NurbsFailure::Index`] when `k > l` or `l > n`.
 pub fn crv_get_epolygon(cur: &Curve, k: usize, l: usize) -> Result<Vec<Vec3>> {
     cur.epolygon(k, l)
 }
@@ -982,12 +983,18 @@ pub fn crv_rational_basis_derivs(
 /// (`sm_CrvDerivs`): the (rational) basis derivatives times the Euclidean control
 /// points.
 ///
-/// Errors with [`NlibCode::MaxDerivative`] when `der > MAX_DERIV`, with the errors of
-/// [`basis_derivs`] and with [`NlibCode::Index`] when the span's control points are
+/// Errors with [`NurbsFailure::DerivativeOrder`] when `der > MAX_DERIV`, with the errors of
+/// [`basis_derivs`] and with [`NurbsFailure::Index`] when the span's control points are
 /// missing.
 pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec3>> {
     if der > MAX_DERIV {
-        return Err(nlib(OP_CDERIVS, NlibCode::MaxDerivative));
+        return Err(SolidError::nurbs(
+            OP_CDERIVS,
+            NurbsFailure::DerivativeOrder {
+                given: der,
+                max: MAX_DERIV,
+            },
+        ));
     }
     let mut cd = vec![Vec3::ZERO; der + 1];
     crv_derivs_into(cur, u, side, &mut cd)?;
@@ -997,12 +1004,21 @@ pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec
 /// [`crv_derivs`] into the caller's slice: `out[k] = C^(k)(u)` for `k < out.len()`
 /// (`der = out.len() - 1`), without a heap allocation.
 ///
-/// Errors as [`crv_derivs`]; an empty `out` is [`NlibCode::MaxDerivative`] as well.
+/// Errors as [`crv_derivs`]; an empty `out` is [`NurbsFailure::NoDerivativeRows`].
 pub fn crv_derivs_into(cur: &Curve, u: f64, side: Side, out: &mut [Vec3]) -> Result<()> {
     const OP: &str = OP_CDERIVS;
     let der = match out.len().checked_sub(1) {
         Some(der) if der <= MAX_DERIV => der,
-        _ => return Err(nlib(OP, NlibCode::MaxDerivative)),
+        Some(der) => {
+            return Err(SolidError::nurbs(
+                OP,
+                NurbsFailure::DerivativeOrder {
+                    given: der,
+                    max: MAX_DERIV,
+                },
+            ))
+        }
+        None => return Err(SolidError::nurbs(OP, NurbsFailure::NoDerivativeRows)),
     };
     if cur.degree() < SMALL_DEGREE {
         crv_derivs_n::<SMALL_DEGREE>(cur, u, side, der, out)
@@ -1034,7 +1050,7 @@ fn crv_derivs_n<const N: usize>(
 
     let k0 = spn
         .checked_sub(pu)
-        .ok_or_else(|| nlib(OP, NlibCode::Index))?;
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Index))?;
     // `crv_get_epolygon` into a stack array (`pu < N`, so `pu + 1` points fit).
     let mut pts = [Vec3::ZERO; N];
     let mut npts = 0;
@@ -1162,12 +1178,19 @@ pub fn crv_eval(cur: &Curve, u: f64, side: Side) -> Result<Vec3> {
     let mut cw = CPoint::new(0.0, 0.0, 0.0, 0.0);
     // Upstream reads Pw[spn - p + i] unchecked; a span below p (a NaN u on a curve
     // with fewer than p + 1 control points) reads before Pw (UB-288): SM_ERR instead.
-    let spn_p = span.checked_sub(p).ok_or_else(|| SolidError::sm_err(OP))?;
+    let spn_p = span.checked_sub(p).ok_or_else(|| {
+        SolidError::b_spline(
+            OP,
+            BSplineFailure::Failed("the curve has fewer control points than its span needs"),
+        )
+    })?;
     for (i, &alpha) in values.iter().enumerate().take(p + 1) {
-        let aw = pw
-            .get(spn_p + i)
-            .copied()
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+        let aw = pw.get(spn_p + i).copied().ok_or_else(|| {
+            SolidError::b_spline(
+                OP,
+                BSplineFailure::Failed("the curve has fewer control points than its span needs"),
+            )
+        })?;
         // MAC_A_updcpt: skip zero weights, add without multiplying for one.
         if alpha == 1.0 {
             cw.x += aw.x;
@@ -1629,7 +1652,7 @@ fn copy_into(dst: &mut [f64], src: &[f64], op: &'static str) -> Result<()> {
 /// Index check of the basis-maximum routines: `0 <= i <= m - p - 1`.
 fn check_basis_index(m: usize, i: usize, p: usize, op: &'static str) -> Result<()> {
     if m.checked_sub(p + 1).is_none_or(|top| i > top) {
-        return Err(nlib(op, NlibCode::Index));
+        return Err(SolidError::nurbs(op, NurbsFailure::Index));
     }
     Ok(())
 }
@@ -1637,8 +1660,8 @@ fn check_basis_index(m: usize, i: usize, p: usize, op: &'static str) -> Result<(
 /// The minimum and maximum of basis function `N[i, p]` over each of its `p + 1` knot
 /// spans and the parameter of its global maximum (`sm_BasisFindAllSpanMaxima`).
 ///
-/// Errors with [`NlibCode::Index`] when `i > m - p - 1`, with
-/// [`NlibCode::Convergence`] when the global maximum lies in no span of the support,
+/// Errors with [`NurbsFailure::Index`] when `i > m - p - 1`, with
+/// [`NurbsFailure::NotConverged`] when the global maximum lies in no span of the support,
 /// and with the errors of [`basis_find_global_max`] and [`basis_i_eval`].
 pub fn basis_find_all_span_maxima(
     knt: &KnotVector<'_>,
@@ -1702,7 +1725,7 @@ pub fn basis_find_all_span_maxima(
         }
     }
     if spn == -1 {
-        return Err(nlib(OP, NlibCode::Convergence));
+        return Err(SolidError::nurbs(OP, NurbsFailure::NotConverged));
     }
 
     let n_at = |x: f64| basis_i_eval(knt, i, p, x, Side::Left);
@@ -1725,7 +1748,7 @@ pub fn basis_find_all_span_maxima(
 
 /// Basis function `N[i, p]` at `u` (`sm_BasisIEval`; clamped knot vectors).
 ///
-/// Errors with [`NlibCode::Index`] when `i > m - p - 1`.
+/// Errors with [`NurbsFailure::Index`] when `i > m - p - 1`.
 pub fn basis_i_eval(knt: &KnotVector<'_>, i: usize, p: usize, u: f64, side: Side) -> Result<f64> {
     const OP: &str = OP_IEVAL;
     check_degree(p, OP)?;
@@ -1737,7 +1760,7 @@ pub fn basis_i_eval(knt: &KnotVector<'_>, i: usize, p: usize, u: f64, side: Side
 
     // Check index.
     if ii > n {
-        return Err(nlib(OP, NlibCode::Index));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Index));
     }
 
     // Special cases for end values.
@@ -1808,7 +1831,7 @@ pub fn basis_i_eval(knt: &KnotVector<'_>, i: usize, p: usize, u: f64, side: Side
 /// (`sm_BasisIDerivs`; clamped knot vectors). [`Side::Left`] gives right
 /// derivatives at knots, [`Side::Right`] left derivatives.
 ///
-/// Errors with [`NlibCode::Index`] when `i > m - p - 1`.
+/// Errors with [`NurbsFailure::Index`] when `i > m - p - 1`.
 pub fn basis_i_derivs(
     knt: &KnotVector<'_>,
     i: usize,
@@ -1830,7 +1853,7 @@ pub fn basis_i_derivs(
 
     // Check index.
     if ii > n {
-        return Err(nlib(OP, NlibCode::Index));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Index));
     }
 
     let mut nt = [[0.0_f64; NT]; NT];
@@ -1944,7 +1967,7 @@ pub fn basis_i_derivs(
 /// `N > tol`) with up to 20 re-brackets. Degree 1 and functions with a `p`-fold inner
 /// knot peak at `U[i+1]` with value 1.
 ///
-/// Errors with [`NlibCode::Index`] when `i > m - p - 1`, with [`NlibCode::Numerical`]
+/// Errors with [`NurbsFailure::Index`] when `i > m - p - 1`, with [`NurbsFailure::Numerical`]
 /// when `N'' == 0` in a Newton step, with [`SolidError::NotConverged`] after 20
 /// re-brackets, and with `InvalidInput` where upstream would loop forever.
 pub fn basis_find_global_max(
@@ -2026,7 +2049,7 @@ pub fn basis_find_global_max(
                 break;
             }
             if nd[2] == 0.0 {
-                return Err(nlib(OP, NlibCode::Numerical));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
             }
             u0 -= nd[1] / nd[2];
             if u0 <= ui || u0 >= ue {
@@ -2079,6 +2102,252 @@ pub fn is_ncrv_degenerate(cur: &Curve, tol3d: f64) -> Result<bool> {
 
     // Test the box for point size.
     Ok(bx.is_point_sized(tol))
+}
+
+/// The Euclidean point of a control point whose convex-hull property is certain:
+/// `None` for a 2D point, a non-finite coordinate, or a rational point whose weight is
+/// not finite and positive (a non-positive weight breaks the hull property, and the
+/// division would not be a convex combination).
+#[must_use]
+pub(crate) fn hull_point(cw: CPoint) -> Option<Vec3> {
+    if cw.z == NOZ {
+        return None;
+    }
+    let p = if cw.w == NOW {
+        Vec3::new(cw.x, cw.y, cw.z)
+    } else if cw.w.is_finite() && cw.w > 0.0 {
+        Vec3::new(cw.x / cw.w, cw.y / cw.w, cw.z / cw.w)
+    } else {
+        return None;
+    };
+    (p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).then_some(p)
+}
+
+/// The indices `i` of the non-empty knot spans `U[i] < U[i+1]` (`i` in `p..=n`) of a
+/// degree `p` curve (or one direction of a surface) with last control index `n`; `None`
+/// unless the knots are `n + p + 2` finite, non-decreasing values.
+#[must_use]
+pub(crate) fn nonempty_spans(knots: &[f64], p: usize, n: usize) -> Option<Vec<usize>> {
+    if knots.len() != n.checked_add(p)?.checked_add(2)?
+        || knots.iter().any(|k| !k.is_finite())
+        || knots.windows(2).any(|w| matches!(w, [a, b] if a > b))
+    {
+        return None;
+    }
+    Some(
+        (p..=n)
+            .filter(|&i| matches!((knots.get(i), knots.get(i + 1)), (Some(a), Some(b)) if a < b))
+            .collect(),
+    )
+}
+
+/// The box of a set of points (`None` when empty).
+#[must_use]
+pub(crate) fn points_box(points: impl IntoIterator<Item = Vec3>) -> Option<Extent3d> {
+    let mut points = points.into_iter();
+    let mut bx = Extent3d::from_point(points.next()?);
+    for p in points {
+        bx.add_point(p);
+    }
+    Some(bx)
+}
+
+/// One box per non-empty knot span of `cur` that meets `ivl`, in knot order: the piece
+/// of the curve on span `[U[i], U[i+1]]` is a convex combination of control points
+/// `i-p..=i` (non-negative weights summing to one, also for a rational curve whose
+/// weights are all positive, whose Euclidean points are then the convex-combination
+/// vertices), so it lies in the box of those Euclidean points.
+///
+/// `None`, meaning no certified boxes, when a weight is not positive and finite, the
+/// curve is 2D, a knot is not finite or the knots are not sized for the net, or `ivl` is
+/// not a finite interval inside the natural domain `[U[p], U[n+1]]`.
+///
+/// Not upstream.
+#[must_use]
+pub fn crv_span_boxes(cur: &Curve, ivl: &Extent1d) -> Option<Vec<Extent3d>> {
+    let (p, n) = (cur.degree(), cur.n());
+    let knots = cur.knots();
+    let spans = nonempty_spans(knots, p, n)?;
+    let (lo, hi) = (ivl.min(), ivl.max());
+    if !(lo.is_finite() && hi.is_finite() && lo <= hi)
+        || lo < *knots.get(p)?
+        || hi > *knots.get(n.checked_add(1)?)?
+    {
+        return None;
+    }
+    let points: Vec<Vec3> = cur
+        .cpts()
+        .iter()
+        .map(|&c| hull_point(c))
+        .collect::<Option<_>>()?;
+    let mut boxes = Vec::new();
+    for i in spans {
+        if *knots.get(i)? <= hi && *knots.get(i + 1)? >= lo {
+            boxes.push(points_box(
+                points.get(i.checked_sub(p)?..=i)?.iter().copied(),
+            )?);
+        }
+    }
+    Some(boxes)
+}
+
+/// Rounding allowance for boxes of pieces made by `levels` convex-combination steps
+/// from control points `cpts` (homogeneous, all weights positive): `16 * levels * eps *
+/// M * (wmax / wmin)`, with `M` the largest Euclidean coordinate magnitude.
+///
+/// Derivation: a step computes `(1-a) P + a Q` with `a` in `[0, 1]` itself rounded; its
+/// rounding error is at most about `5 eps` times the largest homogeneous component
+/// (`eps` for `a`, times `|Q - P|`, plus three roundings), and a later step cannot
+/// amplify an earlier error since the combination weights sum to one. So after
+/// `levels` steps each homogeneous component is off by at most `8 levels eps` times its
+/// bound, `wmax * M` for `w x` and `wmax` for `w`. Dividing by the piece's weight, at
+/// least `wmin` (a convex combination of weights), turns the `w x` error and `|x|` times
+/// the `w` error into at most `16 levels eps M wmax / wmin`; the division's own
+/// rounding is within that. `None` when a weight is not positive and finite.
+#[must_use]
+pub(crate) fn piece_slack(cpts: impl IntoIterator<Item = CPoint>, levels: usize) -> Option<f64> {
+    let (mut scale, mut wmin, mut wmax) = (0.0_f64, f64::INFINITY, 0.0_f64);
+    for c in cpts {
+        let p = hull_point(c)?;
+        scale = scale.max(p.x.abs()).max(p.y.abs()).max(p.z.abs());
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        wmin = wmin.min(w);
+        wmax = wmax.max(w);
+    }
+    let slack = 16.0 * levels as f64 * f64::EPSILON * scale * (wmax / wmin);
+    slack.is_finite().then_some(slack)
+}
+
+/// The control-point boxes of `pieces` (`None` when a point has no hull point).
+fn curve_piece_boxes(pieces: &[Curve]) -> Option<Vec<Extent3d>> {
+    pieces
+        .iter()
+        .map(|c| {
+            points_box(
+                c.cpts()
+                    .iter()
+                    .map(|&p| hull_point(p))
+                    .collect::<Option<Vec<_>>>()?,
+            )
+        })
+        .collect()
+}
+
+/// Whether the knot vector is clamped (its first and last `p + 1` knots equal), which
+/// Bezier extraction assumes.
+pub(crate) fn is_clamped(knots: &[f64], p: usize) -> bool {
+    let k = p.saturating_add(1);
+    let ends_equal =
+        |s: Option<&[f64]>| s.is_some_and(|s| s.windows(2).all(|w| matches!(w, [a, b] if a == b)));
+    ends_equal(knots.get(..k))
+        && ends_equal(knots.len().checked_sub(k).and_then(|i| knots.get(i..)))
+}
+
+/// A certified cover of a curve over an interval that can be refined span by span.
+///
+/// Level 0 is [`crv_span_boxes`]. [`CurveCover::pieces`] splits a span's Bezier segment
+/// (`create_bez_segments`) at its parameter midpoint (`crv_split`) `depth` times and
+/// returns the control-point boxes of the `2^depth` pieces, the allowance
+/// [`CurveCover::slack`] is to be added to distances to them; made once per span and kept. Where a
+/// refinement cannot be made (unclamped knots, a split or weight failure) the span
+/// keeps its level 0 box: a coarser, still certified cover, never an error.
+///
+/// Not upstream.
+pub struct CurveCover {
+    curve: Curve,
+    /// Indices into the non-empty spans of the curve, one per level 0 box.
+    spans: Vec<usize>,
+    coarse: Vec<Extent3d>,
+    depth: usize,
+    slack: f64,
+    segments: Option<Vec<Curve>>,
+    refined: Vec<Option<Vec<Extent3d>>>,
+}
+
+impl CurveCover {
+    /// The cover of `cur` over `ivl`, to be refined `depth` times; `None` as for
+    /// [`crv_span_boxes`].
+    #[must_use]
+    pub fn new(cur: &Curve, ivl: &Extent1d, depth: usize) -> Option<Self> {
+        let coarse = crv_span_boxes(cur, ivl)?;
+        let p = cur.degree();
+        let knots = cur.knots();
+        let all = nonempty_spans(knots, p, cur.n())?;
+        let (lo, hi) = (ivl.min(), ivl.max());
+        let spans: Vec<usize> = all
+            .iter()
+            .enumerate()
+            .filter(|&(_, &i)| {
+                matches!((knots.get(i), knots.get(i + 1)), (Some(&a), Some(&b)) if a <= hi && b >= lo)
+            })
+            .map(|(k, _)| k)
+            .collect();
+        // Bezier extraction chains at most `p` insertions per span, each split of a
+        // degree `p` curve `p` more.
+        let levels = p.saturating_mul(all.len().saturating_add(depth));
+        let slack = piece_slack(cur.cpts().iter().copied(), levels)?;
+        let refined = vec![None; coarse.len()];
+        Some(Self {
+            curve: cur.clone(),
+            spans,
+            coarse,
+            depth,
+            slack,
+            segments: None,
+            refined,
+        })
+    }
+
+    /// The level 0 boxes, one per span that meets the interval, in knot order.
+    #[must_use]
+    pub fn coarse(&self) -> &[Extent3d] {
+        &self.coarse
+    }
+
+    /// The rounding allowance to add to a distance test against boxes of
+    /// [`CurveCover::pieces`] (see [`piece_slack`]).
+    #[must_use]
+    pub const fn slack(&self) -> f64 {
+        self.slack
+    }
+
+    /// The boxes of span `i` split `depth` times, the level 0 box alone when it cannot
+    /// be refined; empty for an `i` out of range.
+    pub fn pieces(&mut self, i: usize) -> &[Extent3d] {
+        if self.refined.get(i).is_some_and(Option::is_none) {
+            let made = self.refine(i);
+            let fallback = self.coarse.get(i).copied();
+            if let Some(slot) = self.refined.get_mut(i) {
+                *slot = made.or_else(|| fallback.map(|b| vec![b]));
+            }
+        }
+        self.refined
+            .get(i)
+            .and_then(Option::as_deref)
+            .unwrap_or(&[])
+    }
+
+    fn refine(&mut self, i: usize) -> Option<Vec<Extent3d>> {
+        if !is_clamped(self.curve.knots(), self.curve.degree()) {
+            return None;
+        }
+        if self.segments.is_none() {
+            self.segments = Some(create_bez_segments(&self.curve).ok()?);
+        }
+        let mut level = vec![self.segments.as_ref()?.get(*self.spans.get(i)?)?.clone()];
+        for _ in 0..self.depth {
+            let mut next = Vec::new();
+            for piece in &level {
+                let knots = piece.knots();
+                let mid = 0.5 * (knots.first()? + knots.last()?);
+                let (a, b) = crv_split(piece, mid).ok()?;
+                next.push(a);
+                next.push(b);
+            }
+            level = next;
+        }
+        curve_piece_boxes(&level)
+    }
 }
 
 #[cfg(test)]
@@ -2169,13 +2438,11 @@ mod tests {
         assert_eq!(basis_eval(&knt, 3, f64::NAN, Side::Left).unwrap().span, 2);
         for side in [Side::Left, Side::Right] {
             match crv_eval(&c, f64::NAN, side) {
-                Err(SolidError::Upstream {
-                    operation,
-                    code,
-                    entity: None,
-                }) => {
-                    assert_eq!(operation, OP_CEVAL);
-                    assert_eq!(code, crate::error::SM_ERR);
+                Err(e) => {
+                    assert_eq!(e.operation(), OP_CEVAL);
+                    assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+                    assert_eq!(e.entity(), None);
+                    assert!(!e.is_nurbs_failure());
                 }
                 other => panic!("{other:?}"),
             }
@@ -2221,17 +2488,11 @@ mod tests {
         }
         assert!(matches!(
             crv_split(&c, 0.0),
-            Err(SolidError::Nlib {
-                code: NlibCode::Parameter,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Parameter))
         ));
         assert!(matches!(
             crv_trim(&c, 0.5, 0.5),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -2451,5 +2712,116 @@ mod tests {
         assert!(allocate_nurb_curve(1 << 47, 3, 3).is_err());
         assert!(allocate_nurb_curve(3, 3, 1 << 48).is_err());
         assert!(allocate_nurb_curve(3, 3, 7).is_ok());
+    }
+
+    /// A rational quadratic quarter circle of radius 2 in the xy plane, weights
+    /// `1, mid_weight, 1` (`sqrt(2)/2` makes it exact).
+    fn quarter_circle(mid_weight: f64) -> Curve {
+        let pw = vec![
+            CPoint::weighted(Vec3::new(2.0, 0.0, 0.0), 1.0),
+            CPoint::weighted(Vec3::new(2.0, 2.0, 0.0), mid_weight),
+            CPoint::weighted(Vec3::new(0.0, 2.0, 0.0), 1.0),
+        ];
+        Curve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap()
+    }
+
+    /// Samples of `cur` on `[a, b]`.
+    fn samples(cur: &Curve, a: f64, b: f64) -> Vec<(f64, Vec3)> {
+        (0..=40)
+            .map(|i| {
+                let u = a + (b - a) * f64::from(i) / 40.0;
+                (u, cur.eval(u, Side::Left).unwrap())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn span_boxes_hold_every_sample_of_their_span() {
+        let c = cubic();
+        let boxes = crv_span_boxes(&c, &Extent1d::from_min_max(0.0, 1.0)).unwrap();
+        let spans = [(0.0, 0.3), (0.3, 0.6), (0.6, 1.0)];
+        assert_eq!(boxes.len(), spans.len());
+        for (bx, &(a, b)) in boxes.iter().zip(&spans) {
+            for (u, p) in samples(&c, a, b) {
+                assert!(bx.contains_point(p, 1e-13), "u={u} p={p:?} box={bx:?}");
+            }
+        }
+        // Rational: the Euclidean control points, not the weighted ones, bound the arc.
+        let arc = quarter_circle(std::f64::consts::FRAC_1_SQRT_2);
+        let boxes = crv_span_boxes(&arc, &Extent1d::from_min_max(0.0, 1.0)).unwrap();
+        assert_eq!(boxes.len(), 1);
+        for (u, p) in samples(&arc, 0.0, 1.0) {
+            assert!(boxes[0].contains_point(p, 1e-13), "u={u} p={p:?}");
+        }
+        assert_eq!(boxes[0].max_at(0), 2.0);
+        assert_eq!(boxes[0].max_at(1), 2.0);
+    }
+
+    #[test]
+    fn span_boxes_only_cover_the_spans_meeting_the_interval() {
+        let c = cubic();
+        let one = crv_span_boxes(&c, &Extent1d::from_min_max(0.4, 0.5)).unwrap();
+        assert_eq!(one.len(), 1);
+        let two = crv_span_boxes(&c, &Extent1d::from_min_max(0.2, 0.4)).unwrap();
+        assert_eq!(two.len(), 2);
+        // Outside the natural domain, reversed, or not finite: no certified cover.
+        for (a, b) in [(-0.1, 0.5), (0.5, 1.1), (f64::NAN, 0.5)] {
+            let ivl = Extent1d::from_raw(a, b);
+            assert!(crv_span_boxes(&c, &ivl).is_none(), "[{a}, {b}]");
+        }
+        assert!(crv_span_boxes(&c, &Extent1d::from_raw(0.6, 0.4)).is_none());
+    }
+
+    #[test]
+    fn a_non_positive_or_non_finite_weight_gives_no_boxes() {
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        for w in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(crv_span_boxes(&quarter_circle(w), &ivl).is_none(), "w={w}");
+            assert!(
+                CurveCover::new(&quarter_circle(w), &ivl, 2).is_none(),
+                "w={w}"
+            );
+        }
+        // A 2D curve has no certified 3D cover.
+        let mut flat = quarter_circle(1.0);
+        flat.to_2d();
+        assert!(crv_span_boxes(&flat, &ivl).is_none());
+    }
+
+    #[test]
+    fn refined_pieces_hold_the_curve_and_are_tighter() {
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        for curve in [cubic(), quarter_circle(0.6)] {
+            let mut cover = CurveCover::new(&curve, &ivl, 3).unwrap();
+            let coarse = cover.coarse().to_vec();
+            let slack = cover.slack();
+            // 1e-13 of 5 units of coordinate and a few hundred levels: far below 1e-9.
+            assert!(slack > 0.0 && slack < 1e-9, "slack={slack}");
+            let all = samples(&curve, 0.0, 1.0);
+            for (i, whole) in coarse.iter().enumerate() {
+                let pieces = cover.pieces(i).to_vec();
+                assert_eq!(pieces.len(), 8);
+                assert!(pieces.iter().all(|p| p.is_contained_by(whole, slack)));
+                // Pieces are strictly smaller than the span box somewhere.
+                assert!(pieces.iter().all(|p| (0..3)
+                    .any(|a| p.max_at(a) - p.min_at(a) < whole.max_at(a) - whole.min_at(a))));
+                for &(_, p) in &all {
+                    if whole.contains_point(p, 0.0) {
+                        // Every sample inside the span box lies in some piece or on a
+                        // neighbouring span's pieces (spans share end points).
+                        let near = pieces.iter().any(|b| b.contains_point(p, slack));
+                        let elsewhere = coarse.iter().enumerate().any(|(j, _)| {
+                            j != i
+                                && cover
+                                    .pieces(j)
+                                    .to_vec()
+                                    .iter()
+                                    .any(|b| b.contains_point(p, slack))
+                        });
+                        assert!(near || elsewhere, "p={p:?}");
+                    }
+                }
+            }
+        }
     }
 }

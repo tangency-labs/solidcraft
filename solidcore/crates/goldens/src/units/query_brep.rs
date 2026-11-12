@@ -421,10 +421,7 @@ fn seed_box() -> Extent3d {
 
 /// The `SmStatus` of a Rust result; `None` for an error upstream has no status for.
 fn status_code(e: &SolidError) -> Option<f64> {
-    match e {
-        SolidError::Upstream { code, .. } => Some(f64::from(*code)),
-        _ => None,
-    }
+    solidcore::error::upstream_status(e).map(f64::from)
 }
 
 /// Appends a box step's status and box (the seed when it failed).

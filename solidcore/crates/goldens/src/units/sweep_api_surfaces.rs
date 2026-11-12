@@ -45,6 +45,59 @@ pub const MIN_GENERATED: usize = 800;
 /// `sweep.api_surfaces` runner.
 pub struct Runner;
 
+/// The skin `create_skin_primitive_with_sources` makes is the one `create_skin_primitive`
+/// makes, bit for bit (faces, their roles, and each face's surface, whose `Debug` prints every
+/// f64 exactly), each on a fresh kernel; or both refuse alike. A difference is a harness error,
+/// so a case whose trace changed its skin fails rather than passes.
+fn traced_is_plain(
+    counts: &[usize],
+    refs: &[Option<&SmCurve>],
+    degree: usize,
+    cap: bool,
+) -> Result<(), HarnessError> {
+    use solidcore::topology::brep::p1::faces;
+    use solidcore::topology::face::p2::surface;
+    let plain = api::create_skin_primitive(&mut Kernel::default(), counts, refs, degree, cap);
+    let traced =
+        api::create_skin_primitive_with_sources(&mut Kernel::default(), counts, refs, degree, cap);
+    let (plain, traced) = match (plain, traced) {
+        (Ok(p), Ok((t, _))) => (p, t),
+        (Err(a), Err(b)) if format!("{a:?}") == format!("{b:?}") => return Ok(()),
+        (a, b) => {
+            return Err(harness(format!(
+                "the traced skin differs: {:?} vs {:?}",
+                a.err(),
+                b.err()
+            )))
+        }
+    };
+    let roles = |s: &api::SkinPrimitive| {
+        (
+            s.start_faces.clone(),
+            s.side_faces.clone(),
+            s.end_faces.clone(),
+        )
+    };
+    if roles(&plain) != roles(&traced) {
+        return Err(harness("the traced skin's face roles differ"));
+    }
+    let fp = faces(&plain.brep, None).map_err(|e| harness(format!("faces: {e}")))?;
+    let ft = faces(&traced.brep, None).map_err(|e| harness(format!("faces: {e}")))?;
+    if fp != ft {
+        return Err(harness("the traced skin's faces differ"));
+    }
+    for f in fp {
+        let a = format!("{:?}", surface(&plain.brep, f));
+        let b = format!("{:?}", surface(&traced.brep, f));
+        if a != b {
+            return Err(harness(format!(
+                "the traced skin's face {f:?} surface differs"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
@@ -351,7 +404,9 @@ fn dump_surface(o: &mut Vec<f64>, s: &BSplineSurface) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -420,7 +475,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             ) {
                 Ok(surface) => {
                     o.extend([0.0, 1.0, flag(surface.owner().is_none())]);
-                    let domain = surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
+                    let domain = surface
+                        .natural_uv_domain_with_nurb(&k)
+                        .map_err(|e| HarnessError::new(e.to_string()))?;
                     o.extend([
                         domain.min().x,
                         domain.min().y,
@@ -481,6 +538,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .map(|&c| usize::try_from(c).map_err(|_| harness("count too large")))
                 .collect::<Result<Vec<_>, _>>()?;
             let degree = usize::try_from(*degree).map_err(|_| harness("degree too large"))?;
+            // the traced skin is the plain one, bit for bit (tangency-labs/solidcraft#13632)
+            traced_is_plain(&counts, &refs, degree, *cap_ends)?;
             match api::create_skin_primitive(&mut k, &counts, &refs, degree, *cap_ends) {
                 Ok(r) => {
                     o.extend([
@@ -987,7 +1046,10 @@ mod tests {
             surface.values.get("revolution_owner_clear"),
             Some(&vec![1.0])
         );
-        assert_eq!(surface.values.get("revolution_status"), Some(&vec![0.0; 25]));
+        assert_eq!(
+            surface.values.get("revolution_status"),
+            Some(&vec![0.0; 25])
+        );
         let points = surface.values.get("revolution_points").unwrap();
         assert_eq!(points.len(), 75);
         assert!(points.iter().any(|value| *value != 0.0));

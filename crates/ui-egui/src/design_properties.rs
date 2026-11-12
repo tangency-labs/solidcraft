@@ -100,7 +100,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let metadata = app.session.doc.metadata.clone();
     let title = solidcraft_ui_text::tr_label("Design Properties");
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
+    let window = ui_kit::Window::new(egui::Id::unique("sc_design_properties"), "settings", title).fields();
+    let window = if let Some((pivot, at)) = crate::shell::floating_editor_anchor(app, ctx) { window.placed(pivot, at) } else { window };
+    let (closed, action) = window.show(ctx, true, |ui| {
         for (i, k) in keys(Owner::Design).enumerate() {
             let (key, label) = (k.name, solidcraft_ui_text::tr(k.label));
             let Some(field) = d.fields.get_mut(i) else { continue };
@@ -329,6 +331,17 @@ fn tensor_text(t: &[[f64; 3]; 3]) -> String {
     t.iter().map(|r| r.map(|x| x.to_string()).join("\t")).collect::<Vec<_>>().join("\n")
 }
 
+/// What an inertia cell reads as: its entry's name from the row's label ("Ixx, Ixy, Ixz") and its
+/// value, or the row's label and the cell's place when the label does not name each cell (the
+/// principal moments).
+fn cell_name(label: &str, cells: usize, i: usize, value: &str) -> String {
+    let names: Vec<&str> = label.split(',').map(str::trim).collect();
+    match names.get(i) {
+        Some(name) if names.len() == cells => format!("{name}: {value}"),
+        _ => format!("{label} {}: {value}", i + 1),
+    }
+}
+
 /// The rows under Moment of inertia (#8095): label and cells, the tensor's three first.
 fn inertia_rows(app: &SolveApp, total: &Value) -> Vec<(String, Vec<String>)> {
     let k = crate::prefs::unit_scale(&app.session.doc.units).0;
@@ -449,13 +462,19 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     );
     let copy = shown_tensor(app, total).map(|t| tensor_text(&t));
     let copy_label = app.tr("ui.properties.copy_matrix").to_string();
+    let copy_hint = app.tr("ui.properties.copy_value").to_string();
+    let mut copied = false;
     let heading = window_title(&title, &v);
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+        // Each value copies itself as shown, unit and all, when clicked (#12218).
         for (label, value) in &rows {
-            ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
+            let label = solidcraft_ui_text::tr_label(label);
+            let name = format!("{label}: {value}");
+            ui_kit::row(ui, label, |ui| copied |= ui_kit::copy_cell(ui, value, &name, false, &copy_hint));
         }
         if let Some(first) = &first {
-            ui_kit::row(ui, &first_label, |ui| ui_kit::text(ui, first, ui_kit::Text::Cell));
+            let name = format!("{first_label}: {first}");
+            ui_kit::row(ui, &first_label, |ui| copied |= ui_kit::copy_cell(ui, first, &name, false, &copy_hint));
         }
         if !inertia.is_empty() || unavailable {
             ui_kit::section(ui, "sc_props_inertia", &section, true, |ui| {
@@ -467,8 +486,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
                 for (n, (label, cells)) in inertia.iter().enumerate() {
                     ui_kit::row(ui, label, |ui| {
                         ui.columns(cells.len(), |columns| {
-                            for (column, cell) in columns.iter_mut().zip(cells) {
-                                ui_kit::text(column, cell, ui_kit::Text::MonoCell);
+                            for (i, (column, cell)) in columns.iter_mut().zip(cells).enumerate() {
+                                let name = cell_name(label, cells.len(), i, cell);
+                                copied |= ui_kit::copy_cell(column, cell, &name, true, &copy_hint);
                             }
                         })
                     });
@@ -488,6 +508,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
             });
         }
     });
+    if copied {
+        app.set_status(solidcraft_ui_text::tr("ui.properties.value_copied"), false);
+    }
     if closed || action == ui_kit::Action::Cancel {
         close_object(app);
     }
@@ -655,6 +678,23 @@ mod tests {
         assert_eq!(rows, want.map(|r| r.to_vec()).to_vec(), "{text}");
         let m = v["total"]["mass_g"].as_f64().unwrap();
         assert!((rows[0][0] - m * (400.0 + 900.0) / 12.0).abs() < 1e-6 * rows[0][0] && rows[0][1] == 0.0, "{text}");
+
+        // #12218: a click on a value copies it as shown, and the status bar says so.
+        let mass = format!("{m:.3} g");
+        // It reads as what it is and its value.
+        let [x, y] = h.widget(&format!("Mass: {mass}")).expect("the mass cell");
+        let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x": x, "y": y}));
+        crate::control::handle(&mut h.app, &h.ctx, &request);
+        let mut copied = Vec::new();
+        for _ in 0..4 {
+            h.frame();
+            copied.extend(h.output.commands.iter().filter_map(|c| match c {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            }));
+        }
+        assert_eq!(copied.last(), Some(&mass), "the mass cell copies its text");
+        assert_eq!(h.app.status.as_ref().map(|(text, ..)| text.as_str()), Some("Value copied"));
         h.step(&json!({"widget": "Close"})).unwrap();
         assert!(h.app.menu.props.is_none());
 
@@ -783,5 +823,13 @@ mod tests {
         h.step(&json!({"click": {"chevron": "Document Settings"}})).unwrap();
         h.step(&json!({"click": {"browser": "Design Properties"}})).unwrap();
         assert!(h.app.design_properties.is_some());
+    }
+
+    /// #12218: an inertia cell reads as its entry and value; a row whose label does not name each
+    /// cell, as the label and the cell's place.
+    #[test]
+    fn inertia_cells_read_as_their_entry() {
+        assert_eq!(super::cell_name("Ixx, Ixy, Ixz", 3, 1, "4.5"), "Ixy: 4.5");
+        assert_eq!(super::cell_name("Principal moments", 3, 2, "7"), "Principal moments 3: 7");
     }
 }

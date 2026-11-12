@@ -1,7 +1,7 @@
 //! STEP (ISO 10303-21) export: AP242 product structure, assemblies, names and colours.
 //!
 //! Each body's record is written as it is, the exact B-rep, by
-//! [`solidcraft_step::write::topology`]: its material regions as solids, its open shells as a
+//! [`solidcore_step::write::topology`]: its material regions as solids, its open shells as a
 //! surface model. Around it this writes one header and context, a product per part with its
 //! shape representation, named solids, surface and face colours, and assemblies as
 //! next-assembly-usage occurrences placed by item-defined transformations (the structure the
@@ -10,8 +10,8 @@
 
 use std::fmt::Write as _;
 
-use solidcraft_step::p21::Param;
-use solidcraft_step::write::{GeomWriter, Writer, string, topology};
+use solidcore_step::p21::Param;
+use solidcore_step::write::{GeomWriter, Writer, string, topology};
 
 use crate::body::Body;
 use crate::{KernelError, Result};
@@ -115,9 +115,18 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         }
     }
     let reached: Vec<(usize, &ExportProduct)> = products.iter().enumerate().filter(|(i, _)| reach.get(*i).copied().unwrap_or(false)).collect();
-    // The context states the models' accuracy: the loosest of their records' tolerances.
-    let uncertainty =
-        reached.iter().flat_map(|(_, p)| &p.bodies).map(|b| b.body.record().tolerance).filter(|t| t.is_finite()).fold(MIN_UNCERTAINTY, f64::max);
+    // The context states the models' accuracy: the loosest tolerance of their records, edges
+    // and vertices. STEP keeps no tolerance per edge, so an edge that lies off its faces (an
+    // intersection curve fitted within its tolerance) is only as good as the file says (#11997).
+    let uncertainty = reached
+        .iter()
+        .flat_map(|(_, p)| &p.bodies)
+        .flat_map(|b| {
+            let r = b.body.record();
+            std::iter::once(r.tolerance).chain(r.edges.iter().map(|e| e.tolerance)).chain(r.vertices.iter().map(|v| v.tolerance))
+        })
+        .filter(|t| t.is_finite())
+        .fold(MIN_UNCERTAINTY, f64::max);
 
     let mut w = Writer::new();
     let app = w.add_distinct("APPLICATION_CONTEXT", &[s("managed model based 3d engineering")]);
@@ -152,7 +161,7 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         ("GLOBAL_UNIT_ASSIGNED_CONTEXT", vec![refs(&[mm, rad, sr])]),
         ("REPRESENTATION_CONTEXT", vec![s("Context #1"), s("3D Context with UNIT and UNCERTAINTY")]),
     ]);
-    let origin = GeomWriter::new(&mut w).placement(&solidcraft_step::geom::Placement {
+    let origin = GeomWriter::new(&mut w).placement(&solidcore_step::geom::Placement {
         origin: [0.0; 3],
         axis: [0.0, 0.0, 1.0],
         ref_direction: [1.0, 0.0, 0.0],
@@ -200,14 +209,15 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
             let opacity = b.body.paint().map_or(1.0, |p| p.opacity);
             let items: Vec<u64> = written.solids.iter().copied().chain(written.sheets).collect();
             if let Some(c) = b.color {
+                let name = b.body.paint().and_then(|p| p.name.as_deref());
                 for item in &items {
-                    styled.push(style(&mut w, *item, c, opacity));
+                    styled.push(style(&mut w, *item, c, opacity, name));
                 }
             }
             // Faces with colours of their own.
             for f in b.body.paint().map(|p| p.faces.as_slice()).unwrap_or(&[]) {
                 if let Some(&face) = written.faces.get(f.face).filter(|id| **id != 0) {
-                    styled.push(style(&mut w, face, f.color, f.opacity));
+                    styled.push(style(&mut w, face, f.color, f.opacity, f.name.as_deref()));
                 }
             }
             solids.extend(written.solids);
@@ -270,9 +280,11 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
     Ok(text)
 }
 
-/// A surface colour for an item (STYLED_ITEM chain; the styles are shared).
-fn style(w: &mut Writer, item: u64, c: [f32; 3], opacity: f32) -> u64 {
-    let rgb = w.add("COLOUR_RGB", &[s(""), Param::Real(c[0] as f64), Param::Real(c[1] as f64), Param::Real(c[2] as f64)]);
+/// A surface colour for an item (STYLED_ITEM chain; the styles are shared), named as its look is
+/// (`COLOUR_RGB`'s name, read back on import) when it has a name.
+fn style(w: &mut Writer, item: u64, c: [f32; 3], opacity: f32, name: Option<&str>) -> u64 {
+    let name = name.and_then(crate::body::colour_name).unwrap_or_default();
+    let rgb = w.add("COLOUR_RGB", &[s(&name), Param::Real(c[0] as f64), Param::Real(c[1] as f64), Param::Real(c[2] as f64)]);
     let fasc = w.add("FILL_AREA_STYLE_COLOUR", &[s(""), r(rgb)]);
     let fas = w.add("FILL_AREA_STYLE", &[s(""), refs(&[fasc])]);
     let ssfa = w.add("SURFACE_STYLE_FILL_AREA", &[r(fas)]);
@@ -309,9 +321,9 @@ pub fn step_export_bodies(bodies: &[ExportBody], header: &StepHeader) -> Result<
 mod tests {
     use super::*;
     use solidcore_record::Vec3;
+    use solidcore_step::p21;
+    use solidcore_step::write::real;
     use solidcraft_geom::prelude::*;
-    use solidcraft_step::p21;
-    use solidcraft_step::write::real;
 
     #[test]
     fn islands_are_solids_of_their_own_not_voids() {
@@ -339,6 +351,38 @@ mod tests {
         assert_eq!(hollow.shell_count(), 2);
         let text = crate::step_export(&[&hollow], "test").unwrap();
         assert_eq!(text.matches("BREP_WITH_VOIDS").count(), 1, "{text}");
+    }
+
+    /// The uncertainty a file states covers every edge and vertex of its bodies (#11997): STEP
+    /// keeps no tolerance per edge, so the context's is the only place an edge's deviation goes.
+    /// A body whose edge may lie 3e-3 mm off its faces (its tolerance) was written with its
+    /// record's tolerance, 2e-5, so a reader takes its geometry as good to 2e-5.
+    #[test]
+    fn uncertainty_covers_the_edge_and_vertex_tolerances() {
+        let bx = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 5.0)).unwrap();
+        let mut record = bx.record().clone();
+        let own = record.tolerance;
+        assert!(own < 1e-4, "{own}");
+        let edge = record.edges.first_mut().unwrap();
+        edge.tolerance = 3e-3;
+        let ends = edge.vertices;
+        for v in ends {
+            record.vertices.get_mut(v as usize).unwrap().tolerance = 4e-3;
+        }
+        let tolerant = crate::Body::from_record(record).unwrap();
+        let text = crate::step_export(&[&tolerant], "test").unwrap();
+        let stated = |text: &str| -> Vec<f64> {
+            let ex = p21::parse(text).unwrap();
+            ex.entities
+                .values()
+                .filter(|e| e.name() == "UNCERTAINTY_MEASURE_WITH_UNIT")
+                .filter_map(|e| e.params().first().and_then(p21::Param::as_f64))
+                .collect()
+        };
+        assert_eq!(stated(&text), vec![4e-3], "the vertex tolerance");
+        // A body without tolerant edges states its own tolerance, as before.
+        let text = crate::step_export(&[&bx], "test").unwrap();
+        assert_eq!(stated(&text), vec![own]);
     }
 
     #[test]

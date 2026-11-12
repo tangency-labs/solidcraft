@@ -134,7 +134,6 @@ enum FaceIn {
 }
 
 impl FaceIn {
-
     /// The `--ssi-corpus` description (`None` for the default plane).
     fn ssi_spec(&self) -> Option<SurfaceSpec> {
         Some(match self.clone() {
@@ -398,8 +397,9 @@ fn static_tree(
 }
 impl TopologyObjects<StaticHandle> for StaticScene {
     fn surface_solve_context(&self) -> Option<Box<dyn SurfaceSolveContext<StaticHandle> + '_>> {
-        (!self.face_caches.is_empty())
-            .then(|| Box::new(StaticSurfaceContext(self)) as Box<dyn SurfaceSolveContext<StaticHandle> + '_>)
+        (!self.face_caches.is_empty()).then(|| {
+            Box::new(StaticSurfaceContext(self)) as Box<dyn SurfaceSolveContext<StaticHandle> + '_>
+        })
     }
     fn brep_trees(&self, brep: StaticHandle) -> SolidResult<TopologyTrees<'_, StaticHandle>> {
         let (vertices, empty) = match brep.0 {
@@ -718,8 +718,15 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
         handle: StaticHandle(999),
     };
     let interval = Extent1d::from_min_max(0.0, 1.0);
-    let shape = Shape::new(&mut kernel, &solidcore::geom::object::NoBreps, &[], &[], &[], &[])
-        .map_err(|e| HarnessError::new(e.to_string()))?;
+    let shape = Shape::new(
+        &mut kernel,
+        &solidcore::geom::object::NoBreps,
+        &[],
+        &[],
+        &[],
+        &[],
+    )
+    .map_err(|e| HarnessError::new(e.to_string()))?;
     let result = match i.entry {
         0 => TopologySolver::brep_point_solve(
             &kernel,
@@ -816,7 +823,11 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
             }
             let status = match e {
                 SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-                SolidError::Upstream { code, .. } => f64::from(code),
+                ref e if solidcore::error::upstream_status(e).is_some() => {
+                    f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+                }
+                // a typed refusal (no upstream status): recorded, not a harness failure
+                SolidError::Unsupported { .. } => return Ok(Output::err(e.to_string())),
                 _ => return Err(HarnessError::new(e.to_string())),
             };
             if let Some(slot) = flat.first_mut() {
@@ -826,4 +837,49 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
         }
     }
     Ok(static_output(&flat))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::case::{repo_root, CaseContext};
+
+    fn fixture(name: &str) -> Case {
+        let ctx = CaseContext {
+            root: repo_root(),
+            seeds: 0,
+        };
+        ctx.fixture_cases("intersect.topology_solver_p2")
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == name)
+            .unwrap()
+    }
+
+    /// #13678: the full torus's traced silhouette lies off the torus, so its
+    /// certified curve maximum (1.6642154866673036) is above what its returned
+    /// face point measures on the surface. The face path refuses with a typed
+    /// error, while the half torus, whose silhouette point measures its value
+    /// exactly, still answers sqrt(2) + 1/4.
+    #[test]
+    fn projected_face_maximum_refuses_a_silhouette_off_the_surface() {
+        for entry in [6, 7] {
+            let out = static_rust(&fixture(&format!("analytic_face_torus_x_{entry}_15"))).unwrap();
+            let error = out.error.unwrap();
+            assert!(
+                error.contains("unsupported")
+                    && error.contains("silhouette point does not measure its value on the surface"),
+                "{error}"
+            );
+            let half =
+                static_rust(&fixture(&format!("analytic_face_torus_half_x_{entry}_15"))).unwrap();
+            assert_eq!(half.error, None);
+            let flat = &half.values["static"];
+            // [1e-5 x (2 + 3 points), count, type, nvars, nobjs, obj0, obj1, value, ..]
+            let count_at = 2 + 3;
+            assert_eq!(flat[count_at], 1.0);
+            let closed = 2.0_f64.sqrt() + 0.25;
+            assert!((flat[count_at + 6] - closed).abs() <= 2.0 * f64::EPSILON * closed);
+        }
+    }
 }

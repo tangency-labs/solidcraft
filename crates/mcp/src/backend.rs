@@ -1,17 +1,16 @@
 //! Where MCP tool calls end up: a control-channel method call (`docs/control-protocol.md`).
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Value, json};
+use solidcraft_control::client::{CallError, Connection, Request, outcome};
 use solidcraft_engine::Session;
 use solidcraft_engine::control_pending;
 use solidcraft_engine::panels::ActionSink;
 use solidcraft_engine::panels::commands::LayoutCatalogue;
-use solidcraft_engine::render::StandardView;
 use solidcraft_engine::schema::ParamCheck;
 use solidcraft_engine::view::Guides;
+use solidcraft_viewport::StandardView;
 
 /// Something that answers control-channel methods: `engine.execute`, `engine.commands`,
 /// `document.inspect`, `ui.view`, `ui.render`, `ui.screenshot`, `control.running`, and
@@ -48,118 +47,44 @@ pub trait Backend {
     fn app_options(&mut self) -> Result<Option<Value>, String> {
         Ok(None)
     }
+    /// A bridge to the same app on a connection of its own, for a backend bridged to one: the
+    /// server answers `running` on it while this backend is busy with a call (#14007), as the
+    /// app answers `control.running` on any connection at once. `None`: nothing to ask apart
+    /// (an in-process session answers only between calls).
+    fn side_channel(&self) -> Option<Remote> {
+        None
+    }
 }
-
-/// Longest reply line accepted from the app.
-const MAX_REPLY: u64 = 64 << 20;
-
-/// How long a reply may take: kernel operations (booleans, fillets) on big parts can take a while.
-const READ_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// How long the app may take to answer `mcp.options`: the window answers it within a frame, so a
 /// longer wait means the app is busy and the server asks again on a later call.
 const OPTIONS_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// How long the app may take to run an `engine.batch`: a little longer than its control server
-/// waits (3600 s), so its "still running" reply arrives first.
-const BATCH_TIMEOUT: Duration = Duration::from_secs(3720);
-
-/// How long a call goes on waiting, asking `control.pending`, after the app said its request is
-/// still running (the app says so after 60 s; #1618), before it says so itself.
-const PENDING_WAIT: Duration = Duration::from_secs(240);
-
-/// How long a later call, or the `pending` tool, waits for a request still running from an
-/// earlier call.
-const SETTLE_WAIT: Duration = Duration::from_secs(60);
-
-/// How often `control.pending` is asked while waiting.
-const POLL_EVERY: Duration = Duration::from_millis(500);
-
-/// How often a long wait is reported on stderr.
-const PROGRESS_EVERY: Duration = Duration::from_secs(30);
-
 /// How a tool error starts when a request is still running in the app after the wait: the
 /// request was not cancelled and its reply waits on the connection; the `pending` tool gets it.
 /// `batch` uses it to tell "still running" from "failed".
-pub(crate) const STILL_RUNNING: &str = "still running:";
-
-/// A request the app said is still running (#1618). Its reply will come on this connection,
-/// through `control.pending`, so the connection is kept for it.
-struct Outstanding {
-    what: String,
-    /// What it does when it finishes; `None`: not known (a request this bridge did not send).
-    effect: Option<solidcraft_control::Effect>,
-    since: Instant,
-}
-
-impl Outstanding {
-    fn secs(&self) -> u64 {
-        self.since.elapsed().as_secs()
-    }
-}
-
-/// What became of a request still running when its call returned, once a later call waited it
-/// out: kept for the `pending` tool.
-enum Settled {
-    Finished { what: String, reply: Value },
-    Lost { what: String },
-}
-
-/// The end of a wait for an outstanding request.
-enum Waited {
-    /// It finished: its own reply.
-    Done(Value),
-    /// The app holds nothing (any more) for this connection.
-    Nothing,
-    /// Still running when the wait ran out.
-    Running,
-}
+pub(crate) use solidcraft_control::client::STILL_RUNNING;
 
 /// How long to wait for a request still running (tests shorten them).
-#[derive(Clone, Copy)]
-pub(crate) struct Waits {
-    pub pending: Duration,
-    pub settle: Duration,
-    pub poll: Duration,
-}
-
-const WAITS: Waits = Waits { pending: PENDING_WAIT, settle: SETTLE_WAIT, poll: POLL_EVERY };
+#[cfg(test)]
+pub(crate) use solidcraft_control::client::Waits;
 
 /// The level a control reply says its request was checked at (#9184), if it says one.
 fn echoed(v: &Value) -> Option<ParamCheck> {
     v.get("param_check").and_then(Value::as_str).and_then(ParamCheck::parse)
 }
 
-/// A control reply as a call's result.
-fn outcome(v: &Value) -> Result<Value, String> {
-    if v.get("ok").and_then(Value::as_bool) == Some(true) {
-        Ok(v.get("result").cloned().unwrap_or(Value::Null))
-    } else {
-        Err(v.get("error").and_then(Value::as_str).unwrap_or("error").to_string())
-    }
-}
-
 /// A running SolidCraft app reached through its loopback control port
-/// (`solidcraft --control PORT`).
+/// (`solidcraft --control PORT`): the shared control client ([`Connection`]), with the agent's
+/// folders on every request and the calls checked against their commands' contracts.
 pub struct Remote {
-    addr: String,
-    port: u16,
-    conn: Option<(BufReader<TcpStream>, TcpStream)>,
-    next_id: u64,
-    /// `--token`, when given. Otherwise each request looks the token up again, since every
-    /// launch of the app makes a new one (docs/control-protocol.md).
-    explicit_token: Option<String>,
-    /// A request still running in the app; its reply waits on `conn`.
-    outstanding: Option<Outstanding>,
-    /// An outstanding request's end, once a later call waited for it (for `pending`).
-    settled: Option<Settled>,
-    waits: Waits,
+    conn: Connection,
     /// How calls are checked (`--param-check`): by the app, when it checks a request's own
     /// level, else here before they are sent.
     param_check: ParamCheck,
     /// Whether the connected app checks a request's `param_check` itself (#9184), asked once per
-    /// connection; `None` until asked.
-    app_checks: Option<bool>,
+    /// connection (the connection's serial number beside it); `None` until asked.
+    app_checks: Option<(u64, bool)>,
     /// The level the app said it checked the last reply at (`param_check` beside `ok`).
     echoed: Option<ParamCheck>,
 }
@@ -167,6 +92,11 @@ pub struct Remote {
 /// How a tool error starts when no app listens at the bridged address. The agent reads it, and
 /// `batch` uses it to tell "never sent" from "sent, reply lost".
 pub(crate) const NOT_RUNNING: &str = "no SolidCraft app is listening at";
+
+/// A long wait for a request still running, on stderr.
+fn note(message: &str) {
+    solidcraft_engine::note!("solidcraft-mcp: {message}");
+}
 
 impl Remote {
     /// Connect to the app at `addr`, with its control token found the usual way
@@ -178,24 +108,15 @@ impl Remote {
     /// [`Remote::connect`] with the token given (`--token`); `None` finds it the usual way.
     pub fn connect_with_token(addr: &str, token: Option<&str>) -> std::io::Result<Self> {
         let mut r = Self::new(addr, token);
-        r.reconnect()?;
+        r.conn.connect()?;
         Ok(r)
     }
 
     /// A bridge to the app at `addr` that connects when a call needs it: an MCP server started
     /// before the app keeps its tools, and they reach the app once it runs.
     pub fn new(addr: &str, token: Option<&str>) -> Self {
-        let port = addr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(0);
-        let explicit_token = token.map(str::to_string);
         Self {
-            addr: addr.to_string(),
-            port,
-            conn: None,
-            next_id: 1,
-            explicit_token,
-            outstanding: None,
-            settled: None,
-            waits: WAITS,
+            conn: Connection::new(solidcraft_engine::control_auth::APP, addr, token).with_progress(note),
             param_check: ParamCheck::Off,
             app_checks: None,
             echoed: None,
@@ -212,294 +133,45 @@ impl Remote {
     /// Shorter waits for requests still running (tests).
     #[cfg(test)]
     pub(crate) fn set_waits(&mut self, waits: Waits) {
-        self.waits = waits;
-    }
-
-    /// Close the connection. A request still running loses its reply with it.
-    fn drop_conn(&mut self) {
-        self.conn = None;
-        // The next connection may reach another app (restarted, another version).
-        self.app_checks = None;
-        if let Some(o) = self.outstanding.take() {
-            self.settled = Some(Settled::Lost { what: o.what });
-        }
+        self.conn.set_waits(waits);
     }
 
     /// See whether the app is there now (`new` does not); the error says why not. The connection
     /// doesn't stay open: the app closes one that shows no token within a few seconds, and the
     /// first call may be long away. That call connects again.
     pub fn try_connect(&mut self) -> std::io::Result<()> {
-        self.reconnect()?;
-        self.drop_conn();
-        Ok(())
+        self.conn.try_connect()
     }
 
-    /// Failing to reach the app at all is `NotConnected`, so [`Remote::explain`] can tell it from
-    /// a connection lost during a call.
-    fn reconnect(&mut self) -> std::io::Result<()> {
-        self.drop_conn();
-        let not_connected = |e: std::io::Error| std::io::Error::new(std::io::ErrorKind::NotConnected, e);
-        let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, format!("cannot resolve {}", self.addr));
-        for sa in self.addr.to_socket_addrs().map_err(not_connected)? {
-            match TcpStream::connect_timeout(&sa, Duration::from_millis(800)) {
-                Ok(s) => {
-                    s.set_nodelay(true).ok();
-                    s.set_read_timeout(Some(READ_TIMEOUT)).ok();
-                    let read = s.try_clone()?;
-                    self.conn = Some((BufReader::new(read), s));
-                    return Ok(());
-                }
-                Err(e) => last = e,
-            }
-        }
-        Err(not_connected(last))
-    }
-
-    /// The tool error for a failed call: whether the app is not running (and how to start it) or
-    /// went away during the call.
-    fn explain(&self, e: &std::io::Error) -> String {
-        let (addr, port) = (&self.addr, self.port);
-        if e.kind() == std::io::ErrorKind::NotConnected {
-            format!(
-                "{NOT_RUNNING} {addr} ({e}): it is not running, or it quit. Start it with `solidcraft --control {port}` \
-                 (or ask the user to); the next call connects to it"
-            )
-        } else {
-            format!(
-                "the SolidCraft app at {addr} did not answer ({e}): it may have quit or crashed during this call, after                  running it or not. Inspect the design before sending a change again; if the app quit, start it with                  `solidcraft --control {port}`"
-            )
-        }
-    }
-
-    fn roundtrip(&mut self, line: &str) -> std::io::Result<String> {
-        if self.conn.is_none() {
-            self.reconnect()?;
-        }
-        let Some((reader, writer)) = self.conn.as_mut() else { return Err(std::io::Error::other("not connected")) };
-        // One write: a request that loses its newline still reaches the app as a request.
-        let sent = writer.write_all(format!("{line}\n").as_bytes()).and_then(|()| writer.flush());
-        if let Err(e) = sent {
-            self.drop_conn();
-            return Err(e);
-        }
-        let mut reply = String::new();
-        let n = match reader.by_ref().take(MAX_REPLY).read_line(&mut reply) {
-            Ok(n) => n,
-            Err(e) => {
-                // A timed-out read leaves a late reply on the stream: start afresh next time.
-                self.drop_conn();
-                return Err(e);
-            }
-        };
-        if n == 0 || !reply.ends_with('\n') {
-            self.drop_conn();
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "connection closed"));
-        }
-        Ok(reply)
-    }
-
-    fn set_read_timeout(&self, t: Duration) {
-        if let Some((_, writer)) = &self.conn {
-            writer.set_read_timeout(Some(t)).ok();
-        }
-    }
-
-    /// `engine.batch` is never sent twice (#743): it goes on a fresh connection (an idle one may
-    /// have been closed by an app restart; connecting again sends nothing), and once it is being
-    /// written any error is final, as the app may have run it.
-    fn send_batch(&mut self, line: &str) -> std::io::Result<String> {
-        self.reconnect().or_else(|_| self.reconnect())?;
-        self.set_read_timeout(BATCH_TIMEOUT);
-        let r = self.roundtrip(line);
-        self.set_read_timeout(READ_TIMEOUT);
-        r
-    }
-}
-
-impl Remote {
-    /// The request line for `method`: a fresh id, the agent's folders and the app's token.
-    fn request_line(&mut self, method: &str, params: Value) -> String {
-        let id = self.next_id;
-        self.next_id += 1;
+    /// `params` with the agent's folders: the app confines the files a request reaches to them
+    /// (control.rs), and to the folders it opened or saved a design in, which count as its open
+    /// design's.
+    fn scoped(params: Value) -> Value {
         let mut params = params;
-        // The app confines the files this request reaches to the agent's folders (control.rs).
         if let (Some(scope), Some(o)) = (solidcraft_engine::io::vfs::current_scope(), params.as_object_mut()) {
             o.insert("allow_paths".into(), json!(scope.roots().iter().map(|r| r.to_string_lossy()).collect::<Vec<_>>()));
-            // And the folders it opened or saved a design in, which count as its open design's.
             if !scope.design_roots().is_empty() {
                 o.insert("design_folders".into(), json!(scope.design_roots().iter().map(|r| r.to_string_lossy()).collect::<Vec<_>>()));
             }
         }
-        let mut msg = json!({"id": id, "method": method, "params": params});
-        // The token goes with every request (an app restarted mid-session has a new one).
-        let token = solidcraft_engine::control_auth::APP.client_token(self.port, self.explicit_token.as_deref());
-        if let Some(t) = &token {
-            msg["token"] = json!(t.token);
-        }
-        msg.to_string()
+        params
     }
 
-    /// Ask the app, on this connection only, about the request it still runs for it.
-    fn ask_pending(&mut self) -> Result<Value, String> {
-        if self.conn.is_none() {
-            self.drop_conn();
-            return Err("the connection to the app was lost".into());
-        }
-        let line = self.request_line("control.pending", json!({}));
-        let reply = self.roundtrip(&line).map_err(|e| self.explain(&e))?;
-        let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from the app: {e}"))?;
-        outcome(&v).inspect_err(|_| self.drop_conn())
-    }
-
-    /// Wait up to `limit` for the outstanding request, asking `control.pending` now and then and
-    /// saying on stderr how long it takes. An error: the connection, and so the reply, was lost.
-    fn wait_outstanding(&mut self, limit: Duration) -> Result<Waited, String> {
-        let start = Instant::now();
-        let mut told = start;
-        loop {
-            let Some(o) = &self.outstanding else { return Ok(Waited::Nothing) };
-            let what = o.what.clone();
-            let r = self.ask_pending()?;
-            if r.get("pending").is_none_or(Value::is_null) {
-                self.outstanding = None;
-                return Ok(Waited::Nothing);
-            }
-            if r.get("done").and_then(Value::as_bool) == Some(true) {
-                self.outstanding = None;
-                return Ok(Waited::Done(r.get("reply").cloned().unwrap_or(Value::Null)));
-            }
-            let waited = start.elapsed();
-            if waited >= limit {
-                return Ok(Waited::Running);
-            }
-            if told.elapsed() >= PROGRESS_EVERY {
-                let secs = self.outstanding.as_ref().map_or(0, Outstanding::secs);
-                solidcraft_engine::note!("solidcraft-mcp: {what} is still running in the app ({secs} s); waiting for it");
-                told = Instant::now();
-            }
-            std::thread::sleep(self.waits.poll.min(limit.saturating_sub(waited)));
-        }
-    }
-
-    /// The tool error for the outstanding request still running after its wait.
-    fn still_running(&self, earlier: bool) -> String {
-        let Some(o) = &self.outstanding else { return format!("{STILL_RUNNING} a request is still running in the app") };
-        let effect =
-            o.effect.map_or_else(|| "it was not cancelled and may still change the design when it finishes".into(), |e| e.when_done("design"));
-        let settle = self.waits.settle.as_secs();
-        if earlier {
-            format!(
-                "{STILL_RUNNING} an earlier request, {}, is still running in the app ({} s; {effect}), so this call was not sent. Call the \
-                 `pending` tool to wait for its result, then send this call again",
-                o.what,
-                o.secs()
-            )
-        } else {
-            format!(
-                "{STILL_RUNNING} {} is still running in the app after {} s ({effect}); don't send it again. Call the `pending` tool to \
-                 wait for its result (up to {settle} s per call); other calls wait for it first",
-                o.what,
-                o.secs()
-            )
-        }
-    }
-
-    /// Before a new request: wait for one still running from an earlier call, keeping its end for
-    /// `pending`. Still running after the wait: the new request is not sent.
-    fn settle_earlier(&mut self) -> Result<(), String> {
-        let Some(what) = self.outstanding.as_ref().map(|o| o.what.clone()) else { return Ok(()) };
-        match self.wait_outstanding(self.waits.settle) {
-            Ok(Waited::Done(reply)) => self.settled = Some(Settled::Finished { what, reply }),
-            Ok(Waited::Nothing) => {}
-            Ok(Waited::Running) => return Err(self.still_running(true)),
-            // The connection was lost, and the earlier reply with it (`pending` says so): the new
-            // request goes on a fresh connection.
-            Err(_) => {}
-        }
-        Ok(())
-    }
-
-    /// `control.pending` for the bridge: the end of the request still running from an earlier
-    /// call, waiting for it up to the settle wait. Never sent on a fresh connection, which has
-    /// nothing pending.
-    fn pending_status(&mut self) -> Result<Value, String> {
-        if let Some(s) = self.settled.take() {
-            return Ok(match s {
-                Settled::Finished { what, reply } => json!({"pending": what, "done": true, "reply": reply}),
-                Settled::Lost { what } => json!({"pending": what, "lost": true}),
-            });
-        }
-        let Some(what) = self.outstanding.as_ref().map(|o| o.what.clone()) else { return Ok(json!({"pending": null})) };
-        match self.wait_outstanding(self.waits.settle) {
-            Ok(Waited::Done(reply)) => Ok(json!({"pending": what, "done": true, "reply": reply})),
-            Ok(Waited::Nothing) => Ok(json!({"pending": null})),
-            Ok(Waited::Running) => Ok(json!({"pending": what, "done": false, "running_s": self.outstanding.as_ref().map_or(0, Outstanding::secs)})),
-            Err(_) => {
-                self.settled = None;
-                Ok(json!({"pending": what, "lost": true}))
-            }
-        }
-    }
-
+    /// `method` sent to the app as the shared client sends a request: named and with its effect
+    /// for messages, `engine.batch` never sent twice (#743), and the level the app checked the
+    /// reply at kept.
     fn call_once(&mut self, method: &str, params: Value, retry_busy: bool) -> Result<Value, String> {
-        // The app answers `control.running` at once, even behind a request still running: it is
-        // not held back for that one as other calls are.
-        if method != "control.running" {
-            self.settle_earlier()?;
-        }
         self.echoed = None;
-        let what = control_pending::describe(method, &params);
-        let effect = control_pending::effect(method, &params);
-        let again = retry_busy.then(|| params.clone());
-        let sent = Instant::now();
-        let line = self.request_line(method, params);
-        let reply = if method == "engine.batch" {
-            self.send_batch(&line)
-        } else {
-            // One retry on a fresh connection (the app may have restarted). When nothing listens
-            // any more, the app went away, maybe while running this request: say that, not
-            // just "not running".
-            self.roundtrip(&line).or_else(|lost| {
-                self.roundtrip(&line).map_err(|e| if e.kind() == std::io::ErrorKind::NotConnected && lost.kind() != e.kind() { lost } else { e })
-            })
-        }
-        .map_err(|e| self.explain(&e))?;
-        let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from the app: {e}"))?;
-        self.echoed = echoed(&v);
-        // Timed out in the app, still running (#1618): wait for its result on this connection.
-        if v.get("running").and_then(Value::as_bool) == Some(true) {
-            self.outstanding = Some(Outstanding { what: what.clone(), effect: Some(effect), since: sent });
-            solidcraft_engine::note!(
-                "solidcraft-mcp: {what} is still running in the app after {} s; waiting up to {} s more for it",
-                sent.elapsed().as_secs(),
-                self.waits.pending.as_secs()
-            );
-            return match self.wait_outstanding(self.waits.pending)? {
-                Waited::Done(reply) => {
-                    self.echoed = echoed(&reply);
-                    outcome(&reply)
-                }
-                Waited::Nothing => {
-                    Err(format!("{what} timed out in the app, which kept no result for it: inspect the design before sending it again"))
-                }
-                Waited::Running => Err(self.still_running(false)),
-            };
-        }
-        // Refused unrun behind a request this bridge did not know of: wait for that one, then
-        // send this one once more.
-        if v.get("busy").and_then(Value::as_bool) == Some(true)
-            && let Some(params) = again
-        {
-            self.outstanding = Some(Outstanding { what: "an earlier request".into(), effect: None, since: Instant::now() });
-            self.settle_earlier()?;
-            return self.call_once(method, params, false);
-        }
-        // A refused token: say which token file it came from (and whether it is stale).
-        outcome(&v).map_err(|error| {
-            solidcraft_engine::control_auth::APP
-                .client_token(self.port, self.explicit_token.as_deref())
-                .map_or_else(|| error.clone(), |t| t.explain_error(&error))
-        })
+        let request = Request {
+            method: method.to_string(),
+            what: control_pending::describe(method, &params),
+            effect: control_pending::effect(method, &params),
+            once: method == "engine.batch",
+            params: Self::scoped(params),
+        };
+        let reply = self.conn.exchange(request, retry_busy)?;
+        self.echoed = echoed(&reply);
+        Ok(self.conn.outcome(&reply)?)
     }
 }
 
@@ -524,21 +196,21 @@ impl Remote {
     /// connection with `control.capabilities`, which lists the levels it takes; an older app
     /// answers "unknown method". Any other answer (no app, a busy one) is asked again next time.
     fn app_checks(&mut self) -> bool {
-        if let Some(known) = self.app_checks {
+        if let Some((serial, known)) = self.app_checks
+            && self.conn.is_connected()
+            && serial == self.conn.serial()
+        {
             return known;
         }
         // Sent ahead of settling a request still running on this connection: the app answers
         // `control.capabilities` at once, as `control.running`, without taking that one's reply.
-        let line = self.request_line("control.capabilities", json!({}));
-        let reply = self.roundtrip(&line).ok().and_then(|r| serde_json::from_str::<Value>(&r).ok());
+        let reply = self.conn.ask("control.capabilities", Self::scoped(json!({}))).ok();
         let known = match reply.as_ref().map(outcome) {
             Some(Ok(c)) => Some(c["param_check"].as_array().is_some_and(|levels| levels.iter().any(|l| l == self.param_check.name()))),
             Some(Err(e)) if e.starts_with("unknown method") => Some(false),
             _ => None,
         };
-        if self.conn.is_some() {
-            self.app_checks = known;
-        }
+        self.app_checks = if self.conn.is_connected() { known.map(|k| (self.conn.serial(), k)) } else { None };
         known.unwrap_or(false)
     }
 
@@ -548,7 +220,7 @@ impl Remote {
     fn confirmed(&mut self, reply: Result<Value, String>) -> Result<Value, String> {
         let unconfirmed = reply.is_ok() && self.echoed != Some(self.param_check);
         if unconfirmed {
-            self.app_checks = Some(false);
+            self.app_checks = Some((self.conn.serial(), false));
         }
         match reply {
             Ok(_) if unconfirmed && self.param_check == ParamCheck::Strict => {
@@ -609,7 +281,7 @@ impl Remote {
         let steps = params.get("commands").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
         if self.param_check == ParamCheck::Strict {
             if let Some(refusal) = solidcraft_engine::batch_preflight::contracts(steps) {
-                return Ok(refusal.reply(steps.len()));
+                return Ok(refusal.reply(steps.len(), params.get("rollback").and_then(Value::as_bool).unwrap_or(true)));
             }
             return self.call_once("engine.batch", params, true);
         }
@@ -633,10 +305,12 @@ impl Remote {
 impl Backend for Remote {
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         match method {
-            "control.pending" => self.pending_status(),
+            "control.pending" => Ok(self.conn.pending()),
             "engine.execute" if self.param_check != ParamCheck::Off => self.execute_checked(params),
             "engine.batch" if self.param_check != ParamCheck::Off => self.batch_checked(params),
             "engine.script" if self.param_check != ParamCheck::Off => self.call_once(method, self.at_level(params), true),
+            // Not behind the request it cancels, as other calls are.
+            "control.cancel" => Ok(self.conn.cancel(Self::scoped(params))?),
             _ => self.call_once(method, params, true),
         }
     }
@@ -646,44 +320,32 @@ impl Backend for Remote {
     fn has_ui(&self) -> bool {
         true
     }
+    /// The same app with this bridge's token, not yet connected: it connects when asked.
+    fn side_channel(&self) -> Option<Remote> {
+        Some(Remote::new(self.conn.addr(), self.conn.explicit_token()).with_param_check(self.param_check))
+    }
     fn app_options(&mut self) -> Result<Option<Value>, String> {
         // This runs on the serve loop before a tool call, so it never waits: not behind a request
         // still running (ask again on a later call), and one try with no retry, because a retry
         // reconnects with READ_TIMEOUT and could block for minutes.
-        if self.outstanding.is_some() {
-            return Err("a request is still running in the app".into());
-        }
-        if self.conn.is_none() {
-            self.reconnect().map_err(|e| self.explain(&e))?;
-        }
-        let line = self.request_line("mcp.options", json!({}));
-        self.set_read_timeout(OPTIONS_TIMEOUT);
-        let reply = self.roundtrip(&line);
-        self.set_read_timeout(READ_TIMEOUT);
-        let reply = reply.map_err(|e| self.explain(&e))?;
-        let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from the app: {e}"))?;
-        let r = outcome(&v).map_err(|error| {
-            solidcraft_engine::control_auth::APP
-                .client_token(self.port, self.explicit_token.as_deref())
-                .map_or_else(|| error.clone(), |t| t.explain_error(&error))
-        });
-        match r {
+        match self.conn.quick("mcp.options", Self::scoped(json!({})), OPTIONS_TIMEOUT) {
             Ok(v) => Ok(Some(v)),
             // An app from before the setting (its agent chat refuses methods it doesn't know):
             // the server's own options decide.
-            Err(e) if e.starts_with("unknown method") || e.contains("is not available in the agent chat") => Ok(None),
-            Err(e) => Err(e),
+            Err(CallError::Refused(e)) if e.starts_with("unknown method") || e.contains("is not available in the agent chat") => Ok(None),
+            Err(e) => Err(e.into()),
         }
     }
     fn describe(&self) -> String {
-        if self.conn.is_some() {
-            format!("connected to the SolidCraft app at {} (the user watches the viewport)", self.addr)
+        if self.conn.is_connected() {
+            format!("connected to the SolidCraft app at {} (the user watches the viewport)", self.conn.addr())
         } else {
             // Still "connected to the SolidCraft app": the skills tell bridged from headless by it.
             format!(
                 "connected to the SolidCraft app at {} once it runs (the user watches the viewport). It was not running \
                  when this server started; until it is (`solidcraft --control {}`), tool calls say so",
-                self.addr, self.port
+                self.conn.addr(),
+                self.conn.port()
             )
         }
     }
@@ -733,13 +395,14 @@ impl Headless {
         if steps.len() > 100_000 {
             return Err("script too long".into());
         }
+        let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
         if method == "engine.batch"
             && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, self.session.param_check, &[])
         {
-            return Ok(refusal.reply(steps.len()));
+            return Ok(refusal.reply(steps.len(), rollback));
         }
         let panels = steps.iter().filter(|step| step_command(step).is_some_and(commands::is_command)).count();
-        if method == "engine.batch" && p.get("rollback").and_then(Value::as_bool).unwrap_or(true) {
+        if method == "engine.batch" && rollback {
             if panels != steps.len() {
                 return Err(commands::error_text(error(
                     Rule::Capability,
@@ -803,7 +466,7 @@ impl Headless {
                     "fit" => {
                         let b = solidcraft_engine::view::bounds(s).map_err(|e| e.to_string())?;
                         if let Some(c) = s.camera.as_mut() {
-                            c.fit(&b);
+                            c.fit(&solidcraft_engine::render::view_bounds(&b));
                         }
                     }
                     _ => {
@@ -848,6 +511,7 @@ impl Headless {
             // is ever left running.
             "control.running" => Ok(json!({"running": []})),
             "control.pending" => Ok(json!({"pending": null})),
+            "control.cancel" => Err("nothing can be cancelled in headless mode: each call runs to its end before it returns".into()),
             other => Err(format!("unknown method `{other}`")),
         }
     }
@@ -963,6 +627,9 @@ impl Backend for Auto {
             // Headless for now: the app may yet start, so ask again on a later call.
             None => Err("no app yet".into()),
         }
+    }
+    fn side_channel(&self) -> Option<Remote> {
+        self.remote.as_ref().and_then(Remote::side_channel)
     }
     fn notice(&self) -> Option<String> {
         self.headless.as_ref().map(|_| {

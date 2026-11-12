@@ -181,7 +181,7 @@ fn solidcore_case(name: &'static str) -> Option<Measured> {
         let solids = solid_count(body).unwrap_or_else(|e| panic!("{name}: solid count: {e}"));
         assert_eq!(solids, c.solids, "{name}: solids");
         let (rec, _) = native(&to_arrays(body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Some(Measured { volume: v, counts: n, kinds: kinds(&rec), solids })
     })
 }
@@ -493,4 +493,87 @@ mod history {
         let h = u(&u(&boxes[0], &boxes[1]), &u(&boxes[2], &boxes[3])).history().unwrap();
         assert!(h.faces.iter().any(|f| f.origins.len() == 4), "{h:?}");
     }
+}
+
+/// A boolean stage fails with a status error whose cause chain holds the stage that failed. The
+/// call is no answer only when that stage is a kernel status: a port failure or a cancellation
+/// in the chain fails the call, as `solidcore-ops`' `session::answer` does. (Each assertion on a
+/// chain fails when `answer` reads only the error on top.)
+#[test]
+fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() {
+    use solidcore::SolidError;
+    use solidcore::error::{Failure, Reason};
+
+    use super::answer;
+
+    let wrap = |cause: SolidError| Failure::new("test::stage", Reason::Failed("a stage failed")).caused_by(cause).into_error();
+
+    let status = wrap(SolidError::sm_err("test::inner"));
+    assert!(status.sm_status().is_some());
+    assert!(matches!(answer::<()>(Err(status)), Ok(None)));
+
+    let unported = wrap(SolidError::unported("test::callee", "test.unit"));
+    assert!(unported.sm_status().is_some());
+    assert!(matches!(answer::<()>(Err(unported)), Err(e) if e.is_port_failure()));
+    let deep = wrap(wrap(SolidError::unported("test::callee", "test.unit")));
+    assert!(answer::<()>(Err(deep)).is_err());
+
+    let cancelled = wrap(SolidError::cancelled("test::cancelled"));
+    assert!(cancelled.sm_status().is_some() && !cancelled.is_port_failure());
+    assert!(answer::<()>(Err(cancelled)).is_err());
+
+    assert!(answer::<()>(Err(SolidError::invalid_input("test::input", "bad"))).is_err());
+}
+
+/// A Boolean failure that slice, sweep and the other users of the merge engine pass up reaches the
+/// caller as the SMLib status it stands for, as the `Upstream` it replaced did, not as a message;
+/// one whose cause chain holds unported code is not supported; another subsystem's failure keeps
+/// its message.
+#[test]
+fn a_boolean_failure_from_another_operation_keeps_its_status() {
+    use solidcore::SolidError;
+    use solidcore::error::{Failure, Reason};
+
+    use super::blend::status;
+
+    let boolean = |cause: Option<SolidError>| {
+        let f = Failure::new("boolean::merge::p3", Reason::Failed("a Boolean of the tree failed"));
+        match cause {
+            Some(c) => f.caused_by(c),
+            None => f,
+        }
+        .into_error()
+    };
+    assert!(matches!(status(boolean(None)), Error::Status(1001)));
+    assert!(matches!(status(boolean(Some(SolidError::sm_err("test::inner")))), Error::Status(1001)));
+    assert!(matches!(status(boolean(Some(SolidError::unported("test::callee", "test.unit")))), Error::Unsupported));
+    let offset = Failure::new("offset::offset_executive::p2", Reason::Failed("the offset could not be built")).into_error();
+    assert!(matches!(status(offset), Error::Solidcore(_)));
+    // an intersection or classification failure passes on as the status it replaced
+    use solidcore::error::intersect::IntersectFailure;
+    let intersect = |f| Failure::new("intersect::point_class", f).into_error();
+    assert!(matches!(status(intersect(IntersectFailure::Failed("no point"))), Error::Status(1001)));
+    assert!(matches!(status(intersect(IntersectFailure::Missing("the face's surface"))), Error::Status(1006)));
+    // a primitive, extrusion, revolution, skin or taper failure passes on as the status it replaced
+    use solidcore::error::primitive::PrimitiveFailure;
+    let primitive = |f| Failure::new("primitive::primitive_creation::p3", f).into_error();
+    assert!(matches!(status(primitive(PrimitiveFailure::Failed("no profiles to sweep"))), Error::Status(1001)));
+    assert!(matches!(status(primitive(PrimitiveFailure::Missing("the target region"))), Error::Status(1006)));
+    assert!(matches!(status(primitive(PrimitiveFailure::AxisInsideFace)), Error::Status(1025)));
+    let helix = PrimitiveFailure::HelixDeviates { deviation: 0.5, tolerance: 0.25 };
+    assert!(matches!(status(primitive(helix)), Error::Status(1021)));
+    // a mass-property, healing or geometry-utility failure passes on as the status it replaced
+    use solidcore::error::geom::GeomFailure;
+    use solidcore::error::heal::HealFailure;
+    use solidcore::error::mass::MassFailure;
+    let mass = |f| Failure::new("mass::integrator", f).into_error();
+    assert!(matches!(status(mass(MassFailure::StepControl)), Error::Status(1001)));
+    assert!(matches!(status(mass(MassFailure::Missing("the edge's curve"))), Error::Status(1006)));
+    let heal = |f| Failure::new("heal::stitch::p1", f).into_error();
+    assert!(matches!(status(heal(HealFailure::Failed("the edges could not be glued"))), Error::Status(1001)));
+    assert!(matches!(status(heal(HealFailure::NotYetHealable)), Error::Status(1040)));
+    let geom = |f| Failure::new("geom::matrix", f).into_error();
+    assert!(matches!(status(geom(GeomFailure::Failed("the matrix is singular"))), Error::Status(1001)));
+    assert!(matches!(status(geom(GeomFailure::CoincidentPoints)), Error::Status(0)));
+    assert!(matches!(status(geom(GeomFailure::ToleranceTooSmall { tolerance: 0.0 })), Error::Status(1007)));
 }

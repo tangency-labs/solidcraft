@@ -3,7 +3,7 @@
 use serde_json::json;
 use solidcraft_engine::geom::prelude::*;
 
-use super::{BOX, in_view};
+use super::{BOX, apart, in_view};
 use crate::scenario::Harness;
 
 fn drawing(command: &str) -> Harness {
@@ -312,7 +312,8 @@ fn rounded_rectangle_takes_typed_width_height_and_radius() {
     let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     let kinds: Vec<_> = sketch.sketch.curves.iter().map(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Arc { .. })).collect();
     assert_eq!(kinds.iter().filter(|arc| **arc).count(), 4, "four corner arcs");
-    assert_eq!(kinds.len(), 8);
+    assert_eq!(kinds.len(), 9, "four sides, four arcs and the centre's construction diagonal");
+    assert_eq!(sketch.sketch.curves.iter().filter(|c| c.construction).count(), 1, "only the diagonal is construction");
     assert_eq!(sketch.profiles.len(), 1);
     let want = 30.0 * 16.0 - (4.0 - std::f64::consts::PI) * 16.0;
     assert!((sketch.profiles[0].area - want).abs() < 1e-6, "area {} want {want}", sketch.profiles[0].area);
@@ -606,6 +607,278 @@ fn value_boxes_stay_in_view_and_off_the_cursor() {
     assert!(tiny.contains_rect(egui::Rect::from_min_size(in_view(egui::pos2(-200.0, -200.0), Some(tiny), Some(egui::pos2(40.0, 15.0))), BOX)));
 }
 
+// Independent slab clipping grades the rendered rectangles, not the placement algorithm.
+fn segment_intersects_input([a, b]: [egui::Pos2; 2], rect: egui::Rect) -> bool {
+    let mut interval = [0.0_f32, 1.0_f32];
+    for (start, end, low, high) in [(a.x, b.x, rect.min.x, rect.max.x), (a.y, b.y, rect.min.y, rect.max.y)] {
+        let delta = end - start;
+        if delta == 0.0 {
+            if start < low || start > high {
+                return false;
+            }
+        } else {
+            let p = (low - start) / delta;
+            let q = (high - start) / delta;
+            interval[0] = interval[0].max(p.min(q));
+            interval[1] = interval[1].min(p.max(q));
+            if interval[0] > interval[1] {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn assert_live_line_inputs_are_clear(h: &Harness) {
+    let tool = h.app.tool.as_ref().unwrap();
+    let point = tool.pts.last().unwrap().0;
+    let end = crate::sketch_dims::shown(&h.app, tool, tool.hover.as_ref().unwrap());
+    let start = if tool.cmd == "sketch.line.midpoint" { point * 2.0 - end } else { point };
+    assert!(start.dist(end) > 1e-9, "{}: the input-clearance check needs a nonzero preview: {start:?} to {end:?}", tool.cmd);
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let segment = [proj.to_screen(plane.to_world(start)).unwrap(), proj.to_screen(plane.to_world(end)).unwrap()];
+    let boxes: Vec<_> = (0..2usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).unwrap()).collect();
+    assert!(!boxes[0].intersects(boxes[1]), "{}: inputs overlap: {boxes:?}", tool.cmd);
+    for rect in boxes {
+        assert!(!segment_intersects_input(segment, rect), "{}: {rect:?} covers {segment:?}", tool.cmd);
+        assert!(h.app.viewport.layout.as_ref().unwrap().drawable.contains_rect(rect), "{rect:?} outside drawing area");
+    }
+    assert_focus(h, 0);
+}
+
+#[test]
+fn line_inputs_clear_the_preview_in_all_directions() {
+    for command in ["sketch.line", "sketch.line.midpoint"] {
+        for view in ["top", "iso"] {
+            for [dx, dy] in [[2, 0], [0, 2], [2, 2], [-2, 2], [-2, 0], [0, -2], [-2, -2], [2, -2]] {
+                let mut h = Harness::new();
+                h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+                h.call("ui.view", json!({"view":view}));
+                h.step(&json!({"start":command})).unwrap();
+                h.step(&json!({"click":{"sketch":[10,10]}})).unwrap();
+                // Approach along the drawing direction so an initial editor does not own the hover.
+                h.step(&json!({"move":{"sketch":[10 + dx * 10,10 + dy * 10]}})).unwrap();
+                h.step(&json!({"move":{"sketch":[10 + dx,10 + dy]}})).unwrap();
+                h.frames(3);
+                let tool = h.app.tool.as_ref().unwrap();
+                let end = crate::sketch_dims::shown(&h.app, tool, tool.hover.as_ref().unwrap());
+                let target = super::Vec2::new(f64::from(10 + dx), f64::from(10 + dy));
+                assert!(end.dist(target) < 1e-8, "{command}, {view}: preview {end:?} must reach {target:?}");
+                assert_live_line_inputs_are_clear(&h);
+            }
+        }
+    }
+}
+
+#[test]
+fn line_inputs_at_drawing_area_edges_clear_the_preview() {
+    for command in ["sketch.line", "sketch.line.midpoint"] {
+        for corner in 0..4 {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.call("ui.view", json!({"view":"top"}));
+            h.step(&json!({"start":command})).unwrap();
+            // Dismiss the startup hint so the bottom-right click reaches the canvas.
+            h.step(&json!({"click":{"handle":"toast:status:close"}})).unwrap();
+            h.frames(3);
+            assert!(h.app.status.is_none());
+            let view = h.app.viewport.layout.as_ref().unwrap().drawable.shrink(20.0);
+            let (start, offset) = match corner {
+                0 => (view.left_top(), egui::vec2(0.0, 14.0)),
+                1 => (view.right_top(), egui::vec2(-14.0, 0.0)),
+                2 => (view.left_bottom(), egui::vec2(14.0, -14.0)),
+                _ => (view.right_bottom(), egui::vec2(-14.0, -14.0)),
+            };
+            let end = start + offset;
+            h.step(&json!({"click":[start.x,start.y]})).unwrap();
+            assert!(!h.app.tool.as_ref().unwrap().pts.is_empty(), "{command}, corner {corner}: click at {start:?} must place the first point");
+            let approach = start + offset * 10.0;
+            h.step(&json!({"move":[approach.x,approach.y]})).unwrap();
+            h.step(&json!({"move":[end.x,end.y]})).unwrap();
+            h.frames(3);
+            assert_live_line_inputs_are_clear(&h);
+        }
+    }
+}
+
+#[test]
+fn line_input_placement_measures_each_field_and_handles_tiny_views() {
+    let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let sizes = [egui::vec2(170.0, 24.0), egui::vec2(82.0, 30.0)];
+    for segment in [
+        [egui::pos2(400.0, 300.0), egui::pos2(400.0, 314.0)],
+        [egui::pos2(20.0, 20.0), egui::pos2(34.0, 34.0)],
+        [egui::pos2(780.0, 580.0), egui::pos2(766.0, 566.0)],
+        [egui::pos2(400.0, 300.0), egui::pos2(400.0, 300.0)],
+    ] {
+        let positions = super::line_input_positions(segment, &sizes, Some(view), 8.0);
+        let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
+        assert!(!rects[0].intersects(rects[1]), "{rects:?}");
+        for rect in rects {
+            assert!(view.contains_rect(rect));
+            assert!(!segment_intersects_input(segment, rect), "{segment:?}: {rect:?}");
+        }
+    }
+    let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(3.0, 3.0));
+    let positions = super::line_input_positions([egui::pos2(1.0, 1.0); 2], &sizes, Some(tiny), 8.0);
+    assert_eq!(positions.len(), 2);
+    assert!(positions.iter().all(|p| p.is_finite()));
+}
+
+#[test]
+fn line_inputs_retry_the_first_position_when_both_fit_in_a_shallow_view() {
+    let view = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(220.0, 70.0));
+    let segment = [egui::pos2(100.0, 55.0), egui::pos2(120.0, 55.0)];
+    let sizes = [egui::vec2(100.0, 24.0); 2];
+    // A constructive witness establishes that overlapping is not forced by the small view.
+    let witness = [egui::Rect::from_min_size(egui::pos2(4.0, 4.0), sizes[0]), egui::Rect::from_min_size(egui::pos2(112.0, 4.0), sizes[1])];
+    assert!(!witness[0].intersects(witness[1].expand(4.0)));
+    for rect in witness {
+        assert!(view.contains_rect(rect));
+        assert!(!segment_intersects_input(segment, rect.expand(4.0)));
+    }
+    let positions = super::line_input_positions(segment, &sizes, Some(view), 8.0);
+    let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
+    assert!(!rects[0].intersects(rects[1].expand(4.0)), "fields overlap: {rects:?}");
+    for rect in rects {
+        assert!(view.contains_rect(rect), "{rect:?} outside {view:?}");
+        assert!(!segment_intersects_input(segment, rect.expand(4.0)), "{rect:?} covers {segment:?}");
+    }
+}
+
+#[test]
+fn line_inputs_slide_clear_of_slanted_previews_in_small_views() {
+    for (view_size, segment, size, witness_positions) in [
+        (
+            egui::vec2(180.0, 60.0),
+            [egui::pos2(0.0, 15.0), egui::pos2(-8.742278e-07, 35.0)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 20.8), egui::pos2(94.0, 4.0)],
+        ),
+        (
+            egui::vec2(180.0, 60.0),
+            [egui::pos2(0.0, 15.0), egui::pos2(-3.4969112e-06, 95.0)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 20.8), egui::pos2(94.0, 4.0)],
+        ),
+        (
+            egui::vec2(220.0, 70.0),
+            [egui::pos2(0.0, 0.0), egui::pos2(173.20508, 100.0)],
+            egui::vec2(100.0, 24.0),
+            [egui::pos2(60.0, 4.0), egui::pos2(116.0, 34.4)],
+        ),
+        (
+            egui::vec2(220.0, 70.0),
+            [egui::pos2(0.0, 70.0), egui::pos2(173.20506, -30.000038)],
+            egui::vec2(100.0, 24.0),
+            [egui::pos2(60.0, 42.0), egui::pos2(116.0, 11.6)],
+        ),
+        (
+            egui::vec2(220.0, 70.0),
+            [egui::pos2(220.0, 0.0), egui::pos2(46.79492, 100.000015)],
+            egui::vec2(100.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(4.0, 34.4)],
+        ),
+        (
+            egui::vec2(220.0, 70.0),
+            [egui::pos2(220.0, 70.0), egui::pos2(46.79492, -29.999992)],
+            egui::vec2(100.0, 24.0),
+            [egui::pos2(4.0, 11.6), egui::pos2(4.0, 42.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(17.320507, 4e+01)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(94.0, 4.0), egui::pos2(7.474098, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(69.28203, 7e+01)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(94.0, 4.0), egui::pos2(7.474098, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(173.20508, 1.3e+02)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(7.474098, 4.0), egui::pos2(94.0, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(17.320507, 19.999996)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(94.0, 4.0), egui::pos2(7.474098, 32.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(69.28203, -10.000015)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(94.0, 4.0), egui::pos2(7.474098, 32.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(0.0, 3e+01), egui::pos2(173.20506, -70.00004)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(94.0, 4.0), egui::pos2(7.474098, 32.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(162.67949, 4e+01)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(110.71797, 7e+01)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(6.794922, 130.00002)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 4.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(162.67949, 2e+01)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 32.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(110.71797, -9.999996)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 32.0)],
+        ),
+        (
+            egui::vec2(1.8e+02, 6e+01),
+            [egui::pos2(1.8e+02, 3e+01), egui::pos2(6.794922, -69.99999)],
+            egui::vec2(82.0, 24.0),
+            [egui::pos2(4.0, 4.0), egui::pos2(90.52591, 32.0)],
+        ),
+    ] {
+        let view = egui::Rect::from_min_size(egui::Pos2::ZERO, view_size);
+        let sizes = [size; 2];
+        // These known clear layouts show that the viewport has enough room.
+        let witness = witness_positions.map(|p| egui::Rect::from_min_size(p, size));
+        assert!(!witness[0].intersects(witness[1].expand(4.0)));
+        for rect in witness {
+            assert!(view.contains_rect(rect));
+            assert!(!segment_intersects_input(segment, rect.expand(4.0)));
+        }
+        let positions = super::line_input_positions(segment, &sizes, Some(view), 8.0);
+        let rects: Vec<_> = positions.iter().map(|p| egui::Rect::from_min_size(*p, size)).collect();
+        assert!(!rects[0].intersects(rects[1].expand(4.0)), "fields overlap: {segment:?}, {rects:?}");
+        for rect in rects {
+            assert!(view.contains_rect(rect), "{rect:?} outside {view:?}");
+            assert!(!segment_intersects_input(segment, rect.expand(4.0)), "{rect:?} covers {segment:?}");
+        }
+    }
+}
+
 #[test]
 fn polygon_inputs_clear_each_other_and_the_preview() {
     for command in ["sketch.polygon.inscribed", "sketch.polygon.circumscribed"] {
@@ -801,5 +1074,47 @@ fn a_definition_in_a_box_that_is_not_a_dimension_is_refused() {
         let status = h.app.status.as_ref().expect("the refusal is reported");
         assert!(status.2 && status.0.starts_with(says), "{command} {text}: {status:?}");
         assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "{command} {text}: the first point stays down");
+    }
+}
+
+/// #10543: in a tilted view the Length and Angle boxes of a line landed on each other on the
+/// screen (only the last digit of the length showed). Boxes that overlap are moved apart; boxes
+/// already apart, and the first of an overlapping pair, stay where they are.
+#[test]
+fn overlapping_value_boxes_are_moved_apart_on_the_screen() {
+    let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let first = egui::pos2(300.0, 200.0);
+    let out = apart(&[Some(first), Some(egui::pos2(310.0, 205.0))], Some(view));
+    let (a, b) = (out[0].unwrap(), out[1].unwrap());
+    assert_eq!(a, first);
+    assert_eq!(b, egui::pos2(310.0, 200.0 + BOX.y + 2.0));
+    // Already apart: untouched. A box not shown stays absent.
+    let apart_already = [Some(egui::pos2(100.0, 100.0)), None, Some(egui::pos2(300.0, 300.0))];
+    assert_eq!(apart(&apart_already, Some(view)), apart_already.to_vec());
+    // At the bottom edge the second box goes above instead of leaving the view.
+    let low = egui::pos2(300.0, 600.0 - BOX.y);
+    let out = apart(&[Some(low), Some(egui::pos2(305.0, low.y + 3.0))], Some(view));
+    assert_eq!(out[1].unwrap(), egui::pos2(305.0, low.y - BOX.y - 2.0));
+}
+
+/// In an isometric view the Length and Angle boxes of a line, placed apart in the sketch, must
+/// not land on each other on the screen (#10543). Lines of several lengths and directions from
+/// the origin: no end point leaves the two boxes overlapping.
+#[test]
+fn a_lines_length_and_angle_boxes_do_not_overlap_in_an_isometric_view() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.view", json!({"view":"iso"}));
+    h.step(&json!({"start":"sketch.line"})).unwrap();
+    h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+    for length in [4.0, 8.0, 15.0] {
+        for deg in (0..360).step_by(15) {
+            let t = f64::from(deg).to_radians();
+            h.step(&json!({"move":{"sketch":[length * t.cos(), length * t.sin()]}})).unwrap();
+            h.frames(3);
+            let boxes: Vec<_> =
+                (0..2usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).expect("value box shown")).collect();
+            assert!(!boxes[0].intersects(boxes[1]), "line of {length} at {deg} deg: the boxes overlap {boxes:?}");
+        }
     }
 }
