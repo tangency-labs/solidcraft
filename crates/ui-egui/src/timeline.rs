@@ -2032,6 +2032,7 @@ mod tests {
     fn a_deep_run_shows_only_its_component_and_the_path_steps_back_out() {
         use crate::scenario::{handle_at, rect_of};
         let (mut h, _) = rig_with_arm_and_leg(30);
+        h.call("ui.resize", json!({"width":2200,"height":1000}));
         let rig_chip = handle_at("timeline-group:Rig").expect("the rig folds");
         assert!(handle_at("timeline-group:Arm").is_none() && handle_at("timeline-path:Rig").is_none());
         assert!(handle_at("timeline-path:All components").is_some(), "the path starts at the whole design");
