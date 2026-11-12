@@ -1,13 +1,14 @@
 //! CAM (`cam.job`, `cam.post.list`, `cam.post.get`, `cam.gcode.check`): toolpaths for a
-//! design's profiles and G-code for a machine, through the `solidcraft-cam` crate. The job
-//! (machine, post, tools, operations) is a JSON file next to the design, never part of it, so
-//! nothing new is saved in a design (docs/cam-jobs.md).
+//! design's profiles and surfaces and G-code for a machine, through the `solidcraft-cam` crate.
+//! The job (machine, post, tools, operations) is a JSON file next to the design, never part of
+//! it, so nothing new is saved in a design (docs/cam-jobs.md).
 //!
-//! `cam.job` plans every operation in work coordinates (the design less the job's origin),
-//! writes the program through the job's post for its machine, reads that back and compares it
-//! with the toolpaths. A program that fails the check is not written unless the call allows
-//! it. Every path is checked against the session's folders (`vfs`, which MCP's `--allow-path`
-//! confines) before anything is computed or written.
+//! `cam.job` plans every operation in work coordinates (the design less the job's origin): the
+//! 2D ones on profiles, the 3D ones on the part's bodies tessellated from their exact surfaces
+//! within a quarter of the job's tolerance. It writes the program through the job's post for
+//! its machine, reads that back and compares it with the toolpaths. A program that fails the
+//! check is not written unless the call allows it. Every path is checked against the session's
+//! folders (`vfs`, which MCP's `--allow-path` confines) before anything is computed or written.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -19,21 +20,26 @@ use solidcraft_cam::gcode5::{JointWords, MachineOperation, MachineProgram, Post5
 use solidcraft_cam::indexed::{IndexedOperation, frame_for_index};
 use solidcraft_cam::kinematics::{AxisLetter, Carrier, Machine, RotaryAxis};
 use solidcraft_cam::readback5::readback_program;
+use solidcraft_cam::surface_ops::{Boundary, ParallelParams, RoughingParams, WaterlineParams, parallel, roughing, waterline};
 use solidcraft_cam::{
-    CamError, ContourParams, Cut, Feeds, Frame, Heights, HolderSection, LineNumbers, PocketParams, SafeRetract, Side, Tool, ToolKind, Toolpath,
-    Toolpath5, contour, limit_descents, pocket,
+    CamError, Compaction, ContourParams, Cut, DEFAULT_DESCENT_LIMIT, Feeds, Frame, Heights, HolderSection, LineNumbers, PocketParams, SafeRetract,
+    Side, Surface, Tool, ToolKind, Toolpath, Toolpath5, compact, contour, limit_descents, pocket,
 };
+use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::cam::{
-    CamGcodeCheckParams, CamGcodeCheckReply, CamJob, CamJobParams, CamJobReply, CamPostGetParams, CamPostGetReply, CamPostListParams,
+    BoundarySpec, CamGcodeCheckParams, CamGcodeCheckReply, CamJob, CamJobParams, CamJobReply, CamPostGetParams, CamPostGetReply, CamPostListParams,
     CamPostListReply, Common, HeightsSpec, MachineSpec, OperationReport, OperationSpec, Outputs, ParseErrorReport, PostEntry, ReadbackReport,
     RotaryRange, SideSpec,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
+
+#[path = "cam_finish3d.rs"]
+mod finish3d;
 
 const JOB_CONTRACT: TypedContract<CamJobParams> = TypedContract::new();
 const POST_LIST_CONTRACT: TypedContract<CamPostListParams> = TypedContract::new();
@@ -49,11 +55,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "job: {…} | job_path: .json (the CAM job, docs/cam-jobs.md: name?, machine: \"3axis\" | \"4axis_a\" | Machine JSON, \
              a_reversed?, a_limits_deg?: [min, max], post: built-in name (cam.post.list) | post_path: Post5 JSON file, work_offset?: 1-6, \
-             origin?: [x,y,z] (the design point that is work zero), bodies?: [names] (drawn in the preview; default every visible body), \
-             tolerance?: mm (default 0.01), tools: [Tool JSON] | tool_library_path, operations: [{name, type: contour | pocket, tool: \
-             number, sketch + profiles? | polygon: [[x,y],…], heights: {clearance, retract, top, bottom}, stepdown?, side? (contour: \
-             outside | inside | on), stepover? (pocket), climb?, stock_to_leave?, ramp_angle_deg?, tolerance?, spindle_rpm?, feeds?: \
-             {cut, plunge}, coolant?, enabled?}]; unknown keys are refused); output: G-code path (required unless dry_run); preview?: \
+             origin?: [x,y,z] (the design point that is work zero), bodies?: [names] (the surface 3D operations follow, drawn in the \
+             preview; default every visible body), tolerance?: mm (default 0.01; 3D operations plan on the bodies tessellated within a \
+             quarter of it), tools: [Tool JSON] | tool_library_path, operations: [{name, type: contour | pocket (sketch + profiles? | \
+             polygon: [[x,y],…], stepdown?, side? (contour: outside | inside | on), stepover? (pocket), ramp_angle_deg?) | parallel | \
+             roughing | waterline | scallop | steep_shallow | pencil | rest_finish (boundary?: {rect?, polygon?, holes?}, stepover?, \
+             step?, …), tool: number, heights: {clearance, retract, top, bottom}, climb?, stock_to_leave?, tolerance?, spindle_rpm?, \
+             feeds?: {cut, plunge, descent?}, coolant?, enabled?}]; unknown keys are refused); output: G-code path (required unless dry_run); preview?: \
              HTML path, another file than output (the part and toolpaths, self-contained); dry_run?: plan and check, write nothing; \
              allow_unsafe?: write even when the read-back fails (its first line then says so) → name, machine, post, operations: [{name, \
              kind, tool, moves, cut_length, cut_minutes, warnings}], program_lines, program_head, readback: {max_tip_deviation, \
@@ -106,6 +114,12 @@ const MAX_COORD: f64 = 1.0e6;
 const MAX_DEGREES: f64 = 1.0e5;
 /// The job's tolerance range (mm).
 const TOLERANCE_RANGE: (f64, f64) = (1e-4, 1.0);
+/// The share of the job's tolerance the bodies are tessellated within for the 3D operations. The
+/// facets of a convex surface are inside it and those of a hollow one outside, by up to that.
+const CHORD_SHARE: f64 = 0.25;
+/// The share of a 3D operation's part of the tolerance its moves may move by when they are
+/// merged into fewer (lines and arcs); the rest is the operation's own.
+const COMPACT_SHARE: f64 = 0.2;
 /// The coarsest the preview draws the part within, when the job's tolerance is finer (mm): the
 /// picture needs no more.
 const PREVIEW_CHORD: f64 = 0.05;
@@ -386,6 +400,50 @@ fn part_bodies(cmd: &str, s: &Session, job: &CamJob) -> Result<Vec<String>> {
     Ok(part)
 }
 
+/// The surface the 3D operations follow: the bodies `names` tessellated from their exact
+/// surfaces within `chord`, in work coordinates (the design less `origin`). The toolpaths are
+/// output, planned within the job's tolerance as an export is; they are not yet planned on the
+/// exact surfaces.
+fn part_surface(cmd: &str, s: &Session, names: &[String], origin: Vec3, chord: f64, notes: &mut Vec<String>) -> Result<Surface> {
+    if names.is_empty() {
+        return Err(bad(cmd, "the job's 3D operations need a part: the design has no visible body, or give `bodies`"));
+    }
+    let st = s.world_state()?;
+    let mut out = Mesh::default();
+    for name in names {
+        let Some(b) = st.bodies.iter().find(|b| &b.name == name) else { return Err(bad(cmd, format!("no body `{name}`"))) };
+        if b.body.is_mesh() {
+            notes.push(format!("body `{name}` is a mesh: its own triangles are used, which may be coarser than the job's tolerance"));
+        }
+        let mesh = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(chord))?;
+        let Ok(start) = u32::try_from(out.positions.len()) else { return Err(bad(cmd, "the part has too many triangles")) };
+        let smooth = mesh.normals.len() == mesh.positions.len();
+        out.positions.extend(mesh.positions.iter().map(|p| *p - origin));
+        if smooth {
+            out.normals.extend(mesh.normals.iter().copied());
+        } else {
+            // Not directions: the surface takes each triangle's own normal instead.
+            out.normals.extend(std::iter::repeat_n(Vec3::ZERO, mesh.positions.len()));
+        }
+        for t in &mesh.triangles {
+            let [Some(a), Some(b), Some(c)] = t.map(|i| i.checked_add(start)) else { return Err(bad(cmd, "the part has too many triangles")) };
+            out.triangles.push([a, b, c]);
+        }
+        if out.triangles.len() > solidcraft_cam::surface_ops::MAX_SAMPLES {
+            return Err(bad(cmd, "the part has too many triangles at this tolerance: raise the job's `tolerance`"));
+        }
+    }
+    let surface = Surface::from_mesh(&out).map_err(|e| cam_err(cmd, "the part", e))?;
+    if surface.is_empty() {
+        return Err(bad(cmd, "the part's bodies have no surface to machine"));
+    }
+    notes.push(format!(
+        "for the 3D operations the bodies are tessellated from their exact surfaces within {} mm (a quarter of the job's tolerance)",
+        num(chord)
+    ));
+    Ok(surface)
+}
+
 /// The part's triangles for the preview page only, in work coordinates (the design less
 /// `origin`), each as nine numbers: the bodies tessellated within the job's tolerance or
 /// [`PREVIEW_CHORD`], whichever is coarser. Nothing is decided with them.
@@ -501,6 +559,8 @@ struct Resolved {
     tool: Tool,
     rpm: f64,
     feeds: Feeds,
+    /// `feeds.descent`, for the 3D finishes.
+    descent: Option<f64>,
 }
 
 /// Everything an operation is planned with.
@@ -513,9 +573,13 @@ struct Ctx<'a> {
     origin: Vec3,
     tol: f64,
     post: &'a Post5,
+    /// The part as the 3D operations follow it, in work coordinates (when one of them is on).
+    part: Option<&'a Surface>,
+    /// The chord tolerance the part was tessellated within (mm).
+    chord: f64,
 }
 
-impl Ctx<'_> {
+impl<'a> Ctx<'a> {
     fn bad(&self, op: &str, why: impl std::fmt::Display) -> EngineError {
         bad(self.cmd, format!("operation `{op}`: {why}"))
     }
@@ -531,7 +595,7 @@ impl Ctx<'_> {
             return Err(self.bad(
                 op,
                 format!(
-                    "tool {} is a {}: a contour or a pocket cuts with a flat end mill, a ball end mill, a bull nose or a face mill",
+                    "tool {} is a {}: a contour, a pocket or a 3D operation cuts with a flat end mill, a ball end mill, a bull nose or a face mill",
                     tool.number,
                     tool.kind.label()
                 ),
@@ -550,7 +614,11 @@ impl Ctx<'_> {
             },
         };
         feeds.validate().map_err(|e| self.bad(op, e))?;
-        Ok(Resolved { tool: tool.clone(), rpm, feeds })
+        let descent = match c.feeds.and_then(|f| f.descent) {
+            Some(d) if !(d > 0.0 && d <= 1.0e6) => return Err(self.bad(op, "the descent feed must be above 0 and at most 1000000 mm/min")),
+            d => d,
+        };
+        Ok(Resolved { tool: tool.clone(), rpm, feeds, descent })
     }
 
     fn tolerance(&self, op: &str, t: Option<f64>) -> Result<f64> {
@@ -561,8 +629,54 @@ impl Ctx<'_> {
         }
     }
 
+    /// What a 3D operation planned on the tessellated part may take of its tolerance `t` (the
+    /// job's by default): the tolerance less the tessellation's chord error, at least half of it.
+    fn surface_budget(&self, op: &str, t: Option<f64>) -> Result<f64> {
+        let t = self.tolerance(op, t)?;
+        Ok((t - self.chord).max(0.5 * t))
+    }
+
     fn degrees(&self, op: &str, deg: f64, what: &str) -> Result<f64> {
         radians(deg, what).map_err(|e| self.bad(op, e))
+    }
+
+    /// The part in `frame`'s coordinates, for a 3D operation.
+    fn surface_in(&self, op: &str, frame: &Frame) -> Result<std::borrow::Cow<'a, Surface>> {
+        let Some(part) = self.part else { return Err(self.bad(op, "a 3D operation needs the part's bodies")) };
+        if *frame == Frame::IDENTITY {
+            return Ok(std::borrow::Cow::Borrowed(part));
+        }
+        part.in_frame(frame).map(std::borrow::Cow::Owned).map_err(|e| self.bad(op, e))
+    }
+
+    /// Where a 3D operation's cutter centre may go.
+    fn boundary(&self, op: &str, b: Option<&BoundarySpec>) -> Result<Boundary> {
+        let Some(b) = b else { return Ok(Boundary::default()) };
+        let rect = match b.rect {
+            None => None,
+            Some([lo, hi]) => {
+                finite_point(&[lo[0], lo[1], hi[0], hi[1]], "`boundary.rect`").map_err(|e| self.bad(op, e))?;
+                if !(lo[0] < hi[0] && lo[1] < hi[1]) {
+                    return Err(self.bad(op, "`boundary.rect` must be [[low x, low y], [high x, high y]]"));
+                }
+                Some([Vec2::new(lo[0], lo[1]), Vec2::new(hi[0], hi[1])])
+            }
+        };
+        let mut region = match &b.polygon {
+            None => None,
+            Some(p) => Some(polygon_region(self.cmd, &format!("operation `{op}`: `boundary.polygon`"), p)?),
+        };
+        if let Some(holes) = &b.holes {
+            let Some(r) = region.as_mut() else { return Err(self.bad(op, "`boundary.holes` goes with `boundary.polygon`")) };
+            if holes.len() > MAX_POINTS {
+                return Err(self.bad(op, format!("`boundary.holes` has more than {MAX_POINTS} polygons")));
+            }
+            for (i, h) in holes.iter().enumerate() {
+                let hole = polygon_region(self.cmd, &format!("operation `{op}`: `boundary.holes[{i}]`"), h)?;
+                r.holes.push(hole.outer);
+            }
+        }
+        Ok(Boundary { rect, region })
     }
 
     /// The regions of a 2D operation in `frame`'s coordinates.
@@ -596,10 +710,59 @@ fn or_tool(v: Option<f64>, tool: Option<f64>, default: f64) -> f64 {
     v.or(tool).unwrap_or(default)
 }
 
-/// A 2D operation planned in `frame`, its slowed descents worked out again from the
-/// coordinates as the post writes them.
-fn plan2(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<(Toolpath, Resolved, &'static str)> {
-    let (mut path, r, kind, name) = match spec {
+/// The share of a 3D operation's budget it plans within, and the share its moves may then move
+/// by when merged (with the share it plans within again).
+fn split_budget(budget: f64) -> (f64, Option<(f64, f64)>) {
+    let planned = budget * (1.0 - COMPACT_SHARE);
+    (planned, Some((budget * COMPACT_SHARE, planned)))
+}
+
+/// An operation as planned, its tool, its kind, and for a 3D one the tolerance its moves may be
+/// merged within and the one it was planned within.
+type Planned3 = (Toolpath, Resolved, &'static str, Option<(f64, f64)>);
+
+/// Whether `spec` follows the part's surface (a 3D operation).
+fn on_surface(spec: &OperationSpec) -> bool {
+    !matches!(spec, OperationSpec::Contour(_) | OperationSpec::Pocket(_))
+}
+
+/// An operation planned in `frame`: a 3D one's runs of moves merged where its tolerance leaves
+/// room, and its slowed descents worked out again from the coordinates as the post writes them.
+fn plan_path(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<(Toolpath, Resolved, &'static str)> {
+    let name = spec.common().name;
+    let (path, r, kind, merge) = plan_raw(ctx, spec, frame)?;
+    let b = &ctx.post.base;
+    let mut path = match merge {
+        Some((tolerance, planned)) => {
+            // An arc may bow out from the moves it replaces as far as they were allowed to cut
+            // across a curve when they were planned.
+            let how = Compaction { tolerance: tolerance.min(b.arc_tolerance.max(1e-6)), arcs: b.arcs, helical: b.helical_arcs, bow: planned };
+            compact(&path, &how).map_err(|e| ctx.bad(name, e))?
+        }
+        None => path,
+    };
+    let feed_step = 10f64.powi(-i32::from(b.feed_decimals)) * b.units.mm();
+    // A 3D finish's moves down a wall go down at its descent feed, its entries (straight down)
+    // at the plunge feed: the larger of the two bounds both.
+    let takes_descent = matches!(
+        spec,
+        OperationSpec::Parallel(_)
+            | OperationSpec::Scallop(_)
+            | OperationSpec::SteepShallow(_)
+            | OperationSpec::Pencil(_)
+            | OperationSpec::RestFinish(_)
+    );
+    let down = match r.descent {
+        Some(d) if takes_descent => d.max(r.feeds.plunge),
+        _ => r.feeds.plunge,
+    };
+    limit_descents(&mut path, down, r.feeds.cut, b.decimals, b.units.mm(), feed_step).map_err(|e| ctx.bad(name, e))?;
+    Ok((path, r, kind))
+}
+
+/// An operation as planned (see [`Planned3`]).
+fn plan_raw(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<Planned3> {
+    match spec {
         OperationSpec::Contour(o) => {
             let c = o.common();
             let r = ctx.resolve(&c)?;
@@ -619,7 +782,7 @@ fn plan2(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<(Toolpath
                 ramp_angle: ctx.degrees(c.name, o.ramp_angle_deg.unwrap_or(0.0), "`ramp_angle_deg`")?,
             };
             let path = contour(&regions, &r.tool, &params, &cut).map_err(|e| ctx.bad(c.name, e))?;
-            (path, r, "contour", c.name)
+            Ok((path, r, "contour", None))
         }
         OperationSpec::Pocket(o) => {
             let c = o.common();
@@ -635,37 +798,87 @@ fn plan2(ctx: &Ctx<'_>, spec: &OperationSpec, frame: &Frame) -> Result<(Toolpath
                 ramp_angle: ctx.degrees(c.name, o.ramp_angle_deg.unwrap_or(0.0), "`ramp_angle_deg`")?,
             };
             let path = pocket(&regions, &r.tool, &params, &cut).map_err(|e| ctx.bad(c.name, e))?;
-            (path, r, "pocket", c.name)
+            Ok((path, r, "pocket", None))
         }
-    };
-    let b = &ctx.post.base;
-    let feed_step = 10f64.powi(-i32::from(b.feed_decimals)) * b.units.mm();
-    limit_descents(&mut path, r.feeds.plunge, r.feeds.cut, b.decimals, b.units.mm(), feed_step).map_err(|e| ctx.bad(name, e))?;
-    Ok((path, r, kind))
+        OperationSpec::Parallel(o) => {
+            let c = o.common();
+            let r = ctx.resolve(&c)?;
+            let surface = ctx.surface_in(c.name, frame)?;
+            let (tolerance, merge) = split_budget(ctx.surface_budget(c.name, o.tolerance)?);
+            let descent_limit = match o.descent_limit_deg {
+                None => DEFAULT_DESCENT_LIMIT,
+                Some(d) if d.is_finite() && (0.0..=90.0).contains(&d) => d.to_radians(),
+                Some(_) => return Err(ctx.bad(c.name, "`descent_limit_deg` must be from 0 to 90 degrees")),
+            };
+            let params = ParallelParams {
+                heights: heights(&o.heights),
+                feeds: r.feeds,
+                descent_feed: r.descent,
+                stepover: or_tool(o.stepover, r.tool.stepover, r.tool.diameter * 0.1),
+                angle: ctx.degrees(c.name, o.angle_deg.unwrap_or(0.0), "`angle_deg`")?,
+                boundary: ctx.boundary(c.name, o.boundary.as_ref())?,
+                stock_to_leave: o.stock_to_leave.unwrap_or(0.0),
+                step: o.step.unwrap_or(r.tool.diameter * 0.25),
+                tolerance,
+                zigzag: o.zigzag.unwrap_or(true),
+                descent_limit,
+            };
+            let path = parallel(&surface, &r.tool, &params).map_err(|e| ctx.bad(c.name, e))?;
+            Ok((path, r, "parallel", merge))
+        }
+        OperationSpec::Roughing(o) => {
+            let c = o.common();
+            let r = ctx.resolve(&c)?;
+            let surface = ctx.surface_in(c.name, frame)?;
+            let (tolerance, merge) = split_budget(ctx.surface_budget(c.name, o.tolerance)?);
+            let params = RoughingParams {
+                heights: heights(&o.heights),
+                feeds: r.feeds,
+                stepdown: or_tool(o.stepdown, r.tool.stepdown, r.tool.diameter * 0.5),
+                stepover: or_tool(o.stepover, r.tool.stepover, r.tool.diameter * 0.4),
+                angle: ctx.degrees(c.name, o.angle_deg.unwrap_or(0.0), "`angle_deg`")?,
+                boundary: ctx.boundary(c.name, o.boundary.as_ref())?,
+                stock_to_leave: o.stock_to_leave.unwrap_or(0.25),
+                step: o.step.unwrap_or(r.tool.diameter * 0.25),
+                tolerance,
+                zigzag: o.zigzag.unwrap_or(true),
+            };
+            let path = roughing(&surface, &r.tool, &params).map_err(|e| ctx.bad(c.name, e))?;
+            Ok((path, r, "roughing", merge))
+        }
+        OperationSpec::Waterline(o) => {
+            let c = o.common();
+            let r = ctx.resolve(&c)?;
+            let surface = ctx.surface_in(c.name, frame)?;
+            let (tolerance, merge) = split_budget(ctx.surface_budget(c.name, o.tolerance)?);
+            let params = WaterlineParams {
+                heights: heights(&o.heights),
+                feeds: r.feeds,
+                stepdown: or_tool(o.stepdown, r.tool.stepdown, r.tool.diameter * 0.25),
+                boundary: ctx.boundary(c.name, o.boundary.as_ref())?,
+                stock_to_leave: o.stock_to_leave.unwrap_or(0.0),
+                step: o.step.unwrap_or(r.tool.diameter * 0.25),
+                tolerance,
+                climb: o.climb.unwrap_or(true),
+            };
+            let path = waterline(&surface, &r.tool, &params).map_err(|e| ctx.bad(c.name, e))?;
+            Ok((path, r, "waterline", merge))
+        }
+        OperationSpec::Scallop(o) => finish3d::plan_scallop(ctx, o, &*ctx.surface_in(&o.name, frame)?),
+        OperationSpec::SteepShallow(o) => finish3d::plan_steep_shallow(ctx, o, &*ctx.surface_in(&o.name, frame)?),
+        OperationSpec::Pencil(o) => finish3d::plan_pencil(ctx, o, &*ctx.surface_in(&o.name, frame)?),
+        OperationSpec::RestFinish(o) => finish3d::plan_rest_finish(ctx, o, &*ctx.surface_in(&o.name, frame)?),
+    }
 }
 
 /// The `name` of `spec`.
 fn spec_name(spec: &OperationSpec) -> &str {
-    match spec {
-        OperationSpec::Contour(o) => &o.name,
-        OperationSpec::Pocket(o) => &o.name,
-    }
+    spec.common().name
 }
 
 /// Whether `spec` is planned and written (`enabled`, true by default).
 fn op_enabled(spec: &OperationSpec) -> bool {
-    match spec {
-        OperationSpec::Contour(o) => o.enabled,
-        OperationSpec::Pocket(o) => o.enabled,
-    }
-    .unwrap_or(true)
-}
-
-fn coolant_of(spec: &OperationSpec) -> bool {
-    match spec {
-        OperationSpec::Contour(o) => o.common().coolant,
-        OperationSpec::Pocket(o) => o.common().coolant,
-    }
+    spec.common().enabled
 }
 
 /// An operation as written (its machine operation), its moves with the tool axis (for the
@@ -686,9 +899,9 @@ fn plan(ctx: &Ctx<'_>, spec: &OperationSpec) -> Result<Planned> {
     }
     let rotary = vec![0.0; ctx.machine.rotaries.len()];
     let frame = frame_for_index(ctx.machine, &rotary).map_err(|e| ctx.bad(name, e))?;
-    let (path, r, kind) = plan2(ctx, spec, &frame)?;
+    let (path, r, kind) = plan_path(ctx, spec, &frame)?;
     let stats = path.stats();
-    let io = IndexedOperation { name: name.into(), tool: r.tool.clone(), spindle_rpm: r.rpm, coolant: coolant_of(spec), rotary, path };
+    let io = IndexedOperation { name: name.into(), tool: r.tool.clone(), spindle_rpm: r.rpm, coolant: spec.common().coolant, rotary, path };
     let poses = io.poses(ctx.machine, ctx.post.base.arc_tolerance).map_err(|e| ctx.bad(name, e))?;
     let report = OperationReport {
         name: name.into(),
@@ -786,13 +999,20 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     let tools = tools_of(cmd, &job, base)?;
     let bodies = part_bodies(cmd, s, &job)?;
     let mut notes = Vec::new();
+    // The part as a surface, for the 3D operations only.
+    let chord = tol * CHORD_SHARE;
+    let part = if job.operations.iter().any(|o| op_enabled(o) && on_surface(o)) {
+        Some(part_surface(cmd, s, &bodies, origin, chord, &mut notes)?)
+    } else {
+        None
+    };
     if job.work_offset.is_some() && !post.base.writes_work_offset() {
         notes.push(format!("post `{post_name}` writes no work offset: the program runs in whichever the controller has active"));
     }
 
     // Every operation planned, in order, then the program written in memory.
     let span = solidcraft_profile::span("cam", "job.plan");
-    let ctx = Ctx { cmd, s, machine: &machine, tools: &tools, origin, tol, post: &post };
+    let ctx = Ctx { cmd, s, machine: &machine, tools: &tools, origin, tol, post: &post, part: part.as_ref(), chord };
     let planned: Vec<Planned> = job.operations.iter().filter(|o| op_enabled(o)).map(|o| plan(&ctx, o)).collect::<Result<_>>()?;
     let program = MachineProgram { name: name.clone(), operations: planned.iter().map(|p| p.op.clone()).collect(), work_offset: job.work_offset };
     let (text, _) = emit_program_report(&program, &post, &machine).map_err(|e| cam_err(cmd, "writing the program", e))?;

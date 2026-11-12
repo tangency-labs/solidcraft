@@ -78,11 +78,13 @@ pub struct CamJob {
     /// work X through work zero. Default: the design's origin.
     #[serde(default)]
     pub origin: Option<[f64; 3]>,
-    /// The part's bodies by name, drawn in the preview. Default: every visible body.
+    /// The part's bodies by name: the surface 3D operations follow, drawn in the preview.
+    /// Default: every visible body.
     #[serde(default)]
     pub bodies: Option<Vec<String>>,
     /// The machining tolerance in mm, 0.0001 to 1: how far a toolpath may be from the profiles
-    /// it follows. Default: 0.01.
+    /// and surfaces it follows. 3D operations plan on the bodies tessellated within a quarter of
+    /// it. Default: 0.01.
     #[serde(default)]
     pub tolerance: Option<f64>,
     /// The tools, as the CAM crate's `Tool` JSON (`number`, `kind`, `diameter`, `flute_length`,
@@ -128,6 +130,27 @@ pub struct FeedsSpec {
     pub cut: f64,
     /// The feed going down into the material: entries from above, ramps, plunges.
     pub plunge: f64,
+    /// A 3D finishing pass's feed for moves inside it that go down the surface at least as
+    /// steeply as its descent limit (a ball running down a roughed wall). Default: the cut
+    /// feed; give the plunge feed to slow them (finishing straight from uncut stock).
+    #[serde(default)]
+    pub descent: Option<f64>,
+}
+
+/// Where a 3D operation's cutter centre may go, seen along the tool axis, in work coordinates.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoundarySpec {
+    /// The low and high corners [[x, y], [x, y]] of a rectangle. Default: the part's extent.
+    #[serde(default)]
+    pub rect: Option<[[f64; 2]; 2]>,
+    /// A closed polygon [[x, y], ...] the centre must also stay inside.
+    #[serde(default)]
+    pub polygon: Option<Vec<[f64; 2]>>,
+    /// With `polygon`: closed polygons inside it the centre stays out of (a flat top a ball
+    /// finish leaves to a facing). Default: none.
+    #[serde(default)]
+    pub holes: Option<Vec<Vec<[f64; 2]>>>,
 }
 
 /// Which side of a profile a contour runs on.
@@ -178,6 +201,7 @@ macro_rules! operation {
                     spindle_rpm: self.spindle_rpm,
                     feeds: self.feeds,
                     coolant: self.coolant.unwrap_or(false),
+                    enabled: self.enabled.unwrap_or(true),
                 }
             }
         }
@@ -192,6 +216,8 @@ pub struct Common<'a> {
     pub spindle_rpm: Option<f64>,
     pub feeds: Option<FeedsSpec>,
     pub coolant: bool,
+    /// Whether it is planned and written (`enabled`, true by default).
+    pub enabled: bool,
 }
 
 operation! {
@@ -267,12 +293,137 @@ operation! {
     }
 }
 
+operation! {
+    /// 3D raster finishing: passes side by side following the part's surface.
+    ParallelOp {
+        /// The Z levels: `bottom` is the floor, `top` is not used.
+        pub heights: HeightsSpec,
+        /// Distance between passes, mm. Default: the tool's `stepover`, else 10% of its diameter.
+        #[serde(default)]
+        pub stepover: Option<f64>,
+        /// Direction of the passes, degrees counter-clockwise from +X. Default: 0.
+        #[serde(default)]
+        pub angle_deg: Option<f64>,
+        /// Where the cutter centre may go. Default: the part's extent.
+        #[serde(default)]
+        pub boundary: Option<BoundarySpec>,
+        /// Material left on the surface, mm. Default: 0.
+        #[serde(default)]
+        pub stock_to_leave: Option<f64>,
+        /// Distance between samples along a pass before refinement, mm. Default: a quarter of
+        /// the tool's diameter.
+        #[serde(default)]
+        pub step: Option<f64>,
+        /// Largest distance from the surface, mm. Default: the job's tolerance.
+        #[serde(default)]
+        pub tolerance: Option<f64>,
+        /// Every other pass runs back. Default: true.
+        #[serde(default)]
+        pub zigzag: Option<bool>,
+        /// Moves inside a pass that go down at least this steeply, degrees from horizontal (0 to
+        /// 90), run at the descent feed (`feeds.descent`); shallower ones at the cut feed.
+        /// Default: 70.
+        #[serde(default)]
+        pub descent_limit_deg: Option<f64>,
+    }
+}
+
+operation! {
+    /// 3D roughing of a stock box in levels, staying `stock_to_leave` clear of the part.
+    RoughingOp {
+        /// The Z levels: `top` is the stock's top, `bottom` the lowest level.
+        pub heights: HeightsSpec,
+        /// Most material per level, mm. Default: the tool's `stepdown`, else half its diameter.
+        #[serde(default)]
+        pub stepdown: Option<f64>,
+        /// Distance between passes, mm. Default: the tool's `stepover`, else 40% of its diameter.
+        #[serde(default)]
+        pub stepover: Option<f64>,
+        /// Direction of the passes, degrees counter-clockwise from +X. Default: 0.
+        #[serde(default)]
+        pub angle_deg: Option<f64>,
+        /// The stock's extent as the cutter centre may reach it. Default: the part's extent.
+        #[serde(default)]
+        pub boundary: Option<BoundarySpec>,
+        /// Material left on the part, mm. Default: 0.25.
+        #[serde(default)]
+        pub stock_to_leave: Option<f64>,
+        /// Distance between samples along a pass before refinement, mm. Default: a quarter of
+        /// the tool's diameter.
+        #[serde(default)]
+        pub step: Option<f64>,
+        /// Largest distance from the surface, mm. Default: the job's tolerance.
+        #[serde(default)]
+        pub tolerance: Option<f64>,
+        /// Every other pass runs back. Default: true.
+        #[serde(default)]
+        pub zigzag: Option<bool>,
+    }
+}
+
+operation! {
+    /// 3D z-level finishing: round the part at each level, for steep walls.
+    WaterlineOp {
+        /// The Z levels: from `top` down to `bottom`, both included.
+        pub heights: HeightsSpec,
+        /// Most distance between levels, mm. Default: the tool's `stepdown`, else a quarter of
+        /// its diameter.
+        #[serde(default)]
+        pub stepdown: Option<f64>,
+        /// Where the cutter centre may go. Default: the part's extent and a little round it.
+        #[serde(default)]
+        pub boundary: Option<BoundarySpec>,
+        /// Material left on the walls, mm. Default: 0.
+        #[serde(default)]
+        pub stock_to_leave: Option<f64>,
+        /// Spacing of the grid the levels are traced on, mm. Default: a quarter of the tool's
+        /// diameter.
+        #[serde(default)]
+        pub step: Option<f64>,
+        /// How close to each level the loops are found, mm. Default: the job's tolerance.
+        #[serde(default)]
+        pub tolerance: Option<f64>,
+        /// Climb milling. Default: true.
+        #[serde(default)]
+        pub climb: Option<bool>,
+    }
+}
+
+// The 3D finishing strategies, declared with the macro above.
+#[path = "cam_finish3d.rs"]
+mod finish3d;
+pub use finish3d::{DirectionSpec, PencilOp, RestFinishOp, ScallopOp, ShallowSpec, SteepShallowOp};
+
 /// One operation of a job, by `type`.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OperationSpec {
     Contour(ContourOp),
     Pocket(PocketOp),
+    Parallel(ParallelOp),
+    Roughing(RoughingOp),
+    Waterline(WaterlineOp),
+    Scallop(ScallopOp),
+    SteepShallow(SteepShallowOp),
+    Pencil(PencilOp),
+    RestFinish(RestFinishOp),
+}
+
+impl OperationSpec {
+    /// What every operation has.
+    pub fn common(&self) -> Common<'_> {
+        match self {
+            OperationSpec::Contour(o) => o.common(),
+            OperationSpec::Pocket(o) => o.common(),
+            OperationSpec::Parallel(o) => o.common(),
+            OperationSpec::Roughing(o) => o.common(),
+            OperationSpec::Waterline(o) => o.common(),
+            OperationSpec::Scallop(o) => o.common(),
+            OperationSpec::SteepShallow(o) => o.common(),
+            OperationSpec::Pencil(o) => o.common(),
+            OperationSpec::RestFinish(o) => o.common(),
+        }
+    }
 }
 
 /// What `cam.job` returns.
