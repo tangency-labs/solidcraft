@@ -126,7 +126,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.internal_pole_row_through_knot = true;
     k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
-    k.fixes.imprint_trims_edge_to_proto_vertex = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.fillet_point_step_per_point = true;

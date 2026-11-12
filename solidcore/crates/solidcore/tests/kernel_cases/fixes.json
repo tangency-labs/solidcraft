@@ -151,7 +151,6 @@
   "point_solve_keeps_triangle_guess",
   "analytic_corner_failure_is_false",
   "sphere_from_arcs_common_centre",
-  "imprint_trims_edge_to_proto_vertex",
   "imprint_extends_edge_to_proto_vertex",
   "imprint_reuses_coincident_face_edge",
   "fillet_point_step_per_point",

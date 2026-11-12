@@ -228,7 +228,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.heal_stage3_failures_propagate = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
-    k.fixes.imprint_trims_edge_to_proto_vertex = true;
     k.fixes.internal_pole_row_through_knot = true;
     k.fixes.iso_curve_sliver_domain_is_degenerate = true;
     k.fixes.join_touching_loops = true;
