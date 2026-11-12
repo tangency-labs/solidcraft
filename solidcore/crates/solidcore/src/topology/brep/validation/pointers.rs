@@ -1293,6 +1293,7 @@ fn edge_geometry(
 mod issue_891_tests {
     use super::*;
     use crate::curve::curve::{Curve, CurveKind};
+    use crate::math::det;
     use crate::nurbs::b_spline_curve::p1::{
         BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
     };
@@ -1307,8 +1308,8 @@ mod issue_891_tests {
         let point = |deg: f64, scale: f64| {
             let t = deg.to_radians();
             Vec3::new(
-                (cx + scale * r * t.cos()) / 60.0,
-                (cy + scale * r * t.sin()) / 4.0,
+                (cx + scale * r * det::cos(t)) / 60.0,
+                (cy + scale * r * det::sin(t)) / 4.0,
                 0.0,
             )
         };

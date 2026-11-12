@@ -23,6 +23,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p2::is_manifold_solid;
@@ -35,7 +36,7 @@ use solidcore::{Brep, Kernel};
 /// The pocket's floor (z = 25) side for walls leaning out `draft` degrees that meet the
 /// top (z = 40) in the 60 x 60 square.
 fn floor_side(draft: f64) -> f64 {
-    60.0 - 30.0 * draft.to_radians().tan()
+    60.0 - 30.0 * det::tan(draft.to_radians())
 }
 
 /// The ends of edge `e`.

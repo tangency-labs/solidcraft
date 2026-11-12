@@ -19,6 +19,7 @@
 //! [`MIN_GENERATED`] generated cases; generated inputs outside the C++ reference wrapper's
 //! input contract ([`keeps_contract`]) are redrawn.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1306,8 +1307,8 @@ pub(crate) fn gen_srf(rng: &mut Rng, max_deg: usize) -> InlineSrf {
                         // cylinder-like: v straight lines, u bent
                         2 => {
                             let t = i as f64 / n as f64 * 2.5;
-                            x = t.cos() * 3.0;
-                            z = t.sin() * 3.0;
+                            x = det::cos(t) * 3.0;
+                            z = det::sin(t) * 3.0;
                             y = j as f64;
                         }
                         // u = 0 side collapsed to a point

@@ -27,6 +27,7 @@ use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
@@ -182,8 +183,8 @@ fn a_chamfer_taking_a_can_top_fits_where_its_band_reaches_the_centre() {
         &mut k,
         &mut b,
         &[Point3::new(
-            10.0 * 100.0_f64.to_radians().cos(),
-            10.0 * 100.0_f64.to_radians().sin(),
+            10.0 * det::cos(100.0_f64.to_radians()),
+            10.0 * det::sin(100.0_f64.to_radians()),
             20.0,
         )],
         10.0,
@@ -210,7 +211,7 @@ fn a_round_past_a_boss_footprint_fits_where_its_rail_reaches_it() {
     let boss = create_cylinder(&mut k, Point3::new(0.0, 0.0, 48.2), 2.7, 2.0).unwrap();
     let mut b = boolean_union(&mut k, can, boss).unwrap();
     let at = 100.0_f64.to_radians();
-    let rim = Point3::new(7.0 * at.cos(), 7.0 * at.sin(), 48.2);
+    let rim = Point3::new(7.0 * det::cos(at), 7.0 * det::sin(at), 48.2);
     let refusal = blend(&mut k, &mut b, &[rim], 6.9, 1, false).expect_err("refused");
     check(
         &refusal,

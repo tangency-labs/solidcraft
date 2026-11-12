@@ -28,6 +28,7 @@
 //! `IntersectWithCone` builds its operand with `SmCone::CreateCanonical` on both sides
 //! ([`Cone::create_canonical`]) and is compared in full.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -615,7 +616,7 @@ pub(crate) fn other_surf(rng: &mut Rng, s: &SurfOfRevolution, coaxial: bool) -> 
     }
     // rotate the X axis about the axis, maybe flip the axis
     let ang = rng.uniform(-180.0, 180.0).to_radians();
-    let (c, sn) = (ang.cos(), ang.sin());
+    let (c, sn) = (det::cos(ang), det::sin(ang));
     let x2 = add([x[0] * c, x[1] * c, x[2] * c], y, sn);
     let flip = rng.chance(0.3);
     let z2 = if flip { [-z[0], -z[1], -z[2]] } else { z };

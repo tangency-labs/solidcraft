@@ -23,6 +23,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use solidcore::nurbs::b_spline_surface::SurfParamType;
@@ -58,13 +59,13 @@ impl Meridian {
                 r: cr,
                 z: cz,
                 radius,
-            } => ((r - cr).hypot(z - cz) - radius).abs(),
+            } => (det::hypot(r - cr, z - cz) - radius).abs(),
             Self::Polygon(rz) => {
                 let mut best = f64::INFINITY;
                 for (&(ax, az), &(bx, bz)) in rz.iter().zip(rz.iter().cycle().skip(1)) {
                     let (dx, dz) = (bx - ax, bz - az);
                     let t = (((r - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)).clamp(0.0, 1.0);
-                    best = best.min((r - ax - t * dx).hypot(z - az - t * dz));
+                    best = best.min(det::hypot(r - ax - t * dx, z - az - t * dz));
                 }
                 best
             }
@@ -148,8 +149,8 @@ fn screw_deviation(
                                 let uu = u[0] + (u[1] - u[0]) * f64::from(a) / 4.0;
                                 let vv = v[0] + (v[1] - v[0]) * f64::from(c) / 4.0;
                                 let q = surface.evaluate_point(k, Point2::new(uu, vv)).unwrap();
-                                let r = q.x.hypot(q.y);
-                                let mut theta = q.y.atan2(q.x);
+                                let r = det::hypot(q.x, q.y);
+                                let mut theta = det::atan2(q.y, q.x);
                                 if theta < 0.0 {
                                     theta += 2.0 * PI;
                                 }
@@ -195,7 +196,7 @@ fn coil() -> Meridian {
 /// The groove of an M10x1.5 thread (ISO 68-1).
 fn m10_groove(p: f64) -> Meridian {
     let h = p * 3f64.sqrt() / 2.0;
-    let slope = (PI / 6.0).tan();
+    let slope = det::tan(PI / 6.0);
     let r0 = 5.0 - 5.0 * h / 8.0;
     let w0 = p / 8.0;
     let r1 = 5.0 + 0.05 * p;
@@ -362,8 +363,8 @@ fn walls(b: &Brep) -> Vec<Surface> {
 fn screw_point(p: Point3, offset: f64, theta: f64, pitch: f64) -> Point3 {
     let (x, y) = (p.x + offset, p.y);
     Point3::new(
-        x * theta.cos() - y * theta.sin(),
-        x * theta.sin() + y * theta.cos(),
+        x * det::cos(theta) - y * det::sin(theta),
+        x * det::sin(theta) + y * det::cos(theta),
         p.z + pitch * theta / (2.0 * PI),
     )
 }
@@ -371,7 +372,7 @@ fn screw_point(p: Point3, offset: f64, theta: f64, pitch: f64) -> Point3 {
 /// The angle the net's arcs turn to at `v` on the span `[v0, v1]` of half angle `half`.
 fn arc_angle(v0: f64, v1: f64, half: f64, v: f64) -> f64 {
     let s = 2.0 * (v - v0) / (v1 - v0) - 1.0;
-    0.5 * (v0 + v1) + 2.0 * ((0.5 * half).tan() * s).atan()
+    0.5 * (v0 + v1) + 2.0 * det::atan(det::tan(0.5 * half) * s)
 }
 
 /// The face's `(u, v)` of the definition's `(w, t)`, through its map.
@@ -591,10 +592,10 @@ fn issue_2572_tapered_thread_walls_carry_their_law() {
         // the wall strays past what its lift alone could make it (the rational lift's
         // largest error on a span of its half angle): the law's error is real, and the
         // bound holds it
-        let tau = (0.5 * c.half).tan();
-        let kk = 2.0 * (1.0 + tau * tau) * tau.atan() / tau;
+        let tau = det::tan(0.5 * c.half);
+        let kk = 2.0 * (1.0 + tau * tau) * det::atan(tau) / tau;
         let x = ((kk - 2.0) / (kk + 2.0)).sqrt();
-        let lift = p / (2.0 * PI) * (kk * x / (1.0 + x * x) - 2.0 * x.atan());
+        let lift = p / (2.0 * PI) * (kk * x / (1.0 + x * x) - 2.0 * det::atan(x));
         assert!(
             c.farthest > 2.0 * lift,
             "strays {}, the lift {lift}",

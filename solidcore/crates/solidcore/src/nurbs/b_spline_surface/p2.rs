@@ -1780,6 +1780,7 @@ impl BSplineSurface {
 mod tests {
     use super::*;
     use crate::error::SM_ERR_INVALID_INPUT;
+    use crate::math::det;
     use crate::nurbs::srf_basic::Surface;
 
     /// A rational quadratic arc from `p0` to `p2` with tangent corner `c` and corner
@@ -1874,12 +1875,12 @@ mod tests {
         let r = 5.0_f64;
         let step = 120.0_f64.to_radians();
         let half = step / 2.0;
-        let w = half.cos();
-        let point = |a: f64| [r * a.cos(), r * a.sin(), 0.0];
+        let w = det::cos(half);
+        let point = |a: f64| [r * det::cos(a), r * det::sin(a), 0.0];
         let corner = |a: f64| {
             let mid = a + half;
-            let d = r / half.cos();
-            [d * mid.cos(), d * mid.sin(), 0.0]
+            let d = r / det::cos(half);
+            [d * det::cos(mid), d * det::sin(mid), 0.0]
         };
         vec![
             arc3(point(0.0), corner(0.0), w, point(step)),
@@ -2080,9 +2081,9 @@ mod tests {
         let u = |i: usize| {
             let phi = std::f64::consts::FRAC_PI_2 * i as f64;
             [
-                theta.sin() * phi.cos(),
-                theta.sin() * phi.sin(),
-                theta.cos(),
+                det::sin(theta) * det::cos(phi),
+                det::sin(theta) * det::sin(phi),
+                det::cos(theta),
             ]
         };
         (0..4)
@@ -2093,7 +2094,7 @@ mod tests {
                 arc3(
                     [0, 1, 2].map(|j| r * a[j]),
                     c,
-                    (cos.acos() / 2.0).cos(),
+                    det::cos(det::acos(cos) / 2.0),
                     [0, 1, 2].map(|j| r * b[j]),
                 )
             })

@@ -277,13 +277,14 @@ enum Stop {
 
 #[cfg(test)]
 mod tests {
+    use solidcore::math::det;
     use super::*;
 
     fn circle(c: [f64; 2], r: f64, n: usize, ccw: bool) -> Vec<[f64; 2]> {
         (0..n)
             .map(|k| {
                 let a = std::f64::consts::TAU * k as f64 / n as f64 * if ccw { 1.0 } else { -1.0 };
-                [c[0] + r * a.cos(), c[1] + r * a.sin()]
+                [c[0] + r * det::cos(a), c[1] + r * det::sin(a)]
             })
             .collect()
     }

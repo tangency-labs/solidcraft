@@ -17,6 +17,7 @@
 //!
 //! Every run has at least [`MIN_GENERATED`] generated cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -220,9 +221,9 @@ fn gen_frame(rng: &mut Rng) -> [[f64; 3]; 3] {
         rng.uniform(0.0, std::f64::consts::TAU),
         rng.uniform(0.0, std::f64::consts::TAU),
     );
-    let (sa, ca) = a.sin_cos();
-    let (sb, cb) = b.sin_cos();
-    let (sc, cc) = c.sin_cos();
+    let (sa, ca) = det::sin_cos(a);
+    let (sb, cb) = det::sin_cos(b);
+    let (sc, cc) = det::sin_cos(c);
     [
         [ca * cb, ca * sb * sc - sa * cc, ca * sb * cc + sa * sc],
         [sa * cb, sa * sb * sc + ca * cc, sa * sb * cc - ca * sc],
@@ -334,8 +335,8 @@ fn gen_freeform(rng: &mut Rng, pl: &Plane) -> InlineCrv {
             let w = rational.then(|| rng.uniform(0.5, 2.0));
             let c = pl.cpt(x, y, w);
             let step = scale * rng.uniform(0.5, 1.5);
-            x += step * ang.cos();
-            y += step * ang.sin();
+            x += step * det::cos(ang);
+            y += step * det::sin(ang);
             ang += rng.uniform(-turn, turn);
             c
         })
@@ -363,7 +364,7 @@ fn gen_line(rng: &mut Rng, pl: &Plane) -> InlineCrv {
     }
     let cpts = ts
         .iter()
-        .map(|&t| pl.cpt(t * len * ang.cos(), t * len * ang.sin(), None))
+        .map(|&t| pl.cpt(t * len * det::cos(ang), t * len * det::sin(ang), None))
         .collect();
     InlineCrv {
         cpts,

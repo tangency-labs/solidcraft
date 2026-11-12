@@ -6,6 +6,8 @@
 //! overflowing sizes now return errors. Geometry validation remains downstream.
 
 /// Text payload, before the adapter supplies the B-spline form and oob defaults.
+use solidcore::math::det;
+
 #[derive(Debug, PartialEq)]
 pub(crate) struct Parsed {
     pub(crate) net: Vec<Vec<[f64; 4]>>,
@@ -17,7 +19,7 @@ pub(crate) struct Parsed {
 
 fn count(path: &str, value: f64) -> Result<usize, String> {
     // Unlike usize::MAX as f64, this is exclusive even when MAX rounds upward.
-    let exclusive = 2.0_f64.powi(usize::BITS as i32);
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32);
     if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value >= exclusive {
         return Err(format!("{path}: bad count {value}"));
     }

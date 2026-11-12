@@ -7,6 +7,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::sweep::api_brep::{
     create_taper_extrude_with_corner, OffsetCornerType, TaperExtrude,
 };
@@ -43,7 +44,7 @@ fn plus() -> Vec<Curve> {
 }
 
 fn expected_volume(outward: bool, round: bool) -> f64 {
-    let offset = 10.0 * 10.0_f64.to_radians().tan();
+    let offset = 10.0 * det::tan(10.0_f64.to_radians());
     let sign = if outward { 1.0 } else { -1.0 };
     let quadratic = if !round {
         4.0

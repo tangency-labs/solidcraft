@@ -22,6 +22,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use solidcore::curve::curve::Curve;
@@ -158,7 +159,7 @@ fn revolve_cones(k: &mut Kernel, reverse: bool, angle: f64, scale: f64) -> Vec<C
         create_rotational_sweep(k, &refs, Vec3::ZERO, Vec3::Z, angle, angle < 360.0).unwrap();
     assert!(is_manifold_solid(&b).unwrap(), "{reverse} {angle} {scale}");
     // the integral of x over the profile: 10 (30^2 - 8^2) / 2 + 12 (30^2 - 18^2) / 2
-    let want = angle.to_radians() * 7636.0 * scale.powi(3);
+    let want = angle.to_radians() * 7636.0 * det::powi(scale, 3);
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
         store: &store,

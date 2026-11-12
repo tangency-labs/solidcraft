@@ -42,6 +42,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::assert_array::{AssertArray, ObjectKey};
 use solidcore::geom::solution_array::{ObjectKind, SolutionObject};
 use solidcore::kernel::{Kernel, KernelOptions};
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::math::{CPoint, NOZ};
 
@@ -372,7 +373,7 @@ fn the_check_still_reports_a_tight_bend_next_to_a_domain_end() {
 
         // closed form at the bend's end: a radius of 1.5 h at a speed of 3 h
         let d = curve.evaluate(bend_t, 2, false, false).unwrap();
-        let radius = d[1].length().powi(3) / d[1].cross(d[2]).length();
+        let radius = det::powi(d[1].length(), 3) / d[1].cross(d[2]).length();
         assert!(
             (radius - 1.5 * BEND_H).abs() <= 1e-12 * radius,
             "radius {radius:e} at the bend, not 1.5 h"

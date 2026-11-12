@@ -18,6 +18,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use crate::curve::curve::Curve;
@@ -154,7 +155,7 @@ pub(crate) fn cross2(a: Vec2, b: Vec2) -> f64 {
 }
 
 fn unit(angle: f64) -> Vec2 {
-    Vec2::new(angle.cos(), angle.sin())
+    Vec2::new(det::cos(angle), det::sin(angle))
 }
 
 fn finite2(p: Point2) -> bool {
@@ -278,7 +279,7 @@ impl Seg2 {
                 #[allow(clippy::cast_precision_loss)]
                 let step = sweep / n as f64;
                 let half = step * 0.5;
-                let w = half.cos();
+                let w = det::cos(half);
                 (0..n)
                     .map(|i| {
                         #[allow(clippy::cast_precision_loss)]
@@ -337,10 +338,15 @@ impl Seg2 {
             } => {
                 // P = c + r u(t), P x P' = r^2 + r (c.x cos t + c.y sin t)
                 let end = start + sweep;
-                let (s0, c0, s1, c1) = (start.sin(), start.cos(), end.sin(), end.cos());
+                let (s0, c0, s1, c1) = (
+                    det::sin(start),
+                    det::cos(start),
+                    det::sin(end),
+                    det::cos(end),
+                );
                 let terms = [r * r * sweep, r * c.x * (s1 - s0), -(r * c.y * (c1 - c0))];
                 let size = r * r * sweep.abs() + 2.0 * r * (c.x.abs() + c.y.abs());
-                // libm's sin and cos within two ulps; gamma covers the products and the sums
+                // `det`'s sin and cos within one ulp (counted as two); gamma covers the products and the sums
                 let v = terms.iter().sum::<f64>() * 0.5;
                 Some((v, gamma(16) * size * 0.5))
             }
@@ -408,15 +414,15 @@ fn conic_factor(w: f64) -> Option<(f64, f64)> {
         return Some((f, 2.0 * w * (tail + gamma(512) * size)));
     }
     let (f, terms) = if w < 1.0 {
-        let phi = w.acos();
-        let s = phi.sin();
+        let phi = det::acos(w);
+        let s = det::sin(phi);
         (
             w * (phi - w * s) / (s * s * s),
             w * (phi + w * s) / (s * s * s),
         )
     } else {
-        let psi = w.acosh();
-        let s = psi.sinh();
+        let psi = det::acosh(w);
+        let s = det::sinh(psi);
         (
             w * (w * s - psi) / (s * s * s),
             w * (w * s + psi) / (s * s * s),

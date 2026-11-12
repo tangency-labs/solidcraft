@@ -192,6 +192,7 @@
 //! - **Bounds.** `sm_ExamineNFixFilletGeoms` copies at most the smaller control net
 //!   row; indices are checked. No input-driven recursion.
 
+use crate::math::det;
 use std::collections::BTreeMap;
 
 use crate::blend::fillet_classification::FilletClassObject;
@@ -3331,7 +3332,7 @@ pub fn interpolate_endpts_and_tangents(
             // Make circular arc
             let vec = end_pnt - start_pnt;
             let angle = vec.angle_between(*start_vec)?;
-            weights[1] = angle.cos();
+            weights[1] = det::cos(angle);
             BSplineCurve::create_canonical(&CanonicalData {
                 dim: curve_dim,
                 degree: 2,
@@ -3541,13 +3542,13 @@ pub fn create_cubic_rail_rail_interpolant(
     let vec = uv_pnt - start_pnt;
     let len = bulge_factor * vec.length();
     let angle = start_tangent.angle_between(vec)?;
-    let len1 = (len / angle.cos()).abs();
+    let len1 = (len / det::cos(angle)).abs();
     let p1 = start_pnt + start_tangent * len1;
     let vec = uv_pnt - end_pnt;
     let len = bulge_factor * vec.length();
 
     let angle = end_tangent.angle_between(vec)?;
-    let len1 = (len / angle.cos()).abs();
+    let len1 = (len / det::cos(angle)).abs();
     let p2 = end_pnt + end_tangent * len1;
 
     let cntrl_poly = [start_pnt, p1, uv_pnt, p2, end_pnt];

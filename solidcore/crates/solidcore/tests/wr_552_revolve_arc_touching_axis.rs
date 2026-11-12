@@ -16,6 +16,7 @@
 )] // test helpers
 
 use solidcore::curve::curve::Curve;
+use solidcore::math::det;
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::sweep::api_brep::create_rotational_sweep;
@@ -31,7 +32,7 @@ fn revolve() -> (Vec<(f64, f64)>, Vec<String>) {
     k.fixes.revolve_analytic_profile_faces = true;
     let r = R + DELTA;
     let s = (r * r - R * R).sqrt();
-    let a_deg = s.atan2(-R).to_degrees();
+    let a_deg = det::atan2(s, -R).to_degrees();
     let top = Point3::new(R, r, 0.0);
     let on_axis = Point3::new(0.0, s, 0.0);
     let cap = Point3::new(0.0, r, 0.0);

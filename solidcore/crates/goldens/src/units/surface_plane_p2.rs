@@ -7,6 +7,7 @@
 //! or without their NURB (upstream's `m_pNurb`, which `IntersectWithPlane`'s parallel
 //! case tests). Curves are real `SmLine`, `SmEllipse`, `SmCircle` and B-spline curves.
 
+use solidcore::math::det;
 use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
@@ -1077,7 +1078,7 @@ fn gen_curve(rng: &mut Rng, p: &PlaneIn, s: f64) -> CurveIn {
         k => {
             let c = q(rng);
             let ang = rng.uniform(0.0, std::f64::consts::TAU);
-            let (ca, sa) = (ang.cos(), ang.sin());
+            let (ca, sa) = (det::cos(ang), det::sin(ang));
             let ex = add(mul(x, ca), mul(y, sa));
             let ey = add(mul(x, -sa), mul(y, ca));
             let ey = if rng.chance(0.3) { mul(ey, -1.0) } else { ey };
@@ -1244,7 +1245,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                 rng.uniform(d[1] - 0.5, d[3] + 0.5),
             );
             let ang = rng.uniform(0.0, std::f64::consts::TAU);
-            let (ca, sa) = (ang.cos(), ang.sin());
+            let (ca, sa) = (det::cos(ang), det::sin(ang));
             let ex = add(mul(x, ca), mul(y, sa));
             let ey = add(mul(x, -sa), mul(y, ca));
             let ey = if rng.chance(0.3) { mul(ey, -1.0) } else { ey };

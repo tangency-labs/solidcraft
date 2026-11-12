@@ -16,6 +16,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::collections::BTreeMap;
 
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
@@ -124,7 +125,7 @@ impl IsoCurve {
         match self {
             IsoCurve::Line { origin, step } => add(*origin, mul(t, *step)),
             IsoCurve::Circle { o, x, y, r } => {
-                add(*o, add(mul(r * t.cos(), *x), mul(r * t.sin(), *y)))
+                add(*o, add(mul(r * det::cos(t), *x), mul(r * det::sin(t), *y)))
             }
             IsoCurve::BSpline {
                 degree,
@@ -149,7 +150,7 @@ impl IsoCurve {
             IsoCurve::Line { origin, step } => dot(sub(q, *origin), *step) / dot(*step, *step),
             IsoCurve::Circle { o, x, y, .. } => {
                 let d = sub(q, *o);
-                dot(d, *y).atan2(dot(d, *x))
+                det::atan2(dot(d, *y), dot(d, *x))
             }
             IsoCurve::BSpline { knots, .. } => {
                 let (lo, hi) = (knots[0], knots[knots.len() - 1]);
@@ -238,8 +239,8 @@ enum IsoSurface {
 
 impl IsoSurface {
     fn at(&self, u: f64, v: f64) -> P {
-        let (su, cu) = u.sin_cos();
-        let (sv, cv) = v.sin_cos();
+        let (su, cu) = det::sin_cos(u);
+        let (sv, cv) = det::sin_cos(v);
         let around = |o: P, x: P, y: P, z: P, r: f64, h: f64| {
             add(add(o, mul(h, z)), add(mul(r * cu, x), mul(r * su, y)))
         };
@@ -483,7 +484,7 @@ impl File {
                     y,
                     z,
                     r: real(&p[2]),
-                    tan: real(&p[3]).tan(),
+                    tan: det::tan(real(&p[3])),
                 }
             }
             "SPHERICAL_SURFACE" => {
@@ -670,7 +671,7 @@ fn ring(
             let end = *options[i][chosen[i]].last().unwrap();
             let j = (i + 1) % uses.len();
             let next = options[j][chosen[j]][0];
-            (end[0] - next[0]).hypot(end[1] - next[1]) < 1e-7 || degenerate(end, next)
+            det::hypot(end[0] - next[0], end[1] - next[1]) < 1e-7 || degenerate(end, next)
         });
         if joined {
             let r: Vec<[f64; 2]> = (0..uses.len())
@@ -968,7 +969,7 @@ fn a_lofted_b_spline_solid_is_written_right_side_out() {
     let square = |r: f64, turn: f64, z: f64| -> Vec<Curve> {
         let corner = |i: usize| {
             let a = (45.0 + 90.0 * i as f64 + turn).to_radians();
-            [3.0 + r * a.cos(), 4.0 + r * a.sin(), 5.0 + z]
+            [3.0 + r * det::cos(a), 4.0 + r * det::sin(a), 5.0 + z]
         };
         (0..4)
             .map(|i| segment(corner(i), corner((i + 1) % 4)))
@@ -1128,7 +1129,7 @@ fn iso_of_model(surface: &solidcore_record::step::model::Surface) -> IsoSurface 
             y: frame.y,
             z: frame.z,
             r: *radius,
-            tan: semi_angle_deg.to_radians().tan(),
+            tan: det::tan(semi_angle_deg.to_radians()),
         },
         MS::Sphere { frame, radius } => IsoSurface::Sphere {
             o: frame.origin,

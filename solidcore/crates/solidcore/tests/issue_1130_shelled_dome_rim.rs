@@ -17,6 +17,7 @@
 mod offset_fixture;
 
 use core::f64::consts::PI;
+use solidcore::math::det;
 
 use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::boolean::api_brep::boolean_difference;
@@ -47,7 +48,7 @@ fn rim(k: &Kernel, b: &Brep) -> (usize, f64, bool) {
         for i in 0..=32 {
             let t = edge.interval.evaluate(f64::from(i) / 32.0);
             let p = curve.evaluate_point(k, t).unwrap();
-            let r = p.x.hypot(p.y);
+            let r = det::hypot(p.x, p.y);
             dev = dev.max((r - 18.0).abs()).max(p.z.abs());
         }
         if dev < 1e-3 {
@@ -103,7 +104,7 @@ fn face_radii(k: &Kernel, b: &Brep) {
 fn issue_1130_shelled_dome_rim_is_the_exact_circle() {
     let mut k = Kernel::default();
     let mut part = dome(&mut k);
-    let outer = 2.0 / 3.0 * PI * 20.0_f64.powi(3);
+    let outer = 2.0 / 3.0 * PI * det::powi(20.0_f64, 3);
     eprintln!(
         "PROBE issue_1130 input volume 1e-6 {} 1e-8 {} want {outer}",
         volume_at(&k, &mut part, 1e-6),
@@ -111,7 +112,7 @@ fn issue_1130_shelled_dome_rim_is_the_exact_circle() {
     );
     let open = planar_faces_at(&k, &part, 2, 0.0);
     assert_eq!(open.len(), 1, "one base face");
-    let want = 2.0 / 3.0 * PI * (20.0_f64.powi(3) - 18.0_f64.powi(3));
+    let want = 2.0 / 3.0 * PI * (det::powi(20.0_f64, 3) - det::powi(18.0_f64, 3));
     let mut shelled = shell(&mut k, part, -2.0, &open).unwrap();
     solidcore::topology::integrity::check(&shelled).unwrap();
     let (count, worst, exact) = rim(&k, &shelled);

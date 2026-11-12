@@ -12,6 +12,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -679,7 +680,7 @@ fn piece_turn(piece: &CurveSegment, shift: Vec3, x: Vec3, y: Vec3, rx: f64, ry: 
     if !inside {
         return Turn::Undecided;
     }
-    Turn::Anticlockwise((sx * ey - sy * ex).atan2(sx * ex + sy * ey).to_degrees())
+    Turn::Anticlockwise(det::atan2(sx * ey - sy * ex, sx * ex + sy * ey).to_degrees())
 }
 
 /// How a net's parameter runs along its spine (#2485): the spine's parameter is
@@ -1017,7 +1018,7 @@ impl AnalyticSupport {
                 origin: placement.origin(),
                 axis: axis(placement),
                 radius: *base_radius,
-                tan_angle: (semi_angle_deg * PI / 180.0).tan(),
+                tan_angle: det::tan(semi_angle_deg * PI / 180.0),
             },
             Self::Sphere { placement, radius } => Implicit::Sphere {
                 centre: placement.origin(),
@@ -1315,8 +1316,9 @@ fn recognise(k: &Kernel, kind: SupportKind, form: &BSplineSurface) -> Result<Opt
 /// a form whose parameter is not the analytic surface's (a reparametrised arc), nor the
 /// form's distance from the analytic surface: those are what the comparison proves.
 ///
-/// `u` is the unit roundoff, `gamma_n = n u / (1 - n u)`. Stated assumption: the libm
-/// `sin`, `cos`, `tan` and `atan2` are within one ulp (relative `2 u`).
+/// `u` is the unit roundoff, `gamma_n = n u / (1 - n u)`. `sin`, `cos` and `tan` are
+/// within one ulp (relative `2 u`) and `atan2` within two (`4 u`), [`crate::math::det`]'s
+/// table.
 ///
 /// 1. **The form** (`Surface::eval`, Cox-de Boor then two blends): each basis value is a
 ///    nonnegative combination over `p` levels of at most 6 operations (two knot differences,
@@ -1339,13 +1341,14 @@ fn recognise(k: &Kernel, kind: SupportKind, form: &BSplineSurface) -> Result<Opt
 ///    the net's reach from `O`. `E_step` is `sqrt 3` times the coordinate bound.
 /// 3. **The generator's parameter**: a circle (torus, sphere) inverts its NURBS point by
 ///    `atan2` about its centre `c`: at its radius `r` the error is that point's (`E_form`)
-///    plus `gamma_4 (size + |c|)` and `gamma_4 r |v|` of the angle's own rounding; a line
+///    plus `gamma_4 (size + |c|)` and `gamma_6 r |v|` of the angle's own rounding (`atan2`'s
+///    two ulps and the conversion to degrees); a line
 ///    (cone) maps it affinely in 6 operations, `gamma_6 2 (|v0| + |v1|)` along the axis and
 ///    its slope, times `1 + |t|`; a B-spline generator's parameter is its NURBS's (none).
 /// 4. **The sweep's parameter**: the polar converter evaluates its circle's NURBS at the
 ///    parameter (item 1's bound of that NURBS's own net, `E_polar`) and inverts the point by
 ///    `atan2` about the circle's centre `c` in its frame: at the circle's radius `rc` the
-///    angle is off by `(E_polar + gamma_4 (rc + 2 |c|)) / rc`, plus `gamma_4 |s|` of the
+///    angle is off by `(E_polar + gamma_4 (rc + 2 |c|)) / rc`, plus `gamma_6 |s|` of the
 ///    angle's own rounding and the degrees' period (`gamma_1 2 pi`), times the STEP point's
 ///    distance from that axis (the lever). The converter's ends are its domain's, which
 ///    recognition takes from the form's own end meridians (#3199), so they are the inverted
@@ -1563,7 +1566,7 @@ impl Rounding {
                 let dh = gamma(1) * minor + 2.0 * minor * dc(step.y);
                 (
                     gamma(3) * (o + m + h) + m * (gamma(2) + 2.0 * dc(step.x)) + dm + dh,
-                    self.e_form + gamma(4) * (size_f + c) + gamma(4) * minor * rad(step.y).abs(),
+                    self.e_form + gamma(4) * (size_f + c) + gamma(6) * minor * rad(step.y).abs(),
                 )
             }
             Generator::Sphere { radius, c } => {
@@ -1572,7 +1575,7 @@ impl Rounding {
                     gamma(3) * (o + 2.0 * radius)
                         + radius * (gamma(2) + 2.0 * dc(step.x))
                         + 2.0 * dm,
-                    self.e_form + gamma(4) * (size_f + c) + gamma(4) * radius * rad(step.y).abs(),
+                    self.e_form + gamma(4) * (size_f + c) + gamma(6) * radius * rad(step.y).abs(),
                 )
             }
             Generator::Cone { r0, t, a, v0, v1 } => {
@@ -1599,7 +1602,7 @@ impl Rounding {
         let sweep = if rc > 0.0 {
             lever
                 * ((e_polar + gamma(4) * (rc + 2.0 * c.length())) / rc
-                    + gamma(4) * rad(step.x).abs()
+                    + gamma(6) * rad(step.x).abs()
                     + gamma(1) * 2.0 * PI)
         } else {
             // a circle of no radius has no angle: any, at the STEP point's lever
@@ -1908,7 +1911,7 @@ impl AnalyticSupport {
         }
         // the radius changes by tan(angle) per unit along the axis
         let tan = (r1 - r0) / along.dot(axis);
-        let semi_angle_deg = tan.atan().to_degrees();
+        let semi_angle_deg = det::atan(tan).to_degrees();
         if semi_r != 0.0 && (semi_angle_deg > 0.0) != (semi_r > 0.0) {
             return None;
         }

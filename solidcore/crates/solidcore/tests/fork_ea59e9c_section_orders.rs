@@ -40,6 +40,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::nurbs::b_spline_curve::p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
@@ -61,7 +62,7 @@ type P2 = [f64; 2];
 /// The G^n section in a section's plane: `c1[k]`, `c2[k]` (k = 0..n) the faces' jets at the
 /// contacts, `T_i(u) = sum_k c_ik (u - 1)^k`.
 fn gn_section(n: usize, w: f64, c1: &[P2], c2: &[P2], t: f64) -> P2 {
-    let (a, b) = ((1.0 - t).powi(n as i32 + 1), t.powi(n as i32 + 1));
+    let (a, b) = (det::powi(1.0 - t, n as i32 + 1), det::powi(t, n as i32 + 1));
     let f = a / (a + b);
     let u1 = -t / (1.0 - w + w * t);
     let u2 = (t - 1.0) / (1.0 - w * t);
@@ -330,7 +331,7 @@ fn pipe_faces() -> Vec<Quadric> {
 }
 
 fn rho_z(x: Point3) -> P2 {
-    [(x.x - 30.0).hypot(x.y - 20.0), x.z]
+    [det::hypot(x.x - 30.0, x.y - 20.0), x.z]
 }
 
 /// The fork's cases that have a kernel to run on today, with the fork's figures.
@@ -406,7 +407,7 @@ fn running_cases() -> Vec<Case> {
             "box_edge_round",
             Blend::Round(3.0),
             1.0 - PI / 4.0,
-            Box::new(|x| ((x.y - 27.0).hypot(x.z - 17.0) - 3.0).abs()),
+            Box::new(|x| (det::hypot(x.y - 27.0, x.z - 17.0) - 3.0).abs()),
             1,
         ),
         boss_case(
@@ -427,7 +428,7 @@ fn running_cases() -> Vec<Case> {
             26056.1770421533,
             Box::new(|x| {
                 let q = rho_z(x);
-                ((q[0] - 10.0).hypot(q[1] - 12.0) - 2.0).abs()
+                (det::hypot(q[0] - 10.0, q[1] - 12.0) - 2.0).abs()
             }),
             1,
         ),
@@ -447,7 +448,9 @@ fn running_cases() -> Vec<Case> {
             "pipe_on_plate_round",
             Blend::Round(2.0),
             40300.8060669181,
-            Box::new(move |x| ((x.y - 20.0 - pipe_g).hypot(x.z - 10.0 - pipe_d) - pipe_d).abs()),
+            Box::new(move |x| {
+                (det::hypot(x.y - 20.0 - pipe_g, x.z - 10.0 - pipe_d) - pipe_d).abs()
+            }),
             1,
         ),
         Case {
@@ -645,7 +648,7 @@ fn grade(case: &Case, k: &mut Kernel) -> Graded {
             .push(format!("{} failed validity tests", lines.len()));
     }
     let tight = [1e-9, 1e-7, 1e-5, 1e-3];
-    let loose = [1f64.to_radians().tan(), 0.01, 0.001, 0.0001];
+    let loose = [det::tan(1f64.to_radians()), 0.01, 0.001, 0.0001];
     let (mut blends, mut seams) = (0, 0);
     let ids: Vec<FaceId> = b.faces().ids().collect();
     let edges: Vec<EdgeId> = b.edge_list().to_vec();
@@ -846,7 +849,7 @@ fn the_grading_refuses_a_wrong_volume_blend_and_order() {
     let volume = refused(&|c| c.volume *= 1.000_001);
     assert!(volume[0].contains("volume"), "{volume:?}");
     let blend = refused(&|c| {
-        c.off = Box::new(|x| ((x.y - 27.0).hypot(x.z - 17.0) - 3.000_001).abs());
+        c.off = Box::new(|x| (det::hypot(x.y - 27.0, x.z - 17.0) - 3.000_001).abs());
     });
     assert!(blend[0].contains("off the exact blend"), "{blend:?}");
     for order in [0, 2] {
@@ -927,12 +930,12 @@ fn the_sections_give_the_fork_s_volumes_on_the_pipe() {
         let mut pts = section(n, w, &plate, &pipe);
         // the pipe's arc back from its contact to the edge (28, 10), the plate's line after it
         let (a0, a1) = (
-            (pts[pts.len() - 1][1] - 16.0).atan2(pts[pts.len() - 1][0] - 20.0),
-            (10.0f64 - 16.0).atan2(8.0),
+            det::atan2(pts[pts.len() - 1][1] - 16.0, pts[pts.len() - 1][0] - 20.0),
+            det::atan2(10.0f64 - 16.0, 8.0),
         );
         for i in 1..=20_000 {
             let a = a0 + (a1 - a0) * f64::from(i) / 20_000.0;
-            pts.push([20.0 + 10.0 * a.cos(), 16.0 + 10.0 * a.sin()]);
+            pts.push([20.0 + 10.0 * det::cos(a), 16.0 + 10.0 * det::sin(a)]);
         }
         area_and_moment(&pts, 0.0).0.abs()
     };
@@ -1201,7 +1204,7 @@ fn balls_envelope_volume(law: &BSplineCurve) -> f64 {
     // the top of the union of the balls' discs in the plane `y` at `x`
     let top = |x: f64, y: f64| -> f64 {
         let disc = |s: f64, r: f64| {
-            let h2 = r * r - (y - 20.0 * s).powi(2) - (x - 10.0 + r).powi(2);
+            let h2 = r * r - det::powi(y - 20.0 * s, 2) - det::powi(x - 10.0 + r, 2);
             if h2 < 0.0 {
                 f64::NEG_INFINITY
             } else {
@@ -1241,9 +1244,9 @@ fn balls_envelope_volume(law: &BSplineCurve) -> f64 {
                 let a0 = PI / 2.0 * f64::from(q) / 8.0;
                 let a1 = PI / 2.0 * f64::from(q + 1) / 8.0;
                 for (th, wt) in nodes(a0, a1) {
-                    let x = 10.0 - r + r * th.sin();
+                    let x = 10.0 - r + r * det::sin(th);
                     let z = top(x, y).clamp(30.0 - r, 30.0);
-                    area += (30.0 - z) * r * th.cos() * wt;
+                    area += (30.0 - z) * r * det::cos(th) * wt;
                 }
             }
             removed += area * wy;

@@ -34,6 +34,7 @@
 //! uncached breaks (`intersect.curve_class_*`) and the unported volume kinds. Every
 //! run has at least [`MIN_GENERATED`] generated cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1530,7 +1531,7 @@ fn gen_transform(rng: &mut Rng, s: f64) -> [[f64; 3]; 4] {
         1 | 2 => {
             // rotation about z by a random angle, translated
             let a = rng.uniform(-3.2, 3.2);
-            let (sn, c) = a.sin_cos();
+            let (sn, c) = det::sin_cos(a);
             [
                 scale3(s, rp(rng, 5.0)),
                 [c, sn, 0.0],
@@ -1603,8 +1604,8 @@ fn planar(rng: &mut Rng, f: &[[f64; 3]; 4], x: f64, y: f64, c: f64, s: f64) -> E
             let t: f64 = rng.uniform(-3.0, 3.0);
             ExactCurveIn::Circle {
                 c: at_frame(f, x, y, c),
-                x: add3(scale3(t.cos(), f[1]), scale3(t.sin(), f[2])),
-                y: add3(scale3(-t.sin(), f[1]), scale3(t.cos(), f[2])),
+                x: add3(scale3(det::cos(t), f[1]), scale3(det::sin(t), f[2])),
+                y: add3(scale3(-det::sin(t), f[1]), scale3(det::cos(t), f[2])),
                 a0,
                 a1: a1.max(a0 + 1.0),
                 r: rng.uniform(0.2, 1.5) * s,
@@ -1637,7 +1638,7 @@ fn planar(rng: &mut Rng, f: &[[f64; 3]; 4], x: f64, y: f64, c: f64, s: f64) -> E
             straight(
                 rng,
                 at_frame(f, x, y, c),
-                at_frame(f, x + d * t.cos(), y + d * t.sin(), c),
+                at_frame(f, x + d * det::cos(t), y + d * det::sin(t), c),
             )
         }
     }
@@ -1753,7 +1754,7 @@ fn gen_exact_volume_case(rng: &mut Rng) -> OpIn {
             let r = rng.uniform(0.3, 3.0) * s;
             let t: f64 = rng.uniform(-3.0, 3.0);
             let (z0, z1) = span(rng, -2.0 * s, 2.0 * s);
-            let (x, y) = (r * t.cos(), r * t.sin());
+            let (x, y) = (r * det::cos(t), r * det::sin(t));
             aligned(
                 rng,
                 at_frame(&f, x, y, z0),
@@ -1774,8 +1775,8 @@ fn gen_exact_volume_case(rng: &mut Rng) -> OpIn {
             };
             ExactCurveIn::Circle {
                 c,
-                x: add3(scale3(t.cos(), f[1]), scale3(t.sin(), f[2])),
-                y: scale3(flip, add3(scale3(-t.sin(), f[1]), scale3(t.cos(), f[2]))),
+                x: add3(scale3(det::cos(t), f[1]), scale3(det::sin(t), f[2])),
+                y: scale3(flip, add3(scale3(-det::sin(t), f[1]), scale3(det::cos(t), f[2]))),
                 a0,
                 a1: a1.max(a0 + 1.0),
                 r: rng.uniform(0.3, 3.0) * s,
@@ -1790,11 +1791,11 @@ fn gen_exact_volume_case(rng: &mut Rng) -> OpIn {
             };
             let (r0, r1) = span(rng, 0.2 * s, 3.0 * s);
             let z = rng.uniform(-2.0, 2.0) * s;
-            let tilt = add3(scale3(-t.sin(), f[1]), scale3(t.cos(), f[2]));
+            let tilt = add3(scale3(-det::sin(t), f[1]), scale3(det::cos(t), f[2]));
             aligned(
                 rng,
-                at_frame(&f, r0 * t.cos(), r0 * t.sin(), z),
-                at_frame(&f, (r1 + 0.1 * s) * t.cos(), (r1 + 0.1 * s) * t.sin(), z),
+                at_frame(&f, r0 * det::cos(t), r0 * det::sin(t), z),
+                at_frame(&f, (r1 + 0.1 * s) * det::cos(t), (r1 + 0.1 * s) * det::sin(t), z),
                 tilt,
             )
         }
@@ -1949,8 +1950,8 @@ fn exact_volume_cases() -> Result<Vec<Case>, HarnessError> {
         (
             comp(6, 1.0),
             line(
-                [0.5 * 0.7f64.cos(), 0.5 * 0.7f64.sin(), 0.2],
-                [2.0 * 0.7f64.cos(), 2.0 * 0.7f64.sin(), 0.2],
+                [0.5 * det::cos(0.7f64), 0.5 * det::sin(0.7f64), 0.2],
+                [2.0 * det::cos(0.7f64), 2.0 * det::sin(0.7f64), 0.2],
             ),
         ),
         (comp(6, 1.0), line([1.0, 0.5, -1.0], [1.0, 0.5, 1.0])),

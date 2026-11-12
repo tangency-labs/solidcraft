@@ -11,6 +11,7 @@
     clippy::disallowed_methods
 )] // test
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use solidcore::surface::surface::SurfaceKind;
@@ -77,7 +78,7 @@ fn a_round_on_a_boss_tilted_off_the_class_keeps_its_definition() {
     let block = make_box([0.0; 3], [40.0, 40.0, 10.0]).unwrap();
     // the boss from z = 5 to 20, its axis turned 1e-10 about x off square to the block's top
     let boss = make_cylinder([0.0; 3], 8.0, 15.0).unwrap();
-    let (c, s) = (1e-10_f64.cos(), 1e-10_f64.sin());
+    let (c, s) = (det::cos(1e-10_f64), det::sin(1e-10_f64));
     boss.transform(&[
         [1.0, 0.0, 0.0, 0.0],
         [0.0, c, s, 0.0],
@@ -112,7 +113,7 @@ fn the_raked_wedges_rounds_keep_their_definitions() {
     .unwrap();
     let (b, _) = Body::from_record(&record, true).unwrap();
     let (_, before) = definitions(&b);
-    let top = 60.0 - 60.0 * 10f64.to_radians().tan();
+    let top = 60.0 - 60.0 * det::tan(10f64.to_radians());
     let mut seeds = Vec::new();
     for x in [-69.0, 69.0] {
         for p in [
@@ -141,7 +142,7 @@ fn the_raked_wedges_rounds_keep_their_definitions() {
 /// rounds that last call makes, how many keep a definition and how many don't.
 fn exact_wedge_rounds() -> (usize, usize) {
     use crate::sweep::{extrude, Curve, DraftCorner};
-    let top = 60.0 - 60.0 * 10f64.to_radians().tan();
+    let top = 60.0 - 60.0 * det::tan(10f64.to_radians());
     let profile = [
         [-60.0, 0.0],
         [60.0, 0.0],

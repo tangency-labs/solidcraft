@@ -23,6 +23,7 @@
 //! `intersect.surface_drop_lib_p3`, is ported). Every run has at least
 //! [`MIN_GENERATED`] generated cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1166,7 +1167,7 @@ fn gen_nsided(rng: &mut Rng) -> OpIn {
     let corners: Vec<[f64; 3]> = (0..k)
         .map(|i| {
             let a = std::f64::consts::TAU * i as f64 / k as f64 + rng.uniform(-0.1, 0.1);
-            [r * a.cos(), r * a.sin(), rng.uniform(-0.3, 0.3)]
+            [r * det::cos(a), r * det::sin(a), rng.uniform(-0.3, 0.3)]
         })
         .collect();
     let corner = |i: usize| corners.get(i % k).copied().unwrap_or([0.0; 3]);

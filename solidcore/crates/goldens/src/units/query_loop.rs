@@ -20,6 +20,7 @@
 //! a side too (`SmSurface::GetSingularities`, `surface.surface_p3`), and the global
 //! point solves of `DropPoint` on kinds whose solver is not ported yet.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -629,8 +630,8 @@ fn gen_shape(rng: &mut Rng, a: P2, b: P2) -> (Vec<[f64; 3]>, usize, bool) {
             let m = lerp2(a, b, 0.5);
             let mid = [m[0] + nrm[0] * h, m[1] + nrm[1] * h];
             // weight cos(half angle) of the arc through a, b with tangent apex `mid`
-            let half = (2.0 * h).atan();
-            let w = half.cos();
+            let half = det::atan(2.0 * h);
+            let w = det::cos(half);
             (
                 vec![
                     [a[0], a[1], 1.0],
@@ -737,16 +738,16 @@ fn push_segment(
         let mid = lerp2(pa, pb, 0.5);
         let half = sub2(pb, pa);
         let c = 0.5 * (half[0] * half[0] + half[1] * half[1]).sqrt();
-        let alpha = m[2].clamp(-1.0, 1.0).acos();
+        let alpha = det::acos(m[2].clamp(-1.0, 1.0));
         let to_apex = sub2(apex, mid);
         let la = (to_apex[0] * to_apex[0] + to_apex[1] * to_apex[1]).sqrt();
         if alpha < 1e-3 || la <= 0.0 || c <= 0.0 {
             return None;
         }
-        let r = c / alpha.sin();
+        let r = c / det::sin(alpha);
         let centre = [
-            mid[0] - to_apex[0] / la * r * alpha.cos(),
-            mid[1] - to_apex[1] / la * r * alpha.cos(),
+            mid[0] - to_apex[0] / la * r * det::cos(alpha),
+            mid[1] - to_apex[1] / la * r * det::cos(alpha),
         ];
         let c3 = srf_pt(k, s, centre)?;
         let a3 = srf_pt(k, s, pa)?;
@@ -975,7 +976,7 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
             angs.sort_by(f64::total_cmp);
             for a in &angs {
                 let r = rng.uniform(0.08, 0.28);
-                verts.push([c[0] + w * r * a.cos(), c[1] + h * r * a.sin()]);
+                verts.push([c[0] + w * r * det::cos(*a), c[1] + h * r * det::sin(*a)]);
             }
             if nv % 2 == 1 && rng.chance(0.12) {
                 // a star polygon {nv/2}: it winds twice around its centre

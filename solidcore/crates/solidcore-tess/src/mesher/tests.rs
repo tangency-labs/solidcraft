@@ -1,3 +1,4 @@
+use solidcore::math::det;
 use super::*;
 
 /// Seeds on a motorcycle trace start at the spacing of the boundary it leaves and grow
@@ -214,7 +215,7 @@ fn sag_refinement_across_an_inflection_ends_without_slivers() {
     for t in &tris {
         let [p, q, r] = t.map(|i| uv[i as usize]);
         let area = (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
-        let longest = [(p, q), (q, r), (r, p)].iter().map(|(x, y)| (x[0] - y[0]).hypot(x[1] - y[1])).fold(0.0, f64::max);
+        let longest = [(p, q), (q, r), (r, p)].iter().map(|(x, y)| det::hypot(x[0] - y[0], x[1] - y[1])).fold(0.0, f64::max);
         assert!(area > 1e-6 * longest * longest, "a sliver {t:?}: {p:?} {q:?} {r:?}");
     }
 }

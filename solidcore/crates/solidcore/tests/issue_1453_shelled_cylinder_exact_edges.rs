@@ -14,6 +14,7 @@
 mod offset_fixture;
 
 use core::f64::consts::PI;
+use solidcore::math::det;
 
 use offset_fixture::{planar_faces_at, shell};
 use solidcore::boolean::api_brep::boolean_difference;
@@ -116,7 +117,7 @@ fn cylinder(k: &mut Kernel) -> Brep {
 }
 
 fn on_cylinder(p: Point3) -> f64 {
-    p.x.hypot(p.y) - 4.0
+    det::hypot(p.x, p.y) - 4.0
 }
 
 /// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. By default
@@ -174,7 +175,7 @@ fn frustum_inner_radius(z: f64) -> f64 {
 }
 
 fn on_frustum(p: Point3) -> f64 {
-    p.x.hypot(p.y) - frustum_inner_radius(p.z)
+    det::hypot(p.x, p.y) - frustum_inner_radius(p.z)
 }
 
 /// A frustum r5 to r3 over h10 shelled 1 inward, its top open. By default its floor

@@ -26,6 +26,7 @@
 //! and what needs the unported `surface.surface_p5` (`LocalPointSolve`, the base
 //! `IsSingularity`), e.g. a drop point or a guessed inversion.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -640,8 +641,8 @@ fn gen_tangent_curve(k: &Kernel, rng: &mut Rng, srf: &SrfIn, uv: [f64; 2]) -> Op
     // crosses the surface's section circle, which gives near-tangent intersections
     let deg = *rng.choose(&[0.0, 0.0, 0.5, 2.0, 6.0, 12.0, 17.0]).unwrap_or(&0.0_f64);
     let phi = deg * std::f64::consts::PI / 180.0;
-    let tt = t * phi.cos() + n * phi.sin();
-    let nn = n * phi.cos() - t * phi.sin();
+    let tt = t * det::cos(phi) + n * det::sin(phi);
+    let nn = n * det::cos(phi) - t * det::sin(phi);
     let q0 = p - tt * len + nn * amp;
     let q2 = p + tt * len + nn * amp;
     let q1 = p - nn * amp;
@@ -935,7 +936,7 @@ fn thin_patch(s: &SrfIn) -> bool {
     }
     let pts: Vec<[f64; 3]> = bs.net.iter().flatten().map(|p| [p[0], p[1], p[2]]).collect();
     let span = |a: &[f64; 3], b: &[f64; 3]| {
-        ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        (det::powi(a[0] - b[0], 2) + det::powi(a[1] - b[1], 2) + det::powi(a[2] - b[2], 2)).sqrt()
     };
     let extent = pts
         .iter()

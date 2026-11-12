@@ -23,6 +23,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent3d::Extent3d;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::p1::BSplineCurveForm;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
@@ -187,7 +188,7 @@ fn sphere_cap_seam_box_stays_on_the_cap() {
         "pole at {pole} of {ivl:?}"
     );
     let seam = Extent1d::from_min_max(ivl.min(), pole);
-    let z30 = 50.0 * 30.0_f64.to_radians().cos();
+    let z30 = 50.0 * det::cos(30.0_f64.to_radians());
 
     let fixed = c
         .calculate_tight_bounding_box(&kernel(true), &seam)
@@ -290,7 +291,7 @@ fn interval_knot_fix_is_opt_in_and_tightens_a_rational_arc_subdomain() {
     let end = *knots.last().unwrap();
     let t30 = parameter_at_y(&curve, &k, 25.0, start, end);
     let interval = Extent1d::from_min_max(start, t30);
-    let expected_x = (50.0_f64.powi(2) - 25.0_f64.powi(2)).sqrt();
+    let expected_x = (det::powi(50.0_f64, 2) - det::powi(25.0_f64, 2)).sqrt();
 
     let legacy = curve.calculate_tight_bounding_box(&k, &interval).unwrap();
     assert_box_close(

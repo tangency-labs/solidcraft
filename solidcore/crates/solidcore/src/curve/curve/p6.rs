@@ -2513,6 +2513,7 @@ fn split_in_three(interval: &Extent1d) -> [Extent1d; 3] {
 mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
+    use crate::math::det;
 
     /// A full circle of radius 2 in the XY plane (rational quadratic B-spline).
     fn circle_of_radius_two(start_deg: f64, end_deg: f64) -> Curve {
@@ -2574,9 +2575,9 @@ mod tests {
         assert!(shared.is_some());
         for i in 0..48 {
             let a = (f64::from(i) + 0.25) * std::f64::consts::TAU / 48.0;
-            let on = Vec3::new(2.0 * a.cos(), 2.0 * a.sin(), 0.0);
+            let on = Vec3::new(2.0 * det::cos(a), 2.0 * det::sin(a), 0.0);
             for r in [2.0, 2.0 + 0.5 * tol] {
-                let p = Vec3::new(r * a.cos(), r * a.sin(), 0.0);
+                let p = Vec3::new(r * det::cos(a), r * det::sin(a), 0.0);
                 let fresh = drop_at(p, &mut None);
                 let reused = drop_at(p, &mut shared);
                 // `Debug` prints every float exactly: equal strings are equal bits
@@ -2639,7 +2640,7 @@ mod tests {
                 let q = half.evaluate_point(&k, e.param(1).unwrap()).unwrap();
                 assert!(p.distance(q) < tol, "{p:?} vs {q:?}");
                 assert!(p.y > -tol && (p.length() - 2.0).abs() < tol, "{p:?}");
-                *angle = p.y.max(0.0).atan2(p.x);
+                *angle = det::atan2(p.y.max(0.0), p.x);
             }
             let [a, b] = angles;
             spans.push((a.min(b), a.max(b)));

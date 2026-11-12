@@ -17,6 +17,7 @@ use super::certify::{affine_fundamentals, t_make, t_nonneg, t_pieces, t_scale, A
 use super::qp::QpRows;
 use super::{el, el_mut, el_ref, sm_err, smax, tensor_elevate, Tensor};
 use crate::error::Result;
+use crate::math::det;
 use crate::math::{Vec3, PI};
 use core::cell::Cell;
 
@@ -144,13 +145,13 @@ impl SectorRows {
         let mut weights = Vec::new();
         for angles in theta.windows(2) {
             let ta = el(angles, 0)?;
-            let (c0, s0) = (ta.cos(), ta.sin());
+            let (c0, s0) = (det::cos(ta), det::sin(ta));
             for pair in 0..2 {
                 let (c1, s1) = if pair == 0 {
                     (c0, s0)
                 } else {
                     let tb = el(angles, 1)?;
-                    (tb.cos(), tb.sin())
+                    (det::cos(tb), det::sin(tb))
                 };
                 weights.push([c0 * c1, c0 * s1 + s0 * c1, s0 * s1]);
             }
@@ -507,12 +508,12 @@ pub(super) fn sector_conditions(
                 for a in 0..theta.len() - 1 {
                     for pair in 0..2 {
                         let ta = el(&theta, a)?;
-                        let (c0, s0) = (ta.cos(), ta.sin());
+                        let (c0, s0) = (det::cos(ta), det::sin(ta));
                         let (c1, s1) = if pair == 0 {
                             (c0, s0)
                         } else {
                             let tb = el(&theta, a + 1)?;
-                            (tb.cos(), tb.sin())
+                            (det::cos(tb), det::sin(tb))
                         };
                         let w = [c0 * c1, c0 * s1 + s0 * c1, s0 * s1];
                         let mut cst = 0.0;

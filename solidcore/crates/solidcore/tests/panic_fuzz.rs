@@ -29,6 +29,7 @@ mod offset_fixture;
 #[path = "support/panic_fuzz.rs"]
 mod panic_fuzz;
 
+use solidcore::math::det;
 use std::io::Write as _;
 
 use panic_fuzz::{
@@ -516,7 +517,7 @@ fn planar_points(r: &mut Rng, p: f64) -> Vec<P> {
         0 => (0..n)
             .map(|i| {
                 let t = std::f64::consts::TAU * i as f64 / n as f64;
-                [s * t.cos(), s * t.sin(), 0.0]
+                [s * det::cos(t), s * det::sin(t), 0.0]
             })
             .collect(),
         1 => vec![[0.0, 0.0, 0.0], [s, s, 0.0], [s, 0.0, 0.0], [0.0, s, 0.0]],

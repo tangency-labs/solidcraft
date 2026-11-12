@@ -5,6 +5,7 @@
 //! the facet angle, then Ruppert refinement for shape. Constraint edges are never split, so the
 //! boundary stays exactly the shared edge nodes.
 
+use solidcore::math::det;
 use crate::vec::VecExt as _;
 use std::collections::HashMap;
 
@@ -18,6 +19,13 @@ type Cdt = ConstrainedDelaunayTriangulation<Point2<f64>>;
 
 /// Smallest angle Ruppert refinement aims for.
 const MIN_ANGLE_DEG: f64 = 25.0;
+
+/// Spade's angle limit for `degrees`: its circumradius to shortest edge ratio, `1 / (2 sin a)`,
+/// with the sine from `det` (`AngleLimit::from_deg` takes the platform's).
+fn angle_limit(degrees: f64) -> AngleLimit {
+    let sin = det::sin(degrees.to_radians());
+    AngleLimit::from_radius_to_shortest_edge_ratio(if sin == 0.0 { f64::INFINITY } else { 0.5 / sin })
+}
 /// A side is split once it is this many times the target length (the lattice's own sides,
 /// exactly the target, and the slightly longer ones where it meets the boundary, stay whole).
 const LONG: f64 = 1.5;
@@ -30,7 +38,7 @@ const CLEARANCE: f64 = 0.5;
 /// angle aimed for, refinement would otherwise crowd points ever closer to it, down to triangles
 /// with no area; a larger floor leaves the slivers of flat faces with no size unshaped.
 pub(crate) fn smallest_area(tol: f64) -> f64 {
-    if tol.is_finite() && tol > 0.0 { (1e-3 * tol).powi(2) } else { 0.0 }
+    if tol.is_finite() && tol > 0.0 { det::powi(1e-3 * tol, 2) } else { 0.0 }
 }
 
 /// Rounds of sag refinement.
@@ -143,7 +151,7 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
         let params = RefinementParameters::<f64>::new()
             .keep_constraint_edges()
             .exclude_outer_faces(true)
-            .with_angle_limit(AngleLimit::from_deg(flat.min_angle))
+            .with_angle_limit(angle_limit(flat.min_angle))
             .with_min_required_area(flat.min_area)
             .with_max_additional_vertices(flat.max_points);
         cdt.refine(params);
@@ -158,7 +166,7 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
             let params = RefinementParameters::<f64>::new()
                 .keep_constraint_edges()
                 .exclude_outer_faces(true)
-                .with_angle_limit(AngleLimit::from_deg(MIN_ANGLE_DEG))
+                .with_angle_limit(angle_limit(MIN_ANGLE_DEG))
                 // Around a corner sharper than the angle (where two pieces' cuts meet) the
                 // refinement would crowd points ever closer to it, down to triangles with no area.
                 .with_min_required_area(smallest_area(sag.tol))
@@ -290,7 +298,7 @@ fn refine_sag(
     let mut cache: HashMap<FixedVertexHandle, Option<(Vec3, Option<Vec3>)>> = HashMap::new();
     // The widest turn between two corner normals.
     let spread = |n: [Option<Vec3>; 3]| match n {
-        [Some(a), Some(b), Some(c)] => [(a, b), (b, c), (c, a)].iter().map(|(x, y)| x.dot(*y).clamp(-1.0, 1.0).acos()).fold(0.0, f64::max),
+        [Some(a), Some(b), Some(c)] => [(a, b), (b, c), (c, a)].iter().map(|(x, y)| det::acos(x.dot(*y).clamp(-1.0, 1.0))).fold(0.0, f64::max),
         _ => 0.0,
     };
     for _ in 0..SAG_ROUNDS {
@@ -545,7 +553,7 @@ fn dist_to_segment(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let l2 = dx * dx + dy * dy;
     let t = if l2 > 0.0 { (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
-    (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy)
+    det::hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
 }
 
 #[cfg(test)]
@@ -610,7 +618,7 @@ mod tests {
                     .map(|k| {
                         let (a, b, c) = (p[k], p[(k + 1) % 3], p[(k + 2) % 3]);
                         let (u, v) = ([b[0] - a[0], b[1] - a[1]], [c[0] - a[0], c[1] - a[1]]);
-                        (u[0] * v[1] - u[1] * v[0]).abs().atan2(u[0] * v[0] + u[1] * v[1]).to_degrees()
+                        det::atan2((u[0] * v[1] - u[1] * v[0]).abs(), u[0] * v[0] + u[1] * v[1]).to_degrees()
                     })
                     .fold(180.0, f64::min)
             })
@@ -622,7 +630,7 @@ mod tests {
         // A disc's rim alone triangulates into fans of slivers; shaped, every triangle keeps the
         // angle, the rim stays whole and the points added stay within the bound.
         let n = 128;
-        let rim: Vec<[f64; 2]> = (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| [10.0 * c, 10.0 * s]).collect();
+        let rim: Vec<[f64; 2]> = (0..n).map(|k| det::sin_cos(k as f64 * std::f64::consts::TAU / n as f64)).map(|(s, c)| [10.0 * c, 10.0 * s]).collect();
         let whole = std::iter::once(0..n).collect::<Vec<_>>();
         let bare = triangulate(&rim, &whole, Fill { seeds: &[], refine: None, shape: false, lenient: false, flat: None });
         let Some((_, bare)) = bare else { panic!("meshes") };
@@ -634,7 +642,7 @@ mod tests {
         assert!(extra.len() <= n);
         let mut uv = rim.clone();
         uv.extend(extra);
-        let exact = 0.5 * n as f64 * 100.0 * (std::f64::consts::TAU / n as f64).sin();
+        let exact = 0.5 * n as f64 * 100.0 * det::sin(std::f64::consts::TAU / n as f64);
         assert!((area(&uv, &tris) - exact).abs() < 1e-9);
         let worst = smallest_angles(&uv, &tris).into_iter().fold(180.0, f64::min);
         assert!(worst >= 15.0 - 1e-9, "smallest angle {worst}");
@@ -651,9 +659,9 @@ mod tests {
             assert!(clear(&outer) && clear(&hole), "{p:?}");
         }
         // Nearest neighbours one side apart, six of them in the open.
-        let near = |p: [f64; 2]| seeds.iter().filter(|q| ((q[0] - p[0]).hypot(q[1] - p[1]) - 1.0).abs() < 1e-9).count();
+        let near = |p: [f64; 2]| seeds.iter().filter(|q| (det::hypot(q[0] - p[0], q[1] - p[1]) - 1.0).abs() < 1e-9).count();
         assert!(seeds.iter().any(|p| near(*p) == 6));
-        assert!(seeds.iter().all(|p| seeds.iter().all(|q| p == q || (q[0] - p[0]).hypot(q[1] - p[1]) > 1.0 - 1e-9)));
+        assert!(seeds.iter().all(|p| seeds.iter().all(|q| p == q || det::hypot(q[0] - p[0], q[1] - p[1]) > 1.0 - 1e-9)));
     }
 
     #[test]

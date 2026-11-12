@@ -49,6 +49,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives as api;
@@ -218,7 +219,10 @@ fn rot_cols() -> [Vec3; 3] {
     let n =
         (ROT_AXIS[0] * ROT_AXIS[0] + ROT_AXIS[1] * ROT_AXIS[1] + ROT_AXIS[2] * ROT_AXIS[2]).sqrt();
     let u = [ROT_AXIS[0] / n, ROT_AXIS[1] / n, ROT_AXIS[2] / n];
-    let (s, c) = (ROT_DEG.to_radians().sin(), ROT_DEG.to_radians().cos());
+    let (s, c) = (
+        det::sin(ROT_DEG.to_radians()),
+        det::cos(ROT_DEG.to_radians()),
+    );
     let m = |i: usize, j: usize| {
         let kr = [[0.0, -u[2], u[1]], [u[2], 0.0, -u[0]], [-u[1], u[0], 0.0]];
         let kk: f64 = (0..3).map(|t| kr[i][t] * kr[t][j]).sum();

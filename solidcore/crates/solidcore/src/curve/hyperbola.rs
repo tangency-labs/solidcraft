@@ -79,6 +79,7 @@ use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject};
 use crate::geom::tol::{are_same, is_zero};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
@@ -337,21 +338,21 @@ impl Hyperbola {
         let mut out = Vec::with_capacity(num_derivs + 1);
 
         // evaluate position
-        out.push(o + (a * t.cosh()) * x + (b * t.sinh()) * y);
+        out.push(o + (a * det::cosh(t)) * x + (b * det::sinh(t)) * y);
 
         // 1st derivative
         if num_derivs > 0 {
-            out.push((a * t.sinh()) * x + (b * t.cosh()) * y);
+            out.push((a * det::sinh(t)) * x + (b * det::cosh(t)) * y);
         }
 
         // 2nd derivative
         if num_derivs > 1 {
-            out.push((a * t.cosh()) * x + (b * t.sinh()) * y);
+            out.push((a * det::cosh(t)) * x + (b * det::sinh(t)) * y);
         }
 
         // 3rd derivative
         if num_derivs > 2 {
-            out.push((a * t.sinh()) * x + (b * t.cosh()) * y);
+            out.push((a * det::sinh(t)) * x + (b * det::cosh(t)) * y);
         }
         Ok(out)
     }
@@ -379,7 +380,7 @@ impl Hyperbola {
 
         // arc-sinh(u) = ln(u + sqrt(u*u+1.0))
         let val = dy / self.semi_image_axis;
-        let param = (val + sqrt(val * val + 1.0)).ln();
+        let param = det::ln(val + sqrt(val * val + 1.0));
 
         // when asked - classify the point
         let mut loc = None;

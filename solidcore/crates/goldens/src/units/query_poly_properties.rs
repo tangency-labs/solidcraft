@@ -19,6 +19,7 @@
 // The generator indexes the meshes it has just built (as other runners do).
 #![allow(clippy::indexing_slicing)]
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -329,7 +330,7 @@ fn prism(n: usize, h: f64) -> Mesh {
     for z in [0.0, h] {
         for i in 0..n {
             let a = std::f64::consts::TAU * i as f64 / n as f64;
-            m.pts.push([a.cos(), a.sin(), z]);
+            m.pts.push([det::cos(a), det::sin(a), z]);
         }
     }
     m.faces.push(vec![(0..n).rev().collect()]);
@@ -349,7 +350,7 @@ fn sphere(nu: usize, nv: usize) -> Mesh {
         let t = std::f64::consts::PI * j as f64 / nv as f64 - std::f64::consts::FRAC_PI_2;
         for i in 0..nu {
             let a = std::f64::consts::TAU * i as f64 / nu as f64;
-            m.pts.push([t.cos() * a.cos(), t.cos() * a.sin(), t.sin()]);
+            m.pts.push([det::cos(t) * det::cos(a), det::cos(t) * det::sin(a), det::sin(t)]);
         }
     }
     m.pts.push([0.0, 0.0, 1.0]);
@@ -374,8 +375,8 @@ fn torus(nu: usize, nv: usize, r: f64) -> Mesh {
         let b = std::f64::consts::TAU * j as f64 / nv as f64;
         for i in 0..nu {
             let a = std::f64::consts::TAU * i as f64 / nu as f64;
-            let rr = 1.0 + r * b.cos();
-            m.pts.push([rr * a.cos(), rr * a.sin(), r * b.sin()]);
+            let rr = 1.0 + r * det::cos(b);
+            m.pts.push([rr * det::cos(a), rr * det::sin(a), r * det::sin(b)]);
         }
     }
     let at = |j: usize, i: usize| (j % nv) * nu + i % nu;
@@ -471,12 +472,12 @@ fn gen_case(rng: &mut Rng) -> Inputs {
 
     // frame and scale
     let s = match rng.below(8) {
-        0 => 10f64.powi(rng.range_i64(-6, -2) as i32),
-        1 => 10f64.powi(rng.range_i64(2, 6) as i32),
+        0 => det::powi(10f64, rng.range_i64(-6, -2) as i32),
+        1 => det::powi(10f64, rng.range_i64(2, 6) as i32),
         _ => rng.uniform(0.5, 4.0),
     };
     let a = rng.uniform(0.0, 6.0);
-    let (ca, sa) = (a.cos(), a.sin());
+    let (ca, sa) = (det::cos(a), det::sin(a));
     let shift = [rng.uniform(-2.0, 2.0) * s, rng.uniform(-2.0, 2.0) * s, rng.uniform(-2.0, 2.0) * s];
     let far = if rng.chance(0.1) { 1e3 * s } else { 0.0 };
     let pts: Vec<[f64; 3]> = m

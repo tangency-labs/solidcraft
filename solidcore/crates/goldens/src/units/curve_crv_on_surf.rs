@@ -27,6 +27,7 @@
 #[path = "fixtures/crv_on_surf_sms.rs"]
 mod sms;
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -469,7 +470,7 @@ fn object(c: &CosIn) -> Option<Object> {
         UvIn::Bspline(bs) => uv_bspline(bs)?,
         UvIn::Line([x0, y0, x1, y1]) => {
             let ok = [x0, y0, x1, y1].iter().all(|&&v| fin(v))
-                && ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt() >= 1e-6;
+                && (det::powi(x1 - x0, 2) + det::powi(y1 - y0, 2)).sqrt() >= 1e-6;
             ok.then(|| ((0.0, 1.0), vec![[*x0, *y0], [*x1, *y1]]))?
         }
     };
@@ -1522,7 +1523,7 @@ fn gen_inner(rng: &mut Rng, a: f64, bb: f64) -> (f64, f64) {
 
 fn rot_frame(rng: &mut Rng) -> ([f64; 3], [f64; 3]) {
     let t = rng.uniform(0.0, std::f64::consts::TAU);
-    let (s, c) = t.sin_cos();
+    let (s, c) = det::sin_cos(t);
     match rng.below(3) {
         0 => ([c, s, 0.0], [-s, c, 0.0]),
         1 => ([c, 0.0, -s], [0.0, 1.0, 0.0]),

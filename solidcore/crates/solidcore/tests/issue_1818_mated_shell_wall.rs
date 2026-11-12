@@ -34,6 +34,7 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::face_area;
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, ShellOutcome};
@@ -66,8 +67,8 @@ fn loft(k: &mut Kernel, square: bool) -> Brep {
                     / 180.0;
                 let frame = Axis2Placement::new(
                     Vec3::new(0.0, 0.0, f64::from(section) * 60.0),
-                    Vec3::new(start.cos(), start.sin(), 0.0),
-                    Vec3::new(-start.sin(), start.cos(), 0.0),
+                    Vec3::new(det::cos(start), det::sin(start), 0.0),
+                    Vec3::new(-det::sin(start), det::cos(start), 0.0),
                 );
                 Curve::from(
                     Ellipse::create_canonical_circle(

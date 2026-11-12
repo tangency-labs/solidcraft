@@ -108,6 +108,7 @@
 
 pub mod curve_loops;
 
+use crate::math::det;
 use std::borrow::Cow;
 
 use crate::curve::curve::p2::CurveKind;
@@ -1585,7 +1586,7 @@ fn next_round_the_vertex(
     let mut best_bend = 0.0;
     for (ii, (ray, acc)) in rays.iter().zip(&accs).enumerate() {
         let r = *ray / ray.length();
-        let mut angle = normal.dot(back.cross(r)).atan2(back.dot(r));
+        let mut angle = det::atan2(normal.dot(back.cross(r)), back.dot(r));
         if angle <= 0.0 {
             angle += two_pi;
         }

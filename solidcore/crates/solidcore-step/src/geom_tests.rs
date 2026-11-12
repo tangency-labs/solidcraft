@@ -2,6 +2,7 @@
 //! parameterisation), writing, and read → write → read round trips. Expected values are
 //! analytic.
 
+use solidcore::math::det;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 use std::sync::Arc;
 
@@ -133,7 +134,7 @@ fn circle_and_ellipse() {
 #[test]
 fn hyperbola_and_parabola() {
     let h = curve("#10=HYPERBOLA('',#4,2.,3.);", 10, MM);
-    at_curve(&h, 1.0, [2.0 * 1f64.cosh(), 3.0 * 1f64.sinh(), 0.0]);
+    at_curve(&h, 1.0, [2.0 * det::cosh(1f64), 3.0 * det::sinh(1f64), 0.0]);
     round_trip_curve(&h, &TS);
     let p = curve("#10=PARABOLA('',#4,0.5);", 10, MM);
     at_curve(&p, 2.0, [2.0, 2.0, 0.0]);
@@ -174,7 +175,7 @@ fn rational_bspline_curve_is_an_exact_quarter_circle() {
     assert!(b.weights.is_some());
     for t in [0.1, 0.5, 0.9] {
         let p = c.point(t).unwrap_or_default();
-        assert!((p[0].hypot(p[1]) - 1.0).abs() < 1e-12, "{p:?}");
+        assert!((det::hypot(p[0], p[1]) - 1.0).abs() < 1e-12, "{p:?}");
     }
     round_trip_curve(&c, &[0.0, 0.3, 0.7, 1.0]);
 }

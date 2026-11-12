@@ -13,6 +13,7 @@
 //! snapshot of every context, and a final snapshot after the live locks are dropped
 //! in slot order. Every run uses at least [`MIN_GENERATED`] generated scripts.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -498,7 +499,7 @@ fn size(rng: &mut Rng) -> f64 {
     } else if r < 0.6 {
         rng.choose(&EDGES).copied().unwrap_or(50.0)
     } else {
-        let v = 10f64.powf(rng.uniform(-6.0, 8.0));
+        let v = det::powf(10f64, rng.uniform(-6.0, 8.0));
         if rng.chance(0.1) {
             -v
         } else {

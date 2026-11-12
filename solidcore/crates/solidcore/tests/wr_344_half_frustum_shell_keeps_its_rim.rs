@@ -27,6 +27,7 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, shell, volume};
 use solidcore::boolean::api_brep::boolean_union;
+use solidcore::math::det;
 use solidcore::math::{Vec3, PI};
 use solidcore::primitive::api_primitives::create_partial_cone;
 use solidcore::query::api_queries::brep_is_manifold_solid;
@@ -55,8 +56,8 @@ fn shelled(fixed: bool, (r0, r1, h, t): (f64, f64, f64, f64)) -> (Kernel, Brep) 
 
 fn closed_form((r0, r1, h, t): (f64, f64, f64, f64)) -> f64 {
     let slope = (r1 - r0) / h;
-    let inner = r0 - t / slope.atan().cos();
-    let cube = |z: f64| (inner + slope * z).powi(3) / (3.0 * slope);
+    let inner = r0 - t / det::cos(det::atan(slope));
+    let cube = |z: f64| det::powi(inner + slope * z, 3) / (3.0 * slope);
     PI * h * (r0 * r0 + r0 * r1 + r1 * r1) / 3.0 - PI * (cube(h) - cube(t))
 }
 

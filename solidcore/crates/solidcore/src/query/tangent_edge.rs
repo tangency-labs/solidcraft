@@ -45,8 +45,8 @@
 //!
 //! **Rounded points.** The points `t_j` are the exact Chebyshev points `t*_j` rounded: in the
 //! piece's `[-1, 1]` scale `|t_j - t*_j| <= delta` (`node_error`: the angle
-//! `(2j + 1) pi / 2n` within `gamma_4 pi`, its cosine within 2 ulps of `f64::cos` (the count
-//! taken for the platform's `cos`), and `m + h c` within `gamma_3 (|m| / h + 1)`). By Markov's
+//! `(2j + 1) pi / 2n` within `gamma_4 pi`, its cosine within 2 ulps of `cos` (twice the one
+//! ulp of [`crate::math::det::cos`]), and `m + h c` within `gamma_3 (|m| / h + 1)`). By Markov's
 //! inequality `|P'| <= D^2 ||P||` on `[-1, 1]`, so `|e . P(t*_j)| <= M + delta D^2 ||P||` for
 //! each unit `e`, and the interpolant at the exact points gives
 //! `||P|| <= L (M + delta D^2 ||P||)`, that is `||P|| <= L M / (1 - L delta D^2)`, used in
@@ -80,9 +80,9 @@
 //! **The cost.** Each piece between the pcurves' knots is decided on a budget of `MAX_POINTS`
 //! evaluations; a piece past it is [`Tangency::Undecided`], not an error.
 //!
-//! **Platforms.** The points use the platform's `cos`, the bounds its `ln`, `atan`, `atan2` and
-//! `acos`, each taken within 2 ulps: the verdicts are sound on any platform where that holds
-//! and may differ in the last bit between platforms.
+//! **Platforms.** The points use [`crate::math::det`]'s `cos`, the bounds its `ln`, `atan`,
+//! `atan2` and `acos`, each taken within 2 ulps (its table gives 1, and 2 for `atan2`): the
+//! same bits, and so the same verdicts, on every platform.
 //!
 //! **The sense.** The two uses are an edge use and its radial partner, the face uses on the
 //! two sides of one region. Their face use normals (the surface's natural normal turned by the
@@ -176,6 +176,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::station::{as_b_spline, span, Nurbs};
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
 use crate::nurbs::crv_basic::Curve as NurbCurve;
@@ -1233,8 +1234,8 @@ fn angle_between(d: I3, b: I3) -> Option<f64> {
     if !acute {
         return None;
     }
-    // acos and asin within 2 ulps (the platform's): 8 u of the angle covers each
-    let by_cos = cos.lo.acos() * (1.0 + 8.0 * UNIT);
+    // acos and asin within 2 ulps (`det`'s, 1 ulp): 8 u of the angle covers each
+    let by_cos = det::acos(cos.lo) * (1.0 + 8.0 * UNIT);
     // the sine form only where both lengths are proved positive; its argument is the upper
     // end of an outward-rounded quotient (so rounded up), clamped at 1 (asin 1 = pi / 2, no
     // tighter than the cosine's acute bound, which is then kept)
@@ -1243,7 +1244,7 @@ fn angle_between(d: I3, b: I3) -> Option<f64> {
         return Some(by_cos);
     }
     let sin = (norm(cross(d, b)) / (nd * nb)).hi.min(1.0);
-    let by_sin = sin.asin() * (1.0 + 8.0 * UNIT);
+    let by_sin = det::asin(sin) * (1.0 + 8.0 * UNIT);
     Some(by_sin.min(by_cos))
 }
 
@@ -1254,8 +1255,8 @@ fn box_bound(p: I3, q: Ivl) -> Option<f64> {
         return None;
     }
     let ratio = norm(p) / q;
-    // atan within 2 ulps (the platform's)
-    Some(ratio.hi.atan() * (1.0 + 8.0 * UNIT))
+    // atan within 2 ulps (`det`'s 1)
+    Some(det::atan(ratio.hi) * (1.0 + 8.0 * UNIT))
 }
 
 /// The pieces between consecutive `breaks` of some length.
@@ -1272,8 +1273,8 @@ fn pieces(breaks: &[f64]) -> Vec<(f64, f64)> {
 /// An upper bound of the Lebesgue constant of `n` Chebyshev points, `1 + (2/pi) ln n`
 /// (module docs), rounded up.
 fn lebesgue(n: usize) -> f64 {
-    let bound = 1.0 + 2.0 / std::f64::consts::PI * (n as f64).ln();
-    // ln within 2 ulps (4 u, the platform's), the quotient, product and sum: gamma_4 more,
+    let bound = 1.0 + 2.0 / std::f64::consts::PI * det::ln(n as f64);
+    // ln within 2 ulps (4 u; `det`'s 1), the quotient, product and sum: gamma_4 more,
     // under the 16 u taken
     bound * (1.0 + 16.0 * UNIT)
 }
@@ -1285,7 +1286,7 @@ fn node_error(s0: f64, s1: f64) -> f64 {
     // the angle (2j + 1) pi / 2n: pi's own rounding, a product and a quotient (the integers
     // are exact), gamma_4 of pi
     let angle = gamma(4) * std::f64::consts::PI;
-    // its cosine, within 2 ulps of a value at most 1 (the platform's `cos`): 4 u
+    // its cosine, within 2 ulps of a value at most 1 (`det`'s `cos`, 1 ulp): 4 u
     let cosine = 4.0 * UNIT;
     // m + h c: m and h each one rounding (the halving is exact), the product and the sum,
     // gamma_3 of |m| + h in the piece's scale h
@@ -1325,8 +1326,8 @@ fn piece_bound(nodes: &[Node], lebesgue: f64, eta: f64) -> Option<f64> {
         return None;
     }
     let ratio = p_norm / floor;
-    // atan within 2 ulps (the platform's)
-    Some(ratio.hi.atan() * (1.0 + 8.0 * UNIT))
+    // atan within 2 ulps (`det`'s 1)
+    Some(det::atan(ratio.hi) * (1.0 + 8.0 * UNIT))
 }
 
 /// The Chebyshev points of `[s0, s1]`, `n` of them.
@@ -1334,7 +1335,7 @@ fn chebyshev(s0: f64, s1: f64, n: usize) -> impl Iterator<Item = f64> {
     let (m, h) = (0.5 * (s0 + s1), 0.5 * (s1 - s0));
     (0..n).map(move |j| {
         let angle = (2 * j + 1) as f64 * std::f64::consts::PI / (2 * n) as f64;
-        m + h * angle.cos()
+        m + h * det::cos(angle)
     })
 }
 
@@ -1404,8 +1405,8 @@ impl Pair {
         let defined = norm(fa).is_positive() && norm(fc).is_positive();
         let angle_lo = defined.then(|| {
             // atan2(y, x) grows with y >= 0 and falls with x: its lower end at (|P|_lo, Q_hi)
-            let a = norm(p).lo.atan2(q.hi);
-            // atan2 within 2 ulps (the platform's)
+            let a = det::atan2(norm(p).lo, q.hi);
+            // atan2 within 2 ulps (`det`'s table)
             a - 8.0 * UNIT * a.abs()
         });
         Ok(Node { p, q, angle_lo })
@@ -2588,7 +2589,7 @@ mod tests {
         let phi = 4.0_f64.to_radians();
         let place = Axis2Placement::new(
             Point3::new(0.0, 20.0, 16.0),
-            Vec3::new(-phi.sin(), 0.0, -phi.cos()),
+            Vec3::new(-det::sin(phi), 0.0, -det::cos(phi)),
             Vec3::new(0.0, 1.0, 0.0),
         );
         crate::topology::brep::p5::transform(k, &mut pipe, &place, None, false).unwrap();
@@ -2809,12 +2810,12 @@ mod tests {
         let (eps, delta) = (1e-3_f64, 1e-9_f64);
         let w = |x: f64| Ivl::new(x - delta, x + delta);
         let d = [w(1.0), w(0.0), w(0.0)];
-        let b = [w(eps.cos()), w(eps.sin()), w(0.0)];
+        let b = [w(det::cos(eps)), w(det::sin(eps)), w(0.0)];
         let got = angle_between(d, b).expect("acute");
         assert!(got >= eps, "{got} below the true angle {eps}");
         assert!(got <= eps + 4.0 * delta + 1e-12, "{got}");
         let cos = dot(d, b) / (norm(d) * norm(b));
-        let by_cos = cos.lo.acos();
+        let by_cos = det::acos(cos.lo);
         assert!(by_cos > got, "the cosine form {by_cos} is the looser");
         assert!(angle_between([w(1.0), w(0.0), w(0.0)], [w(-1.0), w(0.0), w(0.0)]).is_none());
     }
@@ -2915,7 +2916,7 @@ mod tests {
                 Node {
                     p: i3([p, 0.0, 0.0]),
                     q: Ivl::from(1.0),
-                    angle_lo: Some(p.abs().atan2(1.0)),
+                    angle_lo: Some(det::atan2(p.abs(), 1.0)),
                 }
             })
             .collect();
@@ -2924,7 +2925,7 @@ mod tests {
             (at_points - std::f64::consts::FRAC_PI_4).abs() < 1e-12,
             "{at_points}"
         );
-        let between = (5.0_f64 / 3.0).atan();
+        let between = det::atan(5.0_f64 / 3.0);
         let bound = piece_bound(&nodes, lebesgue(n), 0.0).unwrap();
         assert!(bound >= between, "{bound} under {between}");
         assert!(bound > 50.0_f64.to_radians(), "{bound}");
@@ -2932,7 +2933,7 @@ mod tests {
         // atan(L) with the bound's own factors: L's 16 u (atan grows by at most its argument's
         // relative change), the atan's 8 u and the interval quotient's outward rounding, under
         // 32 u; 64 u takes it
-        let most = lebesgue(n).atan() * (1.0 + 64.0 * UNIT);
+        let most = det::atan(lebesgue(n)) * (1.0 + 64.0 * UNIT);
         assert!(bound <= most, "{bound} over {most}");
     }
 
@@ -2953,7 +2954,7 @@ mod tests {
         let eta = 0.05;
         let room = 1.0 - lam * eta;
         let (p_norm, q_norm) = (lam / room, lam / room);
-        let want = (p_norm / (1.0 - lam * eta * q_norm)).atan();
+        let want = det::atan(p_norm / (1.0 - lam * eta * q_norm));
         let got = piece_bound(&nodes, lam, eta).unwrap();
         assert!(
             got >= want && got <= want * (1.0 + 1e-12),
@@ -2977,7 +2978,7 @@ mod tests {
             })
             .collect();
         let floor = 1.1875 - lam * 0.1875;
-        let want = (lam * 0.1 / floor).atan();
+        let want = det::atan(lam * 0.1 / floor);
         let got = piece_bound(&nodes, lam, 0.0).unwrap();
         assert!((got - want).abs() <= 1e-12 * want, "{got} vs {want}");
     }
@@ -3047,9 +3048,9 @@ mod g2_tests {
         let i3 = |v: [f64; 3]| v.map(Ivl::from);
         let st = Starred {
             s: [
-                i3([-r * u.sin(), r * u.cos(), 0.0]),
+                i3([-r * det::sin(u), r * det::cos(u), 0.0]),
                 i3([0.0, 0.0, 1.0]),
-                i3([-r * u.cos(), -r * u.sin(), 0.0]),
+                i3([-r * det::cos(u), -r * det::sin(u), 0.0]),
                 i3([0.0; 3]),
                 i3([0.0; 3]),
             ],

@@ -7,6 +7,7 @@
 //! of `sm_InsertSolutions` and the vertices of `IntersectVertices`, including the edits
 //! both make (vertex tolerances, the classification curve, edge-use UV trim curves).
 
+use solidcore::math::det;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -408,7 +409,7 @@ fn status(e: &SolidError) -> f64 {
 
 fn stationary_curve(dim: u64, scale: f64, angle: f64) -> ScResult<Curve> {
     let points = [0.75, 0.25, 0.75]
-        .map(|x| CPoint::new(x * scale * angle.cos(), x * scale * angle.sin(), 0., 1.));
+        .map(|x| CPoint::new(x * scale * det::cos(angle), x * scale * det::sin(angle), 0., 1.));
     Ok(Curve::from(BSplineCurve::from_data(
         dim,
         2,
@@ -455,7 +456,7 @@ fn build_pool(k: &Kernel, i: &Input) -> ScResult<Pool> {
         } else {
             Curve::from(Line::bounded(
                 Vec3::ZERO,
-                Vec3::new(i.angle.cos(), i.angle.sin(), 0.),
+                Vec3::new(det::cos(i.angle), det::sin(i.angle), 0.),
                 &Extent1d::from_min_max(0., 1.),
                 &BoundedLineOptions {
                     scale: i.scale,

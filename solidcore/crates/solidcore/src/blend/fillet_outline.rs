@@ -41,6 +41,7 @@ use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::knots::Side as KnotSide;
 use crate::surface::surface::p4::NoObject;
@@ -754,7 +755,7 @@ fn tangent_along_rim(
     match *section {
         Section::Straight { x, y, .. } => {
             let from = P2::new(normal.dot(x), normal.dot(y));
-            let angle = (from.x * to.y - from.y * to.x).atan2(from.dot(to));
+            let angle = det::atan2(from.x * to.y - from.y * to.x, from.dot(to));
             let mut turn = Axis2Placement::default();
             turn.init();
             turn.rotate_about_axis_at_point(angle, section.to3(rim), x.cross(y));

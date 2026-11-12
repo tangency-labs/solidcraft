@@ -403,13 +403,14 @@ fn segment_meets_box(a: [f64; 2], b: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> bo
 
 #[cfg(test)]
 mod tests {
+    use solidcore::math::det;
     use super::*;
 
     fn circle(c: [f64; 2], r: f64, n: usize, ccw: bool) -> Vec<[f64; 2]> {
         (0..n)
             .map(|k| {
                 let a = std::f64::consts::TAU * k as f64 / n as f64 * if ccw { 1.0 } else { -1.0 };
-                [c[0] + r * a.cos(), c[1] + r * a.sin()]
+                [c[0] + r * det::cos(a), c[1] + r * det::sin(a)]
             })
             .collect()
     }
@@ -459,7 +460,7 @@ mod tests {
     fn a_disc_is_cells_and_a_band() {
         let b = circle([0.0, 0.0], 1.0, 64, true);
         let loops = one(64);
-        let poly_area = 0.5 * 64.0 * (std::f64::consts::TAU / 64.0).sin();
+        let poly_area = 0.5 * 64.0 * det::sin(std::f64::consts::TAU / 64.0);
         let Some(out) = cut_grid(&b, &loops, &lines(-1.0, 1.0, 10), &lines(-1.0, 1.0, 10), &[], [1.0, 1.0]) else { panic!("meshes") };
         check(&b, &loops, poly_area, &out);
         // Most of the disc is grid cells (two triangles each).
@@ -471,7 +472,7 @@ mod tests {
         let mut b = vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
         b.extend(circle([2.0, 2.0], 1.0, 32, false));
         let loops = [0..4, 4..36];
-        let hole = 0.5 * 32.0 * (std::f64::consts::TAU / 32.0).sin();
+        let hole = 0.5 * 32.0 * det::sin(std::f64::consts::TAU / 32.0);
         let Some(out) = cut_grid(&b, &loops, &lines(0.0, 4.0, 16), &lines(0.0, 4.0, 16), &[], [1.0, 1.0]) else { panic!("meshes") };
         check(&b, &loops, 16.0 - hole, &out);
     }
@@ -482,7 +483,7 @@ mod tests {
         let mut b: Vec<[f64; 2]> = (0..=8).map(|k| [k as f64 / 8.0, 0.0]).collect();
         b.extend((1..8).map(|k| {
             let a = std::f64::consts::FRAC_PI_2 * k as f64 / 8.0;
-            [a.cos(), a.sin()]
+            [det::cos(a), det::sin(a)]
         }));
         b.extend((1..8).rev().map(|k| [0.0, k as f64 / 8.0]));
         let n = b.len();
@@ -504,7 +505,7 @@ mod tests {
         let mut b = vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
         b.extend(circle([1.7, 2.3], 1.0, 32, false));
         let loops = [0..4, 4..36];
-        let hole = 0.5 * 32.0 * (std::f64::consts::TAU / 32.0).sin();
+        let hole = 0.5 * 32.0 * det::sin(std::f64::consts::TAU / 32.0);
         let traces = super::super::motorcycle::traces(&b, &loops, [1.0, 1.0], 0.0);
         assert_eq!(traces.len(), 4, "{traces:?}");
         let Some(out) = cut_grid(&b, &loops, &lines(0.0, 4.0, 16), &lines(0.0, 4.0, 16), &traces, [1.0, 1.0]) else { panic!("meshes") };

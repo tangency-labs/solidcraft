@@ -139,6 +139,7 @@ use crate::geom::tol::{are_same, are_same_to_tol, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{asin, sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     max2, min2, rad_to_deg, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
 };
@@ -785,10 +786,10 @@ impl Sphere {
         }
 
         // evaluate expensive trigonometric functions
-        let cos_u = (uv.x * PI / 180.0).cos();
-        let sin_u = (uv.x * PI / 180.0).sin();
-        let cos_v = (uv.y * PI / 180.0).cos();
-        let sin_v = (uv.y * PI / 180.0).sin();
+        let cos_u = det::cos(uv.x * PI / 180.0);
+        let sin_u = det::sin(uv.x * PI / 180.0);
+        let cos_v = det::cos(uv.y * PI / 180.0);
+        let sin_v = det::sin(uv.y * PI / 180.0);
 
         let n = (hu + 1) * (hv + 1);
         let d = d
@@ -1567,7 +1568,7 @@ impl Sphere {
             let (center, x, y) = if ii == 0 || ii == 1 {
                 // min/max V boundaries - Varying U isoParam Circles
                 (
-                    sphere_origin + self.radius * sphere_z_axis * ang_rad.sin(),
+                    sphere_origin + self.radius * sphere_z_axis * det::sin(ang_rad),
                     sphere_x_axis,
                     sphere_y_axis,
                 )
@@ -1575,7 +1576,7 @@ impl Sphere {
                 // min/max U boundries - Varying V isoParam Circles
                 (
                     sphere_origin,
-                    ang_rad.cos() * sphere_x_axis + ang_rad.sin() * sphere_y_axis,
+                    det::cos(ang_rad) * sphere_x_axis + det::sin(ang_rad) * sphere_y_axis,
                     sphere_z_axis,
                 )
             };
@@ -1608,7 +1609,7 @@ impl Sphere {
                 let cir_vec = p - circle_center;
                 let d_x = cir_vec.dot(circle_x_axis);
                 let d_y = cir_vec.dot(circle_y_axis);
-                let angle_deg = d_y.atan2(d_x) * 180.0 / PI;
+                let angle_deg = det::atan2(d_y, d_x) * 180.0 / PI;
 
                 // accumulate angles
                 ang_degs.push(angle_deg);
@@ -1684,7 +1685,8 @@ impl Sphere {
                     let mut ang = at(&ang_degs, 0) + 42.0; // random...
                     ang = deg2rad(ang);
                     test_point = circle_center
-                        + circle_radius * (ang.cos() * circle_x_axis + ang.sin() * circle_y_axis);
+                        + circle_radius
+                            * (det::cos(ang) * circle_x_axis + det::sin(ang) * circle_y_axis);
                 }
 
                 // Test the point. Tol loosened [B661]
@@ -1742,7 +1744,8 @@ impl Sphere {
             let mid_angle_rad = (start_angle + arc_angle_deg / 2.0) * PI / 180.0;
             let mid_arc_point = circle_center
                 + circle_radius
-                    * (mid_angle_rad.cos() * circle_x_axis + mid_angle_rad.sin() * circle_y_axis);
+                    * (det::cos(mid_angle_rad) * circle_x_axis
+                        + det::sin(mid_angle_rad) * circle_y_axis);
 
             // when circle arcLength is shorter than tolerance
             if deg2rad(arc_angle_deg) * circle_radius < tol_3d {
@@ -1805,7 +1808,8 @@ impl Sphere {
             let arc_ang_rad = at(&ang_degs, ii) * PI / 180.0;
             let arc_point = circle_center
                 + circle_radius
-                    * (arc_ang_rad.cos() * circle_x_axis + arc_ang_rad.sin() * circle_y_axis);
+                    * (det::cos(arc_ang_rad) * circle_x_axis
+                        + det::sin(arc_ang_rad) * circle_y_axis);
 
             // Actually, check all circle-circle intersections.  There will be some
             // outside of the surface patch.
@@ -2684,7 +2688,7 @@ impl Sphere {
         let d_z = vec.dot(z_axis);
 
         // Get Spherical Coordinates (degrees)
-        let d_u = d_y.atan2(d_x) * 180.0 / PI; //  dU range:[-180 to 180]
+        let d_u = det::atan2(d_y, d_x) * 180.0 / PI; //  dU range:[-180 to 180]
         let d_v = asin(d_z / self.radius) * 180.0 / PI; //  dV range:[-90 to 90]
 
         // set output
@@ -3152,7 +3156,7 @@ mod tests {
         fn quarter(u: f64) -> f64 {
             let w = 0.5_f64.sqrt();
             let b = [(1.0 - u) * (1.0 - u), 2.0 * u * (1.0 - u) * w, u * u];
-            (b[1] + b[2]).atan2(b[0] + b[1])
+            det::atan2(b[1] + b[2], b[0] + b[1])
         }
         fn rational(t: f64) -> f64 {
             if t <= 0.5 {
@@ -3189,7 +3193,7 @@ mod tests {
             ("uniform", uniform as fn(f64) -> f64, 6.02),
             ("rational", rational, 5.98),
         ] {
-            let at = |a: f64| c + Vec3::new(r * a.cos(), r * a.sin(), 0.0);
+            let at = |a: f64| c + Vec3::new(r * det::cos(a), r * det::sin(a), 0.0);
             let pts = params.map(|t| at(angle(t)));
             let (frame, base) = end(&pts);
             // the gradient of the end angle in each point, by central differences

@@ -47,6 +47,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::intersect::surface_intersector::p1::SrfIndex;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{rad_to_deg, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -199,7 +200,7 @@ fn tangent_at_vertex(k: &Kernel, b: &Brep, e: EdgeId, vertex: VertexId) -> Resul
 /// `sm_MeridianAngleDeg`: the angle (degrees) of `w` in the frame (`x`, `z`) of a meridian
 /// plane, `atan2(w.z, w.x)`.
 fn meridian_angle_deg(w: Vec3, x: Vec3, z: Vec3) -> f64 {
-    rad_to_deg(w.dot(z).atan2(w.dot(x)))
+    rad_to_deg(det::atan2(w.dot(z), w.dot(x)))
 }
 
 /// The radius of `solver`'s offset surface `rail` (`GetSurface(rail)->GetOffsetDistance()`,
@@ -463,7 +464,7 @@ pub fn swept_corner_edge_geom(
     }
     let z = z.unitize()?;
     let y = z.cross(x);
-    let turn_deg = rad_to_deg(sin.atan2(x.dot(x2)));
+    let turn_deg = rad_to_deg(det::atan2(sin, x.dot(x2)));
 
     // the end section's arc: from S to A in the meridian (X, Z) through the first ball
     let a_pnt = pseudo.vertex_point(a)?;

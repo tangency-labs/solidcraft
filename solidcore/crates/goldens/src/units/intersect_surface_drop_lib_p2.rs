@@ -20,6 +20,7 @@
 //!
 //! At least [`MIN_GENERATED`] generated cases run.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1043,7 +1044,7 @@ fn tangent(rng: &mut Rng, su: [f64; 3], sv: [f64; 3], n: [f64; 3], s: f64) -> [f
         1 => scale3(n, s),
         2 => {
             let a = pick(rng, &[0.5_f64, 2.9, 3.1, 10.0], 2.9).to_radians();
-            add3(scale3(n, a.cos() * s), scale3(norm3(su), a.sin() * s))
+            add3(scale3(n, det::cos(a) * s), scale3(norm3(su), det::sin(a) * s))
         }
         3 => scale3(unit_dir(rng), s),
         4 => scale3(sv, pick(rng, &[1.0, -1.0], 1.0)),

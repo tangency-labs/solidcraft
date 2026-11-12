@@ -18,6 +18,7 @@
 //! Holes are always represented; there is no fan-fallback that would ignore them.
 
 use crate::MeshError;
+use solidcore::math::det;
 
 /// A neutral planar face used by the triangulator.
 #[allow(dead_code)]
@@ -229,7 +230,7 @@ fn face_scale(body: &PlanarBody, face: usize, coordinates: &[Uv]) -> f64 {
             max[1] = max[1].max(point.y);
         }
     }
-    let scale = ((max[0] - min[0]).powi(2) + (max[1] - min[1]).powi(2)).sqrt();
+    let scale = (det::powi(max[0] - min[0], 2) + det::powi(max[1] - min[1], 2)).sqrt();
     if scale > 0.0 && scale.is_finite() {
         scale
     } else {

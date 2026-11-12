@@ -38,6 +38,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::math::det;
 use core::cmp::Ordering;
 
 use super::certificate::{gn_certify_span, gn_certify_span_reusing, GnLaw, NurbsCurve, SpanReuse};
@@ -156,7 +157,7 @@ fn extrapolate_curve(pts: &[Hpt], lo: f64, hi: f64) -> Result<(Vec<Hpt>, f64)> {
         .fold(1.0_f64, |m, &tau| m.max((1.0 - tau).abs() + tau.abs()));
     let exp = i32::try_from(d).map_err(|_| SolidError::sm_err(OP))?;
     #[allow(clippy::cast_precision_loss)]
-    let err = d as f64 * gamma(4) * lambda.powi(exp) * size;
+    let err = d as f64 * gamma(4) * det::powi(lambda, exp) * size;
     if err.is_finite() {
         Ok((out, err))
     } else {
@@ -1152,7 +1153,7 @@ mod tests {
 
     /// `T_m(x)` for `x >= 1` by its closed form, independent of the recurrence.
     fn cheb(m: usize, x: f64) -> f64 {
-        (m as f64 * x.acosh()).cosh()
+        det::cosh(m as f64 * det::acosh(x))
     }
 
     /// The circle section's weight `1 - 2 t (1 - t) (1 - c)` is at most 1 over the
@@ -1198,8 +1199,8 @@ mod tests {
             .map(|i| {
                 let x = f64::from(i);
                 (
-                    Vec3::new(x, (0.7 * x).sin() * 3.0, (0.3 * x * x).cos()),
-                    1.0 + 0.3 * (1.3 * x).sin(),
+                    Vec3::new(x, det::sin(0.7 * x) * 3.0, det::cos(0.3 * x * x)),
+                    1.0 + 0.3 * det::sin(1.3 * x),
                 )
             })
             .collect()
@@ -1212,7 +1213,7 @@ mod tests {
         let mut binom = 1.0_f64;
         let (mut p, mut w) = (Vec3::ZERO, 0.0);
         for (i, &(q, wq)) in pts.iter().enumerate() {
-            let b = binom * tau.powi(i as i32) * (1.0 - tau).powi((d - i) as i32);
+            let b = binom * det::powi(tau, i as i32) * det::powi(1.0 - tau, (d - i) as i32);
             p += q * b;
             w += wq * b;
             binom = binom * (d - i) as f64 / (i + 1) as f64;

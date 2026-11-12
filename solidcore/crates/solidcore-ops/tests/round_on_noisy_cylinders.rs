@@ -18,6 +18,7 @@
 mod common;
 
 use common::{kernel_copy, rel, volume};
+use solidcore::math::det;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::Vec3;
 use solidcore_ops::blend::{blend, tangent_chain, Blend, Corners};
@@ -28,7 +29,7 @@ use solidcore_record::brep::Brep as Record;
 const TANGENT: f64 = 0.5 * std::f64::consts::PI / 180.0;
 
 fn lean() -> f64 {
-    10f64.to_radians().tan()
+    det::tan(10f64.to_radians())
 }
 
 /// The edge nearest `p`.

@@ -25,6 +25,7 @@
 #[path = "fixtures/trim_srf_cache_sms.rs"]
 mod sms;
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -738,8 +739,8 @@ fn gen_srf(rng: &mut Rng, max_deg: usize) -> InlineSrf {
                         1 => z = 0.0,
                         2 => {
                             let t = i as f64 / n as f64 * 2.5;
-                            x = t.cos() * 3.0;
-                            z = t.sin() * 3.0;
+                            x = det::cos(t) * 3.0;
+                            z = det::sin(t) * 3.0;
                             y = j as f64;
                         }
                         3 if i == 0 => {

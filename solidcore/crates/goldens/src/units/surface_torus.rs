@@ -17,6 +17,7 @@
 //! (`SmSurfOfRevolution::Transform`, `surface.surf_of_revolution_p3`); a plane
 //! intersection reaching the general intersector (`GlobalSurfaceIntersect`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -842,7 +843,7 @@ fn gen_plane(rng: &mut Rng, t: &TorusIn, exact: bool) -> PlaneIn {
     if exact {
         let (origin, normal, px) = if rng.chance(0.5) {
             let a = rng.uniform(0.0, 360.0).to_radians();
-            let dir = add(add([0.0; 3], t.x, a.cos()), t.y, a.sin());
+            let dir = add(add([0.0; 3], t.x, det::cos(a)), t.y, det::sin(a));
             (t.origin, normalize(cross3(axis, dir)), axis)
         } else {
             let h = if rng.chance(0.2) {
@@ -864,8 +865,8 @@ fn gen_plane(rng: &mut Rng, t: &TorusIn, exact: bool) -> PlaneIn {
                     0.0
                 };
             let a = ang.to_radians();
-            let dir = add([0.0; 3], t.x, a.cos());
-            let dir = add(dir, t.y, a.sin());
+            let dir = add([0.0; 3], t.x, det::cos(a));
+            let dir = add(dir, t.y, det::sin(a));
             let n = normalize(cross3(axis, dir));
             let shift = if rng.chance(0.2) {
                 rng.uniform(-0.5, 0.5) * r

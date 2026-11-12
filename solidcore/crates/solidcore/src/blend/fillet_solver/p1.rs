@@ -142,6 +142,7 @@ use crate::intersect::point_class::ClassGeometry;
 use crate::intersect::point_class::{ClassObject, PointClassType};
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -3389,7 +3390,7 @@ pub fn test_manifold_tangent_rollover(
 
     // Test tangency. Note, we're comparing vectors that would be perpendicular when
     // the Faces are tangent.
-    let dot_limit = (PI / 2.0 - tangency_tol_rad).cos(); // [B683]
+    let dot_limit = det::cos(PI / 2.0 - tangency_tol_rad); // [B683]
     if bin_vec2.dot(faceuse_normal).abs() > dot_limit {
         return Ok((false, opposite_normals));
     }

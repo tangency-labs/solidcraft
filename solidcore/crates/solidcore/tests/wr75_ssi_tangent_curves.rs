@@ -24,6 +24,7 @@ use solidcore::geom::tol::approx_tol3d;
 use solidcore::geom::vector2d::Vec2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
@@ -154,7 +155,7 @@ fn circle_sectors(x: &SurfaceIntersection) -> usize {
                 .unwrap();
             let r = (p.x * p.x + p.y * p.y).sqrt();
             if (r - 1.0).abs() < 1e-4 && p.z.abs() < 1e-4 {
-                let a = p.y.atan2(p.x).to_degrees().rem_euclid(360.0);
+                let a = det::atan2(p.y, p.x).to_degrees().rem_euclid(360.0);
                 hit[((a / 10.0) as usize).min(35)] = true;
             }
         }

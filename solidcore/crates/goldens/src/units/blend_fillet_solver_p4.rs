@@ -34,6 +34,7 @@
 //! creation, `intersect.surface_drop_lib_p3`; `sm_FindFilletTsectPnt` after
 //! `EvaluateBinormal`, `blend.fillet_solver_p3`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -799,7 +800,7 @@ fn frame(rng: &mut Rng) -> ([f64; 3], [f64; 3], [f64; 3]) {
 /// `e` turned by `ang` about `axis` (unit, perpendicular to `e`).
 fn turn(e: [f64; 3], axis: [f64; 3], ang: f64) -> [f64; 3] {
     let w = cross(axis, e);
-    add(scale3(e, ang.cos()), w, ang.sin())
+    add(scale3(e, det::cos(ang)), w, det::sin(ang))
 }
 
 fn gen_plane(rng: &mut Rng, s: f64) -> SurfaceIn {

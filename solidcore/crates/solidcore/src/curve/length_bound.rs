@@ -74,6 +74,7 @@ use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::PI;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
@@ -202,7 +203,7 @@ fn arc_bound(
         let c = (*y - *x).length();
         // the chord to its points' rounding and its own
         let slack = 2.0 * 3.0_f64.sqrt() * e + gamma(4) * c;
-        let angle = |c: f64| 2.0 * (c / (2.0 * r)).clamp(0.0, 1.0).asin();
+        let angle = |c: f64| 2.0 * det::asin((c / (2.0 * r)).clamp(0.0, 1.0));
         let (lo, hi) = (angle((c - slack).max(0.0)), angle(c + slack));
         if hi >= 0.5 * PI {
             // a piece of a quarter turn or more: the halving did not reach the knots'
@@ -436,7 +437,7 @@ impl Span {
         }
         let unit = chord * (1.0 / c);
         // the chord's own direction to its rounding
-        let du = (slack / c).min(1.0).asin();
+        let du = det::asin((slack / c).min(1.0));
         // the hodograph's numerator N = A' W - A W', degree 2p - 1, in Bernstein form with
         // the binomials normalised (Vandermonde: each coefficient a combination of weight 1)
         let p = self.p;
@@ -510,11 +511,12 @@ impl Span {
             // the angle to the chord as atan2 of its sine and cosine parts (an acos near 1
             // knows a small angle only to sqrt(eps)), widened by the coefficient's and the
             // chord's rounding
-            let phi = unit.cross(v).length().atan2(along) + (err / len).min(1.0).asin() + du;
+            let phi =
+                det::atan2(unit.cross(v).length(), along) + det::asin((err / len).min(1.0)) + du;
             if phi >= 0.5 * PI {
                 return Ok(open(lower));
             }
-            cos_phi = cos_phi.min(phi.cos());
+            cos_phi = cos_phi.min(det::cos(phi));
         }
         if !(cos_phi.is_finite() && cos_phi > 0.0) {
             return Ok(open(lower));

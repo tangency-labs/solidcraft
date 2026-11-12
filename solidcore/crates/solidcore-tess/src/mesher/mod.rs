@@ -59,6 +59,7 @@ pub(crate) mod surface;
 pub(crate) mod tangle;
 pub(crate) mod uv;
 
+use solidcore::math::det;
 pub use size::MAX_ANGLE_BOUNDARY;
 pub use crate::stats::{PlanStats, RefusedFace};
 
@@ -615,7 +616,7 @@ fn boundary(
                 .flat_map(|(lp, fs)| lp.pts.iter().zip(&lp.uv).zip(fs))
                 .filter(|((r, _), f)| !**f && **r == p)
                 .map(|((_, w), _)| *w)
-                .min_by(|a, b| (a[0] - q[0]).hypot(a[1] - q[1]).total_cmp(&(b[0] - q[0]).hypot(b[1] - q[1])));
+                .min_by(|a, b| det::hypot(a[0] - q[0], a[1] - q[1]).total_cmp(&det::hypot(b[0] - q[0], b[1] - q[1])));
             if let (Some(mut w), Some(slot)) = (partner, out.loops.get_mut(l).and_then(|lp| lp.uv.get_mut(k))) {
                 for (d, per) in dom.period.into_iter().enumerate() {
                     if per.is_some()
@@ -1618,7 +1619,7 @@ fn plan_pieces(f: &Region) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
 /// between them (sizes `sa · q^k` summing to the length), then each interval split in half while
 /// `fine` fails between its ends.
 fn graded(a: [f64; 2], b: [f64; 2], sa: f64, sb: f64, h: f64, speed: [f64; 2], fine: &dyn Fn([f64; 2], [f64; 2]) -> bool) -> Vec<f64> {
-    let len = ((b[0] - a[0]) * speed[0]).hypot((b[1] - a[1]) * speed[1]);
+    let len = det::hypot((b[0] - a[0]) * speed[0], (b[1] - a[1]) * speed[1]);
     let cap = |x: f64| {
         if x.is_finite() && x > 0.0 {
             x.min(if h > 0.0 { h } else { f64::INFINITY })
@@ -1637,8 +1638,8 @@ fn graded(a: [f64; 2], b: [f64; 2], sa: f64, sb: f64, h: f64, speed: [f64; 2], f
             let k = (len / (0.5 * (sa + sb))).round().clamp(1.0, 4096.0) as usize;
             vec![len / k as f64; k]
         } else {
-            let k = (1.0 + (sb / sa).ln() / q.ln()).round().clamp(1.0, 4096.0) as usize;
-            let raw: Vec<f64> = (0..k).map(|j| sa * q.powi(j as i32)).collect();
+            let k = (1.0 + det::ln(sb / sa) / det::ln(q)).round().clamp(1.0, 4096.0) as usize;
+            let raw: Vec<f64> = (0..k).map(|j| sa * det::powi(q, j as i32)).collect();
             let total: f64 = raw.iter().sum();
             raw.into_iter().map(|x| x * len / total).collect()
         };

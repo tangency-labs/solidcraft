@@ -21,6 +21,7 @@ use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_curves::{create_arc, create_circle, create_line_segment};
 use solidcore::sweep::api_brep::create_taper_extrude;
@@ -65,7 +66,7 @@ fn arcs(z: f64, start: f64, end: f64) -> Vec<Curve> {
 /// The region of the r 37 circle in z between the chords `y = lo` and `y = hi` (`None`:
 /// the circle itself), counterclockwise.
 fn region(z: f64, lo: Option<f64>, hi: Option<f64>) -> Vec<Curve> {
-    let angle = |y: f64| (y / R).asin().to_degrees();
+    let angle = |y: f64| det::asin(y / R).to_degrees();
     let x = |y: f64| (R * R - y * y).sqrt();
     let mut curves = Vec::new();
     match (lo, hi) {

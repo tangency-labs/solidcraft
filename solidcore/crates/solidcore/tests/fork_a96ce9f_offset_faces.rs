@@ -22,6 +22,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
@@ -114,7 +115,8 @@ fn boss_with_foot_round(k: &mut Kernel) -> (Brep, FaceId) {
         .find(|&&f| {
             !is_plane(&b, f)
                 && face_points(&b, f).iter().all(|p| {
-                    ((p.x - 30.0).powi(2) + (p.y - 20.0).powi(2)).sqrt() > 9.99 && p.z > 11.9
+                    (det::powi(p.x - 30.0, 2) + det::powi(p.y - 20.0, 2)).sqrt() > 9.99
+                        && p.z > 11.9
                 })
         })
         .unwrap();

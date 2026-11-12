@@ -23,6 +23,7 @@
 //!
 //! Every run has at least [`MIN_GENERATED`] generated cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -271,7 +272,7 @@ fn polygon(rng: &mut Rng, c: V3, nrm: V3, n: usize, star: bool) -> Vec<V3> {
             } else {
                 r0
             };
-            add(c, add(scale(u, r * t.cos()), scale(v, r * t.sin())))
+            add(c, add(scale(u, r * det::cos(t)), scale(v, r * det::sin(t))))
         })
         .collect()
 }

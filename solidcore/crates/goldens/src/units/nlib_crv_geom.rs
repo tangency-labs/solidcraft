@@ -23,6 +23,7 @@
 //! `N_CrvReadFromFilePtr` does). Every run has at least [`MIN_GENERATED`] generated
 //! cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -400,9 +401,9 @@ fn gen_frame(rng: &mut Rng) -> [[f64; 3]; 3] {
         rng.uniform(0.0, std::f64::consts::TAU),
         rng.uniform(0.0, std::f64::consts::TAU),
     );
-    let (sa, ca) = a.sin_cos();
-    let (sb, cb) = b.sin_cos();
-    let (sc, cc) = c.sin_cos();
+    let (sa, ca) = det::sin_cos(a);
+    let (sb, cb) = det::sin_cos(b);
+    let (sc, cc) = det::sin_cos(c);
     [
         [ca * cb, ca * sb * sc - sa * cc, ca * sb * cc + sa * sc],
         [sa * cb, sa * sb * sc + ca * cc, sa * sb * cc - ca * sc],
@@ -443,14 +444,14 @@ fn gen_circle(rng: &mut Rng) -> InlineCrv {
     };
     let three_d = !planar || rng.chance(0.5);
     let dth = sweep / narcs as f64;
-    let w1 = (0.5 * dth).cos();
+    let w1 = det::cos(0.5 * dth);
     let start = rng.uniform(0.0, 6.0);
     let mut cpts = Vec::new();
     let mut push = |pt: [f64; 3], w: f64| {
         let z = if three_d { pt[2] * w } else { NOZ };
         cpts.push([pt[0] * w, pt[1] * w, z, w]);
     };
-    let at = |t: f64, s: f64| apply(&f, o, s * t.cos(), s * t.sin());
+    let at = |t: f64, s: f64| apply(&f, o, s * det::cos(t), s * det::sin(t));
     push(at(start, r), 1.0);
     for k in 0..narcs {
         let t0 = start + k as f64 * dth;
@@ -673,7 +674,7 @@ fn gen_polyline(rng: &mut Rng, c: InlineCrv) -> Inputs {
         .fold(0.0f64, |m, x| m.max(x.abs()));
     let (e0, e1) = (euclid(&c, 0), euclid(&c, c.cpts.len().saturating_sub(1)));
     let chord =
-        ((e1[0] - e0[0]).powi(2) + (e1[1] - e0[1]).powi(2) + (e1[2] - e0[2]).powi(2)).sqrt();
+        (det::powi(e1[0] - e0[0], 2) + det::powi(e1[1] - e0[1], 2) + det::powi(e1[2] - e0[2], 2)).sqrt();
     let relative = chord >= 1e-2 * size && rng.chance(0.4);
     let tol = if relative {
         *rng.choose(&[1e-2, 1e-3, 1e-4, 1e-5]).unwrap_or(&1e-3)

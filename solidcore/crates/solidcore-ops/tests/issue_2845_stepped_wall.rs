@@ -15,6 +15,7 @@ mod common;
 use common::{all_fixes, built, edge_at, kernel_copy, volume};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore_ops::boolean::boolean;
 use solidcore_ops::{blend, make_box, Blend, Body, BooleanOp, CheckLevel, Corners};
 
@@ -53,7 +54,7 @@ fn both_rounds_that_fit_build_their_closed_form() {
 fn past_the_wall(r: f64) -> f64 {
     let near = r - 4.0;
     let height = (r * r - near * near).sqrt();
-    let under = |u: f64| u / 2.0 * (r * r - u * u).max(0.0).sqrt() + r * r / 2.0 * (u / r).asin();
+    let under = |u: f64| u / 2.0 * (r * r - u * u).max(0.0).sqrt() + r * r / 2.0 * det::asin(u / r);
     9520.0 - 42.0 * (4.0 * height - (under(r) - under(near)))
 }
 

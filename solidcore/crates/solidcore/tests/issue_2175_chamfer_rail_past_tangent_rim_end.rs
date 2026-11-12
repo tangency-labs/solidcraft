@@ -34,6 +34,7 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::create_sphere;
@@ -69,7 +70,7 @@ fn line(a: (f64, f64), b: (f64, f64)) -> Curve {
 /// A block with an arc side, a ball r 5 at (2.5, 22.5, 5) cut from its back face y = 22.5.
 fn body(k: &mut Kernel) -> Brep {
     let (c, r) = ((24.0625, 11.25), 26.5625);
-    let a = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
+    let a = |p: (f64, f64)| det::atan2(p.1 - c.1, p.0 - c.0);
     let (s, mut e) = (a((0.0, 22.5)), a((0.0, 0.0)));
     while e < s {
         e += 2.0 * PI;

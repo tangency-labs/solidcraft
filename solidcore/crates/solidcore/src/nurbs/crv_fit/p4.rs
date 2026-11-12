@@ -360,12 +360,13 @@ pub fn approx_end_derivs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn arc(n: usize) -> Vec<Vec3> {
         (0..n)
             .map(|i| {
                 let t = i as f64 / (n - 1) as f64 * 1.5;
-                Vec3::new(t.cos(), t.sin(), 0.1 * t)
+                Vec3::new(det::cos(t), det::sin(t), 0.1 * t)
             })
             .collect()
     }

@@ -605,6 +605,7 @@ impl UnitDiff for Runner {
 
 #[cfg(test)]
 mod tests {
+    use solidcore::math::det;
     use super::*;
 
     use std::collections::BTreeMap;
@@ -677,7 +678,7 @@ mod tests {
     /// Some Bezier patch of `sur` gets a sample count of at least `slm` (1000).
     fn slm_reached(sur: &Surface, i: &Inputs) -> bool {
         let exp = if i.pp == 1 || i.qq == 1 { 0.5 } else { 0.34 };
-        let f1 = (1.0 / i.tol).powf(exp);
+        let f1 = det::powf(1.0 / i.tol, exp);
         let f2 = 2.0 * i.pp.max(i.qq) as f64;
         decompose_to_bez(sur).unwrap().iter().flatten().any(|b| {
             let mut b = b.clone();

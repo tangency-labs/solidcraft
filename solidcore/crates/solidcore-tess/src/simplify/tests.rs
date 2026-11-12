@@ -1,4 +1,5 @@
 use super::*;
+use solidcore::math::det;
 
 /// A sphere of radius `r` as a scan reads it: `n` × 2`n` quads, each triangle's corners its own
 /// points (the same position repeated where triangles meet).
@@ -8,7 +9,7 @@ fn sphere(r: f64, n: u32) -> (Vec<Vec3>, Vec<[u32; 3]>) {
             std::f64::consts::PI * f64::from(i) / f64::from(n),
             std::f64::consts::TAU * f64::from(j) / f64::from(2 * n),
         );
-        let (st, ct, sp, cp) = (t.sin(), t.cos(), p.sin(), p.cos());
+        let (st, ct, sp, cp) = (det::sin(t), det::cos(t), det::sin(p), det::cos(p));
         // The poles exactly, and the seam the same as the start, so corners weld.
         let (st, sp, cp) = (
             if i == 0 || i == n { 0.0 } else { st },
@@ -71,7 +72,7 @@ fn a_sphere_comes_down_to_each_target_within_its_error() {
     let full = tris.len();
     let made = levels(&pos, &tris, &[full / 4, full / 16, full / 64]);
     assert_eq!(made.len(), 3);
-    let exact = 4.0 / 3.0 * std::f64::consts::PI * 50.0f64.powi(3);
+    let exact = 4.0 / 3.0 * std::f64::consts::PI * det::powi(50.0f64, 3);
     let mut last = 0.0;
     for (l, target) in made.iter().zip([full / 4, full / 16, full / 64]) {
         assert!(
@@ -83,7 +84,7 @@ fn a_sphere_comes_down_to_each_target_within_its_error() {
         assert!(l.error >= last, "the error grows: {} after {last}", l.error);
         last = l.error;
         // Each point within the error of the sphere (its faces' planes lie within their sag of it).
-        let sag = 50.0 * (1.0 - (std::f64::consts::PI / 100.0).cos());
+        let sag = 50.0 * (1.0 - det::cos(std::f64::consts::PI / 100.0));
         for p in &l.positions {
             assert!(
                 (p.len() - 50.0).abs() <= l.error + sag + 1e-9,

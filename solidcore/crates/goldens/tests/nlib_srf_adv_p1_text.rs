@@ -3,6 +3,7 @@
 #[path = "../src/units/fixtures/nlib_srf_adv_p1_text.rs"]
 mod text;
 
+use solidcore::math::det;
 use solidcore::nurbs::math::{NOW, NOZ};
 use text::{parse_smc, parse_sms};
 
@@ -68,7 +69,7 @@ fn smc_2d_3d_and_rational_preserve_coordinates() {
 
 #[test]
 fn smc_non3_dimensions_keep_original_two_coordinate_branch() {
-    let large = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let large = det::powi(2.0_f64, usize::BITS as i32 - 1);
     for dim in [0., 1., 2., 4., large] {
         for (flag, point, w) in [("0", "2 4", NOW), ("1", "2 4 2", 2.)] {
             let c = parse_smc(PATH, &format!("0 0 {flag} {dim} {point} 0 1")).unwrap();
@@ -79,7 +80,7 @@ fn smc_non3_dimensions_keep_original_two_coordinate_branch() {
 
 #[test]
 fn every_count_rejects_bad_nonfinite_and_exclusive_upper_bound() {
-    let exclusive = 2.0_f64.powi(usize::BITS as i32).to_string();
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32).to_string();
     for bad in ["-1", "0.5", "NaN", "inf", "-inf", "1e300", &exclusive] {
         for index in 0..4 {
             let e = parse_sms(PATH, &replace(SMS, index, bad)).unwrap_err();
@@ -115,7 +116,7 @@ fn no_new_degree_or_geometry_validation() {
 
 #[test]
 fn huge_representable_headers_preflight_without_allocating() {
-    let huge = 2.0_f64.powi(usize::BITS as i32 - 2).to_string();
+    let huge = det::powi(2.0_f64, usize::BITS as i32 - 2).to_string();
     for index in 0..4 {
         let e = parse_sms(PATH, &replace(SMS, index, &huge)).unwrap_err();
         assert!(
@@ -134,8 +135,8 @@ fn huge_representable_headers_preflight_without_allocating() {
 
 #[test]
 fn checked_knot_point_stride_and_total_payload_overflow() {
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1);
-    let quarter = 2.0_f64.powi(usize::BITS as i32 - 2);
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1);
+    let quarter = det::powi(2.0_f64, usize::BITS as i32 - 2);
     for source in [
         format!("{half} 0 {half} 0 0"), // u knots
         format!("0 {half} 0 {half} 0"), // v knots

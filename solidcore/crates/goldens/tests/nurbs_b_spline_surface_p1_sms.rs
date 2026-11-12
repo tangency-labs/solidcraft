@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used)]
 
 use goldens::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 #[path = "../src/units/fixtures/nurbs_b_spline_surface_p1_sms.rs"]
@@ -94,7 +95,7 @@ fn integral_float_counts_and_unrestricted_degrees() {
 
 #[test]
 fn invalid_counts_at_every_header_position() {
-    let exclusive = 2.0_f64.powi(usize::BITS as i32).to_string();
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32).to_string();
     for bad in ["-1", "0.5", "NaN", "inf", "-inf", "1e300", &exclusive] {
         for position in 0..4 {
             let mut tokens = ["0"; 5];
@@ -118,10 +119,10 @@ fn header_errors_remain_sequential() {
 
 #[test]
 fn checked_shape_arithmetic_and_tiny_bodies() {
-    let exclusive = 2.0_f64.powi(usize::BITS as i32);
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32);
     let below = f64::from_bits(exclusive.to_bits() - 1).floor();
     let half = exclusive / 2.0;
-    let root = 2.0_f64.powi((usize::BITS / 2) as i32);
+    let root = det::powi(2.0_f64, (usize::BITS / 2) as i32);
     let overflow = format!("{PATH}: SMS size overflow");
     // knot addition, points, coordinates, then total addition.
     for input in [

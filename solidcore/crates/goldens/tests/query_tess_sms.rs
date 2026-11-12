@@ -6,6 +6,7 @@
 mod query_tess_sms;
 
 use query_tess_sms::{parse, ParsedSurface};
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 use std::fmt::Write;
 
@@ -112,7 +113,7 @@ fn counts_validate_in_header_order() {
 }
 
 fn exclusive() -> f64 {
-    2.0_f64.powi(usize::BITS as i32)
+    det::powi(2.0_f64, usize::BITS as i32)
 }
 
 fn largest_count() -> f64 {

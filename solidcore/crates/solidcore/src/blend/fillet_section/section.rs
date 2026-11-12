@@ -36,6 +36,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, PI};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
@@ -2160,7 +2161,7 @@ impl GnSectionFsg {
             1,
         )?;
         let ni = vec3(p.at(1, 0)).cross(vec3(p.at(0, 1))).unitize()?;
-        let scale = (-1.0 / (1.0 - w)).powf((n + 1) as f64);
+        let scale = det::powf(-1.0 / (1.0 - w), (n + 1) as f64);
         // the jet's n-th coefficient leaves out the face curve's tangent part tau_n: the
         // section is off the curve by -tau_n (u - 1)^n in the tangent plane at the rail,
         // which the face's normal, turning by N_1 (u - 1) along the curve, sees at order
@@ -2406,7 +2407,7 @@ mod tests {
             // distance r from both
             (
                 Vec3::new(c, 0.0, s60),
-                Vec3::new(r / (30.0_f64.to_radians()).tan(), 0.0, r),
+                Vec3::new(r / det::tan(30.0_f64.to_radians()), 0.0, r),
             ),
         ] {
             let f1 = plane(Vec3::X, Vec3::Y);

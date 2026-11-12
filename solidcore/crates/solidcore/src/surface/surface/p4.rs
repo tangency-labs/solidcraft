@@ -93,6 +93,7 @@ use crate::geom::solution_array::{
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{asin, sqrt as sm_sqrt};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI,
     UNDEF_DOUBLE,
@@ -2065,7 +2066,7 @@ pub fn classify_curve_surface_xsect_point_with(
     // get the cosine of the angle between the surfaceSectionNormal plane and the plane
     // of the curve's osculating circle (needed for Meusnier's Theorem)
     let ang_rad = passed_on(curve_binormal.angle_between(surface_normal), pass)?.unwrap_or(0.0);
-    let cos_phi = (ang_rad - PI / 2.0).cos().abs();
+    let cos_phi = det::cos(ang_rad - PI / 2.0).abs();
 
     // characterize the curve shape as a circle or a line
     let mut curve_line: bool;

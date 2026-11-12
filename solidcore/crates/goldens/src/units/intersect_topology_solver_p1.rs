@@ -29,6 +29,7 @@
 //! `intersect.topology_solver_p2`), solution comparisons that need an edge's parameter
 //! interval (`topology.edge`) and the unported paths of the curve point solves.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -898,7 +899,7 @@ fn gen_best(rng: &mut Rng, d: f64, signed: bool) -> f64 {
             }
         }
         4 => 0.0,
-        _ => (d * rng.uniform(0.5, 1.5)).powi(2),
+        _ => det::powi(d * rng.uniform(0.5, 1.5), 2),
     }
 }
 

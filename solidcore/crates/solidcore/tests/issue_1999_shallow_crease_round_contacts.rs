@@ -7,6 +7,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use solidcore::blend::definition_check::{BlendFaceKind, BlendFaceLog};
@@ -28,7 +29,7 @@ fn line(a: (f64, f64), b: (f64, f64)) -> Curve {
 
 /// The rise of the crease above y = 1 for a turn of `turn` degrees.
 fn rise(turn: f64) -> f64 {
-    3.0 * (0.5 * turn * PI / 180.0).tan()
+    3.0 * det::tan(0.5 * turn * PI / 180.0)
 }
 
 /// The 6 x 1 roof profile, extruded 2 along z.
@@ -229,9 +230,9 @@ fn new_blend_constructs_valid_shallow_crease_rounds() {
             // The unrounded section is the 6x1 rectangle plus the roof triangle;
             // extruding it by 2 and scaling all lengths gives the volume below.
             let half_turn = 0.5 * turn * PI / 180.0;
-            let part_volume = (6.0 + 3.0 * rise(turn)) * 2.0 * scale.powi(3);
+            let part_volume = (6.0 + 3.0 * rise(turn)) * 2.0 * det::powi(scale, 3);
             let removed_volume =
-                radius * radius * (half_turn.tan() - half_turn) * 2.0 * scale.powi(3);
+                radius * radius * (det::tan(half_turn) - half_turn) * 2.0 * det::powi(scale, 3);
             let expected = part_volume - removed_volume;
             let rounding = 1e-9 * part_volume;
             assert!(
@@ -277,7 +278,7 @@ fn new_blend_vertex_contact_boundary() {
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
     for turn in [0.6, 1.5, 2.5, 5.0, 10.0, 30.0] {
         for sagitta in [1.9e-5, 2.1e-5, 4.9e-5, 5.1e-5] {
-            let radius = sagitta / (1.0 / (0.5 * turn * PI / 180.0).cos() - 1.0);
+            let radius = sagitta / (1.0 / det::cos(0.5 * turn * PI / 180.0) - 1.0);
             let mut k = Kernel {
                 fixes: UpstreamFixes::all(),
                 ..Kernel::default()

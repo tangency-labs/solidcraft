@@ -30,6 +30,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, BIG_DOUBLE};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::{create_box, create_cone, create_cylinder};
@@ -164,7 +165,7 @@ fn arc(k: &Kernel, c: Point3, r: f64, a0: f64, a1: f64) -> Curve {
     let axis = Vec3::Z;
     let reference = Vec3::X;
     let y = axis.cross(reference);
-    let x0 = reference * a0.cos() + y * a0.sin();
+    let x0 = reference * det::cos(a0) + y * det::sin(a0);
     let y0 = axis.cross(x0);
     let frame = Axis2Placement::new(c, x0, y0);
     let interval = Extent1d::from_min_max(0.0, (a1 - a0) * 180.0 / PI);
@@ -173,7 +174,7 @@ fn arc(k: &Kernel, c: Point3, r: f64, a0: f64, a1: f64) -> Curve {
 
 /// capi `d_prism`: the disc of radius `rr` about (cx, cy) less x > cx + a, from z0 to z0 + h.
 fn d_prism(k: &mut Kernel, cx: f64, cy: f64, rr: f64, a: f64, z0: f64, height: f64) -> Brep {
-    let al = (a / rr).acos();
+    let al = det::acos(a / rr);
     let h = (rr * rr - a * a).sqrt();
     let l = line(
         Point3::new(cx + a, cy - h, z0),
@@ -186,7 +187,7 @@ fn d_prism(k: &mut Kernel, cx: f64, cy: f64, rr: f64, a: f64, z0: f64, height: f
 /// The D section of radius `rp` and flat `ap`: its area and perimeter.
 fn d_section(rp: f64, ap: f64) -> (f64, f64) {
     let hp = (rp * rp - ap * ap).sqrt();
-    let al = (ap / rp).acos();
+    let al = det::acos(ap / rp);
     (
         rp * rp * (PI - al) + ap * hp,
         2.0 * rp * (PI - al) + 2.0 * hp,
@@ -312,9 +313,9 @@ fn cone_frustum_corners_are_balls_some_certified() {
     let mut k = all_fixes();
     let (rr, z1, height, a, rad): (f64, f64, f64, f64, f64) = (10.0, 6.0, 10.0, 4.0, 1.5);
     let beta: f64 = PI / 6.0;
-    let (tb, cb) = (beta.tan(), beta.cos());
+    let (tb, cb) = (det::tan(beta), det::cos(beta));
     let (ap, rc) = (a - rad, rr - rad);
-    let zs = z1 - rad * (beta / 2.0).tan();
+    let zs = z1 - rad * det::tan(beta / 2.0);
     let zt = height - rad;
     let rho = |z: f64| {
         if z <= zs {
@@ -338,7 +339,7 @@ fn cone_frustum_corners_are_balls_some_certified() {
     assert_eq!(counts(&b), (5, 9, 6));
     let h0 = (rr * rr - a * a).sqrt();
     let zc = 8.0;
-    let hc = ((rr - 2.0 * tb).powi(2) - a * a).sqrt();
+    let hc = (det::powi(rr - 2.0 * tb, 2) - a * a).sqrt();
     round(
         &mut k,
         &mut b,

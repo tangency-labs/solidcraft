@@ -108,13 +108,14 @@ impl BSplineSurface {
 mod tests {
     use super::*;
     use crate::error::nurbs::NurbsFailure;
+    use crate::math::det;
 
     fn grid(rows: usize, cols: usize) -> Vec<Point3> {
         let mut v = Vec::new();
         for i in 0..rows {
             for j in 0..cols {
                 let (x, y) = (i as f64, j as f64);
-                v.push(Vec3::new(x, y, (x * 0.3).sin() + (y * 0.2).cos()));
+                v.push(Vec3::new(x, y, det::sin(x * 0.3) + det::cos(y * 0.2)));
             }
         }
         v

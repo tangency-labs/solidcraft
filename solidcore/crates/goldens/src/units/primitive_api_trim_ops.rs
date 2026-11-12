@@ -12,6 +12,7 @@
 //! then the B-rep's counts and `support/primitive_record.h` record, reported as the
 //! values `rec`. A case that reaches an unported unit is deferred.
 
+use solidcore::math::det;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
@@ -452,7 +453,7 @@ fn ngon(rng: &mut Rng, cx: f64, cy: f64, r: f64, z: f64, n: u64) -> Vec<[f64; 3]
     (0..n)
         .map(|i| {
             let a = (i as f64 + phase) * std::f64::consts::TAU / n as f64;
-            [cx + r * a.cos(), cy + r * a.sin(), z]
+            [cx + r * det::cos(a), cy + r * det::sin(a), z]
         })
         .collect()
 }

@@ -19,6 +19,7 @@ use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletEdgeType, FilletVertexType};
 use solidcore::curve::curve::Curve;
 use solidcore::kernel::UpstreamFixes;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -304,7 +305,7 @@ fn gamma(t: f64) -> (f64, f64) {
 fn distance_to_profile(x: f64, y: f64, lo: f64, hi: f64) -> f64 {
     let d = |t: f64| {
         let (gx, gy) = gamma(t);
-        (gx - x).hypot(gy - y)
+        det::hypot(gx - x, gy - y)
     };
     let n = 20000;
     let h = (hi - lo) / f64::from(n);

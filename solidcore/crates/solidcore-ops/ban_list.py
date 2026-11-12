@@ -66,6 +66,8 @@ FREE = [
     ("geom/vector3d.rs", "solidcore::geom::vector3d", set()),
     ("math.rs", "solidcore::math",
      {"is_infinite_param", "max2", "min2", "max3", "min3", "max4", "min4"}),
+    # the transcendental functions every crate calls in place of the f64 methods
+    ("math/det.rs", "solidcore::math::det", set()),
     ("nurbs/geom.rs", "solidcore::nurbs::geom", set()),
     ("geom/certified.rs", "solidcore::geom::certified", {"above"}),
     ("geom/geom_utility/p1.rs", "solidcore::geom::geom_utility::p1", set()),

@@ -1,6 +1,7 @@
 //! Non-C++ tests of the production offset-surface SMS decoder.
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/surface_offset_surface_sms.rs"]
 mod sms;
@@ -123,7 +124,7 @@ fn eager_bad_tail_precedes_all_semantic_failures() {
 
 #[test]
 fn counts_have_exclusive_usize_bounds_and_ordered_validation() {
-    let upper = format!("{:.0}", 2.0_f64.powi(usize::BITS as i32));
+    let upper = format!("{:.0}", det::powi(2.0_f64, usize::BITS as i32));
     for value in ["-1", "0.5", "NaN", "inf", "-inf", "1e100", &upper] {
         for position in 0..4 {
             let mut header = ["0"; 5];
@@ -173,7 +174,7 @@ fn checked_knot_helper_covers_both_additions_without_large_storage() {
 // points are supplied to reach the real parser's arithmetic positions.
 fn overflow_values() -> (usize, f64) {
     let gap = if usize::BITS > 53 { 2048 } else { 1 };
-    (gap, 2.0_f64.powi(usize::BITS as i32) - gap as f64)
+    (gap, det::powi(2.0_f64, usize::BITS as i32) - gap as f64)
 }
 
 #[test]
@@ -194,7 +195,7 @@ fn net_then_u_then_v_error_precedence_and_reachable_overflows() {
 
 #[test]
 fn huge_representable_headers_require_real_data_before_growth() {
-    let huge = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let huge = det::powi(2.0_f64, usize::BITS as i32 - 1);
     for text in [
         format!("{huge:.0} {huge:.0} 0 0 0"),
         format!("{huge:.0} 0 {huge:.0} 0 0"),

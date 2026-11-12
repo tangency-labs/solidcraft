@@ -28,6 +28,7 @@ use solidcore::boolean::api_brep::{boolean_union, boolean_with_options};
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::error::SM_ERR;
 use solidcore::geom::a_object::BooleanOperation;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -172,7 +173,7 @@ fn wr_530_split_block_step_is_refused_without_the_opt_in() {
 const AXIS: (f64, f64) = (30.0, 20.0);
 
 fn axis_distance(p: Point3) -> f64 {
-    (p.x - AXIS.0).hypot(p.y - AXIS.1)
+    det::hypot(p.x - AXIS.0, p.y - AXIS.1)
 }
 
 /// WR-530's part: a 60 x 40 x 10 plate, an r10 boss, an r2 round at the boss's base.

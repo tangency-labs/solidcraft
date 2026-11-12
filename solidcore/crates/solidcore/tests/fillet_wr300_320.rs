@@ -15,6 +15,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p2::is_manifold_solid;
@@ -195,7 +196,7 @@ fn cylinder_rim(k: &mut Kernel, size: f64, xsect: u32) -> Outcome {
             let c = edge::curve(&b, e).unwrap().unwrap();
             let ivl = edge::interval(&b, e).unwrap();
             let p = c.evaluate_point(k, ivl.min()).unwrap();
-            (p.z - 20.0).abs() < 1e-6 && (p.x.hypot(p.y) - 10.0).abs() < 1e-6
+            (p.z - 20.0).abs() < 1e-6 && (det::hypot(p.x, p.y) - 10.0).abs() < 1e-6
         })
         .unwrap();
     fillet(k, &mut b, &[rim], size, xsect)
@@ -283,7 +284,7 @@ fn no_room_refusals_are_named() {
             let c = edge::curve(&b, e).unwrap().unwrap();
             let ivl = edge::interval(&b, e).unwrap();
             let p = c.evaluate_point(&k, ivl.min()).unwrap();
-            (p.z - 20.0).abs() < 1e-6 && (p.x.hypot(p.y) - 10.0).abs() < 1e-6
+            (p.z - 20.0).abs() < 1e-6 && (det::hypot(p.x, p.y) - 10.0).abs() < 1e-6
         })
         .unwrap();
     assert_eq!(

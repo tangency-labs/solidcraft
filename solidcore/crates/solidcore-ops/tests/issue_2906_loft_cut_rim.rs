@@ -18,6 +18,7 @@
 mod common;
 
 use common::{edge_at, volume};
+use solidcore::math::det;
 use solidcore_ops::{blend, session, Blend, Body, CheckLevel, Corners};
 
 /// The slab less the loft's frustum, by the prismoidal formula.
@@ -73,9 +74,9 @@ const TOL: f64 = 2e-10;
 fn the_floor_edges_of_the_long_sides_take_their_closed_forms() {
     fixes();
     let v = slab_less_loft();
-    let phi = (4.0_f64 / 9.5).atan();
-    let round = 80.0 * 64.0 * ((phi / 2.0).tan() - phi / 2.0);
-    let chamfer = 80.0 * 32.0 * phi.sin();
+    let phi = det::atan(4.0_f64 / 9.5);
+    let round = 80.0 * 64.0 * (det::tan(phi / 2.0) - phi / 2.0);
+    let chamfer = 80.0 * 32.0 * det::sin(phi);
     for y in [418.84, 338.84] {
         let p = [450.0, y, 156.0];
         let r = blended(Blend::Round, p);
@@ -112,9 +113,9 @@ fn the_rest_of_the_rim_builds() {
 fn the_cut_from_a_pocket_floor_takes_the_same_closed_forms() {
     fixes();
     let v = volume(&beside_a_hole());
-    let phi = (4.0_f64 / 9.5).atan();
-    let round = 80.0 * 64.0 * ((phi / 2.0).tan() - phi / 2.0);
-    let chamfer = 80.0 * 32.0 * phi.sin();
+    let phi = det::atan(4.0_f64 / 9.5);
+    let round = 80.0 * 64.0 * (det::tan(phi / 2.0) - phi / 2.0);
+    let chamfer = 80.0 * 32.0 * det::sin(phi);
     for y in [-61.16, -141.16] {
         for (kind, added) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
             let b = beside_a_hole();

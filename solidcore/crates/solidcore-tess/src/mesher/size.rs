@@ -8,6 +8,7 @@
 //! sags the tolerance; an edge takes the smaller size of its two faces, so a curved face and
 //! its flat neighbour meet at the same spacing.
 
+use solidcore::math::det;
 use solidcore::Vec3;
 use crate::vec::VecExt as _;
 use solidcore::eval::plan::EvalSurface;
@@ -83,7 +84,7 @@ impl Rules {
         let r = 1.0 / k;
         let mut across = (8.0 * r * self.tol).sqrt();
         if let Some(t) = self.turn
-            && r * (1.0 - (0.5 * t.angle).cos()) > t.floor
+            && r * (1.0 - det::cos(0.5 * t.angle)) > t.floor
         {
             across = across.min(r * t.angle);
         }

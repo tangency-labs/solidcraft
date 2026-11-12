@@ -9,6 +9,7 @@
     clippy::float_cmp
 )]
 
+use crate::math::det;
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
 use super::extrude::extrude_region;
@@ -151,7 +152,7 @@ fn areas_in_closed_form_are_enclosed_by_their_bounds() {
     // a circular arc as a conic (w the cosine of its half angle): its sector less the triangle,
     // past the series' range (75 degrees) and inside it (30 degrees)
     for half in [75.0_f64.to_radians(), 30.0_f64.to_radians()] {
-        let (s, c) = half.sin_cos();
+        let (s, c) = det::sin_cos(half);
         let arc = Seg2::Conic {
             a: p(c, -s),
             apex: p(1.0 / c, 0.0),
@@ -174,7 +175,7 @@ fn areas_in_closed_form_are_enclosed_by_their_bounds() {
     }
     // x^2 - y^2 = 1 from (cosh 1, -sinh 1) to (cosh 1, sinh 1), w = cosh 1: the segment between
     // the hyperbola and its chord is sinh 1 cosh 1 - 1
-    let (sh, ch) = (1.0_f64.sinh(), 1.0_f64.cosh());
+    let (sh, ch) = (det::sinh(1.0_f64), det::cosh(1.0_f64));
     let hyper = Seg2::Conic {
         a: p(ch, -sh),
         apex: p(1.0 / ch, 0.0),
@@ -500,8 +501,13 @@ fn sampling_and_retracing_do_not_certify() {
     for i in 0..8 {
         let a = f64::from(i) * FRAC_PI_2;
         let (m, b) = (a + FRAC_PI_2 * 0.5, a + FRAC_PI_2);
-        pts.push([10.0 * m.cos() / w * w, 10.0 * m.sin() / w * w, 0.0, w]);
-        pts.push([10.0 * b.cos(), 10.0 * b.sin(), 0.0, 1.0]);
+        pts.push([
+            10.0 * det::cos(m) / w * w,
+            10.0 * det::sin(m) / w * w,
+            0.0,
+            w,
+        ]);
+        pts.push([10.0 * det::cos(b), 10.0 * det::sin(b), 0.0, 1.0]);
         knots.extend([f64::from(i + 1) / 8.0; 2]);
     }
     knots.push(1.0);

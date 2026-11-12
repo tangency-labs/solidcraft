@@ -99,6 +99,7 @@
 //!   derivative vanishes and the step-off never clamps). The bisector tries at most 6
 //!   angles per edge use. No recursion.
 
+use crate::math::det;
 use std::collections::BTreeSet;
 
 use crate::curve::crv_on_surf::CrvOnSurf;
@@ -1827,7 +1828,7 @@ pub(crate) fn find_and_classify_loop_bisector_cached<O: LoopObject + PartialEq>(
         ignored(surface.evaluate_normal(k, uv0, Side::Left, Side::Left))?;
 
         // Rotation Range to search for 'good' classify curve
-        let drop_tan_deg = rad2deg(uv1.y.atan2(uv1.x)); // Rtn: [-Pi to Pi] => [-180 to 180]
+        let drop_tan_deg = rad2deg(det::atan2(uv1.y, uv1.x)); // Rtn: [-Pi to Pi] => [-180 to 180]
         let mut ang_range_deg = Extent1d::from_raw(drop_tan_deg - 90.0, drop_tan_deg + 90.0);
         let mut missing_seam_sampling = false;
 
@@ -1856,7 +1857,7 @@ pub(crate) fn find_and_classify_loop_bisector_cached<O: LoopObject + PartialEq>(
                     _ => Point2::new(face_uv_domain.u_min(), face_uv_domain.v_max()),
                 };
                 let dir = corner - uv0;
-                *ang = rad2deg(dir.y.atan2(dir.x)); // Rtn: -Pi to Pi => -180, 180
+                *ang = rad2deg(det::atan2(dir.y, dir.x)); // Rtn: -Pi to Pi => -180, 180
 
                 // place all angles in range 0 to 360 picking 0.0 for case 2 and 360.0
                 // for case 1 when angle is 0.0
@@ -1922,7 +1923,7 @@ pub(crate) fn find_and_classify_loop_bisector_cached<O: LoopObject + PartialEq>(
             }
 
             // Map dAngleDeg to a dir vector
-            let uv_dir = Vec2::new(deg2rad(angle_deg).cos(), deg2rad(angle_deg).sin());
+            let uv_dir = Vec2::new(det::cos(deg2rad(angle_deg)), det::sin(deg2rad(angle_deg)));
 
             // build UVLine to use as the UVClassificationCurve
             if let Some(ivl) = surf_uv_domain.intersect_with_infinite_line(uv0, uv_dir, None, None)

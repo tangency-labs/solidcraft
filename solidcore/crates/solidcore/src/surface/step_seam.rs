@@ -29,6 +29,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{rad_to_deg, Point2, Point3, Vec2, PI};
 use crate::surface::step_window::{face_window, BoundaryEdge, WindowMargin};
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -328,9 +329,9 @@ fn wrap(a: f64) -> f64 {
 fn angle_of(q: Vec2) -> f64 {
     let (ax, ay) = (q.x.abs(), q.y.abs());
     let a = if ay <= ax {
-        rad_to_deg((ay / ax).atan())
+        rad_to_deg(det::atan(ay / ax))
     } else {
-        QUARTER - rad_to_deg((ax / ay).atan())
+        QUARTER - rad_to_deg(det::atan(ax / ay))
     };
     wrap(if q.x >= 0.0 {
         if q.y >= 0.0 {
@@ -353,7 +354,7 @@ fn sin_cos_deg(a: f64) -> (f64, f64) {
     // (exact: below 45 degrees nothing is taken off, and above it a and the quarter
     // line are within a factor of two)
     let r = a - QUARTER * quarter;
-    let (s, c) = (r * (PI / 180.0)).sin_cos();
+    let (s, c) = det::sin_cos(r * (PI / 180.0));
     if quarter == 1.0 {
         (c, -s)
     } else if quarter == 2.0 {
@@ -616,7 +617,7 @@ mod tests {
             seam_into_widest_gap(&k, &s, &loops, &[], Some(p(3.0, 4.0, 1.0)), TOL).unwrap();
 
         let angle = placed.u.angle.unwrap();
-        assert_angle(angle, 4.0_f64.atan2(3.0).to_degrees());
+        assert_angle(angle, det::atan2(4.0_f64, 3.0).to_degrees());
         assert!(placed.u.gap.is_none());
         let pos = position(&placed.surface);
         assert_eq!(pos.x_axis(), v3(3.0 / 5.0, 4.0 / 5.0, 0.0));

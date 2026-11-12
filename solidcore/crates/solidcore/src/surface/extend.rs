@@ -88,6 +88,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::math::det;
 use std::cell::Cell;
 
 use crate::error::{Result, SolidError};
@@ -1601,7 +1602,7 @@ impl Local {
         // rounding of t itself only reparametrises the continuation, its points stay on it)
         let a = (1.0 - t).abs() + t.abs();
         #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-        let amp = a.powi(p as i32);
+        let amp = det::powi(a, p as i32);
         let err_local = amp * (span.err + gamma(3 * p + 3) * span.size());
         // the weights' own: not translated, combined of weights alone (none on a polynomial
         // net, its weights stored as exactly 1)

@@ -790,6 +790,7 @@ pub(super) use super::projected_residual::maximum_is_bounded;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     #[test]
     fn bounded_native_proposals_cannot_certify_a_missed_peak() {
@@ -974,7 +975,7 @@ mod tests {
         let surface = Surface::from(sphere);
         let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
         let angle = 45.0_f64.to_radians();
-        let normal = Vec3::new(angle.sin(), 0.0, angle.cos()) * 0.001;
+        let normal = Vec3::new(det::sin(angle), 0.0, det::cos(angle)) * 0.001;
         let point = Vec3::new(0.2, 0.3, 2.0);
         let expected = 0.5 * normal.length_squared()
             + normal

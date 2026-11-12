@@ -750,6 +750,7 @@ pub fn func_interp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn grid(n: usize, m: usize, f: impl Fn(f64, f64) -> [f64; 3]) -> Vec<Vec<Vec3>> {
         (0..=n)
@@ -861,7 +862,7 @@ mod tests {
 
     #[test]
     fn interpolation_hits_points() {
-        let a = grid(4, 3, |i, j| [i, j, (i * 0.7).sin() + j * j * 0.1]);
+        let a = grid(4, 3, |i, j| [i, j, det::sin(i * 0.7) + j * j * 0.1]);
         let (u, v) = param_values(&a, ParamMethod::ChordLength).unwrap();
         let ku = interp_knot_vector(&u, 3).unwrap();
         let kv = interp_knot_vector(&v, 2).unwrap();

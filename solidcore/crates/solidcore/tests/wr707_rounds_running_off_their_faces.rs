@@ -22,6 +22,7 @@ use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
@@ -225,7 +226,7 @@ fn a_round_running_over_a_hole_builds() {
 /// `pi int_2^12 ((17 - sqrt(144 - w^2))^2 - 25) dw` from 16000 - 250 pi.
 #[test]
 fn a_round_of_a_hole_rim_past_the_plate_bottom_builds() {
-    let s = 36.0 * PI - (140.0_f64.sqrt() + 72.0 * (1.0_f64 / 6.0).asin());
+    let s = 36.0 * PI - (140.0_f64.sqrt() + 72.0 * det::asin(1.0_f64 / 6.0));
     let removed = PI * (2640.0 - 34.0 * s + 1440.0 - (1728.0 - 8.0) / 3.0);
     let want = 16000.0 - 250.0 * PI - removed;
     assert!(
@@ -254,7 +255,7 @@ fn a_round_of_a_hole_rim_past_the_plate_bottom_builds() {
 /// 338 pi.
 #[test]
 fn a_round_of_a_disc_rim_past_its_wall_builds() {
-    let s = 3.125 * PI / 2.0 - (0.5 * 6.0_f64.sqrt() / 2.0 + 3.125 * 0.2_f64.asin());
+    let s = 3.125 * PI / 2.0 - (0.5 * 6.0_f64.sqrt() / 2.0 + 3.125 * det::asin(0.2_f64));
     let removed = PI * (58.75 * 2.0 - 21.0 * s - (12.5 - (15.625 - 0.125) / 3.0));
     let want = 338.0 * PI - removed;
     assert!(
@@ -316,9 +317,9 @@ fn block_with_hole(k: &mut Kernel, z0: f64, height: f64) -> (Brep, solidcore::Re
 fn hole_overlap(top: f64, theta0: f64) -> f64 {
     integrate(
         |t: f64| {
-            let y = 18.2 + t.sin();
+            let y = 18.2 + det::sin(t);
             let low = 6.0 + (16.0 - (y - 16.0) * (y - 16.0)).sqrt();
-            2.0 * t.cos() * t.cos() * (top - low)
+            2.0 * det::cos(t) * det::cos(t) * (top - low)
         },
         theta0,
         PI / 2.0,
@@ -344,7 +345,8 @@ fn a_round_over_a_through_hole_between_its_rails_builds() {
 #[test]
 fn a_round_opening_a_blind_pocket_is_refused() {
     let y = 16.0 + (16.0_f64 - 3.5 * 3.5).sqrt();
-    let want = 8000.0 - 9.5 * PI - (16.0 - 4.0 * PI) * 40.0 + hole_overlap(9.5, (y - 18.2).asin());
+    let want =
+        8000.0 - 9.5 * PI - (16.0 - 4.0 * PI) * 40.0 + hole_overlap(9.5, det::asin(y - 18.2));
     let mut k = kernel(true);
     let (_, built) = block_with_hole(&mut k, -1.0, 10.5);
     let err = built.expect_err("refused");
@@ -392,7 +394,7 @@ fn a_round_wider_than_both_its_faces_builds() {
 
 /// `int sqrt(81 - u^2) du`, the area under the arc of radius 9.
 fn arc_area(u: f64) -> f64 {
-    0.5 * (u * (81.0 - u * u).sqrt() + 81.0 * (u / 9.0).asin())
+    0.5 * (u * (81.0 - u * u).sqrt() + 81.0 * det::asin(u / 9.0))
 }
 
 /// The 20 x 4 x 10 block with the slot x 8..12 under a bridge 1 thick, and a rib 0.05
@@ -407,10 +409,10 @@ fn thin_rib(k: &mut Kernel) -> (Brep, solidcore::Result<()>) {
     let block = cuboid(k, [0.0, 0.0, 0.0], [20.0, 4.0, 10.0]);
     let slot = cuboid(k, [8.0, -1.0, -1.0], [4.0, 6.0, 10.0]);
     let bridged = boolean_difference(k, block, slot).unwrap();
-    let arc = |t: f64| (9.0 - 9.0 * t.cos(), 1.0 + 9.0 * t.sin());
+    let arc = |t: f64| (9.0 - 9.0 * det::cos(t), 1.0 + 9.0 * det::sin(t));
     let (y1, z1) = arc(22.5_f64.to_radians());
     let (y2, z2) = arc(33.75_f64.to_radians());
-    let len = (y2 - y1).hypot(z2 - z1);
+    let len = det::hypot(y2 - y1, z2 - z1);
     let (dy, dz) = ((y2 - y1) / len, (z2 - z1) / len);
     let h = 0.05;
     let mut rib = cuboid(k, [0.0, 0.0, 0.0], [4.0, len + 2.0, h]);
@@ -437,7 +439,7 @@ fn thin_rib(k: &mut Kernel) -> (Brep, solidcore::Result<()>) {
 #[test]
 fn a_round_past_a_thin_rib_across_its_slot_builds() {
     let area = 40.0 - (4.0 + arc_area(9.0) - arc_area(5.0));
-    let d = 9.0 * 5.625_f64.to_radians().cos();
+    let d = 9.0 * det::cos(5.625_f64.to_radians());
     let lens = 2.0 * (arc_area(d + 0.025) - arc_area(d - 0.025));
     let want = 656.0 - 16.0 * area - 16.0 + 4.0 * lens;
     assert!((want - 401.198953621465).abs() < 1e-9, "closed form {want}");

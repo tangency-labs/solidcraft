@@ -13,6 +13,7 @@ use solidcore::blend::fillet_section::station::as_b_spline;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
@@ -60,7 +61,8 @@ fn form_at(k: &mut Kernel, c: Point3, r: f64, turn: f64) -> (BSplineSurface, Ana
     // turned about (1, 1, 1) by `turn`, then moved to `c`
     let a = turn.to_radians();
     let n = Vec3::new(1.0, 1.0, 1.0) * (1.0 / 3.0_f64.sqrt());
-    let rot = |v: Vec3| v * a.cos() + n.cross(v) * a.sin() + n * (n.dot(v) * (1.0 - a.cos()));
+    let rot =
+        |v: Vec3| v * det::cos(a) + n.cross(v) * det::sin(a) + n * (n.dot(v) * (1.0 - det::cos(a)));
     let mut place = Axis2Placement::default();
     place
         .set_canonical(

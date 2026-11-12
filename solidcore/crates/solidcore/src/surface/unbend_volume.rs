@@ -124,6 +124,7 @@ use crate::geom::transform::Transform;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_RAD, EFF_ZERO_SQ, INFINITE_PARAMETER,
     UNDEF_DOUBLE,
@@ -359,7 +360,7 @@ impl UnbendVolume {
         let dr2 = du * du + dv * dv; // (u**2 + v**2)
         let dr1 = dr2.sqrt(); // (u**2 + v**2)**(1/2)
 
-        let datan = dv.atan2(du);
+        let datan = det::atan2(dv, du);
 
         let mid = volume.unbend_mid_dir();
         let bin = volume.unbend_binormal();
@@ -489,7 +490,7 @@ impl UnbendVolume {
         let dr2 = du * du + dv * dv; // (u**2 + v**2)
         let dr1 = dr2.sqrt(); // (u**2 + v**2)**(1/2)
 
-        let datan = dv.atan2(du);
+        let datan = det::atan2(dv, du);
 
         // init output array
         let mut d = vec![Vec3::ZERO; eval_size(n)];
@@ -742,8 +743,8 @@ impl UnbendVolume {
         let theta = proj_point.y / dd;
 
         // the inverse map from ProjSpace to ParamSpace
-        let du = dr * theta.cos();
-        let dv = dr * theta.sin();
+        let du = dr * det::cos(theta);
+        let dv = dr * det::sin(theta);
         let dw = proj_point.z;
         Vec3::new(du, dv, dw)
     }
@@ -1160,8 +1161,8 @@ impl UnbendVolume {
             // check orientation of surface (positive = SrfNormals pt in CCW direction about
             // UnbendAxis
             let inspace_ang_rad = mid_dir_ang_rad_range.mid();
-            positive = (inspace_ang_rad.cos() * input_binormal
-                - inspace_ang_rad.sin() * input_mid_dir)
+            positive = (det::cos(inspace_ang_rad) * input_binormal
+                - det::sin(inspace_ang_rad) * input_mid_dir)
                 .dot(input_surface_normal)
                 > 0.0;
 

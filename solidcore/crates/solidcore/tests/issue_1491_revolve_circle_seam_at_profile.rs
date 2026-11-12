@@ -19,6 +19,7 @@ use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::sweep::api_brep::create_rotational_sweep;
@@ -136,7 +137,7 @@ fn issue_1491_seam_at_the_profile_unions_with_a_square_ring() {
     // c = sqrt(r^2 - h^2) (23.772778)
     let (h, r) = (2.5_f64, 3.0_f64);
     let c = (r * r - h * h).sqrt();
-    let overlap = 4.0 * (c * h + 0.5 * r * r * ((h / r).asin() - (c / r).asin()));
+    let overlap = 4.0 * (c * h + 0.5 * r * r * (det::asin(h / r) - det::asin(c / r)));
     let want = 2.0 * PI * 30.0 * (25.0 + 9.0 * PI - overlap);
     let got = volume(&k, &mut joined);
     assert!(

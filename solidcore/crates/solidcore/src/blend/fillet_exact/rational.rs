@@ -47,6 +47,7 @@
 //!   precision by cancellation near the last end. This changes its numerics for
 //!   correctness; the rational construction and its degree are unchanged.
 
+use crate::math::det;
 use std::collections::VecDeque;
 
 use super::{BlendQuadric, BlendSpine, ExactBlend, QuadricKind};
@@ -310,7 +311,7 @@ fn contact_of(o: &BlendQuadric, contact: f64, s: &Segment) -> Contact {
         }
         // SM_BQ_CONE (the fork's default): n = ((V - H d) cos^2 a - H d sin^2 a) / (H sin a)
         _ => {
-            let (c, sn) = (o.angle.cos(), o.angle.sin());
+            let (c, sn) = (det::cos(o.angle), det::sin(o.angle));
             let h = dot_const(&v, o.dir);
             let r = v_add(&v, &v_mul(&v_const(o.dir), &h), -1.0);
             let n = v_add(&v_scale(&r, c * c), &v_mul(&v_const(o.dir), &h), -sn * sn);
@@ -459,7 +460,7 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
     // a12 / |a12| times (r - h, -a12) scaled by |a12| / (r - h).
     let m = 0.5 * (a11 + a22);
     let h = 0.5 * (a11 - a22);
-    let r = h.hypot(a12);
+    let r = det::hypot(h, a12);
     let adl = [m + r, m - r];
     let sg = if a12 < 0.0 { -1.0 } else { 1.0 };
     let axes = [
@@ -552,8 +553,8 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
 /// `sm_ConicPoint`.
 fn conic_point(k: &Conic, t: f64) -> Point3 {
     match k.kind {
-        ConicKind::Ellipse => k.c + k.a1 * t.cos() + k.a2 * t.sin(),
-        ConicKind::Hyperbola => k.c + (k.a1 * t.cosh() + k.a2 * t.sinh()) * k.branch,
+        ConicKind::Ellipse => k.c + k.a1 * det::cos(t) + k.a2 * det::sin(t),
+        ConicKind::Hyperbola => k.c + (k.a1 * det::cosh(t) + k.a2 * det::sinh(t)) * k.branch,
         ConicKind::Parabola => k.c + k.a2 * t + k.a1 * (t * t),
     }
 }
@@ -564,8 +565,8 @@ fn conic_param(k: &Conic, x: Point3) -> f64 {
     let px = d.dot(k.a1) / k.a1.dot(k.a1);
     let py = d.dot(k.a2) / k.a2.dot(k.a2);
     match k.kind {
-        ConicKind::Ellipse => py.atan2(px),
-        ConicKind::Hyperbola => (py * k.branch).asinh(),
+        ConicKind::Ellipse => det::atan2(py, px),
+        ConicKind::Hyperbola => det::asinh(py * k.branch),
         ConicKind::Parabola => py,
     }
 }
@@ -579,12 +580,12 @@ fn conic_segment(k: &Conic, t0: f64, t1: f64) -> Segment {
     let mut w = 1.0;
     let p1 = match k.kind {
         ConicKind::Ellipse => {
-            w = h.cos();
-            k.c + (k.a1 * tm.cos() + k.a2 * tm.sin()) * (1.0 / w)
+            w = det::cos(h);
+            k.c + (k.a1 * det::cos(tm) + k.a2 * det::sin(tm)) * (1.0 / w)
         }
         ConicKind::Hyperbola => {
-            w = h.cosh();
-            k.c + (k.a1 * tm.cosh() + k.a2 * tm.sinh()) * (k.branch / w)
+            w = det::cosh(h);
+            k.c + (k.a1 * det::cosh(tm) + k.a2 * det::sinh(tm)) * (k.branch / w)
         }
         // P(t0) + (t1 - t0)/2 P'(t0)
         ConicKind::Parabola => p0 + (k.a2 + k.a1 * (2.0 * t0)) * h,
@@ -1083,7 +1084,7 @@ fn rational_spine_parts(
                 // a spine segment's end weight is not positive
                 return Err(sm_err("a spine segment's end weight is not positive"));
             }
-            let c = (w0 / wd).powf(1.0 / d as f64);
+            let c = det::powf(w0 / wd, 1.0 / d as f64);
             let mut ci = prev / w0;
             for i in 0..=d {
                 let wi = at(&sg.w, i) * ci;
@@ -1401,7 +1402,7 @@ mod tests {
         let q = BlendQuadric {
             kind: QuadricKind::Cylinder,
             point: Point3::ZERO,
-            dir: Vec3::new(0.0, -tau.sin(), tau.cos()),
+            dir: Vec3::new(0.0, -det::sin(tau), det::cos(tau)),
             radius: 4.0,
             angle: 0.0,
             side: 1.0,
@@ -1418,7 +1419,7 @@ mod tests {
                 assert!(q.distance(x).abs() < 1e-13, "{}", q.distance(x));
             }
             let p = conic_point(&kc, t);
-            assert!((conic_param(&kc, p) - t.sin().atan2(t.cos())).abs() < 1e-12);
+            assert!((conic_param(&kc, p) - det::atan2(det::sin(t), det::cos(t))).abs() < 1e-12);
         }
     }
 
@@ -1475,8 +1476,8 @@ mod tests {
         let b = cyl(Point3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 1.5);
         let node = Point3::new(0.0, 3.5, 0.0);
         let on = |phi: f64| {
-            let y = 2.0 + 1.5 * phi.cos();
-            Point3::new((3.5f64 * 3.5 - y * y).sqrt(), y, 1.5 * phi.sin())
+            let y = 2.0 + 1.5 * det::cos(phi);
+            Point3::new((3.5f64 * 3.5 - y * y).sqrt(), y, 1.5 * det::sin(phi))
         };
         let arc =
             nodal_quartic(&a, &b, node, on(0.3) - node, on(2.0 * PI - 0.3) - node, 0).unwrap();
@@ -1521,8 +1522,8 @@ mod tests {
                 let origin = Point3::new(7.0, -4.0, 2.0) * size;
                 let rotate = |v: Vec3| {
                     Vec3::new(
-                        angle.cos() * v.x - angle.sin() * v.y,
-                        angle.sin() * v.x + angle.cos() * v.y,
+                        det::cos(angle) * v.x - det::sin(angle) * v.y,
+                        det::sin(angle) * v.x + det::cos(angle) * v.y,
                         v.z,
                     )
                 };
@@ -1544,8 +1545,12 @@ mod tests {
                     );
                     let node = origin + rotate(Vec3::new(0.0, r, 0.0)) * size;
                     let from_node = |phi: f64| {
-                        let y = r - rho + rho * phi.cos();
-                        rotate(Vec3::new((r * r - y * y).sqrt(), y - r, rho * phi.sin())) * size
+                        let y = r - rho + rho * det::cos(phi);
+                        rotate(Vec3::new(
+                            (r * r - y * y).sqrt(),
+                            y - r,
+                            rho * det::sin(phi),
+                        )) * size
                     };
                     for (first, second) in [(a, b), (b, a)] {
                         for reversed in [false, true] {
@@ -1606,16 +1611,16 @@ mod tests {
             ..BlendQuadric::default()
         };
         let cylinder_sphere = |phi: f64| {
-            let x = 2.0 * phi.cos();
-            Point3::new(x, 2.0 * phi.sin(), (8.0 - 4.0 * x).sqrt())
+            let x = 2.0 * det::cos(phi);
+            Point3::new(x, 2.0 * det::sin(phi), (8.0 - 4.0 * x).sqrt())
         };
         let cone_sphere = |z: f64| {
             let x = -0.5 * z * z + 3.0 * z - 2.0;
             Point3::new(x, (z * z - x * x).sqrt(), z)
         };
         let cylinder_cone = |phi: f64| {
-            let x = 1.0 + 2.0_f64.sqrt() * phi.cos();
-            let z = 3.0 + 2.0_f64.sqrt() * phi.sin();
+            let x = 1.0 + 2.0_f64.sqrt() * det::cos(phi);
+            let z = 3.0 + 2.0_f64.sqrt() * det::sin(phi);
             Point3::new(x, (z * z - x * x).sqrt(), z)
         };
         let cone_cone = |t: f64| {
@@ -1757,7 +1762,7 @@ mod tests {
                 Cone::create_canonical_with_semi_angle(
                     k,
                     &frame,
-                    q.angle.tan(),
+                    det::tan(q.angle),
                     q.angle * 180.0 / PI,
                     Some(6.0),
                     false,

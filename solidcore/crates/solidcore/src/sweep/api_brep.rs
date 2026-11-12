@@ -1095,6 +1095,7 @@ mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::geom::axis2_placement::Axis2Placement;
+    use crate::math::det;
     use crate::primitive::api_curves;
 
     fn circle() -> Curve {
@@ -1525,7 +1526,7 @@ mod tests {
                 .iter()
                 .map(|&v| crate::topology::vertex::point(&b, v).unwrap())
                 .filter(|p| p.z > 10.0)
-                .map(|p| p.x.hypot(p.y))
+                .map(|p| det::hypot(p.x, p.y))
                 .fold(0.0, f64::max);
             // the rim vertex's distance from the axis
             let rim = crate::topology::brep::p1::vertices(&b, None)
@@ -1533,7 +1534,7 @@ mod tests {
                 .iter()
                 .map(|&v| crate::topology::vertex::point(&b, v).unwrap())
                 .filter(|p| p.z <= 10.0)
-                .map(|p| p.x.hypot(p.y))
+                .map(|p| det::hypot(p.x, p.y))
                 .fold(0.0, f64::max);
             // the fork's c4209ab test: of the NURB's rows at the ends of v, the one at the
             // top (z 20), its points' farthest from its first
@@ -1621,12 +1622,12 @@ mod tests {
         let n = surface.natural_uv_domain_if_built();
         for (u, v) in [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)] {
             let p = surface.evaluate_point(&k, n.evaluate(u, v)).unwrap();
-            assert!(p.x.hypot(p.y) <= 1e-12, "pole {p:?} off the axis");
+            assert!(det::hypot(p.x, p.y) <= 1e-12, "pole {p:?} off the axis");
         }
         // the two vertices are the poles
         for v in crate::topology::brep::p1::vertices(&b, None).unwrap() {
             let p = crate::topology::vertex::point(&b, v).unwrap();
-            assert!(p.x.hypot(p.y) <= 1e-12, "vertex {p:?} off the axis");
+            assert!(det::hypot(p.x, p.y) <= 1e-12, "vertex {p:?} off the axis");
             assert!(
                 (p.z.abs() - 5.0).abs() <= 1e-12,
                 "vertex {p:?} not at a pole"

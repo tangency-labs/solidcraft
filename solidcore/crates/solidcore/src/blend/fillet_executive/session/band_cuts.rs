@@ -46,6 +46,7 @@ use crate::geom::tol::{brep_zone_tol_3d, SmallTopoType};
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{rad_to_deg, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::query::brep::BrepQuery;
@@ -308,7 +309,7 @@ fn keeps_material_behind(
         let rho = aa.sqrt();
         let e1 = a / rho;
         let e2 = (b - a * (ab / aa)).unitize()?;
-        let phi = b.dot(e2).atan2(b.dot(e1));
+        let phi = det::atan2(b.dot(e2), b.dot(e1));
         let circle = Ellipse::new_circle(
             k,
             centre,
@@ -321,7 +322,7 @@ fn keeps_material_behind(
                 ..EllipseOptions::default()
             },
         )?;
-        let middle = centre + e1 * (rho * (0.5 * phi).cos()) + e2 * (rho * (0.5 * phi).sin());
+        let middle = centre + e1 * (rho * det::cos(0.5 * phi)) + e2 * (rho * det::sin(0.5 * phi));
         (Curve::from(circle), middle)
     };
     let interval = section.natural_interval();
@@ -590,7 +591,7 @@ fn section_breaks_through(
         let rho = aa.sqrt();
         let e1 = a / rho;
         let e2 = (b - a * (ab / aa)).unitize()?;
-        let phi = b.dot(e2).atan2(b.dot(e1));
+        let phi = det::atan2(b.dot(e2), b.dot(e1));
         Curve::from(Ellipse::new_circle(
             k,
             centre,

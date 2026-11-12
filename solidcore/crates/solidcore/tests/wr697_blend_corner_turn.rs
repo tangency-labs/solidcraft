@@ -27,6 +27,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, BIG_DOUBLE};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::{get_edges, get_faces};
@@ -155,10 +156,10 @@ fn mitres(k: &Kernel, b: &Brep) -> Mitres {
                     .max(((p.x - cx) * ox - (p.y - cy) * oy).abs() / 2.0_f64.sqrt());
                 out.cyl = out
                     .cyl
-                    .max(((p.x - (cx + ox)).hypot(p.z - 11.0) - 1.0).abs());
+                    .max((det::hypot(p.x - (cx + ox), p.z - 11.0) - 1.0).abs());
                 out.cyl = out
                     .cyl
-                    .max(((p.y - (cy + oy)).hypot(p.z - 11.0) - 1.0).abs());
+                    .max((det::hypot(p.y - (cy + oy), p.z - 11.0) - 1.0).abs());
             }
             let mut faces = Vec::new();
             for eu in edge::edgeuses(b, e, None, None).unwrap() {

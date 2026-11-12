@@ -319,6 +319,7 @@ mod tests {
     use super::*;
     use crate::vec::VecExt as _;
     use solidcore::eval::plan::EvalCurve;
+    use solidcore::math::det;
 
     fn close(a: Vec3, b: Vec3, tol: f64) -> bool {
         a.dist(b) <= tol
@@ -336,7 +337,7 @@ mod tests {
     /// translation scales with each weight) and a revolved one (composed with its own map).
     #[test]
     fn a_transformed_plan_evaluates_to_the_moved_points() {
-        let (c, s) = (0.6f64.cos(), 0.6f64.sin());
+        let (c, s) = (det::cos(0.6f64), det::sin(0.6f64));
         // Turned about z by 0.6 rad, then moved: by columns.
         let m = [
             [c, s, 0.0, 0.0],

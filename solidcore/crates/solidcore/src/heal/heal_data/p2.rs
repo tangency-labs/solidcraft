@@ -97,6 +97,7 @@ use crate::heal::face_props::{
     FaceProps, HealerOpType, LoopObject, MixedLinkType, PropStage, Tri, TriedLinkType,
 };
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, UNDEF_DOUBLE};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
@@ -148,7 +149,7 @@ pub fn edge_len_histogram_index(a: f64) -> Result<usize> {
     } else if a > 1e4 {
         Ok(10)
     } else {
-        let f = a.log10().floor();
+        let f = det::log10(a).floor();
         if f.is_nan() {
             return Err(SolidError::invalid_input(
                 OP,

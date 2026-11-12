@@ -1,6 +1,7 @@
 //! Edge nodes: every edge of a body sampled once, so the faces on either side share the very
 //! same boundary points (watertight by construction).
 
+use solidcore::math::det;
 use solidcore::Vec3;
 use solidcore_record::brep::{self, Curve};
 use solidcore::eval::CurveEval;
@@ -244,7 +245,7 @@ pub(crate) fn turn(a: Vec3, b: Vec3) -> f64 {
     if !(la > 0.0 && lb > 0.0) {
         return 0.0;
     }
-    (a.dot(b) / (la * lb)).clamp(-1.0, 1.0).acos()
+    det::acos((a.dot(b) / (la * lb)).clamp(-1.0, 1.0))
 }
 
 #[cfg(test)]

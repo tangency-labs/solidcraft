@@ -81,6 +81,7 @@
 
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::math::det;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
@@ -225,7 +226,7 @@ pub(crate) fn third_derivative(d1: Vec3, d2: Vec3, target: Vec3) -> Result<Vec3>
     let tp = d2 * (1.0 / sigma) - d1 * (d1.dot(d2) / (sigma * sigma * sigma));
     let nn = d2 - t * d2.dot(t);
     let r = tp * (-d2.dot(t)) - t * d2.dot(tp);
-    let x = (target * sigma.powi(5) - r * (sigma * sigma) + nn * (2.0 * d1.dot(d2)))
+    let x = (target * det::powi(sigma, 5) - r * (sigma * sigma) + nn * (2.0 * d1.dot(d2)))
         * (1.0 / (sigma * sigma));
     if !(x.x.is_finite() && x.y.is_finite() && x.z.is_finite()) {
         return Err(invalid("the change of curvature is not finite"));

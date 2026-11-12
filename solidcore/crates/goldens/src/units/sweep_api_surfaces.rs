@@ -21,6 +21,7 @@
 //! services. Input validation (`NULL` curve, malformed profiles, bad degree)
 //! remains compared. Every run has at least [`MIN_GENERATED`] generated cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -610,8 +611,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 /// A length scale: mostly moderate, sometimes tiny or huge.
 fn gen_scale(rng: &mut Rng) -> f64 {
     match rng.below(10) {
-        0 => 10f64.powi(-(rng.range_i64(3, 6) as i32)),
-        1 => 10f64.powi(rng.range_i64(3, 6) as i32),
+        0 => det::powi(10f64, -(rng.range_i64(3, 6) as i32)),
+        1 => det::powi(10f64, rng.range_i64(3, 6) as i32),
         _ => rng.uniform(0.2, 20.0),
     }
 }

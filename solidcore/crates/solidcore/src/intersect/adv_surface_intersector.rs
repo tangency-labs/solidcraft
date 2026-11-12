@@ -1902,6 +1902,7 @@ impl SurfaceIntersector<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     #[test]
     fn audit_483_singularity_alignment_skips_a_failed_angle() {
@@ -2193,7 +2194,7 @@ mod tests {
         assert_eq!(n, 1);
         for i in 1..8 {
             let a = f64::from(i) * 0.7;
-            add_sing_dir(Vec3::new(a.cos(), a.sin(), 0.0), &mut n, &mut dirs).unwrap();
+            add_sing_dir(Vec3::new(det::cos(a), det::sin(a), 0.0), &mut n, &mut dirs).unwrap();
         }
         assert_eq!(n, 8);
         assert!(add_sing_dir(Vec3::new(0.0, 0.0, 1.0), &mut n, &mut dirs).is_err());
@@ -2205,9 +2206,9 @@ mod tests {
     fn add_sing_dir_keeps_close_branches() {
         let mut dirs = [Vec3::UNDEF; MAX_SING_DIRS];
         let mut n = 0;
-        let a = (1.0_f64 / 21.0_f64.sqrt()).atan();
-        add_sing_dir(Vec3::new(a.cos(), a.sin(), 0.0), &mut n, &mut dirs).unwrap();
-        add_sing_dir(Vec3::new(a.cos(), -a.sin(), 0.0), &mut n, &mut dirs).unwrap();
+        let a = det::atan(1.0_f64 / 21.0_f64.sqrt());
+        add_sing_dir(Vec3::new(det::cos(a), det::sin(a), 0.0), &mut n, &mut dirs).unwrap();
+        add_sing_dir(Vec3::new(det::cos(a), -det::sin(a), 0.0), &mut n, &mut dirs).unwrap();
         assert_eq!(n, 2);
     }
 }

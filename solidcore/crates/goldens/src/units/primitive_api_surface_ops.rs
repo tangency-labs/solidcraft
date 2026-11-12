@@ -13,6 +13,7 @@
 //! then the result, reported as the values `rec`. A case that reaches an unported unit
 //! is deferred.
 
+use solidcore::math::det;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
@@ -464,7 +465,7 @@ fn net(rng: &mut Rng, rows: u64, columns: u64) -> Vec<P3> {
     for i in 0..rows {
         for j in 0..columns {
             let (x, y) = (i as f64 * 10.0, j as f64 * 10.0);
-            let z = tilt * x + amp * ((x * 0.07).sin() + (y * 0.05).cos()) + rng.uniform(-0.5, 0.5);
+            let z = tilt * x + amp * (det::sin(x * 0.07) + det::cos(y * 0.05)) + rng.uniform(-0.5, 0.5);
             v.push(p3([x, y, z]));
         }
     }
@@ -475,7 +476,7 @@ fn net(rng: &mut Rng, rows: u64, columns: u64) -> Vec<P3> {
 /// lattice (sometimes jittered, sometimes with a row repeated), at a random scale from
 /// `1e-3` to `1e3`.
 fn ordered_grid(rng: &mut Rng, rows: u64, columns: u64) -> Vec<P3> {
-    let scale = 10f64.powi(rng.range_i64(-3, 3) as i32);
+    let scale = det::powi(10f64, rng.range_i64(-3, 3) as i32);
     let amp = rng.uniform(0.0, 3.0);
     let jitter = if rng.chance(0.5) { rng.uniform(0.0, 0.3) } else { 0.0 };
     let repeat_row = rng.chance(0.08).then(|| rng.below(rows.max(1)));
@@ -485,7 +486,7 @@ fn ordered_grid(rng: &mut Rng, rows: u64, columns: u64) -> Vec<P3> {
         for j in 0..columns {
             let x = ii as f64 + jitter * rng.uniform(-1.0, 1.0);
             let y = j as f64 + jitter * rng.uniform(-1.0, 1.0);
-            let z = amp * ((x * 0.6).sin() * (y * 0.4).cos());
+            let z = amp * (det::sin(x * 0.6) * det::cos(y * 0.4));
             v.push(p3([x * scale, y * scale, z * scale]));
         }
     }

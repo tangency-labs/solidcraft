@@ -28,6 +28,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_curves as curves;
@@ -192,7 +193,7 @@ fn built_volume(r: f64, xsect: u32) -> f64 {
 /// `scenario_round_past_the_rim_over_an_opening`, to 1e-7).
 #[test]
 fn a_round_past_the_rim_over_the_opening_keeps_the_bridge() {
-    let g = |t: f64| 6.0 * t - 0.5 * t * (36.0 - t * t).sqrt() - 18.0 * (t / 6.0).asin();
+    let g = |t: f64| 6.0 * t - 0.5 * t * (36.0 - t * t).sqrt() - 18.0 * det::asin(t / 6.0);
     let q = 32.0_f64.sqrt();
     let full = g(q) + 4.0 * (6.0 - q);
     let bridge = full - g(5.0);

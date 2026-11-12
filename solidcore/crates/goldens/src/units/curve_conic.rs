@@ -14,6 +14,7 @@
 //! upstream status is not `SM_SUCCESS` is compared as the error `status_<code>`.
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -463,7 +464,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             if rng.chance(0.6) {
                 b = a.clone();
                 if rng.chance(0.7) {
-                    let eps = 10f64.powi(-(rng.range_i64(9, 15) as i32));
+                    let eps = det::powi(10f64, -(rng.range_i64(9, 15) as i32));
                     match rng.below(4) {
                         0 => b.a += eps,
                         1 => b.b += eps,

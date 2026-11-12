@@ -10,6 +10,7 @@
 //! output array may start with null entries (`prefill`), as upstream's tests append to
 //! arrays holding curves. Recorded: the status (`status`) and the record (`record`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::Curve;
@@ -309,7 +310,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let scale = 10f64.powi(rng.range_i64(-1, 1) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-1, 1) as i32);
         let op = match rng.below(4) {
             0 => Op::ProjectBrep,
             1 => Op::Silhouette,

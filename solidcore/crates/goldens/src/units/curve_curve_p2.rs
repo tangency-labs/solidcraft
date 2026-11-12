@@ -17,6 +17,7 @@
 //! `SmLine`, `curve.line`; ...) and `ReadFromDB` of the analytic and generated curve
 //! types. Every run has at least [`MIN_GENERATED`] generated cases.
 
+use solidcore::math::det;
 use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
@@ -1858,8 +1859,8 @@ fn gen_static(rng: &mut Rng) -> Inputs {
                     let th = sweep * (i as f64 / k as f64);
                     let s = sweep / (b - a);
                     [
-                        Vec3::new(cen[0] + r * th.cos(), cen[1] + r * th.sin(), cen[2]),
-                        Vec3::new(-r * s * th.sin(), r * s * th.cos(), 0.0),
+                        Vec3::new(cen[0] + r * det::cos(th), cen[1] + r * det::sin(th), cen[2]),
+                        Vec3::new(-r * s * det::sin(th), r * s * det::cos(th), 0.0),
                     ]
                 } else {
                     match curve

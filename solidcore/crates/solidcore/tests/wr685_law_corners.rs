@@ -34,6 +34,7 @@ use solidcore::geom::vector2d::Point2;
 use solidcore::intersect::point_class::{PointClassType, PointClassification};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
@@ -805,7 +806,7 @@ fn surface_normal_at(k: &Kernel, b: &Brep, f: FaceId, p: Point3) -> Vec3 {
 
 /// The angle between the lines along `a` and `b`.
 fn line_angle(a: Vec3, b: Vec3) -> f64 {
-    (a.dot(b).abs() / (a.length() * b.length())).min(1.0).acos()
+    det::acos((a.dot(b).abs() / (a.length() * b.length())).min(1.0))
 }
 
 /// jyviko's blend-definition rule (#2243, #2489): each face the blend made is a definition

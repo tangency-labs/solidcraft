@@ -2,6 +2,7 @@
 //! against its golden. Records values, adaptive step sizes, mutated scales and
 //! accepted/reduced counts. Includes coupled-to-state equations to detect stage/array
 //! adaptation errors.
+use solidcore::math::det;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -33,8 +34,8 @@ fn eval(i: &Input, t: f64, y: &[f64], dy: &mut [f64]) -> solidcore::Result<()> {
             return Err(SolidError::sm_err("test evaluator"));
         }
         *d = match i.kind {
-            1 => p[0] * (p[1] * t + p[2]).sin() + p[3] * v,
-            2 => p[0] * (p[1] * t).exp() + p[2] * v + p[3],
+            1 => p[0] * det::sin(p[1] * t + p[2]) + p[3] * v,
+            2 => p[0] * det::exp(p[1] * t) + p[2] * v + p[3],
             _ => p[0] + p[1] * t + p[2] * t * t + p[3] * v,
         };
     }

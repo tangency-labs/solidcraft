@@ -30,6 +30,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
@@ -91,7 +92,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// `∫ sqrt(r² - u²) du` from 0 to `u`.
 fn quarter(u: f64, r: f64) -> f64 {
-    (u * (r * r - u * u).sqrt() + r * r * (u / r).asin()) / 2.0
+    (u * (r * r - u * u).sqrt() + r * r * det::asin(u / r)) / 2.0
 }
 
 /// The regimes' bound, r = (L² + t²) / 2t: the ball touching the top face and the bottom
@@ -113,8 +114,8 @@ fn tangent_to_top(r: f64) -> f64 {
 /// edge; the section loses the triangle over their chord less the circle's segment on it.
 fn through_both_edges(r: f64) -> f64 {
     let chord = (L * L + T * T).sqrt();
-    let angle = 2.0 * (chord / (2.0 * r)).asin();
-    let segment = r * r / 2.0 * (angle - angle.sin());
+    let angle = 2.0 * det::asin(chord / (2.0 * r));
+    let segment = r * r / 2.0 * (angle - det::sin(angle));
     L * T * W - W * (L * T / 2.0 - segment)
 }
 
@@ -201,7 +202,7 @@ fn a_round_up_to_the_bound_is_tangent_to_the_top_and_ends_on_the_bottom_edge() {
                 gap <= 1e-9 * r,
                 "r {r}: tangent line off the round by {gap}"
             );
-            let angle = n.cross(Vec3::new(0.0, 0.0, 1.0)).length().asin();
+            let angle = det::asin(n.cross(Vec3::new(0.0, 0.0, 1.0)).length());
             assert!(angle <= 1e-9, "r {r}: normals {angle} rad apart");
             // through the bottom edge
             let (gap, _) = on_round(&k, &b, Point3::new(0.0, y, 0.0));
@@ -255,7 +256,7 @@ fn the_disc_wall_ends_on_its_bottom_rim() {
     let xc = (r * r - (r - t) * (r - t)).sqrt();
     let lost = (big - xc) * (r * xc - quarter(xc, r))
         + r * xc * xc / 2.0
-        + ((r - t).powi(3) - r.powi(3)) / 3.0;
+        + (det::powi(r - t, 3) - det::powi(r, 3)) / 3.0;
     let want = PI * big * big * t - 2.0 * PI * lost;
     assert!((want - 965.536_758_055_394).abs() < 1e-9, "{want}");
     let mut k = kernel(true);
@@ -263,7 +264,7 @@ fn the_disc_wall_ends_on_its_bottom_rim() {
     round(&mut k, &mut b, [0.0, big, t], r).unwrap();
     holds(&mut k, &mut b, 3, want, 1e-9);
 
-    let s = 3.125 * PI / 2.0 - (0.5 * 6.0_f64.sqrt() / 2.0 + 3.125 * 0.2_f64.asin());
+    let s = 3.125 * PI / 2.0 - (0.5 * 6.0_f64.sqrt() / 2.0 + 3.125 * det::asin(0.2_f64));
     let removed = PI * (58.75 * 2.0 - 21.0 * s - (12.5 - (15.625 - 0.125) / 3.0));
     let continued = 338.0 * PI - removed;
     let mut k = kernel(false);
@@ -346,8 +347,9 @@ fn a_hole_rim_ends_on_the_hole_s_bottom_rim() {
     let (r, t) = (12.0_f64, 10.0_f64);
     let xc = (r * r - (r - t) * (r - t)).sqrt();
     let rc = 5.0 + xc;
-    let lost =
-        rc * (r * xc - quarter(xc, r)) - r * xc * xc / 2.0 - ((r - t).powi(3) - r.powi(3)) / 3.0;
+    let lost = rc * (r * xc - quarter(xc, r))
+        - r * xc * xc / 2.0
+        - (det::powi(r - t, 3) - det::powi(r, 3)) / 3.0;
     let want = 16000.0 - 250.0 * PI - 2.0 * PI * lost;
     assert!((want - 13_811.173_028_388_774).abs() < 1e-8, "{want}");
     let mut k = kernel(true);
@@ -369,8 +371,8 @@ fn a_hole_rim_ends_on_the_hole_s_bottom_rim() {
 fn a_round_wider_than_both_its_faces_ends_on_both_rims() {
     let r = 10.0_f64;
     let chord = 50.0_f64.sqrt();
-    let angle = 2.0 * (chord / (2.0 * r)).asin();
-    let segment = r * r / 2.0 * (angle - angle.sin());
+    let angle = 2.0 * det::asin(chord / (2.0 * r));
+    let segment = r * r / 2.0 * (angle - det::sin(angle));
     let want = 80.0 * (25.0 - 12.5 + segment);
     let mut k = kernel(true);
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 80.0, 5.0, 5.0).unwrap();

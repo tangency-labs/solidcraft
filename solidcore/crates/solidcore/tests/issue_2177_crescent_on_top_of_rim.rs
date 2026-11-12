@@ -21,6 +21,7 @@ use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::primitive::api_curves::create_arc;
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -39,8 +40,8 @@ const PRISM: f64 = 5.0;
 /// The crescent's area: the r 6 disc centred at (10, 0) less the r 10 disc.
 fn crescent_area() -> f64 {
     let (d, r) = (R, R_CRESCENT);
-    let lens = r * r * ((d * d + r * r - R * R) / (2.0 * d * r)).acos()
-        + R * R * ((d * d + R * R - r * r) / (2.0 * d * R)).acos()
+    let lens = r * r * det::acos((d * d + r * r - R * R) / (2.0 * d * r))
+        + R * R * det::acos((d * d + R * R - r * r) / (2.0 * d * R))
         - 0.5 * ((-d + r + R) * (d + r - R) * (d - r + R) * (d + r + R)).sqrt();
     std::f64::consts::PI * r * r - lens
 }
@@ -60,8 +61,8 @@ fn union(fixed: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
     k.fixes.close_loop_relates_only_coincident_edges = fixed;
     let y = (R * R - 8.2 * 8.2).sqrt();
-    let big = y.atan2(8.2).to_degrees();
-    let small = y.atan2(8.2 - R).to_degrees();
+    let big = det::atan2(y, 8.2).to_degrees();
+    let small = det::atan2(y, 8.2 - R).to_degrees();
     let inner = Curve::from(create_arc(Vec3::new(0.0, 0.0, 0.0), R, -big, big).unwrap());
     let outer = Curve::from(create_arc(Vec3::new(R, 0.0, 0.0), R_CRESCENT, -small, small).unwrap());
     let mut tool = create_linear_sweep(

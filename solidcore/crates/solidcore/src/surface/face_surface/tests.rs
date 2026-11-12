@@ -1,6 +1,7 @@
 use super::*;
 use crate::eval::{Curve, Frame};
 use crate::geom::vector2d::Point2;
+use crate::math::det;
 use core::f64::consts::PI;
 
 fn k() -> Kernel {
@@ -48,7 +49,7 @@ fn on_cylinder(k: &Kernel, f: &FaceSurface, r: f64) {
         (0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y)),
     ] {
         let p = f.surface.evaluate_point(k, Point2::new(u, v)).unwrap();
-        assert!((p.x.hypot(p.y) - r).abs() <= 1e-14 * 16.0, "{p:?}");
+        assert!((det::hypot(p.x, p.y) - r).abs() <= 1e-14 * 16.0, "{p:?}");
     }
 }
 
@@ -449,7 +450,7 @@ fn a_label_with_its_origin_elsewhere_on_the_axis_passes_the_kernels_check() {
                 },
                 Record::Cone {
                     frame: at(h),
-                    radius_at_origin: 5.0 + h * 0.25_f64.tan(),
+                    radius_at_origin: 5.0 + h * det::tan(0.25_f64),
                     half_angle: 0.25,
                 },
             ),

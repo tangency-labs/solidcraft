@@ -24,6 +24,7 @@
 // offsets checked against their lengths above each use.
 #![allow(clippy::indexing_slicing)]
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -211,16 +212,16 @@ impl EvalFunction for TestFn {
             }
             2 => {
                 let arg = p[1] * t + p[2];
-                f = p[0] * arg.sin() + p[3] * t + p[4];
-                fp = p[0] * p[1] * arg.cos() + p[3];
+                f = p[0] * det::sin(arg) + p[3] * t + p[4];
+                fp = p[0] * p[1] * det::cos(arg) + p[3];
             }
             3 => {
                 let u = p[1] * (t - p[2]);
-                f = p[0] * u.atan() + p[3];
+                f = p[0] * det::atan(u) + p[3];
                 fp = p[0] * p[1] / (1.0 + u * u);
             }
             4 => {
-                let q = (t - p[1]).cbrt();
+                let q = det::cbrt(t - p[1]);
                 f = p[0] * q + p[2];
                 fp = if q == 0.0 { 0.0 } else { p[0] / (3.0 * q * q) };
             }
@@ -231,7 +232,7 @@ impl EvalFunction for TestFn {
             }
             6 => {
                 let d = t - p[2];
-                let e = (-p[1] * d * d).exp();
+                let e = det::exp(-p[1] * d * d);
                 f = p[0] * e + p[3];
                 fp = -2.0 * p[0] * p[1] * d * e;
             }
@@ -501,7 +502,7 @@ fn gen_func(rng: &mut Rng) -> Func {
         kind,
         p,
         found_tol: if rng.chance(0.3) {
-            10f64.powf(rng.uniform(-12.0, -4.0))
+            det::powf(10f64, rng.uniform(-12.0, -4.0))
         } else {
             0.0
         },
@@ -595,11 +596,11 @@ impl UnitDiff for Runner {
                 periodic: rng.chance(0.2),
                 algorithm: rng.below(4) as i32,
                 desired: if rng.chance(0.3) {
-                    Some(10f64.powf(rng.uniform(-14.0, -3.0)))
+                    Some(det::powf(10f64, rng.uniform(-14.0, -3.0)))
                 } else {
                     None
                 },
-                acceptable: 10f64.powf(rng.uniform(-12.0, -1.0)),
+                acceptable: det::powf(10f64, rng.uniform(-12.0, -1.0)),
                 guesses,
             }
         } else if r < 0.8 {
@@ -625,7 +626,7 @@ impl UnitDiff for Runner {
                 ax,
                 bx,
                 cx,
-                tol: 10f64.powf(rng.uniform(-14.0, -3.0)),
+                tol: det::powf(10f64, rng.uniform(-14.0, -3.0)),
                 maximize: rng.chance(0.5),
             }
         } else {

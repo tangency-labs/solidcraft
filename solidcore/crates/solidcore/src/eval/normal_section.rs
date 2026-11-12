@@ -21,6 +21,7 @@
 
 use super::spline::{orders, Partials, MAX_PARTIAL_ORDER};
 use super::vec::VecExt;
+use crate::math::det;
 use crate::math::Vec3;
 
 /// Taylor coefficients in `x` up to the fourth power (index = power).
@@ -80,7 +81,7 @@ pub fn normal_section(d: &Partials, normal: Vec3, direction: Vec3) -> Option<Sec
     }
     let [_, _, h2, h3, h4] = height;
     let (curvature, change) = (2.0 * h2, 6.0 * h3);
-    let rate = 24.0 * h4 - 3.0 * curvature.powi(3);
+    let rate = 24.0 * h4 - 3.0 * det::powi(curvature, 3);
     let jet = SectionJet {
         curvature,
         curvature_change: change,
@@ -203,7 +204,7 @@ mod tests {
     /// h‴ = 1 and h⁗ = 2 at the origin: curvature 0, its change 1 and the change's rate 2 along x.
     #[test]
     fn a_polynomial_graph_reads_its_own_derivatives() {
-        let z = |x: f64| x.powi(3) / 6.0 + x.powi(4) / 12.0;
+        let z = |x: f64| det::powi(x, 3) / 6.0 + det::powi(x, 4) / 12.0;
         // Monomial coefficients a0..a4 = [0, 0, 0, 1/6, 1/12]; Bézier b_i = Σ_k C(i,k)/C(4,k) a_k.
         let a = [0.0, 0.0, 0.0, 1.0 / 6.0, 1.0 / 12.0];
         let c = |n: usize, k: usize| {

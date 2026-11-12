@@ -23,6 +23,7 @@ use solidcore::curve::line::Line;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::sweep::api_brep::{
     create_taper_extrude_with_corner, OffsetCornerType, TaperExtrude,
 };
@@ -101,8 +102,8 @@ fn assert_rel(a: f64, b: f64, rel: f64) {
 const WEDGE_VOLUME: f64 = 72.883_284_979_193;
 
 fn slot_volume() -> f64 {
-    let t = 10.0_f64.to_radians().tan();
-    ((10.0 + 4.0 * t).powi(3) - 1000.0) / (6.0 * t) - 0.08 / t
+    let t = det::tan(10.0_f64.to_radians());
+    (det::powi(10.0 + 4.0 * t, 3) - 1000.0) / (6.0 * t) - 0.08 / t
 }
 
 #[test]

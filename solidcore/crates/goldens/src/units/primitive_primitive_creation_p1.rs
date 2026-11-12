@@ -1,5 +1,6 @@
 //! Runner for primitive maps, pivot selection and path helpers, ported from upstream
 //! `PrimitiveCreation`; checked against its golden.
+use solidcore::math::det;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -110,7 +111,7 @@ fn boolean_face(
     let frame = Axis2Placement::new(
         Vec3::new(0.0, 0.0, value(data, 2)),
         Vec3::X,
-        Vec3::new(0.0, angle.cos(), angle.sin()),
+        Vec3::new(0.0, det::cos(angle), det::sin(angle)),
     );
     let domain = Extent2d::from_bounds(
         value(data, 3),

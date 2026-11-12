@@ -17,6 +17,7 @@ use solidcore::error::SM_ERR;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tol::approx_tol3d;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::surface::cone::Cone;
 use solidcore::surface::sphere::{Sphere, SphereOptions};
@@ -42,7 +43,7 @@ fn placement() -> Axis2Placement {
 
 /// The cone with its apex at the origin, its lower end, opening up the Z axis to height 1.
 fn apex_cone(k: &Kernel) -> Cone {
-    let top = SEMI.to_radians().tan();
+    let top = det::tan(SEMI.to_radians());
     Cone::create_canonical(k, &placement(), 0.0, top, 1.0, false, false).unwrap()
 }
 
@@ -125,7 +126,7 @@ fn circles_inside_and_past_the_top_are_unchanged() {
 /// 4 cos² 70 + 2 tol cos 70.
 #[test]
 fn sphere_crossing_just_past_the_apex() {
-    let (s, c) = (SEMI.to_radians().sin(), SEMI.to_radians().cos());
+    let (s, c) = (det::sin(SEMI.to_radians()), det::cos(SEMI.to_radians()));
     let centre = Point3::new(0.0, 0.0, 2.0);
     let past = Point3::new(-2.0 * TOL * s, 0.0, -2.0 * TOL * c);
     let radius = past.distance(centre);

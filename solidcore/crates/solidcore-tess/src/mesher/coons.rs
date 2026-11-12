@@ -4,6 +4,7 @@
 //! A blend that folds (a strongly non-convex boundary) is refused, and the face goes to the
 //! constrained Delaunay path.
 
+use solidcore::math::det;
 use solidcore::Vec3;
 use crate::vec::VecExt as _;
 
@@ -38,13 +39,13 @@ fn candidates(uv: &[[f64; 2]], scale: [f64; 2]) -> Option<Vec<usize>> {
     for i in 0..n {
         let (a, b, c) = (p(i + n - 1)?, p(i)?, p(i + 1)?);
         let (d0, d1) = ([b[0] - a[0], b[1] - a[1]], [c[0] - b[0], c[1] - b[1]]);
-        let (l0, l1) = (d0[0].hypot(d0[1]), d1[0].hypot(d1[1]));
+        let (l0, l1) = (det::hypot(d0[0], d0[1]), det::hypot(d1[0], d1[1]));
         // Two copies of a pole meet with no length between them: that is a corner.
         if l0 == 0.0 || l1 == 0.0 {
             found.push(i);
             continue;
         }
-        let turn = (d0[0] * d1[1] - d0[1] * d1[0]).atan2(d0[0] * d1[0] + d0[1] * d1[1]).abs();
+        let turn = det::atan2(d0[0] * d1[1] - d0[1] * d1[0], d0[0] * d1[0] + d0[1] * d1[1]).abs();
         if turn > CORNER_TURN {
             found.push(i);
         }
@@ -98,7 +99,7 @@ fn min_angle(uv: &[[f64; 2]], r: &(Vec<[f64; 2]>, Vec<[u32; 3]>), scale: [f64; 2
         let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) else { continue };
         for (p, q, s) in [(a, b, c), (b, c, a), (c, a, b)] {
             let (u, v) = ([q[0] - p[0], q[1] - p[1]], [s[0] - p[0], s[1] - p[1]]);
-            let ang = (u[0] * v[1] - u[1] * v[0]).abs().atan2(u[0] * v[0] + u[1] * v[1]);
+            let ang = det::atan2((u[0] * v[1] - u[1] * v[0]).abs(), u[0] * v[0] + u[1] * v[1]);
             worst = worst.min(ang);
         }
     }

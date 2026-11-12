@@ -34,6 +34,7 @@ use offset_fixture::{planar_faces_at, shell, volume, Notifications};
 use solidcore::curve::curve::Curve;
 use solidcore::error::offset::{OffsetFailure, Unsoundness};
 use solidcore::error::Reason;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -82,11 +83,11 @@ fn shelled(up: bool, fixed: bool) -> (Kernel, Brep) {
 }
 
 fn closed_form() -> f64 {
-    let a = (HB / R).atan();
-    let y0 = 2.0 / a.cos();
+    let a = det::atan(HB / R);
+    let y0 = 2.0 / det::cos(a);
     let y1 = HB / R * (R - 2.0) + y0;
     let vase = PI * R * R * (HB / 3.0 + H - HB);
-    let cavity = PI * (R - 2.0).powi(2) * ((H - y1) + (y1 - y0) / 3.0);
+    let cavity = PI * det::powi(R - 2.0, 2) * ((H - y1) + (y1 - y0) / 3.0);
     vase - cavity
 }
 

@@ -23,6 +23,7 @@
 //!   (see `plan/findings.md`, `geom.polynomial`).
 //! - The `SM_DEBUG_CODE` self-checks (disabled upstream) are not ported.
 
+use crate::math::det;
 use core::ops::Deref;
 
 use crate::geom::vector3d::{acos, cbrt, sqrt};
@@ -161,9 +162,9 @@ pub fn solve_cubic(coefficients: &[f64; 4], zero_tol: f64) -> Roots {
         let phi = 1.0 / 3.0 * acos(-q / (-cb_p).sqrt());
         let t = 2.0 * sqrt(-p);
 
-        roots.push(t * phi.cos());
-        roots.push(-t * (phi + PI / 3.0).cos());
-        roots.push(-t * (phi - PI / 3.0).cos());
+        roots.push(t * det::cos(phi));
+        roots.push(-t * det::cos(phi + PI / 3.0));
+        roots.push(-t * det::cos(phi - PI / 3.0));
     } else {
         // One real root.
         let sqrt_d = sqrt(d);

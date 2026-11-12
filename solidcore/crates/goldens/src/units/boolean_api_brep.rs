@@ -81,6 +81,7 @@
 //! their own stream (`tess0000`, ...): every operand kind at small, moderate and large
 //! scales, angle tolerances from `0.5` to `90` degrees and invalid ones.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1574,8 +1575,8 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
 /// upstream `SmApiCreateSphere` takes tens of seconds at radius `~5e-5`.
 fn gen_scale(rng: &mut Rng) -> f64 {
     match rng.below(10) {
-        0 => 10f64.powi(-(rng.range_i64(2, 3) as i32)),
-        1 => 10f64.powi(rng.range_i64(2, 4) as i32),
+        0 => det::powi(10f64, -(rng.range_i64(2, 3) as i32)),
+        1 => det::powi(10f64, rng.range_i64(2, 4) as i32),
         _ => rng.uniform(0.5, 20.0),
     }
 }

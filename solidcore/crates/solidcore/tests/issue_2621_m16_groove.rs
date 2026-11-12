@@ -37,6 +37,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection};
@@ -110,7 +111,7 @@ impl Thread {
         let root = self.d / 2.0 - 5.0 / 8.0 * h;
         let outer = self.d / 2.0 + self.p / 20.0;
         let half_root = self.p / 8.0;
-        let half_outer = half_root + (outer - root) * 30f64.to_radians().tan();
+        let half_outer = half_root + (outer - root) * det::tan(30f64.to_radians());
         [
             (root, -half_root),
             (outer, -half_outer),
@@ -127,7 +128,7 @@ impl Thread {
         const BELOW: f64 = 0.566_367_513_459_481_3;
         let base = SHOULDER - BELOW * self.p;
         let turns = (TOP + self.p - base) / self.p;
-        let (s, c) = phi.sin_cos();
+        let (s, c) = det::sin_cos(phi);
         let corners: Vec<Point3> = self
             .section()
             .iter()

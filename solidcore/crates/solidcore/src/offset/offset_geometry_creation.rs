@@ -184,6 +184,7 @@ use crate::geom::solution_array::{SolutionArray, SolutionObject, SolutionType};
 use crate::geom::tol::{are_same, zone_tol_3d_of_curve};
 use crate::intersect::point_class::{ClassGeometry, ClassObject};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI,
     UNDEF_DOUBLE,
@@ -5587,7 +5588,7 @@ impl OffsetGeometryCreation {
         let c3_ivl = c3.natural_interval();
         let dropped =
             ext_s.drop_curve::<NoObject>(k, &ext_dom, c3, &c3_ivl, tol, false, None, true)?;
-        let drop_dev = dropped.max_drop_to_surf.hypot(dropped.max_approx_dev);
+        let drop_dev = det::hypot(dropped.max_drop_to_surf, dropped.max_approx_dev);
         if dropped.uv_curves.is_empty() || !drop_dev.is_finite() || drop_dev > tol {
             return Err(SolidError::Unsupported {
                 operation: OP_EDGEUSE,
@@ -6191,7 +6192,7 @@ mod tests {
         assert!(!passes_through(&k, &touching, at(1e-6), &plane, uv, tol).unwrap());
         let lifted = over_the_plane(1e-3, 1.0 / 3.0, true);
         assert!(passes_through(&k, &lifted, at(1e-3), &plane, uv, tol).unwrap());
-        let shallow = over_the_plane(0.6_f64.to_radians().tan(), 0.0, false);
+        let shallow = over_the_plane(det::tan(0.6_f64.to_radians()), 0.0, false);
         assert!(passes_through(&k, &shallow, 0.5, &plane, uv, tol).unwrap());
     }
 
@@ -6223,7 +6224,7 @@ mod tests {
         assert!(!passes_through(&k, &touching, at(1e-6), &surface, uv, tol).unwrap());
         let lifted = over_the_plane(1e-3, 1.0 / 3.0, true);
         assert!(passes_through(&k, &lifted, at(1e-3), &surface, uv, tol).unwrap());
-        let shallow = over_the_plane(0.6_f64.to_radians().tan(), 0.0, false);
+        let shallow = over_the_plane(det::tan(0.6_f64.to_radians()), 0.0, false);
         assert!(passes_through(&k, &shallow, 0.5, &surface, uv, tol).unwrap());
     }
 

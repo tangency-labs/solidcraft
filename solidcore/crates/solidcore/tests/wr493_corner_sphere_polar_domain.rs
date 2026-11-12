@@ -14,6 +14,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_taper_extrude;
@@ -22,7 +23,11 @@ use solidcore::{Brep, Kernel};
 
 fn rounded_wedge(k: &mut Kernel, deg: f64, r: f64) -> Brep {
     let a = deg.to_radians();
-    let p = [(0.0, 0.0), (40.0, 0.0), (40.0 * a.cos(), 40.0 * a.sin())];
+    let p = [
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0 * det::cos(a), 40.0 * det::sin(a)),
+    ];
     let c: Vec<Curve> = (0..3)
         .map(|i| {
             let (s, e) = (p[i], p[(i + 1) % 3]);

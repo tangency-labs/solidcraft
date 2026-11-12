@@ -15,6 +15,7 @@
 
 mod common;
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use common::{edge_at, vertex_at};
@@ -99,7 +100,7 @@ fn end_take(t: f64, r: f64) -> f64 {
 #[test]
 fn the_oracle_spline_radius_round_box_drafts_its_bottom_and_ends() {
     solidcraft_fixes();
-    let t = 2.0_f64.to_radians().tan();
+    let t = det::tan(2.0_f64.to_radians());
     let plain = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
     draft_bottom_and_ends(&plain).unwrap();
     assert!(rel(plain.volume(1e-10).unwrap(), grown(t)) < 1e-9);
@@ -127,7 +128,7 @@ fn the_oracle_spline_radius_round_box_drafts_its_bottom_and_ends() {
 #[test]
 fn a_flat_ended_spline_radius_round_box_drafts_by_its_closed_form() {
     solidcraft_fixes();
-    let t = 2.0_f64.to_radians().tan();
+    let t = det::tan(2.0_f64.to_radians());
     let b = rounded(&[2.0, 2.0, 5.0, 1.5, 3.0, 3.0]);
     let before = b.volume(1e-10).unwrap();
     draft_bottom_and_ends(&b).unwrap();

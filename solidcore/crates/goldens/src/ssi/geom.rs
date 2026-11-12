@@ -9,6 +9,7 @@
 //! `argsort` is not stable; only exact ties can differ).
 
 use serde_json::Value;
+use solidcore::math::det;
 
 use crate::HarnessError;
 
@@ -281,7 +282,7 @@ fn powi(x: f64, i: usize) -> f64 {
         0 => 1.0,
         1 => x,
         2 => x * x,
-        _ => x.powf(i as f64),
+        _ => det::powf(x, i as f64),
     }
 }
 
@@ -520,9 +521,11 @@ pub fn truth_distance(t: &Truth, pts: &[P3]) -> Vec<f64> {
                         Truth::Cylinder { radius, .. } => (rho - radius).abs(),
                         Truth::Cone { half_angle_deg, .. } => {
                             let al = half_angle_deg.to_radians();
-                            (rho * al.cos() - h * al.sin()).abs()
+                            (rho * det::cos(al) - h * det::sin(al)).abs()
                         }
-                        Truth::Torus { major, minor, .. } => ((rho - major).hypot(h) - minor).abs(),
+                        Truth::Torus { major, minor, .. } => {
+                            (det::hypot(rho - major, h) - minor).abs()
+                        }
                         _ => f64::NAN,
                     }
                 })

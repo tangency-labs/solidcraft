@@ -19,6 +19,7 @@
 //! ([`write_rejection`]) are rejected. Besides the fixtures, [`WRITE_GENERATED`] such
 //! cases are generated from their own seeds (the other generated cases do not move).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::Curve;
@@ -931,7 +932,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let scale = 10f64.powi(rng.range_i64(-2, 2) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-2, 2) as i32);
         let mut size = || rng.uniform(1.0, 20.0) * scale;
         let size = [size(), size(), size()];
         let op = match rng.below(4) {

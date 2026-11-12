@@ -55,6 +55,7 @@
 // The fork's range tests are NaN-safe negations (`!(x > y)`); kept as written.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::curve::curve::{Curve, CurveKind};
@@ -131,7 +132,9 @@ struct Screw {
 impl Screw {
     /// Rodrigues: `v` turned right-handed about `k` by angle `a`.
     fn turn(&self, v: Vec3, a: f64) -> Vec3 {
-        v * a.cos() + self.k.cross(v) * a.sin() + self.k * (self.k.dot(v) * (1.0 - a.cos()))
+        v * det::cos(a)
+            + self.k.cross(v) * det::sin(a)
+            + self.k * (self.k.dot(v) * (1.0 - det::cos(a)))
     }
 
     fn lift(&self, a: f64) -> f64 {
@@ -248,7 +251,7 @@ impl Stations {
         if j % 2 == 0 {
             1.0
         } else {
-            self.half.cos()
+            det::cos(self.half)
         }
     }
 }
@@ -260,8 +263,11 @@ fn lift_error(half: f64) -> f64 {
     let mut worst: f64 = 0.0;
     for i in 0..=2048 {
         let s = f64::from(i) / 2048.0;
-        let lift = half * s / (1.0 - (1.0 - s * s) * (1.0 - half.cos()) / 2.0);
-        worst = max2(worst, (lift - 2.0 * ((half / 2.0).tan() * s).atan()).abs());
+        let lift = half * s / (1.0 - (1.0 - s * s) * (1.0 - det::cos(half)) / 2.0);
+        worst = max2(
+            worst,
+            (lift - 2.0 * det::atan(det::tan(half / 2.0) * s)).abs(),
+        );
     }
     worst
 }
@@ -270,7 +276,7 @@ fn lift_error(half: f64) -> f64 {
 /// quadratic offset strays from the true offset turned with the profile, at most
 /// (about `h / 8`).
 fn offset_error(half: f64) -> f64 {
-    let c = half.cos();
+    let c = det::cos(half);
     let h = 2.0 * half;
     let mut worst: f64 = 0.0;
     for i in 0..=4096 {
@@ -281,11 +287,11 @@ fn offset_error(half: f64) -> f64 {
         let b2 = t * t;
         let den = b0 + c * b1 + b2;
         let ax = 0.5 * (b2 - b0) * c / den;
-        let ay = 0.5 * (b2 + b0) * half.sin() / den;
-        let phi = 2.0 * ((half / 2.0).tan() * s).atan();
+        let ay = 0.5 * (b2 + b0) * det::sin(half) / den;
+        let phi = 2.0 * det::atan(det::tan(half / 2.0) * s);
         worst = max2(
             worst,
-            (ax - phi / h * phi.cos()).hypot(ay - phi / h * phi.sin()),
+            det::hypot(ax - phi / h * det::cos(phi), ay - phi / h * det::sin(phi)),
         );
     }
     worst
@@ -303,7 +309,7 @@ fn path(m: &Screw, p: Point3, st: &Stations) -> Vec<Point3> {
             d.push(m.at(p, t0));
             let mid = 0.5 * (t0 + t1);
             d.push(
-                m.o + m.turn(radial + m.shift(mid), mid) * (1.0 / st.half.cos())
+                m.o + m.turn(radial + m.shift(mid), mid) * (1.0 / det::cos(st.half))
                     + m.k * (axial + m.lift(mid)),
             );
         }
@@ -809,7 +815,7 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
     breaks.push(total);
     breaks.sort_by(f64::total_cmp);
     let rise = m.pitch.abs() / TAU;
-    let mut h = min2(TAU / 8.0, (tolerance / (0.008 * rise)).cbrt());
+    let mut h = min2(TAU / 8.0, det::cbrt(tolerance / (0.008 * rise)));
     let mut shrink = 0;
     while rise * lift_error(0.5 * h) > tolerance {
         h *= 0.99;

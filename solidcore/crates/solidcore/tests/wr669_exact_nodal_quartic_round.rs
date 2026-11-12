@@ -27,6 +27,7 @@ use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::primitive::api_primitives::create_cylinder;
@@ -71,7 +72,7 @@ fn off_a(x: Point3) -> f64 {
 
 /// Distance from the small pipe's cylinder.
 fn off_b(x: Point3) -> f64 {
-    (((x.y - (R - RHO)).powi(2) + x.z * x.z).sqrt() - RHO).abs()
+    ((det::powi(x.y - (R - RHO), 2) + x.z * x.z).sqrt() - RHO).abs()
 }
 
 /// The two pipes united and their concave edge rounded; the round faces.
@@ -120,16 +121,16 @@ fn pipes_kept(exact: bool, definition: bool) -> (Kernel, Brep, Result<()>, Vec<F
 /// The ball's centre: on the offsets (R + r about z, RHO + r about the small axis), at
 /// angle `phi` round the small one from +y (the node at `phi = 0`), on the x > 0 lobe.
 fn spine(phi: f64) -> Point3 {
-    let y = (R - RHO) + (RHO + FILLET) * phi.cos();
-    let z = (RHO + FILLET) * phi.sin();
-    let x = ((R + FILLET).powi(2) - y * y).sqrt();
+    let y = (R - RHO) + (RHO + FILLET) * det::cos(phi);
+    let z = (RHO + FILLET) * det::sin(phi);
+    let x = (det::powi(R + FILLET, 2) - y * y).sqrt();
     Point3::new(x, y, z)
 }
 
 /// The angle where the centre's x is `x` (on (0, pi)).
 fn phi_at_x(x: f64) -> f64 {
-    let y = ((R + FILLET).powi(2) - x * x).sqrt();
-    ((y - (R - RHO)) / (RHO + FILLET)).acos()
+    let y = (det::powi(R + FILLET, 2) - x * x).sqrt();
+    det::acos((y - (R - RHO)) / (RHO + FILLET))
 }
 
 /// The point at `p` along the ball's arc at `phi`, from its contact with the big pipe
@@ -138,9 +139,9 @@ fn arc(phi: f64, p: f64) -> (Point3, Vec3) {
     let c = spine(phi);
     let a = -Vec3::new(c.x, c.y, 0.0).unitize().unwrap();
     let b = -Vec3::new(0.0, c.y - (R - RHO), c.z).unitize().unwrap();
-    let om = a.dot(b).acos();
-    let e = (a * ((1.0 - p) * om).sin() + b * (p * om).sin()) * (1.0 / om.sin());
-    let de = (a * (-((1.0 - p) * om).cos()) + b * (p * om).cos()) * (om / om.sin());
+    let om = det::acos(a.dot(b));
+    let e = (a * det::sin((1.0 - p) * om) + b * det::sin(p * om)) * (1.0 / det::sin(om));
+    let de = (a * (-det::cos((1.0 - p) * om)) + b * det::cos(p * om)) * (om / det::sin(om));
     (c + e * FILLET, de * FILLET)
 }
 
@@ -157,7 +158,7 @@ fn gauss(n: usize) -> Vec<(f64, f64)> {
     };
     (0..n)
         .map(|i| {
-            let mut x = (PI * (i as f64 + 0.75) / (n as f64 + 0.5)).cos();
+            let mut x = det::cos(PI * (i as f64 + 0.75) / (n as f64 + 0.5));
             for _ in 0..100 {
                 let (p, dp) = legendre(x);
                 x -= p / dp;
@@ -261,7 +262,7 @@ fn the_quadrature_integrates_a_quarter_torus() {
     // 2 pi int_0^(pi/2) (rc - r cos t) r dt = 2 pi r (rc pi / 2 - r)
     let g = gauss(20);
     let (rc, r) = (4.0, 0.5);
-    let q = 2.0 * PI * integrate(&g, 0.0, 0.5 * PI, 4, &|t| (rc - r * t.cos()) * r);
+    let q = 2.0 * PI * integrate(&g, 0.0, 0.5 * PI, 4, &|t| (rc - r * det::cos(t)) * r);
     let expect = 2.0 * PI * r * (rc * 0.5 * PI - r);
     assert!((q - expect).abs() < 1e-13 * expect, "{q} != {expect}");
 }

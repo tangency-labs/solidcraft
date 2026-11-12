@@ -24,6 +24,7 @@
 // The shape builders index the vectors they have just built.
 #![allow(clippy::indexing_slicing)]
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore_record::step::model::{
@@ -338,7 +339,7 @@ fn ngon(n: usize, r: f64, phase: f64) -> Vec<[f64; 2]> {
     (0..n)
         .map(|i| {
             let a = phase + i as f64 * std::f64::consts::TAU / n as f64;
-            [r * a.cos(), r * a.sin()]
+            [r * det::cos(a), r * det::sin(a)]
         })
         .collect()
 }
@@ -455,7 +456,7 @@ fn fan(angles: &[f64]) -> Body {
     let mut edges = vec![line_edge(0, 1, vertices[0], vertices[1])];
     let mut faces = Vec::new();
     for &a in angles {
-        let d = [a.to_radians().cos(), a.to_radians().sin(), 0.0];
+        let d = [det::cos(a.to_radians()), det::sin(a.to_radians()), 0.0];
         let (v2, v3) = (vertices.len(), vertices.len() + 1);
         vertices.push(d);
         vertices.push([d[0], d[1], 1.0]);
@@ -477,7 +478,7 @@ fn fan(angles: &[f64]) -> Body {
 /// A cone frustum about the Z axis: bottom radius `r0`, height `h`, semi-angle `deg`
 /// (the radius grows along +Z), with circular edges and a seam line.
 fn cone(r0: f64, h: f64, deg: f64) -> Body {
-    let r1 = r0 + h * deg.to_radians().tan();
+    let r1 = r0 + h * det::tan(deg.to_radians());
     let mut b = cylinder(r0, h, [0.0; 3]);
     if let Some(e) = b.edges.get_mut(1) {
         if let Curve::Circle { radius, .. } = &mut e.curve {
@@ -744,7 +745,7 @@ fn shapes() -> Vec<(String, Body)> {
 }
 
 fn random_shape(rng: &mut Rng) -> Body {
-    let scale = 10f64.powf(rng.unit() * 6.0 - 3.0);
+    let scale = det::powf(10f64, rng.unit() * 6.0 - 3.0);
     let p = rng.point3(-100.0, 100.0);
     let offset = [p[0] * scale, p[1] * scale, p[2] * scale];
     let mut b = match rng.below(7) {

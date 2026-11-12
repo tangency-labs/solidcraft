@@ -6,6 +6,7 @@
 //! a square's corners are its concave peaks, so the traces extend the squares' sides, and every
 //! patch outside the collars is a rectangle bounded by iso-lines.
 
+use solidcore::math::det;
 use super::motorcycle::{self, End as Stop};
 use super::pieces::{End, Segment};
 
@@ -127,13 +128,13 @@ pub(crate) fn segments(uvs: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale
     let to_box = |p: [f64; 2], (lo, hi): ([f64; 2], [f64; 2])| {
         let dx = (lo[0] - p[0]).max(0.0).max(p[0] - hi[0]);
         let dy = (lo[1] - p[1]).max(0.0).max(p[1] - hi[1]);
-        dx.hypot(dy)
+        det::hypot(dx, dy)
     };
     let to_segment = |p: [f64; 2], a: [f64; 2], b: [f64; 2]| {
         let (ab, ap) = ([b[0] - a[0], b[1] - a[1]], [p[0] - a[0], p[1] - a[1]]);
         let len2 = ab[0] * ab[0] + ab[1] * ab[1];
         let t = if len2 > 0.0 { ((ap[0] * ab[0] + ap[1] * ab[1]) / len2).clamp(0.0, 1.0) } else { 0.0 };
-        (p[0] - a[0] - t * ab[0]).hypot(p[1] - a[1] - t * ab[1])
+        det::hypot(p[0] - a[0] - t * ab[0], p[1] - a[1] - t * ab[1])
     };
     let corners_of = |(lo, hi): ([f64; 2], [f64; 2])| [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]];
     // Each square: the hole's box grown by half its clearance to the outer loop and a quarter of
@@ -155,7 +156,7 @@ pub(crate) fn segments(uvs: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale
                 let gx = (other.0[0] - bx.1[0]).max(bx.0[0] - other.1[0]).max(0.0);
                 let gy = (other.0[1] - bx.1[1]).max(bx.0[1] - other.1[1]).max(0.0);
                 // Both holes' squares grow into this gap: each takes half of it.
-                clear = clear.min(0.5 * gx.hypot(gy));
+                clear = clear.min(0.5 * det::hypot(gx, gy));
             }
         }
         let margin = 0.5 * clear;
@@ -202,7 +203,7 @@ pub(crate) fn segments(uvs: &[[f64; 2]], loops: &[std::ops::Range<usize>], scale
                 // the boundary).
                 let (pa, pb) = (metric(*domain.get(a)?), metric(*domain.get(b)?));
                 let q = metric(t.b);
-                let k = if (pa[0] - q[0]).hypot(pa[1] - q[1]) <= (pb[0] - q[0]).hypot(pb[1] - q[1]) { a } else { b };
+                let k = if det::hypot(pa[0] - q[0], pa[1] - q[1]) <= det::hypot(pb[0] - q[0], pb[1] - q[1]) { a } else { b };
                 End::Node(u32::try_from(outer.start + k).ok()?)
             }
             Stop::Boundary(a, b) => {

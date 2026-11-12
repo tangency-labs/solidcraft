@@ -22,6 +22,7 @@
 //! vector (`{"pts": [[x, y, z]...], "deg", "range"?}`), or a full rational circle
 //! (`{"circle": r, "plane": "yz" | "xy", "center"?}`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -656,7 +657,7 @@ fn gen_fill(rng: &mut Rng) -> Inputs {
             let a = std::f64::consts::TAU * (i as f64 + rng.uniform(-0.15, 0.15)) / (k + 1) as f64;
             let rr = r * rng.uniform(0.85, 1.15);
             let z = if flat { 0.0 } else { rng.uniform(-0.5, 0.5) };
-            [rr * a.cos(), rr * a.sin(), z]
+            [rr * det::cos(a), rr * det::sin(a), z]
         })
         .collect();
     let two_d = flat && rng.chance(0.4);
@@ -670,7 +671,7 @@ fn gen_fill(rng: &mut Rng) -> Inputs {
         let pts: Vec<[f64; 3]> = (0..=n)
             .map(|j| {
                 let t = j as f64 / n as f64;
-                let s = (std::f64::consts::PI * t).sin();
+                let s = det::sin(std::f64::consts::PI * t);
                 let out = rng.uniform(-0.3, 0.3) * s;
                 let mx = a[0] + (b[0] - a[0]) * t;
                 let my = a[1] + (b[1] - a[1]) * t;

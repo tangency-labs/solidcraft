@@ -295,6 +295,7 @@ fn pieces(c: &Curve, other: &Curve, q: usize, size: f64) -> Result<(Vec<Curve>, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::knots::clamped_uniform;
 
     fn spline(points: &[[f64; 3]], degree: usize) -> Curve {
@@ -345,7 +346,7 @@ mod tests {
                 c.eval(t, Side::Left).unwrap(),
                 m.eval(t, Side::Left).unwrap(),
             );
-            let gap2 = (p.x - r.x).powi(2) + (p.y - r.y).powi(2) + (p.z - r.z).powi(2);
+            let gap2 = det::powi(p.x - r.x, 2) + det::powi(p.y - r.y, 2) + det::powi(p.z - r.z, 2);
             assert!(gap2 <= d * d, "at {t}: {gap2} past {d}²");
         }
     }

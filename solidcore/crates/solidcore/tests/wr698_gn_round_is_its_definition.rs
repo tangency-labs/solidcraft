@@ -30,6 +30,7 @@ use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::edge_closest_point;
@@ -711,7 +712,7 @@ fn tilted_pipe_rounded(k: &mut Kernel, xsect: u32, continuity: u32, thumbweight:
     let phi = 4.0_f64.to_radians();
     let place = Axis2Placement::new(
         Point3::new(0.0, 20.0, 16.0),
-        Vec3::new(-phi.sin(), 0.0, -phi.cos()),
+        Vec3::new(-det::sin(phi), 0.0, -det::cos(phi)),
         Vec3::new(0.0, 1.0, 0.0),
     );
     solidcore::topology::brep::p5::transform(k, &mut pipe, &place, None, false).unwrap();

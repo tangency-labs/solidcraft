@@ -2,6 +2,7 @@
 //! the plan stores are the ones the evaluators use), and the tolerance-driven divisions of a
 //! face's parameter box.
 
+use solidcore::math::det;
 use crate::vec::VecExt as _;
 use solidcore::eval::plan::EvalSurface;
 pub(crate) use solidcore::eval::plan::uv::{Domain, domain, unwrap};
@@ -68,7 +69,7 @@ pub(crate) fn fine_between(s: &EvalSurface, rules: &Rules, h: f64, a: [f64; 2], 
         n(q).or_else(|| n([q[0] + 1e-4 * (toward[0] - q[0]), q[1] + 1e-4 * (toward[1] - q[1])]))
     };
     match (rules.turn, normal(a, b), normal(b, a)) {
-        (Some(t), Some(na), Some(nb)) => !t.exceeds(na.dot(nb).clamp(-1.0, 1.0).acos(), sag),
+        (Some(t), Some(na), Some(nb)) => !t.exceeds(det::acos(na.dot(nb).clamp(-1.0, 1.0)), sag),
         _ => true,
     }
 }
@@ -117,7 +118,7 @@ fn limits<'a>(s: &'a EvalSurface, d: usize, across: (f64, f64), rules: &'a Rules
             let na = normal(a, y).or_else(|| normal(a + 1e-4 * (b - a), y));
             let nb = normal(b, y).or_else(|| normal(b - 1e-4 * (b - a), y));
             match (rules.turn, na, nb) {
-                (Some(t), Some(na), Some(nb)) => !t.exceeds(na.dot(nb).clamp(-1.0, 1.0).acos(), sag),
+                (Some(t), Some(na), Some(nb)) => !t.exceeds(det::acos(na.dot(nb).clamp(-1.0, 1.0)), sag),
                 _ => true,
             }
         })

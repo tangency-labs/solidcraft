@@ -29,6 +29,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::create_box;
@@ -274,8 +275,8 @@ impl Basin {
         };
         let basin = 100.0 * 60.0 * 30.0 - simpson(&section, 10.0, 30.0);
         let wall = (1.0 / 5.0f64.sqrt(), -2.0 / 5.0f64.sqrt());
-        let alpha = (-wall.0).acos();
-        let s = d / (alpha / 2.0).tan();
+        let alpha = det::acos(-wall.0);
+        let s = d / det::tan(alpha / 2.0);
         // the top rail (rim - s, 30), the wall rail (rim + s w.y, 30 + s w.z)
         let (ty, wy, wz) = (self.rim - s, self.rim + s * wall.0, 30.0 + s * wall.1);
         let chamfer_y = |z: f64| ty + (wy - ty) * (30.0 - z) / (30.0 - wz);

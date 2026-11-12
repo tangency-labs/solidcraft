@@ -23,6 +23,7 @@
 // The generator indexes the nets it has just built (as other runners do).
 #![allow(clippy::indexing_slicing)]
 
+use solidcore::math::det;
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
@@ -321,8 +322,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 
 fn scale(rng: &mut Rng) -> f64 {
     match rng.below(8) {
-        0 => 10f64.powi(rng.range_i64(-6, -2) as i32),
-        1 => 10f64.powi(rng.range_i64(2, 6) as i32),
+        0 => det::powi(10f64, rng.range_i64(-6, -2) as i32),
+        1 => det::powi(10f64, rng.range_i64(2, 6) as i32),
         _ => rng.uniform(0.5, 4.0),
     }
 }
@@ -334,11 +335,11 @@ fn frame(rng: &mut Rng, b: &mut Vec<f64>, s: f64) {
         0 => ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
         1 => {
             let a = rng.uniform(0.0, 6.0);
-            ([a.cos(), a.sin(), 0.0], [-a.sin(), a.cos(), 0.0])
+            ([det::cos(a), det::sin(a), 0.0], [-det::sin(a), det::cos(a), 0.0])
         }
         2 => {
             let a = rng.uniform(0.0, 6.0);
-            ([a.cos(), 0.0, a.sin()], [0.0, 1.0, 0.0])
+            ([det::cos(a), 0.0, det::sin(a)], [0.0, 1.0, 0.0])
         }
         _ => ([1.0, 0.0, 0.0], [rng.uniform(-0.3, 0.3), 1.0, rng.uniform(-0.2, 0.2)]),
     };
@@ -458,7 +459,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                 let t = [rng.uniform(-1.0, 1.0) * s, rng.uniform(-1.0, 1.0) * s, 0.5 * s];
                 b.push(3.0);
                 b.extend(t);
-                b.extend([a.cos(), a.sin(), 0.0, -a.sin(), a.cos(), 0.0, 0.0, 0.0, 1.0]);
+                b.extend([det::cos(a), det::sin(a), 0.0, -det::sin(a), det::cos(a), 0.0, 0.0, 0.0, 1.0]);
             }
             _ => {
                 b.push(0.0);

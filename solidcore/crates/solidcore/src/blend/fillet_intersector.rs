@@ -118,6 +118,7 @@ use crate::intersect::surface_intersector::p4::{
     LawIntersectionOptions, PointIntersectionOptions,
 };
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max2, max4, min2, EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::surface::surface::p2::{drop_vectors, TsectCurveType};
@@ -1139,7 +1140,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             tsect.tangent_plane_angle_rad,
             next_tsp.tangent_plane_angle_rad,
         );
-        let mut adjusted_tolerance = 2.0 * si.this_approx_tol_3d * (min_tan_angle / 2.0).sin();
+        let mut adjusted_tolerance = 2.0 * si.this_approx_tol_3d * det::sin(min_tan_angle / 2.0);
         // Don't let the adjusted tolerance get to be less then 1/10th of the actual
         // tolerance.
         adjusted_tolerance = max2(adjusted_tolerance, si.this_approx_tol_3d / 1.0);

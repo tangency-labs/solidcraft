@@ -31,6 +31,7 @@
 //! defers it.
 
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -888,9 +889,9 @@ fn arc(c: Vec3, z: Vec3, p: Vec3, angle: f64) -> CrvIn {
     let center = c + z * (p - c).dot(z);
     let x = p - center;
     let y = z.cross(x);
-    let at = |t: f64, scale: f64| center + (x * t.cos() + y * t.sin()) * scale;
+    let at = |t: f64, scale: f64| center + (x * det::cos(t) + y * det::sin(t)) * scale;
     let half = angle / 2.0;
-    let w = half.cos();
+    let w = det::cos(half);
     let (p0, p1, p2) = (at(0.0, 1.0), at(half, 1.0 / w), at(angle, 1.0));
     CrvIn {
         dim: 3,
@@ -907,7 +908,7 @@ fn arc(c: Vec3, z: Vec3, p: Vec3, angle: f64) -> CrvIn {
 /// `p` rotated by `angle` about the z axis through the origin.
 fn rot_z(p: [f64; 3], angle: f64) -> [f64; 3] {
     let [x, y, z] = p;
-    let (s, c) = angle.sin_cos();
+    let (s, c) = det::sin_cos(angle);
     [c * x - s * y, s * x + c * y, z]
 }
 
@@ -1069,9 +1070,9 @@ fn gen_closed_surface(rng: &mut Rng) -> SrfIn {
                     let a = std::f64::consts::TAU * i as f64 / n as f64;
                     let b = std::f64::consts::TAU * j as f64 / m as f64;
                     [
-                        (2.0 + b.cos()) * a.cos(),
-                        (2.0 + b.cos()) * a.sin(),
-                        j as f64 + b.sin(),
+                        (2.0 + det::cos(b)) * det::cos(a),
+                        (2.0 + det::cos(b)) * det::sin(a),
+                        j as f64 + det::sin(b),
                         NOW,
                     ]
                 })
@@ -2354,7 +2355,7 @@ fn gen_corner(rng: &mut Rng) -> Inputs {
         0 => 1e-3 * scale,
         1 => 1e-6 * scale,
         2 => 0.0,
-        _ => scale * 10f64.powf(rng.uniform(-9.0, -2.0)),
+        _ => scale * det::powf(10f64, rng.uniform(-9.0, -2.0)),
     };
     let tan = rng.uniform(1e-4, 0.2);
 
@@ -2579,8 +2580,8 @@ fn gen_face_corner(rng: &mut Rng) -> Inputs {
     let o = rng.point3(-scale, scale);
     let a = rng.uniform(0.0, std::f64::consts::TAU);
     let tilt = rng.uniform(-0.5, 0.5);
-    let u = [a.cos(), a.sin(), 0.0];
-    let v = [-a.sin() * tilt.cos(), a.cos() * tilt.cos(), tilt.sin()];
+    let u = [det::cos(a), det::sin(a), 0.0];
+    let v = [-det::sin(a) * det::cos(tilt), det::cos(a) * det::cos(tilt), det::sin(tilt)];
     let n = 3 + rng.below(3) as usize;
     let ccw = rng.chance(0.5);
     let mut pts: Vec<[f64; 3]> = (0..n)
@@ -2588,7 +2589,7 @@ fn gen_face_corner(rng: &mut Rng) -> Inputs {
             let t = std::f64::consts::TAU * i as f64 / n as f64 + rng.uniform(-0.2, 0.2);
             let t = if ccw { t } else { -t };
             let r = scale * rng.uniform(0.5, 1.0);
-            add3(o, add3(scale3(u, r * t.cos()), scale3(v, r * t.sin())))
+            add3(o, add3(scale3(u, r * det::cos(t)), scale3(v, r * det::sin(t))))
         })
         .collect();
     if rng.chance(0.1) {
@@ -2983,6 +2984,6 @@ mod tests {
         let p = c.cpts[1];
         // the middle control point lies on the bisector at r / cos(a/2)
         let (x, y) = (p[0] / p[3], p[1] / p[3]);
-        assert!(((x * x + y * y).sqrt() - 2.0 / 0.5f64.cos()).abs() < 1e-12);
+        assert!(((x * x + y * y).sqrt() - 2.0 / det::cos(0.5f64)).abs() < 1e-12);
     }
 }

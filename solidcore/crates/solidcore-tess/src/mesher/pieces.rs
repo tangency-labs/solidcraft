@@ -6,6 +6,7 @@
 //! boundary node, at a point inside the face (a square's corner, or where two traces met
 //! head-on), or on another cut (a T-node, which that cut then passes through).
 
+use solidcore::math::det;
 use std::collections::HashMap;
 
 use crate::ring::Ring;
@@ -56,7 +57,7 @@ pub(crate) fn cut(
     let metric = |q: [f64; 2]| [q[0] * scale[0], q[1] * scale[1]];
     let dist = |a: [f64; 2], b: [f64; 2]| {
         let (a, b) = (metric(a), metric(b));
-        (a[0] - b[0]).hypot(a[1] - b[1])
+        det::hypot(a[0] - b[0], a[1] - b[1])
     };
     let mut cut_uv: Vec<[f64; 2]> = Vec::new();
     let mut points: HashMap<[u64; 2], u32> = HashMap::new();
@@ -191,7 +192,7 @@ pub(crate) fn cut(
         })?;
         let (a, b) = side(longest)?;
         let (pa, pb) = (pos(a)?, pos(b)?);
-        let len = (pb[0] - pa[0]).hypot(pb[1] - pa[1]);
+        let len = det::hypot(pb[0] - pa[0], pb[1] - pa[1]);
         if !(len > 0.0) {
             return None;
         }
@@ -212,7 +213,7 @@ pub(crate) fn cut(
     // Outgoing half-edges per node, by angle.
     let angle = |a: u32, b: u32| -> Option<f64> {
         let (p, q) = (pos(a)?, pos(b)?);
-        Some((q[1] - p[1]).atan2(q[0] - p[0]))
+        Some(det::atan2(q[1] - p[1], q[0] - p[0]))
     };
     let mut out: HashMap<u32, Vec<(f64, usize)>> = HashMap::new();
     for (h, &(a, b)) in half.iter().enumerate() {

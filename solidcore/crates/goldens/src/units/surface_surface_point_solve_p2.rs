@@ -29,6 +29,7 @@
 //! from a singularity), and the bounding box of a curve-bounded or STEP surface for the
 //! directed operation (`surface.surface_p6`, as in p1).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -612,11 +613,11 @@ fn gen_uv_edge(rng: &mut Rng, d: [f64; 4]) -> [f64; 2] {
         1 => v = if rng.chance(0.5) { d[1] } else { d[3] },
         2 => {
             // near a side, by a tiny to small amount
-            let e = 10f64.powf(rng.uniform(-12.0, -2.0));
+            let e = det::powf(10f64, rng.uniform(-12.0, -2.0));
             u = if rng.chance(0.5) { d[0] + e * w } else { d[2] - e * w };
         }
         _ => {
-            let e = 10f64.powf(rng.uniform(-12.0, -2.0));
+            let e = det::powf(10f64, rng.uniform(-12.0, -2.0));
             v = if rng.chance(0.5) { d[1] + e * h } else { d[3] - e * h };
         }
     }
@@ -747,7 +748,7 @@ fn gen_op(rng: &mut Rng, (nu, nv): (usize, usize), d: [f64; 4], sd: [f64; 4], si
             tight: tight(rng),
             stol: {
                 let w = (sd[2] - sd[0]).min(sd[3] - sd[1]);
-                w * 10f64.powf(rng.uniform(-10.0, -1.0))
+                w * det::powf(10f64, rng.uniform(-10.0, -1.0))
             },
         },
         32..=35 => OpIn::Step {

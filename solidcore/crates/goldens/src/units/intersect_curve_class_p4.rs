@@ -46,6 +46,7 @@
 //! the touch list and the props snapshot; a failing status is recorded alone, as upstream may
 //! leave the touches collected before it.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -1751,7 +1752,7 @@ fn revolution(sphere: bool, r: f64, z0: f64, z1: f64, sweep: f64) -> FaceSurfIn 
 /// A point at angle `a` (degrees) about the z axis, radius `r`, height `z`.
 fn polar(r: f64, a: f64, z: f64) -> [f64; 3] {
     let t = a.to_radians();
-    [r * t.cos(), r * t.sin(), z]
+    [r * det::cos(t), r * det::sin(t), z]
 }
 
 /// The face of a generated script: a plane (the z = 0 plane), a cylinder or a sphere about
@@ -1823,12 +1824,12 @@ pub(crate) fn gen_face(rng: &mut Rng) -> FaceIn {
                 1 => {
                     let lat = rng.uniform(-60.0f64, 60.0).to_radians();
                     face.loops = Some(LoopsIn::Vertex {
-                        at: polar(r * lat.cos(), rng.uniform(0.0, sweep), r * lat.sin()),
+                        at: polar(r * det::cos(lat), rng.uniform(0.0, sweep), r * det::sin(lat)),
                     });
                 }
                 _ => {
                     let lat = rng.uniform(10.0f64, 50.0).to_radians();
-                    let (rc, z) = (r * lat.cos(), r * lat.sin());
+                    let (rc, z) = (r * det::cos(lat), r * det::sin(lat));
                     let a0 = rng.uniform(5.0, 40.0);
                     let a1 = a0 + rng.uniform(30.0, sweep - a0 - 5.0);
                     face.loops = Some(LoopsIn::Edges {

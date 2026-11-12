@@ -23,6 +23,7 @@
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
 use solidcore::error::{SM_ERR, SM_ERR_INVALID_INPUT};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::surface::surface::SurfaceKind;
@@ -48,7 +49,7 @@ fn blended(radius: f64, continuity: u32) -> (Result<(), SolidError>, Brep) {
             let c = edge::curve(&b, e).unwrap().unwrap();
             let ivl = edge::interval(&b, e).unwrap();
             let p = c.evaluate_point(&k, ivl.min()).unwrap();
-            (p.z - H).abs() < 1e-6 && (p.x.hypot(p.y) - R).abs() < 1e-6
+            (p.z - H).abs() < 1e-6 && (det::hypot(p.x, p.y) - R).abs() < 1e-6
         })
         .unwrap();
     let result = fillet_edges(

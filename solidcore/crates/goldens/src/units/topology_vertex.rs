@@ -17,6 +17,7 @@
 //! counts); other selectors likewise, `-1` selecting null.
 
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -469,7 +470,7 @@ fn turn(rng: &mut Rng, d: [f64; 3], deg: f64) -> [f64; 3] {
     let ([d0, d1, d2], [r0, r1, r2]) = (d, r);
     let dot = d0 * r0 + d1 * r1 + d2 * r2;
     let [p0, p1, p2] = unit3([r0 - dot * d0, r1 - dot * d1, r2 - dot * d2]);
-    let (c, sn) = (deg.to_radians().cos(), deg.to_radians().sin());
+    let (c, sn) = (det::cos(deg.to_radians()), det::sin(deg.to_radians()));
     unit3([c * d0 + sn * p0, c * d1 + sn * p1, c * d2 + sn * p2])
 }
 

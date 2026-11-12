@@ -21,6 +21,7 @@ mod common;
 
 use common::{edge_at, kernel_copy, rel, volume};
 use serde_json::Value;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::knots::Side;
 use solidcore::query::api_queries::{edge_closest_point, surface_closest_point};
@@ -75,7 +76,7 @@ fn angle_at(k: &Kernel, b: &Brep, e: EdgeId, p: Point3) -> f64 {
     };
     let n = normal(face::surface(b, *f).unwrap().unwrap());
     let m = normal(face::surface(b, *g).unwrap().unwrap());
-    n.cross(m).length().atan2(n.dot(m).abs())
+    det::atan2(n.cross(m).length(), n.dot(m).abs())
 }
 
 /// `body` with the entry's edges rounded 4, picked at their points.

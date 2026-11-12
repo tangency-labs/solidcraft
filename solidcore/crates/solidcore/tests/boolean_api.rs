@@ -10,6 +10,7 @@ use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boo
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives as api;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -97,7 +98,7 @@ fn operands(k: &mut Kernel, name: &str) -> solidcore::Result<(Brep, Brep, Op)> {
         ),
         // An r=2 sphere touching an r=3 one at latitude 30 of its seam meridian.
         "seam-sphere-sphere" => {
-            let (sin, cos) = (PI / 6.0).sin_cos();
+            let (sin, cos) = det::sin_cos(PI / 6.0);
             (
                 api::create_sphere(k, p(0.0, 0.0, 0.0), 3.0)?,
                 api::create_sphere(k, p(5.0 * cos, 0.0, 5.0 * sin), 2.0)?,
@@ -120,7 +121,7 @@ fn operands(k: &mut Kernel, name: &str) -> solidcore::Result<(Brep, Brep, Op)> {
         // meridian.
         "seam-torus-sphere" => {
             let a = PI / 4.0;
-            let (x, z) = (5.0 + 3.5 * a.cos(), 3.5 * a.sin());
+            let (x, z) = (5.0 + 3.5 * det::cos(a), 3.5 * det::sin(a));
             (
                 api::create_torus(k, p(0.0, 0.0, 0.0), 5.0, 1.5)?,
                 api::create_sphere(k, p(x, 0.0, z), 2.0)?,
@@ -261,7 +262,7 @@ struct PointContact {
 }
 
 fn point_contacts() -> Vec<PointContact> {
-    let sphere = |r: f64| 4.0 / 3.0 * PI * r.powi(3);
+    let sphere = |r: f64| 4.0 / 3.0 * PI * det::powi(r, 3);
     let torus = 2.0 * PI * PI * 5.0 * 1.5 * 1.5;
     let contact = |name, volume, faces| PointContact {
         name,

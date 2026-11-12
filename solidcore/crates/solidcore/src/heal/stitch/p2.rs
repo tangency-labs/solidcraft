@@ -55,6 +55,7 @@ use crate::geom::object::NotifyOperation;
 use crate::geom::tol::{update_object_tolerance, zone_tol3d, TopologyToUpdate};
 use crate::geom::tree::{NodeGeomType, Tree};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Vec3, BIG_DOUBLE, PI};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -192,7 +193,7 @@ impl RadialGlue {
         // the angle round the axis from the first face to a face
         let angle = |k: &mut Kernel, b: &mut Brep, at: (EdgeId, f64)| -> Result<f64> {
             let w = Self::into_face(k, b, at)?.project_to_plane(axis);
-            let a = w.dot(side).atan2(w.dot(start));
+            let a = det::atan2(w.dot(side), w.dot(start));
             Ok(if a < 0.0 { a + 2.0 * PI } else { a })
         };
         let to_second = angle(k, b, second)?;

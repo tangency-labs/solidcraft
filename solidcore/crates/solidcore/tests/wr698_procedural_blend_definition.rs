@@ -19,6 +19,7 @@
 use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_THUMBWEIGHT_EQUAL_AREA};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, KnotType};
 use solidcore::nurbs::b_spline_surface::{
@@ -272,7 +273,7 @@ fn the_circle_between_planes_is_the_ball_s() {
             let d = pb.evaluate_definition(&k, s, t, 1, 1).unwrap();
             let p = d[0][0];
             assert!((p.x - L * s).abs() < 1e-12, "{p:?}");
-            let r = ((p.y - R).powi(2) + (p.z - R).powi(2)).sqrt();
+            let r = (det::powi(p.y - R, 2) + det::powi(p.z - R, 2)).sqrt();
             assert!((r - R).abs() < 1e-12, "{s} {t}: {r}");
             assert!((d[1][0] - Vec3::new(L, 0.0, 0.0)).length() < 1e-12);
         }
@@ -1169,7 +1170,7 @@ fn turned_about_its_axis(label: AnalyticSupport, angle: f64) -> AnalyticSupport 
         | AnalyticSupport::Sphere { placement, .. }
         | AnalyticSupport::Torus { placement, .. } => placement,
     };
-    let (c, s) = (angle.cos(), angle.sin());
+    let (c, s) = (det::cos(angle), det::sin(angle));
     *p = Axis2Placement::new(
         p.origin(),
         p.x_axis() * c + p.y_axis() * s,
@@ -1239,7 +1240,7 @@ fn a_support_s_turned_frame_is_refused() {
 
         // a sphere's axis is unconstrained by its implicit equation too
         if let AnalyticSupport::Sphere { placement, radius } = label {
-            let (c, si) = (1e-6_f64.cos(), 1e-6_f64.sin());
+            let (c, si) = (det::cos(1e-6_f64), det::sin(1e-6_f64));
             let tilted = AnalyticSupport::Sphere {
                 placement: Axis2Placement::new(
                     placement.origin(),

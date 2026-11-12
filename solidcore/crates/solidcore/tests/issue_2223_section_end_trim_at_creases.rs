@@ -46,6 +46,7 @@ use solidcore::error::SolidError;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::query::api_queries::edge_closest_point;
@@ -121,7 +122,7 @@ fn arc(c: (f64, f64), r: f64, from: f64, to: f64) -> Curve {
 
 /// R25 disc with a tab (sides x = +-4, R2 corners, top y = 280/9 + 2), 2 thick.
 fn plate(k: &mut Kernel) -> Brep {
-    let t = (4.0_f64 / 25.0).acos();
+    let t = det::acos(4.0_f64 / 25.0);
     let y = (625.0_f64 - 16.0).sqrt();
     let cy = 280.0 / 9.0;
     let curves = [

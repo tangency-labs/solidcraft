@@ -29,6 +29,7 @@
 //! At least [`MIN_GENERATED`] generated cases run, then [`TRIM_CASES`] fixed-seed
 //! `DropAndTrimCurve` cases (`trim0000` ..).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1480,7 +1481,7 @@ fn gen_iso(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
             if r < 1.0e-6 * s {
                 return None;
             }
-            let a0 = pa[1].atan2(pa[0]);
+            let a0 = det::atan2(pa[1], pa[0]);
             let span = pick(rng, &[0.5, 1.0, 3.0, 6.0], 1.0);
             CurveIn::Circle {
                 c: [0.0, 0.0, pa[2]],

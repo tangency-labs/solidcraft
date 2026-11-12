@@ -12,6 +12,7 @@
 mod common;
 
 use common::*;
+use solidcore::math::det;
 
 use std::f64::consts::PI;
 use std::io::Read as _;
@@ -977,7 +978,7 @@ fn a_tangent_chain_is_one_chamfer_measured_where_no_station_folds() {
     let ellipse = |cos_w: f64| {
         let sin_w = (1.0 - cos_w * cos_w).sqrt();
         let c = (1.0 + 2.0 * cos_w - 1000.0 * tolerance * sin_w) / (2.0 + cos_w);
-        let s = c.acos().sin();
+        let s = det::sin(det::acos(c));
         let (r_top, r_wall) = ((2.0 - c) / s, (1.0 - 2.0 * c) / s);
         let radius = 5.0 - r_wall;
         let half_x = radius * SQRT_5 / 2.0;

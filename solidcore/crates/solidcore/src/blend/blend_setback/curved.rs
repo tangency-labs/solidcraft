@@ -89,6 +89,7 @@ use crate::blend::fillet_exact::{
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, PI};
 use crate::nurbs::b_spline_surface::BSplineSurface;
 
@@ -774,7 +775,7 @@ fn line_spine(a: &Face, b: &Face, ends: [Point3; 2], row: &[Hom], tol: f64) -> R
                 quadric.kind = QuadricKind::Cone;
                 quadric.point = face.point - face.axis * (face.radius / face.slope);
                 quadric.dir = face.axis * if face.slope > 0.0 { 1.0 } else { -1.0 };
-                quadric.angle = face.slope.abs().atan();
+                quadric.angle = det::atan(face.slope.abs());
                 quadric.side = face.side;
             }
         }
@@ -828,7 +829,7 @@ fn round_row_k(
         for (j, hj) in j0.iter().enumerate() {
             h = axpy(
                 &h,
-                binomial(q, j)? * t.powf(j as f64) * (1.0 - t).powf((q - j) as f64),
+                binomial(q, j)? * det::powf(t, j as f64) * det::powf(1.0 - t, (q - j) as f64),
                 hj,
             );
         }
@@ -1990,7 +1991,7 @@ pub(super) fn graph_g1_curved(
             let sig = el_ref(&side0, q)?.d;
             let a = (sig.x * dt.y - sig.y * dt.x) / det;
             let b = (ds.x * sig.y - ds.y * sig.x) / det;
-            let mut th = b.atan2(a);
+            let mut th = det::atan2(b, a);
             if th < 0.0 {
                 th += PI;
             }

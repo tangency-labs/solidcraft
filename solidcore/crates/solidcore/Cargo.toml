@@ -20,6 +20,10 @@ curve-memo-off = []
 profile = []
 
 [dependencies]
+# musl's libm (FreeBSD msun; CORE-MATH for cbrt) in Rust, for `math::det`: the same bits on every
+# platform. Pinned exactly: a new release may change a function's last bit, which moves the
+# goldens on every platform at once.
+libm = "=0.2.16"
 serde = { version = "1", features = ["derive"] }
 thiserror.workspace = true
 

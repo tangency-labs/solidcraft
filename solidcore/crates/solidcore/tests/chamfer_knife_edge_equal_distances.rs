@@ -11,6 +11,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use solidcore::blend::fillet_executive::session::FilletSession;
@@ -85,8 +86,8 @@ fn removed(d: f64) -> f64 {
     let flat = TIP - (4.0 * R * d).sqrt();
     let wy = -R + (R - d) * R / (R + d);
     let triangle = 0.5 * ((TIP - flat) * wy).abs();
-    let b = ((R - d) / (R + d)).acos();
-    (triangle - 0.5 * R * R * (b - b.sin())) * H
+    let b = det::acos((R - d) / (R + d));
+    (triangle - 0.5 * R * R * (b - det::sin(b))) * H
 }
 
 #[test]

@@ -29,6 +29,7 @@
 //! (`surface.surface_p4`, `surface.surface_p5`). Every run has at least
 //! [`MIN_GENERATED`] generated cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -786,7 +787,7 @@ fn translate(c: &InlineCrv, d: Vec3) -> InlineCrv {
 /// (`e_b` up): arc 1 of radius `r1` about `P1 = (0, r1)` swept `alpha`, arc 2 of
 /// radius `r2` swept `beta` more.
 fn tower_2d(r1: f64, r2: f64, alpha: f64, beta: f64) -> [[f64; 2]; 3] {
-    let u = |t: f64| [t.sin(), -t.cos()];
+    let u = |t: f64| [det::sin(t), -det::cos(t)];
     let p1 = [0.0, r1];
     let ua = u(alpha);
     let c2 = [p1[0] + (r1 - r2) * ua[0], p1[1] + (r1 - r2) * ua[1]];

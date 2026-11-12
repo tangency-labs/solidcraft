@@ -10,6 +10,7 @@
 //! semantic graph of the B-rep reachable after it (`combine_target` records only the
 //! target stage, the notifications their lists).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::Curve;
@@ -595,7 +596,7 @@ impl UnitDiff for Runner {
         }
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let scale = 10f64.powi(rng.range_i64(-6, 6) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-6, 6) as i32);
         let mut i = Inputs {
             fixture: [
                 0.,

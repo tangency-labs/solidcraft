@@ -27,6 +27,7 @@
 //!
 //! At least [`MIN_GENERATED`] generated cases run.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -883,7 +884,7 @@ fn gen_lsi(rng: &mut Rng) -> Inputs {
         0.5 * (bbox[1] + bbox[4]),
         0.5 * (bbox[2] + bbox[5]),
     ];
-    let size = ((bbox[3] - bbox[0]).powi(2) + (bbox[4] - bbox[1]).powi(2) + (bbox[5] - bbox[2]).powi(2))
+    let size = (det::powi(bbox[3] - bbox[0], 2) + det::powi(bbox[4] - bbox[1], 2) + det::powi(bbox[5] - bbox[2], 2))
         .sqrt()
         .max(1e-12);
     let dir = unit_dir(rng);

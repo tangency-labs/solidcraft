@@ -89,6 +89,7 @@ use crate::geom::tol::are_same;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -1500,8 +1501,8 @@ pub(crate) fn intersect_revolved_into<T: Revolved + ?Sized, R: Revolved + ?Sized
                 let (crv, curve_type) = if degenerate_ivl {
                     // get point position
                     let sweep_point = circle_center
-                        + circle_radius * (ivl.min() * PI / 180.0).cos() * x_axis
-                        + circle_radius * (ivl.min() * PI / 180.0).sin() * y_axis;
+                        + circle_radius * det::cos(ivl.min() * PI / 180.0) * x_axis
+                        + circle_radius * det::sin(ivl.min() * PI / 180.0) * y_axis;
 
                     // A Single value solution + degenerate interval means this
                     // srf-srf XSect is a point [B661]

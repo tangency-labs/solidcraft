@@ -188,6 +188,7 @@ pub fn run_ssi(case: &SsiCase, tol: Option<f64>) -> Result<RawOutput, EngineFail
 
 #[cfg(test)]
 mod tests {
+    use solidcore::math::det;
     use std::collections::BTreeMap;
 
     use serde_json::json;
@@ -202,7 +203,7 @@ mod tests {
         let pts: Vec<P3> = (0..4001)
             .map(|i| {
                 let t = std::f64::consts::TAU * f64::from(i) / 4000.0;
-                [r * t.cos(), r * t.sin(), 0.5]
+                [r * det::cos(t), r * det::sin(t), 0.5]
             })
             .collect();
         let v = json!({

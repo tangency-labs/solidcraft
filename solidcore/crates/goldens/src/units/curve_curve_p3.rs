@@ -23,6 +23,7 @@
 //! cases that delete a duplicate curve (a use after free upstream, see
 //! `plan/findings.md`) are generated and record the port's result.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1259,7 +1260,7 @@ fn gen_polygon(rng: &mut Rng, k: usize) -> Vec<[f64; 3]> {
                 a = -a;
             }
             let rr = r * rng.uniform(0.7, 1.3);
-            add(c, add(scale3(x, rr * a.cos()), scale3(y, rr * a.sin())))
+            add(c, add(scale3(x, rr * det::cos(a)), scale3(y, rr * det::sin(a))))
         })
         .collect()
 }

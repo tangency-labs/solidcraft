@@ -310,6 +310,7 @@ fn rate(rho: f64, distance: f64) -> Result<f64> {
 mod tests {
     use super::*;
     use crate::geom::vector2d::Vec2;
+    use crate::math::det;
     use crate::surface::plane::Plane;
     use crate::surface::sphere::{Sphere, SphereOptions};
     use crate::surface::torus::{Torus, TorusOptions};
@@ -387,7 +388,7 @@ mod tests {
             assert!(matches!(g.kind(), SurfaceKind::Sphere(_)));
             let (dom, side) = side_at(&s, false, 90.0);
             let g = s.continued(&k(), &dom, side, 1.0).unwrap();
-            let want = 90.0 + (1.0 / (2.0 * 15f64.to_radians().cos())).to_degrees();
+            let want = 90.0 + (1.0 / (2.0 * det::cos(15f64.to_radians()))).to_degrees();
             assert!(
                 close(steps(&g).max().x, want),
                 "{swap} {inside}: {:?}",
@@ -500,7 +501,7 @@ mod tests {
         // round, at the side's middle latitude 15: rho = 2 cos 15
         let (dom, side) = side_at(&s, false, 90.0);
         let g = s.continued(&k(), &dom, side, 1.0).unwrap();
-        let want = 90.0 + (1.0 / (2.0 * 15f64.to_radians().cos())).to_degrees();
+        let want = 90.0 + (1.0 / (2.0 * det::cos(15f64.to_radians()))).to_degrees();
         assert!(close(steps(&g).max().x, want), "{:?}", steps(&g));
         assert!(matches!(g.kind(), SurfaceKind::Sphere(_)));
         // toward the pole by an arc of pi/3 (60 degrees of radius 2): to the pole exactly
@@ -538,7 +539,7 @@ mod tests {
         // round the axis at the side's middle (tube angle 45): rho = 5 + cos 45
         let (dom, side) = side_at(&t, false, 90.0);
         let g = t.continued(&k(), &dom, side, 1.0).unwrap();
-        let want = 90.0 + (1.0 / (5.0 + 45f64.to_radians().cos())).to_degrees();
+        let want = 90.0 + (1.0 / (5.0 + det::cos(45f64.to_radians()))).to_degrees();
         assert!(close(steps(&g).max().x, want), "{:?}", steps(&g));
         assert!(matches!(g.kind(), SurfaceKind::Torus(_)));
         // over a turn: refused naming the arc to a full turn at rho, which works
@@ -551,7 +552,7 @@ mod tests {
         else {
             panic!("{err:?}");
         };
-        let rho = 5.0 + 45f64.to_radians().cos();
+        let rho = 5.0 + det::cos(45f64.to_radians());
         assert!(close(named, 1.5 * PI * rho), "{named}");
         let g = t.continued(&k(), &dom, side, named).unwrap();
         assert!(close(steps(&g).max().x - steps(&g).min().x, 360.0));

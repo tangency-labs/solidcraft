@@ -17,6 +17,7 @@
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p1;
@@ -95,7 +96,8 @@ fn issue_388_island_in_a_void_passes_test_12() {
             let (mut k, mut b) = island(fix, cut);
             let (n, lines) = test_12(&mut k, &mut b);
             assert_eq!(n, 0, "fix {fix} cut {cut:?}: {lines:?}");
-            let want = 50.0_f64.powi(3) - 40.0_f64.powi(3) + 20.0_f64.powi(3) - cut_off;
+            let want =
+                det::powi(50.0_f64, 3) - det::powi(40.0_f64, 3) + det::powi(20.0_f64, 3) - cut_off;
             let got = volume(&k, &mut b);
             assert!((got - want).abs() <= 1e-9 * want, "{got} vs {want}");
         }

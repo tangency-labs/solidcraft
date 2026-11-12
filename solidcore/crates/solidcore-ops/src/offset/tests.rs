@@ -1,6 +1,7 @@
 //! Shells, face offsets, thickening and sheet offsets against closed forms (the cases of
 //! SolidCraft's `core/offset_tests.rs`, on record face indices through the body's `Order`).
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use solidcore::geom::extent3d::Extent3d;
@@ -134,7 +135,9 @@ fn a_basin_shells_past_its_rim_to_its_closed_form() {
     // z = 10 - t ... 30 - t; its sides stay inside the shrunk slab in x and at the back for t <= 6.
     let (r5, r164) = (5f64.sqrt(), 1.64f64.sqrt());
     let integral = |c: [f64; 3], lo: f64, hi: f64| {
-        c[0] * (hi - lo) + c[1] * (hi * hi - lo * lo) / 2.0 + c[2] * (hi.powi(3) - lo.powi(3)) / 3.0
+        c[0] * (hi - lo)
+            + c[1] * (hi * hi - lo * lo) / 2.0
+            + c[2] * (det::powi(hi, 3) - det::powi(lo, 3)) / 3.0
     };
     // (w0 + z)(h0 + h1 z) as coefficients in z.
     let product = |w0: f64, h0: f64, h1: f64| [w0 * h0, w0 * h1 + h0, h1];

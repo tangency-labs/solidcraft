@@ -30,6 +30,7 @@
 //! operators' own deferrals).
 
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1337,7 +1338,7 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
                 .map(|i| {
                     let t = std::f64::consts::TAU * i as f64 / k as f64;
                     let r = scale * rng.uniform(0.5, 1.5);
-                    [c[0] + r * t.cos(), c[1] + r * t.sin(), c[2]]
+                    [c[0] + r * det::cos(t), c[1] + r * det::sin(t), c[2]]
                 })
                 .collect();
             let curves = polygon(&pts, rng.chance(0.3));

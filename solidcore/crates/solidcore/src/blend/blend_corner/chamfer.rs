@@ -1377,6 +1377,7 @@ pub fn create_chamfer_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// The square corner's frame: the edges along u, v, w; face i between edges i - 1
     /// and i, so face 0 (edges w, u) is v = 0, face 1 (u, v) is w = 0, face 2 (v, w) is
@@ -1458,7 +1459,7 @@ mod tests {
         // a ball of offsets r on a wedge of angle phi touches r cot(phi / 2) from the edge
         let phi = 2.0 * std::f64::consts::PI / 3.0;
         let qa = Vec3::new(1.0, 0.0, 0.0);
-        let qb = Vec3::new(phi.cos(), phi.sin(), 0.0);
+        let qb = Vec3::new(det::cos(phi), det::sin(phi), 0.0);
         let t = [qa, Vec3::Z, qb];
         let planes = chamfer_planes(
             &t,
@@ -1510,7 +1511,7 @@ mod tests {
         let u: Vec<Vec3> = (0..3)
             .map(|k| {
                 let a = f64::from(k) * 2.0 * std::f64::consts::PI / 3.0;
-                Vec3::new(a.cos(), a.sin(), 0.0)
+                Vec3::new(det::cos(a), det::sin(a), 0.0)
             })
             .collect();
         let t: Vec<Vec3> = u

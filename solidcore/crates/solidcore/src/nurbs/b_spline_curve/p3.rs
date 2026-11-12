@@ -2090,6 +2090,7 @@ pub fn assert_no_periodic_jump_of(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::math::{CPoint, NOW};
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 
@@ -2463,8 +2464,8 @@ mod tests {
                 let t = f64::from(i) * PI / 4.0;
                 let scale = if i % 2 == 1 { s } else { 1.0 };
                 Vec3::new(
-                    (cx + scale * r * t.cos()) / sx,
-                    (cy + scale * r * t.sin()) / sy,
+                    (cx + scale * r * det::cos(t)) / sx,
+                    (cy + scale * r * det::sin(t)) / sy,
                     0.0,
                 )
             })

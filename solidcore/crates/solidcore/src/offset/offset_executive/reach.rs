@@ -44,6 +44,7 @@ use crate::geom::certified;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector3d::{sqrt, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, EFF_ZERO};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::p2::IsoCurveOptions;
@@ -191,7 +192,7 @@ pub fn extension_reach(
     if !offset.is_finite() {
         return Err(SolidError::invalid_input(OP, "the offset is not finite"));
     }
-    let tangent_sine = tangency_tol_radians.abs().min(crate::math::PI / 2.0).sin();
+    let tangent_sine = det::sin(tangency_tol_radians.abs().min(crate::math::PI / 2.0));
     let mut reach = 0.0_f64;
     let mut met = false;
     for lu in eu::faceuse_loopuses(b, faceuse, false, None)? {
@@ -2100,7 +2101,7 @@ pub fn local_extension_reach(
     tangency_tol_radians: f64,
     bounds: &mut EdgeBounds,
 ) -> Result<Option<LocalReach>> {
-    let tangent_sine = tangency_tol_radians.abs().min(crate::math::PI / 2.0).sin();
+    let tangent_sine = det::sin(tangency_tol_radians.abs().min(crate::math::PI / 2.0));
     let tolerance = b.tolerance();
     let own_face = b.faceuse(faceuse)?.face;
     let is_moved = |f: Option<FaceId>| f.is_some_and(|f| moved.iter().any(|(m, _)| *m == f));
@@ -2748,13 +2749,13 @@ mod tests {
     #[test]
     fn a_tilted_top_is_met_by_its_tangent_at_the_corners() {
         let theta: f64 = 0.3;
-        let (s, c) = (theta.sin(), theta.cos());
+        let (s, c) = (det::sin(theta), det::cos(theta));
         let top = Surface::from(crate::surface::plane::Plane::from_normal(
             Point3::new(0.5, 1.0, 3.0),
             Vec3::new(0.0, -s, c),
         ));
         let [top, front, left, bottom] = moved_top(&top);
-        let t = theta.tan();
+        let t = det::tan(theta);
         for (name, (reach, shift)) in [("top", top), ("front", front), ("left", left)] {
             assert!((reach - t).abs() < 1e-12, "{name} reach {reach}");
             assert!((shift - s).abs() < 1e-12, "{name} move {shift}");
@@ -3288,7 +3289,10 @@ mod tests {
     /// of it, meets it nowhere near.
     #[test]
     fn a_kept_straight_edge_meets_a_moved_plane_where_its_line_crosses_it() {
-        let (s, c) = (3.0_f64.to_radians().sin(), 3.0_f64.to_radians().cos());
+        let (s, c) = (
+            det::sin(3.0_f64.to_radians()),
+            det::cos(3.0_f64.to_radians()),
+        );
         let tilted = Tangent {
             point: Vec3::new(5.0, 0.0, 10.0),
             normal: Vec3::new(-s, 0.0, c),
@@ -3310,7 +3314,7 @@ mod tests {
         else {
             panic!("no meeting");
         };
-        let want = (0.16 + (5.4 * s / c).powi(2)).sqrt();
+        let want = (0.16 + det::powi(5.4 * s / c, 2)).sqrt();
         assert!(r >= want && r - want < 1e-12, "{r} {want}");
         // the curve's distance from its line, over the sine of the line's angle to the plane
         let off = StraightEdge {

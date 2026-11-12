@@ -15,6 +15,7 @@
 
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
+use solidcore::math::det;
 use solidcore::surface::cone::Cone;
 use solidcore::{Kernel, Point2, Point3, Vec3};
 
@@ -37,7 +38,7 @@ fn cylinder(k: &Kernel, origin: Point3) -> Cone {
 /// whose analytic data and NURB both bound the frustum's volume.
 fn check_draft(k: &Kernel) {
     let cylinder = cylinder(k, Point3::new(0.0, 0.0, 0.0));
-    let slope = -(0.1f64).tan();
+    let slope = -det::tan(0.1f64);
     let cone = cylinder
         .lean_cylinder(k, slope, 0.0)
         .expect("a leaned cylinder rebuilds as a cone");
@@ -47,12 +48,12 @@ fn check_draft(k: &Kernel) {
 
     let canonical = cone.canonical();
     assert!((canonical.radius - 5.0).abs() < 1e-9);
-    assert!((canonical.semi_angle_deg - slope.atan().to_degrees()).abs() < 1e-9);
+    assert!((canonical.semi_angle_deg - det::atan(slope).to_degrees()).abs() < 1e-9);
 
     // The analytic cone's frustum over heights 0 to 10.
     let h = 10.0;
     let big = canonical.radius;
-    let small = big + h * canonical.semi_angle_deg.to_radians().tan();
+    let small = big + h * det::tan(canonical.semi_angle_deg.to_radians());
     let analytic = std::f64::consts::PI * h * (big * big + big * small + small * small) / 3.0;
     assert!(rel_close(analytic, VOLUME), "{analytic} vs {VOLUME}");
 

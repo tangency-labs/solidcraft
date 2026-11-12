@@ -7,6 +7,7 @@
 
 mod common;
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use common::edge_at;
@@ -52,8 +53,8 @@ fn blended(x0: f64, kind: Blend) -> f64 {
 #[test]
 fn the_round_ends_on_the_end_disc() {
     let quad = 0.212_372_435_695_794_78;
-    let segment = 2.0 * (0.2_f64.asin() - 0.2);
-    let sector = 0.2_f64.acos() / 8.0;
+    let segment = 2.0 * (det::asin(0.2_f64) - 0.2);
+    let sector = det::acos(0.2_f64) / 8.0;
     let area = quad - segment - sector;
     let expected = 12000.0 - 500.0 * (1.0 - PI / 4.0) + 12.0 * PI + 6.0 * area;
     let v = blended(5.0, Blend::Round);

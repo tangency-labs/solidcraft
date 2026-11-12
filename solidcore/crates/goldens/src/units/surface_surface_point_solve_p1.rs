@@ -22,6 +22,7 @@
 //! and every surface cache build of a curve-bounded or STEP surface's bounding box
 //! (`SmSurface::CalculateContinuities`, `surface.surface_p6`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -568,7 +569,7 @@ pub(crate) fn gen_test(k: &Kernel, rng: &mut Rng, s: &Surface, d: [f64; 4], size
     let n = su.cross(sv).unitize_or_z();
     let off = match rng.below(6) {
         0 => 0.0,
-        1 => size * 10f64.powf(rng.uniform(-12.0, -7.0)),
+        1 => size * det::powf(10f64, rng.uniform(-12.0, -7.0)),
         2 => size * rng.uniform(-0.3, 0.3),
         3 => size * rng.uniform(-3.0, 3.0),
         4 => return gvec(rng, size * 1.5),
@@ -592,7 +593,7 @@ pub(crate) fn test_on_normal(k: &Kernel, rng: &mut Rng, s: &Surface, uv: [f64; 2
     let n = su.cross(sv).unitize_or_z();
     let off = match rng.below(4) {
         0 => 0.0,
-        1 => size * 10f64.powf(rng.uniform(-13.0, -6.0)),
+        1 => size * det::powf(10f64, rng.uniform(-13.0, -6.0)),
         2 => size * rng.uniform(-1.0, 1.0),
         _ => size * rng.uniform(-20.0, 20.0),
     };
@@ -650,7 +651,7 @@ pub(crate) fn gen_closed(rng: &mut Rng) -> InlineSrf {
                 (0..v_rows)
                     .map(|j| {
                         let z = h * j as f64 / q as f64;
-                        [r * t.cos(), r * t.sin(), z, NOW]
+                        [r * det::cos(t), r * det::sin(t), z, NOW]
                     })
                     .collect()
             })

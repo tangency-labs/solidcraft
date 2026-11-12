@@ -16,6 +16,7 @@
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
@@ -78,7 +79,7 @@ fn wr_547_notch_corner_patch_is_tangent_to_its_rounds() {
             // the normals' angle either way round, from the cross product, which resolves
             // it below acos's 2.1e-8 rad floor (tangency-labs/smlib#119)
             let (n1, n2) = (normal(s1, p), normal(s2, p));
-            let angle = n1.cross(n2).length().atan2(n1.dot(n2).abs());
+            let angle = det::atan2(n1.cross(n2).length(), n1.dot(n2).abs());
             worst = worst.max(angle.to_degrees());
         }
     }

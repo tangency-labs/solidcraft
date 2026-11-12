@@ -35,6 +35,7 @@
 //! a whole file is bounded (shared shells count each time a solid uses them).
 
 use crate::vec::Vec3Geom as _;
+use solidcore::math::det;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::TAU;
 
@@ -1914,7 +1915,7 @@ fn form_reach(label: &BSurface, v: [f64; 2], tolerance: f64) -> [f64; 2] {
     match label {
         BSurface::Cylinder { radius, .. } => [reach(radius.abs()), 0.0],
         BSurface::Cone { radius_at_origin, half_angle, .. } => {
-            let slope = half_angle.tan();
+            let slope = det::tan(*half_angle);
             [reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), 0.0]
         }
         BSurface::Sphere { radius, .. } => [reach(radius.abs()), reach(radius.abs())],
@@ -2200,7 +2201,7 @@ struct Mapped {
 }
 
 fn angle_of(a: f64, b: f64) -> f64 {
-    let t = b.atan2(a);
+    let t = det::atan2(b, a);
     if t < 0.0 { t + TAU } else { t }
 }
 

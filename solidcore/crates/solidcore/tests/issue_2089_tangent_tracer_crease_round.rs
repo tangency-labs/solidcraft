@@ -39,6 +39,7 @@ use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::intersect::point_class::{PointClassType, PointClassification};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::query::face::p1 as fq;
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -148,11 +149,11 @@ fn check_failures(k: &mut Kernel, b: &mut Brep) -> Vec<String> {
 /// at `r`.
 fn off_envelope(p: Point3) -> f64 {
     let r = 1.0_f64;
-    let line = ((p.y - (4.0_f64)).powi(2) + (p.z - (14.0_f64)).powi(2)).sqrt();
+    let line = (det::powi(p.y - (4.0_f64), 2) + det::powi(p.z - (14.0_f64), 2)).sqrt();
     // the centre at angle t round the offset torus's section in the plane y = 4.0
     let centre = |t: f64| {
-        let rho = 12.0_f64 + (2.0_f64 + r) * t.cos();
-        let z = 17.0_f64 + (2.0_f64 + r) * t.sin();
+        let rho = 12.0_f64 + (2.0_f64 + r) * det::cos(t);
+        let z = 17.0_f64 + (2.0_f64 + r) * det::sin(t);
         let x2 = rho * rho - (4.0_f64) * (4.0_f64);
         (x2 >= 0.0).then(|| Point3::new(x2.sqrt(), 4.0_f64, z))
     };
@@ -181,7 +182,7 @@ fn off_envelope(p: Point3) -> f64 {
 /// rho = 10 has its centre on the circle rho = 12, z = 17.
 fn torus_distance(p: Point3) -> f64 {
     let rho = (p.x * p.x + p.y * p.y).sqrt();
-    ((rho - 12.0).powi(2) + (p.z - 17.0).powi(2)).sqrt()
+    (det::powi(rho - 12.0, 2) + det::powi(p.z - 17.0, 2)).sqrt()
 }
 
 /// Whether `p` lies on a face the r 1 round does not make: the block's planes, the
@@ -297,7 +298,7 @@ fn crease_round_with(mut k: Kernel, form: Form) -> (i32, Option<Built>) {
     let refs: Vec<Option<&Curve>> = lines.iter().map(Some).collect();
     let block = create_linear_sweep(&mut k, &refs, v(0., 0., 1.), 15.0, true).unwrap();
     let a0: f64 = 0.6131;
-    let x0 = v(a0.cos(), a0.sin(), 0.);
+    let x0 = v(det::cos(a0), det::sin(a0), 0.);
     let frame = Axis2Placement::new(v(0., 0., 0.), x0, v(0., 0., 1.).cross(x0));
     let circle = Curve::from(
         Ellipse::create_canonical_circle(

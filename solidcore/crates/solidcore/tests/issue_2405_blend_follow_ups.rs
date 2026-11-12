@@ -25,6 +25,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, BIG_DOUBLE};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::create_box;
@@ -245,7 +246,7 @@ fn torus_box_sections(k: &mut Kernel, through_axis: bool) -> [Vec<(bool, f64)>; 
     use solidcore::primitive::api_primitives::create_torus;
     let plane: fn(Vec3) -> f64 = if through_axis { |p| p.x } else { |p| p.z };
     let circles: fn(Vec3) -> f64 = if through_axis {
-        |p| (((p.y.abs() - 10.0).powi(2) + p.z * p.z).sqrt() - 3.0).abs()
+        |p| ((det::powi(p.y.abs() - 10.0, 2) + p.z * p.z).sqrt() - 3.0).abs()
     } else {
         |p| {
             let rho = (p.x * p.x + p.y * p.y).sqrt();
@@ -371,7 +372,10 @@ fn a_draft_cone_wall_keeps_its_exact_seam_pcurves() {
     use solidcore::sweep::api_brep::{
         create_taper_extrude_with_corner, OffsetCornerType, TaperExtrude,
     };
-    let (tan, cos) = (10.0f64.to_radians().tan(), 10.0f64.to_radians().cos());
+    let (tan, cos) = (
+        det::tan(10.0f64.to_radians()),
+        det::cos(10.0f64.to_radians()),
+    );
     for keep in [true, false] {
         let mut k = Kernel::default();
         k.fixes.keep_exact_pcurves = keep;

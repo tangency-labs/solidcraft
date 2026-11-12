@@ -1003,6 +1003,9 @@ fn projected_counts(fixture: &Fixture, counts: [i64; 7]) -> Vec<i64> {
         vec![faces, loops, edges, uses, vertices]
     }
 }
+/// The points' bounding box. A bound moves only to a strictly smaller (larger) value, so of
+/// `-0.0` and `0.0` the first met is kept: `f64::min` and `f64::max` may return either zero,
+/// and aarch64 (`fminnm`) and `x86_64` return different ones, which the golden would print.
 fn bounds(points: impl Iterator<Item = [f64; 3]>) -> Vec<f64> {
     let mut lo = [f64::INFINITY; 3];
     let mut hi = [f64::NEG_INFINITY; 3];
@@ -1010,8 +1013,12 @@ fn bounds(points: impl Iterator<Item = [f64; 3]>) -> Vec<f64> {
     for point in points {
         any = true;
         for ((lo, hi), value) in lo.iter_mut().zip(&mut hi).zip(point) {
-            *lo = lo.min(value);
-            *hi = hi.max(value);
+            if value < *lo {
+                *lo = value;
+            }
+            if value > *hi {
+                *hi = value;
+            }
         }
     }
     if any {

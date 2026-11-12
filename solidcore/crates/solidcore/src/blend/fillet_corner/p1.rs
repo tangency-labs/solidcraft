@@ -138,6 +138,7 @@
 //!
 //! No loops depend on input size beyond the given arrays; there is no recursion.
 
+use crate::math::det;
 use std::collections::BTreeMap;
 
 use crate::blend::fillet_corner::p2::is_b_spline_kind;
@@ -699,7 +700,7 @@ pub fn fillet_radius(
         ang_rad = PI - ang_rad;
     }
     let leng = surf_pnt.distance(surf_pnt2);
-    let radius = leng / 2.0 / (ang_rad / 2.0).sin();
+    let radius = leng / 2.0 / det::sin(ang_rad / 2.0);
     Ok((radius, ang_rad))
 }
 

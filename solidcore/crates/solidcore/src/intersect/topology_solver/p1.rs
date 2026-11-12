@@ -2541,6 +2541,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::curve::line::{BoundedLineOptions, Line};
     use crate::geom::solution_array::ObjectKind;
+    use crate::math::det;
 
     /// Free-standing test objects: vertices `(point, tolerance)` and curves.
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2855,7 +2856,7 @@ pub(crate) mod tests {
                 );
             }
             // 1 degree off the direction is admitted; 45 degrees is not.
-            let one = 10.0 * 1.0_f64.to_radians().tan();
+            let one = 10.0 * det::tan(1.0_f64.to_radians());
             assert!(ts
                 .may_contain_answer(&origin, &point(one, 10.0, 0.0))
                 .unwrap());

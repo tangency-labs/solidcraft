@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
 use goldens::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 #[path = "../src/units/fixtures/nlib_srf_adv_p2_sms.rs"]
@@ -32,7 +33,7 @@ fn error(text: &str) -> String {
 
 #[test]
 fn each_count_rejects_malformed_and_exclusive_limit() {
-    let limit = 2.0_f64.powi(usize::BITS as i32).to_string();
+    let limit = det::powi(2.0_f64, usize::BITS as i32).to_string();
     for at in 0..4 {
         for invalid in ["-1", "0.5", "NaN", "inf", "-inf", "1e999", &limit] {
             let mut header = ["0", "0", "0", "0", "0"];
@@ -47,13 +48,13 @@ fn each_count_rejects_malformed_and_exclusive_limit() {
 
 #[test]
 fn huge_representable_counts_do_not_allocate_from_header() {
-    let huge = (2.0_f64.powi(usize::BITS as i32 - 4)).to_string();
+    let huge = (det::powi(2.0_f64, usize::BITS as i32 - 4)).to_string();
     for at in 0..4 {
         let mut header = ["0", "0", "0", "0", "0"];
         header[at] = &huge;
         assert!(error(&header.join(" ")).contains("truncated"));
     }
-    let limit = 2.0_f64.powi(usize::BITS as i32);
+    let limit = det::powi(2.0_f64, usize::BITS as i32);
     let largest = if usize::BITS <= 53 {
         limit - 1.0
     } else {
@@ -71,7 +72,7 @@ fn huge_representable_counts_do_not_allocate_from_header() {
 
 #[test]
 fn checked_size_arithmetic() {
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1);
     // U/V knot addition, net multiplication, coordinate multiplication, then
     // payload additions (overflow at U, and separately at V).
     for header in [
@@ -87,7 +88,7 @@ fn checked_size_arithmetic() {
     // On 64-bit hosts usize::MAX is not representable as f64, so row/column
     // addition overflow is unreachable after count validation there.
     if usize::BITS <= 53 {
-        let max = 2.0_f64.powi(usize::BITS as i32) - 1.0;
+        let max = det::powi(2.0_f64, usize::BITS as i32) - 1.0;
         assert!(error(&format!("{max} 0 0 0 0")).contains("overflow"));
         assert!(error(&format!("0 {max} 0 0 0")).contains("overflow"));
     }

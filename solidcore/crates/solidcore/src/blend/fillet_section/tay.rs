@@ -9,6 +9,7 @@
 //! off the grid and at points kept once each, f9b133a, smlib#109); see [`super`] for the
 //! table.
 
+use crate::math::det;
 use core::ops::{Add, Div, Mul, Sub};
 use std::collections::BTreeMap;
 
@@ -78,7 +79,7 @@ fn smax(a: f64, b: f64) -> f64 {
 /// `sm_Acos(double)`: the arc cosine of x clamped to [-1, 1].
 #[must_use]
 pub fn acos_clamped(x: f64) -> f64 {
-    smax(-1.0, smin(1.0, x)).acos()
+    det::acos(smax(-1.0, smin(1.0, x)))
 }
 
 impl TayScalar for f64 {
@@ -89,12 +90,12 @@ impl TayScalar for f64 {
         acos_clamped(self)
     }
     fn sin_cos_s(self) -> (Self, Self) {
-        (self.sin(), self.cos())
+        (det::sin(self), det::cos(self))
     }
 }
 
-/// `sm_Wide`: `[a, b]` widened by `1e-15` relative (the C library's `acos`, `sin` and
-/// `cos` are within an ulp or two), or the whole line if either is NaN.
+/// `sm_Wide`: `[a, b]` widened by `1e-15` relative ([`crate::math::det`]'s `acos`, `sin`
+/// and `cos` are within an ulp), or the whole line if either is NaN.
 #[must_use]
 pub fn wide(a: f64, b: f64) -> Ivl {
     if a.is_nan() || b.is_nan() {
@@ -115,7 +116,7 @@ impl TayScalar for Ivl {
         if !inside {
             return Ivl::whole();
         }
-        wide(self.hi.acos(), self.lo.acos())
+        wide(det::acos(self.hi), det::acos(self.lo))
     }
     /// On `[0, pi/2]` (the double below pi/2 its top), where sin rises and cos falls; the
     /// whole line elsewhere.
@@ -125,8 +126,8 @@ impl TayScalar for Ivl {
             return (Ivl::whole(), Ivl::whole());
         }
         (
-            wide(self.lo.sin(), self.hi.sin()),
-            wide(self.hi.cos(), self.lo.cos()),
+            wide(det::sin(self.lo), det::sin(self.hi)),
+            wide(det::cos(self.hi), det::cos(self.lo)),
         )
     }
 }
@@ -519,8 +520,8 @@ mod tests {
             let u = 0.5 * (core::f64::consts::PI - a);
             let t = gn_target(&Tay::<f64>::lift(u)).c[0];
             let h = 0.5 * a;
-            let cot = h.cos() / h.sin();
-            let e = (cot - 0.5 * (core::f64::consts::PI - a)) / (cot * h.cos() * h.cos());
+            let cot = det::cos(h) / det::sin(h);
+            let e = (cot - 0.5 * (core::f64::consts::PI - a)) / (cot * det::cos(h) * det::cos(h));
             assert!((t - e).abs() < 1e-13 * e.abs(), "{a} {t} {e}");
         }
     }

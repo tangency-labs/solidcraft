@@ -39,6 +39,7 @@ use crate::intersect::surface_intersector::tangent_tracer::{
     tc_near_poly, tc_poly_dist, tc_tangents, tc_uv_der, SolveMode, TangentTracer, TcPt,
 };
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::surface::p2::TsectCurveType;
@@ -150,7 +151,7 @@ fn covers_crossing(
     let mut i = 0;
     while i < rc.len() {
         let Some(p) = rc.get(i) else { break };
-        let in_band = 20.0 * tol >= 0.02 * size * p.ang.sin();
+        let in_band = 20.0 * tol >= 0.02 * size * det::sin(p.ang);
         match drop_distance(k, c, p.p, tol * 10.0)? {
             Some(d) if d <= cov_tol => on |= !in_band,
             _ if in_band => {}
@@ -266,7 +267,7 @@ pub(crate) fn find_tangent_curves(
                 let Some(e2) = tr.eval(k, 1, b.x, b.y)? else {
                     continue;
                 };
-                if e1.n.dot(e2.n).abs() < deg2rad(1.0).cos() {
+                if e1.n.dot(e2.n).abs() < det::cos(deg2rad(1.0)) {
                     continue;
                 }
             }
@@ -300,7 +301,7 @@ pub(crate) fn find_tangent_curves(
         if len(e1.p - e2.p) > 0.01 * size {
             continue;
         }
-        if e1.n.dot(e2.n).abs() < deg2rad(10.0).cos() {
+        if e1.n.dot(e2.n).abs() < det::cos(deg2rad(10.0)) {
             continue;
         }
         tr.sign = if e1.n.dot(e2.n) < 0.0 { -1.0 } else { 1.0 };
@@ -452,7 +453,7 @@ pub(crate) fn find_tangent_curves(
                     c.n = e1.n;
                     c.n2 = e2.n;
                     c.gap = len(e1.p - e2.p);
-                    c.ang = smin(1.0, len(e1.n.cross(e2.n))).asin();
+                    c.ang = det::asin(smin(1.0, len(e1.n.cross(e2.n))));
                     if c.gap < 10.0 * tol {
                         charts.push(c);
                     }
@@ -490,7 +491,7 @@ pub(crate) fn find_tangent_curves(
                 let closed = tr.march(k, &n, dir, &n, &mut fwd, Some(&mut nodes))?;
                 if !closed {
                     // the smooth continuation backwards through N
-                    let mut best = deg2rad(45.0).cos();
+                    let mut best = det::cos(deg2rad(45.0));
                     let mut back: Option<usize> = None;
                     for (j, d) in dirs.iter().enumerate() {
                         let c = -d.dot(dir);
@@ -675,7 +676,7 @@ pub(crate) fn find_tangent_curves(
                     let a1 = rb
                         .get(seg.saturating_add(1).min(rb.len().saturating_sub(1)))
                         .map_or(0.0, |p| p.ang);
-                    let sin = smin(a0, a1).sin();
+                    let sin = det::sin(smin(a0, a1));
                     let band = smax(near_tol, 20.0 * tol / smax(sin, 1e-12));
                     if dist < smin(band, 0.02 * size) {
                         near = true;

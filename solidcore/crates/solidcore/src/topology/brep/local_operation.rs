@@ -1302,6 +1302,7 @@ fn move_faces(k: &mut Kernel, b: &mut Brep, new_brep: &mut Brep) -> Result<()> {
 mod tests {
     use super::*;
     use crate::geom::extent2d::Extent2d;
+    use crate::math::det;
     use crate::math::{Point3, Vec3};
     use crate::primitive::api_primitives::create_box;
     use crate::surface::plane::Plane;
@@ -1315,12 +1316,12 @@ mod tests {
     #[test]
     fn parallel_plane_origin_uses_determinants_before_rounding_the_origin_difference() {
         let k = Kernel::default();
-        let t = 2.0_f64.powi(-25) + 2.0_f64.powi(-77);
+        let t = det::powi(2.0_f64, -25) + det::powi(2.0_f64, -77);
         let x = Vec3::new(1.0, t, 0.0);
         let y = Vec3::Z;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let scale = crate::math::Vec2::new(1.0, 1.0);
-        let origin = x * 2.0_f64.powi(-53);
+        let origin = x * det::powi(2.0_f64, -53);
         let own = Surface::from(Plane::new(origin, x, y, scale, &domain));
         let coincident = Surface::from(Plane::new(x, x, y, scale, &domain));
         // Both origins lie exactly in the stored axis span, but rounding x-origin
@@ -1356,7 +1357,7 @@ mod tests {
     #[test]
     fn parallel_net_moves_every_control_point_using_the_given_stored_plane_axes() {
         let k = Kernel::default();
-        let t = 2.0_f64.powi(-25) + 2.0_f64.powi(-77);
+        let t = det::powi(2.0_f64, -25) + det::powi(2.0_f64, -77);
         let x = Vec3::new(1.0, t, 0.0);
         let y = Vec3::Z;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
@@ -1411,7 +1412,7 @@ mod tests {
     #[test]
     fn perpendicularity_to_the_rounded_normal_does_not_prove_parallel_planes() {
         let k = Kernel::default();
-        let t = 2.0_f64.powi(-25) + 2.0_f64.powi(-77);
+        let t = det::powi(2.0_f64, -25) + det::powi(2.0_f64, -77);
         let x = Vec3::new(1.0, t, 0.0);
         let y = Vec3::Z;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
@@ -1428,7 +1429,7 @@ mod tests {
             .is_none());
         // Scaling amplifies the mismatch in the control coordinates. It remains
         // exactly perpendicular to m, but not in the given plane's stored span.
-        let a = a * 2.0_f64.powi(80);
+        let a = a * det::powi(2.0_f64, 80);
         assert!(exact::is_zero(&exact::dot(m, a).unwrap()));
         assert!(!exact::is_zero(&exact::det3(x, y, a).unwrap()));
         let own_net = Surface::from(
@@ -1859,7 +1860,12 @@ mod tests {
             .unwrap()
             .unwrap()
             .clone();
-        given_its_own(k, b, s, 4.0 / 3.0 * std::f64::consts::PI * 1.5_f64.powi(3));
+        given_its_own(
+            k,
+            b,
+            s,
+            4.0 / 3.0 * std::f64::consts::PI * det::powi(1.5_f64, 3),
+        );
     }
 
     #[test]
@@ -1868,7 +1874,7 @@ mod tests {
         let mut k = Kernel::default();
         let b = ap::create_torus(&mut k, Point3::ZERO, 3.0, 1.0).unwrap();
         let s = Surface::from(ap::create_torus_surface(&k, Point3::ZERO, 3.0, 1.0).unwrap());
-        given_its_own(k, b, s, 2.0 * std::f64::consts::PI.powi(2) * 3.0);
+        given_its_own(k, b, s, 2.0 * det::powi(std::f64::consts::PI, 2) * 3.0);
     }
 
     /// A whole torus's one face, meeting only itself across its seams, given the coaxial
@@ -1890,7 +1896,7 @@ mod tests {
         .unwrap();
         let (v, manifold) = volume_and_manifold(&k, &mut b);
         assert!(manifold);
-        let want = 2.0 * std::f64::consts::PI.powi(2) * 3.0 * 1.5 * 1.5;
+        let want = 2.0 * det::powi(std::f64::consts::PI, 2) * 3.0 * 1.5 * 1.5;
         assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
         assert_eq!(
             (b.faces().len(), b.edges().len(), b.vertices().len()),
@@ -2965,7 +2971,7 @@ mod tests {
 
     /// `∫ √(R² − u²) du` from 0 to `u`.
     fn quarter_disc_area(radius: f64, u: f64) -> f64 {
-        0.5 * (u * (radius * radius - u * u).sqrt() + radius * radius * (u / radius).asin())
+        0.5 * (u * (radius * radius - u * u).sqrt() + radius * radius * det::asin(u / radius))
     }
 
     /// The fix sets the tangent-edge cases run with: none (the kernel's default) and every

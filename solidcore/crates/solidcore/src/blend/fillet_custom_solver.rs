@@ -95,6 +95,7 @@ use crate::geom::matrix::Matrix;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -959,11 +960,11 @@ impl EiffelTowerFs {
             // of (R1-R2)*sin(m_dTowerAngle) as our final guess sUV1
             // Similarily, move sUV2 along -sNormal1 for a distance of
             // (R1-R2)*cos(m_dTowerAngle) as our final guess sUV2
-            let len1 = fs.orientation(1)? * scale_factor * rad_diff * self.tower_angle.sin();
+            let len1 = fs.orientation(1)? * scale_factor * rad_diff * det::sin(self.tower_angle);
             let v1 = len1 * s.normal2;
             let delta1 = drop_vector(k, base1, uv1, v1, OP)?;
             uv1 += delta1;
-            let len2 = -fs.orientation(0)? * rad_diff * self.tower_angle.cos();
+            let len2 = -fs.orientation(0)? * rad_diff * det::cos(self.tower_angle);
             let v2 = len2 * s.normal1;
             let delta2 = drop_vector(k, base2, uv2, v2, OP)?;
             uv2 += delta2;
@@ -974,11 +975,11 @@ impl EiffelTowerFs {
             // of (R1-R2)*sin(m_dTowerAngle) as our final guess sUV2
             // Similarily, move sUV2 along -sNormal1 for a distance of
             // (R1-R2)*cos(m_dTowerAngle) as our final guess sUV2
-            let len2 = fs.orientation(1)? * scale_factor * rad_diff * self.tower_angle.sin();
+            let len2 = fs.orientation(1)? * scale_factor * rad_diff * det::sin(self.tower_angle);
             let v2 = len2 * s.normal1;
             let delta2 = drop_vector(k, base2, uv2, v2, OP)?;
             uv2 += delta2;
-            let len1 = -fs.orientation(0)? * rad_diff * self.tower_angle.cos();
+            let len1 = -fs.orientation(0)? * rad_diff * det::cos(self.tower_angle);
             let v1 = len1 * s.normal2;
             let delta1 = drop_vector(k, base1, uv1, v1, OP)?;
             uv1 += delta1;
@@ -1162,7 +1163,7 @@ impl EiffelTowerFs {
         set_f(
             f,
             *num_equations,
-            unit_nf.dot(unit_v) - self.tower_angle.cos(),
+            unit_nf.dot(unit_v) - det::cos(self.tower_angle),
             OP,
         )?;
         *num_equations += 1;
@@ -1575,7 +1576,7 @@ impl SecantConstantRadiusFs {
             // Now we have a point corresponding to sUV2 where the ball touches
             // surface2 tangentially. Then we want to move sUV2 along -sNormal1 for
             // a (3-d)distance of 2*Radius*sin(theta) as our final guess point
-            let len = -fs.orientation(1)? * fs.radius(1)? * self.secant_angle.sin();
+            let len = -fs.orientation(1)? * fs.radius(1)? * det::sin(self.secant_angle);
             let v = len * s.normal1;
             let delta = drop_vector(k, base2, uv2, v, OP)?;
             uv2 += delta * 2.0;
@@ -1585,7 +1586,7 @@ impl SecantConstantRadiusFs {
             // Now we have a point corresponding to sUV1 where the ball touches
             // surface1 tangentially. Then we want to move sUV1 along -sNormal2 for
             // a (3-d)distance of 2*Radius*sin(theta) as our final guess point
-            let len = -fs.orientation(0)? * fs.radius(0)? * self.secant_angle.sin();
+            let len = -fs.orientation(0)? * fs.radius(0)? * det::sin(self.secant_angle);
             let v = len * s.normal2;
             let delta = drop_vector(k, base1, uv1, v, OP)?;
             uv1 += delta * 2.0;
@@ -1745,7 +1746,7 @@ impl SecantConstantRadiusFs {
         set_f(
             f,
             *num_equations,
-            diff.dot(n2) - r1 * self.secant_angle.cos(),
+            diff.dot(n2) - r1 * det::cos(self.secant_angle),
             OP,
         )?;
         *num_equations += 1;

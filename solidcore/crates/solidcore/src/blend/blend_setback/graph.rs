@@ -40,6 +40,7 @@ use super::{
 };
 use crate::error::{Result, SolidError};
 use crate::geom::vector3d::sqrt;
+use crate::math::det;
 use crate::math::{Point3, Vec3, PI};
 
 /// `SM_SB_GRAPH_DEPTH`: the certificate's halvings.
@@ -348,7 +349,7 @@ pub(super) fn graph_gk(
         // the section's middle
         let mut mh = HOM_ZERO;
         for (c, hc) in h0.iter().enumerate() {
-            mh = axpy(&mh, binomial(q, c)? / 2.0_f64.powf(q as f64), hc);
+            mh = axpy(&mh, binomial(q, c)? / det::powf(2.0_f64, q as f64), hc);
         }
         *el_mut(&mut mids, m)? = Point3::new(mh[0] / mh[3], mh[1] / mh[3], mh[2] / mh[3]);
         *el_mut(&mut h0s, m)? = h0;
@@ -884,7 +885,7 @@ pub(super) fn graph_gk(
             let sq = el(&sigma, q)?;
             let a = (sq.x * dt.y - sq.y * dt.x) / det;
             let b = (ds.x * sq.y - ds.y * sq.x) / det;
-            let mut th = b.atan2(a);
+            let mut th = det::atan2(b, a);
             if th < 0.0 {
                 th += PI;
             }

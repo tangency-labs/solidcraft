@@ -19,6 +19,7 @@ mod common;
 
 use common::{edge_at, kernel_copy, rel, volume};
 use solidcore::kernel::UpstreamFixes;
+use solidcore::math::det;
 use solidcore_ops::blend::{blend, Blend, Corners};
 use solidcore_ops::{make_box, session, Body, CheckLevel};
 
@@ -56,7 +57,7 @@ fn layer(z: f64, r: f64) -> f64 {
     }
     // the part of the corner [0, a] x [0, b] inside the disc: b to where the circle comes down
     // to height b, then under the circle
-    let under = |t: f64| 0.5 * (t * s(r, t) + r * r * (t / r).min(1.0).asin());
+    let under = |t: f64| 0.5 * (t * s(r, t) + r * r * det::asin((t / r).min(1.0)));
     let x0 = s(r, b);
     a * b - (b * x0.min(a) + (under(a) - under(x0)).max(0.0))
 }

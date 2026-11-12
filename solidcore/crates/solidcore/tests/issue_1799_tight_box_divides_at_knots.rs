@@ -24,6 +24,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use solidcore::boolean::api_brep::boolean_difference;
@@ -374,7 +375,7 @@ fn tight_box_cells_are_solved_on_their_own_subpatch() {
     // 0.05 (2 - 6)^3 = -3.2 at its bottom point to 0 at its top. The trim is the circle
     // projected within the trim tolerance (0.01), so x and y are held to that; z is flat at
     // the top, where a trim 0.01 past the circle rises 0.05 x 0.01^3 = 5e-8.
-    let z = |y: f64| SHEET_RISE * (y - SHEET_FLAT).powi(3);
+    let z = |y: f64| SHEET_RISE * det::powi(y - SHEET_FLAT, 3);
     for (what, got, want, tol) in [
         ("x min", bx.min().x, cx - r, 1e-3),
         ("x max", bx.max().x, cx + r, 1e-3),

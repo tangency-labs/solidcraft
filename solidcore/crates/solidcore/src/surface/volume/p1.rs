@@ -2474,6 +2474,7 @@ mod tests {
     use super::*;
     use crate::geom::extent2d::Extent2d;
     use crate::geom::vector2d::{Point2, Vec2};
+    use crate::math::det;
     use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
     use crate::surface::plane::p1::Plane;
     use crate::surface::sphere::Sphere;
@@ -2906,7 +2907,7 @@ mod tests {
         for k in 0..order {
             factor *= f64::from(pow - k);
         }
-        factor * val.powi((pow - order) as i32)
+        factor * det::powi(val, (pow - order) as i32)
     }
 
     fn poly_partial(terms: &[(u32, u32, u32, Vec3)], p: Point3, ox: u32, oy: u32, oz: u32) -> Vec3 {

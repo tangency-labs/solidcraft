@@ -30,6 +30,7 @@
     clippy::many_single_char_names
 )]
 
+use crate::math::det;
 use super::vec::VecExt as _;
 use crate::math::Vec3;
 
@@ -226,7 +227,7 @@ impl EvalSurface {
                 let [u, v] = self.wrap([u, v]);
                 let (s, a) = if *swap { (v, u) } else { (u, v) };
                 let (c, dc) = profile.eval(s)?;
-                let (sin, cos) = a.sin_cos();
+                let (sin, cos) = det::sin_cos(a);
                 let rot = |x: Vec3| x * cos + axis.cross(x) * sin + *axis * (axis.dot(x) * (1.0 - cos));
                 let r = c - *origin;
                 let p = *origin + rot(r);
@@ -493,9 +494,9 @@ mod tests {
         };
         for &(u, v) in &[(0.0, 0.0), (0.5, 1.0), (1.0, 4.0), (0.25, 6.0)] {
             let (p, n) = s.eval(u, v);
-            assert!(close(p, Vec3::new(2.0 * v.cos(), 2.0 * v.sin(), 5.0 * u), 1e-12), "{p:?}");
+            assert!(close(p, Vec3::new(2.0 * det::cos(v), 2.0 * det::sin(v), 5.0 * u), 1e-12), "{p:?}");
             // S_u = +Z, S_v = tangential: the normal points inward (−radial) for this profile.
-            assert!(close(n, Vec3::new(-v.cos(), -v.sin(), 0.0), 1e-12), "{n:?}");
+            assert!(close(n, Vec3::new(-det::cos(v), -det::sin(v), 0.0), 1e-12), "{n:?}");
         }
     }
 

@@ -89,8 +89,8 @@
 //! **Refused.** A path piece that is not a line, arc or helix: a spline path's
 //! rotation-minimizing frame needs a certified enclosure (tangency-labs/solidcore#2572).
 //!
-//! **Platforms.** The frames use the platform's `sin_cos`, `atan2` and `acos`; they agree
-//! across platforms to rounding, not bit for bit.
+//! **Platforms.** The frames use [`crate::math::det`]'s `sin_cos`, `atan2` and `acos`: the
+//! same bits on every platform.
 //!
 //! Deviations: no upstream counterpart. At most `MAX_PIECES` pieces, `MAX_STATIONS`
 //! stations, `MAX_TURNS` turns of an arc or helix; the root isolation's bounds are
@@ -99,6 +99,7 @@
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{gamma, CPoint, NOW};
@@ -261,7 +262,7 @@ impl Piece {
             a.distance(b)
         } else {
             self.screw().map_or(0.0, |(_, _, radial, angle, rise)| {
-                angle * radial.length().hypot(rise)
+                angle * det::hypot(radial.length(), rise)
             })
         }
     }
@@ -282,7 +283,7 @@ impl Piece {
         let t = unit(axis.cross(r) + axis * rise, "a piece's tangent")?;
         let screw = rotation(axis, phi);
         let a = radial.length();
-        let psi = -rise * phi / a.hypot(rise);
+        let psi = -rise * phi / det::hypot(a, rise);
         let m = if rise == 0.0 {
             screw
         } else {
@@ -298,7 +299,7 @@ impl Piece {
             None => 0.0,
             Some((_, _, radial, angle, rise)) => {
                 let a = radial.length();
-                angle * a / a.hypot(rise)
+                angle * a / det::hypot(a, rise)
             }
         }
     }
@@ -350,7 +351,7 @@ impl Measured {
 /// none where they meet G1, the procedural sweep's rule (`|t1 - t0| <= 1e-8`,
 /// docs/procedural-sweep.md section 3.1, [`G1_TANGENTS`]).
 fn corner(t0: Vec3, t1: Vec3) -> Result<Corner> {
-    let angle = t0.cross(t1).length().atan2(t0.dot(t1));
+    let angle = det::atan2(t0.cross(t1).length(), t0.dot(t1));
     if (t1 - t0).length() <= G1_TANGENTS {
         return Ok(Corner {
             turn: IDENTITY,
@@ -370,7 +371,7 @@ fn corner(t0: Vec3, t1: Vec3) -> Result<Corner> {
     Ok(Corner {
         turn: rotation(axis, angle),
         half: rotation(axis, 0.5 * angle),
-        mitre: Some((stretch, 1.0 / (0.5 * angle).cos())),
+        mitre: Some((stretch, 1.0 / det::cos(0.5 * angle))),
     })
 }
 
@@ -630,7 +631,7 @@ pub fn fractions(path: &Path, laws: &Laws<'_>) -> Result<Vec<f64>> {
         if i > 0 {
             if let Some((_, s)) = c.mitre {
                 // the corner's angle back from its mitre factor 1 / cos(theta / 2)
-                turn += 2.0 * (1.0 / s).acos();
+                turn += 2.0 * det::acos(1.0 / s);
             }
         }
     }
@@ -925,7 +926,7 @@ pub fn stations(
             Orientation::Perpendicular => transport,
             Orientation::Parallel => {
                 // the angle between the tangent and the plane is asin(t . axis)
-                if t.dot(axis) <= laws.min_crossing.sin() {
+                if t.dot(axis) <= det::sin(laws.min_crossing) {
                     return Err(invalid(
                         "a parallel profile the path does not cross by the least angle asked",
                     ));
@@ -947,7 +948,7 @@ pub fn stations(
                 compose(&fi, &transpose_rotation(&f0))
             }
         };
-        let (sin, cos) = (laws.twist * u).sin_cos();
+        let (sin, cos) = det::sin_cos(laws.twist * u);
         let scale = 1.0 + (laws.end_scale - 1.0) * u;
         let shape = |v: Vec3| {
             let along = axis * v.dot(axis);

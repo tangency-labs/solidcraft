@@ -22,6 +22,7 @@
 mod common;
 
 use common::edge_at;
+use solidcore::math::det;
 use solidcore_ops::blend::{blend, Blend, Corners};
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
 use solidcore_ops::{session, Body, CheckLevel};
@@ -45,7 +46,7 @@ impl Drop for ResetFixes {
 }
 
 fn angle(c: [f64; 2], p: [f64; 2]) -> f64 {
-    (p[1] - c[1]).atan2(p[0] - c[0])
+    det::atan2(p[1] - c[1], p[0] - c[0])
 }
 
 /// The profile, counter-clockwise: the big circle's arc outside the small one from `P` to `Q`,
@@ -86,7 +87,7 @@ fn profile_area() -> f64 {
         if turn <= 0.0 {
             turn += 2.0 * std::f64::consts::PI;
         }
-        r * r * (turn - turn.sin()) / 2.0
+        r * r * (turn - det::sin(turn)) / 2.0
     };
     segment(C1, R1, P, Q) + segment(C2, R2, Q, P)
 }
@@ -95,7 +96,7 @@ fn profile_area() -> f64 {
 /// contacts and the corner, less the three circular segments (as SolidCraft's test).
 fn round_gap(x: [f64; 2], r: f64) -> f64 {
     let (a, b) = (R1 + r, R2 + r);
-    let d = (C2[0] - C1[0]).hypot(C2[1] - C1[1]);
+    let d = det::hypot(C2[0] - C1[0], C2[1] - C1[1]);
     let u = [(C2[0] - C1[0]) / d, (C2[1] - C1[1]) / d];
     let along = (a * a - b * b + d * d) / (2.0 * d);
     let side = if (x[0] - C1[0]) * -u[1] + (x[1] - C1[1]) * u[0] < 0.0 {
@@ -118,11 +119,12 @@ fn round_gap(x: [f64; 2], r: f64) -> f64 {
     ];
     let between = |c: [f64; 2], p: [f64; 2], q: [f64; 2]| {
         let (v, w) = ([p[0] - c[0], p[1] - c[1]], [q[0] - c[0], q[1] - c[1]]);
-        ((v[0] * w[0] + v[1] * w[1]) / (v[0].hypot(v[1]) * w[0].hypot(w[1])))
-            .clamp(-1.0, 1.0)
-            .acos()
+        det::acos(
+            ((v[0] * w[0] + v[1] * w[1]) / (det::hypot(v[0], v[1]) * det::hypot(w[0], w[1])))
+                .clamp(-1.0, 1.0),
+        )
     };
-    let segment = |r: f64, t: f64| r * r * (t - t.sin()) / 2.0;
+    let segment = |r: f64, t: f64| r * r * (t - det::sin(t)) / 2.0;
     let triangle =
         ((x[0] - t1[0]) * (t2[1] - t1[1]) - (t2[0] - t1[0]) * (x[1] - t1[1])).abs() / 2.0;
     triangle

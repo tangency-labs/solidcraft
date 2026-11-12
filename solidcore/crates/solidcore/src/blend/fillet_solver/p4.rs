@@ -3899,6 +3899,7 @@ mod tests_c6 {
     use super::*;
     use crate::blend::fillet_custom_solver::{ConstantRadiusAssistedFs, SurfaceId};
     use crate::intersect::surface_intersector::p1::IntersectionPointType;
+    use crate::math::det;
     use crate::nurbs::b_spline_surface::BSplineSurface;
 
     fn bilinear(p: [[f64; 3]; 4]) -> Surface {
@@ -4132,7 +4133,7 @@ mod tests_c6 {
         let r = run(&mut ops, &k, 1.0, &mut p, None);
         assert!(ops.guesses.len() >= 2, "{r:?} {:?}", ops.guesses);
         // how far each of the first two guesses lies from the point's uv
-        let from = |g: &[f64]| (g[0] - 0.5).hypot(g[1] - 0.25);
+        let from = |g: &[f64]| det::hypot(g[0] - 0.5, g[1] - 0.25);
         let (first, retry) = (from(&ops.guesses[0]), from(&ops.guesses[1]));
         assert!(first > 0.0 && first < 1.0e-4, "{first}");
         assert!((retry / first - 100.0).abs() < 1.0e-6, "{}", retry / first);
@@ -4165,7 +4166,7 @@ mod tests_c6 {
                 }
             );
             let g = ops.guesses.first().expect("a finite-difference solve ran");
-            (g[0] - 0.5).hypot(g[1] - 0.25)
+            det::hypot(g[0] - 0.5, g[1] - 0.25)
         };
         let (fresh, preset) = (first_guess(true, None), first_guess(true, Some(1.0e-5)));
         assert!(fresh > 0.0);

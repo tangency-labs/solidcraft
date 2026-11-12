@@ -56,6 +56,7 @@ use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::surface_intersector::p1::SrfIndex;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -699,14 +700,14 @@ pub fn exact_mitre_curve(
     };
     let w = a.cross(u);
     let s_off = s_pnt - c;
-    let dt = s_off.dot(w).atan2(s_off.dot(u));
+    let dt = det::atan2(s_off.dot(w), s_off.dot(u));
     if dt.abs() <= EFF_ZERO || dt.abs() >= 0.99 * core::f64::consts::PI {
         return Ok(false);
     }
     let um = u - a * (u.dot(m) / am);
     let wm = w - a * (w.dot(m) / am);
-    let xs = [1.0, 1.0, dt.cos()];
-    let ys = [0.0, (0.5 * dt).tan(), dt.sin()];
+    let xs = [1.0, 1.0, det::cos(dt)];
+    let ys = [0.0, det::tan(0.5 * dt), det::sin(dt)];
     let mut points = Vec::new();
     let mut weights = Vec::new();
     for jj in 0..3_usize {
@@ -715,7 +716,7 @@ pub fn exact_mitre_curve(
             return Err(nul());
         };
         points.push(c + (um * px + wm * py) * dr);
-        weights.push(if kk == 1 { (0.5 * dt).cos() } else { 1.0 });
+        weights.push(if kk == 1 { det::cos(0.5 * dt) } else { 1.0 });
     }
     let curve = rational_span(
         3,

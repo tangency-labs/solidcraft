@@ -57,6 +57,7 @@
 //! and the in-place notification and inset-on-shell-face mating (`SmBrep::Notify`,
 //! `SmBrep::MateLaminaEdgeToSurface`, `topology.brep_p2`).
 
+use solidcore::math::det;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
@@ -3756,14 +3757,14 @@ fn edge_cases() -> Vec<(String, Value)> {
         // from angle `a0` to `a1` (degrees, less than 180 apart)
         let plane_arc = |c: [f64; 3], u: [f64; 3], v: [f64; 3], r: f64, a0: f64, a1: f64| {
             let at = |a: f64, rr: f64| -> [f64; 3] {
-                let (sa, ca) = a.to_radians().sin_cos();
+                let (sa, ca) = det::sin_cos(a.to_radians());
                 [
                     c[0] + rr * (ca * u[0] + sa * v[0]),
                     c[1] + rr * (ca * u[1] + sa * v[1]),
                     c[2] + rr * (ca * u[2] + sa * v[2]),
                 ]
             };
-            let w = (0.5 * (a1 - a0)).to_radians().cos();
+            let w = det::cos((0.5 * (a1 - a0)).to_radians());
             let (p0, p2) = (at(a0, r), at(a1, r));
             let p1 = at(0.5 * (a0 + a1), r / w);
             CrvIn {
@@ -4413,7 +4414,7 @@ fn edge_cases() -> Vec<(String, Value)> {
                 true,
                 circle(1.0, 0.0),
                 circle(1.0, 3.0),
-                circle(1.0 + 3.0 * a260.cos(), 3.0 * a260.sin()),
+                circle(1.0 + 3.0 * det::cos(a260), 3.0 * det::sin(a260)),
             ),
             (
                 "self_intersecting_miss",
@@ -4457,7 +4458,7 @@ fn edge_cases() -> Vec<(String, Value)> {
             let minor = rng.uniform(0.2, 2.0 * major);
             let t1 = rng.uniform(-170.0, 170.0).to_radians();
             let t2 = t1 + rng.uniform(20.0, 170.0).to_radians();
-            let (r1, r2) = (major + minor * t1.cos(), major + minor * t2.cos());
+            let (r1, r2) = (major + minor * det::cos(t1), major + minor * det::cos(t2));
             if r1 < 0.05 || r2 < 0.05 {
                 continue;
             }
@@ -4468,8 +4469,8 @@ fn edge_cases() -> Vec<(String, Value)> {
                     minor,
                     analytics,
                     circle(major, 0.0),
-                    circle(r1, minor * t1.sin()),
-                    circle(r2, minor * t2.sin()),
+                    circle(r1, minor * det::sin(t1)),
+                    circle(r2, minor * det::sin(t2)),
                 ),
             );
             made += 1;

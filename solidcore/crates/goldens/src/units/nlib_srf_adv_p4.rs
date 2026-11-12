@@ -22,6 +22,7 @@
 // would fail the case (runner panics are caught).
 #![allow(clippy::indexing_slicing)]
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -929,7 +930,7 @@ fn gen_approx(rng: &mut Rng) -> Inputs {
     let dsf = p / (span(c.p + 1) - a);
     let def = p / (b - span(n));
     let jitter = if tiny {
-        10f64.powf(rng.uniform(-12.0, -2.0))
+        det::powf(10f64, rng.uniform(-12.0, -2.0))
     } else {
         rng.uniform(0.0, 1.0) * if rng.chance(0.3) { 0.0 } else { 1.0 }
     };
@@ -952,7 +953,7 @@ fn gen_approx(rng: &mut Rng) -> Inputs {
             let dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
             let ma = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
             let mb = (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]).sqrt();
-            (dot / (ma * mb)).clamp(-1.0, 1.0).acos().to_degrees()
+            det::acos((dot / (ma * mb)).clamp(-1.0, 1.0)).to_degrees()
         };
         let along = |o: [f64; 3], f: f64, v: [f64; 3]| [o[0] + f * v[0], o[1] + f * v[1], o[2] + f * v[2]];
         let als = angle(pts[1], along(pts[0], 1.0 / dsf, ds));

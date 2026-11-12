@@ -32,6 +32,7 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::curve::curve::Curve;
 use solidcore::error::{SolidError, SM_ERR, SM_ERR_INVALID_INPUT};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::create_box;
@@ -93,7 +94,7 @@ fn arc(c: (f64, f64), r: f64, from: f64, to: f64) -> Curve {
 
 /// R25 disc with a tab (sides x = +-4, R2 corners, top y = 280/9 + 2), 2 thick (#2176).
 fn plate(k: &mut Kernel) -> Brep {
-    let t = (4.0_f64 / 25.0).acos();
+    let t = det::acos(4.0_f64 / 25.0);
     let y = (625.0_f64 - 16.0).sqrt();
     let cy = 280.0 / 9.0;
     let curves = [
@@ -233,8 +234,8 @@ fn an_edge_between_tangent_faces_has_no_blend() {
 /// smallest radius that rounds it; that radius, a hair more, is not; a round of 0.5 builds.
 #[test]
 fn a_round_within_the_tolerance_of_its_edge_is_refused() {
-    let turn = SLOPE.atan();
-    let reach = 1.0 / (0.5 * turn).cos() - 1.0;
+    let turn = det::atan(SLOPE);
+    let reach = 1.0 / det::cos(0.5 * turn) - 1.0;
     let mut k = kernel(|_| {});
     let mut b = crease(&mut k);
     let e = pick(&k, &b, [10.0, 0.0, 2.5]);

@@ -4,6 +4,7 @@
 //! incremental net/knot construction. Preserve eager float parsing (including tails)
 //! before header validation; numeric tails remain ignored. No geometry validity caps.
 
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 use crate::HarnessError;
@@ -29,7 +30,7 @@ pub(super) fn parse_sms(text: &str, path: &str) -> Result<ParsedSurface, Harness
     let mut num = || it.next().ok_or_else(|| error("truncated"));
     let count = |value: f64| {
         // usize::MAX rounds upward on 64-bit hosts. The upper bound is exclusive.
-        let upper = 2.0_f64.powi(usize::BITS as i32);
+        let upper = det::powi(2.0_f64, usize::BITS as i32);
         if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value >= upper {
             return Err(error(&format!("bad count {value}")));
         }

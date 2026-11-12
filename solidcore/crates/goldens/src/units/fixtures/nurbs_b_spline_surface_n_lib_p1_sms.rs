@@ -1,6 +1,7 @@
 //! Pure SMS fixture decoder shared by the runner and non-C++ regression tests.
 
 use crate::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 pub(super) struct ParsedSrf {
@@ -19,7 +20,7 @@ fn count(value: f64, path: &str) -> Result<usize, HarnessError> {
     if !value.is_finite()
         || value < 0.0
         || value.fract() != 0.0
-        || value >= 2.0_f64.powi(usize::BITS as i32)
+        || value >= det::powi(2.0_f64, usize::BITS as i32)
     {
         return Err(error(path, format!("bad count {value}")));
     }

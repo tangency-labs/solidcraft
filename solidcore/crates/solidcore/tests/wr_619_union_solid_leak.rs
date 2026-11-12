@@ -13,6 +13,7 @@
 )] // test helpers
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::error::SM_ERR;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p1;
@@ -34,7 +35,7 @@ fn operands(k: &mut Kernel) -> (Brep, Brep) {
     let a = create_box(k, Point3::new(-2.0, 16.0, 0.0), SIDE, SIDE, SIDE).unwrap();
     let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), SIDE, SIDE, SIDE).unwrap();
     let o = Point3::new(0.0, 0.0, 0.0);
-    let deg = SLOPE.atan().to_degrees();
+    let deg = det::atan(SLOPE).to_degrees();
     api_rotate(
         k,
         Some(TransformObject::Brep(&mut b)),

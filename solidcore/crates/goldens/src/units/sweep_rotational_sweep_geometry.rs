@@ -23,6 +23,7 @@
 //! Deferred cases: `CopyAndAddAnalytics` of a non-planar B-spline surface
 //! (`SmCone::IsNurbSurfaceCone`, unit `surface.cone_p2`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -812,13 +813,13 @@ impl Frame {
 
     /// The point at radius `r`, angle `th` (radians) and height `h`.
     fn at(&self, r: f64, th: f64, h: f64) -> [f64; 3] {
-        let radial = add(scale3(self.u, r * th.cos()), scale3(self.w, r * th.sin()));
+        let radial = add(scale3(self.u, r * det::cos(th)), scale3(self.w, r * det::sin(th)));
         add(add(self.o, radial), scale3(self.d, h))
     }
 
     /// The radial direction at angle `th`.
     fn radial(&self, th: f64) -> [f64; 3] {
-        add(scale3(self.u, th.cos()), scale3(self.w, th.sin()))
+        add(scale3(self.u, det::cos(th)), scale3(self.w, det::sin(th)))
     }
 }
 

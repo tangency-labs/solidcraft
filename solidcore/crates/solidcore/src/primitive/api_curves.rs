@@ -52,6 +52,7 @@
 //!   `SmTol::GetApproxTol3d(pCurve)`: half the recorded edge tolerance
 //!   ([`Curve::owner_zone_tol_3d`]), else half of [`zone_tol_3d_of_curve`].
 
+use crate::math::det;
 use core::f64::consts::TAU;
 
 use crate::curve::curve::{Curve, CurveKind};
@@ -378,8 +379,8 @@ pub fn create_helix(params: &HelixParams) -> Result<BSplineCurve> {
         }
 
         let radius = (radius_start * (two_pi_turns - theta) + radius_end * theta) / two_pi_turns;
-        let ax = origin.x + radius * theta.cos();
-        let ay = origin.y + rl * radius * theta.sin();
+        let ax = origin.x + radius * det::cos(theta);
+        let ay = origin.y + rl * radius * det::sin(theta);
         let az = origin.z + height * theta / two_pi_turns;
 
         let ddx = on_curve.x - ax;
@@ -524,13 +525,13 @@ pub fn create_regular_polygon(center: Point3, num_sides: u64, radius: f64) -> Re
         let a1 = angle_step * (ii + 1) as f64;
 
         let pt0 = Point3::new(
-            center.x + radius * a0.cos(),
-            center.y + radius * a0.sin(),
+            center.x + radius * det::cos(a0),
+            center.y + radius * det::sin(a0),
             center.z,
         );
         let pt1 = Point3::new(
-            center.x + radius * a1.cos(),
-            center.y + radius * a1.sin(),
+            center.x + radius * det::cos(a1),
+            center.y + radius * det::sin(a1),
             center.z,
         );
 

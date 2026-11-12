@@ -31,6 +31,7 @@
 //! import the same records on the Rust side; entity selectors are resolved modulo the
 //! export's counts.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1561,7 +1562,7 @@ fn gen_torus(rng: &mut Rng) -> Inputs {
     };
     let mut ts = vec![
         tsect([rho, 0.0], [0.0, r], 0.0),
-        tsect([rho * phi.cos(), rho * phi.sin()], [0.0, r], 1.0),
+        tsect([rho * det::cos(phi), rho * det::sin(phi)], [0.0, r], 1.0),
     ];
     if on_axis {
         if let Some(t) = ts.first_mut() {

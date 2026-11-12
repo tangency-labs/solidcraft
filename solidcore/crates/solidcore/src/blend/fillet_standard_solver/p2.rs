@@ -105,6 +105,7 @@
 //!   otherwise solves globally on the base, which finds a point on a closed surface's seam
 //!   once at each end of the period and refuses the two answers.
 
+use crate::math::det;
 use std::borrow::Cow;
 
 use crate::blend::fillet_custom_solver::{
@@ -3515,7 +3516,7 @@ impl super::p1::LinearCrossSectionFsg {
             };
         }
         let [n1, n2] = inward;
-        let wedge = PI - n1.dot(n2).clamp(-1.0, 1.0).acos();
+        let wedge = PI - det::acos(n1.dot(n2).clamp(-1.0, 1.0));
         let (offsets, chamfer) = match (solver_type, ball.radii, ball.chord) {
             (FilletSolverType::ConstRadius, Some(r), _) => {
                 if !(r[0] > approx_tol_3d && r[1] > approx_tol_3d) {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::math::det;
 use core::f64::consts::{FRAC_PI_2, PI, TAU};
 
 fn k() -> Kernel {
@@ -443,16 +444,16 @@ fn backtracking_form(a: f64) -> Record {
 fn arcs_form(deg: f64, breaks: &[f64]) -> Record {
     let arcs = breaks.len() - 1;
     let half = (deg / 2.0).to_radians();
-    let w = half.cos();
+    let w = det::cos(half);
     let mut h = Vec::new();
     for i in 0..arcs {
         let t0 = (deg * i as f64).to_radians();
         if i == 0 {
-            h.push([t0.cos(), t0.sin(), 0.0, 1.0]);
+            h.push([det::cos(t0), det::sin(t0), 0.0, 1.0]);
         }
-        h.push([(t0 + half).cos(), (t0 + half).sin(), 0.0, w]);
+        h.push([det::cos(t0 + half), det::sin(t0 + half), 0.0, w]);
         let t1 = t0 + 2.0 * half;
-        h.push([t1.cos(), t1.sin(), 0.0, 1.0]);
+        h.push([det::cos(t1), det::sin(t1), 0.0, 1.0]);
     }
     let mut knots = vec![breaks[0]; 3];
     for b in &breaks[1..arcs] {

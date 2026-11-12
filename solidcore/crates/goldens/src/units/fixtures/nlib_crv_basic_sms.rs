@@ -1,6 +1,7 @@
 //! Allocation-checked SMS decoding shared by the runner and non-C++ regression tests.
 
 use crate::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 pub(super) struct SmsSurface {
@@ -24,7 +25,7 @@ pub(super) fn decode(text: &str, path: &str) -> Result<SmsSurface, HarnessError>
     let count = |value: f64| {
         // usize::MAX rounds up on 64-bit targets: test the exclusive bound
         // before casting, rather than allowing a saturating conversion.
-        let exclusive = 2.0_f64.powi(usize::BITS as i32);
+        let exclusive = det::powi(2.0_f64, usize::BITS as i32);
         if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value >= exclusive {
             return Err(error(&format!("bad count {value}")));
         }

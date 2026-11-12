@@ -11,6 +11,7 @@
 //! `invalid_input` (`SM_ERR_INVALID_INPUT`) or `status_<code>`.
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -406,9 +407,9 @@ fn coord(rng: &mut Rng) -> f64 {
     } else if r < 0.72 {
         rng.range_i64(-5, 5) as f64
     } else if r < 0.80 {
-        rng.uniform(-1.0, 1.0) * 10f64.powi(-(rng.range_i64(6, 14) as i32))
+        rng.uniform(-1.0, 1.0) * det::powi(10f64, -(rng.range_i64(6, 14) as i32))
     } else if r < 0.86 {
-        rng.uniform(-1.0, 1.0) * 10f64.powi(rng.range_i64(3, 12) as i32)
+        rng.uniform(-1.0, 1.0) * det::powi(10f64, rng.range_i64(3, 12) as i32)
     } else if r < 0.88 {
         UNDEF_DOUBLE
     } else {
@@ -420,7 +421,7 @@ fn unit(rng: &mut Rng) -> [f64; 3] {
     let z = rng.uniform(-1.0, 1.0);
     let t = rng.uniform(0.0, 2.0 * PI);
     let r = (1.0 - z * z).sqrt();
-    [r * t.cos(), r * t.sin(), z]
+    [r * det::cos(t), r * det::sin(t), z]
 }
 
 fn scale(v: [f64; 3], k: f64) -> [f64; 3] {
@@ -476,7 +477,7 @@ fn partner(rng: &mut Rng, a: [f64; 3]) -> [f64; 3] {
         scale(a, k)
     } else if r < 0.30 {
         // Nearly (anti)parallel: exercises the asin branch and tolerance edges.
-        let eps = 10f64.powi(-(rng.range_i64(1, 16) as i32)) * rng.uniform(0.5, 2.0);
+        let eps = det::powi(10f64, -(rng.range_i64(1, 16) as i32)) * rng.uniform(0.5, 2.0);
         let len = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
         let p = cross(a, unit(rng));
         let plen = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
@@ -490,11 +491,11 @@ fn partner(rng: &mut Rng, a: [f64; 3]) -> [f64; 3] {
         let eps = if rng.chance(0.5) {
             0.0
         } else {
-            rng.uniform(-1.0, 1.0) * 10f64.powi(-(rng.range_i64(4, 14) as i32))
+            rng.uniform(-1.0, 1.0) * det::powi(10f64, -(rng.range_i64(4, 14) as i32))
         };
         add(scale(p, k), scale(a, eps))
     } else if r < 0.54 {
-        let eps = 10f64.powi(-(rng.range_i64(8, 16) as i32));
+        let eps = det::powi(10f64, -(rng.range_i64(8, 16) as i32));
         [
             a[0] + rng.uniform(-1.0, 1.0) * eps,
             a[1] + rng.uniform(-1.0, 1.0) * eps,
@@ -509,7 +510,7 @@ fn partner(rng: &mut Rng, a: [f64; 3]) -> [f64; 3] {
 fn ang_tol_deg(rng: &mut Rng) -> f64 {
     match rng.below(4) {
         0 => 1e-4,
-        1 => 10f64.powi(-(rng.range_i64(0, 12) as i32)),
+        1 => det::powi(10f64, -(rng.range_i64(0, 12) as i32)),
         2 => rng.uniform(0.0, 90.0),
         _ => 0.000001,
     }
@@ -557,16 +558,16 @@ fn scalar(rng: &mut Rng, op: Op, a: [f64; 3], b: [f64; 3]) -> f64 {
             1 => 0.0,
             2 => -0.0,
             3 => -rng.uniform(0.0, 10.0),
-            _ => rng.uniform(0.0, 100.0) * 10f64.powi(rng.range_i64(-20, 20) as i32),
+            _ => rng.uniform(0.0, 100.0) * det::powi(10f64, rng.range_i64(-20, 20) as i32),
         },
-        Op::Cbrt => coord(rng) * 10f64.powi(rng.range_i64(-5, 5) as i32),
+        Op::Cbrt => coord(rng) * det::powi(10f64, rng.range_i64(-5, 5) as i32),
         Op::Acos | Op::Asin => match rng.below(6) {
             0 => 1.0,
             1 => -1.0,
             2 => rng.uniform(-1.5, 1.5),
             3 => {
                 (if rng.chance(0.5) { 1.0 } else { -1.0 })
-                    * (1.0 - 10f64.powi(-(rng.range_i64(1, 16) as i32)))
+                    * (1.0 - det::powi(10f64, -(rng.range_i64(1, 16) as i32)))
             }
             _ => rng.uniform(-1.0, 1.0),
         },
@@ -620,7 +621,7 @@ fn operands(rng: &mut Rng, op: Op, a: [f64; 3]) -> [[f64; 3]; 4] {
                     rng.uniform(-PI, PI)
                 };
                 let k = rng.uniform(0.1, 3.0);
-                add(scale(u, k * t.cos()), scale(w, k * t.sin()))
+                add(scale(u, k * det::cos(t)), scale(w, k * det::sin(t)))
             };
             v = [inplane(), inplane(), inplane(), v[3]];
         }

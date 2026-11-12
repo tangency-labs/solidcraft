@@ -26,6 +26,7 @@ use offset_fixture::{planar_faces_at, Notifications};
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -57,7 +58,7 @@ fn rim_off_circle(k: &Kernel, b: &Brep) -> f64 {
                     .unwrap()
             })
             .collect();
-        let radius = |p: &Point3| (p.x - 30.0).hypot(p.y - 20.0);
+        let radius = |p: &Point3| det::hypot(p.x - 30.0, p.y - 20.0);
         if pts
             .iter()
             .all(|p| (p.z - 22.0).abs() < 1e-3 && (radius(p) - 10.0).abs() < 1e-3)

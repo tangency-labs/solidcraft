@@ -23,6 +23,7 @@ mod common;
 use common::{edge_at, kernel_copy};
 use serde_json::Value;
 use solidcore::geom::global_solver::{SolutionRequested, SolverOperation};
+use solidcore::math::det;
 use solidcore::math::{Point2, Vec3};
 use solidcore::nurbs::knots::Side;
 use solidcore::surface::surface::p4::NoObject;
@@ -58,7 +59,7 @@ fn rounded() -> Body {
     let mut records: Value = serde_json::from_str(&text).unwrap();
     let record: Record = serde_json::from_value(records["b12"].take()).unwrap();
     let (body, _) = Body::from_record(&record, true).unwrap();
-    let y0 = 10.0 * 5.0_f64.to_radians().tan();
+    let y0 = 10.0 * det::tan(5.0_f64.to_radians());
     let picks = [
         edge_at(&body, [20.0, y0, 10.0]),
         edge_at(&body, [32.0 + y0, 8.0, 10.0]),
@@ -69,8 +70,8 @@ fn rounded() -> Body {
 
 /// X, the rails' crossing on the top.
 fn crossing(r: f64) -> [f64; 3] {
-    let y0 = 10.0 * 5.0_f64.to_radians().tan();
-    let d = r * 42.5_f64.to_radians().tan();
+    let y0 = 10.0 * det::tan(5.0_f64.to_radians());
+    let d = r * det::tan(42.5_f64.to_radians());
     let (radius, rail) = (8.0 - y0 + d, y0 + d);
     [
         40.0 - (radius * radius - (8.0 - rail) * (8.0 - rail)).sqrt(),
@@ -80,7 +81,7 @@ fn crossing(r: f64) -> [f64; 3] {
 }
 
 fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b))
+    det::atan2(a.cross(b).length(), a.dot(b))
 }
 
 /// The largest angle between the faces' surface normals, turned as their face uses, at 31
@@ -157,7 +158,7 @@ fn the_corner_is_the_mixed_one_and_g1() {
         .iter()
         .map(|&v| {
             let p = vertex::point(&b, v).unwrap();
-            let d = (p.x - x[0]).hypot(p.y - x[1]).hypot(p.z - x[2]);
+            let d = det::hypot(det::hypot(p.x - x[0], p.y - x[1]), p.z - x[2]);
             (d, v)
         })
         .min_by(|a, c| a.0.total_cmp(&c.0))
@@ -177,7 +178,7 @@ fn the_corner_is_the_mixed_one_and_g1() {
 
     // no patch stands out of the front face: below the top, every point of a free-form face
     // is behind the plane through (x, 0, 0) and (x, y0, 10)
-    let tan = 5.0_f64.to_radians().tan();
+    let tan = det::tan(5.0_f64.to_radians());
     let mut stands_out = f64::NEG_INFINITY;
     for f in b.face_list().to_vec() {
         let s = face::surface(&b, f).unwrap().unwrap();

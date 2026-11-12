@@ -51,6 +51,7 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::zone_tol3d;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{rad_to_deg, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::knots::Side;
 use crate::query::brep::{BrepFaceServices, FaceCaches};
@@ -252,7 +253,7 @@ pub fn continuing_edges(
         let [leave0, leave1] = leave;
         if along_its_face
             && leaves
-            && leave0.dot(leave1) < -(tan_tol_deg * (PI / 180.0)).cos()
+            && leave0.dot(leave1) < -det::cos(tan_tol_deg * (PI / 180.0))
             && same_convexity_edges_round_vertex(k, target, fil_eu, other)?
             && !(run_out && run_on_leaves_the_part(k, target, vertex, fil_eu, eu, leave0)?)
         {

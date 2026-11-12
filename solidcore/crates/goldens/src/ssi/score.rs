@@ -502,6 +502,7 @@ fn py_list(v: &[String]) -> String {
 mod tests {
     use super::*;
     use crate::ssi::raw::RawCurve;
+    use solidcore::math::det;
 
     #[test]
     fn printf_e() {
@@ -515,7 +516,7 @@ mod tests {
         let pts: Vec<P3> = (0..4001)
             .map(|i| {
                 let t = std::f64::consts::TAU * f64::from(i) / 4000.0;
-                [t.cos(), t.sin(), 0.0]
+                [det::cos(t), det::sin(t), 0.0]
             })
             .collect();
         let v = json!({

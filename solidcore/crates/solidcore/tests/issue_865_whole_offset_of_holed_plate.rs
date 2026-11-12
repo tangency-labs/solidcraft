@@ -20,6 +20,7 @@
 mod offset_fixture;
 
 use core::f64::consts::PI;
+use solidcore::math::det;
 
 use offset_fixture::{offset_full, report};
 use solidcore::boolean::api_brep::boolean_difference;
@@ -37,7 +38,7 @@ fn want() -> f64 {
     let t: f64 = 1.5;
     let r = 1.5 + t;
     let d = 2.5 - t; // the hole offset's centre from the front's offset
-    let segment = r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    let segment = r * r * det::acos(d / r) - d * (r * r - d * d).sqrt();
     let disc_inside = PI * r * r - segment;
     ((30.0 - 2.0 * t) * (20.0 - 2.0 * t) - disc_inside) * (6.0 - 2.0 * t)
 }

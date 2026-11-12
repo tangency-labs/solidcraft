@@ -14,6 +14,7 @@
 use super::uv;
 use super::vec::VecExt;
 use super::{Curve2, EvalError};
+use crate::math::det;
 use crate::math::{det3, Vec3};
 use crate::nurbs::crv_basic::Curve as NlCurve;
 use crate::nurbs::knots::Side;
@@ -52,7 +53,7 @@ pub(crate) fn tabulate(mut f: impl FnMut(usize, usize) -> Option<Vec3>) -> Optio
 
 /// The `k`-th derivatives of cos and sin at `t`: `cos(t + kπ/2)` and `sin(t + kπ/2)`.
 pub(crate) fn trig_derivative(t: f64, k: usize) -> (f64, f64) {
-    let (sin, cos) = t.sin_cos();
+    let (sin, cos) = det::sin_cos(t);
     match k % 4 {
         0 => (cos, sin),
         1 => (-sin, cos),
@@ -514,7 +515,7 @@ impl EvalSurface {
                 let [u, v] = self.wrap([u, v]);
                 let (s, a) = if *swap { (v, u) } else { (u, v) };
                 let (c, dc) = profile.eval(s)?;
-                let (sin, cos) = a.sin_cos();
+                let (sin, cos) = det::sin_cos(a);
                 let rot =
                     |x: Vec3| x * cos + axis.cross(x) * sin + *axis * (axis.dot(x) * (1.0 - cos));
                 let r = c - *origin;

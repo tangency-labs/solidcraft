@@ -18,6 +18,7 @@ use offset_fixture::Notifications;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::error::SM_ERR;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_cylinder_surface};
 use solidcore::surface::surface::Surface;
@@ -28,7 +29,7 @@ use solidcore::{Brep, Kernel};
 const AXIS: (f64, f64) = (30.0, 20.0);
 
 fn axis_distance(p: Point3) -> f64 {
-    (p.x - AXIS.0).hypot(p.y - AXIS.1)
+    det::hypot(p.x - AXIS.0, p.y - AXIS.1)
 }
 
 /// The plate with its boss and the r2 round at the boss's base.

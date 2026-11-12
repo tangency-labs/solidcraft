@@ -114,6 +114,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -357,7 +358,7 @@ fn may_meet_tangentially(
         return Ok(true);
     }
     let cos = (n1.dot(n2) / (l1 * l2)).abs().min(1.0);
-    Ok(crate::math::rad_to_deg(cos.acos()) <= bound_deg)
+    Ok(crate::math::rad_to_deg(det::acos(cos)) <= bound_deg)
 }
 const OP_MAKE_EDGE: &str = "blend::fillet_geom::p5::FilletBrep::make_fillet_edge";
 const OP_COPY: &str = "blend::fillet_geom::p5::FilletBrep::copy_fillet_geom";
