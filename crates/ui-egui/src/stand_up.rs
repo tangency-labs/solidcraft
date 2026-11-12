@@ -182,8 +182,11 @@ pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&
     let known_y_up = text("exporter_up") == Some("y");
     let subcomponents = result.and_then(|r| r.get("subcomponents")).and_then(serde_json::Value::as_u64).unwrap_or(0);
     let asked = Asked { bodies, occurrence, known_y_up, subcomponents };
-    if app.preferences.stand_up_unknown == StandUpUnknown::Ask {
-        return asked.offer(app, None);
+    match app.preferences.stand_up_unknown {
+        StandUpUnknown::Ask => return asked.offer(app, None),
+        // No offer for another program's file: nothing to estimate.
+        StandUpUnknown::Off if !known_y_up => return,
+        _ => {}
     }
     // The estimate meshes the bodies. Just after an open they are being meshed beside the window
     // (`open_meshing`), and meshing them here waited for that: the window stood still for a
@@ -214,6 +217,10 @@ impl Asked {
     /// Make the offer, or none, from how the bodies rest (`None`: the dialog is asked for
     /// whatever their shape, `StandUpUnknown::Ask`).
     fn offer(self, app: &mut SolveApp, upright: Option<Upright>) {
+        // Asked again when made: the preferences may have changed while the estimate was made.
+        if !app.preferences.offer_stand_up || app.preferences.up_axis != "z" {
+            return;
+        }
         let note = match (app.preferences.stand_up_unknown, upright) {
             (StandUpUnknown::Ask, _) | (_, None) => false,
             (_, Some(u)) if self.known_y_up => u == Upright::Z,

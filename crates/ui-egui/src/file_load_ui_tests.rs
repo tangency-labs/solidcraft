@@ -1306,3 +1306,40 @@ fn the_stand_up_offer_waits_beside_the_window_for_the_bodies_meshed_on_open() {
     assert!(w.app.stand_up.is_none() && w.app.stand_up_later.is_none(), "a changed design is not offered");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An offer waiting for its estimate is not made when the offer was turned off meanwhile, and a
+/// file from another program gets no estimate at all when such files get no offer.
+#[test]
+fn a_waiting_stand_up_offer_follows_the_preferences_when_it_is_made() {
+    let dir = scratch("stand-up-later-prefs");
+    let path = dir.join("on_its_back.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 5, "height": 40})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+    let opened = |w: &mut Win| {
+        let result = w.app.session.execute("file.insert_step", &json!({"path": path})).unwrap();
+        crate::open_meshing::start(&mut w.app, None);
+        crate::stand_up::offer(&mut w.app, &path, &[], Some(&result));
+    };
+    // Turned off while the estimate is made: no offer.
+    let mut w = Win::new();
+    opened(&mut w);
+    assert!(w.app.stand_up_later.is_some());
+    w.app.preferences.offer_stand_up = false;
+    for _ in 0..10_000 {
+        w.frame(vec![]);
+        if w.app.stand_up_later.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "an offer turned off meanwhile is not made");
+    // Another program's files get no offer: nothing waits for an estimate.
+    let mut w = Win::new();
+    w.app.preferences.stand_up_unknown = crate::prefs::StandUpUnknown::Off;
+    opened(&mut w);
+    assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "no estimate for an offer that won't be made");
+    let _ = std::fs::remove_dir_all(&dir);
+}
