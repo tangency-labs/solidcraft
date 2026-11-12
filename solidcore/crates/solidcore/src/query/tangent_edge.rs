@@ -1884,19 +1884,26 @@ mod tests {
 
     /// `wr698`'s `circle_root` (a pipe's root on a plate rounded r 2 by the ball's exact
     /// circle, a procedural blend whose definition is enclosed): on its edges along the root,
-    /// each piece's margin is bounded wherever the definition is enclosed, halved where it is
-    /// too loose; and the verdict is today's, exactly: Undecided with no bound (pi, pi) at
-    /// `s` = 87.04, where the pipe's foot crosses its net's C1 quarter knot (u = 15.708,
-    /// multiplicity 2) and `definition_partials_over_box` refuses the feet's box
-    /// (`FEET_BOX_CONTINUITY`), 3 parts there left not enclosed on each edge. w2949's C1-knot
-    /// follow-up encloses that box: then this test fails, and is to say Tangent.
+    /// each piece's margin is bounded, halved where it is too loose. Where the pipe's foot
+    /// crosses its net's C1 quarter knot (u = 15.708, multiplicity 2, near `s` = 87.22) the
+    /// definition's feet box is taken cell by cell (the C1-knot follow-up to
+    /// tangency-labs/solidcraft#14284, a use of order 1): edge 35 is Tangent, every part
+    /// enclosed (before it, 3 parts there were not and both edges were Undecided (pi, pi) at
+    /// 87.04, #15005). Edge 46 keeps one piece not enclosed, pinned exactly: where the foot sits
+    /// on the knot at the piece's start (s = 87.2234028), the guesses' first box lies just past
+    /// the line (by 2e-10 in u), so the cell path is not taken; Krawczyk's iterations grow the
+    /// box across it and the one solve refuses it, as before. Edge 46 is then Undecided at
+    /// 87.2234 (margin pi) with 2 parts not enclosed in its decision; this test's halving leaves
+    /// that one piece, [87.22340, 87.22345], refused by the definition box's typed "the
+    /// enclosure is not proved". Taking such a box cell by cell is tangency-labs/solidcraft#15183.
     #[test]
     #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn a_procedural_round_s_edges_carry_its_margin() {
         let mut k = Kernel::default();
         let (mut b, edges) = circle_root_round(&mut k);
         let half = 0.5_f64.to_radians();
-        let mut decided = 0;
+        // every edge measured before anything is asserted, so a failure names them all
+        let mut seen = Vec::new();
         for e in edges {
             let Some(pair) = Pair::of(&k, &mut b, e).unwrap() else {
                 continue;
@@ -1904,10 +1911,9 @@ mod tests {
             if pair.a.definition.is_none() && pair.c.definition.is_none() {
                 continue;
             }
-            decided += 1;
-            // a piece's margin, halved where it is too loose; where the definition is not
-            // enclosed, the place must be the knot's (s in [86.9, 87.4]) and the reason the
-            // definition's partials
+            let mut left = Vec::new();
+            // a piece's margin, halved where it is too loose; the definition is enclosed on
+            // every piece, the pipe's quarter knot included
             let mut stack: Vec<(f64, f64, u32)> = pieces(&pair.breaks)
                 .into_iter()
                 .map(|(a, b)| (a, b, 0))
@@ -1918,21 +1924,7 @@ mod tests {
                 match kind {
                     Margin::Bounded(m) if m < half => assert!(m > 0.0, "{e:?} [{s0}, {s1}]: {m}"),
                     Margin::NotEnclosed if depth >= MAX_UNENCLOSED_SPLITS => {
-                        // the window is read off a run, not derived: the pipe's foot crosses
-                        // u = 15.708 at s = 87.2234 (its seed foot over the not-enclosed box,
-                        // probe 14611p-1), and the parts left after the four halvings lie
-                        // within [86.9, 87.4]; the foot's map s -> u is the definition's
-                        // solve, which this test does not redo
-                        let at_knot = s0 >= 86.9 && s1 <= 87.4;
-                        // the definition's partials refused, exactly: definition_box's typed
-                        // refusal (#14932), its operation and its reason
-                        let refused = concat!(
-                            ": partials Failed(Failure { operation: ",
-                            "\"blend::fillet_section::definition_box\", entity: None, ",
-                            "reason: Blend(Failed(\"the enclosure is not proved\"))"
-                        );
-                        let partials = why.iter().any(|w| w.contains(refused));
-                        assert!(at_knot && partials, "{e:?} [{s0}, {s1}]: {why:?}");
+                        left.push((s0, s1, why));
                     }
                     // halved as the decision halves a piece (to MAX_CELL_DEPTH on the box path;
                     // the margin falls with the part's width)
@@ -1946,20 +1938,42 @@ mod tests {
             }
             let mut counts = Counts::default();
             let verdict = decide(&k, &mut b, e, half, &mut counts).unwrap();
-            let Some(Tangency::Undecided { angle, margin, at }) = verdict else {
-                panic!(
-                    "{e:?}: {verdict:?} (the C1 knot enclosed? then this test is to say Tangent)"
-                );
-            };
-            let pi = std::f64::consts::PI;
-            let unbounded = angle.to_bits() == pi.to_bits() && margin.to_bits() == pi.to_bits();
-            assert!(unbounded, "{e:?}: {verdict:?}");
-            // 87.04: the middle of the first part noted undecided, read off a run (as the window
-            // above); a change of the halving order or of the knot's place moves it
-            assert!((at - 87.04).abs() < 0.01, "{e:?}: {verdict:?}");
-            assert_eq!(counts.not_enclosed, 3, "{e:?}: {counts:?}");
+            seen.push((e, verdict, counts.not_enclosed, left));
         }
-        assert!(decided >= 2, "{decided}");
+        eprintln!("circle_root edges: {seen:?}");
+        // the definition's partials refused, exactly: definition_box's typed refusal (#14932)
+        let refused = concat!(
+            ": partials Failed(Failure { operation: ",
+            "\"blend::fillet_section::definition_box\", entity: None, ",
+            "reason: Blend(Failed(\"the enclosure is not proved\"))"
+        );
+        let pi = std::f64::consts::PI;
+        let pinned = |e: &EdgeId,
+                      verdict: &Option<Tangency>,
+                      not_enclosed: usize,
+                      left: &[(f64, f64, [String; 2])]| {
+            match format!("{e:?}").as_str() {
+                "EdgeId(35)" => {
+                    *verdict == Some(Tangency::Tangent) && not_enclosed == 0 && left.is_empty()
+                }
+                "EdgeId(46)" => {
+                    let undecided = matches!(verdict, Some(Tangency::Undecided { margin, at, .. })
+                        if margin.to_bits() == pi.to_bits() && (at - 87.2234).abs() < 1e-4);
+                    let parts = left.len() == 1
+                        && left.iter().all(|(s0, s1, why)| {
+                            *s0 >= 87.22340
+                                && *s1 <= 87.22345
+                                && why.iter().any(|w| w.contains(refused))
+                        });
+                    undecided && not_enclosed == 2 && parts
+                }
+                _ => false,
+            }
+        };
+        let all = seen
+            .iter()
+            .all(|(e, verdict, not_enclosed, left)| pinned(e, verdict, *not_enclosed, left));
+        assert!(seen.len() == 2 && all, "{seen:?}");
     }
 
     /// Which step of [`Use::margin`] leaves a piece's margin unbounded (a test's diagnosis).
