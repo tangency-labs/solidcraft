@@ -1,0 +1,152 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2820-pipe-cut-oblique-hole-through-a-block",
+  "expected": {
+    "body_count": 1,
+    "faces": 7,
+    "method": "the cylinder between two parallel planes 20 apart, leaning 30 degrees from their normal, has volume pi r^2 h / cos(30) = pi 9 20 / 0.8660 = 653.0 (it crosses both faces well inside the block); V = 32000 - 653.0. Faces: 4 sides, top and bottom with an elliptical hole each, and the hole wall = 7.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2820"
+    ],
+    "volume_mm3": 31347.032228875683,
+    "what": "a pipe of diameter 6 cut through a 40 x 40 x 20 block along a line leaning 30 degrees from the vertical"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 17,
+      "faces": 7,
+      "vertices": 12
+    }
+  },
+  "records": "2820-pipe-cut-oblique-hole-through-a-block.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6770.0150703160125,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 31347.032228941207
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2820"
+  ],
+  "traced_ops": [
+    "extrude",
+    "sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a pipe of diameter 6 cut through a 40 x 40 x 20 block along a line leaning 30 degrees from the vertical",
+  "why_not": []
+}

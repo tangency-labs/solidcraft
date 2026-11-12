@@ -361,6 +361,37 @@ fn edge_on_face_lays_out_as_one_silhouette_line_and_stays_current() {
     assert!(!sk.link(&link).unwrap().lost);
 }
 
+/// A face with a hole cut through the hole by the sketch plane: its section is two pieces on
+/// one line, one each side of the hole. Only a projection seen edge-on is one line end to end;
+/// a section keeps the gap (#14282).
+#[test]
+fn intersected_face_with_a_hole_keeps_both_pieces_on_one_line() {
+    // A pipe's top ring (bore 10, outside 22) cut through its axis.
+    let section = vec![LinkGeom::Line(Vec2::new(-22.0, 40.0), Vec2::new(-10.0, 40.0)), LinkGeom::Line(Vec2::new(10.0, 40.0), Vec2::new(22.0, 40.0))];
+    let ends = |sk: &Sketch, link: &str| -> Vec<[Vec2; 2]> {
+        sk.link_curves(link)
+            .iter()
+            .map(|c| match sk.curves[*c].kind {
+                CurveKind::Line { a, b } => [sk.points[a].pos, sk.points[b].pos],
+                _ => panic!("a line"),
+            })
+            .collect()
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Intersect, face(), &section).unwrap();
+    let pieces = [[Vec2::new(-22.0, 40.0), Vec2::new(-10.0, 40.0)], [Vec2::new(10.0, 40.0), Vec2::new(22.0, 40.0)]];
+    assert_eq!(ends(&sk, &link), pieces, "one line each side of the hole");
+    assert!(!sk.update_link(&link, &section).unwrap(), "the same section keeps its curves");
+    assert_eq!(ends(&sk, &link), pieces);
+    assert!(!sk.link(&link).unwrap().lost);
+    // Intersecting the same face again finds both pieces already there, so nothing is added.
+    assert!(sk.link_geometry_or_points_present(&section), "the section is already linked");
+    // Projected, the same ring seen edge-on is still one line end to end.
+    let projected = sk.add_link(LinkKind::Project, face(), &section).unwrap();
+    let [[a, b]] = ends(&sk, &projected)[..] else { panic!("one line") };
+    assert!([a, b].contains(&Vec2::new(-22.0, 40.0)) && [a, b].contains(&Vec2::new(22.0, 40.0)), "{a:?} {b:?}");
+}
+
 /// A conic that comes with a link (projected geometry) takes the curve prefix `n` like a drawn
 /// one, not the constraints' `k` (#6173).
 #[test]
@@ -425,7 +456,8 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
 }
 
 /// #5388: a circle the user drew on a projected hole's centre survives when the face changes
-/// shape and its projection is rebuilt (a second hole added to the face).
+/// shape and its projection is rebuilt (a second hole added to the face). It stays on that
+/// hole's centre while the hole is there, and on a free point where it was once it is gone.
 #[test]
 fn rebuilt_face_keeps_a_users_circle_on_its_projected_centre() {
     let mut sk = Sketch::new();
@@ -445,18 +477,25 @@ fn rebuilt_face_keeps_a_users_circle_on_its_projected_centre() {
     assert!(sk.curves[mine].link.is_none());
     // The face gains two more holes: the projection's shape changes, so it is rebuilt.
     assert!(sk.update_link(&link, &face_with(&[Vec2::ZERO, Vec2::new(-10.0, 0.0), Vec2::new(10.0, 0.0)])).unwrap());
-    let kept = sk.curves.iter().find(|c| c.id == "c_mine").expect("the user's circle survives the rebuild");
-    assert!(kept.link.is_none());
-    match kept.kind {
-        CurveKind::Circle { c, r } => {
-            assert_eq!(r, 5.25);
-            let p = &sk.points[c];
-            assert!(p.link.is_none(), "it sits on a point of its own, not a projected one");
-            assert!(p.pos.len() < 1e-9, "still at the hole's centre: {:?}", p.pos);
+    let centre_of_mine = |sk: &Sketch| {
+        let kept = sk.curves.iter().find(|c| c.id == "c_mine").expect("the user's circle survives the rebuild");
+        assert!(kept.link.is_none());
+        match kept.kind {
+            CurveKind::Circle { c, r } => {
+                assert_eq!(r, 5.25);
+                assert!(sk.points[c].pos.len() < 1e-9, "still at the hole's centre: {:?}", sk.points[c].pos);
+                c
+            }
+            ref k => panic!("not a circle: {k:?}"),
         }
-        ref k => panic!("not a circle: {k:?}"),
-    }
+    };
+    let c = centre_of_mine(&sk);
+    assert_eq!(sk.points[c].link.as_deref(), Some(link.as_str()), "it stays on the hole's projected centre");
     assert_eq!(sk.link_curves(&link).len(), 4 + 3, "the projection is the new outline and holes");
+    // The hole it was drawn on goes: the circle stays where it was, on a point of its own.
+    assert!(sk.update_link(&link, &face_with(&[Vec2::new(-10.0, 0.0), Vec2::new(10.0, 0.0)])).unwrap());
+    let c = centre_of_mine(&sk);
+    assert!(sk.points[c].link.is_none() && !sk.points[c].fixed, "it sits on a point of its own, not a projected one");
 }
 
 /// #12086: the bottom face of a holder, an arm 2 thick along a hole's ring, projected into a
@@ -500,6 +539,34 @@ fn a_face_with_a_thin_arm_follows_its_body_made_smaller() {
     assert!(sk.points[lower].pos.dist(Vec2::new(56.0, -8.0)) < 1e-9, "{:?}", sk.points[lower].pos);
     assert!(solve(&mut sk).ok());
     assert!(sk.points[free].pos.dist(Vec2::new(56.0, -6.0)) < 1e-7, "{:?}", sk.points[free].pos);
+}
+
+/// #13471: a face taken with `Intersect` is the face's section with the sketch plane: an open
+/// chain of segments, which no closed boundary describes. The refresh that follows closing the
+/// sketcher must not read that chain as an ambiguous projected boundary and lose the link.
+#[test]
+fn an_intersected_face_section_keeps_its_link_across_a_refresh() {
+    let section = vec![LinkGeom::Line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)), LinkGeom::Line(Vec2::new(10.0, 0.0), Vec2::new(10.0, 6.0))];
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Intersect, face(), &section).unwrap();
+    assert_eq!(sk.update_link(&link, &section).map_err(|e| e.to_string()), Ok(false), "the same section keeps the link");
+    assert!(!sk.link(&link).unwrap().lost, "the link is not lost");
+}
+
+/// #13471: the same section, bigger, as the body it comes from grows: the link follows it.
+#[test]
+fn an_intersected_face_section_follows_a_resized_body() {
+    let section = |size: f64| -> Vec<LinkGeom> {
+        vec![LinkGeom::Line(Vec2::new(0.0, 0.0), Vec2::new(size, 0.0)), LinkGeom::Line(Vec2::new(size, 0.0), Vec2::new(size, size * 0.6))]
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Intersect, face(), &section(10.0)).unwrap();
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    let corner = sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos.dist(Vec2::new(10.0, 0.0)) < 1e-9).unwrap();
+    assert_eq!(sk.update_link(&link, &section(12.0)).map_err(|e| e.to_string()), Ok(false), "the grown section keeps the link");
+    assert!(!sk.link(&link).unwrap().lost, "the link is not lost");
+    assert_eq!(ids, sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect::<Vec<_>>(), "the curves keep their ids");
+    assert!(sk.points[corner].pos.dist(Vec2::new(12.0, 0.0)) < 1e-9, "{:?}", sk.points[corner].pos);
 }
 
 /// The lines at a point leave it the same ways only when each direction matches a different

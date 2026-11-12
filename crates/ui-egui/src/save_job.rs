@@ -14,6 +14,13 @@ pub struct Saving {
     done: std::sync::mpsc::Receiver<(Session, Result<Value, String>)>,
 }
 
+impl Saving {
+    /// The command writing: `file.save` or `file.save_as`.
+    pub(crate) fn command(&self) -> &'static str {
+        self.command
+    }
+}
+
 /// Run `file.save` or `file.save_as` with `params`. On the desktop it runs on a worker and is
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
 /// runs here and is finished on return (false).
@@ -21,11 +28,13 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     // An assembly reading its links for a part edited in place takes them up when the read is
     // done: a save before then would record a design that is about to change as saved.
     if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
-        app.set_status(crate::i18n::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
+        app.set_status(solidcraft_ui_text::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
         return false;
     }
+    // A save keeps print faces only when the user keeps them (#11512).
+    crate::print_face_ui::sync(&mut app.session, &app.preferences);
     #[cfg(not(target_arch = "wasm32"))]
-    if app.saving.is_none() && app.file_picker.is_none() && !app.file_load.busy() {
+    if app.saving.is_none() && app.file_picker.is_none() && !app.file_load_holds() {
         let mut copy = app.session.scratch();
         // The copy has no file: the command saves to this session's (and names the design after it).
         copy.path.clone_from(&app.session.path);
@@ -66,6 +75,11 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
         Some((_, Err(e))) => Err(e),
         None => Err(format!("{command}: the save stopped")),
     };
+    let outcome = match &r {
+        Ok(_) => crate::operations::Outcome::Done,
+        Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(command, e)),
+    };
+    crate::operations::ended(app, &format!("save:{command}"), outcome);
     app.finish_command(command, &r);
     // Saving a newer SolidCraft's file keeps what this version can't read, unless it was changed
     // around: then the save says what went.

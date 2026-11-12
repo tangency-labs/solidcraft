@@ -1,0 +1,288 @@
+{
+  "cases": [
+    {
+      "name": "nested_sphere_difference",
+      "upstream_ref": "SolidCraft 451 (fixtures/solidcraft/451-hollow-shell-cut.json)",
+      "inputs": {
+        "api": "difference",
+        "a": {
+          "kind": "sphere",
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "radius": 40.0
+        },
+        "b": {
+          "kind": "sphere",
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "radius": 18.5
+        }
+      }
+    },
+    {
+      "name": "nested_sphere_offset_difference",
+      "upstream_ref": "SolidCraft 451 (fixtures/solidcraft/451-hollow-shell-cut.json)",
+      "inputs": {
+        "api": "difference",
+        "a": {
+          "kind": "sphere",
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "radius": 40.0
+        },
+        "b": {
+          "kind": "sphere",
+          "center": [
+            1,
+            2,
+            3
+          ],
+          "radius": 18.5
+        }
+      }
+    },
+    {
+      "name": "nested_sphere_union",
+      "upstream_ref": "SolidCraft 451 (fixtures/solidcraft/451-hollow-shell-cut.json)",
+      "inputs": {
+        "api": "union",
+        "a": {
+          "kind": "sphere",
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "radius": 40.0
+        },
+        "b": {
+          "kind": "sphere",
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "radius": 18.5
+        }
+      }
+    },
+    {
+      "name": "nested_sphere_intersection",
+      "upstream_ref": "SolidCraft 451 (fixtures/solidcraft/451-hollow-shell-cut.json)",
+      "inputs": {
+        "api": "intersection",
+        "a": {
+          "kind": "sphere",
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "radius": 40.0
+        },
+        "b": {
+          "kind": "sphere",
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "radius": 18.5
+        }
+      }
+    },
+    {
+      "name": "box_in_sphere_difference",
+      "upstream_ref": "SolidCraft 451 (fixtures/solidcraft/451-hollow-shell-cut.json)",
+      "inputs": {
+        "api": "difference",
+        "a": {
+          "kind": "sphere",
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "radius": 40.0
+        },
+        "b": {
+          "kind": "box",
+          "origin": [
+            -4,
+            -4,
+            -4
+          ],
+          "size": [
+            8,
+            8,
+            8
+          ]
+        }
+      }
+    },
+    {
+      "name": "sphere_in_box_difference",
+      "upstream_ref": "SolidCraft 451 (fixtures/solidcraft/451-hollow-shell-cut.json)",
+      "inputs": {
+        "api": "difference",
+        "a": {
+          "kind": "box",
+          "origin": [
+            -40,
+            -40,
+            -40
+          ],
+          "size": [
+            80,
+            80,
+            80
+          ]
+        },
+        "b": {
+          "kind": "sphere",
+          "center": [
+            0,
+            0,
+            0
+          ],
+          "radius": 18.5
+        }
+      }
+    },
+    {
+      "name": "block_crossing_hollow_minus_sphere_shell",
+      "upstream_ref": "SolidCraft 451 (fixtures/solidcraft/451-hollow-shell-cut.json)",
+      "inputs": {
+        "api": "difference",
+        "a": {
+          "kind": "box",
+          "origin": [
+            8,
+            -4,
+            -4
+          ],
+          "size": [
+            12,
+            8,
+            8
+          ]
+        },
+        "b": {
+          "kind": "boolean",
+          "operation": 3,
+          "a": {
+            "kind": "sphere",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "radius": 40.0
+          },
+          "b": {
+            "kind": "sphere",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "radius": 18.5
+          }
+        }
+      }
+    },
+    {
+      "name": "block_in_hollow_minus_sphere_shell",
+      "upstream_ref": "SolidCraft 451 (fixtures/solidcraft/451-hollow-shell-cut.json)",
+      "inputs": {
+        "api": "difference",
+        "a": {
+          "kind": "box",
+          "origin": [
+            -4,
+            -4,
+            -4
+          ],
+          "size": [
+            8,
+            8,
+            8
+          ]
+        },
+        "b": {
+          "kind": "boolean",
+          "operation": 3,
+          "a": {
+            "kind": "sphere",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "radius": 40.0
+          },
+          "b": {
+            "kind": "sphere",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "radius": 18.5
+          }
+        }
+      }
+    },
+    {
+      "name": "block_crossing_hollow_union_sphere_shell",
+      "upstream_ref": "SolidCraft 451 (fixtures/solidcraft/451-hollow-shell-cut.json)",
+      "inputs": {
+        "api": "union",
+        "a": {
+          "kind": "box",
+          "origin": [
+            8,
+            -4,
+            -4
+          ],
+          "size": [
+            12,
+            8,
+            8
+          ]
+        },
+        "b": {
+          "kind": "boolean",
+          "operation": 3,
+          "a": {
+            "kind": "sphere",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "radius": 40.0
+          },
+          "b": {
+            "kind": "sphere",
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "radius": 18.5
+          }
+        }
+      }
+    }
+  ]
+}

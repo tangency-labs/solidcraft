@@ -28,8 +28,8 @@ use solidcraft_engine::sketch::{
 };
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 pub(crate) mod window;
 
@@ -117,6 +117,9 @@ struct DimensionDraft {
     /// The first dimension of a sketch scales it rather than distorting it (#1365), unless the
     /// Sketch preference is off (#4109).
     scale_sketch: bool,
+    /// It scales about the sketch origin even for a drawing nothing ties there (the Sketch
+    /// preference, off by default: a free drawing scales about its own middle, #11043).
+    scale_about_origin: bool,
 }
 
 impl DimensionDraft {
@@ -130,7 +133,12 @@ impl DimensionDraft {
     fn params(&self, expr: &str) -> serde_json::Value {
         // The first dimension of a sketch scales it rather than distorting it (#1365), unless the
         // Sketch preference is off (#4109).
-        let mut params = json!({"entities": entities_value(&self.entities), "value": expr, "scale_sketch": self.scale_sketch});
+        let mut params = json!({
+            "entities": entities_value(&self.entities),
+            "value": expr,
+            "scale_sketch": self.scale_sketch,
+            "scale_about_origin": self.scale_about_origin,
+        });
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
@@ -163,7 +171,7 @@ impl DimensionDraft {
 /// of its id, and without the `value:` field tag, since the box is the value
 /// ("Sketch Dimension: `mm` is a unit name, so it cannot be a parameter name").
 fn shown_error(id: &str, e: &str) -> String {
-    let label = crate::i18n::tr_label(crate::command_label(id));
+    let label = solidcraft_ui_text::tr_label(crate::command_label(id));
     crate::friendly_error(id, e).replacen(&format!("{label}: value: "), &format!("{label}: "), 1)
 }
 
@@ -226,7 +234,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
         ellipse_as_before(draft.half_axes, &mut params);
         AXIS.with(|axis| *axis.borrow_mut() = None);
         app.run("sketch.dimension", params)?;
-        app.set_status(crate::i18n::tr("sketch.dimension_added_driven"), false);
+        app.set_status(solidcraft_ui_text::tr("sketch.dimension_added_driven"), false);
         return Ok(());
     }
     EDIT.with(|edit| {
@@ -409,6 +417,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         driven,
         half_axes: app.preferences.ellipse_axes,
         scale_sketch: app.preferences.first_dimension_scales,
+        scale_about_origin: app.preferences.first_dimension_scales_about_origin,
     };
     if !draft.preview.sketch(sketch).is_some_and(|solved| solved.report.ok()) {
         return Err("That dimension conflicts with the sketch constraints".into());
@@ -474,6 +483,13 @@ thread_local! {
     /// Value texts of finished sketches' shown dimensions (Show Dimensions), as the model view
     /// drew them last frame: sketch, constraint id, parameter (None: driven), text box.
     static MODEL: RefCell<Vec<ModelDim>> = const { RefCell::new(Vec::new()) };
+    /// The value box of the dimension being placed or typed, as drawn this frame.
+    static DRAFT_TEXT: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+}
+
+/// Where the value of the dimension being placed or typed was drawn this frame.
+pub(crate) fn draft_text() -> Option<Rect> {
+    DRAFT_TEXT.with(std::cell::Cell::get)
 }
 
 /// A shown dimension of a finished sketch, as drawn in the model view (screen space).
@@ -753,7 +769,7 @@ fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, drive
     let plain = expr.is_none_or(|e| {
         let e = e.trim();
         let e = ["mm", "cm", "in", "ft", "m", "deg", "rad", "°"].iter().find_map(|unit| e.strip_suffix(unit)).unwrap_or(e);
-        crate::prefs::parse_number(e).is_some()
+        crate::ui_kit::parse_number(e).is_some()
     });
     let text = if plain { num } else { format!("fx: {num}") };
     if driven { format!("({text})") } else { text }
@@ -761,6 +777,7 @@ fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, drive
 
 /// Draw the active sketch's dimensions and remember where they are for picking.
 pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    DRAFT_TEXT.with(|d| d.set(None));
     let mut drawn = Vec::new();
     let editor_draft = EDIT.with(|edit| {
         let mut edit = edit.borrow_mut();
@@ -833,7 +850,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     let tk = Tokens::get();
     let is_sel = |id: &str| app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { id: x } if x == id));
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(hit);
-    let font = FontId::monospace(crate::theme::Tokens::get().font_body);
+    let font = FontId::monospace(solidcraft_theme::Tokens::get().font_body);
     let centres = chain_centres(sk);
     let draft_sketch = draft.as_ref().and_then(|(_, d)| d.preview.sketch(d.sketch));
     let draft_centres = draft_sketch.map(|solved| chain_centres(&solved.sketch));
@@ -866,12 +883,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
             DimFrame::Angular { vertex, .. } => vertex,
         };
-        // Millimetres per pixel at the dimension.
-        let (Some(a), Some(b)) = (to(anchor), to(anchor + Vec2::X)) else { continue };
-        let px = 1.0 / f64::from(a.distance(b)).max(1e-9);
-        if !px.is_finite() {
-            continue;
-        }
+        let Some(px) = mm_per_pixel(to, anchor) else { continue };
         let display_doc =
             if is_draft { draft.as_ref().map(|(_, d)| d.preview_doc.as_ref()).unwrap_or(app.session.doc.as_ref()) } else { app.session.doc.as_ref() };
         let expr = c.param.as_ref().and_then(|p| display_doc.param(p)).map(|p| p.expr.as_str());
@@ -895,7 +907,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         // Unplaced linear dimensions sit outside the shape they measure.
         let away = first_point(sk, &c.kind).and_then(|p| centres.get(p).copied()).unwrap_or(anchor);
         let reach = dim_reach(sk, &c.kind);
-        let mut text = c.text.or_else(|| default_text(&frame, away, px));
+        let mut text = c.text.or_else(|| default_text(&frame, away, px, half));
         let mut lay = dim_layout_reaching(&frame, text, px, half, reach);
         // #44: a text that would land on an already-drawn dimension's text steps to the next
         // row — across the dimension line for a linear one, out from the centre for the rest —
@@ -906,7 +918,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
                 break;
             }
             let row = (f64::from(size.y) + 2.0) * px;
-            let base = text.unwrap_or_else(|| default_text_offset(&frame, px));
+            let base = text.unwrap_or_else(|| default_text_offset(&frame, px, half));
             text = Some(match frame {
                 DimFrame::Linear { .. } => base + Vec2::new(0.0, row * if base.y < 0.0 { -1.0 } else { 1.0 }),
                 _ => base + base.normalized().unwrap_or(Vec2::X) * row,
@@ -929,6 +941,9 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         }
         let Some(tc) = to(lay.text) else { continue };
         let r = Rect::from_center_size(tc, size);
+        if is_draft {
+            DRAFT_TEXT.with(|d| d.set(Some(r)));
+        }
         placed.push(r);
         painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
         painter.galley(r.min + vec2(3.0, 1.0), galley, col);
@@ -953,6 +968,18 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     DRAWN.with(|d| *d.borrow_mut() = drawn);
     window::paint(app, painter, proj);
     edit_box(app, ui.ctx());
+}
+
+/// Millimetres per pixel at the sketch point `at`, along whichever of the sketch's x and y
+/// directions looks longer on screen (`to`: sketch to screen). Seen nearly edge-on, one of them
+/// points at the eye and looks a pixel long or less: sized from it alone, a dimension's text and
+/// gaps grew so large that its lines ran across the window (#14826). Face-on both are the same.
+/// A direction that does not project leaves the other to size it; with neither, there is no size.
+pub(crate) fn mm_per_pixel(to: impl Fn(Vec2) -> Option<Pos2>, at: Vec2) -> Option<f64> {
+    let a = to(at)?;
+    let longest = [Vec2::X, Vec2::Y].into_iter().filter_map(|d| to(at + d)).map(|p| a.distance(p)).reduce(f32::max)?;
+    let px = 1.0 / f64::from(longest).max(1e-9);
+    px.is_finite().then_some(px)
 }
 
 /// A point a dimension measures (for the shape it belongs to).
@@ -1166,8 +1193,8 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             Container::show_backing(ui, frame, |ui| {
                 crate::ui_kit::scope(ui, |ui| {
                     ui.set_max_width(popup_width);
-                    crate::ui_kit::text(ui, &crate::i18n::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
-                        .backing_on_hover_text(crate::i18n::tr("dialog.dimension_insert_hint"));
+                    crate::ui_kit::text(ui, &solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
+                        .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
                     if !e.owned {
                         // The whole value is selected before the field reads its state, every frame
                         // until the person takes it over, so typing replaces it (#11204). Only on the
@@ -1189,7 +1216,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     // or pinned the value, which began before the box sat there.
                     let settled = e.shown == Some(anchor);
                     e.owned |= settled && r.hovered() && ui.input(|i| i.pointer.any_pressed());
-                    crate::theme::TabAccent::number_focus(ui, &r);
+                    solidcraft_theme::TabAccent::number_focus(ui, &r);
                     if r.has_focus() {
                         e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
                     }
@@ -1266,9 +1293,9 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
                     // The sentence comes from the catalog, so it reads in the interface language (#8863).
                     let named = reply.get("renamed").and_then(|r| r.get("to")).and_then(serde_json::Value::as_str);
                     let status = match (reply.get("defined").and_then(serde_json::Value::as_str), named) {
-                        (Some(name), _) => crate::i18n::format("sketch.dimension_applied_defined", &[("name", name)]),
-                        (None, Some(name)) => crate::i18n::format("sketch.dimension_applied_renamed", &[("name", name)]),
-                        (None, None) => crate::i18n::tr("sketch.dimension_applied").to_string(),
+                        (Some(name), _) => solidcraft_ui_text::format("sketch.dimension_applied_defined", &[("name", name)]),
+                        (None, Some(name)) => solidcraft_ui_text::format("sketch.dimension_applied_renamed", &[("name", name)]),
+                        (None, None) => solidcraft_ui_text::tr("sketch.dimension_applied").to_string(),
                     };
                     app.set_status(status, false);
                 }

@@ -18,12 +18,13 @@ use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::Vec3;
+use solidcore_record::{Plane, Vec3};
 use solidcraft_geom::Aabb3;
 
 use solidcraft_sketch::linalg;
 
-use crate::{DocError, Document, IDENTITY, Mat, ModelState, Result, apply_point, apply_vector, mat_inverse, mat_mul};
+use crate::construct::{ConstructGeom, DatumRef};
+use crate::{DocError, Document, IDENTITY, Mat, ModelState, PlaneRef, Result, apply_point, apply_vector, mat_inverse, mat_mul};
 
 #[path = "joints_handles.rs"]
 mod handles;
@@ -31,6 +32,49 @@ pub use handles::{MotionAxis, motion_axes};
 
 /// Joints the solver (and the URDF export) reads at most.
 pub const MAX_JOINTS: usize = 10_000;
+
+/// A reference to an axis for a joint origin (component coordinates): an origin axis (X, Y, Z),
+/// a named construction axis, a placement's origin datum, or an axis from model geometry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AxisRef {
+    Target(AxisTarget),
+    /// Name shorthand: "X", "Y", "Z" for the side's own origin axes, or a construction axis
+    /// feature name.
+    Name(String),
+}
+
+/// A structured reference to an axis.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AxisTarget {
+    /// An origin axis: "X", "Y", or "Z" (the side's own component's).
+    Origin { axis: String },
+    /// A construction axis feature, by name, bound to the component that owns it.
+    Construction { name: String },
+    /// An origin datum of an exact placement (`o:2/3/origin/X`), re-resolved at every solve.
+    Datum { datum: DatumRef },
+    /// An axis from model or sketch geometry.
+    Geo { geo: crate::construct::GeoRef },
+}
+
+impl AxisRef {
+    pub fn origin(axis: impl Into<String>) -> Self {
+        AxisRef::Target(AxisTarget::Origin { axis: axis.into() })
+    }
+
+    pub fn construction(name: impl Into<String>) -> Self {
+        AxisRef::Target(AxisTarget::Construction { name: name.into() })
+    }
+
+    pub fn datum(datum: DatumRef) -> Self {
+        AxisRef::Target(AxisTarget::Datum { datum })
+    }
+
+    pub fn geo(geo: crate::construct::GeoRef) -> Self {
+        AxisRef::Target(AxisTarget::Geo { geo })
+    }
+}
 
 /// Where a joint origin sits on a component's geometry (component coordinates).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -95,6 +139,26 @@ pub enum Snap {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<Vec3>,
     },
+    /// A plane (the root's origin planes, a construction plane feature, or a placement's origin
+    /// datum): z along its normal, x along the plane's x axis (or `x` if given). Origin at `pick`
+    /// projected onto the plane, or the plane's own origin when `pick` is omitted.
+    Plane {
+        plane: Box<PlaneRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pick: Option<Vec3>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<XRef>,
+    },
+    /// An axis (the side's own origin axis "X"|"Y"|"Z", a construction axis, a placement's origin
+    /// datum, or model edge/axis): z along the axis, x square to z (or `x` if given). Origin at
+    /// `pick` projected onto the axis line, or the axis origin when `pick` is None.
+    Axis {
+        axis: Box<AxisRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pick: Option<Vec3>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<XRef>,
+    },
 }
 
 /// The z of an edge origin that isn't its face's normal (component coordinates); its x follows
@@ -150,6 +214,9 @@ impl Snap {
         if let Snap::Edge { edge, face, corner, .. } = self {
             out.extend(edge.iter().chain(face.iter()).chain(corner.iter()));
         }
+        if let Snap::Plane { x: Some(XRef::Face { face, .. }), .. } | Snap::Axis { x: Some(XRef::Face { face, .. }), .. } = self {
+            out.push(face);
+        }
         out
     }
 
@@ -171,28 +238,56 @@ impl Snap {
                 }
             }
             Snap::Edge { edge, face, corner, .. } => out.extend(edge.iter_mut().chain(face.iter_mut()).chain(corner.iter_mut())),
+            Snap::Plane { x: Some(XRef::Face { face, .. }), .. } | Snap::Axis { x: Some(XRef::Face { face, .. }), .. } => {
+                out.push(face);
+            }
             _ => {}
         }
         out
     }
 
-    /// The direction a face or circle snap keeps as its frame's x (`XRef::Dir`), in the
-    /// component's coordinates; `None` for a face reference or none.
+    /// The direction a face, circle, plane or axis snap keeps as its frame's x (`XRef::Dir`),
+    /// in the component's coordinates; `None` for a face reference or none.
     pub fn frame_x(&self) -> Option<Vec3> {
         match self {
-            Snap::FaceCenter { x: Some(XRef::Dir(d)), .. } | Snap::CircleCenter { x: Some(XRef::Dir(d)), .. } => Some(*d),
+            Snap::FaceCenter { x: Some(XRef::Dir(d)), .. }
+            | Snap::CircleCenter { x: Some(XRef::Dir(d)), .. }
+            | Snap::Plane { x: Some(XRef::Dir(d)), .. }
+            | Snap::Axis { x: Some(XRef::Dir(d)), .. } => Some(*d),
             _ => None,
         }
     }
 
-    /// A face or circle snap given no x reference keeps `x` (the frame's x as it is now): each
-    /// solve lays it onto the face, or square to the hole's axis, as the geometry is then, so a
-    /// part on a face that tilts keeps its turn about z. Without it (designs made before) x
-    /// follows from z alone, and turns through a right angle where z crosses 0.9 along the
-    /// component's X. A snap with a reference keeps it.
+    /// A face, circle, plane or axis snap given no x reference keeps `x` (the frame's x as it is
+    /// now): each solve lays it onto the face, or square to the axis, as the geometry is then, so
+    /// a part on a face that tilts keeps its turn about z. A snap with a reference keeps it.
     pub fn with_frame_x(mut self, x: Vec3) -> Snap {
-        if let Snap::FaceCenter { x: slot @ None, .. } | Snap::CircleCenter { x: slot @ None, .. } = &mut self {
+        if let Snap::FaceCenter { x: slot @ None, .. }
+        | Snap::CircleCenter { x: slot @ None, .. }
+        | Snap::Plane { x: slot @ None, .. }
+        | Snap::Axis { x: slot @ None, .. } = &mut self
+        {
             *slot = Some(XRef::Dir(x));
+        }
+        self
+    }
+
+    /// A datum plane or axis side given no `pick` keeps the origin it resolved to when the joint
+    /// was made (the side's own coordinates, as `pick`): the datum is re-resolved at every solve,
+    /// and the stored point is laid onto it again, so the side follows the datum's orientation
+    /// and rides it across its normal - and none of that reads the side's own placement back.
+    /// Without the pin, a side on one placement of a component naming another placement's datum
+    /// would map the datum through its own current frame each solve (`in_occurrence`), and the
+    /// solve would move that placement again: the joint drifts by the datum's offset every time
+    /// the assembly is solved.
+    pub fn with_datum_pick(mut self, origin: Vec3) -> Snap {
+        let pinned = match &self {
+            Snap::Plane { plane, pick, .. } => matches!(plane.as_ref(), PlaneRef::Datum { .. }) && pick.is_none(),
+            Snap::Axis { axis, pick, .. } => matches!(axis.as_ref(), AxisRef::Target(AxisTarget::Datum { .. })) && pick.is_none(),
+            _ => false,
+        };
+        if pinned && let Snap::Plane { pick: slot @ None, .. } | Snap::Axis { pick: slot @ None, .. } = &mut self {
+            *slot = Some(origin);
         }
         self
     }
@@ -209,6 +304,7 @@ impl Snap {
             Snap::FaceCenter { pick, x, .. } | Snap::CircleCenter { pick, x, .. } => pick.is_finite() && x_ok(x),
             Snap::Point { point, z, x } => point.is_finite() && z.is_none_or(|z| z.is_finite()) && x.is_none_or(|x| x.is_finite()),
             Snap::Edge { pick, axis, .. } => pick.is_finite() && axis.is_none_or(|a| a.dir().is_finite()),
+            Snap::Plane { pick, x, .. } | Snap::Axis { pick, x, .. } => pick.is_none_or(|p| p.is_finite()) && x_ok(x),
         }
     }
 }
@@ -216,8 +312,33 @@ impl Snap {
 /// A joint origin: a snap on an occurrence's component (occurrence 0 = the root design).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct JointOrigin {
+    /// What the origin is on: the occurrence a joint at it holds or moves.
     pub occurrence: u64,
+    /// The occurrences below `occurrence`, one per level, down to the part whose geometry `snap`
+    /// names (its [`JointOrigin::part`]). Set when that part sits in a sub-assembly placed more
+    /// than once and the origin was picked on another copy than the first: the part's own
+    /// occurrence is shared by every copy, so the origin is on the copy instead (#11426).
+    /// Empty: the snap is on `occurrence`'s own component.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inside: Vec<u64>,
     pub snap: Snap,
+}
+
+impl JointOrigin {
+    /// An origin on `occurrence`'s own component.
+    pub fn new(occurrence: u64, snap: Snap) -> Self {
+        JointOrigin { occurrence, inside: Vec::new(), snap }
+    }
+
+    /// The occurrence whose component the snap's geometry and face names belong to.
+    pub fn part(&self) -> u64 {
+        self.inside.last().copied().unwrap_or(self.occurrence)
+    }
+
+    /// Every occurrence the origin needs: it is lost when any of them goes.
+    pub fn occurrences(&self) -> impl Iterator<Item = u64> + '_ {
+        std::iter::once(self.occurrence).chain(self.inside.iter().copied())
+    }
 }
 
 /// A named joint origin (Joint Origin command), referenced by joints by name.
@@ -308,6 +429,75 @@ impl JointKind {
     }
 }
 
+/// The assembly constraint a joint was made as (`assembly.constraint.create`): the rule in the
+/// words of the Constrain dialog. The joint itself is an ordinary joint of the kind the rule needs
+/// (a mate is planar, a concentric constraint cylindrical); the solver never reads this.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Constraint {
+    /// Two planes against each other (planar), `offset` apart.
+    Mate,
+    /// Two planes facing the same way (planar, flipped), `offset` apart.
+    Flush,
+    /// A plane `offset` from a plane (planar) or a point `offset` from a plane (point on plane).
+    Distance,
+    /// Two axes on one line (cylindrical): B slides and turns along it.
+    Concentric,
+    /// Two round edges at one centre on one axis (revolute): B only turns.
+    Insert,
+    /// Two planes or axes parallel.
+    Parallel,
+    /// Two planes or axes square to each other.
+    Perpendicular,
+    /// Two planes or axes at `angle`.
+    Angle,
+    /// A cylinder resting on a plane (line on plane, `offset` its radius).
+    Tangent,
+    /// A point on an axis (point on line).
+    PointOnAxis,
+}
+
+impl Constraint {
+    pub const ALL: [Constraint; 10] = [
+        Constraint::Mate,
+        Constraint::Flush,
+        Constraint::Distance,
+        Constraint::Concentric,
+        Constraint::Insert,
+        Constraint::Parallel,
+        Constraint::Perpendicular,
+        Constraint::Angle,
+        Constraint::Tangent,
+        Constraint::PointOnAxis,
+    ];
+
+    /// The rule's command name (`mate`, `point_on_axis`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Constraint::Mate => "mate",
+            Constraint::Flush => "flush",
+            Constraint::Distance => "distance",
+            Constraint::Concentric => "concentric",
+            Constraint::Insert => "insert",
+            Constraint::Parallel => "parallel",
+            Constraint::Perpendicular => "perpendicular",
+            Constraint::Angle => "angle",
+            Constraint::Tangent => "tangent",
+            Constraint::PointOnAxis => "point_on_axis",
+        }
+    }
+
+    /// Case, spaces, `_` and `-` are ignored; `coincident` and `axis` are also taken.
+    pub fn parse(s: &str) -> Option<Constraint> {
+        let key = s.to_ascii_lowercase().replace([' ', '_', '-'], "");
+        match key.as_str() {
+            "coincident" => Some(Constraint::Mate),
+            "axis" => Some(Constraint::Concentric),
+            _ => Constraint::ALL.into_iter().find(|c| c.name().replace('_', "") == key),
+        }
+    }
+}
+
 /// A joint between two occurrences.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Joint {
@@ -337,6 +527,21 @@ pub struct Joint {
     /// again whenever the design changes, so a joint follows the parameters it is defined by.
     #[serde(default, skip_serializing_if = "JointExprs::is_empty")]
     pub exprs: JointExprs,
+    /// The values Capture Position saved, which Revert Position puts the joint back to. None in
+    /// files from before captured joint values: such a joint keeps its values on Revert Position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured: Option<Vec<f64>>,
+    /// The assembly constraint it was made as; `None` for a joint made as a joint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<Constraint>,
+}
+
+impl Joint {
+    /// Whether its values start where its parts are when it is made or changed, so B moves no
+    /// further than the joint needs: a relation, or any joint made as an assembly constraint.
+    pub fn starts_where_it_is(&self) -> bool {
+        self.kind.is_relation() || self.constraint.is_some()
+    }
 }
 
 /// Expressions a joint's numbers follow (over the design's parameters): the offset (a length),
@@ -800,7 +1005,7 @@ fn named_pick(doc: &Document, st: &ModelState, component: u64, pick: Vec3, face:
 /// planar face nearest `pick` (component coordinates; a body moved in from another component
 /// placed by its offset, as a named face is).
 fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -> Result<(Vec3, Vec3)> {
-    let comp = component_of(doc, o.occurrence)?;
+    let comp = component_of(doc, o.part())?;
     let mut best: Option<(f64, &crate::ModelBody, solidcraft_kernel::FaceInfo, Vec3)> = None;
     for b in component_bodies(doc, st, comp) {
         let offset = doc.model_body_offset(b);
@@ -825,8 +1030,77 @@ fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -
     })
 }
 
-/// Resolve a joint origin to a frame in its component's coordinates.
+/// The world seen from an occurrence's component: the inverse of the occurrence's own world
+/// frame (identity for the root).
+fn in_occurrence(doc: &Document, occ: u64) -> Result<Mat> {
+    if occ == 0 {
+        return Ok(IDENTITY);
+    }
+    mat_inverse(&occurrence_world(doc, occ)).ok_or_else(|| DocError::Invalid("joint origin: the occurrence's placement is singular".into()))
+}
+
+/// Resolve an axis reference to a line (origin, unit direction) in the side's component
+/// coordinates. `occurrence` is the joint origin's occurrence: a construction axis resolves only
+/// in the component that owns it (no cross-component fallback), and a placement's datum resolves
+/// in the world ([`crate::construct::resolve_datum`]) and is mapped into the side's frame.
+pub fn resolve_axis_ref(doc: &Document, st: &ModelState, occurrence: u64, axis: &AxisRef) -> Result<(Vec3, Vec3)> {
+    let comp = component_of(doc, occurrence)?;
+    match axis {
+        AxisRef::Target(AxisTarget::Origin { axis }) => {
+            let d = match axis.to_ascii_uppercase().as_str() {
+                "X" => Vec3::X,
+                "Y" => Vec3::Y,
+                "Z" => Vec3::Z,
+                _ => return Err(DocError::Unknown(format!("axis `{axis}`"))),
+            };
+            Ok((Vec3::ZERO, d))
+        }
+        AxisRef::Name(axis) if axis.eq_ignore_ascii_case("X") => Ok((Vec3::ZERO, Vec3::X)),
+        AxisRef::Name(axis) if axis.eq_ignore_ascii_case("Y") => Ok((Vec3::ZERO, Vec3::Y)),
+        AxisRef::Name(axis) if axis.eq_ignore_ascii_case("Z") => Ok((Vec3::ZERO, Vec3::Z)),
+        AxisRef::Target(AxisTarget::Construction { name }) | AxisRef::Name(name) => {
+            let mut match_comp = None;
+            for c in &st.construct {
+                if c.name == *name {
+                    if let ConstructGeom::Axis { origin, dir } = &c.geom {
+                        let feat_comp = doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+                        if feat_comp == comp {
+                            match_comp = Some((*origin, *dir));
+                            break;
+                        }
+                    } else {
+                        return Err(DocError::Invalid(format!("construction `{name}` is not an axis")));
+                    }
+                }
+            }
+            match_comp.ok_or_else(|| DocError::Unknown(format!("construction axis `{name}`")))
+        }
+        AxisRef::Target(AxisTarget::Datum { datum }) => {
+            // Through the core: the datum in the world (its exact placement), then into the
+            // side's frame. `resolve_datum_in`'s component mapping is not used here: it goes
+            // through a component's FIRST placement, while a joint side is an exact occurrence,
+            // which may be a later placement of its component.
+            let inv = in_occurrence(doc, occurrence)?;
+            match crate::construct::resolve_datum(doc, datum)? {
+                ConstructGeom::Axis { origin, dir } => Ok((apply_point(&inv, origin), apply_vector(&inv, dir))),
+                _ => Err(DocError::Invalid("the datum is not an axis (pick the X, Y or Z of a component)".into())),
+            }
+        }
+        AxisRef::Target(AxisTarget::Geo { geo }) => {
+            let (vals, _) = doc.param_values();
+            let ctx = crate::construct::Ctx { doc, vals: &vals, st, depth: 0, component: comp };
+            crate::construct::line(&ctx, geo)
+        }
+    }
+}
+
+/// Resolve a joint origin to a frame in its component's coordinates (its `occurrence`'s: an
+/// origin with occurrences `inside` is resolved on its part and carried up through them).
 pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
+    if !o.inside.is_empty() {
+        let on_part = resolve_origin(doc, st, &JointOrigin::new(o.part(), o.snap.clone()))?;
+        return Ok(mat_mul(&inside_transform(doc, o)?, &on_part));
+    }
     let bad = || DocError::Invalid("joint origin: degenerate frame".into());
     match &o.snap {
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
@@ -850,7 +1124,66 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
             let r = round_of(doc, st, o)?;
             frame(r.centre, r.z, face::x_axis(doc, st, component_of(doc, o.occurrence)?, x.as_ref(), r.centre)?).ok_or_else(bad)
         }
+        Snap::Plane { plane, pick, x } => {
+            let comp = component_of(doc, o.occurrence)?;
+            let (vals, _) = doc.param_values();
+            // A construction plane is kept evaluated in its owning component's frame and stays
+            // bound to it: a plane of another component is refused, and the side reads its own
+            // component's as it is. Every other kind resolves in the world (the root's origin
+            // planes, a placement's datum) and is mapped into the side's frame — through the
+            // side's exact occurrence, not `resolve_datum_in`'s first-placement mapping.
+            let pl = match plane.as_ref() {
+                PlaneRef::Construction { feature } => {
+                    if doc.feature(feature.0).map(|f| f.component) != Some(comp) {
+                        return Err(DocError::Unknown(format!("construction plane is not on this component (occurrence {})", o.occurrence)));
+                    }
+                    doc.resolve_plane_in(&vals, plane, 0, comp, Some(st))?
+                }
+                _ => {
+                    let inv = in_occurrence(doc, o.occurrence)?;
+                    let world = doc.resolve_plane_in(&vals, plane, 0, 0, Some(st))?;
+                    Plane::new(apply_point(&inv, world.origin), apply_vector(&inv, world.x), apply_vector(&inv, world.y)).ok_or_else(bad)?
+                }
+            };
+            let n = pl.normal().normalized().ok_or_else(bad)?;
+            let origin = match pick {
+                Some(p) => *p - n * (*p - pl.origin).dot(n),
+                None => pl.origin,
+            };
+            let x_axis = match x {
+                Some(_) => face::x_axis(doc, st, comp, x.as_ref(), origin)?,
+                None => Some(pl.x),
+            };
+            frame(origin, n, x_axis).ok_or_else(bad)
+        }
+        Snap::Axis { axis, pick, x } => {
+            let comp = component_of(doc, o.occurrence)?;
+            let (line_origin, line_dir) = resolve_axis_ref(doc, st, o.occurrence, axis)?;
+            let z = line_dir.normalized().ok_or_else(bad)?;
+            let origin = match pick {
+                Some(p) => line_origin + z * (*p - line_origin).dot(z),
+                None => line_origin,
+            };
+            let x_axis = face::x_axis(doc, st, comp, x.as_ref(), origin)?;
+            frame(origin, z, x_axis).ok_or_else(bad)
+        }
     }
+}
+
+/// The transform from an origin's part to its `occurrence`, through the occurrences `inside`
+/// (each placed in the one before). An error when they no longer lead from one to the next.
+fn inside_transform(doc: &Document, o: &JointOrigin) -> Result<Mat> {
+    let lost = || DocError::Invalid("joint origin: its part is no longer in that sub-assembly".into());
+    if o.inside.len() > crate::MAX_PLACEMENT_DEPTH {
+        return Err(lost());
+    }
+    let (mut m, mut component) = (IDENTITY, component_of(doc, o.occurrence)?);
+    for id in &o.inside {
+        let x = doc.occurrences.iter().find(|x| x.id == *id && x.parent == component).ok_or_else(lost)?;
+        m = mat_mul(&m, &x.transform);
+        component = x.component;
+    }
+    Ok(m)
 }
 
 /// A circle-centre snap's cylinder and the end it takes (component coordinates): through its
@@ -858,7 +1191,7 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
 /// it, as older builds found them. Any other snap is refused.
 fn round_of(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<face::Round> {
     let Snap::CircleCenter { pick, face, end, .. } = &o.snap else { return Err(DocError::Invalid("pick a round face".into())) };
-    let comp = component_of(doc, o.occurrence)?;
+    let comp = component_of(doc, o.part())?;
     if let Some(n) = face.as_deref()
         && let Some(r) = face::named_round(doc, st, comp, *pick, n, end.as_deref())?
     {
@@ -889,6 +1222,24 @@ fn round_of(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<face::Ro
 /// The cylindrical face of a circle-centre snap (component coordinates).
 fn circle_at(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<solidcraft_kernel::CylinderFace> {
     round_of(doc, st, o).map(|r| r.cylinder)
+}
+
+/// Where a joint origin picked on the placement `path` (occurrence ids from the root) goes: the
+/// deepest occurrence of the path that [`occurrence_world`] places there (every occurrence above
+/// it is its component's first), and the occurrences below it, which the origin is `inside`. A
+/// path through first occurrences only gives its last occurrence and nothing inside, as an
+/// origin was before; an empty path, the root.
+pub fn origin_anchor(doc: &Document, path: &[u64]) -> (u64, Vec<u64>) {
+    let first = |id: &u64| {
+        let component = doc.occurrences.iter().find(|o| o.id == *id).map(|o| o.component);
+        component.and_then(|c| doc.occurrence_of(c)).is_some_and(|f| f.id == *id)
+    };
+    let last = path.len().saturating_sub(1);
+    let k = path.iter().take(last).position(|id| !first(id)).unwrap_or(last);
+    match path.get(k) {
+        Some(anchor) => (*anchor, path.get(k + 1..).unwrap_or_default().to_vec()),
+        None => (0, Vec::new()),
+    }
 }
 
 /// World transform of an occurrence (through its parents).
@@ -1022,13 +1373,16 @@ pub fn joint_values(asm: &Assembly) -> BTreeMap<u64, Vec<f64>> {
 }
 
 /// The turn and offset from A's joint frame to B's: mated (B's z against A's, as faces meet)
-/// unless flipped.
+/// unless flipped. Two datum references (a plane or an axis on each side) both point along the
+/// geometry's own normal rather than out of a body, so they mate aligned - each part keeps its
+/// side of the datum - and `flip` asks for the mated relation.
 fn flip_of(j: &Joint) -> Mat {
     // An angle relation's `angle` is its tilt (`tail`); a perpendicular one has none.
     let turn = if matches!(j.kind, JointKind::Angle | JointKind::Perpendicular) { 0.0 } else { j.angle };
     let mut m = rot_z(turn);
     m[3][2] = j.offset;
-    if !j.flip { mat_mul(&m, &[[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]) } else { m }
+    let datums = matches!(j.a.snap, Snap::Plane { .. } | Snap::Axis { .. }) && matches!(j.b.snap, Snap::Plane { .. } | Snap::Axis { .. });
+    if datums == j.flip { mat_mul(&m, &[[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]) } else { m }
 }
 
 /// Component-space frames stay fixed throughout one solve. Cache their inverses without
@@ -1727,6 +2081,27 @@ fn close_group(
     let bounds = limit_bounds(tree, &vars);
     // Closer than the conflict check needs: 1e-7 mm, and turns of 1e-10 rad across the loop.
     let tol = (1e-10 * scale).min(1e-7);
+    let stored: Vec<f64> = vars.iter().map(|(id, i)| vals.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0)).collect();
+    // A ball joint moves by a turn from where it starts, as in a reach (`BallTurn`), not by its
+    // angles: at pitch 0, where a ball made as built starts, they can't tilt it about its x, and a
+    // loop that needs that tilt can't move (#14852).
+    let balls = reach::ball_turns(tree, &vars, &stored, &bounds);
+    let (mut x0, mut free) = (stored, bounds.clone());
+    for k in balls.iter().flat_map(|b| b.at..b.at + 3) {
+        if let (Some(x), Some(b)) = (x0.get_mut(k), free.get_mut(k)) {
+            (*x, *b) = (0.0, (f64::NEG_INFINITY, f64::INFINITY));
+        }
+    }
+    // The values for the solve's `x`.
+    let values = |x: &[f64]| -> Vec<f64> {
+        let mut v = x.to_vec();
+        for b in &balls {
+            if let (Some(q), Some(slot)) = (b.values(x), v.get_mut(b.at..b.at + 3)) {
+                slot.copy_from_slice(&q);
+            }
+        }
+        v
+    };
     // The values with the held ones `t` of the way along (and the unknowns at `x`).
     let place = |work: &mut Values, x: &[f64], t: f64| {
         for (id, i, from, to) in moves {
@@ -1734,20 +2109,27 @@ fn close_group(
                 *slot = from + (to - from) * t;
             }
         }
-        for ((id, i), (v, (lo, hi))) in vars.iter().zip(x.iter().zip(&bounds)) {
+        for ((id, i), (v, (lo, hi))) in vars.iter().zip(values(x).iter().zip(&bounds)) {
             if let Some(slot) = work.get_mut(id).and_then(|q| q.get_mut(*i)) {
                 *slot = v.max(*lo).min(*hi);
             }
         }
         apply_links(asm, work);
     };
-    let x0: Vec<f64> = vars.iter().map(|(id, i)| vals.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0)).collect();
     // Steps that move no value around the loops (links included) more than 5 degrees or a
     // twentieth of the loops' size.
     // How many such steps apart two sets of values are, over the loops' values.
     let stride = |a: &Values, b: &Values| -> f64 {
         let mut most = 0.0f64;
         for j in around.iter().filter_map(|id| tree.joints.get(id)) {
+            if j.kind == JointKind::Ball {
+                // A ball joint by how far it turns.
+                let three = |v: &Values| v.get(&j.id).and_then(|q| Some([*q.first()?, *q.get(1)?, *q.get(2)?]));
+                if let (Some(p), Some(q)) = (three(a), three(b)) {
+                    most = most.max(reach::ball_turn_between(p, q) / 5f64.to_radians());
+                }
+                continue;
+            }
             for i in 0..j.kind.dofs().len() {
                 let (Some(p), Some(q)) = (a.get(&j.id).and_then(|v| v.get(i)), b.get(&j.id).and_then(|v| v.get(i))) else { continue };
                 let step = if j.kind.is_angle(i) { 5f64.to_radians() } else { 0.05 * scale };
@@ -1790,7 +2172,7 @@ fn close_group(
     let mut x = x0;
     let start = largest(&gaps(&x, 0.0)?);
     let loose = loose_gap(scale);
-    let tol = match close_within(&mut |x| gaps(x, 0.0), &mut x, &bounds, tol, loose)? {
+    let tol = match close_within(&mut |x| gaps(x, 0.0), &mut x, &free, tol, loose)? {
         t if t > tol && moves.is_empty() && start <= t => return Some(BTreeMap::new()),
         t => t,
     };
@@ -1804,7 +2186,7 @@ fn close_group(
         let mut trial = x.clone();
         // Each step as closed as the start, or within the conflict check where the loop's gap
         // grows as it moves (axes a hair out of parallel, #6211).
-        if close_within(&mut |x| gaps(x, t1), &mut trial, &bounds, tol, loose).is_some() {
+        if close_within(&mut |x| gaps(x, t1), &mut trial, &free, tol, loose).is_some() {
             // A step that moved some loop value too far (through a link and a limit, or close to
             // a dead point) is taken again in halves.
             let next = effective(&trial, t1);
@@ -1825,7 +2207,7 @@ fn close_group(
     // The values that changed from what is stored.
     let moved = vars
         .iter()
-        .zip(&x)
+        .zip(&values(&x))
         .filter(|((id, i), v)| tree.joints.get(id).is_some_and(|j| j.values.get(*i).is_none_or(|s| (s - *v).abs() > 1e-12)))
         .map(|(var, v)| (*var, *v))
         .collect();
@@ -2003,7 +2385,14 @@ struct Built<'a> {
 /// Lay out the joint graph: the spanning tree out from the fixed occurrences (the root, grounded
 /// ones; with neither involved, the first joint's A side) and the joints left over, which close
 /// loops. Joints whose origins can't be resolved go to `sol.errors`; `sol.fixed` is set.
-fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Solution) -> Built<'a> {
+///
+/// Candidates are taken in FIFO order from a `VecDeque`: a parent popped earlier at depth `D-1`
+/// enqueues its children first, so its edge reaches an occurrence before any parent popped later
+/// at the same level. When two joints at equal BFS depth reach the same occurrence, the one from
+/// the **earlier-queued parent** wins the tie (the original behaviour, predating `BinaryHeap`).
+/// Two runs of the same design place identically; a design's tree can still differ from
+/// `BinaryHeap`'s, which broke ties by joint creation index instead.
+fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Solution) -> Built<'a> {
     let asm = &doc.assembly;
     let joints: Vec<&Joint> = asm.joints.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
     // Joint frames in component coordinates (errors leave the joint out). An origin several joints
@@ -2012,8 +2401,17 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
     let mut found: BTreeMap<(u64, String), std::result::Result<Mat, String>> = BTreeMap::new();
     let mut resolve = |o: &JointOrigin| -> Result<Mat> {
         let Ok(comp) = component_of(doc, o.occurrence) else { return resolve_origin(doc, st, o) };
+        // A plane or axis side resolves in the world and is mapped into the side's exact
+        // occurrence's frame (`in_occurrence`), so its frame depends on the occurrence, not just
+        // on the component: two placements of one component whose sides name the same datum must
+        // not share the cached entry, or the second reads the first's frame. Such sides key by
+        // their occurrence; every other snap stays component-local and shares as before.
+        let keyed = match &o.snap {
+            Snap::Plane { .. } | Snap::Axis { .. } => o.occurrence,
+            _ => comp,
+        };
         found
-            .entry((comp, format!("{:?}", o.snap)))
+            .entry((keyed, format!("{:?}", (&o.inside, &o.snap))))
             .or_insert_with(|| resolve_origin(doc, st, o).map_err(|e| e.to_string()))
             .clone()
             .map_err(DocError::Invalid)
@@ -2056,7 +2454,7 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
         // Every joint's values are known, suppressed ones too (their motion links still set values).
         Tree { joints: asm.joints.iter().map(|j| (j.id, j)).collect(), frames, fixed: placed.clone(), parent: BTreeMap::new(), order: Vec::new() };
     let mut used: BTreeSet<u64> = BTreeSet::new();
-    let mut queue: VecDeque<u64> = placed.keys().copied().collect();
+
     // An occurrence's degrees of freedom are the distinct values that move it: those of the
     // joints on its path, a value a motion link sets standing for the values its link chain
     // starts from (a driven gear turns with its driving gear's one value). Kept per occurrence as
@@ -2065,51 +2463,106 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
     let sources = link_sources(asm);
     let shared: BTreeSet<(u64, usize)> = sources.values().flatten().copied().collect();
     let mut moved_by: BTreeMap<u64, (usize, BTreeSet<(u64, usize)>)> = BTreeMap::new();
-    // The joints at each occurrence, in the joints' order (a large assembly is not walked joint by
-    // joint for every occurrence).
-    let mut at: BTreeMap<u64, Vec<&Joint>> = BTreeMap::new();
-    for j in joints.iter().copied() {
-        at.entry(j.a.occurrence).or_default().push(j);
+
+    // Adjacency list: each occurrence's joints, in joint definition order. The FIFO tie-break uses
+    // this order for the seed (several fixed occurrences push their edges in that order), and the
+    // order in which the neighbours of a freshly placed occurrence are enqueued.
+    let mut at: BTreeMap<u64, Vec<(usize, &Joint)>> = BTreeMap::new();
+    for (idx, j) in joints.iter().copied().enumerate() {
+        at.entry(j.a.occurrence).or_default().push((idx, j));
         if j.b.occurrence != j.a.occurrence {
-            at.entry(j.b.occurrence).or_default().push(j);
+            at.entry(j.b.occurrence).or_default().push((idx, j));
         }
     }
-    while let Some(occ) = queue.pop_front() {
-        let Some(t) = placed.get(&occ).copied() else { continue };
-        for j in at.get(&occ).map(Vec::as_slice).unwrap_or_default() {
-            if used.contains(&j.id) || !tree.frames.contains_key(&j.id) {
+
+    // Topological distance from the fixed occurrences (filled, kept for callers that inspect it).
+    let mut depths: BTreeMap<u64, usize> = BTreeMap::new();
+    for &occ in placed.keys() {
+        depths.insert(occ, 0);
+    }
+
+    // Spanning tree by BFS: candidates are popped FIFO, so a joint enqueued by a parent popped
+    // earlier at the previous depth is placed before one enqueued by a later parent at that depth.
+    // This is exactly the pre-`BinaryHeap` ordering: the earliest-queued parent wins the tie.
+    // `idx` (the joint's creation index) is carried alongside in case a future ordering needs it;
+    // the FIFO tie-break does not use it.
+    // Tuple: (depth, idx, j_id, occ, other, from_a)
+    let mut queue: VecDeque<(usize, usize, u64, u64, u64, bool)> = VecDeque::new();
+    // A datum joint (a plane or axis snap) anchors its part to the design's own frame rather
+    // than to another part: where one competes with a chain out of a grounded occurrence, the
+    // chain keeps the part — at any depth — and the datum joint closes a loop on it. So with a
+    // datum snap among the joints, every fixed occurrence but the root is walked to exhaustion
+    // before the root's joints. Without one, the seeds keep their pre-change order (the root
+    // first, then the grounded occurrences in id order), so assemblies built of the existing
+    // snaps alone solve exactly as before.
+    let datum = joints
+        .iter()
+        .any(|j| matches!(j.a.snap, Snap::Plane { .. } | Snap::Axis { .. }) || matches!(j.b.snap, Snap::Plane { .. } | Snap::Axis { .. }));
+    let waves: Vec<Vec<u64>> =
+        if datum { vec![placed.keys().copied().filter(|&o| o != 0).collect(), vec![0]] } else { vec![placed.keys().copied().collect()] };
+    for seeds in waves {
+        for occ in seeds {
+            for &(idx, j) in at.get(&occ).map(Vec::as_slice).unwrap_or_default() {
+                if !tree.frames.contains_key(&j.id) {
+                    continue;
+                }
+                let (other, from_a) = if j.a.occurrence == occ {
+                    (j.b.occurrence, true)
+                } else if j.b.occurrence == occ {
+                    (j.a.occurrence, false)
+                } else {
+                    continue;
+                };
+                if !placed.contains_key(&other) {
+                    queue.push_back((1, idx, j.id, occ, other, from_a));
+                }
+            }
+        }
+
+        while let Some((depth, _, j_id, occ, other, from_a)) = queue.pop_front() {
+            if placed.contains_key(&other) || used.contains(&j_id) {
                 continue;
             }
-            let (other, from_a) = if j.a.occurrence == occ {
-                (j.b.occurrence, true)
-            } else if j.b.occurrence == occ {
-                (j.a.occurrence, false)
-            } else {
-                continue;
-            };
-            if placed.contains_key(&other) {
-                continue;
-            }
-            let Some(m) = tree.step(j.id, from_a, &t, vals) else { continue };
-            used.insert(j.id);
+            let Some(t) = placed.get(&occ).copied() else { continue };
+            let Some(m) = tree.step(j_id, from_a, &t, vals) else { continue };
+            used.insert(j_id);
             placed.insert(other, m);
-            tree.parent.insert(other, (occ, j.id, from_a));
+            depths.insert(other, depth);
+            tree.parent.insert(other, (occ, j_id, from_a));
             tree.order.push(other);
             let (mut own, mut common) = moved_by.get(&occ).cloned().unwrap_or_default();
-            for v in (0..j.kind.dofs().len()).map(|i| (j.id, i)) {
-                match sources.get(&v) {
-                    Some(from) => common.extend(from.iter().copied()),
-                    None if shared.contains(&v) => {
-                        common.insert(v);
+            if let Some(j) = tree.joints.get(&j_id) {
+                for v in (0..j.kind.dofs().len()).map(|i| (j.id, i)) {
+                    match sources.get(&v) {
+                        Some(from) => common.extend(from.iter().copied()),
+                        None if shared.contains(&v) => {
+                            common.insert(v);
+                        }
+                        None => own += 1,
                     }
-                    None => own += 1,
                 }
             }
             dof.insert(other, own + common.len());
             moved_by.insert(other, (own, common));
-            queue.push_back(other);
+            let next_depth = depth + 1;
+            for &(idx, next_j) in at.get(&other).map(Vec::as_slice).unwrap_or_default() {
+                if used.contains(&next_j.id) || !tree.frames.contains_key(&next_j.id) {
+                    continue;
+                }
+                let (next_other, next_from_a) = if next_j.a.occurrence == other {
+                    (next_j.b.occurrence, true)
+                } else if next_j.b.occurrence == other {
+                    (next_j.a.occurrence, false)
+                } else {
+                    continue;
+                };
+                if !placed.contains_key(&next_other) {
+                    queue.push_back((next_depth, idx, next_j.id, other, next_other, next_from_a));
+                }
+            }
         }
     }
+
     // Joints that close loops: the solve moves the loops' values to meet them, then checks they
     // agree.
     let closing: Vec<u64> = joints
@@ -2182,6 +2635,11 @@ impl Document {
         let t = if o.occurrence == 0 { IDENTITY } else { occurrence_world(self, o.occurrence) };
         Ok(mat_mul(&t, &f))
     }
+
+    /// The radius of the round face a circle origin is on (mm; an error when it is on none).
+    pub fn origin_radius(&self, st: &ModelState, o: &JointOrigin) -> Result<f64> {
+        circle_at(self, st, o).map(|c| c.radius)
+    }
 }
 
 #[path = "joints_cam.rs"]
@@ -2230,6 +2688,8 @@ pub fn frame_of(o: Vec3, z: Vec3, x: Option<Vec3>) -> Option<Mat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FeatureKind;
+    use crate::construct::DatumItem;
 
     thread_local! {
         pub(super) static PLACEMENT_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -2393,7 +2853,7 @@ mod tests {
     /// Revolute joints 1…n (joint 1 at `start`, the others at 0) linked 1 → 2 → … → n with
     /// ratio 2, the links stored from the end of the chain; joint 3 limited to ±50.
     pub(super) fn chain(n: u64, start: f64) -> Assembly {
-        let origin = JointOrigin { occurrence: 0, snap: Snap::Point { point: Vec3::ZERO, z: None, x: None } };
+        let origin = JointOrigin::new(0, Snap::Point { point: Vec3::ZERO, z: None, x: None });
         let joints = (1..=n)
             .map(|id| Joint {
                 id,
@@ -2408,6 +2868,8 @@ mod tests {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                captured: None,
+                constraint: None,
             })
             .collect();
         let links =
@@ -2468,7 +2930,7 @@ mod tests {
         let back = serde_json::to_value(&l).unwrap();
         assert_eq!(back["coupling"], serde_json::json!({"type": "gear", "ra": 10.0, "rb": "r2 * 2", "internal": true}));
         let picked: Size = serde_json::from_str(r#"{"occurrence": 3, "snap": {"type": "circle_center", "pick": [1, 0, 0]}}"#).unwrap();
-        assert!(matches!(picked, Size::Circle(JointOrigin { occurrence: 3, snap: Snap::CircleCenter { .. } })));
+        assert!(matches!(picked, Size::Circle(JointOrigin { occurrence: 3, snap: Snap::CircleCenter { .. }, .. })));
         let screw: Coupling = serde_json::from_str(r#"{"type": "screw", "pitch": 1.5, "reverse": true}"#).unwrap();
         assert_eq!(screw, Coupling::Screw { pitch: Size::Length(1.5), reverse: true });
     }
@@ -2549,5 +3011,107 @@ mod tests {
         let values: Vec<_> = doc.assembly.joints.iter().map(|j| j.values.clone()).collect();
         assert_eq!(values, vec![vec![0.0], vec![0.75]]);
         assert!(!doc.apply_joint_solution(&Solution { world, ..Solution::default() }), "applied twice, nothing moves");
+    }
+
+    #[test]
+    fn resolve_plane_and_axis_origins() {
+        let mut doc = Document::default();
+        // The constructs are features: registered in the document (the owner the side resolvers
+        // check against), with their evaluated geometry in the model state.
+        let spine_feature = doc
+            .add_feature(
+                FeatureKind::ConstructionAxis {
+                    def: crate::construct::AxisDef::TwoPoints {
+                        a: crate::construct::GeoRef::Point { p: Vec3::ZERO },
+                        b: crate::construct::GeoRef::Point { p: Vec3::new(0.0, 0.0, 50.0) },
+                    },
+                },
+                Some("Spine"),
+            )
+            .unwrap();
+        let plane_feature =
+            doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: "XY".into() } }, Some("WorkPlane")).unwrap();
+        let mut st = ModelState::default();
+        st.construct.push(crate::construct::Construct {
+            feature: spine_feature,
+            name: "Spine".into(),
+            geom: ConstructGeom::Axis { origin: Vec3::new(10.0, 5.0, 0.0), dir: Vec3::Z },
+            bodies: Vec::new(),
+        });
+        st.construct.push(crate::construct::Construct {
+            feature: plane_feature,
+            name: "WorkPlane".into(),
+            geom: ConstructGeom::Plane(Plane::new(Vec3::new(0.0, 0.0, 15.0), Vec3::X, Vec3::Y).unwrap()),
+            bodies: Vec::new(),
+        });
+
+        // 1. Origin plane XY
+        let o_xy = JointOrigin::new(0, Snap::Plane { plane: Box::new(PlaneRef::Origin { name: "XY".into() }), pick: None, x: None });
+        let m = resolve_origin(&doc, &st, &o_xy).unwrap();
+        assert_eq!(apply_point(&m, Vec3::ZERO), Vec3::ZERO);
+        assert_eq!(apply_vector(&m, Vec3::Z), Vec3::Z);
+
+        // 2. Origin plane XY with pick projected
+        let o_xy_pick = JointOrigin::new(
+            0,
+            Snap::Plane { plane: Box::new(PlaneRef::Origin { name: "XY".into() }), pick: Some(Vec3::new(12.0, 34.0, 56.0)), x: None },
+        );
+        let m_pick = resolve_origin(&doc, &st, &o_xy_pick).unwrap();
+        assert_eq!(apply_point(&m_pick, Vec3::ZERO), Vec3::new(12.0, 34.0, 0.0));
+
+        // 3. Construction plane by feature (PlaneRef::Construction: the name-overload of
+        //    PlaneRef::Origin is gone — a construction plane is a feature, bound to its
+        //    component).
+        let o_wp =
+            JointOrigin::new(0, Snap::Plane { plane: Box::new(PlaneRef::Construction { feature: plane_feature.into() }), pick: None, x: None });
+        let m_wp = resolve_origin(&doc, &st, &o_wp).unwrap();
+        assert_eq!(apply_point(&m_wp, Vec3::ZERO), Vec3::new(0.0, 0.0, 15.0));
+        assert_eq!(apply_vector(&m_wp, Vec3::Z), Vec3::Z);
+
+        // 4. Origin axis Z
+        let o_z = JointOrigin::new(0, Snap::Axis { axis: Box::new(AxisRef::origin("Z")), pick: None, x: None });
+        let m_z = resolve_origin(&doc, &st, &o_z).unwrap();
+        assert_eq!(apply_point(&m_z, Vec3::ZERO), Vec3::ZERO);
+        assert_eq!(apply_vector(&m_z, Vec3::Z), Vec3::Z);
+
+        // 5. Construction axis
+        let o_spine = JointOrigin::new(0, Snap::Axis { axis: Box::new(AxisRef::Name("Spine".into())), pick: None, x: None });
+        let m_spine = resolve_origin(&doc, &st, &o_spine).unwrap();
+        assert_eq!(apply_point(&m_spine, Vec3::ZERO), Vec3::new(10.0, 5.0, 0.0));
+        assert_eq!(apply_vector(&m_spine, Vec3::Z), Vec3::Z);
+
+        // 6. A placement's datum, on a side of that placement: the XY datum of a moved
+        //    occurrence, in its component's own frame (the exact placement, not a first one).
+        let mut placed = Document::new("placed");
+        let comp = placed.add_component(Some("Part"), 0).unwrap();
+        let occ = placed.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+        let away: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
+        placed.occurrences.iter_mut().find(|o| o.id == occ).unwrap().transform = away;
+        let datum = DatumRef { path: vec![occ], item: DatumItem::XY };
+        let o_datum =
+            JointOrigin::new(occ, Snap::Plane { plane: Box::new(PlaneRef::Datum { datum }), pick: Some(Vec3::new(3.0, 0.0, 7.0)), x: None });
+        let m_datum = resolve_origin(&placed, &st, &o_datum).unwrap();
+        assert_eq!(apply_point(&m_datum, Vec3::ZERO), Vec3::new(3.0, 0.0, 0.0), "the pick, projected onto the component's own XY");
+        assert_eq!(apply_vector(&m_datum, Vec3::Z), Vec3::Z);
+        let o_datum_axis = JointOrigin::new(
+            occ,
+            Snap::Axis { axis: Box::new(AxisRef::datum(DatumRef { path: vec![occ], item: DatumItem::X })), pick: None, x: None },
+        );
+        let m_axis = resolve_origin(&placed, &st, &o_datum_axis).unwrap();
+        assert_eq!(apply_point(&m_axis, Vec3::ZERO), Vec3::ZERO, "the component's own X datum in its own frame");
+        assert_eq!(apply_vector(&m_axis, Vec3::Z), Vec3::X);
+
+        // 7. Serde roundtrip (plane and geometry axis)
+        let json = serde_json::to_string(&o_xy).unwrap();
+        let decoded: JointOrigin = serde_json::from_str(&json).unwrap();
+        assert_eq!(o_xy, decoded);
+
+        let o_geo = JointOrigin::new(
+            0,
+            Snap::Axis { axis: Box::new(AxisRef::geo(crate::construct::GeoRef::World { axis: "Z".into() })), pick: None, x: None },
+        );
+        let json_geo = serde_json::to_string(&o_geo).unwrap();
+        let decoded_geo: JointOrigin = serde_json::from_str(&json_geo).unwrap();
+        assert_eq!(o_geo, decoded_geo);
     }
 }

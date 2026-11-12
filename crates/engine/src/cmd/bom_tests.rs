@@ -201,6 +201,20 @@ fn csv_quotes_every_field_and_json_writes_the_rows() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A field that a spreadsheet would run as a formula gets a `'` first, so it opens as text
+/// (#12728). A count stays a number.
+#[test]
+fn a_csv_field_a_spreadsheet_would_run_opens_as_text() {
+    let dir = scratch("formula");
+    let mut s = assembly();
+    run(&mut s, "component.metadata.set", json!({"component": "Plate", "part_number": "=1+1", "description": "-5 mm shim", "revision": "@A"}));
+    let csv = dir.join("bom.csv");
+    run(&mut s, "assembly.bom", json!({"path": csv}));
+    let text = std::fs::read_to_string(&csv).unwrap();
+    assert!(text.contains("\n\"1\",\"'=1+1\",\"'-5 mm shim\",\"'@A\",\"3\",\"Plate\"\n"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn standard_parts_carry_a_part_number_that_follows_a_resize() {
     let mut s = Session::default();
