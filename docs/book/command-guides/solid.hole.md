@@ -44,7 +44,7 @@ Put a hole in a solid body: a simple hole, a counterbore, a countersink or a tap
 
 - **Do** locate holes from edges the way the print dimensions them. When the part changes size, the holes keep their distances from those edges.
 - **Do** use Tapped and pick the size from the list instead of typing a drill diameter. The hole then carries the thread callout, and the tap drill comes from a standard tap drill chart.
-- **Do** check the Tap drill diameter before clicking OK. UNC and UNF sizes show it in inches (hover for millimetres); metric and pipe sizes show millimetres. If your shop runs a different drill, such as 0.203 in for 1/4-20 in steel, type it in.
+- **Do** check the Tap drill diameter before clicking OK. UNC and UNF sizes show it in inches; metric and pipe sizes show millimetres. If your shop runs a different drill, such as 0.203 in for 1/4-20 in steel, type it in. Hovering over the box shows the tap maker's drill in millimetres and the accepted range, not the drill you typed.
 - **Don't** turn on Modeled just to show the hole is tapped. The callout already says it.
 - **Do** turn off Full thread depth on blind tapped holes and set a Thread depth shorter than the drill Depth, so a standard tap doesn't bottom out.
 - **Do** type the unit with the number when the print is in another unit. In a millimetre design, typing 0.75 in enters 19.05 mm.
