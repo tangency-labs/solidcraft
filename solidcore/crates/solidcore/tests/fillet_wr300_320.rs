@@ -262,7 +262,8 @@ fn no_room_reason(
 
 /// The `NoRoom` refusals name themselves (#960): a rail leaving its face (the holed cube's
 /// blend of 6) and a blend taking a whole face (the cylinder's chamfer of 10), where the
-/// comment was the only difference; a refusal under another code names none.
+/// comment was the only difference; a refusal under another code names none. The holed
+/// cube's chamfer of 5, once refused under another code (WR-301's rollover), builds.
 #[test]
 fn no_room_refusals_are_named() {
     let mut k = kernel(|f| f.fillet_refuse_rails_leaving_faces = true);
@@ -289,6 +290,14 @@ fn no_room_refusals_are_named() {
         no_room_reason(&mut k, &mut b, &[rim], 10.0),
         Some(NoRoomReason::FaceConsumed)
     );
+
+    // the holed cube's chamfer of 5, whose rollover failed (SM_FILERR_EDGE_PROBLEM) before
+    // WR-301 became the default: 4000 - 12.5 * 20
+    let mut k = Kernel::default();
+    let Outcome::Built { volume, manifold } = holed_cube_blend(&mut k, 5.0, 0) else {
+        panic!("size 5: refused");
+    };
+    assert!(manifold && near(volume, 3750.0, 1e-4), "size 5: {volume}");
 
     // a chamfer of 25 on the cube of 20 (SM_FILERR_BAD_INT)
     let mut k = Kernel::default();
