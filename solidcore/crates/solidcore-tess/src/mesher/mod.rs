@@ -780,7 +780,8 @@ fn snap_touches(
     };
     let mut tangled: Vec<usize> = faces.to_vec();
     for _ in 0..MAX_SNAP {
-        let mut add: HashMap<u32, Vec<(f64, Vec3)>> = HashMap::new();
+        // In edge order, so the first edge that cannot take its nodes is the same every run.
+        let mut add: std::collections::BTreeMap<u32, Vec<(f64, Vec3)>> = std::collections::BTreeMap::new();
         for &fi in &tangled {
             let Some(fb) = boundaries.get(fi) else { continue };
             for (l, k) in crossing(fi, fb) {
