@@ -47,7 +47,7 @@ pub(super) fn paint(
                     if section.tabs.len() > 1 {
                         for id in tabs {
                             if let Ok(tab) = runtime.instance_presentation(id)
-                                && ui.selectable_label(id == active, tab.title).clicked()
+                                && ui_kit::choice_chip(ui, &id.0, &tab.title, id == active).clicked()
                             {
                                 action = Some(WindowAction::Activate(id.clone()));
                             }
