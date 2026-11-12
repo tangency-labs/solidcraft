@@ -86,7 +86,7 @@ struct Mesh<'a> {
     stuck: Vec<bool>,
     /// The sides of the pole caps' rings, by their two nodes in index order: kept like the
     /// boundary, but split in the face ([`split_ring`]).
-    ring: BitsMap<(u32, u32), ()>,
+    ring: std::collections::BTreeSet<(u32, u32)>,
     /// The triangles of the pole caps' fans: never flipped or refined.
     frozen: Vec<bool>,
 }
@@ -108,8 +108,8 @@ fn angle(o: Vec3, a: Vec3, b: Vec3) -> f64 {
 
 impl Mesh<'_> {
     /// Whether side `e` is kept: a boundary side or a ring side.
-    fn kept(&self, e: &(u32, u32)) -> bool {
-        self.fixed.contains_key(e) || self.ring.contains_key(e)
+    fn kept(&self, e: (u32, u32)) -> bool {
+        self.fixed.contains_key(&e) || self.ring.contains(&e)
     }
 
     fn is_frozen(&self, ti: u32) -> bool {
@@ -186,7 +186,7 @@ impl Mesh<'_> {
             if left == 0 {
                 break;
             }
-            if self.kept(&e) {
+            if self.kept(e) {
                 continue;
             }
             let Some(&[t1, t2]) = self.sides.get(&e).map(Vec::as_slice) else { continue };
@@ -254,7 +254,7 @@ impl Mesh<'_> {
             match out {
                 None => return on.map_or(Located::Inside(t), |(a, b)| Located::OnSide(t, a, b)),
                 Some((a, b)) => {
-                    if self.kept(&key(a, b)) {
+                    if self.kept(key(a, b)) {
                         return Located::Beyond(a, b);
                     }
                     match self.across(a, b, t) {
@@ -283,7 +283,7 @@ impl Mesh<'_> {
                 Some((vec![ti, t2, t3], vec![key(a, b), key(b, c), key(c, a)]))
             }
             Located::OnSide(ti, x, y) => {
-                if self.kept(&key(x, y)) {
+                if self.kept(key(x, y)) {
                     return None;
                 }
                 let tj = self.across(x, y, ti)?;
@@ -340,7 +340,7 @@ pub(crate) fn shape(
     }
     let stuck = vec![false; tris.len()];
     let frozen: Vec<bool> = (0..tris.len()).map(|t| fans.contains(&t)).collect();
-    let ring: BitsMap<(u32, u32), ()> = ring_sides.iter().map(|&(a, b)| (key(a, b), ())).collect();
+    let ring: std::collections::BTreeSet<(u32, u32)> = ring_sides.iter().map(|&(a, b)| key(a, b)).collect();
     let mut m = Mesh { uv, pos, tris, sides: BitsMap::default(), fixed, stuck, ring, frozen };
     for ti in 0..m.tris.len() {
         if let Ok(ti) = u32::try_from(ti) {
@@ -376,7 +376,7 @@ pub(crate) fn shape(
             || (0..3).any(|k| {
                 let [i, j, _] = super::rot3(t, k);
                 let ([pi, pj, _], [ui, uj, _]) = (super::rot3([a, b, c], k), super::rot3([qa, qb, qc], k));
-                !m.kept(&key(i, j)) && off([(ui[0] + uj[0]) * 0.5, (ui[1] + uj[1]) * 0.5], (pi + pj) * 0.5) > rules.tol
+                !m.kept(key(i, j)) && off([(ui[0] + uj[0]) * 0.5, (ui[1] + uj[1]) * 0.5], (pi + pj) * 0.5) > rules.tol
             });
         let sharp = sharpest < rules.min_angle;
         if !(sharp || long || sags) {
@@ -384,7 +384,7 @@ pub(crate) fn shape(
         }
         // A corner of the boundary sharper than the angle, between two of its sides, stays.
         let [i, j, k] = super::rot3(t, at);
-        if sharp && !long && !sags && m.kept(&key(i, j)) && m.kept(&key(k, i)) {
+        if sharp && !long && !sags && m.kept(key(i, j)) && m.kept(key(k, i)) {
             give_up(&mut m, ti, Some(ShapeLimit::Corner), &mut limits);
             continue;
         }
@@ -436,7 +436,7 @@ pub(crate) fn shape(
                         for k in 0..3 {
                             let [x, y, _] = super::rot3(tk, k);
                             let e = key(x, y);
-                            if !m.kept(&e) || near.contains(&e) {
+                            if !m.kept(e) || near.contains(&e) {
                                 continue;
                             }
                             let (Some((px, _)), Some((py, _))) = (m.node(x), m.node(y)) else { continue };
@@ -526,12 +526,12 @@ fn split_ring(m: &mut Mesh<'_>, e: (u32, u32), point: Point<'_>, min_angle: f64)
     let p = point(q)?;
     m.ring.remove(&e);
     let Some((made, facing)) = m.insert(Located::OnSide(other, x, y), q, p) else {
-        m.ring.insert(e, ());
+        m.ring.insert(e);
         return None;
     };
     let n = u32::try_from(m.uv.len().checked_sub(1)?).ok()?;
-    m.ring.insert(key(x, n), ());
-    m.ring.insert(key(n, y), ());
+    m.ring.insert(key(x, n));
+    m.ring.insert(key(n, y));
     // The fan triangle's two halves stay fans: the insert put them in its slot and the last one.
     if let Some(&last) = made.last() {
         for t in [fan, last] {
