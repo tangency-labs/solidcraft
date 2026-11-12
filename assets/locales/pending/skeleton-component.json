@@ -1,0 +1,20 @@
+{
+  "en": {
+    "cmd.component_create_skeleton": "New Skeleton Component",
+    "cmd.component_set_kind": "Set Component Kind",
+    "help.component.create_skeleton": "Adds a skeleton: a component that holds only sketches and construction geometry, never solid bodies. Use it to lay out the planes, axes and sketches that several parts of an assembly are built from."
+  },
+  "fr": {
+    "cmd.component_create_skeleton": "Nouveau composant squelette",
+    "cmd.component_set_kind": "Définir le type de composant",
+    "help.component.create_skeleton": "Ajoute un squelette : un composant qui ne contient que des esquisses et de la géométrie de construction, jamais de corps solides. Utilisez-le pour poser les plans, les axes et les esquisses à partir desquels plusieurs pièces d'un assemblage sont construites."
+  },
+  "ja": {
+    "cmd.component_create_skeleton": "新規スケルトンコンポーネント",
+    "cmd.component_set_kind": "コンポーネントの種類を設定"
+  },
+  "zh": {
+    "cmd.component_create_skeleton": "新建骨架组件",
+    "cmd.component_set_kind": "设置组件类型"
+  }
+}

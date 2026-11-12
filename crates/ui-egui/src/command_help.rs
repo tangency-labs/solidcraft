@@ -17,6 +17,7 @@ pub const DOCUMENTED: &[&str] = &[
     "component.break_link",
     "component.capture_position",
     "component.create",
+    "component.create_skeleton",
     "component.finish_edit",
     "component.from_bodies",
     "component.insert_design",
