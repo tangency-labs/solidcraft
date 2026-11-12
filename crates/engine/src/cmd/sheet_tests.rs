@@ -1365,6 +1365,15 @@ fn a_sharp_bend_has_only_its_outer_cylindrical_face() {
     assert_eq!(cylinders, 3, "one outer face per sharp bend, no inner cylinders");
     let bends = flat(&mut s)["bends"].clone();
     assert_eq!(bends.as_array().map(Vec::len), Some(3), "{bends}");
+    // A tiny radius above the sharp limit keeps its inner cylinder, and the body stays closed.
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Tiny", "thickness": t, "k_factor": k, "bend_radius": 0.0005, "active": true}));
+    base(&mut s, 100.0, w);
+    run(&mut s, "sheet.fold", json!({"points": [[80, 0, t], [80, w, t]], "fixed": fixed, "flip": false, "radius": 0.0005}));
+    let body = &s.model.state().bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1, "{:?}", body.validity());
+    let cylinders = body.faces(1e-6).map(|f| f.iter().filter(|f| f.plane_normal.is_none()).count()).unwrap_or(0);
+    assert_eq!(cylinders, 2, "a tiny radius keeps both cylindrical faces");
 }
 
 #[test]
