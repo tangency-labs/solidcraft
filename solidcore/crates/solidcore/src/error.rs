@@ -895,7 +895,7 @@ pub struct Failure {
     /// decisions that read it before the record existed. [`SolidError::or_at`] never
     /// writes it, so no outcome depends on filling a site. It goes as the sites move onto
     /// [`Failure::site`].
-    pub(crate) entity: Option<EntityRef>,
+    pub entity: Option<EntityRef>,
     /// The status the pinned C++ reports for this failure: a comparison detail, read
     /// only through [`SolidError::sm_status`]. It is recorded where the failure is made
     /// because it depends on the call path, not only on the reason (a refusal the C++
