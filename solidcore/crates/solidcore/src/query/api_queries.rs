@@ -1080,8 +1080,9 @@ pub fn edge_plane_crossings(
         ));
     }
     let edge = brep.edge(id)?;
-    // The edge's evaluation copy carries the edge's tolerance, which the solve reads
-    // (`SmTol::GetZoneTol3d` through the curve's edge); the record's own curve cannot reach it.
+    // The edge's evaluation copy carries the edge's tolerance: the solve builds its curve tree
+    // to half of it (`SmTol::GetApproxTol3d` through the curve's edge), where the record's own
+    // curve gives the system's. The tube a touch is found in is `tol`, passed to the solve.
     let curve = edge::evaluation_curve(brep, id)?
         .ok_or(SolidError::invalid_input(OP, "the edge has no curve"))?;
     let curve = &curve;
