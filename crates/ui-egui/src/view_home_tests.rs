@@ -4,7 +4,7 @@ use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::render::StandardView;
+use solidcraft_viewport::StandardView;
 
 /// A block drawn at the origin and extruded, then moved 500 mm along X: its sketch stays at the
 /// origin, used by the extrude (so not drawn).
@@ -25,7 +25,7 @@ fn near_box(a: Aabb3, lo: [f64; 3], hi: [f64; 3]) {
 }
 
 /// The camera Home gives: the iso view framing what is shown.
-fn home(h: &Harness) -> solidcraft_engine::render::Camera {
+fn home(h: &Harness) -> solidcraft_viewport::Camera {
     let mut cam = h.app.cam;
     cam.set_view(StandardView::Iso);
     h.app.fitted(cam)
@@ -37,7 +37,7 @@ fn spot(h: &Harness) -> egui::Pos2 {
     d.left_top() + egui::vec2(d.width() * 0.3, d.height() * 0.7)
 }
 
-fn same_cam(a: &solidcraft_engine::render::Camera, b: &solidcraft_engine::render::Camera) -> bool {
+fn same_cam(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
     a.target.dist(b.target) < 1e-6 && (a.distance - b.distance).abs() < 1e-6 && (a.yaw - b.yaw).abs() < 1e-9 && (a.pitch - b.pitch).abs() < 1e-9
 }
 
@@ -499,4 +499,48 @@ fn navigation_bar_look_at_keeps_the_active_sketch_fallback() {
     assert_eq!(h.app.session.active_sketch, sketch);
     assert_eq!(h.app.session.doc.to_json(), design);
     assert_eq!(h.app.session.undo.len(), undo);
+}
+
+/// In the default orbit mode, orbit turns about the middle of the part of the view the panels
+/// leave free, the middle Home moves the model to (#14651): straight after Home, an orbit keeps
+/// that point still and turns the model about it, with the Browser shown and with it hidden.
+/// Turning about the window's centre instead swung the model off to the side.
+#[test]
+fn orbit_after_home_turns_the_model_in_place_beside_the_browser() {
+    for browser in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        moved_block(&mut h);
+        h.app.ui.show_browser = browser;
+        h.settle();
+        assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
+        let layout = h.app.viewport.layout.clone().unwrap();
+        let middle = layout.middle.center();
+        let aside = middle.x - layout.viewport.center().x;
+        assert_eq!(aside > 50.0, browser, "browser {browser}: the middle of the free view is {aside} pt right of the view's centre");
+        h.app.animate_view("home");
+        h.settle();
+        let rect = h.app.viewport.rect.unwrap();
+        let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
+        // The model's middle, and the point at the camera target's depth under the free view's middle.
+        let centre = crate::viewport::view_bounds(&h.app).center();
+        let (origin, dir) = proj(&h).ray(middle);
+        let back = h.app.cam.back();
+        let pivot = origin + dir * ((h.app.cam.target - origin).dot(back) / dir.dot(back));
+        let before = proj(&h).to_screen(centre).unwrap();
+        // Home moves the model to the free view's middle, as far as the compass and the
+        // navigation bar leave room.
+        let reach = before.distance(middle);
+        assert!((before.x - middle.x).abs() < 1.0 && reach < 40.0, "browser {browser}: Home puts the model at {before:?}, the middle is {middle:?}");
+        let (yaw, pitch) = (h.app.cam.yaw, h.app.cam.pitch);
+        // Fusion's orbit (the default preset): Shift and the middle button.
+        let p = spot(&h);
+        h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x + 60.0, "y1": p.y + 30.0, "button": "middle", "shift": true, "steps": 6}));
+        h.settle();
+        assert!((h.app.cam.yaw - yaw).abs() > 0.1 && (h.app.cam.pitch - pitch).abs() > 0.05, "browser {browser}: the drag orbits");
+        let held = proj(&h).to_screen(pivot).unwrap();
+        assert!(held.distance(middle) < 1.0, "browser {browser}: the free view's middle moved from {middle:?} to {held:?}");
+        let after = proj(&h).to_screen(centre).unwrap();
+        assert!(after.distance(middle) < reach + 1.0, "browser {browser}: the model's middle went from {before:?} to {after:?}");
+    }
 }

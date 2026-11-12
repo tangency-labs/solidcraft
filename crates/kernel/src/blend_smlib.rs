@@ -481,6 +481,18 @@ mod imp {
                     KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow{beside}; {fits}"))
                 }
                 SmError::Unported(why) => KernelError::Invalid(format!("not supported yet: {why}")),
+                // Not too large: a longer setback. Named as building only where solidcore's fill
+                // is the corner; where another patch replaces it (a G2 corner) it is what
+                // solidcore's corner needs, which that patch may not fit.
+                SmError::SetbackTooShort { least, at, builds } => {
+                    let at = at.map(|[x, y, z]| format!(" at ({x:.3}, {y:.3}, {z:.3})")).unwrap_or_default();
+                    let least = crate::blend::trimmed_mm(least);
+                    KernelError::Invalid(if builds {
+                        format!("the setback{at} of the {what} is too short for its corner's fill; {}{least} mm", crate::blend::SETBACK_AT_LEAST)
+                    } else {
+                        format!("the setback{at} of the {what} is too short for its corner's fill: solidcore's corner needs a setback of at least {least} mm")
+                    })
+                }
                 e => failed(what, "operation", e),
             })?;
             // Checked here unless the evaluation's validation mode leaves it to the feature's end

@@ -1340,6 +1340,13 @@ impl OffsetBrep<H> for Two {
     fn edgeuse_is_marked(&self, _k: &Kernel, eu: H, _mark: MarkType) -> solidcore::Result<bool> {
         Ok(self.marked.contains(&eu))
     }
+    fn edgeuse_middle_binormal(&mut self, k: &Kernel, eu: H) -> solidcore::Result<Vec3> {
+        let b = self.brep_m(eu)?;
+        let e = eu1::edge(b, euid(eu))?.ok_or_else(|| invalid("edge use without edge"))?;
+        let middle = ed::interval(b, e)?.evaluate(0.5);
+        let options = eu3::BinormalOptions::default();
+        Ok(eu3::evaluate_binormal(k, b, euid(eu), middle, false, &options)?.binormal)
+    }
     fn edgeuse_normalized_evaluate(
         &mut self,
         k: &Kernel,
@@ -1572,7 +1579,9 @@ fn put_curve(out: &mut Vec<f64>, c: Option<&SmCurve>) -> Result<(), HarnessError
 /// The upstream status code of an error the surface samples report.
 fn status_code(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -2151,8 +2160,8 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(0.0);
             Ok(Some(v))
         }
-        Err(SolidError::Upstream { code, .. }) => {
-            o.push(f64::from(code));
+        Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
+            o.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)));
             Ok(None)
         }
         Err(SolidError::InvalidInput {

@@ -11,7 +11,8 @@
 //! The pinned C++ (v1.0.1) fails the arc round with 1001 too. With only the fork's line added
 //! to `SmAdvSurfaceIntersector::ComputeSingularityPoint` (`SmAdvSurfaceIntersector.cpp`
 //! recompiled and linked ahead of the pinned `libSMLib.a`) it builds one manifold solid of
-//! volume 9531.3100142533 (`SmApiBrepComputeVolume` at 1e-8), the reference below. There is
+//! volume 9531.3100142533 (`SmApiBrepComputeVolume` at 1e-8), the reference below; with
+//! WR-568's span as well, which the default kernel takes, 9531.3100486849. There is
 //! no closed form: the round's ends, on the front round and into the knife edge, are traced.
 //! #1522's second case (a 20 cube, its top back edge rounded r3, then the end face's top
 //! edge r1) builds to the same volume with and without the flag, in the pinned C++ and with
@@ -34,7 +35,7 @@ use solidcore::query::api_queries::{brep_is_manifold_solid, edge_closest_point};
 use solidcore::topology::brep::p1::regions;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{Brep, EdgeId};
-use solidcore::{Kernel, SolidError};
+use solidcore::Kernel;
 
 /// The plate's length, where the arc wall starts: 62 1/6 - 21.
 const PLATE: f64 = 41.0 + 1.0 / 6.0;
@@ -49,6 +50,10 @@ const ARC: [f64; 3] = [48.045114044109852, -5.4635486396119797, 10.0];
 
 /// The pinned C++ with the fork's line: the part after both rounds.
 const BOTH_ROUNDS: f64 = 9531.3100142533;
+/// The same with WR-568's span as well, which the default kernel takes: the fork's one line
+/// in `SmFilletSolver::CalcTorusFilletGeom` (tangency-labs/smlib@985faae) recompiled and
+/// linked ahead too, `SmApiBrepComputeVolume` at 1e-8.
+const BOTH_ROUNDS_SPAN: f64 = 9531.3100486849;
 
 /// The plate joined with the corner box less the cylinder, as the fork's capi test builds it.
 fn part(k: &mut Kernel) -> Brep {
@@ -101,18 +106,13 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// The arc round fails as upstream does: `SmFilletExecutive` status 1001.
 fn assert_refused(r: solidcore::Result<()>) {
     match r {
-        Err(SolidError::Upstream { code: 1001, .. }) => {}
+        Err(e) if solidcore::error::upstream_status(&e) == Some(1001) => {}
         other => panic!("expected status 1001, got {other:?}"),
     }
 }
 
-/// The arc round built one manifold solid that checks clean, of the C++ volume within `tol`
-/// relative.
-fn assert_built(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: f64) {
-    assert_built_to(k, b, r, tol, BOTH_ROUNDS);
-}
-
-/// [`assert_built`] against the volume `want`.
+/// The arc round built one manifold solid that checks clean, of the C++ volume `want` within
+/// `tol` relative.
 fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: f64, want: f64) {
     r.unwrap();
     let infinite = b.infinite_region();
@@ -141,14 +141,15 @@ fn default_kernel_refuses_the_arc_round() {
     assert_refused(r);
 }
 
-/// The default kernel with the flag: the C++ body with the fork's line, to 1e-9 (the gate's
-/// tolerance; the same construction and integration on both sides).
+/// The default kernel with the flag: the C++ body with the fork's line and WR-568's span,
+/// [`BOTH_ROUNDS_SPAN`], to 1e-9 (the gate's tolerance; the same construction and integration
+/// on both sides).
 #[test]
 fn the_flag_builds_the_arc_round() {
     let mut k = Kernel::default();
     k.fixes.ssi_singular_start_inside_direction = true;
     let (mut b, r) = both_rounds(&mut k);
-    assert_built(&mut k, &mut b, r, 1e-9);
+    assert_built_to(&mut k, &mut b, r, 1e-9, BOTH_ROUNDS_SPAN);
 }
 
 /// Every fix with the blend corner End: the arc round's end on the front round, where the

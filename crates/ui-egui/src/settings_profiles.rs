@@ -66,6 +66,7 @@ const PROFILE_KEYS: &[&str] = &[
     "history_sketches",
     "home_fit_size",
     "invert_navigator_arrows",
+    "keep_hover_while_navigating",
     "keep_work_on_tab_switch",
     "language",
     "layout",
@@ -75,6 +76,7 @@ const PROFILE_KEYS: &[&str] = &[
     "look_at_anim",
     "look_at_speed",
     "manipulator_free_alt",
+    "maya_horizontal_zoom",
     "middle_double_click",
     "mouse_gestures",
     "nav",
@@ -113,6 +115,7 @@ const PROFILE_KEYS: &[&str] = &[
     "sketch_face_activates_part",
     "sketch_open_look_at",
     "sketch_recent_snap",
+    "sketch_snap_to_visible_grid",
     "sketch_state_icons",
     "sketch_tab_always",
     "sketch_tracking_guides",
@@ -754,7 +757,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Run before the Preferences window so Escape belongs to this editor, including in a scrolled
 /// page. A separate popup container keeps the shared rename menu accessible and unclipped.
 pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
-    if !app.prefs_window.open || app.prefs_window.section != prefs::PAGE_GENERAL || !app.prefs_window.filter.is_empty() {
+    if !app.prefs_window.shell.open || app.prefs_window.shell.section != prefs::PAGE_GENERAL || !app.prefs_window.shell.filter.is_empty() {
         app.settings_profiles.rename = None;
         return;
     }

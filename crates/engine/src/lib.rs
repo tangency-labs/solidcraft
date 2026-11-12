@@ -20,7 +20,9 @@ pub mod easyprint;
 pub mod frames;
 pub mod fuzz;
 pub mod licences;
+mod mesh_lines;
 pub mod occurrences;
+pub mod origins;
 pub mod panels;
 pub mod params;
 pub mod product_scene;
@@ -50,8 +52,8 @@ use solidcraft_doc::{Document, Model, ModelState};
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command,
-    resolve_design_links, shown_scope, standard_view,
+    Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach,
+    find_command, resolve_design_links, shown_scope, standard_view,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -86,6 +88,10 @@ pub enum EngineError {
     /// A command panicked; the document was kept as it was (a bug: please report it).
     #[error("internal error in `{0}` (the design was kept as it was): {1}")]
     Internal(String, String),
+    /// The work running the command was cancelled ([`solidcraft_doc::progress::Progress::cancel`])
+    /// while it ran: nothing was applied, whatever was computed before the cancel came in.
+    #[error("`{0}` was cancelled; nothing was applied")]
+    Cancelled(String),
 }
 
 impl From<solidcraft_doc::DocError> for EngineError {
@@ -354,7 +360,10 @@ impl Ahead {
         let stop = self.0.stop.clone();
         stop.within(|| {
             let (after, _) = self.0.preview_in_place(commands, Some(step))?;
-            after.world_state()?.warm_display();
+            // Stopped by its watcher: nothing it ends with will be shown.
+            if !solidcraft_doc::progress::cancelled() {
+                after.world_state()?.warm_display();
+            }
             Ok(Evaluated(after.model))
         })
     }
@@ -529,6 +538,12 @@ pub struct Session {
     /// How the host uploads a model to EasyPrint (`file.open_in_easyprint`); `None`: it can't. It
     /// belongs to the session like `param_check`, so it survives opening and starting designs.
     pub easyprint_upload: Option<EasyPrintUpload>,
+    /// Whether print faces (`body.print_face`) are saved with the design and kept when one is
+    /// opened (#11512). On by default, so scripts and the command line keep them; the app sets it
+    /// from its "Keep print faces" preference, which is off unless the user turns it on. Off: a
+    /// save leaves them out of the file and an opened design starts without them. The user's,
+    /// like `param_check`, so it survives opening and starting designs.
+    pub keep_print_faces: bool,
     /// After a live frame: its sketch, the document it left and the revision. Its links were
     /// brought up to date by that frame, so the gesture's next frame needn't project them again
     /// while nothing else has run (#3222).
@@ -618,7 +633,7 @@ pub struct Session {
     /// The camera `view.apply` asked the view to use (view state, not saved). The desktop app
     /// moves its viewport there and takes it; headless renders keep using it until a standard
     /// view is chosen.
-    pub camera: Option<render::Camera>,
+    pub camera: Option<solidcraft_viewport::Camera>,
     /// Host-owned viewport metadata, never saved or included in history.
     render_viewport: Option<Arc<render::ExecutorDescriptor>>,
     render_jobs: render_jobs::Jobs,
@@ -742,8 +757,8 @@ pub enum CombPick {
 
 impl SurfaceAnalysis {
     /// How a picture shades the faces for this analysis.
-    pub fn mode(self) -> render::AnalysisMode {
-        use render::AnalysisMode as M;
+    pub fn mode(self) -> solidcraft_viewport::AnalysisMode {
+        use solidcraft_viewport::AnalysisMode as M;
         match self {
             SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes },
             SurfaceAnalysis::Draft { pull, angle } => M::Draft { pull, angle },
@@ -786,14 +801,21 @@ impl Session {
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
-        let doc = Arc::new(doc);
+        let mut doc = Arc::new(doc);
         // A model saved under another check mode holds that mode's results: evaluated again.
-        let model = Self::saved_model(&doc, saved).filter(|model| model.validation() == validation).unwrap_or_else(|| {
-            let mut model = Model::new();
-            model.set_validation(validation);
-            model.evaluate_shared(&doc);
-            model
-        });
+        let model = match Self::saved_model(&doc, saved).filter(|model| model.validation() == validation) {
+            Some(model) => model,
+            None => {
+                // Stored body names follow the numbering of the STEP reader that inserted each
+                // file; this version's reader may number the bodies otherwise (#13382). The
+                // reads are held so the evaluation doesn't read the files again.
+                let _reads = cmd::realign_imports(Arc::make_mut(&mut doc));
+                let mut model = Model::new();
+                model.set_validation(validation);
+                model.evaluate_shared(&doc);
+                model
+            }
+        };
         Self::with_model(doc, visibility, model)
     }
 
@@ -834,6 +856,7 @@ impl Session {
             project_construction: false,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
+            keep_print_faces: true,
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
@@ -900,6 +923,7 @@ impl Session {
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
+        let keep_print_faces = self.keep_print_faces;
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
@@ -920,6 +944,7 @@ impl Session {
         self.set_single_surface_analysis(single_surface_analysis);
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
+        self.keep_print_faces = keep_print_faces;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
         self.checkpoints = checkpoints;
@@ -1278,8 +1303,12 @@ impl Session {
 
     /// A component by its id or name, or by the name of one of its placements (`K:2`); never the
     /// root.
-    pub(crate) fn component_or_placement(&self, key: &str) -> Option<u64> {
-        self.doc.find_component(key).or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component)).filter(|id| *id != 0)
+    pub(crate) fn component_or_placement(&self, key: &str) -> solidcraft_doc::Result<Option<u64>> {
+        Ok(self
+            .doc
+            .resolve_component(key)?
+            .or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component))
+            .filter(|id| *id != 0))
     }
 
     /// Number of live-model evaluations after this session's initialization.
@@ -1695,6 +1724,9 @@ impl Session {
         // Picks in the world go into their component's frame (once: commands run by commands
         // already have them there).
         let (_nested, outermost) = frames::Nested::enter(spec.id);
+        if outermost {
+            frames::reset_inner_undoable();
+        }
         let mapped = if outermost {
             frames::forget_picks();
             frames::to_local(self, spec.id, params)?
@@ -1718,9 +1750,21 @@ impl Session {
                 Err(EngineError::Internal(spec.id.to_string(), msg))
             }
         };
+        // Cancelled while it ran: no result, even one finished before the cancel came in, and
+        // the design goes back as it was (solidcore#3247). Opening, starting or recovering a
+        // design (which replaces the session) keeps its own Cancel: the features not yet built
+        // are skipped and what is built so far is shown (#10577).
+        let r = if solidcraft_doc::progress::cancelled() && self.replacements == replacements {
+            Err(EngineError::Cancelled(spec.id.to_string()))
+        } else {
+            r
+        };
         // The kernel's internal errors come up without the command's id.
         let r = r.map_err(|e| match e {
-            EngineError::Internal(id, msg) if id.is_empty() => EngineError::Internal(spec.id.to_string(), msg),
+            EngineError::Internal(id, msg) if id.is_empty() => {
+                crash::kernel_caught();
+                EngineError::Internal(spec.id.to_string(), msg)
+            }
             e => e,
         });
         // A value typed as `name = expression` defines the user parameter `name` (#4071), in the
@@ -1772,7 +1816,18 @@ impl Session {
                     let render_only = self.replacements == replacements && self.render_only_change(&before);
                     let display_only = !changed && hidden;
                     let previous_doc = before.doc.clone();
-                    if spec.undoable {
+                    // One undo step per command: the outermost one saves it, for itself or for an
+                    // undoable command it ran (#12393), unless it replaced the session (opening a design starts
+                    // a fresh history). A command run inside another saves none.
+                    let saves = if outermost {
+                        spec.undoable || (frames::inner_undoable() && self.replacements == replacements)
+                    } else {
+                        if spec.undoable {
+                            frames::note_inner_undoable();
+                        }
+                        false
+                    };
+                    if saves {
                         self.undo.push(before);
                         if self.undo.len() > MAX_UNDO {
                             self.undo.remove(0);
@@ -1955,6 +2010,7 @@ impl Session {
             project_construction: self.project_construction,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
+            keep_print_faces: self.keep_print_faces,
             live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
@@ -2399,6 +2455,8 @@ mod hole_reference_tests;
 #[cfg(test)]
 mod large_assembly_tests;
 #[cfg(test)]
+mod loft_sheet_tests;
+#[cfg(test)]
 mod measure_centre_tests;
 #[cfg(test)]
 mod measure_surface_tests;
@@ -2501,6 +2559,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        notes,
         visibility,
         next_component_color_index,
     } = a;
@@ -2537,6 +2596,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
         && *named_views == b.named_views
+        && *notes == b.notes
         && *visibility == b.visibility
         && *next_component_color_index == b.next_component_color_index
 }

@@ -15,22 +15,29 @@
 //! | [`SM_ERR_OFFSET_WALLS_TOUCH`], [`SM_ERR_OFFSET_EDGE_VANISHES`], [`SolidError::is_offset_edge_vanishes`] | the fork's `SmMessages.h` statuses 1042, 1043 |
 //! | [`SM_TRUE`], [`SM_FALSE`], [`SM_UNSURE`] | `TRUE`, `FALSE`, `UNSURE` of an `SmBoolean` (`SmTypes.h`) |
 //! | [`SM_ERR_NULL_POINTER`], [`SolidError::null_pointer`] | `SM_ERR_NULL_POINTER`, `NER(...)` on `NULL` |
-//! | [`SolidError::Nlib`], [`SolidError::nlib`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`) |
 //! | [`SolidError::Unported`], [`SolidError::unported`], [`SolidError::is_unported`] | (none: call into a unit not ported yet) |
 //! | [`SolidError::Cancelled`], [`SolidError::cancelled`], [`SolidError::is_cancelled`] | (none: cooperative cancellation on [`crate::Kernel`]) |
 //! | [`SolidError::invalid_input`] | (none: out-of-range reads / null dereferences upstream) |
 //! | `ignored`, `ignore_status` (crate) | a call whose `SmStatus` upstream ignores    |
 //! | `checked_or_ignored` (crate) | per-call opt-in status policy (#483); legacy helpers unchanged |
 //! | `native_failure` (crate)  | a call whose failing `SmStatus` upstream handles (internal errors propagate) |
-//! | [`NlibCode`]                | `NL_*_ERR` numbers (`source/SMLib/inc/NL_DataStruct.h`) |
 //! | `?` operator                | `SER(...)` / `NER(...)` (return on error)        |
 //! | [`SolidError::Failed`], [`Failure`], [`Reason`] | none: a failure in solidcore's own terms (#2615) |
 //! | [`ErrorKind`], [`SolidError::kind`] | none: solidcore's stable error codes (#2615) |
 //! | [`offset::OffsetFailure`]   | none: the offset subsystem's refusals (#2615)    |
+//! | [`boolean::BooleanFailure`] | none: the Boolean operation's failures           |
+//! | [`nurbs::NurbsFailure`], [`nurbs::BSplineFailure`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`): the `NL_*_ERR` numbers, in solidcore's terms |
+//! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
+//! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
+//! | [`curve::CurveFailure`]     | none: why a curve query refuses, and the curve routines' failures |
+//! | [`query::QueryFailure`]     | none: the query routines' failures               |
+//! | [`topology::TopologyFailure`] | none: the topology routines' failures          |
+//! | [`surface::SurfaceFailure`] | none: the surface routines' failures             |
+//! | [`blend::BlendFailure`]     | none: the blend routines' failures               |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
-//! error number in the process-wide `NL_ERROR` record; solidcore returns
-//! [`SolidError::Nlib`] carrying that number as an [`NlibCode`] instead.
+//! error number in the process-wide `NL_ERROR` record; solidcore returns a
+//! [`SolidError::Failed`] with a [`nurbs::NurbsFailure`] reason instead.
 //!
 //! Every variant names the `operation` (a `&'static str`, by convention the Rust path
 //! of the failing function, e.g. `"geom::vector3d::Vec3::unitize"`) so that errors surfaced to
@@ -46,7 +53,8 @@
 //!   (`"offset::offset_executive::crossing_loops::resolve_crossing_loops"`);
 //! - `reason`: a typed [`Reason`] naming what failed, on which entity, with the key
 //!   values (a size, a distance, a gap, a tolerance). Each subsystem's reasons are one
-//!   enum in a submodule of this module ([`offset::OffsetFailure`]), so the taxonomy
+//!   enum in a submodule of this module ([`offset::OffsetFailure`],
+//!   [`boolean::BooleanFailure`]), so the taxonomy
 //!   stays in one place;
 //! - `entity`: the entity the failure is about, in the caller's B-rep where there is one;
 //! - `cause`: the error of the stage this failure comes from. Where a caller turns a
@@ -65,14 +73,30 @@
 //! [`SolidError::sm_status`] is the one hook that reads it, for difftest (and the FFI
 //! side) only. It is not a public field, never part of a message, and not for callers.
 //!
-//! **Retiring "upstream".** The goal is no [`SolidError::Upstream`] (nor `Nlib`,
+//! **Retiring "upstream".** The goal is no [`SolidError::Upstream`] (nor
 //! `FilletRefused`) variant and no "upstream status" text in the public API. They are
 //! the pre-#2615 shape: subsystems move their sites to [`SolidError::Failed`] one PR at
 //! a time (offset first), and the variants go when their last site does. Then
 //! `sm_status` and the status numbers here move to a comparison-only module (or to
 //! difftest and the FFI), since nothing but the comparison needs them.
 
+#[cfg(test)]
+mod bare_scan;
+pub mod blend;
+pub mod boolean;
+pub mod curve;
+pub mod defeature;
+pub mod geom;
+pub mod heal;
+pub mod intersect;
+pub mod mass;
+pub mod nurbs;
 pub mod offset;
+pub mod primitive;
+pub mod query;
+pub mod surface;
+pub mod sweep;
+pub mod topology;
 
 use crate::topology::{
     BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId, VertexId,
@@ -304,16 +328,6 @@ pub enum SolidError {
         entity: Option<EntityRef>,
     },
 
-    /// An NLib routine failed (upstream: returned its error flag after `N_ErrSet`
-    /// stored `code` in the global `NL_ERROR.eno`).
-    #[error("{operation}: NLib error {code:?} ({})", .code.code())]
-    Nlib {
-        /// Operation that failed.
-        operation: &'static str,
-        /// Upstream NLib error number.
-        code: NlibCode,
-    },
-
     /// A port-side invariant or adapter failure with no upstream `SmStatus`: an owner,
     /// handle or identity the port could not resolve where upstream follows a pointer
     /// (e.g. a B-rep cache owner that is not in the source B-rep under the caller's
@@ -347,8 +361,8 @@ pub enum SolidError {
         operation: &'static str,
     },
 
-    /// A fillet refused as too large, with the largest size that builds it (opt-in
-    /// `fixes.fillet_gn_section_generator`; the fork's `GetFitRadius`, `GetFitEdge` and
+    /// A fillet refused as too large, with the largest size that builds it (the fork's
+    /// `GetFitRadius`, `GetFitEdge` and
     /// `GetFitKind`, which its capi's `smlib_blend_fit_size` reads, tangency-labs/smlib#79,
     /// WR-696). Returned in place of [`SolidError::Upstream`] with the same `code` (so
     /// [`SolidError::sm_status`] is unchanged) only when the refusal's cause has a size; a
@@ -418,6 +432,20 @@ pub enum SolidError {
         distance: Option<f64>,
     },
 
+    /// A blend face's definition, read from a record, whose net it does not certify: the net is
+    /// not proved within the definition's bound `eps` of S (docs/definitions-and-certificates.md
+    /// §4.5), so the face is refused, never kept with a larger bound. Not upstream; its
+    /// [`SolidError::sm_status`] is `None`.
+    #[error("{operation}: the definition of {face} does not certify its net within {eps}")]
+    DefinitionNotCertified {
+        /// Operation that read the definition.
+        operation: &'static str,
+        /// The face.
+        face: EntityRef,
+        /// The bound ε the definition states.
+        eps: f64,
+    },
+
     /// The operation needs an upstream routine whose unit is not ported yet (a
     /// plan back-edge). Returned instead of panicking or faking a result; every
     /// site carries a `// UNPORTED(<unit id>): <C++ symbol>` comment so the
@@ -431,67 +459,6 @@ pub enum SolidError {
         /// Plan unit id that will port it (e.g. `"geom.curve"`).
         unit: &'static str,
     },
-}
-
-/// NLib error numbers (`NL_*_ERR`, `source/SMLib/inc/NL_DataStruct.h`); the
-/// discriminant is the upstream value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum NlibCode {
-    /// `NL_CUR_ERR`: curve definition error (e.g. `n+p+1 != m`).
-    Curve = 1,
-    /// `NL_SUR_ERR`: surface definition error.
-    Surface = 2,
-    /// `NL_DEG_ERR`: degree limit error (`p > NL_MAXDEG`).
-    Degree = 3,
-    /// `NL_KNT_ERR`: knot vector error (e.g. `U[i] > U[i+1]`).
-    Knot = 4,
-    /// `NL_WEI_ERR`: weight error (negative or too small).
-    Weight = 5,
-    /// `NL_PAR_ERR`: parameter value error (e.g. `u < U[0]`).
-    Parameter = 6,
-    /// `NL_IND_ERR`: index range error (e.g. `i < 0`).
-    Index = 7,
-    /// `NL_DER_ERR`: derivative value error (e.g. `C'(u) = 0`).
-    Derivative = 8,
-    /// `NL_STO_ERR`: insufficient storage.
-    Storage = 9,
-    /// `NL_MAT_ERR`: math function error (e.g. domain error).
-    Math = 10,
-    /// `NL_NUM_ERR`: numerical failure (e.g. zero division).
-    Numerical = 11,
-    /// `NL_CON_ERR`: convergence failure.
-    Convergence = 12,
-    /// `NL_CAL_ERR`: error in called routine.
-    Call = 13,
-    /// `NL_INP_ERR`: input data is corrupt.
-    Input = 14,
-    /// `NL_MEM_ERR`: memory allocation error.
-    Memory = 15,
-    /// `NL_SEQ_ERR`: system of equations error (e.g. singular).
-    Equations = 16,
-    /// `NL_GEO_ERR`: geometric operation failure.
-    Geometry = 17,
-    /// `NL_FIL_ERR`: cannot open file.
-    File = 18,
-    /// `NL_TOL_ERR`: tolerance error.
-    Tolerance = 19,
-    /// `NL_MXD_ERR`: derivative limit error (`der > NL_MAXDER`).
-    MaxDerivative = 20,
-    /// `NL_KML_ERR`: knot multiplicity error (multiplicity > degree).
-    KnotMultiplicity = 21,
-    /// `NL_CUR_REV`: curve end control points reverse direction.
-    CurveReversed = 22,
-    /// `NL_SCN_ERR`: scan (read) error.
-    Scan = 23,
-}
-
-impl NlibCode {
-    /// The upstream `NL_*_ERR` number.
-    #[must_use]
-    pub fn code(self) -> i32 {
-        self as i32
-    }
 }
 
 // ---- SmStatus codes -------------------------------------------------------------------
@@ -659,6 +626,14 @@ impl Failure {
         self
     }
 
+    /// The same failure, with `status` as the one the pinned C++ reports for it (a
+    /// comparison detail, for a failure whose phrase is not a typed reason).
+    #[must_use]
+    pub(crate) fn with_status(mut self, status: i32) -> Self {
+        self.status = status;
+        self
+    }
+
     /// The failure's stable [`ErrorKind`].
     #[must_use]
     pub fn kind(&self) -> ErrorKind {
@@ -684,7 +659,12 @@ impl core::fmt::Display for Failure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}: {}", self.operation, self.reason)?;
         // a reason that names no entity of its own is followed by the failure's
-        if let (Reason::Failed(_), Some(entity)) = (&self.reason, self.entity) {
+        let names_none = match &self.reason {
+            Reason::Failed(_) | Reason::Topology(_) | Reason::Blend(_) => true,
+            Reason::Offset(o) => o.replaces_upstream_status(),
+            _ => false,
+        };
+        if let (true, Some(entity)) = (names_none, self.entity) {
             write!(f, " ({entity})")?;
         }
         if let Some(cause) = &self.cause {
@@ -705,6 +685,50 @@ pub enum Reason {
     Failed(&'static str),
     /// An offset, shell, thicken or local operation refused.
     Offset(offset::OffsetFailure),
+    /// A NURBS routine failed.
+    Nurbs(nurbs::NurbsFailure),
+    /// A Boolean operation failed.
+    Boolean(boolean::BooleanFailure),
+    /// A defeature kept a feature on its base: its patch is not built (#3218).
+    Defeature(defeature::DefeatureFailure),
+    /// An intersection or classification failed.
+    Intersect(intersect::IntersectFailure),
+    /// A primitive, extrusion, revolution, skin or taper failed.
+    Primitive(primitive::PrimitiveFailure),
+    /// A sweep or loft refused (#3140).
+    Sweep(sweep::SweepFailure),
+    /// A mass-property integration or enclosure computation failed.
+    Mass(mass::MassFailure),
+    /// A healing or stitching step failed.
+    Heal(heal::HealFailure),
+    /// A geometry utility (linear algebra, transforms, boxes, solvers, tolerances,
+    /// attributes) failed.
+    Geom(geom::GeomFailure),
+    /// A curve query refused (#3184).
+    Curve(curve::CurveFailure),
+    /// A query failed.
+    Query(query::QueryFailure),
+    /// A topology routine failed.
+    Topology(topology::TopologyFailure),
+    /// A surface routine failed.
+    Surface(surface::SurfaceFailure),
+    /// A blend routine failed.
+    Blend(blend::BlendFailure),
+    /// A blend certificate's feet box runs past a support's net in a direction the
+    /// support's kind does not continue (not upstream, tangency-labs/solidcraft#14284):
+    /// support `support` (0 or 1) over the leader's piece `s`, the box `uv` against the net's
+    /// `domain` (each `[[u_lo, u_hi], [v_lo, v_hi]]`). Nothing past the net is the face
+    /// there, so the piece is refused, never assumed.
+    FootPastDomainEnd {
+        /// Which support.
+        support: usize,
+        /// The leader's piece the feet were enclosed over.
+        s: [f64; 2],
+        /// The feet's box on that support.
+        uv: [[f64; 2]; 2],
+        /// The support net's domain.
+        domain: [[f64; 2]; 2],
+    },
 }
 
 impl Reason {
@@ -712,8 +736,23 @@ impl Reason {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match self {
-            Self::Failed(_) => None,
+            Self::Failed(_)
+            | Self::Nurbs(_)
+            | Self::Defeature(_)
+            | Self::Intersect(_)
+            | Self::Primitive(_)
+            | Self::Sweep(_)
+            | Self::Mass(_)
+            | Self::Heal(_)
+            | Self::Geom(_)
+            | Self::Curve(_)
+            | Self::Query(_)
+            | Self::Topology(_)
+            | Self::Surface(_)
+            | Self::Blend(_)
+            | Self::FootPastDomainEnd { .. } => None,
             Self::Offset(o) => o.entity(),
+            Self::Boolean(b) => b.entity(),
         }
     }
 
@@ -721,8 +760,22 @@ impl Reason {
     /// comparison detail).
     pub(crate) fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) => SM_ERR,
+            Self::Failed(_) | Self::FootPastDomainEnd { .. } => SM_ERR,
             Self::Offset(o) => o.comparison_status(),
+            Self::Nurbs(n) => n.comparison_status(),
+            Self::Boolean(b) => b.comparison_status(),
+            Self::Defeature(d) => d.comparison_status(),
+            Self::Intersect(i) => i.comparison_status(),
+            Self::Primitive(p) => p.comparison_status(),
+            Self::Sweep(w) => w.comparison_status(),
+            Self::Mass(m) => m.comparison_status(),
+            Self::Heal(h) => h.comparison_status(),
+            Self::Geom(g) => g.comparison_status(),
+            Self::Curve(c) => c.comparison_status(),
+            Self::Query(q) => q.comparison_status(),
+            Self::Topology(t) => t.comparison_status(),
+            Self::Surface(s) => s.comparison_status(),
+            Self::Blend(b) => b.comparison_status(),
         }
     }
 
@@ -731,7 +784,22 @@ impl Reason {
     pub(crate) fn kind_given(&self, status: i32) -> ErrorKind {
         match self {
             Self::Failed(_) => ErrorKind::of_status(status),
+            Self::FootPastDomainEnd { .. } => ErrorKind::OutsideDomain,
             Self::Offset(o) => o.kind(),
+            Self::Nurbs(n) => n.kind(),
+            Self::Boolean(b) => b.kind(),
+            Self::Defeature(d) => d.kind(),
+            Self::Intersect(i) => i.kind(),
+            Self::Primitive(p) => p.kind(),
+            Self::Sweep(w) => w.kind(),
+            Self::Mass(m) => m.kind(),
+            Self::Heal(h) => h.kind(),
+            Self::Geom(g) => g.kind(),
+            Self::Curve(c) => c.kind(),
+            Self::Query(q) => q.kind(),
+            Self::Topology(t) => t.kind(),
+            Self::Surface(s) => s.kind(),
+            Self::Blend(b) => b.kind(),
         }
     }
 }
@@ -741,13 +809,121 @@ impl core::fmt::Display for Reason {
         match self {
             Self::Failed(what) => f.write_str(what),
             Self::Offset(o) => o.fmt(f),
+            Self::Nurbs(n) => n.fmt(f),
+            Self::Boolean(b) => b.fmt(f),
+            Self::Defeature(d) => d.fmt(f),
+            Self::Intersect(i) => i.fmt(f),
+            Self::Primitive(p) => p.fmt(f),
+            Self::Sweep(w) => w.fmt(f),
+            Self::Mass(m) => m.fmt(f),
+            Self::Heal(h) => h.fmt(f),
+            Self::Geom(g) => g.fmt(f),
+            Self::Curve(c) => c.fmt(f),
+            Self::Query(q) => q.fmt(f),
+            Self::Topology(t) => t.fmt(f),
+            Self::Surface(s) => s.fmt(f),
+            Self::Blend(b) => b.fmt(f),
+            Self::FootPastDomainEnd {
+                support,
+                s,
+                uv,
+                domain,
+            } => write!(
+                f,
+                "a foot past its face's domain end: support {support} over the piece s in [{}, {}], its box u [{}, {}] v [{}, {}] past the net's domain u [{}, {}] v [{}, {}], in a direction its kind does not continue",
+                s[0], s[1], uv[0][0], uv[0][1], uv[1][0], uv[1][1], domain[0][0], domain[0][1], domain[1][0], domain[1][1]
+            ),
         }
+    }
+}
+
+impl From<boolean::BooleanFailure> for Reason {
+    fn from(b: boolean::BooleanFailure) -> Self {
+        Self::Boolean(b)
+    }
+}
+
+impl From<nurbs::NurbsFailure> for Reason {
+    fn from(n: nurbs::NurbsFailure) -> Self {
+        Self::Nurbs(n)
+    }
+}
+
+impl From<defeature::DefeatureFailure> for Reason {
+    fn from(d: defeature::DefeatureFailure) -> Self {
+        Self::Defeature(d)
+    }
+}
+
+impl From<intersect::IntersectFailure> for Reason {
+    fn from(i: intersect::IntersectFailure) -> Self {
+        Self::Intersect(i)
+    }
+}
+
+impl From<primitive::PrimitiveFailure> for Reason {
+    fn from(p: primitive::PrimitiveFailure) -> Self {
+        Self::Primitive(p)
+    }
+}
+
+impl From<mass::MassFailure> for Reason {
+    fn from(m: mass::MassFailure) -> Self {
+        Self::Mass(m)
+    }
+}
+
+impl From<heal::HealFailure> for Reason {
+    fn from(h: heal::HealFailure) -> Self {
+        Self::Heal(h)
+    }
+}
+
+impl From<geom::GeomFailure> for Reason {
+    fn from(g: geom::GeomFailure) -> Self {
+        Self::Geom(g)
     }
 }
 
 impl From<offset::OffsetFailure> for Reason {
     fn from(o: offset::OffsetFailure) -> Self {
         Self::Offset(o)
+    }
+}
+
+impl From<sweep::SweepFailure> for Reason {
+    fn from(w: sweep::SweepFailure) -> Self {
+        Self::Sweep(w)
+    }
+}
+
+impl From<curve::CurveFailure> for Reason {
+    fn from(c: curve::CurveFailure) -> Self {
+        Self::Curve(c)
+    }
+}
+
+impl From<query::QueryFailure> for Reason {
+    fn from(q: query::QueryFailure) -> Self {
+        Self::Query(q)
+    }
+}
+
+impl From<topology::TopologyFailure> for Reason {
+    fn from(t: topology::TopologyFailure) -> Self {
+        Self::Topology(t)
+    }
+}
+
+impl From<surface::SurfaceFailure> for Reason {
+    fn from(s: surface::SurfaceFailure) -> Self {
+        Self::Surface(s)
+    }
+}
+
+impl From<blend::BlendFailure> for Reason {
+    fn from(b: blend::BlendFailure) -> Self {
+        Self::Blend(b)
     }
 }
 
@@ -912,8 +1088,9 @@ impl SolidError {
 
     /// Maps the error of a failed NLib call inside an `Sm*` method to `SM_ERR` (upstream
     /// `if (NL_YES == N_...) SER(SM_ERR)`), letting [`SolidError::Unported`] and
-    /// [`SolidError::Cancelled`] through.
-    /// Use as `.map_err(SolidError::nl_ser(OP))`.
+    /// [`SolidError::Cancelled`] through. Being replaced by
+    /// [`SolidError::nurbs_routine`], which keeps the error as the cause.
+    /// Pass `nl_ser(OP)` to `map_err`.
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
@@ -944,9 +1121,6 @@ impl SolidError {
     ///
     /// - [`SolidError::Upstream`]: its `code`.
     /// - [`SolidError::Failed`]: its failure's `status`.
-    /// - [`SolidError::Nlib`]: [`SM_ERR`]. The `Sm*` callers of an NLib routine
-    ///   surface its failure as `SER(SM_ERR)` (`if (NL_YES == N_...) SER(SM_ERR)`;
-    ///   `nl_ser`), never as the `NL_*_ERR` number.
     /// - Every other variant: `None`. [`SolidError::InvalidInput`],
     ///   [`SolidError::NotFound`], [`SolidError::Degenerate`],
     ///   [`SolidError::NotConverged`] and [`SolidError::Unsupported`] are used both for
@@ -962,7 +1136,6 @@ impl SolidError {
             | Self::BlendRefused { code, .. }
             | Self::RoundRefused { code, .. } => Some(*code),
             Self::Failed(f) => Some(f.status),
-            Self::Nlib { .. } => Some(SM_ERR),
             Self::InvalidInput { .. }
             | Self::NotFound { .. }
             | Self::Degenerate { .. }
@@ -974,7 +1147,45 @@ impl SolidError {
             | Self::FaceTrimsUnavailable { .. }
             | Self::UnsureRegion { .. }
             | Self::ExtendRefused { .. }
+            | Self::DefinitionNotCertified { .. }
             | Self::Unported { .. } => None,
+        }
+    }
+
+    /// The status of an error that answers with an `SmStatus` the way a
+    /// [`SolidError::Upstream`] does: its `code`, or the status of a failure that replaced
+    /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
+    /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
+    /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
+    /// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`], [`curve::CurveFailure`] or
+    /// [`offset::OffsetFailure`] or [`blend::BlendFailure`] that replaced one
+    /// ([`sweep::SweepFailure::replaces_upstream_status`],
+    /// [`curve::CurveFailure::replaces_upstream_status`],
+    /// [`offset::OffsetFailure::replaces_upstream_status`],
+    /// [`blend::BlendFailure::replaces_upstream_status`])). The callers that branch on an
+    /// upstream status use it so that they treat both alike; it goes with `Upstream` in
+    /// the last PR of the typed-errors work.
+    #[must_use]
+    pub(crate) fn upstream_status(&self) -> Option<i32> {
+        match self {
+            Self::Upstream { code, .. } => Some(*code),
+            Self::Failed(f) => match &f.reason {
+                Reason::Nurbs(nurbs::NurbsFailure::BSpline(_))
+                | Reason::Intersect(_)
+                | Reason::Primitive(_)
+                | Reason::Mass(_)
+                | Reason::Heal(_)
+                | Reason::Geom(_)
+                | Reason::Query(_)
+                | Reason::Topology(_)
+                | Reason::Surface(_) => Some(f.status),
+                Reason::Sweep(w) if w.replaces_upstream_status() => Some(f.status),
+                Reason::Curve(c) if c.replaces_upstream_status() => Some(f.status),
+                Reason::Offset(o) if o.replaces_upstream_status() => Some(f.status),
+                Reason::Blend(b) if b.replaces_upstream_status() => Some(f.status),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -1028,7 +1239,9 @@ impl SolidError {
     #[must_use]
     pub fn kind(&self) -> ErrorKind {
         match self {
-            Self::InvalidInput { .. } => ErrorKind::InvalidInput,
+            Self::InvalidInput { .. } | Self::DefinitionNotCertified { .. } => {
+                ErrorKind::InvalidInput
+            }
             Self::NotFound { .. } => ErrorKind::NotFound,
             Self::Degenerate { .. } => ErrorKind::Degenerate,
             Self::NotConverged { .. } => ErrorKind::NotConverged,
@@ -1038,10 +1251,6 @@ impl SolidError {
             }
             Self::FaceTrimsUnavailable { .. } => ErrorKind::FaceTrimsUnavailable,
             Self::Upstream { code, .. } => ErrorKind::of_status(*code),
-            Self::Nlib { code, .. } => match code {
-                NlibCode::Convergence => ErrorKind::NotConverged,
-                _ => ErrorKind::Failed,
-            },
             Self::PortInvariant { .. } => ErrorKind::PortInvariant,
             Self::PreparationRequired { .. } => ErrorKind::PreparationRequired,
             Self::Cancelled { .. } => ErrorKind::Cancelled,
@@ -1055,10 +1264,36 @@ impl SolidError {
     }
 
     /// True for a solidcore-side failure rather than a failure of the operation on its
-    /// input ([`ErrorKind::is_port_failure`], #1452).
+    /// input ([`ErrorKind::is_port_failure`], #1452). It follows the cause chain: a
+    /// failure whose kept cause ([`SolidError::cause`], down to
+    /// [`SolidError::root_cause`]) is a solidcore-side failure is one too, so a caller that
+    /// skips an entity where the operation fails on it does not skip when the stage that
+    /// failed was an unported call or a missing preparation.
     #[must_use]
     pub fn is_port_failure(&self) -> bool {
-        self.kind().is_port_failure()
+        let mut e = self;
+        loop {
+            if e.kind().is_port_failure() {
+                return true;
+            }
+            match e.cause() {
+                Some(cause) => e = cause,
+                None => return false,
+            }
+        }
+    }
+
+    /// True when the error is a kernel status the operation answers with, and so stands for
+    /// "no answer" rather than a failure of the call: it is exactly a status
+    /// ([`SolidError::sm_status`]) and nothing in its cause chain ([`SolidError::cause`]) is a
+    /// solidcore-side failure ([`SolidError::is_port_failure`]) or a cancellation
+    /// ([`SolidError::is_cancelled`]). A stage that failed because a call was unported, or
+    /// because the caller cancelled, is no answer of the operation on its input.
+    #[must_use]
+    pub fn is_status_answer(&self) -> bool {
+        self.sm_status().is_some()
+            && !self.is_port_failure()
+            && !std::iter::successors(Some(self), |e| e.cause()).any(Self::is_cancelled)
     }
 
     /// The failure in solidcore's terms, for a [`SolidError::Failed`].
@@ -1100,11 +1335,19 @@ impl SolidError {
             .into_error()
     }
 
-    /// [`SolidError::Nlib`] with the upstream error number `code` (NLib's
-    /// `N_ErrSet(.., code, ..)` followed by an error return).
-    #[must_use]
-    pub const fn nlib(operation: &'static str, code: NlibCode) -> Self {
-        Self::Nlib { operation, code }
+    /// [`SolidError::Failed`] for a stage that failed, as the phrase says, with status
+    /// [`SM_ERR`] (upstream `return SE(SM_ERR)`).
+    pub(crate) fn stage_failed(operation: &'static str, what: &'static str) -> Self {
+        Failure::new(operation, Reason::Failed(what)).into_error()
+    }
+
+    /// [`SolidError::Failed`] for an entity a stage needs that is not there, as the phrase
+    /// says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL`
+    /// pointer); its kind is [`ErrorKind::Missing`].
+    pub(crate) fn entity_missing(operation: &'static str, what: &'static str) -> Self {
+        Failure::new(operation, Reason::Failed(what))
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
     }
 
     /// The operation that produced this error (for [`SolidError::Unported`], the
@@ -1124,7 +1367,7 @@ impl SolidError {
             | Self::BlendRefused { operation, .. }
             | Self::RoundRefused { operation, .. }
             | Self::ExtendRefused { operation, .. }
-            | Self::Nlib { operation, .. }
+            | Self::DefinitionNotCertified { operation, .. }
             | Self::PreparationRequired { operation }
             | Self::FaceTrimsUnavailable { operation, .. }
             | Self::Cancelled { operation } => operation,
@@ -1137,9 +1380,9 @@ impl SolidError {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match self {
-            Self::NotFound { entity, .. } | Self::FaceTrimsUnavailable { entity, .. } => {
-                Some(*entity)
-            }
+            Self::NotFound { entity, .. }
+            | Self::FaceTrimsUnavailable { entity, .. }
+            | Self::DefinitionNotCertified { face: entity, .. } => Some(*entity),
             Self::UnsureRegion { region, .. } => Some(EntityRef::Region(*region)),
             Self::Degenerate { entity, .. }
             | Self::Upstream { entity, .. }
@@ -1151,13 +1394,32 @@ impl SolidError {
             | Self::Unsupported { .. }
             | Self::PortInvariant { .. }
             | Self::ExtendRefused { .. }
-            | Self::Nlib { .. }
             | Self::Unported { .. }
             | Self::Cancelled { .. }
             | Self::RoundRefused { .. }
             | Self::PreparationRequired { .. } => None,
         }
     }
+}
+
+/// The status `error` answers with the way a [`SolidError::Upstream`] does: an
+/// `Upstream`'s code, or the status of a failure that replaced an `Upstream` site
+/// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
+/// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
+/// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
+/// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`], [`curve::CurveFailure`] or
+/// [`offset::OffsetFailure`] or [`blend::BlendFailure`] that replaced one
+/// ([`sweep::SweepFailure::replaces_upstream_status`],
+/// [`curve::CurveFailure::replaces_upstream_status`],
+/// [`offset::OffsetFailure::replaces_upstream_status`],
+/// [`blend::BlendFailure::replaces_upstream_status`])).
+///
+/// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
+/// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the
+/// [`Reason`].
+#[must_use]
+pub fn upstream_status(error: &SolidError) -> Option<i32> {
+    error.upstream_status()
 }
 
 #[cfg(test)]
@@ -1174,7 +1436,7 @@ mod tests {
                 operation: "ray",
                 entity: None,
             },
-            SolidError::nlib("ray", NlibCode::Numerical),
+            SolidError::nurbs("ray", nurbs::NurbsFailure::Numerical),
         ];
         for e in native {
             assert_eq!(native_failure::<()>(Err(e)), Ok(None));
@@ -1204,6 +1466,10 @@ mod tests {
             Err(request.clone())
         );
         assert_eq!(SolidError::nl_ser("native")(request.clone()), request);
+        assert_eq!(
+            SolidError::nurbs_routine("native")(request.clone()),
+            request
+        );
     }
 
     #[test]
@@ -1228,8 +1494,14 @@ mod tests {
                 },
                 Some(1023),
             ),
-            (SolidError::nlib("op", NlibCode::Knot), Some(SM_ERR)),
-            (SolidError::nlib("op", NlibCode::Convergence), Some(SM_ERR)),
+            (
+                SolidError::nurbs("op", nurbs::NurbsFailure::Knots),
+                Some(SM_ERR),
+            ),
+            (
+                SolidError::nurbs("op", nurbs::NurbsFailure::NotConverged),
+                Some(SM_ERR),
+            ),
             (SolidError::invalid_input("op", "bad"), None),
             (
                 SolidError::NotFound {
@@ -1282,9 +1554,13 @@ mod tests {
         // an ignored upstream status swallows it as it did the `InvalidInput` it was
         assert_eq!(ignored::<()>(Err(e.clone())), Ok(None));
         assert_eq!(
-            SolidError::nl_ser("native")(e),
+            SolidError::nl_ser("native")(e.clone()),
             SolidError::sm_err("native")
         );
+        // a B-spline method keeps it as the cause of its own failure
+        let wrapped = SolidError::nurbs_routine("native")(e.clone());
+        assert_eq!(wrapped.sm_status(), Some(SM_ERR));
+        assert_eq!(wrapped.cause(), Some(&e));
     }
 
     fn walls_touch(face: Option<FaceId>) -> SolidError {
@@ -1362,6 +1638,102 @@ mod tests {
     }
 
     #[test]
+    fn is_port_failure_follows_the_cause_chain() {
+        let unported =
+            SolidError::unported("topology::brep::p1::update_vertex_edge_intervals", "u");
+        assert!(unported.is_port_failure());
+        // a stage that failed because a call was not ported is not a failure of the
+        // operation on its input, though the error on top is a generic one
+        let wrapped = SolidError::failed_after("op", "a stage failed", unported.clone());
+        assert_eq!(wrapped.kind(), ErrorKind::Failed);
+        assert!(wrapped.is_port_failure());
+        let deeper = SolidError::failed_after("outer", "the operation failed", wrapped);
+        assert!(deeper.is_port_failure());
+        assert_eq!(deeper.root_cause(), &unported);
+        // a chain of ordinary failures is not one, and neither is a cancellation
+        let ordinary = SolidError::failed_after(
+            "outer",
+            "the operation failed",
+            SolidError::failed_after("op", "a stage failed", SolidError::sm_err("inner")),
+        );
+        assert!(!ordinary.is_port_failure());
+        let cancelled =
+            SolidError::failed_after("op", "a stage failed", SolidError::cancelled("c"));
+        assert!(!cancelled.is_port_failure());
+        // the port-failure kinds on top still count
+        assert!(SolidError::port_invariant("op", "broken").is_port_failure());
+        assert!(!SolidError::sm_err("op").is_port_failure());
+    }
+
+    #[test]
+    fn boolean_failures_describe_the_stage_in_solidcore_terms() {
+        use boolean::{BooleanFailure, BooleanStage};
+
+        let face = FaceId::from_index(7);
+        let cases = [
+            (
+                SolidError::boolean_stage_failed(
+                    "boolean::topology_intersector::p1::relate",
+                    BooleanStage::Relate,
+                    "another entity is already related to the other one",
+                ),
+                "boolean::topology_intersector::p1::relate: relating the operands' entities \
+                 failed: another entity is already related to the other one",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                SolidError::boolean_entity_missing(
+                    "boolean::topology_intersector::p2::close_intersection_loop",
+                    BooleanStage::CloseLoop,
+                    "a vertex to close the loop at",
+                ),
+                "boolean::topology_intersector::p2::close_intersection_loop: closing an \
+                 intersection loop needs a vertex to close the loop at, which the B-rep does \
+                 not have",
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                Failure::new(
+                    "boolean::merge::p4::manifold_boolean",
+                    BooleanFailure::SolidLeaks { face },
+                )
+                .into_error(),
+                "boolean::merge::p4::manifold_boolean: the union would delete face 7 and merge \
+                 the solid it bounds into the outside",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                SolidError::stage_failed("boolean::merge::p3", "the Boolean tree has no result"),
+                "boolean::merge::p3: the Boolean tree has no result",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                SolidError::entity_missing("boolean::merge::p1", "the shell lies in no region"),
+                "boolean::merge::p1: the shell lies in no region",
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ),
+        ];
+        for (error, message, kind, status) in cases {
+            assert_eq!(error.to_string(), message);
+            assert_eq!(error.kind(), kind, "{error}");
+            // the comparison status is unchanged, and never part of the message
+            assert_eq!(error.sm_status(), Some(status), "{error}");
+            let text = error.to_string();
+            for forbidden in ["Sm", "NL_", "SM_ERR", "1001", "1006", "status"] {
+                assert!(!text.contains(forbidden), "{forbidden} in {text}");
+            }
+            assert!(!error.is_port_failure());
+        }
+        let leak = Failure::new("op", BooleanFailure::SolidLeaks { face }).into_error();
+        assert_eq!(leak.entity(), Some(EntityRef::Face(face)));
+    }
+
+    #[test]
     fn every_error_has_a_stable_kind() {
         let f = FaceId::from_index(1);
         let up = |code| SolidError::Upstream {
@@ -1428,9 +1800,13 @@ mod tests {
                 ErrorKind::OffsetEdgeVanishes,
                 203,
             ),
-            (SolidError::nlib("op", NlibCode::Knot), ErrorKind::Failed, 6),
             (
-                SolidError::nlib("op", NlibCode::Convergence),
+                SolidError::nurbs("op", nurbs::NurbsFailure::Knots),
+                ErrorKind::Failed,
+                6,
+            ),
+            (
+                SolidError::nurbs("op", nurbs::NurbsFailure::NotConverged),
                 ErrorKind::NotConverged,
                 4,
             ),
@@ -1481,6 +1857,448 @@ mod tests {
         assert_eq!(e.sm_status(), Some(SM_ERR_OFFSET_EDGE_VANISHES));
         assert!(up(SM_ERR_OFFSET_EDGE_VANISHES).is_offset_edge_vanishes());
         assert!(!walls_touch(None).is_offset_edge_vanishes());
+    }
+
+    #[test]
+    fn nurbs_failures_describe_the_routine_in_solidcore_terms() {
+        use nurbs::NurbsFailure as N;
+
+        // (failure, message, kind, the NL number difftest compares)
+        let cases = [
+            (
+                N::CurveDefinition,
+                "the curve's control point, knot and degree counts do not agree",
+                ErrorKind::Failed,
+                1,
+            ),
+            (
+                N::SurfaceDefinition,
+                "the surface's control net, knot and degree counts do not agree",
+                ErrorKind::Failed,
+                2,
+            ),
+            (
+                N::Degree,
+                "the degree is not allowed here",
+                ErrorKind::Failed,
+                3,
+            ),
+            (
+                N::DegreeTooHigh { given: 21, max: 16 },
+                "degree 21 is above the largest degree, 16",
+                ErrorKind::Failed,
+                3,
+            ),
+            (
+                N::Knots,
+                "the knot vector is not valid here",
+                ErrorKind::Failed,
+                4,
+            ),
+            (
+                N::KnotsDecrease { index: 4 },
+                "the knot vector decreases at knot 4",
+                ErrorKind::Failed,
+                4,
+            ),
+            (
+                N::Weight,
+                "a weight is not valid here",
+                ErrorKind::Failed,
+                5,
+            ),
+            (
+                N::WeightOutOfRange {
+                    index: 1,
+                    weight: -2.0,
+                    min: 0.5,
+                    max: 8.0,
+                },
+                "the weight of control point 1 is -2, outside [0.5, 8]",
+                ErrorKind::Failed,
+                5,
+            ),
+            (
+                N::Parameter,
+                "a parameter is outside the domain",
+                ErrorKind::OutsideDomain,
+                6,
+            ),
+            (
+                N::ParameterOutside {
+                    parameter: 2.5,
+                    lo: 0.0,
+                    hi: 1.0,
+                },
+                "parameter 2.5 is outside the domain [0, 1]",
+                ErrorKind::OutsideDomain,
+                6,
+            ),
+            (N::Index, "an index is out of range", ErrorKind::Failed, 7),
+            (
+                N::IndexOutOfRange { index: 9, len: 4 },
+                "index 9 is out of range for 4 items",
+                ErrorKind::Failed,
+                7,
+            ),
+            (
+                N::ZeroDerivative,
+                "a derivative is zero where a direction is needed",
+                ErrorKind::Failed,
+                8,
+            ),
+            (
+                N::Storage,
+                "a buffer supplied by the caller is too small",
+                ErrorKind::Failed,
+                9,
+            ),
+            (
+                N::Numerical,
+                "a numerical failure (a division by zero or overflow)",
+                ErrorKind::Failed,
+                11,
+            ),
+            (
+                N::NotConverged,
+                "the iteration did not converge",
+                ErrorKind::NotConverged,
+                12,
+            ),
+            (
+                N::CallFailed,
+                "a routine it calls rejected its arguments, or the direction is not handled",
+                ErrorKind::Failed,
+                13,
+            ),
+            (
+                N::Input,
+                "the input data is not valid",
+                ErrorKind::Failed,
+                14,
+            ),
+            (
+                N::Memory,
+                "the memory for the result cannot be allocated",
+                ErrorKind::Failed,
+                15,
+            ),
+            (
+                N::Singular,
+                "the system of equations is singular",
+                ErrorKind::Failed,
+                16,
+            ),
+            (
+                N::Geometry,
+                "the geometry does not allow the operation",
+                ErrorKind::Failed,
+                17,
+            ),
+            (
+                N::NoDerivativeRows,
+                "the output has no row for the point itself",
+                ErrorKind::Failed,
+                20,
+            ),
+            (
+                N::DerivativeOrder { given: 7, max: 4 },
+                "derivative order 7 is above the largest order, 4",
+                ErrorKind::Failed,
+                20,
+            ),
+        ];
+        for (failure, message, kind, number) in cases {
+            let error = SolidError::nurbs("nurbs::knots::insert", failure);
+            assert_eq!(
+                error.to_string(),
+                format!("nurbs::knots::insert: {message}")
+            );
+            assert_eq!(error.kind(), kind, "{error}");
+            assert_eq!(error.operation(), "nurbs::knots::insert");
+            assert_eq!(error.nurbs_failure(), Some(&failure));
+            assert!(error.is_nurbs_failure());
+            assert!(!error.is_port_failure());
+            // the comparison hooks: the status the Sm* callers report, never the NL number
+            assert_eq!(error.sm_status(), Some(SM_ERR), "{error}");
+            assert_eq!(nurbs::nlib_number(&error), Some(number), "{error}");
+            // no status number, NLib name or SMLib name in the message
+            let text = error.to_string();
+            for forbidden in ["NL_", "Nlib", "NLib", "Sm", "SM_ERR", "status"] {
+                assert!(!text.contains(forbidden), "{forbidden} in {text}");
+            }
+        }
+        // a failure that is not a NURBS one has no NL number
+        assert_eq!(nurbs::nlib_number(&SolidError::sm_err("op")), None);
+        assert!(!SolidError::sm_err("op").is_nurbs_failure());
+        // a NURBS failure collapsed to a generic one keeps the NURBS failure as the cause
+        let collapsed = SolidError::failed_after(
+            "op",
+            "a stage failed",
+            SolidError::nurbs("inner", N::Singular),
+        );
+        assert!(!collapsed.is_nurbs_failure());
+        assert_eq!(collapsed.root_cause().nurbs_failure(), Some(&N::Singular));
+    }
+
+    #[test]
+    fn b_spline_failures_keep_the_status_their_methods_returned() {
+        use nurbs::{BSplineFailure as B, NurbsFailure as N};
+
+        // (failure, message, kind, the status the C++ method returns)
+        let cases = [
+            (
+                B::RoutineFailed,
+                "a NURBS routine it calls failed",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                B::NoNurbsForm,
+                "it holds no NURBS form",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                B::Missing("the spine rail"),
+                "the spine rail is missing",
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                B::ZeroAxis,
+                "the axis direction is a zero vector",
+                ErrorKind::InvalidInput,
+                SM_ERR_INVALID_INPUT,
+            ),
+            (
+                B::DegreeOutside {
+                    given: 1,
+                    min: 2,
+                    max: 17,
+                },
+                "degree 1 is outside [2, 17]",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                B::ParameterOutside {
+                    parameter: 1.5,
+                    lo: 0.0,
+                    hi: 1.0,
+                },
+                "parameter 1.5 is outside the domain [0, 1]",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                B::Failed("the arcs have different radii"),
+                "the arcs have different radii",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+        ];
+        for (failure, message, kind, status) in cases {
+            let op = "nurbs::b_spline_surface::p2::BSplineSurface::create_sphere_from_arcs";
+            let error = SolidError::b_spline(op, failure);
+            assert_eq!(error.to_string(), format!("{op}: {message}"));
+            assert_eq!(error.operation(), op);
+            assert_eq!(error.nurbs_failure(), Some(&N::BSpline(failure)));
+            // the same kind and statuses as the `Upstream` the method returned before
+            let before = SolidError::Upstream {
+                operation: op,
+                code: status,
+                entity: None,
+            };
+            assert_eq!(error.kind(), kind, "{error}");
+            assert_eq!(error.kind(), before.kind(), "{error}");
+            assert_eq!(error.sm_status(), before.sm_status(), "{error}");
+            assert_eq!(error.upstream_status(), Some(status), "{error}");
+            assert_eq!(error.is_port_failure(), before.is_port_failure());
+            assert_eq!(error.entity(), None);
+            // not an NLib routine's failure: no NL number, and no caller drops it as one
+            assert_eq!(nurbs::nlib_number(&error), None);
+            assert!(!error.is_nurbs_failure());
+            let text = error.to_string();
+            let reason = text.trim_start_matches(op);
+            for forbidden in ["NL_", "Nlib", "NLib", "Sm", "SM_ERR", "status"] {
+                assert!(!reason.contains(forbidden), "{forbidden} in {text}");
+            }
+        }
+        // only `Upstream` and the B-spline failures answer with an upstream status
+        assert_eq!(
+            SolidError::null_pointer("op").upstream_status(),
+            Some(SM_ERR_NULL_POINTER)
+        );
+        assert_eq!(SolidError::nurbs("op", N::Knots).upstream_status(), None);
+        assert_eq!(
+            SolidError::failed_after("op", "a stage failed", SolidError::sm_err("in"))
+                .upstream_status(),
+            None
+        );
+        assert_eq!(
+            SolidError::invalid_input("op", "bad").upstream_status(),
+            None
+        );
+    }
+
+    /// A B-spline method whose NLib call fails keeps that failure as its cause, with the
+    /// status `SM_ERR` it returned before; the answers no upstream status stands for pass
+    /// through unwrapped, so callers (and SolidCraft through solidcore-ops) still see
+    /// them at the top.
+    #[test]
+    fn a_failed_nurbs_routine_is_kept_as_the_cause_and_port_answers_pass_through() {
+        use nurbs::{BSplineFailure as B, NurbsFailure as N};
+        let op = "nurbs::b_spline_curve_n_lib::BSplineCurve::degree_reduction";
+        let wrap = SolidError::nurbs_routine(op);
+
+        let inner = SolidError::nurbs("nurbs::crv_approx::reduce_degree", N::Singular);
+        let e = wrap(inner.clone());
+        assert_eq!(e.nurbs_failure(), Some(&N::BSpline(B::RoutineFailed)));
+        assert_eq!(e.cause(), Some(&inner));
+        assert_eq!(e.root_cause().nurbs_failure(), Some(&N::Singular));
+        assert_eq!(e.operation(), op);
+        // what `nl_ser` gave: SM_ERR, kind Failed, no NL number, not an NLib failure
+        let collapsed = SolidError::nl_ser(op)(inner.clone());
+        assert_eq!(e.sm_status(), collapsed.sm_status());
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), collapsed.kind());
+        assert_eq!(e.upstream_status(), collapsed.upstream_status());
+        assert_eq!(nurbs::nlib_number(&e), None);
+        assert!(!e.is_nurbs_failure());
+        assert!(!e.is_port_failure());
+        assert_eq!(
+            e.to_string(),
+            format!(
+                "{op}: a NURBS routine it calls failed; caused by \
+                 nurbs::crv_approx::reduce_degree: the system of equations is singular"
+            )
+        );
+
+        // any other error is kept as the cause the same way
+        let invalid = SolidError::invalid_input("nurbs::knots::insert", "bad knot");
+        assert_eq!(wrap(invalid.clone()).cause(), Some(&invalid));
+        assert_eq!(wrap(invalid).sm_status(), Some(SM_ERR));
+
+        // the answers no upstream status stands for come through as they are
+        let passed = [
+            SolidError::unported(
+                "SmBSplineCurve::DegreeReduction",
+                "nurbs.b_spline_curve_n_lib",
+            ),
+            SolidError::cancelled("nurbs::crv_approx::reduce_degree"),
+            SolidError::PreparationRequired {
+                operation: "nurbs::crv_approx::reduce_degree",
+            },
+        ];
+        for p in passed {
+            let out = wrap(p.clone());
+            assert_eq!(out, p);
+            assert_eq!(out, SolidError::nl_ser(op)(p.clone()));
+            assert_eq!(out.kind(), p.kind());
+            assert_eq!(out.sm_status(), None);
+            assert!(out.cause().is_none());
+        }
+        assert!(wrap(SolidError::cancelled("x")).is_cancelled());
+        assert!(wrap(SolidError::unported("SmX", "x")).is_unported());
+        // a routine that failed on its input is a status answer, as the collapsed SM_ERR was
+        assert!(e.is_status_answer());
+        // a solidcore-side failure kept as the cause makes the method's failure one too
+        // (is_port_failure follows the cause chain): it is no answer of the operation
+        let port = wrap(SolidError::port_invariant("nurbs::crv_basic", "no curve"));
+        assert!(port.is_port_failure());
+        assert!(!port.is_status_answer());
+        assert_eq!(port.sm_status(), Some(SM_ERR));
+    }
+
+    /// The NURBS routines report their failures as `NurbsFailure`s, and `SolidError::Nlib`,
+    /// `SolidError::nlib` and `NlibCode` are gone: no library source file of the crate
+    /// builds, matches or names an NLib error number variant any more.
+    #[test]
+    fn no_source_builds_an_nlib_error() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let mut entries: Vec<_> = std::fs::read_dir(dir)
+                .expect("read_dir")
+                .map(|e| e.expect("entry").path())
+                .collect();
+            entries.sort();
+            for path in entries {
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|x| x == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        walk(&root, &mut files);
+        assert!(files.len() > 400, "{} files under {root:?}", files.len());
+        assert!(files.iter().any(|p| p.ends_with("nurbs/crv_common.rs")));
+        for path in files {
+            // a checkout with CRLF line endings reads the same
+            let text = std::fs::read_to_string(&path)
+                .expect("read")
+                .replace("\r\n", "\n");
+            // this test's own needles sit in its test module
+            let library = bare_scan::library_text(&text);
+            for needle in [
+                "SolidError::Nlib",
+                "Self::Nlib",
+                "Nlib {",
+                "NlibCode",
+                "SolidError::nlib(",
+                "fn nlib(",
+            ] {
+                assert!(!library.contains(needle), "{needle} in {path:?}");
+            }
+        }
+    }
+
+    /// The B-spline methods describe their failures ([`nurbs::BSplineFailure`]): their
+    /// library code builds no bare `Upstream` status, and no source file but the one
+    /// held back collapses an NLib failure without keeping it (`nl_ser`).
+    #[test]
+    fn the_b_spline_methods_build_no_bare_statuses() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let library = |rel: &str| {
+            let text = std::fs::read_to_string(src.join(rel))
+                .expect("read")
+                .replace("\r\n", "\n");
+            bare_scan::library_code(&text)
+        };
+        for rel in [
+            "nurbs/b_spline_curve_n_lib.rs",
+            "nurbs/b_spline_surface_n_lib/p1.rs",
+            "nurbs/b_spline_surface_n_lib/p2.rs",
+            "nurbs/b_spline_surface_n_lib/approx.rs",
+            "nurbs/b_spline_surface/p1.rs",
+            "nurbs/b_spline_surface/p2.rs",
+            "nurbs/b_spline_curve/p2.rs",
+            "nurbs/nurbs_crv.rs",
+        ] {
+            let text = library(rel);
+            for needle in [
+                "SolidError::sm_err(",
+                "SolidError::null_pointer(",
+                "SolidError::Upstream {",
+                "nl_ser(",
+            ] {
+                assert!(!text.contains(needle), "{needle} in {rel}");
+            }
+        }
+        for rel in [
+            "surface/surface/approximate.rs",
+            "surface/step_window.rs",
+            "surface/surface_cache/p2.rs",
+            "surface/surface/p9.rs",
+            "curve/curve_cache.rs",
+            "curve/ellipse/p1.rs",
+            "offset/offset_executive/reach.rs",
+            "mass/integrator.rs",
+        ] {
+            assert!(!library(rel).contains("nl_ser("), "nl_ser in {rel}");
+        }
     }
 
     #[test]
@@ -1574,5 +2392,80 @@ mod tests {
         assert_eq!(ignore_status::<()>(Err(c.clone())), Err(c.clone()));
         assert_eq!(native_failure::<()>(Err(c.clone())), Err(c.clone()));
         assert_eq!(SolidError::nl_ser("native")(c.clone()), c);
+        assert_eq!(SolidError::nurbs_routine("native")(c.clone()), c);
+    }
+}
+
+/// Samples for the tests of the decisions that read [`SolidError::upstream_status`] (#13790):
+/// typed failures that replaced an [`SolidError::Upstream`], and typed failures that never
+/// stood for an upstream status.
+#[cfg(test)]
+pub(crate) mod replaced_upstream_samples {
+    use super::SolidError;
+
+    /// The typed failures of five areas that replaced an `Upstream` with `code` (#13790):
+    /// an intersection's, a geometry utility's, a topology routine's, an offset routine's and
+    /// a blend routine's, at `entity` when one is given.
+    pub(crate) fn replaced_upstream(
+        operation: &'static str,
+        code: i32,
+        entity: Option<crate::error::EntityRef>,
+    ) -> [SolidError; 5] {
+        use crate::error::{
+            blend::BlendFailure, geom::GeomFailure, intersect::IntersectFailure,
+            offset::OffsetFailure, topology::TopologyFailure, Failure, Reason,
+        };
+        let typed = |reason: Reason| {
+            let f = Failure::new(operation, reason).with_status(code);
+            match entity {
+                Some(e) => f.at(e),
+                None => f,
+            }
+            .into_error()
+        };
+        [
+            typed(Reason::Intersect(IntersectFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Geom(GeomFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Topology(TopologyFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Offset(OffsetFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Blend(BlendFailure::Failed(
+                "replaced an upstream status",
+            ))),
+        ]
+    }
+
+    /// Typed failures with `code` that never stood for an upstream status (#13790): a sweep's
+    /// station cap and a curve length's floor.
+    pub(crate) fn native_failures(operation: &'static str, code: i32) -> [SolidError; 2] {
+        use crate::error::{curve::CurveFailure, sweep::SweepFailure, Failure, Reason};
+        let typed = |reason: Reason| {
+            Failure::new(operation, reason)
+                .with_status(code)
+                .into_error()
+        };
+        let natives = [
+            typed(Reason::Sweep(SweepFailure::RailPastStationCap {
+                asked: 1e-6,
+                reached: 1e-3,
+                wires: 64,
+            })),
+            typed(Reason::Curve(CurveFailure::LengthBelowFloor {
+                asked: 1e-12,
+                floor: 1e-9,
+                pieces: 8,
+            })),
+        ];
+        for e in &natives {
+            assert_eq!(e.upstream_status(), None, "{e:?}");
+        }
+        natives
     }
 }

@@ -412,8 +412,10 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             .first()
             .copied()
             .flatten()
-            .ok_or(SolidError::null_pointer(OP_LSI))?;
-        let cache = self.surface_cache.ok_or(SolidError::null_pointer(OP_LSI))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_LSI, "the branch's surface node"))?;
+        let cache = self
+            .surface_cache
+            .ok_or_else(|| SolidError::surface_missing(OP_LSI, "the surface cache"))?;
         let patch = cache.patch(surface_id)?.clone();
         let tree = self.base.tree(0)?;
         let parent = original_surface(tree, &surface_node)?;
@@ -570,7 +572,9 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             )?
             .first()
             .copied()
-            .ok_or(SolidError::sm_err(OP_LSI))
+            .ok_or_else(|| {
+                SolidError::surface_failed(OP_LSI, "the tangent plane drop gave no point")
+            })
         };
         let mut first_uv = drop(first_uv_guess, first_t)?;
 
@@ -960,10 +964,10 @@ impl<O: SolutionObject> CombineContext<'_, O> {
         };
         let tree = self
             .curve_tree
-            .ok_or(SolidError::null_pointer(OP_COMBINE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_COMBINE, "the curve tree"))?;
         let cache = self
             .surface_cache
-            .ok_or(SolidError::null_pointer(OP_COMBINE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_COMBINE, "the surface cache"))?;
         Ok(Some((
             tree.curve_aux(n1)?.interval,
             cache.aux(id2)?.uv_domain,
@@ -1329,7 +1333,10 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         };
         // the packed indices never pass the array (shrinking only)
         if last >= solutions.len() {
-            return Err(SolidError::sm_err(OP_COMBINE));
+            return Err(SolidError::surface_failed(
+                OP_COMBINE,
+                "the packed solution index is past the end of the solutions",
+            ));
         }
         solutions.set_size(last + 1);
     }
@@ -1545,7 +1552,9 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 let pv = curve.evaluate(k, p(&sol.start, 0)?, 1, true, true)?;
                 let uv = Point2::new(p(&sol.start, 1)?, p(&sol.start, 2)?);
                 let normal = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
-                let tangent = pv.get(1).copied().ok_or(SolidError::sm_err(OP_COMBINE))?;
+                let tangent = pv.get(1).copied().ok_or_else(|| {
+                    SolidError::surface_failed(OP_COMBINE, "the curve gave no tangent")
+                })?;
                 if !tangent.is_perpendicular_to(normal, 2.0) {
                     tmp.add(sol);
                 }
@@ -1721,5 +1730,40 @@ mod tests {
         )
         .unwrap();
         assert!(sols.is_empty());
+    }
+
+    /// The line and curve intersection failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+            (
+                OP_LSI,
+                SurfaceFailure::Missing("the surface cache"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                OP_COMBINE,
+                SurfaceFailure::Failed("the curve gave no tangent"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }

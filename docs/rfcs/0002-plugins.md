@@ -6,9 +6,22 @@
 | Started | 2026-10-14 (when #1221 opened) |
 | Apps | SolidCraft |
 | Discussion | [#1221](https://github.com/tangency-labs/solidcraft/issues/1221) |
-| Related | [#4980](https://github.com/tangency-labs/solidcraft/pull/4980) (draft WIT proposal, `solidcraft:plugin@0.1.0`), [#4933](https://github.com/tangency-labs/solidcraft/pull/4933) (plugin commands in Utilities) |
+| Related | [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) (native Wasm command plugin runtime, the base for phase 1), [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) (design forms, the plugin UI mechanism), [#4933](https://github.com/tangency-labs/solidcraft/pull/4933) (plugin commands in Utilities), [#5586](https://github.com/tangency-labs/solidcraft/pull/5586) (install from a GitHub link) |
 
 This RFC replaces `docs/plugins.md` and folds in what the 37 comments on #1221 settled. Only the Preferences page exists today. No plugin runs.
+
+## Decisions
+
+These are settled and override older text in this RFC, in #1221 and in the draft PRs.
+
+1. **One API.** The plugin API is the MCP engine command surface. There is no second surface.
+2. **WebAssembly is the plugin runtime.** No CPython, no pip, and no embedded script interpreter. Rhai and similar runtimes are not part of the plan.
+3. **No network to start.** The linker has no fetch, sockets or HTTP, and a manifest that asks for `net` is refused. `net` stays a reserved permission name. It can be granted later only to signed official plugins from the curated index (phase 6), with named `https` origins and requests made by the host, never by the plugin.
+4. **Plugin UI is host-drawn, and only where the app allows it.** Forms come from declared input schemas drawn with the design-forms mechanism in [#15100](https://github.com/tangency-labs/solidcraft/issues/15100). A plugin ships no UI code.
+5. **Phase 1 sets the shape, so it gets a design review.** The phase 1 PR is reviewed on its design (WIT, manifest, permissions, limits) before phase 2 starts. See section 8.
+6. **Examples and converters live outside this repository.** The repo carries the WIT, the host and the tests, not each plugin.
+7. **Agent-first.** Plugins are written by agents from a spec, docs and the API. See section 6a.
+8. **Shared across Craft apps.** The plugin host is an app-agnostic crate that SolidCraft, PCBCraft and other Craft apps each plug their own commands into. See section 6b.
 
 ## 1. Goals and non-goals
 
@@ -33,7 +46,7 @@ World `solidcraft:plugin@1.0.0`. The interface stays thin: a few typed functions
 | `run(command, args) -> result<string, string>` | The engine commands, JSON in and out, exactly as over MCP. Filtered by the plugin's permissions. |
 | `log`, `progress` | Always available. |
 | `read-file`, `write-file` | Only inside folders the user granted. |
-| `fetch` | Only with the `net` permission, only to origins named in the manifest, made by the host. |
+| `fetch` | Reserved, not in the phase 1 linker. Later, only with the `net` permission, only for signed official plugins, only to origins named in the manifest, made by the host. |
 
 | Export | Notes |
 |---|---|
@@ -54,7 +67,7 @@ World `solidcraft:plugin@1.0.0`. The interface stays thin: a few typed functions
 |---|---|
 | (none) | `run`, `log`, `progress` |
 | `files` | Named folders, read or write |
-| `net` | Named `https` origins. On the web build, only through a host-approved fetch. |
+| `net` | Reserved. A manifest that asks for it is refused until phase 6. Then: named `https` origins for signed official plugins only, requested by the host. On the web build, only through a host-approved fetch. |
 | `clock` | Wall clock. Without it, it reads a fixed epoch. |
 
 ## 3. Runtime and sandbox
@@ -101,12 +114,36 @@ Design metadata under `plugin.<id>` survives a missing, disabled or newer plugin
 
 - **Now:** a folder per plugin, `{data}/plugins/<id>/plugin.json`.
 - **Next:** Install Plugin from a file or GitHub release. An Add-on Manager lists tools, versions and permissions, with enable, disable and remove.
-- **Later:** a curated index. Anyone can sideload. To be listed, a plugin must be open source and signed. The comments favour GitHub Releases as the artifact source and keeping packages independent of one host.
+- **Later:** a curated index. Anyone can sideload. Network access for a plugin is decided here and only here: it needs a signature from the index and named origins. To be listed, a plugin must be open source and signed. The comments favour GitHub Releases as the artifact source and keeping packages independent of one host.
 - **Tools:** `solidcraft-cli plugin check <dir>` validates the manifest and schemas; `plugin test <dir>` runs every entry on the real host; `--plugin-dev <dir>` loads an unapproved folder, marked as dev, and reloads on change. The `plugin.json` schema is generated from the host's types.
 
 ## 6. Web build
 
 wasmtime does not run in the browser tab. Options are jco-transpiled components, or desktop-only plugins at first. The same WIT world and manifest should serve both, with the same permission checks before `run` reaches the engine. Parametric features offline on the web need the module cached, so only plugins whose fallback allows it. Network access on the web goes through a host-approved fetch, never the page's own.
+
+## 6a. Agent-first
+
+Plugins will mostly be written by agents working from a spec, docs and the API, not typed by people. The design serves that reader first.
+
+1. **Machine-readable API.** The WIT and the engine command schemas (the same ones MCP serves) are the API reference. The reference is generated from them and never copied by hand, so it cannot drift.
+2. **A plugin skill file.** A `skills/<name>/SKILL.md` written for agents, covering the API, the manifest, permissions, packaging and how to test. It links to the generated reference instead of repeating it.
+3. **A headless test harness.** `solidcraft-cli plugin test <dir>` runs a plugin against a design with no UI and prints machine-readable pass or fail per entry (JSON), with the resulting design and journal available for assertions. An agent can edit, run and iterate without a person.
+4. **Typed, actionable errors.** Every host failure names its cause as data: the permission that was missing, the command that failed and why, the limit that was hit (fuel, memory, size), and the manifest field at fault. A trap or a denial never comes back as a bare string.
+5. **Language is secondary.** Any language that compiles to a WebAssembly component works. The guide recommends what agents target most reliably: Rust first, TypeScript next.
+
+Plugin inputs are schemas (section 2), so the app draws the values and variables editor through the design-forms work in #15100. A user changes numbers without touching code.
+
+## 6b. Shared across Craft apps
+
+[RFC 0001](0001-craft-bridge.md) hands work between Craft apps. Plugins should not need a second implementation per app either, so the host is built once and each app supplies its own commands.
+
+1. **App-agnostic core crate `craft-plugin`.** No CAD and no SolidCraft knowledge. It owns the manifest, permissions, limits (fuel, memory, no network), install and signing, and the headless test harness. The app implements one trait: its command catalog as schemas, plus "run this command". SolidCraft implements it with the MCP engine command surface. PCBCraft and other Craft apps implement their own.
+2. **Declarative UI contributions.** A plugin declares entries, placed in named slots (menu or ribbon), and inputs as schemas. The app draws them through the [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) forms. A plugin ships no UI code, and each app decides which slots exist.
+3. **Runtimes are sub-crates on the same trait.** `craft-plugin-wasm` is wasmtime on desktop and jco on the web, and it is the runtime. A `craft-plugin-script` crate (Monty or Rhai) is optional, is not part of phase 1, and is not added unless the owner decides to revisit decision 2.
+4. **The WIT world is generic:** run a command, log, progress, cancel, granted files. App commands are data (schemas), not WIT types, so one WIT serves every Craft app. The `solidcraft:plugin@1.0.0` world in section 2 becomes this generic world, with SolidCraft's commands as its catalog.
+5. **Location.** The crates start in this repository as `crates/craft-plugin*`, and `cargo xtask layers` forbids any dependency on SolidCraft crates. They move to their own repository, as solidcore did, when a second app needs them.
+
+Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` against that trait, not hard-coded to SolidCraft.
 
 ## 7. What exists today
 
@@ -116,25 +153,27 @@ wasmtime does not run in the browser tab. Options are jco-transpiled components,
 
 **Not built**
 - No wasmtime, no WIT file, no host, no example plugin, no permissions, no signing, no install flow (#4330 was closed), no `Plugin` feature kind. Nothing in the folder is loaded or run.
-- #4980 is an open draft of the WIT and a gear pilot, and is not merged.
+- #4980 (draft WIT and a gear pilot) was closed as superseded by this RFC. Its streaming importer design and threat model stay useful reading for phase 2.
 
 ## 8. Phases
 
-| Phase | Delivers |
-|---|---|
-| 1 | WIT, a wasmtime host with fuel and memory limits, `execute`, permissions in the manifest, tests: no file access without a grant, a runaway loop is stopped, a crash leaves the model untouched, undo works |
-| 2 | Spur-gear example plugin, author guide, `plugin check` and `plugin test`, importers and exporters |
-| 3 | `FeatureKind::Plugin`, `evaluate`, recorded fallbacks, generic timeline row |
-| 4 | Install from file or GitHub, Add-on Manager, parameter schema dialogs |
-| 5 | Web host on the same WIT |
-| 6 | Curated, signed index; panels and overlays if agreed |
+| Phase | Delivers | Who and where |
+|---|---|---|
+| 1 | WIT `solidcraft:plugin@1.0.0`, a wasmtime host with fuel and memory limits, `execute`, permissions in the manifest, no network in the linker, a manifest asking for `net` refused, tests: no file access without a grant, a runaway loop is stopped, a crash leaves the model untouched, undo works | Builds on [#8987](https://github.com/tangency-labs/solidcraft/pull/8987) |
+| 2 | Importers and exporters, author guide, `plugin check` and `plugin test`. Measurements (component size, compile memory, binary growth) go in a #1221 comment. | After the phase 1 design review |
+| 3 | `FeatureKind::Plugin`, `evaluate`, recorded fallbacks, generic timeline row | |
+| 4 | Install from file or GitHub, Add-on Manager, plugin dialogs drawn from input schemas through [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) | [#5586](https://github.com/tangency-labs/solidcraft/pull/5586), [#4933](https://github.com/tangency-labs/solidcraft/pull/4933) |
+| 5 | Web host on the same WIT | |
+| 6 | Curated, signed index; `net` for signed official plugins; panels and overlays if agreed | |
+
+**Phase 1 design review.** The phase 1 PR sets the shape that every later phase builds on: the WIT, the manifest fields, the permission names, the limits and the error model. Before phase 2 starts, the owner reviews that design in the PR itself, and changes that come out of it land before any importer or example depends on them. A phase is done when its tests pass and, for phase 1, that review is recorded in the PR.
 
 ## 9. Open questions
 
 1. **Wasmtime size and component limit.** Accept the binary growth, and raise the 16 MiB limit after measuring compile memory?
-2. **Plugin UI.** Declarative panels, viewport overlays, then workspaces (the slicer-as-a-tab case). Or should such tools live in-tree?
+2. **Plugin UI.** Settled for forms: host-drawn through #15100. Still open: viewport overlays and workspaces (the slicer-as-a-tab case), or whether such tools live in-tree.
 3. **Defaults.** Are newly installed plugins on or off until approved?
-4. **Local network.** May a plugin reach a companion service on the user's machine, entered by the user? Starting a print also needs a confirmation level above `edit`.
+4. **Local network.** Not before phase 6, and under the same rule as any network: signed official plugins only. Starting a print would also need a confirmation level above `edit`.
 5. **Extending core commands.** Data-driven extension points, such as thread standards in the Hole dialog, later. Never overrides.
 6. **Signing and the index.** What signs, who hosts the index, and who reviews listings?
 7. **Web.** jco, or desktop only?

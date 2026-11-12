@@ -14,22 +14,37 @@
 //! it is preserved, independently of whether any pairs were found.
 //! The opt-in profiler counts supplied candidates and query invocations; its
 //! counters are observational and compile out without the `profile` feature.
+//! A vertex/face drop or an edge/face coincidence solve is skipped when the certified
+//! boxes of a stored B-spline face (the control-point boxes of its knot spans, each
+//! refined by splitting its Bezier patch `COVER_DEPTH` times) and of the edge's curve
+//! (the same for a stored B-spline curve, else the curve's own box) are all farther
+//! than `2 * tol` plus their rounding allowance apart (see [`cover_margin`]):
+//! no pair can result, so the pairs, reports and their order are unchanged. Two side
+//! effects of skipping: a query that would have returned an Unported or Cancelled
+//! error (`ignored` propagates those) is no longer run, so such an `Err` can become
+//! `Ok`; and a skipped query no longer fills the per-face caches (`FaceCaches`),
+//! which only memoise results of later queries.
 use super::spatial::SpatialIndex;
 use super::{invalid, required, Reports};
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result};
 use crate::geom::assert_array::AssertArray;
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::SolutionType;
 use crate::geom::tools::{find_coincident_edge, CoincidentEdgeQuery};
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
-use crate::math::UNDEF_DOUBLE;
+use crate::math::{Point3, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
+use crate::nurbs::nurbs_crv::CurveCover;
+use crate::nurbs::nurbs_srf::SurfaceCover;
 use crate::profile::{profile_count, profile_scope};
 use crate::query::brep::{BrepFaceServices, FaceCaches};
 use crate::query::face::{p1 as query_face, p2 as classify_face};
 use crate::surface::surface::p5::DropPointOptions;
+use crate::surface::surface::SurfaceKind;
 use crate::topology::brep::p1;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::face::{p1 as face1, p2 as face2, p4 as face4};
@@ -44,6 +59,153 @@ pub struct CoincidenceResult {
     /// Pairs in vertex/vertex, edge/edge, face/face, vertex/edge,
     /// vertex/face and edge/face order.
     pub pairs: Vec<(EntityRef, EntityRef)>,
+}
+
+/// How many times a surviving span of a face or edge is split before its boxes are
+/// tested (4 pieces per split of a surface patch, 2 of a curve segment).
+const COVER_DEPTH: usize = 3;
+
+/// How far a certified box may be from a point or another box and still hold a pair.
+///
+/// A pair needs a gap `<= tol` between exact geometry. The boxes bound the exact
+/// geometry (convex hull of each span's, or piece's, control points), but the solvers
+/// measure that gap in floating point, whose error is the rounding of the evaluated
+/// coordinates: about `n * eps * |coordinate|` for a degree-`n` evaluation. That is
+/// below `tol` for coordinates up to `tol / (n * eps)` (about 3e10 for the default 1e-5
+/// and a cubic), so the allowance for it is taken as one more `tol`. The rounding of
+/// splitting spans into pieces is a separate allowance, `slack` of the covers.
+fn cover_margin(tol: f64) -> f64 {
+    2.0 * tol
+}
+
+/// A face's certified cover: its surface's span boxes, refinable, and a lookup index of
+/// them.
+struct FaceCover {
+    surface: SurfaceCover,
+    index: SpatialIndex,
+}
+
+impl FaceCover {
+    /// `None` means no certified cover (no surface, another kind, an unreadable net):
+    /// nothing is pruned then, as before. A missing surface is reported by the query that
+    /// needs it, not here.
+    fn new(b: &Brep, f: FaceId) -> Result<Option<Self>> {
+        let Some(surface) = b.face(f)?.surface.as_ref() else {
+            return Ok(None);
+        };
+        let SurfaceKind::BSpline(spline) = surface.kind() else {
+            return Ok(None);
+        };
+        Ok(spline
+            .cover(COVER_DEPTH)
+            .filter(|cover| !cover.coarse().is_empty())
+            .map(|surface| Self {
+                index: SpatialIndex::new(surface.coarse().iter().copied().map(Some)),
+                surface,
+            }))
+    }
+
+    /// Whether a surface point can be within `margin` of `point`: some span near it has
+    /// a piece box near it.
+    fn may_reach_point(&mut self, point: Point3, margin: f64) -> bool {
+        let reach = margin + self.surface.slack();
+        for i in self.index.near_point(point, margin) {
+            if self
+                .surface
+                .pieces(i)
+                .iter()
+                .any(|piece| piece.contains_point(point, reach))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether a point of `curve` can be within `margin` of a surface point: some curve
+    /// span and some surface span within `margin` have pieces within `margin` plus both
+    /// allowances.
+    fn may_reach_curve(&mut self, curve: &mut EdgeCover, margin: f64) -> bool {
+        let reach = margin + self.surface.slack() + curve.slack();
+        for ci in 0..curve.coarse().len() {
+            let Some(span) = curve.coarse().get(ci).copied() else {
+                continue;
+            };
+            for si in self.index.boxes_in_box(&span, margin) {
+                let curve_pieces = curve.pieces(ci);
+                let surface_pieces = self.surface.pieces(si);
+                if curve_pieces
+                    .iter()
+                    .any(|c| surface_pieces.iter().any(|s| !c.are_disjoint(s, reach)))
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+/// A cover made on first use: not yet made, made and not certified (nothing to prune
+/// with), or made.
+enum Lazy<T> {
+    Unmade,
+    Absent,
+    Made(T),
+}
+
+impl<T> Lazy<T> {
+    /// The cover, made by `make` on the first call; `None` when not certified.
+    fn get_or_make(&mut self, make: impl FnOnce() -> Result<Option<T>>) -> Result<Option<&mut T>> {
+        if matches!(self, Self::Unmade) {
+            *self = make()?.map_or(Self::Absent, Self::Made);
+        }
+        Ok(match self {
+            Self::Made(cover) => Some(cover),
+            Self::Unmade | Self::Absent => None,
+        })
+    }
+}
+
+/// An edge's certified cover: the refinable span boxes of a stored B-spline curve, or
+/// the curve's own box (the one the solver itself rejects with) for any other curve.
+enum EdgeCover {
+    Spline(CurveCover),
+    Whole([Extent3d; 1]),
+}
+
+impl EdgeCover {
+    /// `own_box` is the box computed for this edge itself (`None` where that failed).
+    /// `None` means no certified cover.
+    fn new(curve: &Curve, interval: &Extent1d, own_box: Option<Extent3d>) -> Option<Self> {
+        match curve.kind() {
+            CurveKind::BSpline(spline) => spline
+                .cover(interval, COVER_DEPTH)
+                .filter(|cover| !cover.coarse().is_empty())
+                .map(Self::Spline),
+            _ => own_box.map(|bx| Self::Whole([bx])),
+        }
+    }
+
+    fn coarse(&self) -> &[Extent3d] {
+        match self {
+            Self::Spline(cover) => cover.coarse(),
+            Self::Whole(bx) => bx,
+        }
+    }
+
+    fn slack(&self) -> f64 {
+        match self {
+            Self::Spline(cover) => cover.slack(),
+            Self::Whole(_) => 0.0,
+        }
+    }
+
+    fn pieces(&mut self, i: usize) -> &[Extent3d] {
+        match self {
+            Self::Spline(cover) => cover.pieces(i),
+            Self::Whole(bx) => bx,
+        }
+    }
 }
 
 fn ignored<T>(value: Result<T>) -> Result<Option<T>> {
@@ -68,6 +230,25 @@ pub fn contains_coincident_topology(
     level: u8,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
 ) -> Result<CoincidenceResult> {
+    search(k, b, tolerance, find_all, reports, level, keys, true)
+}
+
+/// [`contains_coincident_topology`]; `prune = false` (only the tests pass it) runs every
+/// query the boxes of the faces and edges leave, as the reference the certified span-box
+/// prune is compared with.
+fn search(
+    k: &Kernel,
+    b: &mut Brep,
+    tolerance: f64,
+    find_all: bool,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+    keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+    prune: bool,
+) -> Result<CoincidenceResult> {
+    // (not upstream) cooperative cancellation once per vertex, edge and face of each search
+    // (solidcore#3247)
+    const OP: &str = "topology::brep::validation::coincidence::contains_coincident_topology";
     profile_scope!(k, "validation::coincidence");
     if level > 4 {
         return Err(invalid("invalid assert test level"));
@@ -94,6 +275,7 @@ pub fn contains_coincident_topology(
     {
         profile_scope!(k, "validation::coincidence::vertex_vertex");
         for (i, &v) in vertices.iter().enumerate() {
+            k.check_cancelled(OP)?;
             let point = b.vertex(v)?.point;
             let mut previous = i;
             for j in point_index
@@ -157,6 +339,7 @@ pub fn contains_coincident_topology(
     {
         profile_scope!(k, "validation::coincidence::edge_edge");
         for (i, &e) in edges.iter().enumerate() {
+            k.check_cancelled(OP)?;
             let v1 = required(edge::vertex(b, e)?)?;
             let v2 = required(edge::other_vertex(b, e, Some(v1))?)?;
             let candidates: Vec<_> = endpoint_groups
@@ -214,6 +397,7 @@ pub fn contains_coincident_topology(
     let mut caches = FaceCaches::new();
     let mut face_boxes = Vec::new();
     for &f in &faces {
+        k.check_cancelled(OP)?;
         face_boxes.push(ignored(query_face::calculate_bounding_box(
             k, &mut *b, f, false,
         ))?);
@@ -232,6 +416,7 @@ pub fn contains_coincident_topology(
     {
         profile_scope!(k, "validation::coincidence::face_face");
         for (i, &f) in faces.iter().enumerate() {
+            k.check_cancelled(OP)?;
             let key = outer_keys.get(i).ok_or_else(|| invalid("face candidate"))?;
             let mut found = None;
             for &j in outer_groups
@@ -308,10 +493,15 @@ pub fn contains_coincident_topology(
         }
     }
     let mut edge_boxes = Vec::new();
+    // The box each edge's own computation returned (`None` where it failed and
+    // `edge_boxes` carries the previous edge's box instead).
+    let mut own_edge_boxes = Vec::new();
+    let margin = cover_margin(tol);
     let mut previous_box = Extent3d::new();
     {
         profile_scope!(k, "validation::coincidence::vertex_edge");
         for &e in &edges {
+            k.check_cancelled(OP)?;
             let bbox = ignored(crate::query::edge::calculate_bounding_box(
                 k,
                 b,
@@ -323,10 +513,12 @@ pub fn contains_coincident_topology(
                 },
                 false,
             ))?;
-            if let Some(bbox) = bbox.and_then(|b| b.normal) {
+            let own_box = bbox.and_then(|b| b.normal);
+            if let Some(bbox) = own_box {
                 previous_box = bbox;
             }
             edge_boxes.push(previous_box);
+            own_edge_boxes.push(own_box);
             let data = b.edge(e)?;
             let Some(curve) = data.curve.as_ref() else {
                 continue;
@@ -380,6 +572,8 @@ pub fn contains_coincident_topology(
         }
     }
     let edge_index = SpatialIndex::new(edge_boxes.iter().copied().map(Some));
+    // Certified curve covers, made at an edge's first use (`None` inside: not certified).
+    let mut edge_covers: Vec<Lazy<EdgeCover>> = edges.iter().map(|_| Lazy::Unmade).collect();
     let mut previous_face_box = Extent3d::new();
     for &f in &faces {
         let face_tol = b.face(f)?.tolerance;
@@ -388,6 +582,8 @@ pub fn contains_coincident_topology(
             previous_face_box = bbox;
         }
         let domain = b.face(f)?.uv_domain;
+        // The face's cover, made when a candidate first needs it.
+        let mut cover: Lazy<FaceCover> = Lazy::Unmade;
         let face_vertices: BTreeSet<_> = face4::vertices(b, f, None, false, None)?
             .into_iter()
             .collect();
@@ -403,6 +599,13 @@ pub fn contains_coincident_topology(
                 let point = b.vertex(v)?.point;
                 if !previous_face_box.contains_point(point, tol) {
                     continue;
+                }
+                if prune {
+                    if let Some(cover) = cover.get_or_make(|| FaceCover::new(b, f))? {
+                        if !cover.may_reach_point(point, margin) {
+                            continue;
+                        }
+                    }
                 }
                 profile_count!(k, CoincidenceQueries, 1);
                 let drop = ignored(drop_face(
@@ -473,6 +676,26 @@ pub fn contains_coincident_topology(
                 if previous_face_box.are_disjoint(bbox, tol) {
                     continue;
                 }
+                if prune {
+                    if let Some(cover) = cover.get_or_make(|| FaceCover::new(b, f))? {
+                        let slot = edge_covers
+                            .get_mut(j)
+                            .ok_or_else(|| invalid("edge cover"))?;
+                        let made = slot.get_or_make(|| {
+                            let data = b.edge(e)?;
+                            let own_box = own_edge_boxes.get(j).copied().flatten();
+                            Ok(data
+                                .curve
+                                .as_ref()
+                                .and_then(|c| EdgeCover::new(c, &data.interval, own_box)))
+                        })?;
+                        if let Some(curve_cover) = made {
+                            if !cover.may_reach_curve(curve_cover, margin) {
+                                continue;
+                            }
+                        }
+                    }
+                }
                 let interval = b.edge(e)?.interval;
                 let curve = required(b.edge(e)?.curve.as_ref())?;
                 let surface = required(b.face(f)?.surface.as_ref())?.clone_for_evaluation()?;
@@ -537,7 +760,7 @@ fn drop_face(
     k: &Kernel,
     b: &mut Brep,
     f: FaceId,
-    point: crate::math::Point3,
+    point: Point3,
     domain: &crate::geom::extent2d::Extent2d,
     opts: &DropPointOptions,
     caches: &mut FaceCaches,
@@ -554,6 +777,149 @@ fn drop_face(
     );
     *caches = services.into_caches();
     result
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+pub(super) mod tests {
+    use super::*;
+    use crate::geom::extent2d::Extent2d;
+    use crate::math::Vec3;
+    use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::nurbs::math::{CPoint, NOW};
+    use crate::nurbs::srf_basic::Surface as Net;
+    use crate::primitive::api_primitives::{create_box, create_cylinder};
+    use crate::surface::surface::Surface;
+    use crate::topology::brep::p1 as brep1;
+    use crate::topology::brep::p2::ArenaNotifyState;
+    use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+    use crate::topology::topology_traverser::Marks;
+
+    /// A sheet body of `n` parallel vertical B-spline panels (`length` long along the
+    /// diagonal `(1, 1, 0)`, `height` tall, bilinear: one span each), `spacing` apart
+    /// across it. Each panel is its own face with four B-spline edges; every panel's box
+    /// overlaps every other's while their pieces do not.
+    pub(in super::super) fn panels(
+        k: &mut Kernel,
+        n: usize,
+        length: f64,
+        height: f64,
+        spacing: f64,
+    ) -> Brep {
+        let mut b = crate::topology::brep::p3::new_brep(
+            k,
+            crate::geom::tol::USE_DEFAULT,
+            crate::geom::tol::USE_DEFAULT,
+        )
+        .unwrap();
+        let mut state = ArenaNotifyState::new(&b);
+        let mut env = state.env(None);
+        let mut marks = Marks::default();
+        let this_face = |f: FaceId| loopuse::notify_ref(EntityRef::Face(f));
+        let mut fenv = FaceBuildEnv {
+            env: &mut env,
+            marks: &mut marks,
+            this_face: &this_face,
+        };
+        let root = std::f64::consts::FRAC_1_SQRT_2;
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        for i in 0..n {
+            let off = i as f64 * spacing * root;
+            let (ox, oy) = (off, -off);
+            let (dx, dy) = (length * root, length * root);
+            let corner = |a: f64, z: f64| CPoint::new(ox + a * dx, oy + a * dy, z, NOW);
+            let net = vec![
+                vec![corner(0.0, 0.0), corner(0.0, height)],
+                vec![corner(1.0, 0.0), corner(1.0, height)],
+            ];
+            let knots = vec![0.0, 0.0, 1.0, 1.0];
+            let patch = Net::new(net, 1, 1, knots.clone(), knots).unwrap();
+            let surface = Surface::from(BSplineSurface::from_gw_nurb(&patch));
+            create_face_from_surface(k, &mut b, Some(surface), &domain, &mut fenv).unwrap();
+        }
+        b.refresh_cached_topology();
+        b
+    }
+
+    /// Both searches on one body: the pruned and the unpruned reference, each with its
+    /// reports; returns `(pairs, reports)` of the pruned one after asserting they agree.
+    fn both(k: &Kernel, body: &Brep, find_all: bool) -> (Vec<(EntityRef, EntityRef)>, String) {
+        let identities = body.clone_standing_for_self().unwrap();
+        let keys = |e| identities.owner_identity(e);
+        let run = |prune: bool| {
+            let mut b = body.clone_standing_for_self().unwrap();
+            let mut reports = AssertArray::new();
+            let r = search(
+                k,
+                &mut b,
+                -1.0,
+                find_all,
+                Some(&mut reports),
+                2,
+                &keys,
+                prune,
+            )
+            .unwrap();
+            (r.found, r.pairs, format!("{:?}", reports.reports()))
+        };
+        let (found_a, pairs_a, reports_a) = run(true);
+        let (found_b, pairs_b, reports_b) = run(false);
+        assert_eq!(found_a, found_b);
+        assert_eq!(pairs_a, pairs_b);
+        assert_eq!(reports_a, reports_b);
+        (pairs_a, reports_a)
+    }
+
+    #[test]
+    fn pruned_and_unpruned_searches_agree_on_the_primitives() {
+        let mut k = Kernel::default();
+        let boxed = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 30.0).unwrap();
+        let cylinder = create_cylinder(&mut k, Point3::new(1.0, 2.0, 3.0), 4.0, 9.0).unwrap();
+        for body in [&boxed, &cylinder] {
+            for find_all in [false, true] {
+                let (pairs, _) = both(&k, body, find_all);
+                assert!(pairs.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn pruned_and_unpruned_searches_agree_on_b_spline_panels() {
+        let mut k = Kernel::default();
+        let body = panels(&mut k, 5, 40.0, 1.0, 3.0);
+        assert_eq!(body.faces().len(), 5);
+        for find_all in [false, true] {
+            let (pairs, _) = both(&k, &body, find_all);
+            assert!(pairs.is_empty());
+        }
+    }
+
+    /// Panel 1's first corner placed `gap` off the middle of panel 0, across it: a pair
+    /// exactly when `gap <= tol`, found in both searches, and the same pairs and reports
+    /// either side of the margin the prune uses (`2 * tol`).
+    #[test]
+    fn a_vertex_just_inside_and_just_past_the_margin_gives_the_same_pairs() {
+        let mut k = Kernel::default();
+        let mut body = panels(&mut k, 3, 40.0, 10.0, 7.0);
+        let tol = body.tolerance();
+        let vertices = brep1::vertices(&body, None).unwrap();
+        let faces = brep1::faces(&body, None).unwrap();
+        let root = std::f64::consts::FRAC_1_SQRT_2;
+        // Middle of panel 0: x = y = 20 root, z = 5; its normal is (1, -1, 0) / sqrt 2.
+        let middle = Point3::new(20.0 * root, 20.0 * root, 5.0);
+        let moved = vertices[4];
+        let mut outcomes = Vec::new();
+        for factor in [0.0, 0.5, 0.99, 1.01, 1.5, 1.99, 2.01, 3.0, 100.0] {
+            body.vertex_mut(moved).unwrap().point =
+                middle + Vec3::new(root, -root, 0.0) * (factor * tol);
+            let (pairs, _) = both(&k, &body, true);
+            let hit = pairs.contains(&(EntityRef::Vertex(moved), EntityRef::Face(faces[0])));
+            outcomes.push((factor, hit));
+        }
+        for (factor, hit) in outcomes {
+            assert_eq!(hit, factor <= 1.0, "gap = {factor} tol");
+        }
+    }
 }
 
 #[cfg(all(test, feature = "profile"))]
@@ -635,5 +1001,63 @@ mod profile_tests {
             1
         );
         assert!(k.take_profile().scopes.is_empty());
+    }
+
+    /// Edge/face and vertex/face queries of `panels` bodies, pruned or not.
+    fn panel_queries(n: usize, prune: bool) -> (u64, u64) {
+        let mut k = Kernel::default();
+        let mut body = tests::panels(&mut k, n, 200.0, 1.0, 4.0);
+        let identities = body.clone_standing_for_self().unwrap();
+        let keys = |e| identities.owner_identity(e);
+        let _ = k.take_profile();
+        // The public entry point is the pruned search; `search` alone is the reference.
+        let result = if prune {
+            contains_coincident_topology(&k, &mut body, -1.0, true, None, 0, &keys)
+        } else {
+            search(&k, &mut body, -1.0, true, None, 0, &keys, false)
+        }
+        .unwrap();
+        assert!(result.pairs.is_empty());
+        let profile = k.take_profile();
+        (
+            count(
+                &profile,
+                "validation::coincidence::edge_face",
+                "coincidence_queries",
+            ),
+            count(
+                &profile,
+                "validation::coincidence::vertex_face",
+                "coincidence_queries",
+            ),
+        )
+    }
+
+    /// Parallel diagonal panels whose single boxes all overlap (the 32 of them span 88
+    /// units across a 141 unit box): without the span prune every panel's edges are
+    /// solved against every other panel, so queries grow with the square of the panels.
+    /// The certified pieces of a panel (3 splits) only reach a few neighbours, so they
+    /// grow with the panels.
+    #[test]
+    fn b_spline_panels_cost_queries_in_proportion_not_in_the_square() {
+        // Measured edge/face queries: 8 panels 108 pruned, 112 plain; 32 panels 684
+        // pruned, 1984 plain. Plain grows 17.7 times for 4 times the panels (the
+        // square, 16, plus the panels' own short edges); pruned 6.3 times.
+        let (few_pruned, _) = panel_queries(8, true);
+        let (many_pruned, _) = panel_queries(32, true);
+        let (few_plain, _) = panel_queries(8, false);
+        let (many_plain, _) = panel_queries(32, false);
+        assert!(
+            many_plain > 16 * few_plain,
+            "plain {few_plain} -> {many_plain}"
+        );
+        assert!(
+            many_pruned < 8 * few_pruned,
+            "pruned {few_pruned} -> {many_pruned}"
+        );
+        assert!(
+            2 * many_pruned < many_plain,
+            "{many_pruned} against {many_plain}"
+        );
     }
 }

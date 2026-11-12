@@ -227,6 +227,29 @@ fn a_cube_record_builds_the_kernels_cube() {
 }
 
 #[test]
+fn a_pcurve_support_may_extend_past_its_edge_interval() {
+    let mut record = cube(1.0);
+    let Curve::Line { start, end } = &record.edges[0].curve else {
+        panic!("cube line")
+    };
+    let (start, end) = (*start, *end);
+    record.edges[0].curve = Curve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![start, end],
+    };
+    record.edges[0].interval = [0.0, f64::from_bits(1.0_f64.to_bits() - 2)];
+    record.validate().unwrap();
+    let original = record.faces.clone();
+    let mut k = kernel();
+    let (mut body, _) = to_kernel(&mut k, &record, true).unwrap();
+    let (saved, _) = to_record(&mut k, &mut body).unwrap();
+    assert_eq!(
+        saved.faces.iter().map(|f| &f.loops).collect::<Vec<_>>(),
+        original.iter().map(|f| &f.loops).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn records_the_conversion_cannot_carry_are_refused() {
     let mut k = kernel();
     let mut r = cube(1.0);
@@ -515,6 +538,47 @@ fn a_void_goes_round_as_its_own_region_and_shell() {
     assert_eq!(back.region(region).unwrap().shells, before);
 }
 
+/// The cup and lid on the default kernel: a 100-cube hollowed to an open cup (walls and floor
+/// 10) joined with a lid over its top 10 seals an 80-cube cavity, 1000000 − 512000. The union
+/// leaves the cavity's shell first in the solid region's list; the record still lists the
+/// solid's outer shell first (the one facing the infinite region), so it validates and goes
+/// round. The record is the same whichever way round the kernel lists the solid's shells.
+#[test]
+fn a_void_the_kernel_lists_first_goes_round_with_the_outer_shell_first() {
+    use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+    for lid_first in [false, true] {
+        let mut k = Kernel::new(&KernelOptions::default());
+        let cube = boxed(&mut k, [3.0, 4.0, 5.0], 100.0);
+        let pocket =
+            primitives::create_box(&mut k, Vec3::new(13.0, 14.0, 15.0), 80.0, 80.0, 100.0).unwrap();
+        let lid =
+            primitives::create_box(&mut k, Vec3::new(3.0, 4.0, 95.0), 100.0, 100.0, 10.0).unwrap();
+        let cup = boolean_difference(&mut k, cube, pocket).unwrap();
+        let (a, c) = if lid_first { (lid, cup) } else { (cup, lid) };
+        let mut b = boolean_union(&mut k, a, c).unwrap();
+        let name = format!("cup and lid (lid first: {lid_first})");
+        assert!(
+            (volume(&k, &mut b) - 488_000.0).abs() <= 1e-9 * 488_000.0,
+            "{name}"
+        );
+        let region = b_region_with_two_shells(&b);
+        let listed = b.region(region).unwrap().shells.clone();
+        let (r, _) = round_trip(&mut k, &name, &mut b);
+        assert_eq!(r.regions.len(), 3, "{name}");
+        let material: Vec<_> = r.regions.iter().filter(|g| g.shells.len() == 2).collect();
+        assert_eq!(material.len(), 1, "{name}: {:?}", r.regions);
+        let void = r.regions.iter().find(|g| g.void).expect("a void region");
+        assert_eq!(void.shells, vec![material[0].shells[1]], "{name}");
+        // the kernel's list turned round: the same record
+        b.region_mut(region).unwrap().shells = listed.iter().rev().copied().collect();
+        let (turned, _) = to_record(&mut k, &mut b).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            turned, r,
+            "{name}: the record follows the kernel's list order"
+        );
+    }
+}
+
 fn b_region_with_two_shells(b: &Brep) -> solidcore::topology::RegionId {
     solidcore::topology::brep::p1::regions(b, None)
         .unwrap()
@@ -556,8 +620,8 @@ fn lumps_and_solids_touching_along_an_edge_go_round() {
 }
 
 /// An analytic body's record: its curved faces are labels on their NURBS forms, its circles
-/// labels on theirs, its lines their two end points over [0, 1]; each pcurve on its edge's
-/// interval.
+/// labels on theirs, its lines as the kernel holds them (its point and unit vector, over the
+/// height); each pcurve on its edge's interval.
 #[test]
 fn analytic_records_carry_labels_on_their_forms() {
     let mut k = kernel();
@@ -576,8 +640,9 @@ fn analytic_records_carry_labels_on_their_forms() {
     for e in &r.edges {
         match &e.curve {
             Curve::Line { start, end } => {
-                assert_eq!(e.interval, [0.0, 1.0]);
-                assert_eq!((start[2], end[2]), (0.0, 5.0));
+                // as the kernel holds the seam: its point and unit vector, over its height
+                assert_eq!(e.interval, [0.0, 5.0]);
+                assert_eq!((start[2], end[2]), (0.0, 1.0));
                 assert!(e.nurbs.is_none());
             }
             Curve::Circle { radius, .. } => {
@@ -1145,4 +1210,52 @@ fn a_ball_patch_far_from_the_origin_reads_as_one() {
         }
         assert!(read_ball(&mut k, &off, i).is_none(), "face {i}");
     }
+}
+
+/// A record whose body tolerance is above its edges' and vertices' builds with the body's
+/// lowered to the least of them (the flat import's `own_tolerances`): valid at Level 2, and
+/// every edge and vertex at least the body's (invariant 5 of `docs/validity-and-tolerances.md`
+/// §10), each at its own (the zone, half the record's), none raised.
+#[test]
+fn a_body_tolerance_above_its_entities_comes_down_to_theirs() {
+    let mut k = kernel();
+    let mut r = cube(10.0);
+    r.tolerance = 1e-4;
+    r.edges[3].tolerance = 4e-6;
+    r.vertices[5].tolerance = 2e-6;
+    r.validate().unwrap();
+    let (mut b, _) = to_kernel(&mut k, &r, true).unwrap();
+    valid(&mut k, &mut b);
+    // the least is the other edges' 1e-6, as a zone: half of it
+    assert_eq!(b.tolerance(), 5e-7);
+    for &e in b.edge_list() {
+        assert!(b.edge(e).unwrap().tolerance >= b.tolerance(), "edge {e:?}");
+    }
+    for &v in b.vertex_list() {
+        assert!(
+            b.vertex(v).unwrap().tolerance >= b.tolerance(),
+            "vertex {v:?}"
+        );
+    }
+    let mut own: Vec<f64> = b
+        .edge_list()
+        .iter()
+        .map(|&e| b.edge(e).unwrap().tolerance)
+        .collect();
+    own.sort_by(f64::total_cmp);
+    own.dedup();
+    assert_eq!(own, vec![5e-7, 2e-6], "edges keep their own zones");
+}
+
+/// A tolerance so small that its zone (half of it) underflows to zero passes the record's
+/// validation and is refused by the conversion, not dropped to the body's.
+#[test]
+fn a_tolerance_whose_zone_underflows_is_refused() {
+    let mut k = kernel();
+    let mut r = cube(1.0);
+    r.vertices[0].tolerance = f64::from_bits(1);
+    assert!(matches!(
+        to_kernel(&mut k, &r, true),
+        Err(Unsupported::Invalid(_))
+    ));
 }

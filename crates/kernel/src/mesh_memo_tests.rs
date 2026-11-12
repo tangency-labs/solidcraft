@@ -1,5 +1,6 @@
 use super::*;
 use crate::{BoolOp, boolean, box_solid, cylinder, measure};
+use solidcraft_geom::tess::EvaluateMesh as _;
 
 /// A plate with a row of holes and a rounded rim along one edge (so that it is no prism the 2D
 /// route would take), as a large body many small regions are cut from.
@@ -78,7 +79,7 @@ fn a_placed_copy_is_planned_as_its_original_moved() {
     let copies: Vec<Body> =
         (0..2).map(|_| crate::transform(&part, shift, Vec3::ZERO, Vec3::Z, angle).unwrap().with_display_share(&share, t)).collect();
     let tol = crate::MeshTolerance::display_of(part.size());
-    let original = part.mesh_plan(&tol).unwrap().evaluate();
+    let original = part.mesh_plan(&tol).unwrap().evaluate_mesh();
     for copy in &copies {
         let m = copy.mesh_of(&copy.mesh_plan(&tol).unwrap()).unwrap();
         assert_eq!(m.triangles, original.triangles);

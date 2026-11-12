@@ -272,7 +272,7 @@ never returns "no kind": a configuration the table does not name is a Setback.
 | event | when | construction |
 |---|---|---|
 | **End** | one blend ends at the vertex | the end rib on the end face, S ∩ E; a tangent side is the tangent end of §3.1 |
-| **Join** | two blends meeting G1 and continuing each other, or one closed blend meeting itself G1, every other edge at the vertex tangent | one shared section |
+| **Join** | two blends meeting G1 and continuing each other, or one closed blend meeting itself G1, every other edge at the vertex tangent, its faces meeting so closely that the two balls are one within the corner's tolerance (faces meeting at an angle a put balls of radius r a distance r a apart), so an upright edge a degree or two off tangent between them makes a Turn | one shared section |
 | **Turn** | two blends sharing a face, turning at a sharp unrounded side edge (a boss base, a pocket's floor or rim; also blends meeting G1 where a side edge between their faces is sharp, such as a ruled loft's side edge at its rim), or one closed blend meeting itself at an angle (a teardrop's tip) | **Mitre** (default) or **Swept** (option) |
 | **Ball** | three equal rounds of one convexity at a vertex of three faces, the vertex not set back | the corner ball's sphere |
 | **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
@@ -336,7 +336,15 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   the search assumes certification is monotone in scale (every scale above one that certifies
   certifies too). That assumption is checked on a grid of cases, not proved; replacing the budgeted
   search with a proved rule is open work. A setback the user gives explicitly that
-  does not fit or does not certify is refused, naming the size that does. No uncertified fill is ever
+  does not fit or does not certify is refused, naming the size that does. Beside a curved
+  face each spring curve must also stay inside its trimmed face, kept clear of the face's
+  other edges on the control points of both. A setback that takes one off is refused,
+  naming the largest common scale that keeps every one on (where none at or above the
+  rails' crossing does, no setback builds): found by the same bisection, then halved in its
+  last thousandth down to the corner's tolerance. That search assumes
+  a spring curve on its face stays on it at every smaller setback; this too is checked on
+  cases, not proved. The size it names is always one the check itself found clear, so a
+  failure of the assumption can only make it smaller than need be. No uncertified fill is ever
   returned. At a convex edge meeting concave ones, any setback blend dips under the faces' planes
   regardless of representation [44]; there the spring curve between adjacent convex and concave
   blends is dropped and their trimlines meet.

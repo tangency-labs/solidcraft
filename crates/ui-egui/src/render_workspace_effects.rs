@@ -104,15 +104,7 @@ fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         crate::scenario::publish_target("render:tone-map", response.response.rect);
-        let label = app.tr("render.studio_denoise").to_string();
-        let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise);
-        crate::scenario::publish_target("render:denoise-enable", response.rect);
-        if app.render_workspace.view.studio.denoise {
-            note(app, ui, "render.studio_denoise_help");
-            if app.render_workspace.view.method == ImageMethod::CpuRaytrace {
-                note(app, ui, "render.cpu_denoise_help");
-            }
-        }
+        super::quality::denoise_controls(app, ui);
     });
     let mut editor = std::mem::take(&mut app.render_workspace.view.inspector.effects);
     let before = app.render_workspace.view.studio.finishing;
@@ -258,7 +250,9 @@ pub(super) fn output_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let dirty = app.render_workspace.view.dirty;
     presentation_controls(app, ui);
     let after = &app.render_workspace.view.studio;
-    if (before.finishing, before.tone_map, before.denoise, before.linear_exr) == (after.finishing, after.tone_map, after.denoise, after.linear_exr) {
+    if (before.finishing, before.tone_map, before.denoise, before.linear_exr, before.denoise_settings, before.denoise_diagnostics)
+        == (after.finishing, after.tone_map, after.denoise, after.linear_exr, after.denoise_settings, after.denoise_diagnostics)
+    {
         return;
     }
     let result = before_setup.and_then(|setup| setups::persist_editor(app, &setup));

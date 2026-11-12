@@ -25,8 +25,9 @@ solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.m
 `skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
 `crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
 
-A kernel-only pull request targets the `kernel` branch. A change that touches the kernel and the
-app goes to `main` as one pull request, with a code owner approving the `solidcore/` part.
+A kernel pull request targets `main` like any other; a change that touches the kernel and the app is one
+pull request. A big feature in several steps goes as stacked pull requests into `main`, each one landing in order
+on top of the one before.
 Crashes and data loss are still taken first.
 
 ### Updating a PR that was moved from solidcore
@@ -37,13 +38,16 @@ contributors without write access can't push to them. To update one:
 1. `git fetch https://github.com/tangency-labs/solidcraft moved/solidcore-N:moved/solidcore-N`, then
    `git switch moved/solidcore-N`.
 2. Commit your changes on it and push it to your fork: `git push <your-fork> moved/solidcore-N`.
-3. Open a PR against `kernel` that says "Replaces #M" (M is the moved PR's number). The moved one
+3. Open a PR against `main` that says "Replaces #M" (M is the moved PR's number). The moved one
    gets closed.
 
 ## Get it running (about 10 minutes on a fast machine)
 
-You need stable Rust 1.95 or newer (required by egui/eframe 0.36). For the web
-build you also need `rustup target add wasm32-unknown-unknown` and [`trunk`](https://github.com/trunk-rs/trunk)
+You need [rustup](https://rustup.rs/). The repository pins Rust 1.98.0 in
+`rust-toolchain.toml`, the version CI builds with, and rustup installs it with rustfmt, clippy and
+the `wasm32-unknown-unknown` target the first time you run `cargo` here. The code itself builds on
+Rust 1.95 or newer (`rust-version` in Cargo.toml, required by egui/eframe 0.36). For the web build
+you also need [`trunk`](https://github.com/trunk-rs/trunk)
 ([documentation](https://trunk-rs.github.io/trunk/)).
 
 ```sh
@@ -284,6 +288,16 @@ CI job runs `cargo xtask oracle` during full validation, and on pull requests th
 fails because of a known bug names its issue in `expected.json` (`"known_failure": "#123"`);
 never change an expected value to match SolidCraft's output.
 
+### Quarantining a flaky test
+
+A test that fails at random can fail a merge-queue batch, and every batch behind it starts over.
+Open an issue for it, then add one line to [`tests/QUARANTINED_TESTS`](tests/QUARANTINED_TESTS):
+`<test> #<issue> <YYYY-MM-DD> [why]`, with the test named as in `tests/KNOWN_FAILING_TESTS`.
+A quarantined test still runs. If it fails, the job summary says `quarantined, failed: <test>; see #<issue>`
+and the job stays green; if it passes, the summary says that too, so you can tell when it is safe to
+release. A quarantined line may be at most 14 days old: `cargo xtask lists` fails after that, so fix the
+test and delete the line. A test that fails every time belongs on `KNOWN_FAILING_TESTS` instead.
+
 ## Changing the design file format
 
 A design file says which format it is in (`"format": "solidcraft/N"`). If your change saves
@@ -320,7 +334,7 @@ and a fresh CI run:
 - **Growing Rust lists**: use slices (`const ITEMS: &[Item] = &[...];`) without a written
   length. `cargo xtask lists` rejects non-test const/static arrays with more than ten lines
   of entries, except fixed standard or algorithm tables listed with reasons in `xtask/src/lists.rs`.
-  Built-in themes need only a JSON file in `assets/styles/ui/themes/`, with a unique nonnegative
+  Built-in themes need only a JSON file in `crates/look/themes/`, with a unique nonnegative
   integer `order` (the picker order) and its own `provenance` line; keep existing order values.
 - **Message catalogs** (`assets/locales/*.json`): one message per line, sorted by id. Add your
   message anywhere and run `cargo xtask lists --fix`; `cargo xtask lists` (in `cargo xtask ci`
@@ -448,7 +462,7 @@ comments only when they're about crashes, wrong results, data loss or security.
 
 Two quick checks run on every pull request (`.github/workflows/pr-checks.yml`, not required): it
 fails when a lower-numbered open PR by someone else already closes the same issue (the label
-`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt).
+`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt). A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default; a changed kernel or geometry result is `Changes a default: no`.
 
 ## Labels and triage
 
@@ -508,11 +522,15 @@ The user guide's screenshots and short clips (`docs/book/src/media/`) are captur
 app by `examples/demo/doc_shots.py`, one function per figure. Each run starts a fresh app with its
 own settings, so your preferences never show. When a change makes a figure out of date, run
 `python3 examples/demo/doc_shots.py <page or shot>` (it needs Xvfb, ffmpeg, Pillow and a release
-build) and commit the new file. A new figure is a new function there, an ATTRIBUTION row in
-`attribution/pending/`, and a `<video>` (clips) or image link on the page. Keep a still under
+build) and commit the new file. Stills come in both themes: `--light` makes `<name>.light.png`,
+and the page shows the one that matches the book's theme (an `<img class="dark-ui">` and an
+`<img class="light-ui">`). A new figure is a new function there, an ATTRIBUTION row in
+`attribution/pending/`, and a `<video>` (clips) or the image pair on the page. Keep a still under
 about 250 KB and a clip under about 1 MB.
 
 ## Licence
 
 By contributing you agree that your contribution is licensed as MIT OR Apache-2.0, like the rest
-of SolidCraft. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).
+of SolidCraft. A contribution to the brand and interface (`crates/ui-kit`, `crates/look`,
+`crates/theme`, `assets/branding`, `assets/icons/app`) is licensed under
+[LICENSE-BRAND](LICENSE-BRAND), which lets the maintainers also license it as MIT OR Apache-2.0. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).

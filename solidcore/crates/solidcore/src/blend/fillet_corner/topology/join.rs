@@ -93,7 +93,7 @@ pub enum JoinTopology {
 
 /// The live solver `id` (`NULL`: `SM_ERR_NULL_POINTER`).
 fn live(solvers: &[Option<SolverObject>], id: Option<FilletSolverId>) -> Result<&FilletSolver> {
-    let id = id.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let id = id.ok_or_else(|| SolidError::blend_missing(OP, "the blend's solver"))?;
     solvers
         .get(id.0 as usize)
         .and_then(Option::as_ref)
@@ -106,9 +106,8 @@ fn live(solvers: &[Option<SolverObject>], id: Option<FilletSolverId>) -> Result<
 /// loop's gap closes ([`LOOP_GAP_ZONES`] of the body's tolerance), the blend with the larger
 /// and the other's offset. Each blend's rails are on its own offsets, which
 /// `SM_FE_CROSS_SECTION` cannot end both of. `None` for anything else: other solvers (a
-/// law's rails are the law's to meet), without `fixes.fillet_gn_section_generator` and
-/// `fixes.fillet_round_as_definition` (a blend not by its definition bends its rails to the
-/// section), or one closed blend.
+/// law's rails are the law's to meet), without `fixes.fillet_round_as_definition` (a blend
+/// not by its definition bends its rails to the section), or one closed blend.
 fn unequal_blends(
     k: &Kernel,
     target: &Brep,
@@ -116,7 +115,7 @@ fn unequal_blends(
     ids: &[Option<FilletSolverId>],
     faces: [Option<FaceId>; 2],
 ) -> Result<Option<(usize, f64)>> {
-    if !(k.fixes.fillet_gn_section_generator && k.fixes.fillet_round_as_definition) {
+    if !k.fixes.fillet_round_as_definition {
         return Ok(None);
     }
     let mut offsets = Vec::new();
@@ -131,7 +130,7 @@ fn unequal_blends(
         let rail = solver.find_index_of_rail_on_face(target, face)?;
         let offset = |r: usize| -> Result<f64> {
             let slot = solver.surface(r)?;
-            let slot = slot.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let slot = slot.ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface"))?;
             Ok(slot.surface.surface.offset_distance().abs())
         };
         offsets.push([offset(rail)?, offset(1 - rail.min(1))?]);
@@ -193,7 +192,10 @@ fn join_sides(target: &Brep, solver_eus: &[EdgeuseId], all_eus: &[EdgeuseId]) ->
             } else if faces.contains(&f1) {
                 between[1].push(eu);
             } else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "a ring edge is on neither face of the closed blend",
+                ));
             }
         }
         return Ok((side, between));
@@ -217,7 +219,10 @@ fn join_sides(target: &Brep, solver_eus: &[EdgeuseId], all_eus: &[EdgeuseId]) ->
         }
     }
     let (Some(idx1), Some(idx2)) = (idx1, idx2) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "a blended edge use is not in the corner's ring",
+        ));
     };
     let at = |kk: usize| {
         all_eus
@@ -246,7 +251,10 @@ fn join_sides(target: &Brep, solver_eus: &[EdgeuseId], all_eus: &[EdgeuseId]) ->
         between.get(known).and_then(|b| b.first()),
         between.get(known).and_then(|b| b.last()),
     ) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "neither side has an edge between the blends",
+        ));
     };
     let neighbour = if known == 0 {
         [first_known, last_known]
@@ -260,11 +268,16 @@ fn join_sides(target: &Brep, solver_eus: &[EdgeuseId], all_eus: &[EdgeuseId]) ->
         let nb = *neighbour
             .get(bb)
             .ok_or_else(|| invalid("blend index past 1"))?;
-        let known_face = face_by_two_edgeuses(target, Some(eu), Some(nb), None)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let known_face =
+            face_by_two_edgeuses(target, Some(eu), Some(nb), None)?.ok_or_else(|| {
+                SolidError::blend_missing(OP, "the face a blend shares with its neighbour")
+            })?;
         let faces = faces_of(target, eu)?;
         if Some(known_face) != faces[0] && Some(known_face) != faces[1] {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the face shared with the neighbour is not one of the blend's faces",
+            ));
         }
         let other_face = if Some(known_face) == faces[0] {
             faces[1]
@@ -318,7 +331,10 @@ impl FilletCorner {
         let all_eus = need(self.all_eus.clone(), "corner without outward edge uses")?;
         let blends = solver_eus.len();
         if blends != 1 && blends != 2 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the corner has other than one or two blended edge uses",
+            ));
         }
         let (side, between) = join_sides(target, &solver_eus, &all_eus)?;
         // the section's ends: on a side with an edge between the blends (where they change
@@ -353,13 +369,14 @@ impl FilletCorner {
             if on_edge.get(s).copied().unwrap_or(false) {
                 let side_eu = find_side_edgeuse(
                     target,
-                    *solver_eus.first().ok_or_else(|| SolidError::sm_err(OP))?,
-                    *between
-                        .get(s)
-                        .and_then(|b| b.first())
-                        .ok_or_else(|| SolidError::sm_err(OP))?,
+                    *solver_eus.first().ok_or_else(|| {
+                        SolidError::blend_failed(OP, "the corner has no blended edge use")
+                    })?,
+                    *between.get(s).and_then(|b| b.first()).ok_or_else(|| {
+                        SolidError::blend_failed(OP, "the side has no edge between the blends")
+                    })?,
                 )?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the side edge use"))?;
                 let v = pseudo.fillet_vertex_mut(fv)?;
                 v.set_point_class(PointClassType::Edgeuse, Some(EntityRef::Edgeuse(side_eu)));
                 v.set_fillet_vertex_type(FilletVertexType::RailXEdgeuse);
@@ -368,7 +385,7 @@ impl FilletCorner {
                     .get(s)
                     .and_then(|f| f.first())
                     .copied()
-                    .ok_or_else(|| SolidError::sm_err(OP))?;
+                    .ok_or_else(|| SolidError::blend_failed(OP, "the side has no face"))?;
                 let v = pseudo.fillet_vertex_mut(fv)?;
                 v.set_point_class(PointClassType::Face, face.map(EntityRef::Face));
                 v.set_fillet_vertex_type(if ee == 0 {
@@ -383,7 +400,10 @@ impl FilletCorner {
             }
         }
         let [Some(first_fv), Some(other_fv)] = ends else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the section's ends were not made",
+            ));
         };
         if !on_edge.get(other).copied().unwrap_or(false) {
             pseudo
@@ -407,24 +427,37 @@ impl FilletCorner {
             eu1::mate(pseudo.brep(), prim)?,
             "fillet edge use without mate",
         )?;
-        let first_geom = *geoms.first().ok_or_else(|| SolidError::sm_err(OP))?;
-        let last_geom = *geoms.last().ok_or_else(|| SolidError::sm_err(OP))?;
+        let first_geom = *geoms
+            .first()
+            .ok_or_else(|| SolidError::blend_failed(OP, "the corner has no blend geometry"))?;
+        let last_geom = *geoms
+            .last()
+            .ok_or_else(|| SolidError::blend_failed(OP, "the corner has no blend geometry"))?;
         pseudo.set_edgeuse_fillet_geom(prim, Some(first_geom))?;
         pseudo.set_edgeuse_fillet_geom(mate, Some(last_geom))?;
         self.edges.push(section);
 
         // the rails' ends
         for ii in 0..blends {
-            let solver = *fs.get(ii).ok_or_else(|| SolidError::sm_err(OP))?;
-            let geom = *geoms.get(ii).ok_or_else(|| SolidError::sm_err(OP))?;
+            let solver = *fs
+                .get(ii)
+                .ok_or_else(|| SolidError::blend_failed(OP, "the blend has no solver"))?;
+            let geom = *geoms
+                .get(ii)
+                .ok_or_else(|| SolidError::blend_failed(OP, "the blend has no geometry"))?;
             let face = side
                 .get(first)
                 .and_then(|f| f.get(ii))
                 .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+                .ok_or_else(|| {
+                    SolidError::blend_failed(OP, "the blend has no face on the first side")
+                })?;
             let rail = solver.find_index_of_rail_on_face(target, face)?;
             if rail > 1 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the blend has no rail on its face on the first side",
+                ));
             }
             let other_rail = 1 - rail;
             let ends: &[(usize, _, OrientType)] = if blends == 1 {

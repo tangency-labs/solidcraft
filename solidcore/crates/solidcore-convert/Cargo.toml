@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 publish = false
-rust-version.workspace = true
+# solidcore-record needs Rust 1.88 (edition 2024 let chains).
+rust-version = "1.88"
 repository = "https://github.com/tangency-labs/solidcore"
 keywords = ["cad", "brep", "nurbs", "geometry"]
 categories = ["data-structures", "science"]

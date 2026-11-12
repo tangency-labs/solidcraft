@@ -560,6 +560,17 @@ impl AppPanelRuntime {
     fn show_production_host(&mut self, app: &mut crate::SolveApp, ui: &mut egui::Ui) -> PanelResult<()> {
         self.prepare_host_paint(&app.session, ui)?;
         app.panel_content_frame = self.host.as_ref().and_then(WorkspacePanelHost::frame).cloned();
+        app.viewport.palette_rect = app.panel_content_frame.as_ref().and_then(|frame| {
+            frame
+                .layout
+                .sections
+                .iter()
+                .find(|section| section.instance.0 == crate::sketch_palette::INSTANCE_ID)
+                .map(|section| super::workspace::egui_rect(section.outer))
+        });
+        if let Some(rect) = app.viewport.palette_rect {
+            crate::scenario::publish_rect("sketch_palette:outer", rect);
+        }
         let mut services = self.services.services();
         let host = self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?;
         let pending = self.preferences.as_ref().is_some_and(|state| state.pending.is_some());
@@ -965,7 +976,7 @@ pub(crate) fn sync_production_setting(app: &mut crate::SolveApp) -> PanelResult<
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     // Switching placement systems waits until Preferences Apply/Cancel settles
     // its snapshot. Content state itself always remains owned by the app.
-    if !app.prefs_window.open
+    if !app.prefs_window.shell.open
         && let Err(reason) = sync_production_setting(app)
     {
         app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
@@ -1071,7 +1082,7 @@ impl crate::SolveApp {
         self.viewport.host_confirm = None;
         crate::ui_kit::Container::begin_host_windows(ui.ctx());
         self.viewport.host_windows = Some(Vec::new());
-        if self.session.active_sketch.is_none() {
+        if super::production::production_active(self) || self.session.active_sketch.is_none() {
             self.viewport.palette_rect = None;
         }
         // Clear stale Browser-owned metadata; the retained independent
@@ -1135,31 +1146,6 @@ impl crate::SolveApp {
             placement.min.y = cards.bottom.min(placement.bottom()).max(placement.top());
         } else {
             self.shell.cards.clear();
-        }
-        if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && crate::render_workspace::active(self) {
-            // These remain legacy content surfaces. Their actual edge reservations
-            // constrain panel placement without changing the full render domain.
-            crate::render_ui::shots_strip(self, ui);
-            crate::render_workspace::panel(self, ui);
-            if self.ui.show_browser && !crate::render_ui::focused(self) {
-                // Keep the unmigrated library in its existing lower card slot.
-                // Reserve its real top edge before admitting shared placements.
-                let bounds = crate::shell::panel_bounds(self, ui.available_rect_before_wrap());
-                let upper = crate::ui_kit::Panel::stack_first_bounds(bounds);
-                crate::render_workspace::appearances_card(self, ui, crate::ui_kit::Panel::stack_next_bounds(bounds, upper));
-            }
-            for (id, (bounds, edge)) in &self.shell.workspace_panels {
-                if *id == "render:appearances" {
-                    placement.max.y = bounds.top().clamp(placement.top(), placement.bottom());
-                    continue;
-                }
-                match edge {
-                    Some(crate::ui_kit::Edge::Left) => placement.min.x = bounds.right().clamp(placement.left(), placement.right()),
-                    Some(crate::ui_kit::Edge::Right) => placement.max.x = bounds.left().clamp(placement.left(), placement.right()),
-                    Some(crate::ui_kit::Edge::Bottom) => placement.max.y = bounds.top().clamp(placement.top(), placement.bottom()),
-                    _ => {}
-                }
-            }
         }
         let gap = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Panel).gap();
         placement.min.x += gap.min(placement.width() / 2.0);

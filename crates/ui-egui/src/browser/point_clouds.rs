@@ -24,7 +24,7 @@ use point_cloud_tracks::{Ask, Paint, Tracks};
 use range_track::{Part, Track, range_track};
 
 /// Filters the GPU applies; the others are kept but not drawn.
-pub const DRAWN_FILTERS: usize = solidcraft_gpu::view::FILTERS;
+pub const DRAWN_FILTERS: usize = solidcraft_viewport_gpu::view::FILTERS;
 
 /// The Edit Point Cloud card: the cloud, the undo depth when it opened, what it worked out once
 /// for the cloud's data (the automatic height range, the number of dots), its tracks' bars, and
@@ -296,9 +296,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         _ => Paint::One,
     };
     let changes_of = c.colored_property().filter(|n| c.complex.integer(n)).map(str::to_string);
-    let at = panel_pos(app);
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx).unwrap_or_else(|| (egui::Align2::LEFT_TOP, panel_pos(app)));
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_point_cloud_panel"), "point", &title)
-        .placed(egui::Align2::LEFT_TOP, at)
+        .placed(pivot, at)
         .fields()
         .actions("", solidcraft_ui_text::tr("ui.close"), None)
         .show(ctx, true, |ui| {

@@ -161,7 +161,7 @@ fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<usize>, end: Option<
             Seg2::Line { .. } => CurveKind::Line { a: prev, b: to },
             Seg2::Cubic { p1, p2, .. } => {
                 let (c1, c2) = (sk.add_point(p1, None)?, sk.add_point(p2, None)?);
-                CurveKind::Spline { pts: vec![prev, c1, c2, to], control: true, degree: 3, periodic: false, nurbs: None }
+                CurveKind::Spline { pts: vec![prev, c1, c2, to], control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }
             }
             Seg2::Conic { apex, w, .. } => {
                 let x = sk.add_point(apex, None)?;
@@ -174,7 +174,7 @@ fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<usize>, end: Option<
                     pts.push(sk.add_point(*q, None)?);
                 }
                 pts.push(to);
-                CurveKind::Spline { pts, control: true, degree: n, periodic: false, nurbs: None }
+                CurveKind::Spline { pts, control: true, degree: n, periodic: false, nurbs: None, handles: Vec::new() }
             }
             Seg2::Arc { .. } => return Err(bad("sketch.trim", "unexpected arc piece")),
         };
@@ -197,6 +197,83 @@ pub(super) fn trim_or_break(sk: &mut Sketch, ci: usize, at: Vec2, remove: bool, 
 /// at one point; open curves require interior positions.
 pub(super) fn break_at_points(sk: &mut Sketch, ci: usize, points: &[Vec2], cmd: &str) -> Result<Value> {
     modify(sk, ci, Vec2::ZERO, false, Some(points), cmd)
+}
+
+/// One stretch of a free-form curve between cuts: its positions and the curves cutting it there.
+type Interval = (f64, f64, Option<usize>, Option<usize>);
+
+/// The crossings a trim of free-form curve `ci` cuts at: an open curve's own ends are none.
+fn trim_cuts(sk: &Sketch, ci: usize, segs: &[Seg2], closed: bool) -> Vec<(f64, Vec2, usize)> {
+    let n = segs.len() as f64;
+    cuts(sk, ci, segs, false).into_iter().filter(|c| closed || (c.0 > 1e-9 && c.0 < n - 1e-9)).collect()
+}
+
+/// The stretches between consecutive cuts (closed curves wrap round).
+fn between_cuts(mut bounds: Vec<(f64, Option<usize>)>, closed: bool, n: f64) -> Vec<Interval> {
+    if closed {
+        let m = bounds.len();
+        return (0..m)
+            .filter_map(|i| {
+                let (a, ca) = *bounds.get(i)?;
+                let (b, cb) = *bounds.get((i + 1) % m)?;
+                let b = if b <= a + 1e-12 { b + n } else { b };
+                Some((a, b, ca, cb))
+            })
+            .collect();
+    }
+    bounds.insert(0, (0.0, None));
+    bounds.push((n, None));
+    bounds.windows(2).map(|w| (w[0].0, w[1].0, w[0].1, w[1].1)).collect()
+}
+
+/// Which of `intervals` holds position `uq`.
+fn holding(intervals: &[Interval], closed: bool, n: f64, uq: f64) -> Option<usize> {
+    intervals.iter().position(|(a, b, ..)| {
+        let u = if closed && uq < *a { uq + n } else { uq };
+        u >= *a && u <= *b
+    })
+}
+
+/// The points along positions `ua` to `ub`.
+fn path(segs: &[Seg2], ua: f64, ub: f64) -> Vec<Vec2> {
+    span(segs, ua, ub).iter().flat_map(|s| s.polyline(1e-3)).collect()
+}
+
+/// What Trim's hover keeps of a free-form curve while the sketch is unchanged: the cuts are the
+/// costly part, and [`FreeformTrim::piece`] only looks the cursor up among them.
+#[derive(Clone, Debug)]
+pub(super) struct FreeformTrim {
+    segs: Vec<Seg2>,
+    closed: bool,
+    intervals: Vec<Interval>,
+    /// The curve as points where nothing cuts it, so a click deletes all of it.
+    whole: Option<Vec<Vec2>>,
+}
+
+impl FreeformTrim {
+    pub(super) fn new(sk: &Sketch, ci: usize) -> Option<Self> {
+        let segs = pieces(sk, ci);
+        if segs.is_empty() {
+            return None;
+        }
+        let closed = segs.first().zip(segs.last()).is_some_and(|(a, b)| a.start().dist(b.end()) < 1e-9);
+        let bounds: Vec<(f64, Option<usize>)> = trim_cuts(sk, ci, &segs, closed).into_iter().map(|c| (c.0, Some(c.2))).collect();
+        let whole = bounds.is_empty().then(|| sk.polyline(ci));
+        // A closed curve with one crossing refuses the trim, so it has no piece to show.
+        let refused = bounds.is_empty() || (closed && bounds.len() < 2);
+        let intervals = if refused { Vec::new() } else { between_cuts(bounds, closed, segs.len() as f64) };
+        Some(Self { segs, closed, intervals, whole })
+    }
+
+    /// The piece a click at `at` removes, the one `sketch.trim` reports.
+    pub(super) fn piece(&self, at: Vec2) -> Option<Vec<Vec2>> {
+        if let Some(whole) = &self.whole {
+            return Some(whole.clone());
+        }
+        let (uq, _) = locate(&self.segs, at);
+        let (a, b, ..) = *self.intervals.get(holding(&self.intervals, self.closed, self.segs.len() as f64, uq)?)?;
+        Some(path(&self.segs, a, b))
+    }
 }
 
 fn modify(sk: &mut Sketch, ci: usize, at: Vec2, remove: bool, points: Option<&[Vec2]>, cmd: &str) -> Result<Value> {
@@ -222,13 +299,13 @@ fn modify(sk: &mut Sketch, ci: usize, at: Vec2, remove: bool, points: Option<&[V
         positions.dedup_by(|a, b| (*a - *b).abs() <= 1e-9);
         positions.into_iter().map(|u| (u, point_at(&segs, u), None)).collect()
     } else {
-        cuts(sk, ci, &segs, false).into_iter().filter(|c| closed || (c.0 > 1e-9 && c.0 < n - 1e-9)).map(|(u, q, c)| (u, q, Some(c))).collect()
+        trim_cuts(sk, ci, &segs, closed).into_iter().map(|(u, q, c)| (u, q, Some(c))).collect()
     };
     let (uq, _) = locate(&segs, at);
     let ends = sk.curves.get(ci).and_then(|c| c.kind.ends());
     let construction = sk.curves.get(ci).is_some_and(|c| c.construction);
     // Intervals between consecutive cuts (closed curves wrap round).
-    let mut bounds: Vec<(f64, Option<usize>)> = cs.iter().map(|c| (c.0, c.2)).collect();
+    let bounds: Vec<(f64, Option<usize>)> = cs.iter().map(|c| (c.0, c.2)).collect();
     if bounds.is_empty() {
         if remove {
             sk.remove_curves(&[ci]);
@@ -236,29 +313,11 @@ fn modify(sk: &mut Sketch, ci: usize, at: Vec2, remove: bool, points: Option<&[V
         }
         return Err(bad(cmd, "nothing to break at there"));
     }
-    let intervals: Vec<(f64, f64, Option<usize>, Option<usize>)> = if closed {
-        if bounds.len() < 2 && remove {
-            return Err(bad(cmd, "a closed curve needs two crossings to trim"));
-        }
-        let m = bounds.len();
-        (0..m)
-            .filter_map(|i| {
-                let (a, ca) = *bounds.get(i)?;
-                let (b, cb) = *bounds.get((i + 1) % m)?;
-                let b = if b <= a + 1e-12 { b + n } else { b };
-                Some((a, b, ca, cb))
-            })
-            .collect()
-    } else {
-        bounds.insert(0, (0.0, None));
-        bounds.push((n, None));
-        bounds.windows(2).map(|w| (w[0].0, w[1].0, w[0].1, w[1].1)).collect()
-    };
-    let inside = |(a, b, _, _): &(f64, f64, Option<usize>, Option<usize>)| {
-        let u = if closed && uq < *a { uq + n } else { uq };
-        u >= *a && u <= *b
-    };
-    let gone = if remove { intervals.iter().position(inside) } else { None };
+    if closed && bounds.len() < 2 && remove {
+        return Err(bad(cmd, "a closed curve needs two crossings to trim"));
+    }
+    let intervals = between_cuts(bounds, closed, n);
+    let gone = if remove { holding(&intervals, closed, n, uq) } else { None };
     // Points at the cuts are shared by neighbouring intervals.
     let mut cut_pt: Vec<(f64, usize)> = Vec::new();
     for (u, q, _) in &cs {
@@ -286,10 +345,8 @@ fn modify(sk: &mut Sketch, ci: usize, at: Vec2, remove: bool, points: Option<&[V
     }
     let ids: Vec<String> = made.iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
     // The removed piece, for previews (`sketch.trim.path`).
-    let removed: Vec<[f64; 2]> = gone
-        .and_then(|k| intervals.get(k))
-        .map(|(a, b, ..)| span(&segs, *a, *b).iter().flat_map(|s| s.polyline(1e-3)).map(|q| [q.x, q.y]).collect())
-        .unwrap_or_default();
+    let removed: Vec<[f64; 2]> =
+        gone.and_then(|k| intervals.get(k)).map(|(a, b, ..)| path(&segs, *a, *b).iter().map(|q| [q.x, q.y]).collect()).unwrap_or_default();
     sk.remove_curves(&[ci]);
     let unused: Vec<usize> = cut_pt.iter().map(|x| x.1).filter(|pi| !sk.curves.iter().any(|c| c.kind.uses(*pi))).collect();
     sk.remove_points(&unused);

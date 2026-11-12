@@ -483,9 +483,10 @@ impl Document {
     }
 
     /// User parameters as CSV (`name,unit,expression,value,comment`). The `value` column is the
-    /// number in the `unit` column, rounded for reading (#10747); import reads `expression`.
+    /// number in the `unit` column, rounded for reading (#10747); import reads `expression`. A text
+    /// field a spreadsheet would run as a formula is written as text ([`crate::csv`]).
     pub fn params_csv(&self) -> String {
-        let q = |s: &str| if s.contains([',', '"', '\r', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
+        let q = crate::csv::field;
         let mut out = String::from("name,unit,expression,value,comment,favorite\n");
         for r in self.param_rows().into_iter().filter(|r| r.source == "user") {
             out += &format!(
@@ -1137,13 +1138,14 @@ fn split_csv(text: &str, separator: char) -> impl Iterator<Item = &str> {
 fn csv_fields(record: &str) -> Result<Vec<String>> {
     split_csv(record, ',')
         .map(|raw| {
+            // `unguard` takes off the `'` an export put before a value a spreadsheet would run.
             let field = raw.trim();
             if !field.contains('"') {
-                return Ok(field.to_string());
+                return Ok(crate::csv::unguard(field).to_string());
             }
             let inner = field.strip_prefix('"').and_then(|s| s.strip_suffix('"'));
             match inner {
-                Some(s) if s.split("\"\"").all(|part| !part.contains('"')) => Ok(s.replace("\"\"", "\"")),
+                Some(s) if s.split("\"\"").all(|part| !part.contains('"')) => Ok(crate::csv::unguard(&s.replace("\"\"", "\"")).to_string()),
                 _ => Err(DocError::Invalid("invalid quoting in parameter CSV".into())),
             }
         })
@@ -1291,6 +1293,25 @@ mod design_length_tests {
         assert_eq!(doc.with_design_unit("=5 mm", length), "=5 mm");
         let inches = doc.eval(&doc.with_design_unit("=5", length), length).unwrap();
         assert!((inches - 127.0).abs() < 1e-9, "{inches}");
+    }
+
+    /// A bare number written with a decimal comma (`2,5`) or as a mixed number (`2 1/8`) means the
+    /// design's units like `2.5` does, not millimetres.
+    #[test]
+    fn a_decimal_comma_or_mixed_number_gets_the_design_unit() {
+        let mut doc = Document::new("Units");
+        doc.units = "in".into();
+        let length = crate::expr::Kind::Length;
+        assert_eq!(doc.with_design_unit("2,5", length), "2,5 in");
+        assert_eq!(doc.with_design_unit("-,5", length), "-,5 in");
+        assert_eq!(doc.with_design_unit("=2 1/8", length), "=2 1/8 in");
+        assert_eq!(doc.with_design_unit("w = 2,5", length), "w = 2,5 in");
+        let inches = doc.eval(&doc.with_design_unit("2 1/8", length), length).unwrap();
+        assert!((inches - 2.125 * 25.4).abs() < 1e-9, "{inches}");
+        // Anything that is not one bare number is left as typed.
+        for e in ["2,5 mm", "2 1/8\"", "(2,5)", "2,5 + 1", "1/2", "d3"] {
+            assert_eq!(doc.with_design_unit(e, length), e, "{e}");
+        }
     }
 
     #[test]

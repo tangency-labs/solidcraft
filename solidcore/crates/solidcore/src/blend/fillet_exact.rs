@@ -547,7 +547,10 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
 
     // what was read off the surface is the surface
     if q.distance(p) > tol || q.normal(p).dot(n) < 1.0 - EFF_ZERO_SQRT {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the surface read back is not the surface",
+        ));
     }
     Ok(q)
 }
@@ -1522,8 +1525,9 @@ pub fn classify_exact_blend(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let tol = b.tolerance();
 
     let mut radius = 0.0;
@@ -1545,7 +1549,7 @@ pub fn classify_exact_blend(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             BlendQuadric::from_surface(k, off.surface.base_surface(), uv, tol)?
         };
         if face.kind == QuadricKind::None && !any_faces {
@@ -1559,7 +1563,7 @@ pub fn classify_exact_blend(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = off.surface.base_surface();
             off.surface
                 .surface
@@ -1880,7 +1884,7 @@ pub struct CollapsedOffset {
     pub partial: bool,
 }
 
-/// Not the fork's (#2401; with `fixes.fillet_gn_section_generator`): for a constant ball of
+/// Not the fork's (#2401): for a constant ball of
 /// `radius` (`None`: the solver's own) whose offset of one of its faces collapses (the face
 /// a cylinder or sphere as wide as the ball, the ball inside it: its offset is the axis or
 /// the centre, [`QuadricKind::Line`] or [`QuadricKind::Point`]), the radius of that face
@@ -1930,13 +1934,14 @@ pub fn ball_zone_open_at_an_end(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     if edge::is_closed(b, e)? {
         return Ok(None);
     }
     let curve = edge::evaluation_curve(b, e)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's evaluation curve"))?
         .clone();
     let ivl = edge::interval(b, e)?;
     let tol = b.tolerance();
@@ -1954,7 +1959,7 @@ pub fn ball_zone_open_at_an_end(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = off.surface.base_surface();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
@@ -1976,7 +1981,7 @@ pub fn ball_zone_open_at_an_end(
             let surface = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = surface.surface.base_surface();
             match edge_match(k, base, &curve, ivl, off, tol)? {
                 // as wide as the ball along part of the edge only: refused, naming the face's
@@ -2047,7 +2052,7 @@ pub fn ball_zone_open_at_an_end(
             let surface = ops
                 .solver()
                 .surface(c)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = surface.surface.base_surface();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
@@ -2192,13 +2197,14 @@ pub fn rail_below_resolution(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     if edge::is_closed(b, e)? {
         return Ok(None);
     }
     let curve = edge::evaluation_curve(b, e)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's evaluation curve"))?
         .clone();
     let ivl = edge::interval(b, e)?;
     let tol = b.tolerance();
@@ -2215,7 +2221,7 @@ pub fn rail_below_resolution(
             let off = ops
                 .solver()
                 .surface(i)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?;
             let base = off.surface.base_surface();
             let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped =
@@ -2380,7 +2386,7 @@ fn ball_on_face_along_arc(
     let surface = ops
         .solver()
         .surface(ring)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?
         .surface
         .base_surface();
     let mut feet = [Vec3::ZERO; 2];
@@ -2491,7 +2497,7 @@ fn keep_definition(
     }
     let support = |i: usize| -> Result<&Surface> {
         Ok(s.surface(i)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's support surface"))?
             .surface
             .base_surface())
     };
@@ -2519,46 +2525,16 @@ fn keep_definition(
         inputs,
     )?;
     let Some(surface) = pseudo.geom_mut(g)?.fillet_surface_mut(None)? else {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::blend_missing(
+            OP,
+            "the fillet geometry's surface",
+        ));
     };
-    keep_round_if_proved(k, surface, round, inputs.tol)?;
+    // The round keeps its definition only where it is proved; a net the certificate refuses
+    // refuses the fillet (definitions-and-certificates.md §7.1, §7.4), never kept bare.
+    round.recertify(k, surface)?;
+    surface.set_exact_round(Some(round));
     Ok(())
-}
-
-/// `round` kept on `net` where it is proved ([`ExactRound::recertify`]), returning whether it
-/// was. The class is read within `tol`, the body's tolerance, and the certificate to rounding.
-/// Supports only that close to the class (a cylinder's axis 1e-13 off square to a plane, as
-/// read from a record) make a net that is the round but not provably on the class's surface:
-/// no bound of 0, so it keeps no definition. A net further off the
-/// class than `tol` ([`ExactRound::miss`]) is built wrongly, and stays an error.
-///
-/// # Errors
-///
-/// The certificate's refusal of a net more than `tol` off the class, or of supports that
-/// give the class no surface; those of the certificate and of [`ExactRound::miss`].
-pub fn keep_round_if_proved(
-    k: &Kernel,
-    net: &mut Surface,
-    round: ExactRound,
-    tol: f64,
-) -> Result<bool> {
-    match round.recertify(k, net) {
-        Ok(_) => {
-            net.set_exact_round(Some(round));
-            Ok(true)
-        }
-        Err(e) => {
-            let off = matches!(
-                &e,
-                SolidError::InvalidInput { operation, .. }
-                    if *operation == crate::surface::implicit::OP_EXACT
-            );
-            match off.then(|| round.miss(k, net)).transpose()?.flatten() {
-                Some(miss) if miss <= tol => Ok(false),
-                _ => Err(e),
-            }
-        }
-    }
 }
 
 /// [`calc_exact_fillet_geom`]'s build by the class (`CalcExactFilletGeom`), without the
@@ -2585,7 +2561,7 @@ fn exact_fillet_geom_of_class(
             .fsg
             .as_ref()
             .map(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::fillet_surface_generator_type)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface generator"))
     };
     match blend.spine {
         BlendSpine::Line => {
@@ -2719,7 +2695,8 @@ fn exact_fillet_geom_of_class(
 mod tests {
     use super::*;
 
-    /// A box's edge rounded 2: the round's net, without its definition, and the definition.
+    /// A cylinder R 10, 20 high, its top rim rounded 2 (a round of the circle class): the
+    /// round's net, without its definition, and the definition.
     fn kept_round() -> (Kernel, Surface, ExactRound) {
         use crate::blend::fillet_executive::session::FilletSession;
         use crate::kernel::UpstreamFixes;
@@ -2729,24 +2706,51 @@ mod tests {
             fixes: UpstreamFixes::all(),
             ..Kernel::default()
         };
-        let mut b = crate::primitive::api_primitives::create_box(
+        let mut b = crate::primitive::api_primitives::create_cylinder(
             &mut k,
             Point3::new(0.0, 0.0, 0.0),
-            30.0,
-            20.0,
             10.0,
+            20.0,
         )
         .unwrap();
-        let edge = b.edge_list()[0];
+        // the top rim: the edge through (10, 0, 20)
+        let rim = *b
+            .edge_list()
+            .iter()
+            .min_by(|&&x, &&y| {
+                let d = |e| {
+                    crate::query::api_queries::edge_closest_point(
+                        &k,
+                        &b,
+                        e,
+                        Point3::new(10.0, 0.0, 20.0),
+                    )
+                    .unwrap()
+                    .closest
+                    .distance
+                        + crate::query::api_queries::edge_closest_point(
+                            &k,
+                            &b,
+                            e,
+                            Point3::new(-10.0, 0.0, 20.0),
+                        )
+                        .unwrap()
+                        .closest
+                        .distance
+                };
+                d(x).total_cmp(&d(y))
+            })
+            .unwrap();
         {
             let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-            s.prepare_constant_radius_edges(&mut k, &[edge], 2.0, 1, 1, 1.0)
+            s.prepare_constant_radius_edges(&mut k, &[rim], 2.0, 1, 1, 1.0)
                 .unwrap();
             s.do_fillet(&mut k).unwrap();
         }
         for &f in b.face_list() {
             let s = face::surface(&b, f).unwrap().unwrap();
             if let Some(BlendRef::Exact { round, .. }) = s.procedural_blend() {
+                assert_eq!(round.class, ExactClass::Circle);
                 let round = round.clone();
                 let mut net = s.clone();
                 net.set_exact_round(None);
@@ -2769,23 +2773,21 @@ mod tests {
         net
     }
 
-    /// The class is read within 2e-5 here. A net on it keeps its definition; one off it by
-    /// less keeps none (the round of supports that close to the class); one further off is
-    /// built wrongly, and stays an error.
+    /// A circle-class round's definition is the torus its net is on, a stated distance from
+    /// the supports' class torus within the tolerance the class was read at (2e-5 here): the
+    /// net as built is at 0, the net moved by (1, 1, 1) 1e-7 is at sqrt 3 1e-7, and the net
+    /// moved by (1, 1, 1) 1e-3 is refused.
     #[test]
-    fn a_net_off_its_class_keeps_no_definition_within_the_tolerance_only() {
-        let tol = 2e-5;
+    fn a_circle_rounds_net_is_certified_on_its_own_torus_near_the_class() {
         let (k, net, round) = kept_round();
-        let mut on = net.clone();
-        assert!(keep_round_if_proved(&k, &mut on, round.clone(), tol).unwrap());
-        assert!(on.procedural_blend().is_some());
-
-        let mut near = moved(&k, &net, 1e-7);
-        assert!(!keep_round_if_proved(&k, &mut near, round.clone(), tol).unwrap());
-        assert!(near.procedural_blend().is_none());
-
-        let mut far = moved(&k, &net, 1e-3);
-        let refused = keep_round_if_proved(&k, &mut far, round, tol);
+        assert_eq!(round.recertify(&k, &net).unwrap(), 0.0);
+        assert!(round.supports_distance(&k, &net).unwrap() < 1e-12);
+        let near = moved(&k, &net, 1e-7);
+        assert_eq!(round.recertify(&k, &near).unwrap(), 0.0);
+        let d = round.supports_distance(&k, &near).unwrap();
+        assert!((d - 3.0_f64.sqrt() * 1e-7).abs() < 1e-12, "{d}");
+        let far = moved(&k, &net, 1e-3);
+        let refused = round.recertify(&k, &far);
         assert!(
             matches!(refused, Err(SolidError::InvalidInput { .. })),
             "{refused:?}"
