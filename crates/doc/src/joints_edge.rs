@@ -135,7 +135,12 @@ pub(super) fn edge_frame(doc: &Document, st: &ModelState, comp: u64, snap: &Snap
             frame(mid, z, Some(y.cross(z))).ok_or_else(bad)
         }
         Some(other) => {
-            let j = crate::name_lookup::locate_edge(b, other, pick).map_err(|_| gone(&format!("the edge `{other}`")))?.edge;
+            // The pick lies on edge `i`, not on this one: a name the pick would decide finds `i`.
+            let j = crate::name_lookup::locate_edge(b, other, pick)
+                .ok()
+                .map(|hit| hit.edge)
+                .filter(|j| *j != i)
+                .ok_or_else(|| gone(&format!("the edge `{other}`")))?;
             let f = m.edges.get(j).ok_or_else(bad)?;
             let t = tol(b);
             let at = meeting(e, f, t).ok_or_else(|| DocError::Invalid(format!("joint origin: its edges no longer meet at a corner (`{other}`)")))?;

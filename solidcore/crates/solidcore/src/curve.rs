@@ -17,6 +17,7 @@
 //!   unchanged.
 
 pub mod arc;
+pub mod arc_of;
 pub mod composite_curve;
 pub mod conic;
 pub mod crv_in_volume;
@@ -35,6 +36,7 @@ pub(crate) mod native_affine;
 pub mod offset_curve;
 pub mod parabola;
 pub mod path;
+pub mod plane_of;
 pub mod projected_curve;
 pub mod step_edge;
 pub mod tangent_field;

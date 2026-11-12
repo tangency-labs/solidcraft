@@ -16,7 +16,7 @@ use solidcraft_engine::geom::prelude::*;
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::gizmo::{self, Change, Drag};
-use crate::selection::{AXIS_PICKS, BODIES, EDGES, FACES, ORIGIN, SelInput, VERTICES};
+use crate::selection::{AXIS_PICKS, BODIES, EDGES, FACES, ORIGIN, SNAP_POINTS, SelInput, VERTICES};
 
 pub const TYPES: [&str; 5] = ["Free Move", "Translate", "Rotate", "Point to Point", "Point to Position"];
 pub const FREE: usize = 0;
@@ -24,7 +24,7 @@ pub const TRANSLATE: usize = 1;
 pub const ROTATE: usize = 2;
 pub const POINT_TO_POINT: usize = 3;
 pub const POINT_TO_POSITION: usize = 4;
-const POINTS: u16 = VERTICES | FACES | EDGES | ORIGIN;
+const POINTS: crate::selection::Accept = VERTICES | FACES | EDGES | ORIGIN | SNAP_POINTS;
 
 /// A fresh Move dialog of a type (all values zero).
 pub fn kind(mode: usize, doc: &solidcraft_engine::doc::Document) -> Kind {
@@ -76,6 +76,7 @@ fn switch_type(app: &SolveApp, d: &mut Dialog, m: usize) {
         i.items = bodies;
     }
     d.extra.remove("pivot");
+    d.extra.remove("origin");
     d.active = if bodies_empty(d) { 0 } else { 1.min(d.inputs.len() - 1) };
 }
 
@@ -389,7 +390,7 @@ enum Step {
     Needs(String),
 }
 
-/// The rigid transform of solid.move parameters: the turn about the origin, then the translation.
+/// The rigid transform of solid.move parameters: the turn about the supplied origin, then the translation.
 fn transform(app: &SolveApp, p: &Value) -> Result<Mat, String> {
     let value = |v: &Value, f: fn(&SolveApp, &str) -> Result<f64, String>| match v {
         Value::String(e) => f(app, e),
@@ -401,14 +402,19 @@ fn transform(app: &SolveApp, p: &Value) -> Result<Mat, String> {
         _ => Vec3::ZERO,
     };
     let Some(angle) = p.get("angle") else { return Ok(rigid(t, Vec3::ZERO, Vec3::Z, 0.0)) };
+    let origin = match p.get("origin").and_then(Value::as_array) {
+        Some(a) if a.len() == 3 => Vec3::new(value(&a[0], len)?, value(&a[1], len)?, value(&a[2], len)?),
+        _ => Vec3::ZERO,
+    };
     let axis = match p.get("axis").and_then(Value::as_array) {
         Some(a) if a.len() == 3 => Vec3::new(value(&a[0], len)?, value(&a[1], len)?, value(&a[2], len)?),
         _ => Vec3::Z,
     };
-    Ok(rigid(t, Vec3::ZERO, axis, value(angle, ang)?))
+    Ok(rigid(t, origin, axis, value(angle, ang)?))
 }
 
-/// `p` with its translation and turn replaced by `m`'s.
+/// `p` with its translation and turn replaced by `m`'s. `m` turns about the world origin, so a
+/// turn names that origin: an omitted one would be the moved body's own frame's origin.
 fn with_transform(mut p: Value, m: &Mat) -> Value {
     let rows = [0, 1, 2].map(|r| [m[0][r], m[1][r], m[2][r]]);
     let (axis, th) = gizmo::axis_angle(&rows);
@@ -416,8 +422,10 @@ fn with_transform(mut p: Value, m: &Mat) -> Value {
     if let Some(o) = p.as_object_mut() {
         o.remove("axis");
         o.remove("angle");
+        o.remove("origin");
     }
     if th.abs() > 1e-12 {
+        p["origin"] = json!([mm(0.0), mm(0.0), mm(0.0)]);
         p["axis"] = json!([axis.x, axis.y, axis.z]);
         p["angle"] = json!(deg(th));
     }
@@ -442,7 +450,7 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
             if turned.is_empty() {
                 p["translate"] = json!([x, y, z]);
                 // A rotation kept from an edited move about another axis.
-                for k in ["axis", "angle"] {
+                for k in ["axis", "angle", "origin"] {
                     if let Some(v) = d.extra.get(k) {
                         p[k] = v.clone();
                     }
@@ -451,16 +459,15 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
                 let piv = pivot(app, d).ok_or("select bodies first")?;
                 let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
                 let (axis, th) = gizmo::axis_angle(&r);
+                p["origin"] = if items(d, 1).is_empty() { d.extra.get("origin").cloned().unwrap_or_else(|| num(piv)) } else { num(piv) };
+                p["translate"] = json!([x, y, z]);
                 match turned.as_slice() {
-                    // One turn about the origin: the typed values stay as they are.
-                    [i] if piv.len() < 1e-9 => {
-                        p["translate"] = json!([x, y, z]);
+                    // A single turn keeps its angle expression and pivot independently.
+                    [i] => {
                         p["axis"] = json!([[1, 0, 0], [0, 1, 0], [0, 0, 1]][*i]);
                         p["angle"] = json!([rx, ry, rz][*i]);
                     }
                     _ => {
-                        let t = Vec3::new(len(app, x)?, len(app, y)?, len(app, z)?);
-                        p["translate"] = num(piv - gizmo::apply(&r, piv) + t);
                         p["axis"] = json!([axis.x, axis.y, axis.z]);
                         p["angle"] = json!(deg(th));
                     }
@@ -471,9 +478,8 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
             let Some((o, a)) = items(d, 1).first().and_then(|s| axis_line(app, d, s)) else {
                 return Ok(Step::Needs("select an axis, a straight or circular edge, or a cylinder, cone or torus face first".into()));
             };
-            let th = ang(app, angle)?;
-            let r = gizmo::rotation(a, th);
-            p["translate"] = num(o - gizmo::apply(&r, o));
+            ang(app, angle)?;
+            p["origin"] = num(o);
             p["axis"] = json!([a.x, a.y, a.z]);
             p["angle"] = json!(angle);
         }
@@ -630,23 +636,32 @@ pub(crate) fn euler_from_axis_angle(axis: Vec3, angle: f64) -> (f64, f64, f64) {
 }
 
 /// The dialog for editing a move: Free Move with its translation and, about a world axis
-/// through the origin, its angle (another axis is shown as the Free Move angles that make
+/// through its saved pivot, its angle (another axis is shown as the Free Move angles that make
 /// the same turn, or kept as it is when the angle does not evaluate to a number).
 pub fn for_feature(
     doc: &solidcraft_engine::doc::Document,
     d: &mut Dialog,
-    bodies: &[String],
-    translate: &[solidcraft_engine::doc::Expr; 3],
-    axis: Option<Vec3>,
-    angle: Option<&solidcraft_engine::doc::Expr>,
-    copy: bool,
+    feature: &solidcraft_engine::doc::FeatureKind,
+    frame: &solidcraft_engine::doc::Mat,
 ) {
-    let [x, y, z] = translate.clone().map(String::from);
+    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy } = feature else { return };
+    let mut translate = translate.clone();
+    let mut origin = origin.clone();
+    let mut axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
+    if !solidcraft_engine::doc::is_identity(frame) {
+        solidcraft_engine::doc::map_vector_expr(frame, &mut translate);
+        if angle.is_some() || origin.is_some() {
+            let pivot = origin.get_or_insert_with(|| solidcraft_engine::doc::point_expr(Vec3::ZERO));
+            solidcraft_engine::doc::map_point_expr(frame, pivot);
+        }
+        axis = solidcraft_engine::doc::apply_vector(frame, axis);
+    }
+    let [x, y, z] = translate.map(String::from);
     let mut k = kind(FREE, doc);
     if let Kind::Move { x: kx, y: ky, z: kz, rx, ry, rz, .. } = &mut k {
         (*kx, *ky, *kz) = (x, y, z);
         if let Some(a) = angle {
-            let dir = axis.unwrap_or(Vec3::Z);
+            let dir = axis;
             let world = [Vec3::X, Vec3::Y, Vec3::Z].iter().position(|w| dir.cross(*w).len() < 1e-9 && dir.dot(*w) > 0.0);
             match world {
                 Some(0) => *rx = a.to_string(),
@@ -663,16 +678,22 @@ pub fn for_feature(
                     }
                 },
             }
-            // The stored move turns about the origin.
-            d.extra.insert("pivot".into(), json!([0.0, 0.0, 0.0]));
+        }
+        if angle.is_some() || origin.is_some() {
+            let origin = origin.unwrap_or_else(|| solidcraft_engine::doc::point_expr(Vec3::ZERO));
+            let pivot = origin.iter().map(|e| doc.eval(e, solidcraft_engine::doc::expr::Kind::Length)).collect::<Result<Vec<_>, _>>();
+            if let Ok(pivot) = pivot {
+                d.extra.insert("pivot".into(), json!(pivot));
+            }
+            d.extra.insert("origin".into(), json!(origin));
         }
     }
     d.kind = k;
     d.inputs = inputs(FREE);
     if let Some(inp) = d.inputs.first_mut() {
-        inp.items = bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect();
+        inp.items = bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
     }
-    if copy {
+    if *copy {
         d.extra.insert("copy".into(), json!(true));
     }
 }

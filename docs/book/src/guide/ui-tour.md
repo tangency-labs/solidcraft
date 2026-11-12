@@ -23,6 +23,10 @@ view.
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
   folder (see [Troubleshooting](troubleshooting.md#reset-the-settings)) and restart; `app` (the
   default) puts the application bar back.
+  The operating system's window title automatically shows the active design, such as
+  `Bracket — SolidCraft`. Unsaved changes add an asterisk: `Bracket * — SolidCraft`.
+  Taskbars and window switchers use this title; the application bar itself is unchanged.
+  With no design open, the title is `SolidCraft`.
 - **Toolbar.** The workspace switcher (DESIGN) sits on the left. The tabs (MODEL, SURFACE,
   ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW and SHEET METAL) hold sections of commands. SKETCH appears while
   editing a sketch; SHEET METAL is always there and is highlighted for the active sheet body. Both select automatically

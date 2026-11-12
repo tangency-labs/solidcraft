@@ -248,7 +248,10 @@ impl FilletCorner {
                     other_side_edgeuse = Some(other);
                 } else {
                     // Invalid brep topology
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the brep's topology at the corner is not valid",
+                    ));
                 }
             }
         }

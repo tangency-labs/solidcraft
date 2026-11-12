@@ -32,6 +32,10 @@ const HOME_MIN: f32 = 128.0;
 const NAME_GAP: f32 = 6.0;
 /// A bar narrower than this shows no product name, no Undo and Redo, and narrower file actions.
 const COMPACT: f32 = 640.0;
+/// Space the File menu keeps below its rows for its frame and a gap above the window's bottom.
+const FILE_MENU_BOTTOM_GAP: f32 = 24.0;
+/// The least height the File menu's rows get, about three rows, however short the window.
+const FILE_MENU_MIN_ROOM: f32 = 100.0;
 
 /// Where the bar publishes its parts in the widget registry.
 #[derive(Clone, Copy, Debug)]
@@ -917,17 +921,24 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
 }
 
 /// Draws the File menu's `rows` at `at` (under the File button) in the area `id`. `just_opened`:
-/// the click that opened it this pass is not a click elsewhere.
+/// the click that opened it this pass is not a click elsewhere. The rows scroll when the menu would
+/// run past the window's bottom, so every row stays reachable in a short window.
 pub fn file_menu(ctx: &egui::Context, rows: &[FileRow], at: Pos2, id: egui::Id, just_opened: bool) -> FileMenuOut {
     use crate::{Container, Surface};
     let mut chosen = None;
+    // Room below `at` for the rows, less the menu frame's margins; never under three rows.
+    let room = (ctx.content_rect().bottom() - at.y - FILE_MENU_BOTTOM_GAP).max(FILE_MENU_MIN_ROOM);
     let resp = Container::new(ctx, Surface::Popup).area(id).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| {
         crate::Menu::show_frame(ui, crate::Menu::frame(), |ui| {
             ui.set_min_width(190.0);
             ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
             ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
             ui.visuals_mut().widgets.hovered.weak_bg_fill = Tokens::get().hover;
-            file_rows(ui, rows, &mut chosen, false);
+            // `min_scrolled_height` lets the rows grow past the size the area kept from an earlier,
+            // shorter list, as the panel drop-downs do (#874); they still shrink to fit their content.
+            egui::ScrollArea::vertical().id_salt("file_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
+                file_rows(ui, rows, &mut chosen, false);
+            });
         });
     });
     let close = chosen.is_some() || (!just_opened && resp.response.clicked_elsewhere());

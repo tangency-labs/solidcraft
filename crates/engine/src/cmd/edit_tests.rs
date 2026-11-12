@@ -648,6 +648,56 @@ fn timeline_folders_are_command_backed_saved_undoable_and_follow_feature_ids() {
     assert!(s.doc.timeline_groups.is_empty());
 }
 
+/// #14884: deleting the last feature behind the rollback marker leaves the marker at the end of
+/// the history. Nothing is rolled back then, but the commands that move bodies, features and
+/// placements into a component still refused as if it were. While a feature is still behind the
+/// marker, they keep refusing.
+#[test]
+fn deleting_the_last_feature_behind_the_marker_lets_things_move_into_a_component() {
+    for command in ["component.from_bodies", "component.move_bodies", "component.move_features", "browser.reparent", "occurrence.reparent"] {
+        let mut s = Session::default();
+        let part = run(&mut s, "component.create", json!({"name": "Part"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let other = run(&mut s, "component.create", json!({"name": "Other"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "name": "BoxA"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "BoxB"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 50, 0], "operation": "new_body", "name": "BoxC"}));
+        run(&mut s, "timeline.rollback", json!({"position": 1}));
+        run(&mut s, "timeline.delete", json!({"feature": "BoxB"}));
+        assert_eq!(s.doc.marker, Some(s.doc.features.len() - 1), "{command}: BoxC is behind the marker");
+        let body = s.model.state().bodies.first().map(|b| b.name.clone()).expect("BoxA's body");
+        let params = match command {
+            "component.from_bodies" => json!({"bodies": [body]}),
+            "component.move_bodies" | "browser.reparent" => json!({"bodies": [body], "component": part["component"]}),
+            "component.move_features" => json!({"features": ["BoxA"], "component": part["component"]}),
+            _ => json!({"occurrence": part["occurrence"], "parent": other["component"]}),
+        };
+        let refused = s.execute(command, &params).unwrap_err().to_string();
+        assert!(refused.contains("finish timeline rollback"), "{command}: BoxC is still behind the marker: {refused}");
+        run(&mut s, "timeline.delete", json!({"feature": "BoxC"}));
+        assert_eq!(s.doc.marker, Some(s.doc.features.len()), "{command}: the marker stays at the end of the history");
+        let reply = run(&mut s, command, params);
+        assert!(!s.doc.marker.is_some_and(|m| m < s.doc.features.len()), "{command}: nothing is behind the marker afterwards");
+        let target = part["component"].as_u64();
+        match command {
+            "occurrence.reparent" => {
+                let moved = s.doc.occurrences.iter().find(|o| Some(o.id) == part["occurrence"].as_u64()).expect("Part's placement");
+                assert_eq!(Some(moved.parent), other["component"].as_u64(), "{command}: Part sits in Other now");
+            }
+            "component.move_features" => {
+                assert_eq!(s.doc.find_feature("BoxA").map(|f| f.component), target, "{command}: BoxA is in Part now");
+            }
+            _ => {
+                let expected = if command == "component.from_bodies" { reply["components"][0]["component"].as_u64() } else { target };
+                let moved = s.model.state().bodies.iter().find(|b| b.name == body).map(|b| s.doc.model_body_component(b));
+                assert_eq!(moved, expected, "{command}: the body is in the target component now");
+                assert_ne!(moved, Some(0), "{command}: the body left the root component");
+            }
+        }
+    }
+}
+
 /// #9373: editing a feature inside a timeline folder left the id of the edit's trial feature in
 /// the folder and gave that id out again, so every edit there added it once more, and a feature
 /// made later took it and was listed twice: the saved design then would not open. Edited, the
@@ -1235,6 +1285,44 @@ fn counted_body_names_stay_when_the_timeline_changes() {
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "name": "E"}));
     assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C"), ("Body4", "E")]));
+}
+
+/// A design saved before body names were pinned, and saved rolled back, is pinned as it opens
+/// for the features after the marker too (#14008): a body made at the marker does not take the
+/// number of a later body, so the later bodies keep the names they were saved with and a combine
+/// that names them still joins the same bodies.
+#[test]
+fn counted_body_names_after_the_marker_stay_in_a_design_saved_before_pinning() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40), ("D", 50)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "name": name}));
+    }
+    run(&mut s, "solid.combine", json!({"target": "Body3", "tools": ["Body4"], "operation": "join", "name": "Join"}));
+    // As a file written before names were pinned: no stored names, and rolled back to after A.
+    let mut doc = (*s.doc).clone();
+    for f in &mut doc.features {
+        f.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    doc.marker = Some(1);
+    let mut s = Session::opened_at(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap(), None, None);
+    assert_eq!(s.doc.find_feature("C").map(|f| f.body_names.clone()), Some(vec!["Body3".to_string()]));
+    assert!(["Body1", "Body2", "Body3", "Body4"].iter().all(|n| s.doc.reserved_body_names.contains(*n)));
+    // Opening changed nothing the user can see: the design is still rolled back, and not dirty.
+    assert_eq!(s.doc.marker, Some(1));
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!(!s.is_dirty());
+    assert!(s.undo.is_empty());
+
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0], "name": "N"}));
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    let st = s.model.state();
+    let names: Vec<(String, String)> =
+        st.bodies.iter().map(|b| (b.name.clone(), s.doc.feature(b.feature).map(|f| f.name.clone()).unwrap_or_default())).collect();
+    let want: Vec<(String, String)> =
+        [("Body1", "A"), ("Body5", "N"), ("Body2", "B"), ("Body3", "C")].iter().map(|(b, f)| (b.to_string(), f.to_string())).collect();
+    assert_eq!(names, want, "C and D are joined into Body3, N takes a new number");
+    assert!(s.doc.features.iter().all(|f| s.model.result(f.id).is_some_and(|r| r.error.is_none())));
 }
 
 /// Pinning reads each feature's bodies once and keeps them with the state it read them from;

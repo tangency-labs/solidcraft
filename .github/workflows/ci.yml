@@ -43,7 +43,7 @@
 # Every Linux job runs on Blacksmith's Ubuntu 24.04 runners (blacksmith-<N>vcpu-ubuntu-2404), sized
 # per job: 32 vCPU for the tests, 16 for Clippy, the GPU path tests, the archive build (nightly) and the merge queue's, 8 for compiles, doc and reference tests, 4 for the light checks, 2 for Select checks and ci.
 # The Windows shader job runs on Blacksmith's Windows Server 2025 runners (blacksmith-8vcpu-windows-2025);
-# the Windows app startup smoke stays on windows-latest, which has a desktop session that presents frames.
+# the Windows app is built there too, and only its startup smoke runs on windows-latest, which has a desktop session that presents frames.
 # Pull requests, forks included, the merge queue, pushes to main and the nightly run all use them:
 # the runners are ephemeral, fork runs get no secrets, and main saves the build caches that every
 # other run restores read-only. Nightly and by hand, Build tests also makes an archive the matrix
@@ -446,7 +446,11 @@ jobs:
       - name: Design format pending changes
         run: bash scripts/test-format-pending.sh
       - name: Web app offline use and updates (headless Chrome)
-        run: cargo xtask web-offline-test
+        # Not blocking while #14591 is open: the check "the open v3 page was given another build's
+        # file after the update" fails in about one queue batch in a few, with no PR to blame. A
+        # failure is reported as a warning (and still printed in this step's log), not as a failure.
+        run: |
+          cargo xtask web-offline-test || echo "::warning title=Web app offline test failed (non-blocking, #14591)::cargo xtask web-offline-test failed; see this step's log. Tracked in #14591."
       - name: Affected-package selection self-test
         run: python3 -I scripts/ci/test_affected.py
       - name: Merge-of-main detection self-test
@@ -1034,25 +1038,47 @@ jobs:
   # The Windows app starts D3D12 first and only the backend it uses (a Vulkan driver crashed the
   # app at startup on Intel). Start the real app on the runner (its D3D12 adapter is WARP) with
   # several saved settings and safe mode, and check each draws a frame and quits cleanly.
-  windows-startup:
-    name: Windows app startup
+  # Split in two (2026-11-12): compiling the app and its startup tests took ~30 of this job's 33
+  # minutes on a 4-vCPU GitHub-hosted runner and held the merge queue's front batch. The build and
+  # the startup unit tests (no window) run on a Blacksmith Windows runner; only the smoke itself,
+  # which needs a desktop that presents frames, stays GitHub-hosted, on the built app.
+  windows-build:
+    name: Windows app build
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    # GitHub-hosted: the startup smoke needs an interactive desktop that presents frames; on
-    # Blacksmith's Windows runners the window never presents ("no frame was presented").
-    runs-on: windows-latest
-    timeout-minutes: 60
+    runs-on: blacksmith-8vcpu-windows-2025
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: windows-startup
+          key: windows-build
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Backend order and probing on Windows
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
       - name: Build the app
         run: cargo build -p solidcraft --profile ci --locked
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-app
+          path: target/ci/solidcraft.exe
+          retention-days: 1
+
+  windows-startup:
+    name: Windows app startup
+    needs: [changes, windows-build]
+    if: needs.changes.outputs.windows == 'true'
+    # GitHub-hosted: the startup smoke needs an interactive desktop that presents frames; on
+    # Blacksmith's Windows runners the window never presents ("no frame was presented").
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-app
+          path: target/ci
       - name: Start the app under different settings
         shell: pwsh
         run: tools/windows-startup-smoke.ps1 -Exe target/ci/solidcraft.exe
@@ -1066,7 +1092,7 @@ jobs:
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup, dependency-advisories, wasm, solidcore, solidcore-standalone]
+    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-standalone]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
@@ -1093,12 +1119,23 @@ jobs:
             echo "Waiting for $pending run(s) of this commit to finish."
             sleep 30
           done
-          # Only a run that passed or failed is a result: runs with every job skipped (labels, before
-          # this job reported) are not, and neither are cancelled ones (a run replaced by a newer push
-          # or label, or a fork run that waited for approval and was then cancelled, which has no
-          # jobs). A cancelled run as "latest" failed this check for good and blocked a PR that passed.
-          latest=$(jq -r '[.[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure"))]
-            | sort_by(.created_at) | last | "\(.conclusion) \(.html_url)"' <<<"$runs")
+          # The result is the newest run that ran checks, by when its latest attempt finished
+          # (updated_at), so a rerun that passed replaces its first attempt's failure. Only runs that
+          # passed or failed count (cancelled ones don't: a run replaced by a newer push or label, or a
+          # fork run that waited for approval and was cancelled), and label runs like this one don't
+          # either: their only job is ci, which repeats an older result, so counting them let one
+          # copied failure outlive the rerun that fixed it.
+          latest=""
+          for id in $(jq -r '[.[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure"))]
+              | sort_by(.updated_at) | reverse | .[].id' <<<"$runs"); do
+            ran=$(gh api "repos/$REPO/actions/runs/$id/jobs?filter=latest&per_page=100" \
+              --jq '[.jobs[] | select(.name != "ci" and .conclusion != "skipped" and .conclusion != null)] | length')
+            if [ "${ran:-0}" -gt 0 ]; then
+              latest=$(jq -r --argjson id "$id" '.[] | select(.id == $id) | "\(.conclusion) \(.html_url)"' <<<"$runs")
+              break
+            fi
+          done
+          [ -n "$latest" ] || latest="none (no run of this commit ran its checks)"
           echo "The commit's latest run: $latest"
           echo "A label started this run: \`ci\` repeats the commit's latest result ($latest)." >> "$GITHUB_STEP_SUMMARY"
           test "${latest%% *}" = success
@@ -1122,6 +1159,7 @@ jobs:
           DOCS: ${{ needs.doc-tests.result }}
           ORACLE: ${{ needs.oracle.result }}
           WINDOWS_FXC: ${{ needs.windows-fxc.result }}
+          WINDOWS_BUILD: ${{ needs.windows-build.result }}
           WINDOWS_STARTUP: ${{ needs.windows-startup.result }}
           DEPS_RUN: ${{ needs.changes.outputs.deps }}
           ADVISORIES: ${{ needs.dependency-advisories.result }}
@@ -1157,6 +1195,7 @@ jobs:
           fi
           if [ "$WINDOWS" = true ]; then
             test "$WINDOWS_FXC" = success
+            test "$WINDOWS_BUILD" = success
             test "$WINDOWS_STARTUP" = success
           fi
           # Cargo.lock or a Cargo.toml changed on a pull request or in a merge group.

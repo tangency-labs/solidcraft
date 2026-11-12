@@ -64,7 +64,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use solidcore_ops::blend::{
     blend_ordered, chamfer_sides_ordered, edge_faces_along_ordered, fillet_variable_ordered, Blend,
-    ChamferSecond, Corners, SetBack, Turn,
+    BlendOptions, ChamferSecond, Corners, SetBack, Turn,
 };
 use solidcore_ops::boolean::{boolean, union_all, BooleanOp};
 use solidcore_ops::extend::{extend_sheet, Continuation};
@@ -972,7 +972,10 @@ fn call_with_copy(
                 &each,
                 &setbacks,
                 Corners::Filled,
-                Turn::Mitre,
+                BlendOptions {
+                    turn: Turn::Mitre,
+                    ..BlendOptions::default()
+                },
             )
             .map(|_| ());
             in_place(Slot { order: None, ..s }, r)
@@ -1031,7 +1034,10 @@ fn call_with_copy(
                 &each,
                 &[],
                 Corners::Filled,
-                turn,
+                BlendOptions {
+                    turn,
+                    ..BlendOptions::default()
+                },
             )
             .map(|_| ());
             in_place(Slot { order: None, ..s }, r)
@@ -2345,7 +2351,10 @@ fn filled_setback_ordered_api_rejects_foreign_entities_without_editing() {
                 distance: 8.0,
             }],
             Corners::Filled,
-            Turn::Mitre,
+            BlendOptions {
+                turn: Turn::Mitre,
+                ..BlendOptions::default()
+            },
         );
         assert!(
             matches!(r, Err(solidcore_ops::Error::Argument)),

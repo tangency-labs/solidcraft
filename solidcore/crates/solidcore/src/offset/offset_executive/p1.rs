@@ -219,6 +219,10 @@ pub struct OffsetExecutive {
     /// face and by each of its face uses, recorded as the face is offset.
     extension_reaches: BTreeMap<FaceId, f64>,
     faceuse_extension_reaches: BTreeMap<FaceuseId, f64>,
+    /// Not upstream: the edge bounds the local operation's reaches have found, each edge's
+    /// taken again from here for its other face ([`super::reach::EdgeBounds`]); forgotten
+    /// when the local surfaces are set and when the relations are cleared.
+    edge_bounds: super::reach::EdgeBounds,
     /// Not upstream: the faces of a local operation that move to surfaces of their own
     /// (the others keep theirs), for their neighbours' reach
     /// ([`super::reach::local_extension_reach`]).
@@ -228,6 +232,9 @@ pub struct OffsetExecutive {
     /// edge uses ([`Self::keep_unmoved_edges`]).
     pub(super) kept_edges: BTreeSet<EdgeId>,
     pub(super) kept_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the uses of the original edges of a local operation where the two new
+    /// surfaces cross ([`super::reach::LocalReach::crossing`]), tangent in the input or not.
+    crossing_edgeuses: BTreeSet<EdgeuseId>,
     /// Not upstream (WR-346): the original faces of an inset whose offset collapses (a
     /// convex round thinner than the wall), mated across instead of offset
     /// (`m_sCollapsedFaces`; only with `Kernel::fixes.offset_collapsed_rounds_mated`).
@@ -289,9 +296,11 @@ impl OffsetExecutive {
             extended_surfaces: BTreeMap::new(),
             extension_reaches: BTreeMap::new(),
             faceuse_extension_reaches: BTreeMap::new(),
+            edge_bounds: super::reach::EdgeBounds::default(),
             moved_faces: Vec::new(),
             kept_edges: BTreeSet::new(),
             kept_edgeuses: BTreeSet::new(),
+            crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
@@ -406,6 +415,7 @@ impl OffsetExecutive {
         self.local_faces = faces.to_vec();
         self.local_surfaces = surfaces;
         self.moved_faces = moved.to_vec();
+        self.edge_bounds.clear();
     }
 
     /// Not upstream: in a local operation, records the edges of `original` that keep their
@@ -451,6 +461,12 @@ impl OffsetExecutive {
     /// own curves ([`Self::keep_unmoved_edges`]).
     pub(super) fn keeps_edgeuse(&self, edgeuse: EdgeuseId) -> bool {
         self.kept_edgeuses.contains(&edgeuse)
+    }
+
+    /// Not upstream: whether the new surfaces of a local operation cross along the edge of
+    /// original edge use `edgeuse` ([`super::reach::LocalReach::crossing`]).
+    pub(super) fn crosses_at_edgeuse(&self, edgeuse: EdgeuseId) -> bool {
+        self.crossing_edgeuses.contains(&edgeuse)
     }
 
     /// Sets `m_eOffsetOperation`.
@@ -608,6 +624,8 @@ impl OffsetExecutive {
         self.blend_to_faces.remove_all();
         self.extension_reaches.clear();
         self.faceuse_extension_reaches.clear();
+        self.edge_bounds.clear();
+        self.crossing_edgeuses.clear();
     }
 
     /// Records how far the surface of original face `face` must be extended for its
@@ -662,21 +680,26 @@ impl OffsetExecutive {
                     kept.push((*f, surface));
                 }
             }
-            super::reach::local_extension_reach(
+            let found = super::reach::local_extension_reach(
                 kernel,
                 original,
                 faceuse,
                 &moved,
                 &kept,
                 self.tangency_tol_radians,
-            )?
+                &mut self.edge_bounds,
+            )?;
+            for &e in found.iter().flat_map(|r| &r.crossing) {
+                self.crossing_edgeuses
+                    .extend(edge::edgeuses(original, e, None, None)?);
+            }
             // A new edge must cross each neighbouring surface's boundary, not sit on it:
             // the mate and the intersection identify points within the body's tolerance,
             // so a crossing shorter than that is indistinguishable from touching the
             // boundary, and the extension reaches at least that far. With nothing moved
             // beside the face (a face given the plane through its own edges), this floor
             // is the only margin (the offset branch's is the offset's size).
-            .map_or(0.0, |r| (r.reach + r.shift).max(original.tolerance()))
+            found.map_or(0.0, |r| (r.reach + r.shift).max(original.tolerance()))
         };
         self.extension_reaches.insert(face, reach);
         let (primary, mate) = crate::topology::face::p2::faceuses(original, face)?;
@@ -4138,6 +4161,20 @@ mod tests {
         assert_eq!(executive.kept_edgeuses.len(), 16);
     }
 
+    /// The reach's edge bounds ([`super::super::reach::EdgeBounds`]) live for one local
+    /// operation: setting its surfaces forgets them, and so does clearing its relations.
+    #[test]
+    fn a_local_operations_edge_bounds_are_forgotten_with_its_surfaces() {
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.125, 1.0e-6);
+        executive.edge_bounds.hold(EdgeId::from_index(3));
+        assert_eq!(executive.edge_bounds.held(), 1);
+        executive.set_local_surfaces(&[], Vec::new(), &[]);
+        assert_eq!(executive.edge_bounds.held(), 0);
+        executive.edge_bounds.hold(EdgeId::from_index(3));
+        executive.clear_relations();
+        assert_eq!(executive.edge_bounds.held(), 0);
+    }
+
     #[test]
     fn a_box_face_margin_is_its_offset_corner_reach() {
         let mut kernel = Kernel::default();
@@ -4713,14 +4750,13 @@ mod tests {
         let mut original = Brep::new();
         let cache = BrepCache::new(crate::geom::a_object::BREP_TYPE).unwrap();
         let keys = OriginalKeys::new(&original).unwrap();
-        assert!(matches!(
-            solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO),
-            Err(SolidError::Upstream {
-                operation: "intersect::topology_solver::p1::TopologyObjects::brep_trees",
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO)
+            .unwrap_err();
+        assert_eq!(
+            e.operation(),
+            "intersect::topology_solver::p1::TopologyObjects::brep_trees"
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]

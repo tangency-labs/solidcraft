@@ -5571,6 +5571,59 @@ fn shared_assistant_body(h: &crate::scenario::Harness) -> egui::Rect {
     egui::Rect::from_min_size(egui::pos2(body.origin.x, body.origin.y), egui::vec2(body.size.width, body.size.height))
 }
 
+/// #15087: an agent that asks to sign in two ways, in the docked Assistant of a small window, with
+/// the default panel layout and the shared one. The sign-in box scrolls inside the panel, and the
+/// message box stays in view below it with nothing drawn over it.
+#[test]
+fn a_long_sign_in_box_scrolls_inside_a_short_docked_assistant() {
+    use solidcraft_ui_registry::{handle_at, rect_of};
+    for shared in [false, true] {
+        let (mut h, _script) = shared_assistant_harness();
+        h.app.preferences.shared_panel_layout = shared;
+        h.app.ui.show_browser = true;
+        h.app.ui.show_timeline = true;
+        h.call("ui.resize", json!({"width":960,"height":600}));
+        let terminal = |id: &str, name: &str, flag: &str| acp::AuthMethod {
+            id: id.into(),
+            name: name.into(),
+            description: format!("Sign in with {name}"),
+            kind: acp::AuthKind::Terminal { args: vec!["--cli".into(), "auth".into(), "login".into(), flag.into()], command: None },
+        };
+        h.app.agent_chat.argv = vec!["standin-agent".into()];
+        h.app.agent_chat.auth = vec![terminal("console", "Console", "--console"), terminal("subscription", "Subscription", "--claudeai")];
+        // A new chat: its tip is drawn below the sign-in box, where the conversation goes.
+        h.app.agent_chat.items.clear();
+        h.app.agent_chat.input.clear();
+        h.app.agent_chat.state = Some(State::NeedsAuth);
+        h.frames(8);
+        assert_eq!(h.app.panel_runtime().is_some(), shared);
+        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 600.0));
+        let body = if shared { shared_assistant_body(&h) } else { rect_of("agent_chat:panel").expect("the docked Assistant") };
+        let composer = rect_of("agent_chat:composer_footer").expect("the message box");
+        let providers = rect_of("agent_chat:providers").expect("the sign-in box's scroll area");
+        let conversation = rect_of("agent_chat:conversation").expect("the conversation");
+        assert!(window.expand(1.0).contains_rect(body), "shared {shared}: the Assistant {body:?} fits the window");
+        assert!(body.expand(1.0).contains_rect(composer), "shared {shared}: the message box {composer:?} stays inside {body:?}");
+        assert!(providers.bottom() <= composer.top() + 1.0, "shared {shared}: the sign-in box {providers:?} ends above the message box {composer:?}");
+        assert!(
+            conversation.bottom() <= composer.top() + 1.0,
+            "shared {shared}: the conversation {conversation:?} ends above the message box {composer:?}"
+        );
+        for _ in 0..10 {
+            if handle_at("agent_chat:auth_retry").is_some_and(|at| providers.contains(at)) {
+                break;
+            }
+            h.call("ui.scroll", json!({"x":providers.center().x,"y":providers.center().y,"delta":-300}));
+            h.frames(4);
+        }
+        let at = handle_at("agent_chat:auth_retry").expect("the I've signed in button is drawn");
+        assert!(
+            providers.contains(at),
+            "shared {shared}: scrolling the sign-in box brings I've signed in: connect again {at:?} into view {providers:?}"
+        );
+    }
+}
+
 #[test]
 fn shared_assistant_wide_and_compact_present_real_regions_without_losing_the_composer_selection() {
     use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation, SectionId, SectionLocation, Size, Zone};

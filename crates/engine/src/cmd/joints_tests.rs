@@ -1199,6 +1199,62 @@ fn a_locked_loop_does_not_move() {
     assert!(r["values"][0]["value"].as_f64().unwrap_or(f64::NAN).to_radians().abs() < 1e-3, "{r}");
 }
 
+/// A spatial loop through a ball joint made as built, its values all 0 (#14852): a crank turning
+/// about Y at the hip, a rod on a ball at the crank's tip, a universal joint (two revolutes
+/// through a cross) at the rod's foot end, and the foot turning about X at the heel. As the crank
+/// starts to turn, the rod moves without turning, so the ball turns about the crank's y, which is
+/// the ball's x: its yaw, pitch and roll can't make that turn at pitch 0.
+fn ankle() -> Session {
+    let mut s = Session::default();
+    for (name, c) in [
+        ("Shank", [-1.0, -1.0, -5.0]),
+        ("Crank", [10.0, 9.0, 39.0]),
+        ("Rod", [19.0, 9.0, 19.0]),
+        ("Cross", [19.0, 9.0, -1.0]),
+        ("Foot", [5.0, -1.0, -1.0]),
+    ] {
+        part(&mut s, name, c);
+    }
+    let g = occ(&s, "Shank");
+    run(&mut s, "occurrence.ground", json!({"occurrence": g, "grounded": true}));
+    pin(&mut s, "revolute", "Hip", "Shank", "Crank", Vec3::new(0.0, 10.0, 40.0), Vec3::Y);
+    let tip = |o: &str| framed(o, [20.0, 10.0, 40.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]);
+    let r = run(&mut s, "joint.create", json!({"type": "ball", "a": tip("Crank"), "b": tip("Rod"), "flip": true, "name": "Ball"}));
+    assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
+    pin(&mut s, "revolute", "Ankle pitch", "Rod", "Cross", Vec3::new(20.0, 10.0, 0.0), Vec3::Y);
+    pin(&mut s, "revolute", "Ankle roll", "Cross", "Foot", Vec3::new(20.0, 10.0, 0.0), Vec3::X);
+    pin(&mut s, "revolute", "Heel", "Shank", "Foot", Vec3::ZERO, Vec3::X);
+    s
+}
+
+/// The ankle's crank drives both ways, and every joint of the loop stays met.
+#[test]
+fn a_loop_through_a_ball_joint_at_rest_drives() {
+    let mut s = ankle();
+    let (hip, tip, ankle) = (Vec3::new(0.0, 10.0, 40.0), Vec3::new(20.0, 10.0, 40.0), Vec3::new(20.0, 10.0, 0.0));
+    for v in [5.0f64, 15.0, -10.0] {
+        let r = run(&mut s, "joint.drive", json!({"joint": "Hip", "value": v}));
+        assert!(r["stopped_by_loop"].is_null() && r["conflicts"].as_array().map(Vec::len) == Some(0), "{v}°: {r}");
+        assert!((r["values"][0]["value"].as_f64().unwrap_or(f64::NAN) - v).abs() < 1e-9, "{v}°: {r}");
+        // The crank's tip turned v° about the hip's y, and the rod's ends are on the crank's tip
+        // and on the foot's ankle, which turned about the heel's x.
+        let at = place(&s, "Crank", tip);
+        assert!(
+            (at.dist(tip) - 40.0 * (v.to_radians() / 2.0).sin().abs()).abs() < 1e-6
+                && (at.dist(hip) - 20.0).abs() < 1e-6
+                && (at.y - 10.0).abs() < 1e-9,
+            "{v}°: tip at {at:?}"
+        );
+        assert!(near(place(&s, "Rod", tip), at), "{v}°: {:?} vs {at:?}", place(&s, "Rod", tip));
+        let foot = place(&s, "Foot", ankle);
+        assert!(
+            (foot.x - 20.0).abs() < 1e-9 && (foot.y.hypot(foot.z) - ankle.y.hypot(ankle.z)).abs() < 1e-6 && foot.dist(ankle) > 1e-3,
+            "{v}°: ankle at {foot:?}"
+        );
+        assert!(near(place(&s, "Rod", ankle), foot) && near(place(&s, "Cross", ankle), foot), "{v}°: {:?} vs {foot:?}", place(&s, "Rod", ankle));
+    }
+}
+
 /// A link that turns the rocker 100 times as far as its dial: a small turn of the dial is a full
 /// turn of the rocker, which it can't make.
 #[test]

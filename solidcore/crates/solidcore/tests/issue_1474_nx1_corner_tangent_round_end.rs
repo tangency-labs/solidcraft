@@ -99,14 +99,14 @@ fn round_fails_with_upstream_behaviour() {
     for tangent_side_edge in [false, true] {
         let (_, _, r) = round(tangent_side_edge, false);
         assert!(
-            matches!(r, Err(solidcore::SolidError::Upstream { code: 1001, .. })),
+            r.as_ref().err().and_then(solidcore::error::upstream_status) == Some(1001),
             "{r:?}"
         );
     }
     // The continuation skip lives inside WR-457's: alone it changes nothing.
     let (_, _, r) = round(false, true);
     assert!(
-        matches!(r, Err(solidcore::SolidError::Upstream { code: 1001, .. })),
+        r.as_ref().err().and_then(solidcore::error::upstream_status) == Some(1001),
         "{r:?}"
     );
 }
