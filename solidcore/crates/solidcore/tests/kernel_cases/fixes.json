@@ -120,7 +120,6 @@
   "iso_curve_sliver_domain_is_degenerate",
   "iso_curve_uv_line_both_params",
   "curve_property_gs_branch_bounds",
-  "topology_failed_evaluations_propagate",
   "heal_stage3_failures_propagate",
   "database_io_byte_swaps_read_boolean_and_u16",
   "cover_refuses_folded_continuation",

@@ -118,7 +118,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_edge_self_loop_on_vertex_degenerate = true;
     f.slice_coincident_faces_sheet_side = true;
     f.boolean_outer_shell_first = true;
-    f.topology_failed_evaluations_propagate = true;
     f.heal_stage3_failures_propagate = true;
     f.cover_refuses_folded_continuation = true;
     f.boolean_vertex_by_best_crossing = true;
