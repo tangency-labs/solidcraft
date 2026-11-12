@@ -741,10 +741,21 @@ mod tests {
     /// in STEP parameters (converted from the kernel's NURB ones), angles in radians.
     #[test]
     fn exported_pcurves_lie_on_their_edges() {
+        use solidcore::curve::ellipse::p2::EllipseOptions;
+        use solidcore::curve::ellipse::Ellipse;
+        use solidcore::curve::line::Line;
+        use solidcore::geom::extent2d::Extent2d;
         use solidcore::geom::global_solver::SolverOperation;
+        use solidcore::math::Vec3;
+        use solidcore::surface::surf_of_extrusion::SurfOfExtrusion;
+        use solidcore::surface::surf_of_revolution::SurfOfRevolution;
+        use solidcore::surface::surface::Surface;
+        use solidcore::topology::brep::p2::edgeuses;
+        use solidcore::topology::brep::sheet::sheet_on;
+        use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
         let mut kernel = Kernel::default();
         let origin = Point3::new(0.0, 0.0, 0.0);
-        let breps = vec![
+        let mut breps = vec![
             (
                 "cylinder",
                 api::create_cylinder(&mut kernel, Point3::new(0.0, 0.0, -2.0), 2.0, 4.0).unwrap(),
@@ -762,6 +773,74 @@ mod tests {
                 api::create_torus(&mut kernel, origin, 5.0, 1.5).unwrap(),
             ),
         ];
+        // A surface of revolution of a line and an extrusion of a circle (u an angle
+        // on both), each a one-face sheet: 20 mm tall at radius 10 about the z axis.
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let y = Vec3::new(0.0, 1.0, 0.0);
+        let mut line =
+            Line::from_points(Point3::new(10.0, 0.0, 0.0), Point3::new(10.0, 0.0, 20.0), 3);
+        // SurfOfRevolution::new revolves the generator's NURB form
+        line.make_nurb().unwrap();
+        let revolved_line = SurfOfRevolution::new(
+            &kernel,
+            Curve::from(line),
+            origin,
+            x,
+            y,
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0),
+            false,
+        )
+        .unwrap();
+        let circle = Ellipse::new_circle(
+            &kernel,
+            origin,
+            x,
+            y,
+            Extent1d::from_min_max(0.0, 360.0),
+            10.0,
+            &EllipseOptions {
+                dim: 3,
+                ..EllipseOptions::default()
+            },
+        )
+        .unwrap();
+        let extruded_circle = SurfOfExtrusion::new(
+            &kernel,
+            Curve::from(circle),
+            origin,
+            Vec3::new(0.0, 0.0, 20.0),
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0),
+            false,
+        )
+        .unwrap();
+        let sheets = [
+            ("revolved line", Surface::from(revolved_line)),
+            ("extruded circle", Surface::from(extruded_circle)),
+        ];
+        for (name, surface) in sheets {
+            let (mut brep, _) =
+                sheet_on(&mut kernel, surface, 1e-6).unwrap_or_else(|e| panic!("{name}: {e}"));
+            // the sheet's sides have no UV curves yet: each edge use gets its own
+            // (no distance or deviation wanted, a UV-space curve is fine)
+            for edgeuse in edgeuses(&brep, None).unwrap() {
+                get_or_create_uv_trim_curve(&kernel, &mut brep, edgeuse, false, false, true)
+                    .unwrap()
+                    .status
+                    .unwrap_or_else(|e| panic!("{name}: {e}"));
+            }
+            // the face keeps its kind, so the checks below go through its branch
+            let model = brep_to_model(&brep).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(
+                model.bodies[0].faces.iter().all(|face| matches!(
+                    (name, &face.surface),
+                    ("revolved line", ModelSurface::Revolution { .. })
+                        | ("extruded circle", ModelSurface::Extrusion { .. })
+                )),
+                "{name}: exported as {:?}",
+                model.bodies[0].faces
+            );
+            breps.push((name, brep));
+        }
         for (name, brep) in &breps {
             let model = brep_to_model(brep).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(!model.pcurves.is_empty(), "{name}: no pcurves");
