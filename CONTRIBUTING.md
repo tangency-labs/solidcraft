@@ -387,7 +387,13 @@ and a fresh CI run:
    quick compile (`cargo check`) when you push. Once a maintainer has reviewed it they add the
    `approved-for-ci` label when the PR is ready to merge, which runs the full CI (build, tests,
    goldens, Clippy); every push after that runs the full set again. Maintainers merge approved
-   PRs in groups by area, so PRs that touch the same code meet a conflict at most once. The one
+   PRs in groups by area, so PRs that touch the same code meet a conflict at most once.
+   You don't have to wait for the label to see the full CI: run it on your fork, on GitHub's free
+   runners. On the fork, set two repository variables (Settings, Secrets and variables, Actions,
+   Variables): `CI_RUNNER` to `ubuntu-24.04` and `CI_RUNNER_WINDOWS` to `windows-latest`. Then
+   open Actions, CI, Run workflow, and pick your branch (or `gh workflow run ci.yml --ref <branch>
+   -R <you>/solidcraft`). It runs the same jobs as the merge queue, more slowly than the
+   project's runners. The one
    exception is the pull request that first vendored SolidCore: it must land with a real merge
    commit, because a squash merge drops the subtree parent and the mirror can no longer
    fast-forward SolidCore (`.github/workflows/solidcore-mirror.yml`).
