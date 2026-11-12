@@ -1929,4 +1929,31 @@ mod tests {
         assert_eq!(callback.tracker(), 27);
         assert!(callback.lists().notify_events.is_empty());
     }
+
+    /// WR-17: an edit that replaces the capture's tracker with another one is refused,
+    /// and the replacing tracker stays installed; its lists are not taken as the edit's.
+    #[test]
+    fn capture_refuses_a_replaced_tracker_and_leaves_it_installed() {
+        use crate::geom::context::NotifyCallback;
+        use crate::topology::topology::TopologyChangeCallback;
+        let mut k = Kernel::default();
+        let mut b = Brep::new();
+        let r = capture_changes(&mut k, &mut b, |k, _| {
+            k.context
+                .set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(5))));
+            Ok(())
+        });
+        let err = r.err();
+        assert!(
+            matches!(err, Some(SolidError::InvalidInput { .. })),
+            "{err:?}"
+        );
+        let callback = k
+            .context
+            .sys_notify_callback()
+            .and_then(NotifyCallback::as_any)
+            .and_then(|a| a.downcast_ref::<TopologyChangeCallback>())
+            .unwrap();
+        assert_eq!(callback.tracker(), 5);
+    }
 }
