@@ -9,6 +9,7 @@ use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{NoPictures, ObjectKind};
+use solidcraft_geom::pixel_grid::GridWindow;
 
 use super::*;
 use crate::schema::drawing_scene::{SheetPaperScene, SheetSceneResult};
@@ -3598,4 +3599,274 @@ fn each_drawn_body_comes_with_the_state_its_view_drew_from() {
     let from_design: Vec<bool> = built(&s, sheet).bodies_drawn().map(|(state, _)| Arc::ptr_eq(state, &placed)).collect();
     // Two cubes in each of the three views.
     assert_eq!((from_design.len(), from_design.iter().filter(|design| **design).count()), (6, 4));
+}
+
+/// A shaded block, its front view at 1:1 centred at `at` on the sheet: the session, the sheet and
+/// the view.
+fn shaded_front(at: [f64; 2]) -> (Session, u64, u64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+    run(&mut s, "drawing.create", json!({}));
+    let p = json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": at, "visual_style": "shaded"});
+    let id = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    (s, sheet, id)
+}
+
+/// The one picture of a sheet's answer.
+fn only_picture(answer: &SheetView) -> &SheetPicture {
+    let [picture] = &answer.pictures[..] else { panic!("{:?}", answer.pictures) };
+    picture
+}
+
+/// A step's picture budget of `k` bands: `spent` says so when asked after the `k`th.
+fn bands(k: usize) -> impl FnMut() -> bool {
+    let mut asked = 0;
+    move || {
+        asked += 1;
+        asked >= k
+    }
+}
+
+/// A shaded view's picture is drawn after its lines, one band a step on a budget of one band, and
+/// handed on only once whole: until then it has no rows and the answer says a picture is being
+/// drawn. At the sheet's corner, so its frame is the export's, its rows are the export's on the same
+/// grid, byte for byte.
+#[test]
+fn a_shaded_views_picture_is_drawn_a_band_a_step_and_handed_on_whole() {
+    let (mut s, sheet, id) = shaded_front([0.0, 0.0]);
+    let mut answer = extract(&mut s, sheet).unwrap();
+    assert!(answer.pictures.is_empty() && !answer.drawing_pictures, "no picture before its view is drawn");
+    while !answer.stale.is_empty() {
+        assert!(step(&mut s), "its picture waits after its lines");
+        answer = extract(&mut s, sheet).unwrap();
+    }
+    let picture = only_picture(&answer);
+    assert_eq!((picture.source, picture.view, picture.rows.is_none(), picture.stale), (id, id, true, true));
+    assert!(answer.drawing_pictures);
+    let mut bands = 0;
+    while step_within(&mut s, &mut self::bands(1)) {
+        bands += 1;
+        assert!(bands < 100_000, "the picture never finished");
+        let now = extract(&mut s, sheet).unwrap();
+        assert!(only_picture(&now).rows.is_none() && now.drawing_pictures, "never half a picture");
+    }
+    let done = extract(&mut s, sheet).unwrap();
+    let picture = only_picture(&done);
+    assert!(bands > 1 && !done.drawing_pictures && !picture.stale && picture.why.is_none(), "{bands} {picture:?}");
+    let grid = picture.grid;
+    assert_eq!(grid.pitch, 25.4 / DEFAULT_DPI);
+    let rows = picture.rows.clone().unwrap();
+    let d = s.drawing("test").unwrap().clone();
+    let whole = GridWindow { x0: 0, y0: 0, x1: grid.width, y1: grid.height };
+    let pictures = crate::drawing_picture::ViewPictures::new(&s, &d, sheet).unwrap();
+    let export = solidcraft_geom::paper::Pictures::rows(&pictures, id, &grid, whole).unwrap();
+    assert!(*rows == export[..], "the window's pixels are the export's");
+    assert!(!step(&mut s));
+}
+
+/// A move draws no picture again: the same rows, current, on a grid moved by exactly the offset.
+/// A design change that leaves the bodies as they look (a sheet added) keeps them too.
+#[test]
+fn a_moved_view_keeps_its_picture() {
+    let (mut s, sheet, id) = shaded_front([200.0, 150.0]);
+    let before = settled(&mut s, sheet);
+    let (was, rows) = (only_picture(&before).grid, only_picture(&before).rows.clone().unwrap());
+    let projections = s.drawing_scenes.projections;
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(id), "set": {"place": {"at": [210.0, 160.0]}}}));
+    run(&mut s, "drawing.sheet.add", json!({}));
+    let after = settled(&mut s, sheet);
+    let picture = only_picture(&after);
+    assert_eq!(s.drawing_scenes.projections, projections);
+    assert!(Arc::ptr_eq(picture.rows.as_ref().unwrap(), &rows) && !picture.stale);
+    assert!((picture.grid.x0 - was.x0 - 10.0).abs() < 1e-9 && (picture.grid.y0 - was.y0 - 10.0).abs() < 1e-9, "{:?}", picture.grid);
+    assert_eq!((picture.grid.width, picture.grid.height, picture.grid.pitch), (was.width, was.height, was.pitch));
+}
+
+/// The last picture shows, stale, until the new one is whole: here after a model edit, made with the
+/// drawing closed, which kept it.
+#[test]
+fn an_edited_model_shows_the_last_picture_stale_until_the_new_one_is_done() {
+    let (mut s, sheet, _) = shaded_front([200.0, 150.0]);
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let last = only_picture(&settled(&mut s, sheet)).rows.clone().unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 60, "height": 15, "corner": [60, -5, 10], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "drawing.open", drawing);
+    let mut answer = extract(&mut s, sheet).unwrap();
+    while answer.drawing_pictures || !answer.stale.is_empty() {
+        let picture = only_picture(&answer);
+        assert!(picture.stale && Arc::ptr_eq(picture.rows.as_ref().unwrap(), &last), "the last picture shows until the new one");
+        step(&mut s);
+        answer = extract(&mut s, sheet).unwrap();
+    }
+    let picture = only_picture(&answer);
+    assert!(!picture.stale && **picture.rows.as_ref().unwrap() != *last, "a new picture");
+}
+
+/// A picture is drawn again when its bodies' colours change, though its lines aren't: a checkpoint
+/// gone back to with the drawing open gives back the block's first colour, and its first pixels.
+#[test]
+fn a_colour_taken_back_draws_the_picture_again_and_not_its_lines() {
+    let (mut s, sheet, _) = shaded_front([200.0, 150.0]);
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let first = only_picture(&settled(&mut s, sheet)).rows.clone().unwrap();
+    let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Block"], "color": "#20a080"}));
+    run(&mut s, "drawing.open", drawing);
+    let green = only_picture(&settled(&mut s, sheet)).rows.clone().unwrap();
+    assert!(*green != *first);
+    let projections = s.drawing_scenes.projections;
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
+    let answer = extract(&mut s, sheet).unwrap();
+    assert!(answer.stale.is_empty() && answer.drawing_pictures && only_picture(&answer).stale, "the lines are as they were, the picture isn't");
+    let back = settled(&mut s, sheet);
+    assert_eq!(s.drawing_scenes.projections, projections);
+    assert!(**only_picture(&back).rows.as_ref().unwrap() == *first && !only_picture(&back).stale);
+}
+
+/// A picture is drawn again on its new grid when its sheet's dpi changes, though its lines aren't:
+/// until then it shows stale, never as current pixels at the old dpi, which the export no longer uses.
+#[test]
+fn a_new_dpi_draws_the_picture_again_on_its_grid() {
+    let (mut s, sheet, _) = shaded_front([200.0, 150.0]);
+    assert_eq!(only_picture(&settled(&mut s, sheet)).grid.pitch, 25.4 / DEFAULT_DPI);
+    let projections = s.drawing_scenes.projections;
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "dpi": DEFAULT_DPI / 2.0}));
+    let answer = extract(&mut s, sheet).unwrap();
+    assert!(answer.stale.is_empty() && answer.drawing_pictures && only_picture(&answer).stale, "the lines are as they were, the picture isn't");
+    let after = settled(&mut s, sheet);
+    let picture = only_picture(&after);
+    assert_eq!(s.drawing_scenes.projections, projections, "no lines drawn again");
+    assert!(!picture.stale && picture.why.is_none() && picture.grid.pitch == 25.4 / (DEFAULT_DPI / 2.0), "{:?}", picture.grid);
+}
+
+/// A picture asked for is dropped once its view changes: the next one is drawn for the view as it
+/// is, and the half-drawn one is never handed on.
+#[test]
+fn a_view_edited_while_its_picture_is_drawn_draws_it_again() {
+    let (mut s, sheet, id) = shaded_front([200.0, 150.0]);
+    let mut answer = extract(&mut s, sheet).unwrap();
+    while !answer.stale.is_empty() {
+        step(&mut s);
+        answer = extract(&mut s, sheet).unwrap();
+    }
+    step_within(&mut s, &mut bands(1));
+    assert!(s.drawing_scenes.picturing.is_some(), "a picture is being drawn");
+    let full = only_picture(&answer).grid;
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(id), "set": {"scale": "1:2"}}));
+    let half = settled(&mut s, sheet);
+    let picture = only_picture(&half);
+    assert!(!picture.stale && picture.rows.is_some() && s.drawing_scenes.picturing.is_none());
+    assert_eq!((picture.grid.width, picture.grid.height), (full.width.div_ceil(2), full.height.div_ceil(2)), "{full:?} {:?}", picture.grid);
+}
+
+/// A step draws a picture's bands until its budget is spent, never more than the band it was spent
+/// in: on a budget of `k` bands, `k` a step, so the picture takes its bands divided by `k` steps,
+/// rounded up, and its pixels are the same whatever the budget.
+#[test]
+fn a_step_draws_a_pictures_bands_within_its_budget() {
+    let drawn = |k: usize| {
+        let (mut s, sheet, _) = shaded_front([200.0, 150.0]);
+        let mut answer = extract(&mut s, sheet).unwrap();
+        while !answer.stale.is_empty() {
+            step(&mut s);
+            answer = extract(&mut s, sheet).unwrap();
+        }
+        let mut each = Vec::new();
+        loop {
+            let before = s.drawing_scenes.bands;
+            let more = step_within(&mut s, &mut bands(k));
+            each.push(s.drawing_scenes.bands - before);
+            if !more {
+                break;
+            }
+            assert!(each.len() < 100_000, "the picture never finished");
+        }
+        (each, only_picture(&extract(&mut s, sheet).unwrap()).rows.clone().unwrap())
+    };
+    let (one, rows) = drawn(1);
+    let work: usize = one.iter().sum();
+    assert!(work > 2 && one.iter().all(|n| *n == 1), "{one:?}");
+    for k in [2, 3] {
+        let (each, same) = drawn(k);
+        assert_eq!(each.iter().sum::<usize>(), work, "the same bands, {k} a step");
+        assert!(each.iter().all(|n| *n <= k), "never past its budget: {each:?}");
+        assert_eq!(each.len(), work.div_ceil(k), "{each:?}");
+        assert!(*same == *rows, "the same pixels");
+    }
+}
+
+/// Once a shaded view's lines are drawn, `begin` hands on its picture's setup to do beside the
+/// window, its triangles placed there too, and `step` then only draws its bands. A setup done for a
+/// design changed since is dropped and asked for again; once one is taken, `begin` has nothing more,
+/// and the picture is the one `step` alone draws.
+#[test]
+fn a_pictures_setup_is_a_job_beside_the_window() {
+    let (mut s, sheet, _) = shaded_front([200.0, 150.0]);
+    let mut answer = extract(&mut s, sheet).unwrap();
+    while !answer.stale.is_empty() {
+        let done = begin(&mut s).unwrap().run();
+        assert!(finish(&mut s, done));
+        answer = extract(&mut s, sheet).unwrap();
+    }
+    let job = begin(&mut s).expect("its picture's setup");
+    assert!(matches!(job.0, Work::Picture(_)) && s.drawing_scenes.picturing.is_none());
+    run(&mut s, "drawing.sheet.add", json!({}));
+    let done = std::thread::spawn(move || job.run()).join().unwrap();
+    assert!(!finish(&mut s, done) && s.drawing_scenes.picturing.is_none(), "set up for the design before");
+    extract(&mut s, sheet).unwrap();
+    let done = begin(&mut s).expect("asked for again").run();
+    assert!(finish(&mut s, done) && s.drawing_scenes.picturing.as_ref().is_some_and(|p| !p.rows.preparing()), "its triangles placed");
+    assert!(begin(&mut s).is_none(), "set up: its bands are step's");
+    let rows = only_picture(&settled(&mut s, sheet)).rows.clone().unwrap();
+    let (mut alone, sheet, _) = shaded_front([200.0, 150.0]);
+    assert!(*only_picture(&settled(&mut alone, sheet)).rows.clone().unwrap() == *rows, "the pixels step alone draws");
+}
+
+/// A view of lines hands no picture, nothing waits for one, and no bodies are read for pictures.
+#[test]
+fn a_view_of_lines_hands_no_picture() {
+    let (mut s, sheet, _) = front_and_top();
+    let answer = settled(&mut s, sheet);
+    assert!(answer.pictures.is_empty() && !answer.drawing_pictures && s.drawing_scenes.bodies.is_none());
+}
+
+/// A picture past the page's pixels is drawn at the sheet's dpi divided by the least whole number
+/// that fits: at 2400 dpi, the 100 by 20 mm view is 17.9 million pixels, so it is drawn at 1200. The
+/// grid is handed on before the picture is drawn, so its lines are all this needs.
+#[test]
+fn a_fine_sheet_draws_the_page_picture_coarser() {
+    let (mut s, sheet, _) = shaded_front([200.0, 150.0]);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "dpi": 2400}));
+    let mut answer = extract(&mut s, sheet).unwrap();
+    while !answer.stale.is_empty() {
+        step(&mut s);
+        answer = extract(&mut s, sheet).unwrap();
+    }
+    let picture = only_picture(&answer);
+    assert!((picture.grid.pitch - 25.4 / 1200.0).abs() < 1e-12 && picture.grid.pixels() <= WINDOW_PICTURE_PIXELS, "{:?}", picture.grid);
+    let rect = |side: f64, tall: f64| Picture { source: 1, rect: Aabb2 { min: Vec2::new(0.0, 0.0), max: Vec2::new(side, tall) }, opacity: 1.0 };
+    for (dpi, k) in [(2400.0, 2.0), (1200.0, 1.0), (25.0, 1.0)] {
+        assert_eq!(window_grid(&rect(100.0, 20.0), dpi).unwrap().pitch, 25.4 / (dpi / k), "{dpi}");
+    }
+    assert!(window_grid(&rect(5000.0, 5000.0), 2400.0).unwrap().pixels() <= WINDOW_PICTURE_PIXELS, "the largest paper at the finest dpi fits");
+}
+
+/// Only the drawing closed last keeps its pictures' pixels: once another closes, the first keeps its
+/// lines but no pixels, so what is kept stays within one drawing's pictures.
+#[test]
+fn only_the_drawing_closed_last_keeps_its_pictures_pixels() {
+    let (mut s, sheet, id) = shaded_front([200.0, 150.0]);
+    let first = s.drawing("test").unwrap().id;
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.close", json!({}));
+    let pixels = |s: &Session| s.drawing_scenes.kept.of(first).and_then(|kept| kept.views.get(&id)).map(|view| view.pixels.len());
+    assert_eq!(pixels(&s), Some(1), "kept at its close");
+    run(&mut s, "drawing.create", json!({"name": "Second"}));
+    let second = s.drawing("test").unwrap().sheets[0].id;
+    extract(&mut s, second).unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    assert_eq!(pixels(&s), Some(0), "its lines are kept, its pixels aren't");
 }

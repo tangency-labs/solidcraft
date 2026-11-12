@@ -1,7 +1,8 @@
 //! A drawing's views drawn off the window's thread (#4892 B7): working a view's lines out takes long
-//! enough on a large design that the window must keep drawing meanwhile. Each view is worked out
-//! on a worker from a copy of the session, and its lines are taken up only when nothing they were
-//! asked from has changed (`drawing_scene::finish`). The drawing page calls [`tick`] each frame.
+//! enough on a large design that the window must keep drawing meanwhile. Each view, and each
+//! shaded picture's setup, is worked out on a worker from a copy of the session, and taken up only
+//! when nothing it was asked from has changed (`drawing_scene::finish`). The drawing page calls
+//! [`tick`] each frame.
 
 use solidcraft_engine::drawing_scene::{self, Done};
 
@@ -12,8 +13,9 @@ pub struct Drawing {
     done: std::sync::mpsc::Receiver<Done>,
 }
 
-/// Takes up a view a worker has drawn, then starts on the next one out of date, and says whether
-/// any is still being drawn. In the browser, or when no thread can start, it draws one view here.
+/// Takes up what a worker has done, then starts on the next view out of date or picture to set up,
+/// and says whether any work is still waiting. In the browser, or when no thread can start, it does
+/// that work here.
 pub fn tick(app: &mut SolveApp) -> bool {
     if let Some(drawing) = &app.drawing_job {
         match drawing.done.try_recv() {
@@ -28,7 +30,8 @@ pub fn tick(app: &mut SolveApp) -> bool {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // No view waiting: the dimensions out of date are read here (they are quick), as `step` does.
+        // Nothing long waiting: the dimensions out of date are read here (they are quick), and a
+        // picture set up draws its bands for a few milliseconds, as `step` does.
         let Some(job) = drawing_scene::begin(&mut app.session) else { return drawing_scene::step(&mut app.session) };
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = std::thread::Builder::new().name("drawing view".into()).spawn(move || {
