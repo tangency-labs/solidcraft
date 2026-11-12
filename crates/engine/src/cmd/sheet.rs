@@ -16,10 +16,9 @@ use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
-    BendDirection, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, FlangeParams, FlatBend, FlatBore, FlatCircle, FlatPatternParams,
-    FlatPatternResult, FlatPerforation, FlatPerforationPattern, FlatPocket, FlatSegment, FlatShape, FoldParams, HemParams, ListedRule,
-    ManageRulesParams, ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, PocketSide, RecognizeParams, RuleFeatureError,
-    RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
+    BendTableFormat, BendTableParams, BendTableResult, ConvertParams, FlangeParams, FlatCircle, FlatPatternParams, FlatPatternResult, FlatSegment,
+    FlatShape, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams,
+    RecognizeParams, RuleFeatureError, RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -1048,7 +1047,7 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
     let pt = |v: &Vec2| json!([v.x, v.y]);
     let outline: Vec<Value> = loops.iter().map(|l| Value::Array(l.iter().map(pt).collect())).collect();
     let holes: Vec<Value> = sk.regions.iter().flat_map(|r| &r.holes).map(|h| Value::Array(h.polyline(1e-3).iter().map(pt).collect())).collect();
-    let hole_shapes: Vec<Value> = sk.regions.iter().flat_map(|r| &r.holes).map(loop_shape).collect();
+    let hole_shapes: Vec<FlatShape> = sk.regions.iter().flat_map(|r| &r.holes).map(loop_shape).collect();
     let bends: Vec<Value> = sk
         .bend_infos()
         .iter()

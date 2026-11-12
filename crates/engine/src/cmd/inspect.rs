@@ -308,17 +308,17 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             }
             b.sheet_metal = Some(true);
         }
+        // A sheet made from surfaces (#6748) is sheet metal too: its perforation fields' holes
+        // are taken off where each body is measured (`measure_body`).
+        if definitions.surface_sheets.iter().any(|sk| sk.body == source) {
+            b.sheet_metal = Some(true);
+        }
         bodies.push(b);
     }
     fn figures(b: &MeasuredBody) -> Option<&BodyFigures> {
         match &b.measurement.outcome {
             BodyOutcome::Measured(f) => Some(f),
             BodyOutcome::Failed(_) => None,
-        }
-        // A sheet made from surfaces (#6748) is sheet metal too: its perforation fields' holes
-        // are taken off where each body is measured (`measure_body`).
-        if definitions.surface_sheets.iter().any(|sk| sk.body == source) {
-            b["sheet_metal"] = json!(true);
         }
     }
     let counted = |n: Option<i64>| n.and_then(|n| u64::try_from(n).ok());
