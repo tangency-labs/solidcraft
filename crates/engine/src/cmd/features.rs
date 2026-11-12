@@ -1818,7 +1818,8 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
                     // Where two faces meet tangentially (a flat wall running into a round one)
                     // there is nothing to blend, so nobody means the edge by the pick (#12215).
                     // Decided only for the edges near the pick: it reads the faces' normals.
-                    let seam = seams.get(i).copied().unwrap_or(false) || mesh.as_ref().is_some_and(|m| m.tangent_join(i, TANGENT_JOIN));
+                    let seam =
+                        seams.get(i).copied().unwrap_or(false) || mesh.as_ref().is_some_and(|m| m.tangent_join(i, solidcraft_geom::TANGENT_CHAIN));
                     near.push((d, seam, leaving(points, q)));
                     candidates.push((i, d, seam));
                 }
@@ -2013,9 +2014,6 @@ fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f
     let d = foot.dist(q);
     d.is_finite().then_some((d, foot))
 }
-
-/// Faces meeting at less than this angle (radians, 2°) meet tangentially, as a tangent chain reads them.
-const TANGENT_JOIN: f64 = 2.0 * std::f64::consts::PI / 180.0;
 
 /// The direction an edge's polyline leaves `pt` in, when `pt` is one of its ends; `None` when
 /// the edge runs on through `pt`.

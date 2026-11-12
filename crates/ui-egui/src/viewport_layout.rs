@@ -1,5 +1,5 @@
 //! Floating controls reserve drawing space without changing rendering or picking projection.
-use egui::{Rect, pos2, vec2};
+use egui::{Pos2, Rect, pos2, vec2};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
@@ -479,6 +479,51 @@ pub(crate) fn fit_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64)
     fit_bounds_sized(cam, bounds, layout, fov, 1.0)
 }
 
+/// The screen point Home and Fit centre the model on: the middle of the view, kept `drawable`-clear for a model
+/// whose half extents on screen are `hx` by `hy` and which `hh` (its fitted half height) sizes. The one place
+/// that decides it: the orbit pivot reads it too (#14651).
+fn framing_point(layout: &Layout, hx: f64, hy: f64, hh: f64) -> Pos2 {
+    let h = f64::from(layout.viewport.height());
+    let drawable = layout.drawable;
+    let size = vec2((hx * h / hh) as f32, (hy * h / hh) as f32).min(drawable.size());
+    let toward = |want: f32, lo: f32, hi: f32| if lo <= hi { want.clamp(lo, hi) } else { (lo + hi) * 0.5 };
+    pos2(
+        toward(layout.middle.center().x, drawable.left() + size.x * 0.5, drawable.right() - size.x * 0.5),
+        toward(layout.middle.center().y, drawable.top() + size.y * 0.5, drawable.bottom() - size.y * 0.5),
+    )
+}
+
+/// Where Home and Fit put the middle of `bounds` on screen for `cam`'s direction in this layout, or `None` when
+/// they could not frame it.
+pub(crate) fn framing_centre(cam: Camera, bounds: &Aabb3, layout: &Layout) -> Option<Pos2> {
+    if bounds.is_empty()
+        || !bounds.min.is_finite()
+        || !bounds.max.is_finite()
+        || !cam.is_valid()
+        || !layout.viewport.is_positive()
+        || !layout.drawable.is_positive()
+        || !layout.drawable.is_finite()
+    {
+        return None;
+    }
+    let (r, u, _) = cam.basis();
+    let centre = bounds.center();
+    let (mut hx, mut hy): (f64, f64) = (0.0, 0.0);
+    for x in [bounds.min.x, bounds.max.x] {
+        for y in [bounds.min.y, bounds.max.y] {
+            for z in [bounds.min.z, bounds.max.z] {
+                let d = Vec3::new(x, y, z) - centre;
+                hx = hx.max(d.dot(r).abs());
+                hy = hy.max(d.dot(u).abs());
+            }
+        }
+    }
+    let h = f64::from(layout.viewport.height());
+    let hh = (hx * h / f64::from(layout.drawable.width())).max(hy * h / f64::from(layout.drawable.height())).max(0.5);
+    let at = framing_point(layout, hx, hy, hh);
+    at.is_finite().then_some(at)
+}
+
 /// [`fit_bounds`] with the model filling `share` (0.1 to 1) of the room between the panels, the
 /// compass and the navigation bar instead of all of it: the Navigation preference "Home and Fit
 /// size" (#10091). The model stays clear of what covers the view at every size.
@@ -524,12 +569,7 @@ pub(crate) fn fit_bounds_sized(mut cam: Camera, bounds: &Aabb3, layout: &Layout,
     // it clear of every control; the room it leaves over in either direction moves the model
     // towards `middle`, the middle of the view, instead of the middle of the gap between the
     // compass and the navigation bar, which left it low and to one side of an otherwise empty view.
-    let size = vec2((hx * h / hh) as f32, (hy * h / hh) as f32).min(drawable.size());
-    let toward = |want: f32, lo: f32, hi: f32| if lo <= hi { want.clamp(lo, hi) } else { (lo + hi) * 0.5 };
-    let at = pos2(
-        toward(layout.middle.center().x, drawable.left() + size.x * 0.5, drawable.right() - size.x * 0.5),
-        toward(layout.middle.center().y, drawable.top() + size.y * 0.5, drawable.bottom() - size.y * 0.5),
-    );
+    let at = framing_point(layout, hx, hy, hh);
     let half = vec2((at.x - drawable.left()).min(drawable.right() - at.x), (at.y - drawable.top()).min(drawable.bottom() - at.y));
     let room = Rect::from_center_size(at, half * 2.0);
     if !room.is_positive() || !room.is_finite() {
