@@ -1395,8 +1395,11 @@ fn top_controls(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state
         new_chat_confirmation(chat, ui);
     }
     // Shared top controls must yield scroll space to the pinned composer, including
-    // when discovery lists several agents or a long message grows the editor.
-    let picker_max = if shared {
+    // when discovery lists several agents or a long message grows the editor. The
+    // sign-in box scrolls in the same place in either layout (#15087), and may use
+    // everything above the composer: there is no conversation to show until it is done.
+    let needs_auth = state == State::NeedsAuth;
+    let picker_max = if shared || needs_auth {
         let t = Tokens::get();
         let composer = view.composer_height.unwrap_or(48.0 + t.control_height * 3.0 + t.space_8 * 2.0 + t.space_6 * 3.0);
         (ui.available_height() - composer - ui.spacing().item_spacing.y).max(0.0)
@@ -1416,13 +1419,10 @@ fn top_controls(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state
             ui_kit::assistant_controls(ui, |ui| switcher(chat, view, ui));
         }
         picker(chat, view, ui);
-        if shared && state == State::NeedsAuth {
+        if needs_auth {
             inset(ui, |ui| auth_box(chat, ui));
         }
     });
-    if !shared && state == State::NeedsAuth {
-        inset(ui, |ui| auth_box(chat, ui));
-    }
     ui.cursor().top() - top - picker.inner_rect.height().min(picker.content_size.y) + picker.content_size.y
 }
 
@@ -2202,7 +2202,9 @@ fn auth_box(chat: &mut AgentChat, ui: &mut egui::Ui) {
             }
         }
         ui.add_space(solidcraft_theme::Tokens::get().space_4);
-        if ui_kit::button(ui, tr("ui.agent_chat_auth_retry"), ui_kit::Button::Normal).clicked() {
+        let retry = ui_kit::button(ui, tr("ui.agent_chat_auth_retry"), ui_kit::Button::Normal);
+        solidcraft_ui_registry::publish_handle("agent_chat:auth_retry", retry.rect.center());
+        if retry.clicked() {
             chat.actions.push(PanelAction::Connect);
         }
     });

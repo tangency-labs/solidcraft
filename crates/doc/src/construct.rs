@@ -59,6 +59,27 @@ pub enum GeoRef {
     SketchPoint { sketch: u64, point: String },
     /// A sketch curve (by sketch feature id and curve id).
     SketchCurve { sketch: u64, curve: String },
+    /// A snap point of an edge, face or sketch curve (#11228): its centre, its middle or a flat
+    /// face's centre, found again on `of` as it is now. Where `of` has more than one (a
+    /// cylinder's two end centres), `end` says which along the axis (0 the low end, 1 the
+    /// high one, set when the reference is made), else the one nearest `at`, where it was picked.
+    Snap {
+        of: Box<GeoRef>,
+        kind: SnapAt,
+        at: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<usize>,
+    },
+}
+
+/// Which snap point of an edge, face or sketch curve a [`GeoRef::Snap`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapAt {
+    /// The centre of a circle or arc, a sphere or torus, or one end of a cylinder or cone.
+    Centre,
+    /// The middle of an edge or sketch curve, along its length.
+    Middle,
 }
 
 /// How a construction axis is defined.
@@ -293,7 +314,25 @@ fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&
             return Ok((b, fi, at));
         }
     }
+    // A mesh body has no faces to pick: say so, rather than let the pick read as a miss (#11469).
+    if let Some(m) = st.bodies.iter().find(|b| lies_on_mesh(b, at)) {
+        return Err(bad(format!("no face at {at:?}: `{}` is a mesh body, which has no faces; use Convert Mesh to make it a solid first", m.name)));
+    }
     Err(bad(format!("no face at {at:?}")))
+}
+
+/// Does `at` lie on the surface of a mesh body, within the pick tolerance? Only mesh bodies:
+/// their triangles are the body itself.
+fn lies_on_mesh(b: &ModelBody, at: Vec3) -> bool {
+    if !b.body.is_mesh() {
+        return false;
+    }
+    let Some((positions, triangles)) = b.body.triangle_mesh() else { return false };
+    let tol = crate::appearance::pick_tolerance(b);
+    triangles.iter().any(|t| {
+        let [a, bb, c] = t.map(|i| positions[i as usize]);
+        crate::appearance::closest_on_triangle(at, a, bb, c).dist(at) <= tol
+    })
 }
 
 /// The edge picked, as a polyline.
@@ -384,7 +423,7 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
     if names.len() < 2 || names.len() > MAX_VERTEX_EDGES {
         return None;
     }
-    let ends: Vec<[Vec3; 2]> = names
+    let found: Vec<(*const ModelBody, usize, [Vec3; 2])> = names
         .iter()
         .map(|n| {
             // The edge with that name itself, never the one nearest the old pick, and its ends
@@ -395,10 +434,16 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
                 let hit = crate::name_lookup::locate_edge(b, n, at).ok()?;
                 let m = b.mesh();
                 let pts = m.edges.get(hit.edge)?;
-                Some([*pts.first()?, *pts.last()?])
+                Some((std::ptr::from_ref(b), hit.edge, [*pts.first()?, *pts.last()?]))
             })
         })
         .collect::<Option<_>>()?;
+    // Two names of a vertex name two edges: a name the point decides (where the body grew so the
+    // vertex lies inside another edge) can find an edge another name found.
+    if found.iter().enumerate().any(|(i, (b, e, _))| found.iter().take(i).any(|(c, f, _)| std::ptr::eq(*b, *c) && e == f)) {
+        return None;
+    }
+    let ends: Vec<[Vec3; 2]> = found.into_iter().map(|(_, _, ends)| ends).collect();
     let (first, rest) = ends.split_first()?;
     let tol = |p: Vec3| 1e-6 * (1.0 + p.len());
     first
@@ -487,12 +532,72 @@ pub(crate) fn point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
         }
         // A round edge or face: its centre.
         GeoRef::Edge { .. } | GeoRef::Face { .. } | GeoRef::SketchCurve { .. } => centre(ctx, g),
+        GeoRef::Snap { of, kind, at, end } => snap_point(ctx.st, of, *kind, *at, *end).or_else(|_| snap_point_ctx(ctx, of, *kind, *at)),
         GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
             ConstructGeom::Point(p) => Ok(p),
             _ => Err(bad("the datum is not a point (pick the O of a component)")),
         },
         _ => Err(bad("pick a point, vertex or sketch point")),
     }
+}
+
+/// The centres of the circular edges that end a cylinder or cone face, from its B-rep (low, high
+/// along its axis), if it is one.
+fn face_axis_ends(st: &ModelState, of: &GeoRef) -> Option<Vec<Vec3>> {
+    let GeoRef::Face { at, name } = of else { return None };
+    let (b, fi, _) = face_of(st, *at, name).ok()?;
+    let (origin, axis) = match kernel::face_surface(&b.body, fi) {
+        Some(FaceSurface::Cylinder { origin, axis, .. }) => (origin, axis),
+        Some(FaceSurface::Cone { apex, axis, .. }) => (apex, axis),
+        _ => return None,
+    };
+    let tol = 1e-6 * (1.0 + b.body.size());
+    let mut ends: Vec<(f64, Vec3)> = kernel::face_edge_indices(&b.body, fi)
+        .into_iter()
+        .filter_map(|e| kernel::edge_circle(&b.body, e))
+        .filter(|c| (c.center - origin).cross(axis).len() <= tol)
+        .map(|c| ((c.center - origin).dot(axis), c.center))
+        .collect();
+    ends.sort_by(|p, q| p.0.total_cmp(&q.0));
+    ends.dedup_by(|p, q| (p.0 - q.0).abs() <= tol);
+    match ends.as_slice() {
+        [] => None,
+        [one] => Some(vec![one.1]),
+        [lo, .., hi] => Some(vec![lo.1, hi.1]),
+    }
+}
+
+/// The one of `found` nearest `at`.
+fn nearest(found: Vec<Vec3>, at: Vec3) -> Option<(usize, Vec3)> {
+    found.into_iter().enumerate().filter(|(_, p)| p.is_finite()).min_by(|(_, p), (_, q)| p.dist(at).total_cmp(&q.dist(at)))
+}
+
+/// A snap point found from the model alone: a cylinder's or cone's end centre (the `end` one,
+/// else the one nearest `at`).
+fn snap_point(st: &ModelState, of: &GeoRef, kind: SnapAt, at: Vec3, end: Option<usize>) -> Result<Vec3> {
+    match (kind, of) {
+        (SnapAt::Centre, GeoRef::Face { .. }) => {
+            let ends = face_axis_ends(st, of).ok_or_else(|| bad("the face is not a cylinder or cone"))?;
+            match end {
+                Some(i) => ends.get(i).copied(),
+                None => nearest(ends, at).map(|(_, p)| p),
+            }
+            .ok_or_else(|| bad("the snap point is gone"))
+        }
+        _ => Err(bad("not a face's snap point")),
+    }
+}
+
+/// A snap point of an edge or sketch curve (its middle or centre), or a sphere's or torus's centre.
+fn snap_point_ctx(ctx: &Ctx, of: &GeoRef, kind: SnapAt, at: Vec3) -> Result<Vec3> {
+    let found: Vec<Vec3> = match (kind, of) {
+        (SnapAt::Middle, GeoRef::Edge { .. } | GeoRef::SketchCurve { .. }) => {
+            vec![along(ctx, of, 0.5)?.0]
+        }
+        (SnapAt::Centre, GeoRef::Edge { .. } | GeoRef::SketchCurve { .. } | GeoRef::Face { .. }) => vec![centre(ctx, of)?],
+        _ => return Err(bad("a snap point is on an edge, a face or a sketch curve")),
+    };
+    nearest(found, at).map(|(_, p)| p).ok_or_else(|| bad("the snap point is gone"))
 }
 
 /// Resolve a planar point or a drawn 3D wire's `wire:index` node in the evaluated state's frame.
@@ -833,6 +938,7 @@ pub(crate) fn source_bodies(ctx: &Ctx, refs: &[&GeoRef]) -> Vec<String> {
             GeoRef::Vertex { .. } => {
                 point(ctx, g).ok().and_then(|p| vertex_body(ctx.st, p)).map(|b| vec![b.definition_name().to_string()]).unwrap_or_default()
             }
+            GeoRef::Snap { of, .. } => source_bodies(ctx, &[of]),
             GeoRef::Axis { name } | GeoRef::ConstructPoint { name } => {
                 ctx.st.construct.iter().find(|c| c.name.as_str() == AsRef::<str>::as_ref(name)).map(|c| c.bodies.clone()).unwrap_or_default()
             }
@@ -1041,6 +1147,10 @@ impl GeoRef {
             GeoRef::Point { p } => pt(p),
             GeoRef::Vertex { at, .. } | GeoRef::Edge { at, .. } | GeoRef::Face { at, .. } => pt(at),
             GeoRef::Plane { plane: p } => plane(p),
+            GeoRef::Snap { of, at, .. } => {
+                pt(at);
+                of.map_points(pt, plane);
+            }
             _ => {}
         }
     }
@@ -1080,6 +1190,12 @@ impl GeoRef {
                 }
             }
             GeoRef::Plane { plane } => plane.name_picks(st),
+            GeoRef::Snap { of, kind: SnapAt::Centre, at, end: end @ None } => {
+                // Which end of a cylinder or cone: it stays that end when the face grows.
+                *end = face_axis_ends(st, of).and_then(|ends| nearest(ends, *at)).map(|(i, _)| i);
+                of.name_picks(st);
+            }
+            GeoRef::Snap { of, .. } => of.name_picks(st),
             _ => {}
         }
     }

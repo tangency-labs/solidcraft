@@ -3409,7 +3409,7 @@ impl Model {
                 // feature names, when it names one and the face is there).
                 let renamed;
                 let mut frame_error: Option<String> = None;
-                let f = match with_named_face_points(doc, &state, f) {
+                let f = match with_named_face_points(doc, &vals, &state, f) {
                     Ok(Some((g, notes))) => {
                         if !notes.is_empty() {
                             warning = Some(notes.join("; "));
@@ -4710,7 +4710,7 @@ fn apply_traced_with(
                 match acc {
                     Some(b) => {
                         if let Some(mb) = state.bodies.get_mut(ti) {
-                            *mb = ModelBody::traced_new(mb.name.clone(), b, mb.feature);
+                            *mb = mb.remade(b);
                         }
                     }
                     None => remove.push(ti),
@@ -4783,7 +4783,7 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
         let operands: Vec<&Traced> = std::iter::once(&base).chain(&tools).collect();
         let acc = union_all(&operands)?;
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
-            *mb = ModelBody::traced_new(mb.name.clone(), acc, mb.feature);
+            *mb = mb.remade(acc);
         }
         return Ok(vec![keep.clone()]);
     }
@@ -4818,7 +4818,7 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
         }
         let absorbed: std::collections::BTreeSet<String> = met.into_iter().skip(1).collect();
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == keep) {
-            *mb = ModelBody::traced_new(mb.name.clone(), acc, mb.feature);
+            *mb = mb.remade(acc);
         }
         state.bodies.retain(|b| !absorbed.contains(&b.name));
         for t in state.threads.iter_mut().filter(|t| absorbed.contains(&t.body)) {
@@ -5007,7 +5007,10 @@ fn named_pieces_of(
             (name, feature)
         };
         taken.insert(name.clone());
-        out.push(ModelBody::new(name, p, made_by).with_lineage(lineage));
+        // Each piece stays in the whole's component until the feature ends (#14305).
+        let mut piece = ModelBody::new(name, p, made_by).with_lineage(lineage);
+        piece.component = mb.component;
+        out.push(piece);
     }
     out
 }
@@ -6078,6 +6081,12 @@ fn hole_references(f: &Feature) -> &[crate::HoleReference] {
 
 /// Where a cylinder stands: its base, or with reference edges (#6380) at their distances in the
 /// plane of the flat face at its base, square to its axis.
+/// A box's lowest corner from its stored point and sides: the point itself, or the box's centre
+/// when it was placed by its centre (#14487).
+fn box_low_corner(at: Vec3, size: Vec3, centred: bool) -> Vec3 {
+    if centred { at - size * 0.5 } else { at }
+}
+
 fn cylinder_base(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, base: &crate::PointExpr, axis: Vec3) -> Result<Vec3> {
     let at = point(vals, base)?;
     with_references(vals, st, f, at, -axis, true)
@@ -7433,9 +7442,9 @@ fn feature_tools_with_constructor(
             let plane = Plane::from_normal(start, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
             Ok(unnamed(vec![kernel::sweep(&plane, &pipe_region(vals, r, wall)?, &segs)?]))
         }
-        FeatureKind::Box { corner, length, width, height, .. } => {
+        FeatureKind::Box { corner, length, width, height, centred, .. } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
-            let corner = point(vals, corner)?;
+            let corner = box_low_corner(point(vals, corner)?, s, *centred);
             Ok(vec![crate::lineage::box_tool(kernel::box_solid(corner, corner + s)?).with_recipe(tool_recipe(doc, f, vals))])
         }
         FeatureKind::Cylinder { base, axis, radius, height, .. } => Ok(vec![
@@ -8548,8 +8557,9 @@ fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelSta
 /// `f` with each face point moved onto its named face (on the body the feature names, when it
 /// names one and the face is there) in `state`, and notes on how the faces were found. `None`
 /// when `f` names no face; an error when a name no longer finds its face (the feature asks for
-/// it to be picked again), or when the frame the faces are looked up in cannot be made.
-fn with_named_face_points(doc: &Document, state: &ModelState, f: &Feature) -> Result<Option<(Feature, Vec<String>)>> {
+/// it to be picked again), or when the frame the faces are looked up in cannot be made. A hole
+/// placed by length expressions is looked up where they evaluate in `vals`, not where it was made.
+fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state: &ModelState, f: &Feature) -> Result<Option<(Feature, Vec<String>)>> {
     // Cylindrical emboss resolves its named face in the selected body's frame
     // and certifies an analytic anchor; mesh projection here would undo that.
     let explicit_emboss = matches!(&f.kind, FeatureKind::Emboss { face: Some(_), .. });
@@ -8565,24 +8575,29 @@ fn with_named_face_points(doc: &Document, state: &ModelState, f: &Feature) -> Re
         FeatureKind::Hole { direction, points: None | Some(crate::SketchPoints { single: true, .. }), .. } => direction.normalized(),
         _ => None,
     };
+    let placed = match &f.kind {
+        FeatureKind::Hole { position, at: at @ Some(_), .. } => hole_position(vals, position, at).ok(),
+        _ => None,
+    };
     let fst = face_point_state(doc, state, &f.kind, f.component)?;
     for (k, (p, n)) in g.kind.face_points_mut().into_iter().zip(&f.face_names).enumerate() {
         if n.is_empty() {
             continue;
         }
-        match crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, *p) {
+        let from = if k == 0 { placed.unwrap_or(*p) } else { *p };
+        match crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, from) {
             Some(hit) => {
                 if let Some(note) = hit.note(n) {
                     notes.push(note);
                 }
                 match (k, hole_axis) {
-                    (0, Some(axis)) => match hit.along(&fst, *p, axis) {
+                    (0, Some(axis)) => match hit.along(&fst, from, axis) {
                         Some(q) => *p = q,
                         // The place still lies on the face (the axis may run along it).
                         None if hit.on_point => {}
                         None => notes.push(format!(
                             "the hole's position [{}, {}, {}] is no longer on face `{n}`: it stays where it was placed",
-                            p.x, p.y, p.z
+                            from.x, from.y, from.z
                         )),
                     },
                     _ => *p = hit.pick_point(&fst, *p),
@@ -8735,7 +8750,7 @@ fn replay(
                     // A copy blends edges the pattern's own copies made: named after the body so far.
                     let nb = mb.traced().then(nb);
                     if let Some(slot) = st.bodies.get_mut(ti) {
-                        *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                        *slot = mb.remade(nb);
                     }
                 }
             }
@@ -8751,7 +8766,7 @@ fn replay(
                 let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
                 let nb = mb.traced().then(kernel::offset_faces(&mb.body, &moved, d)?);
                 if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                    *slot = mb.remade(nb);
                 }
             }
             continue;
@@ -8867,7 +8882,7 @@ fn replay(
             // Each copy's faces are named as the source feature's, with the instance. Its face
             // points follow their named faces, as the feature's own did (#2121): a To Object
             // extrude's copies reach the face where it is now, not where it was picked.
-            let moved = with_named_face_points(doc, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g);
+            let moved = with_named_face_points(doc, vals, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g);
             let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
@@ -9151,7 +9166,7 @@ pub fn tangent_face_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<(usize, Vec3)> {
             }
             let Some(mid) = e.get(e.len() / 2).copied() else { continue };
             if let (Some(n1), Some(n2)) = (normal_near(f, mid), normal_near(other, mid))
-                && n1.dot(n2) > 2f64.to_radians().cos()
+                && n1.dot(n2) > solidcraft_geom::TANGENT_CHAIN.cos()
             {
                 chosen.push(other);
             }
@@ -9283,7 +9298,7 @@ fn chamfer_with(
     };
     Ok(match side {
         Some(s) => kernel::chamfer_sides(b, edges, d, s, flip)?,
-        None => match kernel::chamfer(b, edges, d) {
+        None => match kernel::chamfer_carrying_face(b, edges, d) {
             Err(kernel::KernelError::TooLarge(why)) => {
                 let hint = kernel::named_fit(&why);
                 return Err(with_largest_fit(why, "distance", || kernel::chamfer_max_why(b, edges, d, hint)).into());
@@ -9599,7 +9614,7 @@ fn eval_feature(
             // Certifying may join faces; their history stays over the same operands.
             let nb = Traced::step(nb.with_shell_certificate(f.id)?, &operands.iter().collect::<Vec<_>>());
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                *slot = mb.remade(nb);
             }
             Ok(())
         }
@@ -9610,7 +9625,7 @@ fn eval_feature(
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let nb = Traced::step(kernel::draft(&mb.body, &crate::plain(faces), &pl, pull.0, a)?, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                *slot = mb.remade(nb);
             }
             Ok(())
         }
@@ -9706,7 +9721,7 @@ fn eval_feature(
             }
             apply_traced(doc, st, f, made, *operation, &[])
         }
-        FeatureKind::SplitFace { faces, body, plane, tool, sketch } => {
+        FeatureKind::SplitFace { faces, body, plane, tool, sketch, loops } => {
             let i = body_at(st, body, &crate::plain(faces))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mut picked: Vec<usize> = Vec::new();
@@ -9726,12 +9741,18 @@ fn eval_feature(
                 }
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
-                    // Each curve's exact segments (lines and arcs split by their own plane and cylinder).
-                    let curves: Vec<Vec<solidcore_record::Seg2>> = (0..ss.sketch.curves.len())
-                        .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
-                        .map(|ci| ss.sketch.segs(ci))
-                        .filter(|segs| !segs.is_empty())
-                        .collect();
+                    // Each curve's exact segments (lines and arcs split by their own plane and cylinder),
+                    // or with `loops` the curves joined end to end: a closed chain is not extended.
+                    let curves: Vec<Vec<solidcore_record::Seg2>> = if *loops {
+                        let ids: Vec<String> = ss.sketch.curves.iter().filter(|c| !c.construction).map(|c| c.id.clone()).collect();
+                        surface::curve_chains(ss, &ids)?
+                    } else {
+                        (0..ss.sketch.curves.len())
+                            .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
+                            .map(|ci| ss.sketch.segs(ci))
+                            .filter(|segs| !segs.is_empty())
+                            .collect()
+                    };
                     if curves.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
                     }
@@ -9744,7 +9765,7 @@ fn eval_feature(
             };
             let nb = Traced::step(nb, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                *slot = mb.remade(nb);
             }
             Ok(())
         }
@@ -9781,7 +9802,7 @@ fn eval_feature(
             }
             let mut it = parts.into_iter();
             if let (Some(first), Some(slot)) = (it.next(), st.bodies.get_mut(i)) {
-                *slot = ModelBody::traced_new(mb.name.clone(), first, mb.feature);
+                *slot = mb.remade(first);
             }
             for (k, b) in it.enumerate() {
                 // A piece renamed with `body.rename` keeps its own name (#3510).
@@ -9984,9 +10005,9 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Box { corner, length, width, height, operation } => {
+        FeatureKind::Box { corner, length, width, height, operation, centred } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
-            let corner = point(vals, corner)?;
+            let corner = box_low_corner(point(vals, corner)?, s, *centred);
             let b = kernel::box_solid(corner, corner + s)?;
             let b = if matches!(operation, Operation::NewBody | Operation::Join) { b.with_box_certificate(f.id)? } else { b };
             let handled = more::sheet_primitive_cut(f, st, &b, more::PrimitivePrism::Box { lo: corner, hi: corner + s }, *operation, false, warning)?;
@@ -10109,7 +10130,7 @@ fn eval_feature(
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 if let Some(mb) = st.bodies.get_mut(i) {
                     let nb = Traced::step(kernel::transform_matrix(&mb.body, m)?, &[&mb.traced()]);
-                    *mb = ModelBody::traced_new(mb.name.clone(), nb, mb.feature);
+                    *mb = mb.remade(nb);
                 }
             }
             Ok(())
@@ -10120,7 +10141,7 @@ fn eval_feature(
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let nb = Traced::step(kernel::offset_faces(&mb.body, &crate::plain(faces), d)?, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                *slot = mb.remade(nb);
             }
             Ok(())
         }
@@ -10139,7 +10160,7 @@ fn eval_feature(
             let left = if *heal { kernel::delete_faces(&mb.body, &all)? } else { kernel::remove_faces(&mb.body, &all)? };
             let nb = Traced::step(left, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                *slot = mb.remade(nb);
             }
             Ok(())
         }
@@ -10182,7 +10203,7 @@ fn eval_feature(
                     st.bodies.push(ModelBody::traced_new(name, traced, f.id));
                     output += 1;
                 } else if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = ModelBody::traced_new(mb.name.clone(), Traced::step(nb, &[&mb.traced()]), mb.feature);
+                    *slot = mb.remade(Traced::step(nb, &[&mb.traced()]));
                 }
             }
             if !*copy {
@@ -11186,6 +11207,7 @@ mod world_placement_cache_tests {
                     width: "3 mm".into(),
                     height: "4 mm".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 Some("AuthoredBox"),
             )
@@ -11222,7 +11244,14 @@ mod world_placement_cache_tests {
         let mut boxes = |comp: u64, operation: Operation, corner: Vec3| {
             let id = doc
                 .add_feature(
-                    FeatureKind::Box { corner: crate::point_expr(corner), length: "10".into(), width: "10".into(), height: "2".into(), operation },
+                    FeatureKind::Box {
+                        corner: crate::point_expr(corner),
+                        length: "10".into(),
+                        width: "10".into(),
+                        height: "2".into(),
+                        operation,
+                        centred: false,
+                    },
                     None,
                 )
                 .unwrap();
@@ -11372,6 +11401,7 @@ mod chain_tests {
                 width: "30".into(),
                 height: "20".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -11418,6 +11448,7 @@ mod chain_tests {
             width: w.into(),
             height: h.into(),
             operation,
+            centred: false,
         };
         doc.add_feature(block(Vec3::new(0.0, 0.0, 20.0), ["40", "20", "20"], Operation::NewBody), None).unwrap();
         doc.add_feature(block(Vec3::new(20.0, 0.0, 0.0), ["20", "20", "20"], Operation::Join), None).unwrap();
@@ -11431,7 +11462,7 @@ mod chain_tests {
         let boss = picked(Vec3::new(20.0, 0.0, 30.0));
         let step = picked(Vec3::new(20.0, 0.0, 10.0));
         assert_ne!(boss, step);
-        assert!(b.mesh().tangent_chain(boss, 2f64.to_radians()).contains(&step), "the mesh walk took the step");
+        assert!(b.mesh().tangent_chain(boss, solidcraft_geom::TANGENT_CHAIN).contains(&step), "the mesh walk took the step");
         assert_eq!(b.blend_chain(boss, Vec3::new(20.0, 0.0, 30.0)), vec![boss]);
     }
 
@@ -11464,6 +11495,7 @@ mod chain_tests {
                 width: "20".into(),
                 height: "20".into(),
                 operation: Operation::NewBody,
+                centred: false,
             };
             doc.add_feature(solid, None).unwrap();
             doc.add_feature(fillet(Vec3::new(20.0, 10.0, 20.0), "2", true), None).unwrap();

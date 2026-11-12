@@ -51,6 +51,7 @@ pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_obj
 pub use features::{auto_operation, extrude_reach, shown_scope};
 pub(crate) use features::{rail_fit_form, sweep_orientation};
 pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};
+pub(crate) use file::import::realign_imports;
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
 pub(crate) use file::{NAMES_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
@@ -110,7 +111,10 @@ mod parameters;
 mod plastic;
 mod print_face;
 mod render;
-pub(crate) use render::{PreparedCapture, prepare_capture_with_metadata, render_cancel_params};
+pub(crate) use render::{
+    PreparedCapture, prepare_capture_with_metadata, read_render_request, render_cancel_params, render_form_refusal, render_saved_job_refusal,
+    render_started,
+};
 pub(crate) use render_ui::batch_request;
 mod render_ui;
 #[cfg(test)]

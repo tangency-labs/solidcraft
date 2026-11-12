@@ -79,6 +79,12 @@
 //!   [`point_classify_prepared`] shares the same walk over read-only topology;
 //!   missing UV trims or a required cache-tree build report [`SolidError::Unported`]
 //!   only when reached. Evaluation copies retain exact NURBS data and tolerances.
+//! - **Inner loops left out (not upstream).** Classifying against every loop, with
+//!   `Kernel::memoize_curve_caches`, an inner loop whose walk provably answers neither
+//!   inside nor on the loop, cannot fail and cannot edit the B-rep
+//!   (`query::loop::WalkExclusion`) is not walked: such an answer never stops
+//!   the classification, so its result is the same. A face holding many holes no longer
+//!   walks every hole for every point (a plate's holes placed into it one by one).
 //! - **Ignored statuses.** `Evaluate1stDerivatives` of the surface and `EvaluatePoint`
 //!   of the on-boundary edge curve: on failure the point stays `SmPoint3d()`
 //!   ([`Vec3::UNDEF`]); [`SolidError::Unported`] still propagates. The `PointClassify`
@@ -163,7 +169,7 @@ use crate::intersect::point_class::{
 use crate::kernel::Kernel;
 use crate::math::{max2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
-use crate::query::r#loop::{contains_uv_point_with_topology, UvContainment};
+use crate::query::r#loop::{contains_uv_point_with_topology, UvContainment, WalkExclusion};
 use crate::surface::surface::p1::{
     get_surface_cache_with_face, get_trim_surface_cache, make_surface_cache, make_trim_srf_cache,
     make_trim_srf_cache_with_face,
@@ -1209,9 +1215,23 @@ fn point_classify_with_topology(
     // Get tolerance
     let tol_3d = max2(face_tolerance, pc.tolerance());
 
+    // (not upstream) with every loop classified, an inner loop's walk only decides when
+    // it answers inside or on the loop, so with the curve memos' shortcuts an inner loop
+    // whose walk provably answers neither, without failing or editing the B-rep, is not
+    // walked (`WalkExclusion`): the same answer, where every inner loop was walked for
+    // every point (each hole of a plate placed into it walking every hole placed before)
+    let exclusion = if !tgt_loops_only && k.memoize_curve_caches {
+        WalkExclusion::at(k, b, f, surface, uv)
+    } else {
+        None
+    };
+
     // For every loop: check containment
     for l in loops {
         let is_outer = Some(l) == outer_loop;
+        if !is_outer && exclusion.is_some_and(|x| x.excludes(k, b, l)) {
+            continue; // neither in nor on this InnerLoop
+        }
 
         // check TargetPoint containment
         let UvContainment {
