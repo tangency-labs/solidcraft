@@ -1482,7 +1482,7 @@ mod tests {
     /// in two lines. Within a face's zone tolerance (1e-5) it is one tangent line.
     #[test]
     fn issue1525_plane_within_tolerance_of_wall_is_tangent() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let mut c = Cone::new_cylinder_bounded(
             Vec3::ZERO,
             Vec3::X,
@@ -1500,24 +1500,16 @@ mod tests {
         let bare = [None, None];
         let zone = Some(1e-5);
 
-        // Bare surfaces keep their two crossing lines, with the flag on as well.
-        let out = wall_section(&k, &c, hair, PlaneOwner::NoFace, bare);
-        assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
-        k.fixes.cylinder_plane_tangent_within_tolerance = true;
+        // Bare surfaces keep their two crossing lines.
         let out = wall_section(&k, &c, hair, PlaneOwner::NoFace, bare);
         assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
 
         // A face's zone tolerance, on the plane's face or on the cone's, makes the
-        // plane one tangent line on the wall with the flag on; the flag off keeps two.
+        // plane one tangent line on the wall.
         for (owner, zone_tols) in [
             (PlaneOwner::Face(zone), [None, zone]),
             (PlaneOwner::NoFace, [zone, None]),
         ] {
-            k.fixes.cylinder_plane_tangent_within_tolerance = false;
-            let out = wall_section(&k, &c, hair, owner, zone_tols);
-            assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
-
-            k.fixes.cylinder_plane_tangent_within_tolerance = true;
             let out = wall_section(&k, &c, hair, owner, zone_tols);
             assert_eq!(
                 out.curve_types,

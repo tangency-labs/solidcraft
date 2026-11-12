@@ -2790,15 +2790,12 @@ mod tests {
     }
 
     /// WR-538 (the fork's tangency-labs/smlib@0cd9d08, #482): a torus whose V interval
-    /// runs past a turn. Upstream tests the U interval twice and never the V one; with
-    /// `torus_check_reads_v_interval` the V test (4) fails.
+    /// runs past a turn. Upstream tests the U interval twice and never the V one; the V
+    /// test (4) fails.
     #[test]
     fn wr_538_torus_check_reads_its_v_interval() {
         let s = torus_over(0.0, 400.0, 5.0, 1.0);
-        let mut k = Kernel::default();
-        let (_, upstream) = failed_tests(&k, &s);
-        assert!(!upstream.contains(&(TORUS_TYPE, 4)), "{upstream:?}");
-        k.fixes.torus_check_reads_v_interval = true;
+        let k = Kernel::default();
         let (ok, fixed) = failed_tests(&k, &s);
         assert!(!ok);
         assert!(fixed.contains(&(TORUS_TYPE, 4)), "{fixed:?}");
