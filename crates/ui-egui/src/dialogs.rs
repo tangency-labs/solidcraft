@@ -1816,7 +1816,7 @@ impl Dialog {
         }
         let profiles: Vec<Sel> = crate::open_meshing::session_world(s)
             .sketch(id)
-            .map(|ss| outermost_profiles(&ss.profiles).map(|index| Sel::Profile { sketch: id, index }).collect())
+            .map(|ss| drawn_profiles(&ss.sketch, &ss.profiles).into_iter().map(|index| Sel::Profile { sketch: id, index }).collect())
             .unwrap_or_default();
         let Some(input) = self.inputs.first_mut() else { return false };
         if profiles.is_empty() {
@@ -2231,6 +2231,27 @@ fn outermost_profiles(profiles: &[solidcraft_engine::sketch::Profile]) -> impl I
     };
     let holes: Vec<Vec<String>> = profiles.iter().flat_map(|p| p.hole_curves.iter().map(|h| key(h))).collect();
     (0..profiles.len()).filter(move |&i| profiles.get(i).is_some_and(|p| !holes.contains(&key(&p.outer_curves))))
+}
+
+/// The profiles a click on a whole sketch takes (#6106): those bounded by what was drawn, as the
+/// engine's `profiles: "all"` takes them. A face's auto-projected edges only count when the drawn
+/// curves alone close nothing (#15521): a circle drawn on a box's face is the circle, not the face
+/// around it. `profiles` index the sketch's profiles with the projected edges, which is what a
+/// pick names, so each one whose inside lies in a drawn profile (not in its holes) is taken.
+fn drawn_profiles(sketch: &solidcraft_engine::sketch::Sketch, profiles: &[solidcraft_engine::sketch::Profile]) -> Vec<usize> {
+    let drawn = solidcraft_engine::sketch::find_drawn_profiles(sketch);
+    if drawn.is_empty() {
+        return outermost_profiles(profiles).collect();
+    }
+    let outer: Vec<&solidcraft_engine::sketch::Profile> = outermost_profiles(&drawn).filter_map(|i| drawn.get(i)).collect();
+    (0..profiles.len())
+        .filter(|&i| {
+            profiles.get(i).is_some_and(|p| {
+                let probe = p.region.interior_point();
+                outer.iter().any(|d| d.contains(probe))
+            })
+        })
+        .collect()
 }
 
 /// Profiles of the sketch a feature would use, when there is just one: the active sketch's, else

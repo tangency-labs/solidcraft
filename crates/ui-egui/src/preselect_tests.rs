@@ -3906,6 +3906,41 @@ fn extrude_takes_every_profile_of_a_sketch_clicked_in_the_browser() {
     );
 }
 
+/// #15521: a sketch on a box's face has the face's edges projected into it. Clicked in the Browser
+/// with Extrude open, it gives Profiles what was drawn, as `profiles: "all"` does: a circle on the
+/// face is the circle, not the face around it, and a drawn rectangle keeps its circle as a hole.
+#[test]
+fn a_face_sketch_clicked_in_the_browser_gives_extrude_what_was_drawn() {
+    let circle = std::f64::consts::PI * 25.0;
+    for (rectangle, want) in [(false, circle), (true, 20.0 * 16.0 - circle)] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 20})).unwrap();
+        h.app.run("sketch.create", json!({"plane": {"face": [30, 20, 20]}, "name": "Hole", "project_edges": true})).unwrap();
+        if rectangle {
+            h.app.run("sketch.rectangle.two_point", json!({"p0": [20, 12], "p1": [40, 28]})).unwrap();
+        }
+        h.app.run("sketch.circle.center", json!({"center": [30, 20], "diameter": 10})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.session.selection.clear();
+        h.app.start("solid.extrude");
+        h.frames(2);
+        h.step(&json!({"click": {"browser": "Hole"}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().expect("Extrude stays open");
+        let world = crate::open_meshing::session_world(&h.app.session);
+        let areas: Vec<f64> = d.inputs[0]
+            .items
+            .iter()
+            .map(|sel| match sel {
+                Sel::Profile { sketch, index } => world.sketch(*sketch).unwrap().profiles[*index].region.area(),
+                other => panic!("rectangle {rectangle}: not a profile: {other:?}"),
+            })
+            .collect();
+        assert_eq!(areas.len(), 1, "rectangle {rectangle}: one profile, not the face around it: {areas:?}");
+        assert!((areas[0] - want).abs() < 0.05, "rectangle {rectangle}: area {} (want {want})", areas[0]);
+    }
+}
+
 /// A selected sketch point and origin axis, either way round, go to Coincident from the toolbar:
 /// the point lands on the axis.
 #[test]
