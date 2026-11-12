@@ -25,6 +25,7 @@ pub mod occurrences;
 pub mod origins;
 pub mod panels;
 pub mod params;
+pub mod plugin;
 pub mod product_scene;
 pub mod recovery;
 pub mod render_jobs;
@@ -53,7 +54,7 @@ use solidcraft_doc::{Document, Model, ModelState};
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
     Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach,
-    find_command, resolve_design_links, shown_scope, standard_view,
+    find_command, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -81,6 +82,8 @@ pub enum EngineError {
     BadParams { cmd: String, msg: String },
     #[error("{0}")]
     Other(String),
+    #[error("plugin: {0}")]
+    Plugin(#[from] craft_plugin::HostError),
     /// The host's pre-command check ([`Session::set_command_check`]) refused the command; the
     /// message is the reason it gave.
     #[error("{reason}")]
@@ -449,7 +452,14 @@ impl ComputedCommands {
     /// Whether the source design and authoring context still match this result.
     pub fn is_current(&self, session: &Session) -> bool {
         let source = &self.source;
-        session.same_document_context(source) && session.selection == source.selection
+        session.same_document_context(source)
+            && session.selection == source.selection
+            && (!self.steps.iter().any(|step| {
+                step.id.eq_ignore_ascii_case("plugin.run")
+                    || step.id.split_once('.').is_some_and(|(package, _)| source.plugin_state.packages.contains_key(package))
+            }) || (session.plugin_limits == source.plugin_limits
+                && session.disabled_plugins == source.disabled_plugins
+                && session.plugin_state == source.plugin_state))
     }
 
     /// Prepare display tessellation before returning the transaction to the window; a model that
@@ -532,6 +542,12 @@ pub struct Session {
     /// make construction geometry rather than normal geometry (off by default; #13142). A
     /// preference, kept like `auto_project` when another design is opened or started.
     pub project_construction: bool,
+    /// Host preferences; never saved in a design.
+    pub disabled_plugins: std::collections::BTreeSet<String>,
+    /// User resource ceilings; never loaded from or saved in a design.
+    pub plugin_limits: plugin::HostLimits,
+    /// Trusted package locations and folder grants, kept outside the design.
+    pub plugin_state: plugin::AppState,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -801,14 +817,21 @@ impl Session {
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
-        let doc = Arc::new(doc);
+        let mut doc = Arc::new(doc);
         // A model saved under another check mode holds that mode's results: evaluated again.
-        let model = Self::saved_model(&doc, saved).filter(|model| model.validation() == validation).unwrap_or_else(|| {
-            let mut model = Model::new();
-            model.set_validation(validation);
-            model.evaluate_shared(&doc);
-            model
-        });
+        let model = match Self::saved_model(&doc, saved).filter(|model| model.validation() == validation) {
+            Some(model) => model,
+            None => {
+                // Stored body names follow the numbering of the STEP reader that inserted each
+                // file; this version's reader may number the bodies otherwise (#13382). The
+                // reads are held so the evaluation doesn't read the files again.
+                let _reads = cmd::realign_imports(Arc::make_mut(&mut doc));
+                let mut model = Model::new();
+                model.set_validation(validation);
+                model.evaluate_shared(&doc);
+                model
+            }
+        };
         Self::with_model(doc, visibility, model)
     }
 
@@ -847,6 +870,9 @@ impl Session {
             followed: None,
             auto_project: true,
             project_construction: false,
+            disabled_plugins: Default::default(),
+            plugin_limits: plugin::default_host_limits(),
+            plugin_state: Default::default(),
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             keep_print_faces: true,
@@ -914,6 +940,9 @@ impl Session {
         let project_construction = self.project_construction;
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
+        let disabled_plugins = self.disabled_plugins.clone();
+        let plugin_limits = self.plugin_limits;
+        let plugin_state = self.plugin_state.clone();
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let keep_print_faces = self.keep_print_faces;
@@ -935,6 +964,9 @@ impl Session {
         // already (`Session::opened_validating`).
         self.set_validation(validation);
         self.set_single_surface_analysis(single_surface_analysis);
+        self.disabled_plugins = disabled_plugins;
+        self.plugin_limits = plugin_limits;
+        self.plugin_state = plugin_state;
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.keep_print_faces = keep_print_faces;
@@ -1679,6 +1711,9 @@ impl Session {
     /// gesture's end (`sketch.drag_end`, or whatever runs next after an abandoned gesture) brings
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
+        if let Some(call) = plugin::resolve_call(self, id, params)? {
+            return self.execute("plugin.run", &call);
+        }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         if panels::commands::is_command(spec.id) {
             // Layout is application state. Even a missing capability must not
@@ -2001,6 +2036,9 @@ impl Session {
             followed: None,
             auto_project: self.auto_project,
             project_construction: self.project_construction,
+            disabled_plugins: self.disabled_plugins.clone(),
+            plugin_limits: self.plugin_limits,
+            plugin_state: self.plugin_state.clone(),
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             keep_print_faces: self.keep_print_faces,
@@ -2555,8 +2593,10 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         notes,
         visibility,
         next_component_color_index,
+        plugin_data,
     } = a;
-    *render == b.render
+    *plugin_data == b.plugin_data
+        && *render == b.render
         && *format == b.format
         && *format_pending == b.format_pending
         && *name == b.name

@@ -135,10 +135,6 @@
     "pe_Fillet_cyl_on_box_w_fillet_f1_d0_out_ext": "tangency-labs/solidcore#3094: success with a body that fails check_brep level 2 (7 lines, the first SmTrimmingTools::Test #0 Edge/Edge Gap)",
     "shell_file_problemShell15_face0_extend": "tangency-labs/solidcore#3094: success with a body that fails check_brep level 2 (12 lines, the first SmTrimmingTools::Test #0 Edge/Edge Gap)"
   },
-  "primitive.primitive_creation_p2": {
-    "gen0092": "tangency-labs/solidcore#2794: a circle of radius 1e-3 swept along two 1e-2 legs at a right angle returns success, but the body fails check_brep level 2 (vertex 1.8284271e-3 off its faces); a refusal or the valid body of volume 6.2832e-8 is right; fix in #2840",
-    "gen0189": "tangency-labs/solidcore#2794: the same input as gen0092 (circle of radius 1e-3 swept along two 1e-2 legs at a right angle) returns success with an invalid body (vertex 1.8284271e-3 off its faces); fix in #2840"
-  },
   "surface.offset_surface": {
     "dome_pole_d0_2_p2": "tangency-labs/solidcraft#13610: simple evaluation succeeds with incorrect finite first and second partials at the collapsed boundary",
     "dome_pole_d0_2_p3": "tangency-labs/solidcraft#13610: simple evaluation succeeds with incorrect finite first and second partials at the collapsed boundary",
@@ -243,9 +239,6 @@
     "gen2949": "tangency-labs/solidcore#2717: step 4 names D(2,0), overwritten by D(1,2) at out[92]",
     "gen2966": "tangency-labs/solidcore#2717: step 0 names D(3,0), overwritten by D(1,2) at out[11]",
     "upper_half_slot_overwrite": "tangency-labs/solidcore#2717: step 1 names D(2,0), overwritten by D(1,2) at out[26]"
-  },
-  "surface.surface_approximate": {
-    "gen0381": "tangency-labs/solidcore#2507: approximation reports success and a returned surface although achieved tolerance 0.5459967665063701 exceeds requested tolerance 0.0013812901040403118"
   },
   "topology.brep_local_operation": {
     "gen0014": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",

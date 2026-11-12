@@ -183,7 +183,10 @@ with exact predicates [11, 12] or with interval enclosures of the sector test is
 A coincident pair on opposite sides of a union, or the same side of a difference, is deleted: those
 are the faces a regularized operation removes. The result's regions take their solid or void flag
 from the source regions they came from (`result_solid`): union solid if either was, intersection if
-both were, difference if A's was and B's was not.
+both were, difference if A's was and B's was not. A region with no record of its sources (no face of
+B was copied into it, because B's faces all lie on its boundary, as when a union fills a void
+exactly) that a deleted face joins to another such region takes the class a deleted face has on both
+sides: solid for a union, void for an intersection or a difference (`deleted_face_sides`).
 
 ## 5. Coincident and near-coincident faces
 
@@ -239,6 +242,16 @@ What the port does today:
   `is_outward_touching_solids` (§3).
 - **The sector test near tangency** steps off the edge and compares binormals until they separate
   (§4.2); where they never do within the face, it returns the coincident or zero-sector class.
+  Tangent faces part as the square of the step over their relative radius, so fixed steps and
+  angle thresholds read the faces of a large enough part as parallel. Two readings therefore step
+  on, three times further each round, until the faces are more than the tolerance apart: a sector
+  whose own two faces look parallel (a zero sector), and a classified face that looks coincident
+  with a face the definitions show to lie on another surface (`query/face/p1.rs`,
+  `faces_on_other_surfaces`: two different analytic kinds, or two quadrics of one kind that
+  `Surface::same_analytic_surface` tells apart). A tangent pair with no definitions to compare (a
+  B-spline on a plane) is still read as coincident once its relative radius passes about 1.7e7
+  times the sum of the two edges' tolerances, 330 mm at 1e-5 each (`query/edge.rs`, the 0.01°
+  rule over eight rounds).
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
@@ -319,7 +332,7 @@ A reviewer can check each of these on a change to the boolean.
    pair; nothing is kept or dropped for any other reason.
 4. Faces connected without crossing a common edge have one class.
 5. The keep rules are the regularized operations of §4.4, and a region's solid flag follows
-   `result_solid`.
+   `result_solid`, or `deleted_face_sides` for a region joined with no record of its sources.
 6. A trimmed or copied face keeps its surface's definition (§7); a change that drops one is a bug.
 7. Two bodies' imprinted edges are mated pairwise; unpaired common objects are `InvalidInput`
    (`pairs`, `merge/p4.rs`).
@@ -341,8 +354,9 @@ A reviewer can check each of these on a change to the boolean.
 - Point solves on S with ε-grown cache boxes (§4.3).
 - Definitions carried through face splits and copies (§7), tested on a round.
 - The ops entry points with the result contract (`solidcore-ops/src/boolean.rs`).
-- The rig: 124 boolean cases in `solidcore/tests/kernel_cases/booleans/`, none listed in
-  `known_failing.json`.
+- The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
+  `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
+  returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - Opt-in fixes for the cases in §5, §6 and §8: `boolean_coincident_strip_drops_crossing`,
   `boolean_union_refuses_solid_leak`, `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`,
   `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing`,

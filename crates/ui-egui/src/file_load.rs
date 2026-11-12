@@ -369,12 +369,14 @@ impl FileLoad {
                 _ => std::path::Path::new(&request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
             },
             steps: None,
+            percent: false,
             queued: true,
             cancelled: false,
             waiting: false,
         };
         let running = self.running.as_ref().map(|r| FileOperation {
             steps: steps(r),
+            percent: r.request.kind != Kind::UpdateLinks && work(r).is_some_and(|(stage, _, _)| crate::operations::bytes_stage(stage)),
             queued: false,
             cancelled: r.cancelled(),
             waiting: r.ready.as_ref().is_some_and(Result::is_ok),
@@ -398,6 +400,8 @@ pub(crate) struct FileOperation {
     pub command: &'static str,
     pub name: String,
     pub steps: Option<(usize, usize)>,
+    /// The steps are bytes (the file being read).
+    pub percent: bool,
     pub queued: bool,
     pub cancelled: bool,
     /// Done, and waiting to land ([`Land::Wait`]).
@@ -406,6 +410,12 @@ pub(crate) struct FileOperation {
 
 /// How far a running request is: the long work inside a feature (a large STEP file read), the
 /// linked designs read again, or the features rebuilt; `None` when that is not known yet.
+/// The long work inside one feature the running request is in (a large STEP file read), if any.
+fn work(r: &Running) -> Option<(&'static str, usize, usize)> {
+    let phase = r.phase.load(Ordering::Relaxed);
+    r.work().filter(|(_, d, t)| r.request.kind == Kind::ExportDxf || (phase == 0 && d < t))
+}
+
 fn steps(r: &Running) -> Option<(usize, usize)> {
     if r.request.kind == Kind::UpdateLinks
         && let Some((_, i, n)) = r.progress.item()
@@ -415,7 +425,7 @@ fn steps(r: &Running) -> Option<(usize, usize)> {
     // As the card reads them: in the web app a design opened a few features a frame counts them
     // itself ([`Running::features`], [`Running::work`]).
     let phase = r.phase.load(Ordering::Relaxed);
-    if let Some((_, d, t)) = r.work().filter(|(_, d, t)| r.request.kind == Kind::ExportDxf || (phase == 0 && d < t)) {
+    if let Some((_, d, t)) = work(r) {
         return Some((d, t));
     }
     let (done, total) = r.features();
@@ -448,12 +458,21 @@ pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde
     }
 }
 
+/// The preference's `reuse_import` default for an import-backed open only: a native design's
+/// request keeps empty options, so `reuse_open` can still switch to its open tab.
+fn default_reuse_import(app: &SolveApp, request: &mut Request) {
+    if request.kind == Kind::Open && solidcraft_engine::io::is_step_path(&request.path) {
+        request.options.entry("reuse_import").or_insert(Value::Bool(app.preferences.reuse_imports));
+    }
+}
+
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
     }
+    default_reuse_import(app, &mut request);
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
     }
@@ -670,6 +689,18 @@ fn recovered(app: &mut SolveApp, request: &Request) {
     }
     app.set_status(format!("recovered {}: save it to keep it", request.path), false);
     app.say_newer_file();
+}
+
+/// A recovered design that landed in a background tab: save it under that tab's own autosaver
+/// first, then discard the recovery entry it came from. [`recovered`] saves the shown design, so
+/// it cannot be used here; until this runs a crash would offer the old (stale) entry again.
+fn recovered_behind(app: &mut SolveApp, uid: u64, id: &str, dir: Option<&str>) {
+    let (autosave, docs) = (&mut app.autosave, &mut app.docs);
+    let Some(slot) = docs.background_slot_mut(uid) else { return };
+    let kept = autosave.as_mut().map(|a| a.save_background(slot));
+    if let Some(Ok(_)) = kept {
+        let _ = slot.session.execute("doc.recovery_discard", &json!({"id": id, "dir": dir}));
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1437,11 +1468,17 @@ fn behind(app: &mut SolveApp, mut running: Running) {
     let Some(Ok(made)) = running.ready.take() else { return };
     let request = &running.request;
     let key = format!("file:{}", request.serial);
+    let uid = made.session.uid;
     match crate::documents::open_tab_behind(app, made.session) {
         Ok(()) => {
             crate::operations::ended(app, &key, Outcome::Done);
             if request.kind == Kind::Open {
                 app.home.add_recent(&request.path);
+            }
+            // A recovered design takes its entry with it into the background tab: saved there
+            // first, so the old entry can go without the design being lost to a crash.
+            if let Kind::Recover { id, dir } = &request.kind {
+                recovered_behind(app, uid, id, dir.as_deref());
             }
             let name = std::path::Path::new(&request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
             app.set_status(solidcraft_ui_text::format("file_load.opened_behind", &[("name", &name)]), false);
@@ -1972,6 +2009,20 @@ mod tests {
         assert_eq!(Request::new("scan.ply", Kind::Open).command().0, "doc.open");
         request.mesh = true;
         assert_eq!(request.command().0, "file.insert_mesh");
+    }
+
+    #[test]
+    fn the_reuse_import_default_is_added_to_import_opens_only() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        for (path, expected) in [("part.step", Some(true)), ("part.IGS", Some(true)), ("design.sc", None), ("old.solidcraft", None)] {
+            let mut request = Request::new(path, Kind::Open);
+            default_reuse_import(&app, &mut request);
+            assert_eq!(request.options.get("reuse_import").and_then(Value::as_bool), expected, "{path}");
+        }
+        app.preferences.reuse_imports = false;
+        let mut request = Request::new("part.step", Kind::Open);
+        default_reuse_import(&app, &mut request);
+        assert_eq!(request.options.get("reuse_import").and_then(Value::as_bool), Some(false), "the old value restores the old behaviour");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! A schema 4 record ([`solidcraft_geom::brep`]) as ISO 10303-42 topology, the inverse of
+//! A schema 4 record ([`solidcore_record::brep`]) as ISO 10303-42 topology, the inverse of
 //! [`crate::topology`]. Each bounded material region becomes a MANIFOLD_SOLID_BREP, or a
 //! BREP_WITH_VOIDS when voids lie inside it (each void's CLOSED_SHELL through an
 //! ORIENTED_CLOSED_SHELL); the open shells become one SHELL_BASED_SURFACE_MODEL. Faces are ADVANCED_FACEs on their
@@ -306,13 +306,14 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
         }
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(profile, *origin, *axis, matrix, *forward)?,
         BSurface::BallPatch { .. } => return Err("a ball patch's label (its face is written as its NURBS form)".into()),
+        BSurface::Blend { .. } => return Err("a blend's label (its face is written as its NURBS form)".into()),
     })
 }
 
-/// Whether a face is written as its NURBS form, pcurves and all: a ball patch, which STEP has no
-/// entity for, is the B-spline surface it is parameterised on.
+/// Whether a face is written as its NURBS form, pcurves and all: a ball patch or a blend by its
+/// definition, which STEP has no entity for, is the B-spline surface it is parameterised on.
 fn as_form(face: &Face) -> bool {
-    face.nurbs.is_some() && matches!(face.surface, BSurface::BallPatch { .. })
+    face.nurbs.is_some() && matches!(face.surface, BSurface::BallPatch { .. } | BSurface::Blend { .. })
 }
 
 /// A record pcurve in the STEP surface's parameters: its control points through `map` (a linear

@@ -1,7 +1,7 @@
 use crate::{Document, ModelBody, ModelState};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource, Sketch};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -458,4 +458,48 @@ fn numbered_edge_projection_recovers_the_edge_between_whole_faces() {
     elsewhere.links[0].source = LinkSource::Edge { body: "Ring".into(), at: Vec3::new(0., -10., 5.) };
     let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut elsewhere).unwrap_err();
     assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == numbered), "{error}");
+}
+
+/// A drafted face's edge is a circle seen at a slant: an ellipse. The sketch takes it as the
+/// ellipse it is, not as the point set a spline of its own would be (#15061).
+#[test]
+fn a_drafted_face_projects_its_edge_as_one_ellipse() {
+    let mut initial = ModelState::default();
+    // A cylinder drafted three degrees: its top rim is a circle seen at a slant, an ellipse of
+    // axis ratio 1/cos(3 deg).
+    let cylinder = solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 20.0, 30.0).unwrap();
+    let drafted = solidcraft_kernel::draft(&cylinder, &[Vec3::new(0.0, 0.0, 30.0)], &Plane::XZ, Vec3::Y, 3f64.to_radians()).unwrap();
+    let faces = drafted.faces(0.01).unwrap();
+    // The drafted face leans off the base plane; the sketch lies in the face's own plane, so
+    // the edge comes to the sketch as the ellipse it is.
+    let lean = faces.iter().filter_map(|f| f.plane_normal).find(|n| n.z > 0.9).unwrap();
+    let angle = 3f64.to_radians();
+    let lean_sign = if lean.y >= 0.0 { 1.0 } else { -1.0 };
+    let normal = Vec3::new(0.0, lean_sign * angle.sin(), angle.cos());
+    let plane = Plane::from_normal(Vec3::new(0.0, 0.0, 30.0), normal).unwrap();
+    let mut body = ModelBody::new("Drafted".into(), drafted, 1);
+    body.names = crate::naming::NameCell::known(Arc::new(vec![String::new(); faces.len()]));
+    initial.bodies.extend([body]);
+    let doc = Document::default();
+    let source = LinkSource::Face { body: "Drafted".into(), at: Vec3::new(0.0, 0.0, 30.0) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    // The edge comes to the sketch as one ellipse, not as the point set of a spline.
+    assert!(
+        resolved.geom.iter().any(|g| matches!(g, LinkGeom::Ellipse { .. })),
+        "a drafted face's edge is an ellipse, not a point set: {:?}",
+        resolved
+            .geom
+            .iter()
+            .map(|g| match g {
+                LinkGeom::Ellipse { .. } => "ellipse".to_string(),
+                LinkGeom::Spline { pts, .. } => format!("spline with {} points", pts.len()),
+                other => format!("{other:?}"),
+            })
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !resolved.geom.iter().any(|g| matches!(g, LinkGeom::Spline { pts, .. } if pts.len() > 10)),
+        "no projected spline may carry a point set: {:?}",
+        resolved.geom
+    );
 }

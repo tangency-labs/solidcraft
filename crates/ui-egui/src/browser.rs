@@ -375,13 +375,39 @@ pub struct OccMove {
     pub angles: [f64; 3],
     /// The occurrence's origin when the move began: what it turns about.
     pub pivot: Option<solidcore_record::Vec3>,
-    /// The values when the current triad drag began.
+    /// The order the angles apply in (`gizmo::turn_of`), so each stays what was dragged.
+    order: [usize; 3],
+    /// The placement the values start from, when not the baseline: a turn no sum of angles can
+    /// make starts the values over from where the occurrence stands.
+    base: Option<solidcraft_engine::doc::Mat>,
+    /// The values when the current triad drag began, and whether its ring has settled its angle.
     drag0: Option<([f64; 3], [f64; 3])>,
+    ring_set: bool,
 }
 
 impl OccMove {
     pub fn new(occurrence: u64) -> Self {
-        OccMove { occurrence, path: Vec::new(), baseline: None, had_pending: false, translate: [0.0; 3], angles: [0.0; 3], pivot: None, drag0: None }
+        OccMove {
+            occurrence,
+            path: Vec::new(),
+            baseline: None,
+            had_pending: false,
+            translate: [0.0; 3],
+            angles: [0.0; 3],
+            pivot: None,
+            order: crate::gizmo::ANGLE_ORDER,
+            base: None,
+            drag0: None,
+            ring_set: false,
+        }
+    }
+
+    /// The values go back to zero where the occurrence stands, which keeps its pending move.
+    fn bake(&mut self, app: &SolveApp) {
+        let t = self.translate;
+        self.pivot = self.pivot.map(|p| p + solidcore_record::Vec3::new(t[0], t[1], t[2]));
+        self.base = app.session.pending_moves.get(&self.occurrence).copied().or(self.base);
+        (self.translate, self.angles, self.order) = ([0.0; 3], [0.0; 3], crate::gizmo::ANGLE_ORDER);
     }
 }
 
@@ -1888,7 +1914,8 @@ pub(crate) fn prune_reveals(app: &mut SolveApp) {
 
 fn component_name(app: &SolveApp, id: u64) -> String {
     if id == 0 {
-        return app.session.doc.name.clone();
+        // The design's top row names it the way its tab does: after the file (#7267).
+        return crate::documents::tab_name(app, &app.session);
     }
     let doc = &app.session.doc;
     let name = doc.components.iter().find(|c| c.id == id).map(|c| c.name.clone()).unwrap_or_default();
@@ -3904,15 +3931,14 @@ pub(crate) fn revert_occurrence_dialog(app: &mut SolveApp, m: &OccMove) {
     }
 }
 
-/// The pending move: turned about X, then Y, then Z through the starting origin, then moved.
+/// The pending move: turned by the angles in the order they were dragged (about X, then Y, then
+/// Z at first) through the starting origin, then moved.
 pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
     use crate::gizmo;
     use solidcore_record::Vec3;
-    let a = m.angles.map(f64::to_radians);
-    let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
-    let (axis, angle) = gizmo::axis_angle(&r);
+    let (axis, angle) = gizmo::axis_angle(&gizmo::turn_of(m.angles.map(f64::to_radians), m.order));
     let o = m.pivot.unwrap_or(Vec3::ZERO);
-    let baseline = m.baseline.or_else(|| app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.transform));
+    let baseline = m.base.or(m.baseline).or_else(|| app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.transform));
     let _ = app.run(
         "occurrence.move",
         if m.path.is_empty() {
@@ -3940,15 +3966,32 @@ pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &
     let Some(g) = gizmo::show(ui, painter, proj, egui::Id::unique("sc_occ_triad"), &t, step) else { return };
     if g.started || m.drag0.is_none() {
         m.drag0 = Some((m.translate, m.angles));
+        m.ring_set = false;
     }
-    let (t0, a0) = m.drag0.unwrap_or((m.translate, m.angles));
     match g.change {
-        Change::Translate(v) => m.translate = [t0[0] + v.x, t0[1] + v.y, t0[2] + v.z],
-        Change::Rotate { axis, angle } => {
-            if let Some(slot) = m.angles.get_mut(axis) {
-                *slot = a0.get(axis).copied().unwrap_or(0.0) + angle.to_degrees();
-            }
+        Change::Translate(v) => {
+            let (t0, _) = m.drag0.unwrap_or((m.translate, m.angles));
+            m.translate = [t0[0] + v.x, t0[1] + v.y, t0[2] + v.z];
         }
+        // Not on the press: a click on a ring changes nothing. Once the ring has turned, a drag
+        // back to where it started is a real zero.
+        Change::Rotate { axis, angle } if angle != 0.0 || m.ring_set => {
+            let i = axis.min(2);
+            // The ring's first turn: let its angle add, or start over on the turns so far.
+            if !m.ring_set {
+                m.ring_set = true;
+                match gizmo::ring_order(m.angles.map(f64::to_radians), m.order, i) {
+                    Some(order) => m.order = order,
+                    None => {
+                        m.bake(app);
+                        m.drag0 = Some((m.translate, m.angles));
+                    }
+                }
+            }
+            let (_, a0) = m.drag0.unwrap_or((m.translate, m.angles));
+            m.angles[i] = gizmo::within_turn((a0[i] + angle.to_degrees()).to_radians()).to_degrees();
+        }
+        Change::Rotate { .. } => {}
     }
     if g.done {
         m.drag0 = None;
@@ -3998,10 +4041,14 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             };
             let Some(px) = crate::dim_view::mm_per_pixel(to, anchor) else { continue };
             let expr = c.param.as_ref().and_then(|p| app.session.doc.param(p)).map(|p| p.expr.as_str());
-            let col = if c.driven { tk.dimension_driven } else { tk.dimension };
+            let col = if ss.report.failing.contains(&c.id) {
+                crate::viewport::Conflict::glyph_colour(app, &tk)
+            } else {
+                crate::prefs::dimension_colour(&app.preferences, c.driven)
+            };
             let galley = painter.layout_no_wrap(
                 crate::dim_view::frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
-                FontId::proportional(tk.font_caption),
+                FontId::proportional(tk.font_caption * crate::prefs::dimension_text_scale(&app.preferences)),
                 col,
             );
             let size = galley.size() + vec2(6.0, 2.0);

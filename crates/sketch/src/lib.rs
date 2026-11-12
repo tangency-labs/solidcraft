@@ -49,7 +49,8 @@ mod wire;
 
 pub use curves::{
     MAX_SPLINE_POINTS, bspline_beziers, conic_point, conic_rho_from_point, ellipse_point, end_curvature, fit_beziers, fit_beziers_mode,
-    spline_end_tangent, spline_end_tangent_mode, spline_point, spline_point_mode, spline_polyline, spline_polyline_mode,
+    fit_beziers_with_handles, fit_tangent_handles, spline_end_tangent, spline_end_tangent_mode, spline_end_tangent_with_handles, spline_point,
+    spline_point_mode, spline_point_with_handles, spline_polyline, spline_polyline_mode, spline_polyline_with_handles,
 };
 pub use decompose::Budget;
 pub use dims::{
@@ -57,7 +58,9 @@ pub use dims::{
 };
 pub use ends::{END_TOL, EndReport, EndTouch, UntiedEnd, loose_ends};
 pub use equation::{EquationCurve, MAX_EQUATION_TEXT, VariableUnit};
-pub use fonts::{DEFAULT_FONT_FAMILY, FontData, families_in, find_style_in, font_data, font_data_styled, installed_families, set_font_file_check};
+pub use fonts::{
+    DEFAULT_FONT_FAMILY, FontData, families_in, find_style_in, font_data, font_data_styled, font_file_path, installed_families, set_font_file_check,
+};
 pub use freeform_offset::{FreeformOffset, FreeformOffsetOutput, OFFSET_TOLERANCE};
 pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES, SKETCH_AXIS_HALF, TextExprs, sketch_axis_geom};
 pub use model::{
