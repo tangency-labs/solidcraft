@@ -29,7 +29,8 @@ pub use leads::{ENTRY_DEG, EntrySpec, LeadSpec, LinkingSpec, MAX_ANGLE_DEG, MAX_
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CamJobParams {
-    /// The job itself (see docs/cam-jobs.md). Give this or `job_path`.
+    /// The job itself (see docs/cam-jobs.md). Give this or `job_path`; with neither, the open job
+    /// (`cam.job.open`, `cam.job.new`).
     #[serde(default)]
     pub job: Option<CamJob>,
     /// A `.json` file holding the job. Relative `post_path` and `tool_library_path` in it are

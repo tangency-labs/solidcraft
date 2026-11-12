@@ -1413,12 +1413,18 @@ fn job_name(cmd: &str, s: &Session, job: &CamJob) -> Result<String> {
     }
 }
 
-/// The job of a call (`inline` under `job`, or the file `path`) as JSON, what it is called in a
-/// refusal, and the folder its relative paths are read from (the job file's).
-fn job_value(cmd: &str, p: &Value, inline: bool, path: Option<&String>) -> Result<(Value, String, Option<PathBuf>)> {
+/// The job of a call (`inline` under `job`, or the file `path`; with neither, the open job) as
+/// JSON, what it is called in a refusal, and the folder its relative paths are read from (the job
+/// file's).
+fn job_value(cmd: &str, s: &Session, p: &Value, inline: bool, path: Option<&String>) -> Result<(Value, String, Option<PathBuf>)> {
     match (inline, path) {
         (true, Some(_)) => Err(bad(cmd, "give `job` or `job_path`, not both")),
-        (false, None) => Err(bad(cmd, "give the `job` (an object) or a `job_path` (a .json file)")),
+        (false, None) => match s.cam_job.as_deref() {
+            Some(open) => Ok((open.value.clone(), "the open job".into(), open.folder())),
+            None => {
+                Err(bad(cmd, "give the `job` (an object) or a `job_path` (a .json file), or open or create a job first (cam.job.open, cam.job.new)"))
+            }
+        },
         (true, None) => Ok((p.get("job").cloned().unwrap_or(Value::Null), "`job`".into(), None)),
         (false, Some(path)) => {
             let raw = read_json(cmd, path, "job_path")?;
@@ -1430,11 +1436,11 @@ fn job_value(cmd: &str, p: &Value, inline: bool, path: Option<&String>) -> Resul
     }
 }
 
-/// The job of a call (`inline` under `job`, or the file `path`), its operations' picks found
+/// The job of a call (`inline` under `job`, or the file `path`; else the open job), its operations' picks found
 /// again and read as their geometry and its heights that follow the model read as numbers
 /// (`cam_picks.rs`), how each pick was found, and the folder its relative paths are read from.
 fn load_job(cmd: &str, s: &Session, p: &Value, inline: bool, path: Option<&String>) -> Result<(CamJob, Vec<PickResolved>, Option<PathBuf>)> {
-    let (mut value, what, base) = job_value(cmd, p, inline, path)?;
+    let (mut value, what, base) = job_value(cmd, s, p, inline, path)?;
     if !picks::has_refs(&value) {
         return Ok((parse(cmd, &value, &what)?, Vec::new(), base));
     }
@@ -2561,6 +2567,8 @@ fn gcode_check(_: &mut Session, p: &Value) -> Result<Value> {
 
 #[path = "cam_features.rs"]
 mod features;
+#[path = "cam_job_edit.rs"]
+pub(super) mod job_edit;
 #[path = "cam_picks.rs"]
 pub(super) mod picks;
 #[path = "cam_image.rs"]

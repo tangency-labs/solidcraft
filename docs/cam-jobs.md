@@ -14,6 +14,7 @@ commands work with jobs, from scripts, the CLI and MCP alike:
 | `cam.view.*` | The simulation view: a job's program played move by move on the simulated stock (see [Simulation view](#simulation-view)) |
 | `cam.view` | A PNG of the part with the job's toolpaths drawn over it, for an agent to look at (see [Pictures and extents for agents](#pictures-and-extents-for-agents)) |
 | `cam.picks.resolve` | Says what picked faces, edges and sketch profiles are, and which operations suit them |
+| `cam.job.new`, `cam.job.open`, `cam.job.save`, … | Keep one job open in the session, edit it with its own undo history, and save it (see [The open job](#the-open-job)) |
 | `cam.features` | Lists the part's machinable features (holes, pockets, faces, profiles, rounds, chamfers, curved areas, and on a 4th axis turned diameters) with stable ids and their exact geometry, for an operation to name |
 
 Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`, …).
@@ -1183,6 +1184,30 @@ and tool changes wait their time. A 1000 mm cut at 6000 mm/min with 2000 mm/s² 
 so far coloured by the tool that cut it last, the toolpaths in one colour per tool with what is
 still to come dim and rapids in red, the tool with its shank and holder at the tool's pose, and
 the findings as crosses. The design's own bodies are hidden unless `part` is shown.
+## The open job
+
+A session keeps one job open: a job file it edits through the commands below, with its own undo
+history apart from the design's. An agent and a person can hand the same file back and forth:
+one writes it, the other opens it and takes it on from there. Nothing of it is saved in the
+design.
+
+| Command | Does |
+| --- | --- |
+| `cam.job.new` | `path?` (default `<design>.cam.json` beside the saved design, or when that is taken `<design>.op2.cam.json`, `.op3`...; none for an unsaved design), `name?`, `discard?`. A job with no operations; nothing is written until it is saved; refused when a file is already at the `path`. |
+| `cam.job.open` | `path`, `discard?`. A file that does not read as a job is refused with the key and line (`operations[2].stepovr`). |
+| `cam.job.save` | `path?` (save as: the job is that file from then on), `overwrite?`. Writes the keys in the job's order with the file's own indent and a final newline, so a job an agent wrote and a person edited reads the same in git. Refused when the file changed outside SolidCraft since it was read, or another file is at `path`, unless `overwrite`. |
+| `cam.job.reload` | `discard?`. Reads the file again as one undo step; replies what changed, one line each ("operation 1 'pocket': stepover 1.5 -> 2"). |
+| `cam.job.close` | `discard?`. |
+| `cam.job.get` | `job?`. Replies whether the file changed outside (`none`, `changed`, `gone`: the file's time and size, or its bytes where there are no file times), the undo and redo steps, a summary, and with `job: true` the job's JSON. |
+| `cam.job.edit` | `set?: {path: value}`, `unset?: [path]`: job keys, or dotted paths into objects and lists (`tools.0.feed`). The operations are not edited here. |
+| `cam.job.undo`, `cam.job.redo` | The job's own history (up to 200 steps). |
+
+Every edit is one step of the job's history, and is read with the job's schema before it is
+kept: an edit that would not read is refused and changes nothing, so a person cannot save a job
+an agent cannot run. A command that would drop unsaved edits refuses without `discard`.
+
+`cam.job` takes the open job when it is given neither `job` nor `job_path`, its relative paths
+read from its file's folder, its unsaved edits included.
 
 ## `cam.post.list` and `cam.post.get`
 

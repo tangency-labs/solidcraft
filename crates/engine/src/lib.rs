@@ -10,6 +10,7 @@
 pub mod agent_setup;
 pub mod batch_params;
 pub mod batch_preflight;
+pub mod cam_job_state;
 pub mod cam_view;
 pub mod capture;
 pub mod cmd;
@@ -618,6 +619,9 @@ pub struct Session {
     /// The CAM simulation view (`cam.view.*`): a program played on the simulated stock. View
     /// state: not part of the design and not an undo step.
     pub cam_view: Option<Box<cam_view::CamView>>,
+    /// The open CAM job (`cam.job.open`, `cam.job.new`): the job file `cam.job.*` edit, with its
+    /// own history. Not part of the design and not an undo step.
+    pub cam_job: Option<Box<cam_job_state::OpenJob>>,
     /// Oldest active slot first; replacing an effect retains its row position.
     status_order: Vec<status_items::StatusId>,
     /// Successful source activations, independently of row order and sharing policy.
@@ -877,6 +881,7 @@ impl Session {
             isocurves: Vec::new(),
             comb: None,
             cam_view: None,
+            cam_job: None,
             status_order: Vec::new(),
             status_activation: Vec::new(),
             single_surface_analysis: true,
@@ -2031,6 +2036,7 @@ impl Session {
             isocurves: Vec::new(),
             comb: None,
             cam_view: None,
+            cam_job: self.cam_job.as_deref().map(|j| Box::new(j.scratch())),
             status_order: Vec::new(),
             status_activation: Vec::new(),
             single_surface_analysis: self.single_surface_analysis,
