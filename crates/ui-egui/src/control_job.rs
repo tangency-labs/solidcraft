@@ -931,7 +931,8 @@ mod tests {
         let (req, _reply) = ControlRequest::new("engine.batch", request);
         // The worker never answers: the batch stays where the test puts it.
         let (_worker, done) = std::sync::mpsc::channel();
-        h.app.control_job = Some(ControlJob { req, work: Work::Answer, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
+        h.app.control_job =
+            Some(ControlJob { req, work: Work::Answer { inspection: None }, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
         let rows = |h: &mut crate::scenario::Harness| {
             let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
             listed["operations"].as_array().unwrap().clone()
@@ -956,7 +957,8 @@ mod tests {
         let steps = Steps::new(&h.app, &mixed, &commands);
         let (req, _reply) = ControlRequest::new("engine.batch", mixed);
         let (_worker, done) = std::sync::mpsc::channel();
-        h.app.control_job = Some(ControlJob { req, work: Work::Answer, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
+        h.app.control_job =
+            Some(ControlJob { req, work: Work::Answer { inspection: None }, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
         steps.now.store(1, Ordering::Relaxed);
         let rows = rows(&mut h);
         assert_eq!(rows[0]["steps"], json!({"done": 0, "total": 3}));
