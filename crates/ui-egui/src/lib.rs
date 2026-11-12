@@ -33,6 +33,7 @@ mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
 pub mod creative_mode;
+pub(crate) mod creative_tools;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;

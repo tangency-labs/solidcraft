@@ -5,6 +5,12 @@
     "prefs.creative_mode_help": "Shape the model directly: pulling a flat face applies on release without a window, and the commands that fit the selection float above it.",
     "creative_mode.switch": "Creative",
     "creative_mode.switch_on_tip": "Creative Mode is on: drag faces to push or pull them, drag edges out to round them or in to chamfer them. Click to turn it off.",
-    "creative_mode.switch_off_tip": "Turn on Creative Mode: shape the model by dragging faces and edges, with the commands for the selection floating above it."
+    "creative_mode.switch_off_tip": "Turn on Creative Mode: shape the model by dragging faces and edges, with the commands for the selection floating above it.",
+    "creative_mode.join": "Join",
+    "creative_mode.join_tip": "Join {tools} into {target}: one body from both.",
+    "creative_mode.cut": "Cut",
+    "creative_mode.cut_tip": "Cut {tools} out of {target}.",
+    "creative_mode.intersect": "Intersect",
+    "creative_mode.intersect_tip": "Keep only where {target} and {tools} overlap."
   }
 }

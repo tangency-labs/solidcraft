@@ -3,11 +3,12 @@
 //!
 //! - Pulling a flat face or a profile extrudes or cuts it, as direct interaction does, and the
 //!   release applies the change: no window waits for OK (`drag_extrude::end`).
-//! - A pill floats above the selection with the few commands that fit it: on a face Sketch and
-//!   Press Pull, on an edge Fillet and Chamfer, on a body Move, Appearance and Delete. Its name
-//!   chip opens the full context menu. The commands come from the context menu's own list for
-//!   the selection ([`crate::context_menu::items`]), so the pill offers nothing the menu would
-//!   refuse, and every action stays an ordinary command on the timeline.
+//! - A pill floats above the selection with the commands that fit it, single or several items:
+//!   the features whose window takes the selection come first ([`crate::creative_tools`]: Sketch
+//!   and Press Pull on a face, Fillet on an edge, Loft on two profiles, Sweep on a profile and a
+//!   path, Mirror and patterns on a body, one-click Join, Cut and Intersect on overlapping
+//!   bodies), then the context menu's Move, Appearance, Hide and Delete. Its name chip opens the
+//!   full context menu. Every action stays an ordinary command on the timeline.
 //! - Dragging an edge across itself rounds it when pulled out of the material and cuts it flat
 //!   when pushed in (`drag_fillet`).
 //! - Double-clicking a body picks it up: Move opens on it with its triad, and releasing a
@@ -35,8 +36,8 @@ const PILL: [&str; 10] = [
     "inspect.measure",
 ];
 
-/// The most actions the pill shows beside its name chip.
-const MAX_ACTIONS: usize = 6;
+/// The most actions the pill shows beside its name chip; the name chip opens the full menu.
+const MAX_ACTIONS: usize = 8;
 
 /// Creative Mode is on.
 pub fn on(app: &SolveApp) -> bool {
@@ -116,10 +117,22 @@ pub(crate) fn bar_switch(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect
     Some(rect)
 }
 
-/// The pill's actions for the current selection, in [`PILL`] order.
+/// The pill's actions for the current selection: the features that fit it
+/// ([`crate::creative_tools`]: Join, Cut and Intersect for overlapping bodies, Loft for two
+/// profiles, Sweep for a profile and a path, and so on), then the context menu's own commands in
+/// [`PILL`] order that are not already there.
 pub(crate) fn pill_items(app: &SolveApp) -> Vec<Item> {
+    let mut v = crate::creative_tools::items(app);
     let all = crate::context_menu::items(app, &Target::Viewport);
-    PILL.iter().filter_map(|id| all.iter().find(|i| i.id == *id && i.enabled)).take(MAX_ACTIONS).cloned().collect()
+    for id in PILL {
+        if !v.iter().any(|i| i.id == id)
+            && let Some(item) = all.iter().find(|i| i.id == id && i.enabled)
+        {
+            v.push(item.clone());
+        }
+    }
+    v.truncate(MAX_ACTIONS);
+    v
 }
 
 /// What the name chip says: the body the selection is on, or how many things are selected.
