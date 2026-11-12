@@ -13,7 +13,7 @@ commands work with jobs, from scripts, the CLI and MCP alike:
 | `cam.simulate` | Runs a written program through a model of the stock and holds what it leaves against the part: gouges, rapids through material, material left |
 | `cam.view.*` | The simulation view: a job's program played move by move on the simulated stock (see [Simulation view](#simulation-view)) |
 | `cam.view` | A PNG of the part with the job's toolpaths drawn over it, for an agent to look at (see [Pictures and extents for agents](#pictures-and-extents-for-agents)) |
-| `cam.features` | Lists the holes of a part a 3-axis mill drills or bores from above, found on its exact faces (see [Machinable features](#machinable-features)) |
+| `cam.features` | Lists the part's machinable features (holes, pockets, faces) with stable ids and their exact geometry, for an operation to name |
 
 Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`, …).
 
@@ -220,12 +220,13 @@ Every operation has `name`, `type`, `tool` (a tool's `number`), and optionally `
 `feeds: {cut, plunge, descent?}`, `coolant` (default false), `gouge_check` (default true: see
 The checks) and `enabled` (default true: `false` keeps it in the job but leaves it out of the
 program). `heights` are `{clearance, retract, top,
-bottom}` in work coordinates.
+bottom}` in work coordinates: all four on a sketch or polygon; on a `feature` (see
+[Operations on features](#operations-on-features)) any of them left out come from it.
 
 | `type` | Keys (defaults) |
 | --- | --- |
-| `contour` | `sketch` (id or name) + `profiles?` (indices; default every drawn profile) or `polygon: [[x, y], …]`; `heights`; `stepdown` (tool's, else half its diameter); `side`: `outside` \| `inside` \| `on` (outside); `climb` (true); `stock_to_leave` (0); `ramp_angle_deg` (0: plunge); `tolerance` (the job's); `lead`, `entry`, `linking`, `tabs`, `finish_passes`, `finish_stepover`, `spring_pass`, `vertical_lead` (see [Leads, entries, linking and tabs](#leads-entries-linking-and-tabs)) |
-| `pocket` | `sketch` + `profiles?` or `polygon`; `heights`; `stepdown`; `stepover` (tool's, else 40% of its diameter); `climb`; `stock_to_leave`; `ramp_angle_deg`; `tolerance`; `entry`; `linking` |
+| `contour` | `sketch` (id or name) + `profiles?` (indices; default every drawn profile), `polygon: [[x, y], …]` or `feature`; `heights`; `stepdown` (tool's, else half its diameter); `side`: `outside` \| `inside` \| `on` (outside; inside a `feature`); `climb` (true); `stock_to_leave` (0); `ramp_angle_deg` (0: plunge); `tolerance` (the job's); `lead`, `entry`, `linking`, `tabs`, `finish_passes`, `finish_stepover`, `spring_pass`, `vertical_lead` (see [Leads, entries, linking and tabs](#leads-entries-linking-and-tabs)) |
+| `pocket` | `sketch` + `profiles?`, `polygon` or `feature`; `heights`; `stepdown`; `stepover` (tool's, else 40% of its diameter); `climb`; `stock_to_leave`; `ramp_angle_deg`; `tolerance`; `entry`; `linking` |
 | `drill` | `sketch` (circle centres, `circles` (true), filtered by `diameter_range: [min, max]`, and lone points, `sketch_points` (true)) or `points: [[x, y], …]`; `heights` (`retract` is the R height, `top` the hole's top, `bottom` its depth); `cycle`: `simple` \| `dwell` \| `peck` \| `chip_break` (simple); `peck` (tool's stepdown, else its diameter); `peck_clearance` (0.5); `back_off` (0.5); `dwell_seconds` (0.5); `to_full_diameter` (false). See [Drilling](#drilling). |
 | `adaptive` | `sketch` + `profiles?` or `polygon`; `heights`; `stepdown` (tool's, else its diameter); `optimal_load` (tool's `stepover`, else 10% of its diameter); `min_engagement_deg`, `max_engagement_deg` (from the load: see [Adaptive clearing](#adaptive-clearing)); `helix_diameter` (80% of the tool's); `ramp_angle_deg` (2); `climb`; `stock_to_leave` (0); `tolerance`; `compare` (true); `from_stock` (true: see [Adaptive clearing](#adaptive-clearing)) |
 | `adaptive_roughing` | `heights` (`top` is the stock's top); `stepdown`; `optimal_load`; `min_engagement_deg`, `max_engagement_deg`; `helix_diameter`; `ramp_angle_deg`; `climb`; `boundary` (the stock's extent; the part's extent); `stock_to_leave` (0.25); `flats` (true); `step_up` (none); `tolerance` |
@@ -1266,38 +1267,62 @@ job's operation names). It returns `path`, `image` (as above), `operations` (eac
 
 ## Machinable features
 
-`cam.features` lists the holes of a part a 3-axis mill drills or bores from above, with stable
-ids and their exact geometry, so an agent can plan drilling and boring without measuring the
-model:
+`cam.features` lists what there is to machine on a modelled part, so an operation can name a
+pocket or a hole instead of a sketch drawn for every cut, and take its heights from the part.
 
 ```json
-{"cmd": "cam.features", "params": {"bodies": ["Plate"], "origin": [0, 0, 0], "tolerance": 0.01}}
+{"bodies": ["Plate"], "origin": [0, 0, 0], "tolerance": 0.01}
 ```
 
 Every key is optional: the bodies default to every visible body, `origin` to the design's origin
 (the job's work zero) and `tolerance` to 0.01 mm (how close two sizes or positions must be to
-count as equal). Unknown keys are refused.
+count as equal).
 
-Holes are read from the exact B-rep, never from a mesh: the faces' analytic surfaces, their loops
-of edges and the faces on the other side of each edge, and the edges' exact circles. Every
-coordinate is in work coordinates (the design less `origin`), the tool along work Z.
+Features are read from the exact B-rep, never from a mesh: the faces' analytic surfaces, their
+loops of edges and the faces on the other side of each edge, lines and arcs read exactly in the
+plane square to the tool. Every coordinate of a feature is in work coordinates (the design less
+`origin`), with Z the tool axis, so its numbers go straight into an operation.
 
-| List | Each entry |
+| List | Each feature |
 | --- | --- |
-| `setups` | The one setup, the tool along work Z: `tool_axis`, `top_z`, `bottom_z`, `bounds` (the part's extent in XY), `features` (the hole ids) |
-| `holes` | `hole:k`: `body`, `center`, `center_work`, `axis_work`, `diameter`, `top_z`, `bottom_z`, `depth`, `through`, `floor` (`through`, `flat`, `cone` with `tip_z`, or `round`: the wall runs on into a curved floor within its radius, below `bottom_z`), `counterbore` / `counterbore_of` (the hole above or below it on the same axis), `countersink` (`diameter`, `angle_deg`), `breaks_out` (`[low, high]` Z over which the wall does not close all the way round: the hole breaks into another feature there, such as a slot across its foot), `faces` (the body's faces that make the round wall), `thread` (the thread the design taps in it: `designation`, `form`, `major_diameter`, `pitch`, `starts`, `hand`, and the threaded length's `top_z`, `bottom_z` and `depth`; the hole is then its tap drill) |
-| `hole_groups` | Holes of one diameter, depth and kind: `diameter`, `depth`, `through`, `count`, `ids` |
+| `setups` | `tool_axis` (work), `top_z`, `bottom_z`, `bounds`, `features` (the ids machined from that side) |
+| `holes` | `hole:k`: `center`, `center_work`, `diameter`, `top_z`, `bottom_z`, `depth`, `through`, `floor` (`through`, `flat`, `cone` with `tip_z`, or `round`: the wall runs on into a curved floor within its radius, below `bottom_z`), `counterbore` / `counterbore_of` (the hole above or below it on the same axis), `countersink` (`diameter`, `angle_deg`), `breaks_out` (`[low, high]` Z over which the wall does not close all the way round), `thread` (the thread the design taps in it), `faces` |
+| `hole_groups` | holes of one diameter, depth and kind: `diameter`, `depth`, `through`, `count`, `ids` |
+| `pockets` | `pocket:k`: a planar floor walled all round. `floor_z`, `top_z` (the top of its walls, followed up past a round or chamfer at their foot), `depth`, `outline` (counter-clockwise), `area` (less its islands), `bounds`, `min_corner_radius` (the smallest inside corner; 0 when one is sharp), `sharp_corners`, `walls_vertical` (false when the walls are rounded, chamfered or drafted at the floor: the outline is then the floor's, inside the walls), `islands` (`outline`, `top_z` the top of the island, past a round at its foot, `area`), `face_id`; or an opening through the part (`through`: a slot, an obround, a window), cut a little past the foot of its walls |
+| `faces` | `face:k`: every planar face facing the tool that a tool coming down Z reaches (one with the part's material over all of it is left out), with `z`, `area`, `bounds`, `normal_work` and `role`: `top`, `plateau` (everything round it falls away), `step` (open on some sides), `island_top`, `pocket_floor` (with `pocket`), `hole_floor` (a blind hole's floor or a counterbore's step) |
 
-Ids are numbered from the top down, then by position (Y, then X). The same bodies, origin and
-tolerance give the same ids. `notes` says what was left out: mesh bodies (they have no exact
-faces), and whole holes running square to Z, which a 3-axis mill does not reach from above.
+Ids are numbered per kind in a fixed order: from the top down, then by position (Y, then X). The
+same bodies, origin and tolerance give the same ids. `notes` says what was left out, such as
+mesh bodies (they have no exact faces) and whole holes running square to Z, which a 3-axis mill
+does not reach from above.
 
 A hole is a whole round wall along the tool axis with material outside it, open at its top (the
 part of a round wall that is a pocket's corner or a slot's end is a wall, not a hole). Whether a
-round wall is a hole or a boss is read from the faces at its ends (a face facing up, or a
-countersink widening up from it, at its top), else by classifying a point just outside it on the
-exact solid; only the ends where the wall closes all the way round are read, so a hole that
-breaks partly into another feature (a slot across the part's underside cutting into its foot) is
-still a hole, with the stretch where it is open as `breaks_out`. A hole whose ends meet curved
-faces (through a domed handle) runs from the highest point of its mouth to the lowest of the
-other. A counterbore is a larger hole on the same axis whose bottom is a smaller one's top.
+round wall is a hole or a boss is read from the planar faces at its ends (the wall leaving an
+inner loop of a face into the material, or rising from a floor's outer loop), else by
+classifying a point just outside it on the exact solid; only the ends where the wall closes all
+the way round are read, so a hole that breaks partly into another feature (a slot across the
+part's underside cutting into its foot) is still a hole, with the stretch where it is open as
+`breaks_out`. A hole whose ends meet curved faces (through a domed handle) runs from the highest point of its mouth to the lowest of the other. A counterbore is a larger hole on the same axis whose bottom is a smaller one's top.
+
+### Operations on features
+
+A `pocket` or `contour` operation takes `feature` in place of `sketch` or `polygon`:
+
+```json
+{"name": "pocket", "type": "pocket", "feature": "pocket:0", "tool": 2}
+```
+
+| Feature | Region | Heights (`top`, `bottom`) | `side` of a contour |
+| --- | --- | --- | --- |
+| `pocket:k` | its outline, with every island that rises above the operation's bottom | its highest wall, its floor | inside |
+| `hole:k` | its circle | its top, its bottom | inside |
+| `face:k` | its outline, with what stands on it (a pocket on a face at the part's top covers the face's extent grown by the tool's radius and 1 mm, so it faces to the edges) | the walls round it (a top face: none, so give `heights.top`), the face | inside |
+
+`heights` may then be left out or given in part (`{"bottom": -3}`): what is left out comes from
+the feature and from the heights given: `retract` 3 mm above the material (the part's top, or
+the `top` given when higher), `clearance` 10 mm above the material and at least 5 mm above the
+`retract` given. Heights out of order are refused with each value and whether it was given or a
+default. Without a feature all four heights are still required. The job finds features as
+`cam.features` does with the job's `bodies` (else every visible body), `origin` and
+`tolerance`. A feature id the part does not have is refused with the ids it does have.

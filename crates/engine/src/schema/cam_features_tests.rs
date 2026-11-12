@@ -20,14 +20,16 @@ fn schemas_and_the_key_check_agree() {
 /// misspelt key.
 #[test]
 fn replies_match_the_output_schema() {
+    let matches = |schema: schemars::Schema, r: &Value| {
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{r}");
+    };
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [-20, -15, -10]}));
     run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 12, "base": [0, 0, -11], "operation": "cut"}));
-    let r = run(&mut s, "cam.features", json!({}));
-    let schema = output_schema_for::<CamFeaturesReply>();
-    let schema = schema.as_value();
-    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
-    assert!(r.get("param_warnings").is_none(), "{r}");
+    run(&mut s, "solid.box", json!({"length": 16, "width": 12, "height": 4, "corner": [4, -6, -4], "operation": "cut"}));
+    matches(output_schema_for::<CamFeaturesReply>(), &run(&mut s, "cam.features", json!({})));
     let mut strict = Session { param_check: ParamCheck::Strict, ..Session::default() };
     let e = strict.execute("cam.features", &json!({"bodys": ["Body1"]})).unwrap_err();
     assert!(e.to_string().contains("bodys"), "{e}");

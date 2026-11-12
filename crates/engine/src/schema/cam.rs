@@ -255,6 +255,26 @@ pub struct HeightsSpec {
     pub bottom: f64,
 }
 
+/// The Z levels of a contour or pocket, any of them left out: an operation on a `feature`
+/// takes the rest from it; one on a sketch or polygon needs all four.
+#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HeightsPartial {
+    /// Where the tool travels between cuts. Default (on a feature): 10 mm above the material.
+    #[serde(default)]
+    pub clearance: Option<f64>,
+    /// Where rapid motion towards the material stops and feed begins. Default (on a feature):
+    /// 3 mm above the material.
+    #[serde(default)]
+    pub retract: Option<f64>,
+    /// Top of the material to cut. Default (on a feature): the feature's top.
+    #[serde(default)]
+    pub top: Option<f64>,
+    /// Final depth. Default (on a feature): the feature's bottom.
+    #[serde(default)]
+    pub bottom: Option<f64>,
+}
+
 /// Feed rates in mm/min.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -395,7 +415,7 @@ operation! {
     /// A 2D contour round closed profiles, in depth passes.
     ContourOp {
         /// The sketch whose closed profiles are cut round (on a plane square to the tool axis,
-        /// facing it). Give this or `polygon`.
+        /// facing it). Give this, `polygon` or `feature`.
         #[serde(default)]
         pub sketch: Option<SketchRef>,
         /// With `sketch`: which of its profiles, by index. Default: every drawn profile.
@@ -404,12 +424,18 @@ operation! {
         /// One closed polygon [[x, y], ...] in work XY.
         #[serde(default)]
         pub polygon: Option<Vec<[f64; 2]>>,
-        /// The Z levels.
-        pub heights: HeightsSpec,
+        /// A feature of the part by its `cam.features` id (`pocket:0`, `hole:2`, `face:1`): its
+        /// exact outline, islands and heights.
+        #[serde(default)]
+        pub feature: Option<String>,
+        /// The Z levels. On a `feature` any left out are worked out from it; on a sketch or
+        /// polygon all four are needed.
+        #[serde(default)]
+        pub heights: Option<HeightsPartial>,
         /// Most depth per pass, mm. Default: the tool's `stepdown`, else half its diameter.
         #[serde(default)]
         pub stepdown: Option<f64>,
-        /// Which side the tool runs on. Default: outside.
+        /// Which side the tool runs on. Default: outside (inside a `feature`).
         #[serde(default)]
         pub side: Option<SideSpec>,
         /// Climb milling. Default: true.
@@ -462,7 +488,7 @@ operation! {
     /// A 2D pocket: clears the inside of closed profiles, in depth passes.
     PocketOp {
         /// The sketch whose closed profiles are pocketed (on a plane square to the tool axis,
-        /// facing it). Give this or `polygon`.
+        /// facing it). Give this, `polygon` or `feature`.
         #[serde(default)]
         pub sketch: Option<SketchRef>,
         /// With `sketch`: which of its profiles, by index. Default: every drawn profile.
@@ -471,8 +497,14 @@ operation! {
         /// One closed polygon [[x, y], ...] in work XY.
         #[serde(default)]
         pub polygon: Option<Vec<[f64; 2]>>,
-        /// The Z levels.
-        pub heights: HeightsSpec,
+        /// A feature of the part by its `cam.features` id (`pocket:0`, `hole:2`, `face:1`): its
+        /// exact outline, islands and heights.
+        #[serde(default)]
+        pub feature: Option<String>,
+        /// The Z levels. On a `feature` any left out are worked out from it; on a sketch or
+        /// polygon all four are needed.
+        #[serde(default)]
+        pub heights: Option<HeightsPartial>,
         /// Most depth per pass, mm. Default: the tool's `stepdown`, else half its diameter.
         #[serde(default)]
         pub stepdown: Option<f64>,

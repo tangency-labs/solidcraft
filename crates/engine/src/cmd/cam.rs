@@ -827,6 +827,8 @@ struct Ctx<'a> {
     band: std::cell::Cell<Option<f64>>,
     /// What an adaptive operation adds to its report, handed from its planning to the report.
     adaptive: std::cell::RefCell<Option<(crate::schema::cam_adaptive::AdaptiveReport, Vec<String>)>>,
+    /// The part's machinable features, found when an operation names one (`cam_features.rs`).
+    features: &'a features::Lazy,
 }
 
 impl<'a> Ctx<'a> {
@@ -1126,13 +1128,25 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<Planned3> {
             let c = o.common();
             let r = ctx.resolve(&c)?;
             let (leave, tol) = (o.stock_to_leave.unwrap_or(0.0), ctx.tolerance(c.name, o.tolerance)?);
-            let regions = ctx.regions(c.name, o.sketch.as_ref(), o.profiles.as_deref(), o.polygon.as_deref(), frame)?;
-            let side = match o.side.unwrap_or(SideSpec::Outside) {
+            // On a feature: its outline and heights, and the side its kind takes.
+            let two = features::op_cut(
+                ctx,
+                c.name,
+                o.sketch.as_ref(),
+                o.profiles.as_deref(),
+                o.polygon.as_deref(),
+                o.feature.as_deref(),
+                o.heights.as_ref(),
+                frame,
+                None,
+            )?;
+            let side = match o.side.or(two.side).unwrap_or(SideSpec::Outside) {
                 SideSpec::Outside => Side::Outside,
                 SideSpec::Inside => Side::Inside,
                 SideSpec::On => Side::On,
             };
-            let cut = Cut { heights: heights(&o.heights), feeds: r.feeds, stepdown: or_tool(o.stepdown, r.tool.stepdown, r.tool.diameter * 0.5) };
+            let regions = two.regions;
+            let cut = Cut { heights: two.heights, feeds: r.feeds, stepdown: or_tool(o.stepdown, r.tool.stepdown, r.tool.diameter * 0.5) };
             let params = ContourParams {
                 side,
                 climb: o.climb.unwrap_or(true),
@@ -1148,7 +1162,7 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<Planned3> {
                     ));
                 }
                 // A V-trace: the groove down to its depth is its own.
-                ctx.band.set(Some(o.heights.top - o.heights.bottom));
+                ctx.band.set(Some(cut.heights.top - cut.heights.bottom));
             }
             let opts = leads::contour_options(ctx, c.name, o, &r.tool)?;
             let surface = ctx.surface_in(c.name, frame)?;
@@ -1160,8 +1174,20 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<Planned3> {
             let c = o.common();
             let r = ctx.resolve(&c)?;
             let (leave, tol) = (o.stock_to_leave.unwrap_or(0.0), ctx.tolerance(c.name, o.tolerance)?);
-            let regions = ctx.regions(c.name, o.sketch.as_ref(), o.profiles.as_deref(), o.polygon.as_deref(), frame)?;
-            let cut = Cut { heights: heights(&o.heights), feeds: r.feeds, stepdown: or_tool(o.stepdown, r.tool.stepdown, r.tool.diameter * 0.5) };
+            // On a face at the part's top, the pocket reaches past the face's edges by the tool.
+            let two = features::op_cut(
+                ctx,
+                c.name,
+                o.sketch.as_ref(),
+                o.profiles.as_deref(),
+                o.polygon.as_deref(),
+                o.feature.as_deref(),
+                o.heights.as_ref(),
+                frame,
+                Some(r.tool.diameter * 0.5),
+            )?;
+            let regions = two.regions;
+            let cut = Cut { heights: two.heights, feeds: r.feeds, stepdown: or_tool(o.stepdown, r.tool.stepdown, r.tool.diameter * 0.5) };
             let params = PocketParams {
                 stepover: or_tool(o.stepover, r.tool.stepover, r.tool.diameter * 0.4),
                 climb: o.climb.unwrap_or(true),
@@ -1481,6 +1507,7 @@ fn plan_job(cmd: &str, s: &Session, job: &CamJob, base: Option<&Path>) -> Result
 
     // Every operation planned, in order, then the program written in memory.
     let span = solidcraft_profile::span("cam", "job.plan");
+    let features = features::Lazy::new(job.bodies.clone(), place.origin, tol);
     let ctx = Ctx {
         cmd,
         s,
@@ -1497,6 +1524,7 @@ fn plan_job(cmd: &str, s: &Session, job: &CamJob, base: Option<&Path>) -> Result
         op_type: std::cell::Cell::new(""),
         band: std::cell::Cell::new(None),
         adaptive: Default::default(),
+        features: &features,
     };
     let mut planned: Vec<Planned> = Vec::with_capacity(job.operations.len());
     for spec in job.operations.iter().filter(|o| op_enabled(o)) {

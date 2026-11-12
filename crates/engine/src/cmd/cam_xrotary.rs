@@ -128,11 +128,12 @@ pub(super) fn name3_mut(op: &mut Op3Spec) -> &mut String {
     }
 }
 
-/// The clearance height of the 3-axis operation `op`.
-fn op3_clearance(op: &Op3Spec) -> f64 {
+/// The clearance height of the 3-axis operation `op`; `own_top` (the highest its planned
+/// toolpath goes) where it left its heights to be worked out from a feature.
+fn op3_clearance(op: &Op3Spec, own_top: f64) -> f64 {
     match op {
-        Op3Spec::Contour(o) => o.heights.clearance,
-        Op3Spec::Pocket(o) => o.heights.clearance,
+        Op3Spec::Contour(o) => o.heights.and_then(|h| h.clearance).unwrap_or(own_top),
+        Op3Spec::Pocket(o) => o.heights.and_then(|h| h.clearance).unwrap_or(own_top),
         Op3Spec::Parallel(o) => o.heights.clearance,
         Op3Spec::Roughing(o) => o.heights.clearance,
         Op3Spec::Waterline(o) => o.heights.clearance,
@@ -421,7 +422,7 @@ pub(super) fn plan_wrap_contour(ctx: &Ctx<'_>, o: &WrapContourOp) -> Result<Plan
 /// Where the tool is while A turns or rapids go round for the operation `spec` (a radius from
 /// the A axis), and the radius of the stock it must also clear; `None` when nothing turns at a
 /// height the operation sets.
-fn turning_radius(ctx: &Ctx<'_>, spec: &OperationSpec) -> Option<(f64, f64)> {
+fn turning_radius(ctx: &Ctx<'_>, spec: &OperationSpec, own_top: f64) -> Option<(f64, f64)> {
     if ctx.machine.rotaries.is_empty() {
         return None;
     }
@@ -432,7 +433,7 @@ fn turning_radius(ctx: &Ctx<'_>, spec: &OperationSpec) -> Option<(f64, f64)> {
         if !post.safe_rotate.is_empty() {
             return None;
         }
-        Some((post.clearance.filter(|_| post.clearance_retract).unwrap_or_else(|| op3_clearance(op)), f64::NEG_INFINITY))
+        Some((post.clearance.filter(|_| post.clearance_retract).unwrap_or_else(|| op3_clearance(op, own_top)), f64::NEG_INFINITY))
     };
     match spec {
         OperationSpec::RotaryFinish(o) => Some((o.clearance, f64::NEG_INFINITY)),
@@ -466,7 +467,11 @@ fn setup_check(ctx: &Ctx<'_>, spec: &OperationSpec, prev: Option<&Planned>, p: &
             return Ok(());
         }
     }
-    let Some((clearance, stock)) = turning_radius(ctx, spec) else { return Ok(()) };
+    let own_top = match &p.op {
+        MachineOperation::Indexed(io) => io.path.moves.iter().filter_map(|m| m.target()).map(|t| t.z).fold(f64::NEG_INFINITY, f64::max),
+        MachineOperation::Continuous(_) => f64::NEG_INFINITY,
+    };
+    let Some((clearance, stock)) = turning_radius(ctx, spec, own_top) else { return Ok(()) };
     let (lo, hi) = p.poses.poses().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.tip.x), hi.max(q.tip.x)));
     if !(lo <= hi) {
         return Ok(());

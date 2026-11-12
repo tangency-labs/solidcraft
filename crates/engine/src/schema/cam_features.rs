@@ -1,13 +1,12 @@
-//! Contracts and result types for `cam.features` (in `cmd/cam_features.rs`): the holes of a part
-//! a 3-axis mill drills or bores from above, found on its exact B-rep. docs/cam-jobs.md
-//! describes it.
+//! Contracts and result types for `cam.features` in `cmd/cam_features.rs`: the machinable
+//! features of a part, found on its exact B-rep. docs/cam-jobs.md describes it.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// List the holes of a part a 3-axis mill drills or bores from above, found on the exact B-rep
-/// of its bodies: round holes along work Z with their floors, counterbores, countersinks and
-/// threads, each with a stable id (`hole:0`, `hole:1`…), and the holes grouped by size.
+/// List the machinable features of a part, found on the exact B-rep of its bodies: holes,
+/// pockets and the planar faces facing the tool, each with a stable id (`hole:0`, `pocket:1`…)
+/// a `cam.job` operation can name instead of a sketch or polygon.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CamFeaturesParams {
@@ -24,8 +23,8 @@ pub struct CamFeaturesParams {
     pub tolerance: Option<f64>,
 }
 
-/// What `cam.features` returns. Every coordinate of a feature is in work coordinates (the design
-/// less `origin`), the tool along work Z.
+/// What `cam.features` returns. Every coordinate of a feature is in work coordinates (the
+/// design less `origin`), Z the tool axis, so its numbers go straight into an operation.
 #[derive(Clone, Debug, Default, Serialize, JsonSchema)]
 pub struct CamFeaturesReply {
     /// Work zero in design coordinates.
@@ -33,12 +32,15 @@ pub struct CamFeaturesReply {
     /// The bodies looked at.
     pub bodies: Vec<String>,
     pub tolerance: f64,
-    /// The setup: the tool along work Z, from above.
+    /// The setup: the tool coming down work Z.
     pub setups: Vec<SetupReport>,
     pub holes: Vec<HoleReport>,
     /// Holes of the same diameter, depth and kind, for one drilling operation each.
     pub hole_groups: Vec<HoleGroup>,
-    /// What was not recognised, or not reachable along the axis.
+    pub pockets: Vec<PocketReport>,
+    /// Planar faces facing the tool.
+    pub faces: Vec<FaceReport>,
+    /// What was not recognised.
     pub notes: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -141,6 +143,67 @@ pub struct HoleGroup {
     pub through: bool,
     pub count: usize,
     pub ids: Vec<String>,
+}
+
+/// A closed pocket: a planar floor below the faces round it, walled all round.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct PocketReport {
+    pub id: String,
+    pub body: String,
+    /// The floor's face (as `model.faces` numbers it), also listed under `faces` as `face_id`.
+    pub floor_face: usize,
+    pub face_id: String,
+    pub floor_z: f64,
+    /// The top of its highest wall.
+    pub top_z: f64,
+    pub depth: f64,
+    /// The floor's outline, counter-clockwise, curves within the tolerance.
+    pub outline: Vec<[f64; 2]>,
+    pub area: f64,
+    pub bounds: [[f64; 2]; 2],
+    /// The smallest radius of the outline's inside corners (where the tool must fit); 0 when
+    /// a corner is sharp.
+    pub min_corner_radius: f64,
+    /// Sharp inside corners (a cutter leaves its own radius there).
+    pub sharp_corners: usize,
+    /// Every wall is square to the floor (no draft or round at its foot): the outline is the
+    /// pocket's all the way up. When false the outline is the floor's, inside the walls: a 2D
+    /// pocket or contour on it leaves the walls.
+    pub walls_vertical: bool,
+    /// Bosses standing in it.
+    pub islands: Vec<IslandReport>,
+    /// An opening through the part (a slot, an obround, a window): no floor; `floor_z` is where
+    /// its walls end and it is cut a little past them. `floor_face` is one of its walls.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub through: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct IslandReport {
+    pub outline: Vec<[f64; 2]>,
+    pub top_z: f64,
+    pub area: f64,
+}
+
+/// A planar face facing the tool.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct FaceReport {
+    pub id: String,
+    pub body: String,
+    /// The face (as `model.faces` numbers it).
+    pub face: usize,
+    pub z: f64,
+    pub area: f64,
+    pub bounds: [[f64; 2]; 2],
+    /// `top` (the highest), `plateau` (everything round it falls away), `step` (open on some
+    /// sides), `island_top` (the top of a boss standing in a pocket), `pocket_floor`,
+    /// `hole_floor` (a blind hole's floor or a counterbore's step).
+    pub role: String,
+    /// The pocket whose floor it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pocket: Option<String>,
+    /// The face's outward normal in work coordinates.
+    pub normal_work: [f64; 3],
 }
 
 #[cfg(test)]
