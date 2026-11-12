@@ -420,9 +420,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         // Each direction's pick shows in its own group, with its quantity and spacing (#9634).
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
     } else if matches!(d.kind, Kind::Move { mode: crate::dialogs_move::FREE, .. }) {
-        // Local or Fixed follows the inputs.
-        input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
-        crate::dialogs_move::frame_row(app, d, ui);
+        // The Pivot input takes picks; its row is a button, not a chip.
+        crate::dialogs::input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
+        crate::dialogs_move::pivot_row(app, d, ui);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -879,6 +879,7 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
+    let placing = crate::dialogs_move::placing_pivot(d);
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -1097,7 +1098,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
         }
         k @ Kind::Move { .. } => {
-            enter |= crate::dialogs_move::rows(ui, k);
+            enter |= if placing { crate::dialogs_move::pivot_rows(ui, k) } else { crate::dialogs_move::rows(ui, k) };
             extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {

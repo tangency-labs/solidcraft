@@ -2397,6 +2397,13 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     app.last_escape = None;
                     continue;
                 }
+                // A pivot being placed goes before the Move it belongs to.
+                if let Some(mut d) = app.dialog.take_if(|d| crate::dialogs_move::placing_pivot(d)) {
+                    crate::dialogs_move::end_pivot(app, &mut d);
+                    app.dialog = Some(d);
+                    app.last_escape = None;
+                    continue;
+                }
                 // Two quick presses in a sketch finish it (keeping it, like Finish Sketch);
                 // the first one has already cancelled whatever was active. A preference turns
                 // this off, so Esc never leaves the sketch (#12069).

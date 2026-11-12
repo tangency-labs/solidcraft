@@ -1834,7 +1834,7 @@ fn the_triad_starts_on_the_bodys_own_axes() {
 }
 
 /// Move starts as it always did, its triad on fixed axes and staying on them; the preference
-/// starts it on the body's own axes, turning with it. The Axes row switches between the two.
+/// starts it on the body's own axes, turning with it. The Pivot row switches between the two.
 #[test]
 fn move_starts_on_fixed_axes_unless_the_preference_says_local() {
     for (starts_fixed, x) in [(true, Vec3::X), (false, Vec3::Y)] {
@@ -1850,9 +1850,278 @@ fn move_starts_on_fixed_axes_unless_the_preference_says_local() {
         assert_eq!(fixed(d), starts_fixed);
         let t = triad(&h.app, d).unwrap();
         assert!((gizmo::axis(&t.axes, 0) - x).len() < 1e-9, "starts fixed {starts_fixed}: {:?}", t.axes);
-        let other = if starts_fixed { "dialog:axes:local" } else { "dialog:axes:fixed" };
+        let other = if starts_fixed { "dialog:pivot:local" } else { "dialog:pivot:fixed" };
         h.step(&json!({"click": {"handle": other}})).unwrap();
         h.frames(2);
-        assert_eq!(fixed(h.app.dialog.as_ref().unwrap()), !starts_fixed, "the Axes row switches");
+        assert_eq!(fixed(h.app.dialog.as_ref().unwrap()), !starts_fixed, "the Pivot row switches");
     }
+}
+
+/// The pivot is placed in two picks, a point and then a line, and accepted with the tick; the
+/// body then turns about it.
+#[test]
+fn a_placed_pivot_is_what_the_body_turns_about() {
+    let (mut h, centre) = turning_box();
+    let mut d = h.app.dialog.take().unwrap();
+    begin_pivot(&h.app, &mut d);
+    assert_eq!(d.active, 1, "picks place the pivot, not bodies");
+    let corner = Vec3::new(20.0, 30.0, 0.0);
+    d.inputs[1].items = vec![Sel::Vertex { body: "Body1".into(), point: corner }];
+    sync(&h.app, &mut d);
+    assert!(d.inputs[1].items.is_empty(), "the pick is taken up, and the next one replaces it");
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    sync(&h.app, &mut d);
+    let t = triad(&h.app, &d).unwrap();
+    assert!((t.center - corner).len() < 1e-5, "a line does not move the point: {:?}", t.center);
+    assert!((gizmo::axis(&t.axes, 2) - Vec3::X).len() < 1e-7, "{:?}", t.axes);
+    accept_pivot(&h.app, &mut d);
+    assert_eq!(d.active, 0);
+    h.app.dialog = Some(d);
+    set_angles(&mut h, ["0 deg", "0 deg", "90 deg"]);
+    // About its Z, which was laid along the world's X, through the corner.
+    let m = whole_move(&h);
+    assert_turn(&m, &gizmo::rotation(Vec3::X, std::f64::consts::FRAC_PI_2));
+    assert!((apply_point(&m, corner) - corner).len() < 1e-4);
+    let spun = corner + gizmo::apply(&gizmo::rotation(Vec3::X, std::f64::consts::FRAC_PI_2), centre - corner);
+    assert!((apply_point(&m, centre) - spun).len() < 1e-4);
+    // Fixed holds the same axes; only the triad stops turning.
+    let mut d = h.app.dialog.take().unwrap();
+    set_fixed(&h.app, &mut d, true);
+    let t = triad(&h.app, &d).unwrap();
+    assert!((t.center - corner).len() < 1e-4);
+    let z = gizmo::apply(&gizmo::rotation(Vec3::X, std::f64::consts::FRAC_PI_2), Vec3::X);
+    assert!((gizmo::axis(&t.axes, 2) - z).len() < 1e-7, "{:?}", t.axes);
+    // Back to the body's own centre and axes, the move kept.
+    let made_so_far = chain(&d).unwrap();
+    clear_pivot(&h.app, &mut d);
+    assert!(mat_inverse(&made_so_far).is_some_and(|back| is_identity(&mat_mul(&back, &chain(&d).unwrap()))));
+    assert!((triad(&h.app, &d).unwrap().center - spun).len() < 1e-4);
+}
+
+/// A pivot placed in a reopened move replaces the origin the move stored, which it saves in its
+/// place: kept, the stored expressions turned the body about the old point instead.
+#[test]
+fn a_placed_pivot_replaces_a_reopened_moves_origin() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("parameters.change", json!({"name": "p", "expression": "5 mm"})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+    let stored = json!({"bodies": ["Body1"], "origin": ["p", "0 mm", "0 mm"], "axis": [0, 0, 1], "angle": "30 deg"});
+    let id = h.app.run("solid.move", stored).unwrap()["feature"].as_u64().unwrap();
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert!(d.extra.contains_key("origin"), "the stored origin is kept");
+    begin_pivot(&h.app, &mut d);
+    if let Kind::Move { x, .. } = &mut d.kind {
+        *x = "12 mm".into();
+    }
+    sync(&h.app, &mut d);
+    let spot = triad(&h.app, &d).unwrap().center;
+    accept_pivot(&h.app, &mut d);
+    let piv = pivot(&h.app, &d).unwrap();
+    assert!((piv - spot).len() < 1e-6 && (piv - Vec3::new(5.0, 0.0, 0.0)).len() > 1.0, "{piv:?}");
+    if let Kind::Move { rz, .. } = &mut d.kind {
+        *rz = "90 deg".into();
+    }
+    let Ok(Step::Made(p)) = step(&h.app, &d) else { panic!("a move") };
+    let m = transform(&h.app, &p).unwrap();
+    assert!((apply_point(&m, piv) - piv).len() < 1e-6, "it turns about the placed pivot: {p}");
+}
+
+/// A round pick places the pivot on the middle of its circle, along its axis; a planar face on
+/// the face, along its normal. The triad's rings and arrows then move the pivot alone.
+#[test]
+fn a_pivot_lands_on_what_is_picked_and_the_triad_adjusts_it() {
+    let (mut h, _) = turning_box();
+    h.app.home.open = false;
+    h.app.cam.distance = 25.0;
+    h.app.dialog = h.app.dialog.take().map(|mut d| {
+        begin_pivot(&h.app, &mut d);
+        d
+    });
+    h.frames(2);
+    let top = h.at(&json!({"world": [18, 27, 10]})).unwrap();
+    h.step(&json!({"click": top})).unwrap();
+    h.frames(2);
+    let d = h.app.dialog.clone().unwrap();
+    let t = triad(&h.app, &d).unwrap();
+    assert!((t.center - Vec3::new(10.0, 15.0, 10.0)).len() < 1e-5, "{:?}", t.center);
+    assert!((gizmo::axis(&t.axes, 2) - Vec3::Z).len() < 1e-7);
+    let Kind::Move { z, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!(z, "5 mm", "the values read how far the pick has put it");
+    let body = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds();
+
+    h.step(&json!({"drag": [{"gizmo": "x"}, {"gizmo": "x", "by": [15.0, 0.0, 0.0]}], "steps": 12})).unwrap();
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    let t = triad(&h.app, d).unwrap();
+    assert!((t.center - Vec3::new(25.0, 15.0, 10.0)).len() < 2.0, "{:?}", t.center);
+    let Kind::Move { x, .. } = &d.kind else { panic!("not a move") };
+    assert_ne!(x, "0 mm", "the value box reads how far it has gone");
+    assert!(is_identity(&whole_move(&h)), "placing moves no body");
+    let still = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds();
+    assert_eq!((still.min, still.max), (body.min, body.max));
+}
+
+/// While a pivot is placed the values measure it from where it started and move no body; the
+/// tick or Enter keeps it, Esc goes back, and the values are the move's again, from zero.
+#[test]
+fn the_values_place_the_pivot_until_it_is_accepted() {
+    let (mut h, centre) = turning_box();
+    let values = |h: &mut crate::scenario::Harness, x: &str, turn: &str| {
+        if let Some(Kind::Move { x: vx, rz, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            (*vx, *rz) = (x.into(), turn.into());
+        }
+        h.frames(3);
+    };
+    let begin = |h: &mut crate::scenario::Harness| {
+        h.app.dialog = h.app.dialog.take().map(|mut d| {
+            begin_pivot(&h.app, &mut d);
+            d
+        });
+        h.frames(2);
+    };
+    let at = |h: &crate::scenario::Harness| triad(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    begin(&mut h);
+    values(&mut h, "12 mm", "90 deg");
+    let spot = centre + Vec3::X * 12.0;
+    assert!((at(&h).center - spot).len() < 1e-5, "{:?}", at(&h).center);
+    assert!((gizmo::axis(&at(&h).axes, 0) - Vec3::Y).len() < 1e-9, "the angles turn the pivot");
+    assert_eq!(pivot_trail(&h.app, h.app.dialog.as_ref().unwrap()).map(|t| t.0), Some(centre));
+    assert!(is_identity(&whole_move(&h)), "no body moves");
+
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    let d = h.app.dialog.as_ref().expect("Enter accepts the pivot and keeps the move open");
+    assert!(!placing_pivot(d) && d.active == 0);
+    assert_eq!(shown_angles(&h), ["0 deg", "0 deg", "0 deg"]);
+    assert!((at(&h).center - spot).len() < 1e-5, "{:?}", at(&h).center);
+    assert!((gizmo::axis(&at(&h).axes, 0) - Vec3::Y).len() < 1e-9);
+    assert!(is_identity(&whole_move(&h)));
+
+    // The values drive the move again, about the accepted pivot.
+    values(&mut h, "0 mm", "90 deg");
+    assert!((apply_point(&whole_move(&h), spot) - spot).len() < 1e-4);
+
+    values(&mut h, "0 mm", "0 deg");
+    begin(&mut h);
+    values(&mut h, "30 mm", "0 deg");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    let d = h.app.dialog.as_ref().expect("Esc discards the pivot and keeps the move open");
+    assert!(!placing_pivot(d));
+    let Kind::Move { x, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!(x, "0 mm");
+    assert!((at(&h).center - spot).len() < 1e-5, "the pivot there was stays: {:?}", at(&h).center);
+}
+
+/// Placing a pivot, Local goes to the object's own axes as it stands, turns made included, and
+/// Fixed to the orientation of the target picked. Each keeps what it is given, and the pivot
+/// stays where it is.
+#[test]
+fn local_and_fixed_switch_the_pivot_between_its_references() {
+    let quarter = std::f64::consts::FRAC_PI_2;
+    let (mut h, _) = turning_box();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.dialog = None;
+    h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": ["0", "0", "0"], "axis": [0.0, 0.0, 1.0], "angle": "90 deg"})).unwrap();
+    h.app.run("select.set", json!({"items": [Sel::Body { name: "Body1".into() }]})).unwrap();
+    h.app.start("solid.move");
+    h.frames(3);
+    let own = gizmo::rotation(Vec3::Z, quarter);
+    let near = |a: &Axes, b: &Axes| a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() < 1e-7);
+    let mut d = h.app.dialog.take().unwrap();
+    assert!(same_axes(&triad(&h.app, &d).unwrap().axes, &own), "Local starts on the object as it stands");
+    begin_pivot(&h.app, &mut d);
+    let spot = Vec3::new(3.0, 4.0, 5.0);
+    d.inputs[1].items = vec![Sel::Vertex { body: String::new(), point: spot }];
+    sync(&h.app, &mut d);
+    let t = triad(&h.app, &d).unwrap();
+    assert!(!fixed(&d) && same_axes(&t.axes, &own), "a point moves it, the object's axes stay");
+    assert!((t.center - spot).len() < 1e-5);
+
+    // The origin point is on no body: its frame is the world's.
+    set_fixed(&h.app, &mut d, true);
+    let t = triad(&h.app, &d).unwrap();
+    assert!(near(&t.axes, &WORLD), "{:?}", t.axes);
+    assert!((t.center - spot).len() < 1e-5);
+
+    // A direction is the target's orientation, and switches to it from Local.
+    set_fixed(&h.app, &mut d, false);
+    assert!(near(&triad(&h.app, &d).unwrap().axes, &own));
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    sync(&h.app, &mut d);
+    assert!(fixed(&d));
+    let target = triad(&h.app, &d).unwrap().axes;
+    assert!((gizmo::axis(&target, 2) - Vec3::X).len() < 1e-7, "{target:?}");
+
+    // The values read how far it has turned from where it started, as well as how far it went.
+    let start = placing(&d).unwrap().1;
+    let shown = angles(&h.app, &d).unwrap();
+    assert!(shown.iter().any(|a| a.abs() > 1e-3), "{shown:?}");
+    let remade = gizmo::mul(&start, &gizmo::turn_of(shown, order(&d)));
+    assert!(remade.iter().flatten().zip(target.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-7), "{remade:?}");
+
+    // Changes go on from a reference and stay with it through a switch away and back.
+    let change = Change::Rotate { axis: 2, angle: quarter };
+    drag(&h.app, &mut d, crate::gizmo::Drag { handle: crate::gizmo::Handle::Ring(2), change, started: true, done: true });
+    let turned = gizmo::mul(&target, &gizmo::rotation(Vec3::Z, quarter));
+    assert!(near(&triad(&h.app, &d).unwrap().axes, &turned));
+    set_fixed(&h.app, &mut d, false);
+    assert!(near(&triad(&h.app, &d).unwrap().axes, &own));
+    set_fixed(&h.app, &mut d, true);
+    assert!(near(&triad(&h.app, &d).unwrap().axes, &turned));
+
+    // Both stay after the tick, and the toggle goes on switching.
+    accept_pivot(&h.app, &mut d);
+    let t = triad(&h.app, &d).unwrap();
+    assert!(near(&t.axes, &turned) && (t.center - spot).len() < 1e-5);
+    set_fixed(&h.app, &mut d, false);
+    let t = triad(&h.app, &d).unwrap();
+    assert!(near(&t.axes, &own) && (t.center - spot).len() < 1e-5, "{:?}", t.axes);
+}
+
+/// The pivot can be picked on the bodies where the move has put them.
+#[test]
+fn a_pivot_lands_on_a_body_that_has_been_moved() {
+    let (mut h, _) = turning_box();
+    h.app.home.open = false;
+    h.app.cam.distance = 25.0;
+    for (distance, turn) in [("50 mm", "0 deg"), ("0 mm", "90 deg")] {
+        if let Some(Kind::Move { x, rz, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            (*x, *rz) = (distance.into(), turn.into());
+        }
+        h.frames(3);
+        let m = whole_move(&h);
+        h.app.dialog = h.app.dialog.take().map(|mut d| {
+            begin_pivot(&h.app, &mut d);
+            d
+        });
+        let centre = apply_point(&m, Vec3::new(10.0, 15.0, 5.0));
+        h.app.cam.target = centre;
+        h.frames(3);
+        let at = placing(h.app.dialog.as_ref().unwrap()).unwrap().0;
+        assert!((at - centre).len() < 1e-6, "{at:?}");
+        let on = apply_point(&m, Vec3::new(18.0, 27.0, 10.0));
+        h.step(&json!({"click": {"world": [on.x, on.y, on.z]}})).unwrap();
+        h.frames(3);
+        let at = triad(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().center;
+        assert!((at - apply_point(&m, Vec3::new(10.0, 15.0, 10.0))).len() < 1e-5, "{distance} {turn}: {at:?}");
+        h.app.dialog = h.app.dialog.take().map(|mut d| {
+            accept_pivot(&h.app, &mut d);
+            clear_pivot(&h.app, &mut d);
+            d
+        });
+    }
+}
+
+/// Free Move's window: the pivot is a button, not a picking chip, beside Local and Fixed.
+#[test]
+fn the_pivot_row_places_a_pivot_from_a_button() {
+    let (mut h, _) = turning_box();
+    h.step(&json!({"click": {"handle": "dialog:pivot:place"}})).unwrap();
+    h.frames(2);
+    assert!(placing_pivot(h.app.dialog.as_ref().unwrap()));
+    h.step(&json!({"click": {"handle": "dialog:pivot:accept"}})).unwrap();
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(!placing_pivot(d) && d.extra.contains_key("pivot_axes"), "{:?}", d.extra);
 }

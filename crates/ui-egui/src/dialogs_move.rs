@@ -4,12 +4,16 @@
 //! so far, and the next type moves the bodies on from where it left them: one solid.move holds
 //! the whole chain.
 //!
-//! A Free Move's values are measured along its triad. Fixed, as it starts, the triad lies along
-//! the world's axes and stays; Local, it starts as the bodies stand and turns with them. The
-//! distances lie along the triad's axes as they are now (`along`) and the angles apply in the
-//! order they were dragged (`order`), so a drag on a handle changes its own value alone and the
-//! value reads what was dragged. Where no sum of angles can make a turn, the turns so far go into
-//! the move made so far and the angle starts over (`bake`).
+//! A Free Move's values are measured along its triad. Fixed, as it starts, the triad lies as the
+//! picked target does, or as the world, and stays; Local, it starts as the bodies stand and turns
+//! with them. A placed pivot gives it a point, and each of the two its own axes to go on from. The
+//! distances lie along the triad's axes as they are now (`along`)
+//! and the angles apply in the order they were dragged (`order`), so a drag on a handle changes
+//! its own value alone and the value reads what was dragged. Where no sum of angles can make a
+//! turn, the turns so far go into the move made so far and the angle starts over (`bake`).
+//!
+//! Placing a pivot is a Free Move of the triad alone: the same values and handles measure the
+//! pivot from where it started, and move no body, until the tick accepts it.
 
 use crate::selection::SelectionExt as _;
 use crate::ui_kit::{choice_row, expr_row};
@@ -45,7 +49,7 @@ pub fn kind(mode: usize, doc: &solidcraft_engine::doc::Document) -> Kind {
 pub fn inputs(mode: usize) -> Vec<SelInput> {
     let mut v = vec![SelInput::new("Bodies", BODIES, true)];
     match mode {
-        FREE => v.push(SelInput::new("Pivot", POINTS, false)),
+        FREE => v.push(SelInput::new("Pivot", POINTS | AXIS_PICKS, false)),
         ROTATE => v.push(SelInput::new("Axis", AXIS_PICKS, false)),
         POINT_TO_POINT => {
             v.push(SelInput::new("From", POINTS, false));
@@ -83,9 +87,10 @@ fn switch_type(app: &SolveApp, d: &mut Dialog, m: usize) {
     if let Some(i) = d.inputs.first_mut() {
         i.items = bodies;
     }
-    for key in ["pivot", "origin", "along", "order"] {
+    for key in ["pivot", "origin", "pivot_axes", "pivot_own", "along", "order"] {
         d.extra.remove(key);
     }
+    forget_placing(d);
     d.active = if bodies_empty(d) { 0 } else { 1.min(d.inputs.len() - 1) };
 }
 
@@ -114,7 +119,7 @@ pub(crate) fn chained(app: &SolveApp) -> Option<(Vec<String>, Mat)> {
 
 /// Whether the triad is being dragged in a Move dialog (`drag` keeps the values it began from).
 pub(crate) fn dragging(app: &SolveApp) -> bool {
-    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }) && d.extra.contains_key("drag0"))
+    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }) && d.extra.contains_key("drag0") && !placing_pivot(d))
 }
 
 /// The current type's own move, when its picks and values make one.
@@ -292,6 +297,25 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Kind) -> bool {
     enter
 }
 
+/// [`rows`] while they place the pivot: framed together with the Pivot row they belong to.
+pub(crate) fn pivot_rows(ui: &mut egui::Ui, k: &mut Kind) -> bool {
+    let t = solidcraft_theme::Tokens::get();
+    let inner = ui.vertical(|ui| rows(ui, k));
+    let band: Option<(egui::layers::ShapeIdx, egui::Pos2)> = ui.ctx().data(|data| data.get_temp(egui::Id::unique("sc_pivot_band")));
+    if let Some((slot, top)) = band {
+        let rect = egui::Rect::from_min_max(top, inner.response.rect.max).expand(t.space_4);
+        let frame = egui::epaint::RectShape::new(
+            rect,
+            t.control_radius,
+            t.warning.gamma_multiply(0.12),
+            egui::Stroke::new(1.0, t.warning),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().set(slot, frame);
+    }
+    inner.inner
+}
+
 /// Where a point pick is: a round edge stands for its centre, where the model is before this
 /// move, in the world (a body of a placed component where its occurrence puts it, as it was
 /// picked); any other pick is where it was picked.
@@ -368,11 +392,12 @@ fn body_frame(app: &SolveApp, d: &Dialog) -> Option<(String, Mat)> {
     frame_of(app, d, bodies_of(app, d).into_iter().next()?)
 }
 
-/// What a Free Move turns about: the picked pivot, else the kept one (editing: the stored
-/// origin, in the world), else the bodies' centre.
+/// What a Free Move turns about: the placed pivot or the kept one (editing: the stored origin),
+/// both in the world, else the bodies' centre. A pivot being placed measures from where it
+/// started.
 fn pivot(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
-    if let Some(p) = sel_point(app, d, items(d, 1).first()) {
-        return Some(p);
+    if let Some((at, _)) = placing(d) {
+        return Some(at);
     }
     if let Some(a) = d.extra.get("pivot").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()) {
         return Some(Vec3::new(a[0], a[1], a[2]));
@@ -383,7 +408,7 @@ fn pivot(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
 /// Whether the move turns about the origin an edited move stored: its stored values, expressions
 /// included, mean that. The triad still sits on the bodies, as that origin can be far from them.
 fn kept_turn(d: &Dialog) -> bool {
-    d.extra.contains_key("pivot") && items(d, 1).is_empty()
+    d.extra.contains_key("pivot") && !d.extra.contains_key("pivot_axes") && !placing_pivot(d)
 }
 
 /// Where the bodies' centre is after the move as it stands.
@@ -426,6 +451,11 @@ fn fixed(d: &Dialog) -> bool {
     d.extra.get("fixed").and_then(Value::as_bool).unwrap_or(true)
 }
 
+/// Whether the triad turns as its rings are dragged: always, for a pivot being placed.
+fn turns(d: &Dialog) -> bool {
+    !fixed(d) || placing_pivot(d)
+}
+
 /// The order the angles apply in (see [`gizmo::turn_of`]).
 fn order(d: &Dialog) -> [usize; 3] {
     d.extra.get("order").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or(gizmo::ANGLE_ORDER)
@@ -450,15 +480,30 @@ fn axes_of(app: &SolveApp, d: &Dialog, frame: Option<(String, Mat)>) -> Axes {
     gizmo::mul(&rows_of(&frame), &turned)
 }
 
-/// The Local reference: the first picked body's axes where the move so far has turned it.
+/// The first picked body's axes where the move so far has turned it.
 fn own_axes(app: &SolveApp, d: &Dialog) -> Axes {
     let own = axes_of(app, d, body_frame(app, d));
     chain(d).map_or(own, |c| gizmo::mul(&rows_of(&c), &own))
 }
 
-/// The axes a Free Move's angles start from: the world's (Fixed) or the bodies' own (Local).
+/// The Local reference: the bodies' own axes, as an accepted pivot was turned from them.
+fn local_axes(app: &SolveApp, d: &Dialog) -> Axes {
+    let own = own_axes(app, d);
+    axes_in(d, "pivot_own").map_or(own, |turn| gizmo::mul(&own, &turn))
+}
+
+/// The Fixed reference: the accepted pivot's target, else the world.
+fn fixed_axes(d: &Dialog) -> Axes {
+    axes_in(d, "pivot_axes").unwrap_or(WORLD)
+}
+
+/// The axes a Free Move's angles start from: where the pivot being placed started, else the
+/// reference of the frame in use.
 fn base_axes(app: &SolveApp, d: &Dialog) -> Axes {
-    if fixed(d) { WORLD } else { own_axes(app, d) }
+    if let Some((_, axes)) = placing(d) {
+        return axes;
+    }
+    if fixed(d) { fixed_axes(d) } else { local_axes(app, d) }
 }
 
 /// The three angles of a Free Move.
@@ -470,7 +515,7 @@ fn angles(app: &SolveApp, d: &Dialog) -> Result<[f64; 3], String> {
 /// The triad's axes now: they turn with the bodies unless fixed.
 fn triad_axes(app: &SolveApp, d: &Dialog) -> Result<Axes, String> {
     let base = base_axes(app, d);
-    Ok(if !fixed(d) { gizmo::mul(&base, &gizmo::turn_of(angles(app, d)?, order(d))) } else { base })
+    Ok(if turns(d) { gizmo::mul(&base, &gizmo::turn_of(angles(app, d)?, order(d))) } else { base })
 }
 
 /// The axes the distances lie along.
@@ -490,6 +535,13 @@ fn distance(app: &SolveApp, d: &Dialog) -> Result<Vec3, String> {
 /// Put the current type's turn (and with `whole` its distances too) into the move made so far,
 /// so the values start from zero where the bodies stand. Nothing moves.
 fn bake(app: &SolveApp, d: &mut Dialog, whole: bool) {
+    // A pivot being placed has no move to keep: it starts its angles over where it stands.
+    if let (Some((at, _)), Ok(axes)) = (placing(d), triad_axes(app, d)) {
+        set_placing(d, at, &axes);
+        d.extra.remove("order");
+        zero_values(app, d, false);
+        return;
+    }
     turn_on_centre(app, d);
     let Some(m) = made(app, d) else { return };
     let t = distance(app, d).unwrap_or(Vec3::ZERO);
@@ -524,12 +576,13 @@ fn zero_values(app: &SolveApp, d: &mut Dialog, whole: bool) {
     }
 }
 
-/// Keep what the values mean as the triad turns: the distances stay along its axes, the bodies
-/// staying where they are.
+/// Keep what the triad and the values mean as they change: a pivot pick places the pivot, and
+/// the distances stay along the triad's axes when they turn, the bodies staying where they are.
 pub fn sync(app: &SolveApp, d: &mut Dialog) {
     if !matches!(d.kind, Kind::Move { mode: FREE, .. }) {
         return;
     }
+    take_pivot_pick(app, d);
     if let Ok(t) = distance(app, d) {
         keep_distance(app, d, t);
     }
@@ -553,32 +606,250 @@ fn keep_distance(app: &SolveApp, d: &mut Dialog, t: Vec3) {
     }
 }
 
-/// Local or Fixed. The move so far stays and the values start from zero on the new axes. A
-/// picked pivot was measured before the move, so it goes, and the triad is on the bodies again.
-pub(crate) fn set_fixed(app: &SolveApp, d: &mut Dialog, on: bool) {
+/// Where the pivot being placed started: what its values measure from.
+fn placing(d: &Dialog) -> Option<(Vec3, Axes)> {
+    let (at, axes): ([f64; 3], Axes) = serde_json::from_value(d.extra.get("placing")?.clone()).ok()?;
+    Some((Vec3::new(at[0], at[1], at[2]), axes))
+}
+
+fn set_placing(d: &mut Dialog, at: Vec3, axes: &Axes) {
+    d.extra.insert("placing".into(), json!(([at.x, at.y, at.z], axes)));
+}
+
+/// Whether a pivot is being placed: the triad and the values then move it, not the bodies.
+pub(crate) fn placing_pivot(d: &Dialog) -> bool {
+    placing(d).is_some()
+}
+
+/// How far the pivot being placed has gone: from where it started to where it is.
+pub(crate) fn pivot_trail(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
+    Some((placing(d)?.0, triad(app, d)?.center))
+}
+
+/// Start placing a pivot from where the triad is, with both references to go to. The move so
+/// far is kept and the values go to the pivot, from zero.
+pub(crate) fn begin_pivot(app: &SolveApp, d: &mut Dialog) {
     bake(app, d, true);
+    let Some(t) = triad(app, d) else { return };
+    let (local, fix) = (local_axes(app, d), fixed_axes(d));
+    d.extra.insert("placing_local".into(), json!(local));
+    d.extra.insert("placing_fixed".into(), json!(fix));
+    zero_values(app, d, true);
     d.extra.remove("along");
-    d.extra.insert("fixed".into(), json!(on));
-    if let Some(i) = d.inputs.get_mut(1) {
-        i.items.clear();
+    d.extra.remove("order");
+    set_placing(d, t.center, &t.axes);
+    d.active = 1;
+}
+
+fn forget_placing(d: &mut Dialog) {
+    for key in ["placing", "placing_local", "placing_fixed", "placing_target"] {
+        d.extra.remove(key);
     }
 }
 
-/// Free Move's Axes row, after the inputs: Local or Fixed.
-pub(crate) fn frame_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
-    let mut frame = usize::from(fixed(d));
-    let options = [solidcraft_ui_text::tr("dialog.move_frame_local"), solidcraft_ui_text::tr("dialog.move_frame_fixed")];
-    let tip = solidcraft_ui_text::tr(if fixed(d) { "dialog.move_frame_fixed_tip" } else { "dialog.move_frame_local_tip" });
+/// Stop placing the pivot, keeping the one there was: the values go back to the move, the next
+/// pick to the bodies.
+pub(crate) fn end_pivot(app: &SolveApp, d: &mut Dialog) {
+    forget_placing(d);
+    d.extra.remove("along");
+    d.extra.remove("order");
+    if let Some(i) = d.inputs.get_mut(1) {
+        i.items.clear();
+    }
+    zero_values(app, d, true);
+    d.active = 0;
+}
+
+/// The tick: the triad's place becomes the pivot, and each frame keeps the axes it reached.
+pub(crate) fn accept_pivot(app: &SolveApp, d: &mut Dialog) {
+    let Some(t) = triad(app, d) else { return };
+    let (local, fix) = if fixed(d) { (axes_in(d, "placing_local"), Some(t.axes)) } else { (Some(t.axes), axes_in(d, "placing_fixed")) };
+    let kept = t.center;
+    d.extra.insert("pivot".into(), json!([kept.x, kept.y, kept.z]));
+    // The move now turns about the placed pivot, which it saves as its origin.
+    d.extra.remove("origin");
+    d.extra.insert("pivot_axes".into(), json!(fix.unwrap_or(WORLD)));
+    let own = gizmo::inverse(&own_axes(app, d));
+    d.extra.insert("pivot_own".into(), json!(gizmo::mul(&own, &local.unwrap_or(t.axes))));
+    end_pivot(app, d);
+}
+
+/// Back to the bodies' centre and the references without a pivot.
+pub(crate) fn clear_pivot(app: &SolveApp, d: &mut Dialog) {
+    bake(app, d, true);
+    for key in ["pivot", "origin", "pivot_axes", "pivot_own", "along"] {
+        d.extra.remove(key);
+    }
+}
+
+/// The distances of the pivot being placed, to reach `at` along `axes`.
+fn pivot_distance(app: &SolveApp, d: &mut Dialog, at: Vec3, axes: &Axes) {
+    let Some((start, _)) = placing(d) else { return };
+    let v = gizmo::apply(&gizmo::inverse(axes), at - start);
+    if let Kind::Move { x, y, z, .. } = &mut d.kind {
+        (*x, *y, *z) = (length(app, v.x), length(app, v.y), length(app, v.z));
+    }
+    d.extra.insert("along".into(), json!(axes));
+}
+
+/// The pivot being placed goes over to `axes`, at `at`. The values read that from where it
+/// started: how far it went, and how far it turned.
+fn pivot_reference(app: &SolveApp, d: &mut Dialog, at: Vec3, axes: &Axes) {
+    let Some((_, start)) = placing(d) else { return };
+    let turned = gizmo::rotation_angles(&gizmo::mul(&gizmo::inverse(&start), axes));
+    if let Kind::Move { rx, ry, rz, .. } = &mut d.kind {
+        // Finer than a typed move's: the axes come back from these, along a picked edge.
+        [*rx, *ry, *rz] = turned.map(|th| degrees(th, 8));
+    }
+    d.extra.remove("order");
+    pivot_distance(app, d, at, axes);
+}
+
+/// Local or Fixed. The move so far stays and the values start from zero on the new axes; a pivot
+/// being placed goes to that frame's reference, each keeping the turns it was given.
+pub(crate) fn set_fixed(app: &SolveApp, d: &mut Dialog, on: bool) {
+    if !placing_pivot(d) {
+        bake(app, d, true);
+        d.extra.remove("along");
+        d.extra.insert("fixed".into(), json!(on));
+        return;
+    }
+    let Some(t) = triad(app, d) else { return };
+    let (left, next) = if on { ("placing_local", "placing_fixed") } else { ("placing_fixed", "placing_local") };
+    d.extra.insert(left.into(), json!(t.axes));
+    d.extra.insert("fixed".into(), json!(on));
+    let axes = axes_in(d, next).unwrap_or(WORLD);
+    pivot_reference(app, d, t.center, &axes);
+}
+
+/// `axes` turned the shortest way until Z lies along `dir`.
+fn laid_along(axes: &Axes, dir: Vec3) -> Axes {
+    let Some(dir) = dir.normalized() else { return *axes };
+    let z = gizmo::axis(axes, 2);
+    let across = z.cross(dir);
+    let turn = match across.normalized().filter(|_| across.len() > 1e-9) {
+        Some(a) => gizmo::rotation(a, z.dot(dir).clamp(-1.0, 1.0).acos()),
+        None if z.dot(dir) < 0.0 => gizmo::rotation(gizmo::axis(axes, 0), std::f64::consts::PI),
+        None => WORLD,
+    };
+    gizmo::mul(&turn, axes)
+}
+
+/// A pick while placing the pivot. A point sets where it is, a line which way its Z lies, so the
+/// two can be picked one after the other; a round edge, a planar face or a round face sets both.
+/// What gives a direction is the Fixed reference and goes there; a point gives the frame of what
+/// it is on, unless a direction has been picked.
+fn take_pivot_pick(app: &SolveApp, d: &mut Dialog) {
+    let (true, Some(s), Some(t)) = (placing_pivot(d), items(d, 1).first().cloned(), triad(app, d)) else { return };
+    if let Some(i) = d.inputs.get_mut(1) {
+        i.items.clear();
+    }
+    let target = axes_in(d, "placing_fixed").unwrap_or(WORLD);
+    let from = if fixed(d) { t.axes } else { target };
+    let line = axis_line(app, d, &s);
+    let plane = match &s {
+        Sel::Face { body, index, .. } => crate::dialogs::planar_face(&app.session, body, *index),
+        _ => None,
+    };
+    let mut at = t.center;
+    let mut laid = None;
+    match (&s, plane, line) {
+        (Sel::Face { .. }, Some((c, n)), _) => {
+            let moved = on_moved(&bodies_of(app, d), &s);
+            at = carried(d, moved, c);
+            laid = Some(laid_along(&from, chain(d).filter(|_| moved).map_or(n, |m| apply_vector(&m, n))));
+        }
+        (Sel::Face { point, .. }, None, Some((o, a))) => {
+            at = o + a * (*point - o).dot(a);
+            laid = Some(laid_along(&from, a));
+        }
+        (Sel::Edge { body, index, .. }, _, Some((_, a))) => {
+            if crate::dialogs::edge_circle(&app.session, body, *index).is_some()
+                && let Some(c) = sel_point(app, d, Some(&s))
+            {
+                at = c;
+            }
+            laid = Some(laid_along(&from, a));
+        }
+        (_, _, Some((_, a))) => laid = Some(laid_along(&from, a)),
+        (Sel::Vertex { point, .. } | Sel::Edge { point, .. } | Sel::Face { point, .. }, ..) => at = *point,
+        _ => {}
+    }
+    if let Some(axes) = laid {
+        d.extra.insert("placing_fixed".into(), json!(axes));
+        d.extra.insert("placing_target".into(), json!(true));
+        d.extra.insert("fixed".into(), json!(true));
+        pivot_reference(app, d, at, &axes);
+        return;
+    }
+    let body = match &s {
+        Sel::Vertex { body, .. } | Sel::Edge { body, .. } | Sel::Face { body, .. } => body.clone(),
+        _ => String::new(),
+    };
+    if !d.extra.contains_key("placing_target") {
+        let on = axes_of(app, d, frame_of(app, d, body));
+        let frame = chain(d).filter(|_| on_moved(&bodies_of(app, d), &s)).map_or(on, |c| gizmo::mul(&rows_of(&c), &on));
+        d.extra.insert("placing_fixed".into(), json!(frame));
+        if fixed(d) {
+            pivot_reference(app, d, at, &frame);
+            return;
+        }
+    }
+    pivot_distance(app, d, at, &t.axes);
+}
+
+/// Free Move's Pivot row, in place of a picking chip: the button that places a pivot, the tick
+/// that accepts it, and Local or Fixed.
+pub(crate) fn pivot_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
+    let place = placing_pivot(d);
+    let custom = d.extra.contains_key("pivot_axes");
     let enabled = !bodies_empty(d);
-    let changed = crate::ui_kit::row(ui, solidcraft_ui_text::tr("ui.axes"), |ui| {
-        let inner = ui.add_enabled_ui(enabled, |ui| {
-            let segments = crate::ui_kit::Segments { compact: true, targets: &["dialog:axes:local", "dialog:axes:fixed"], ..Default::default() };
-            crate::ui_kit::segmented(ui, &mut frame, &options, segments)
-        });
-        inner.response.on_hover_text(tip);
-        inner.inner
+    // The frame round a pivot being placed starts at this row and closes in `pivot_rows`.
+    if place {
+        let band = (ui.painter().add(egui::Shape::Noop), ui.cursor().min);
+        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_pivot_band"), band));
+    }
+    let mut frame = usize::from(fixed(d));
+    let (mut press, mut tick, mut reset, mut framed) = (false, false, false, false);
+    crate::ui_kit::row(ui, solidcraft_ui_text::tr_label("Pivot"), |ui| {
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.horizontal(|ui| {
+                let label = solidcraft_ui_text::tr(if place { "dialog.move_pivot_discard" } else { "dialog.move_pivot_set" });
+                let mut on = place || custom;
+                let button = crate::ui_kit::toggle_icon(ui, "pivot", label, &mut on, "origin");
+                // The Pivot input's field, for what reads the form: a button with no text on it.
+                button.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, "Pivot"));
+                crate::scenario::publish_rect("dialog:field:Pivot", button.rect);
+                crate::scenario::publish_handle("dialog:pivot:place", button.rect.center());
+                press = button.clicked();
+                if place {
+                    tick = crate::ui_kit::check_button(ui, "dialog:pivot:accept", solidcraft_ui_text::tr("dialog.move_pivot_accept")).clicked();
+                } else if custom {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(ui.spacing().interact_size.y, ui.spacing().interact_size.y), egui::Sense::hover());
+                    reset = crate::ui_kit::icon_button_at(ui, rect, "close", solidcraft_ui_text::tr("dialog.move_pivot_clear")).clicked();
+                }
+                let options = [solidcraft_ui_text::tr("dialog.move_frame_local"), solidcraft_ui_text::tr("dialog.move_frame_fixed")];
+                let segments =
+                    crate::ui_kit::Segments { compact: true, targets: &["dialog:pivot:local", "dialog:pivot:fixed"], ..Default::default() };
+                framed = ui.scope(|ui| crate::ui_kit::segmented(ui, &mut frame, &options, segments)).inner;
+            });
+        })
+        .response
+        .on_hover_text(solidcraft_ui_text::tr(if fixed(d) { "dialog.move_frame_fixed_tip" } else { "dialog.move_frame_local_tip" }));
     });
-    if changed && frame != usize::from(fixed(d)) {
+    if press && place {
+        end_pivot(app, d);
+    } else if press {
+        begin_pivot(app, d);
+    }
+    if tick {
+        accept_pivot(app, d);
+    }
+    if reset {
+        clear_pivot(app, d);
+    }
+    if framed {
         set_fixed(app, d, frame == 1);
     }
 }
@@ -607,7 +878,11 @@ fn mm(v: f64) -> String {
 }
 
 fn deg(v: f64) -> String {
-    let s = format!("{:.4}", v.to_degrees());
+    degrees(v, 4)
+}
+
+fn degrees(v: f64, places: usize) -> String {
+    let s = format!("{:.*}", places, v.to_degrees());
     let s = s.trim_end_matches('0').trim_end_matches('.');
     format!("{} deg", if s == "-0" || s.is_empty() { "0" } else { s })
 }
@@ -689,6 +964,8 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
     let mut p = targets_json(app, d);
     match *mode {
         TRANSLATE => p["translate"] = json!([x, y, z]),
+        // The values place the pivot for now: they move no body.
+        FREE if placing_pivot(d) => p["translate"] = num(Vec3::ZERO),
         FREE => {
             let a = [ang(app, rx)?, ang(app, ry)?, ang(app, rz)?];
             let turned: Vec<usize> = (0..3).filter(|i| a[*i].abs() > 1e-12).collect();
@@ -834,7 +1111,7 @@ pub fn step_value_field(d: &mut Dialog, step: i64) {
 /// Before a ring's first turn: let its angle add, or start it over on the turns so far.
 fn settle_ring(app: &SolveApp, d: &mut Dialog, ring: usize) {
     let Ok(a) = angles(app, d) else { return };
-    match gizmo::ring_order(a, order(d), ring, !fixed(d)) {
+    match gizmo::ring_order(a, order(d), ring, turns(d)) {
         Some(o) => {
             d.extra.insert("order".into(), json!(o));
         }
