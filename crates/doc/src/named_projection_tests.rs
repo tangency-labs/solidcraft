@@ -43,7 +43,7 @@ fn tilted_spline_projection_keeps_one_exact_curve() {
             })
             .map(|p| to.to_local(from.to_world(p)))
             .collect();
-        sketch.add_curve(CurveKind::Spline { pts, control, degree: 3, periodic, nurbs }, Some("source")).unwrap();
+        sketch.add_curve(CurveKind::Spline { pts, control, degree: 3, periodic, nurbs, handles: Vec::new() }, Some("source")).unwrap();
         let report = solidcraft_sketch::solve(&mut sketch);
         let mut state = ModelState::default();
         state.sketches.push(Arc::new(crate::eval::SolvedSketch {
@@ -75,7 +75,7 @@ fn tilted_spline_projection_keeps_one_exact_curve() {
             if reversed {
                 projected.reverse_spline(ci).unwrap();
             }
-            let CurveKind::Spline { pts, control: projected_control, degree, periodic, nurbs } = &projected.curves[ci].kind else {
+            let CurveKind::Spline { pts, control: projected_control, degree, periodic, nurbs, .. } = &projected.curves[ci].kind else {
                 panic!("projection is not a spline")
             };
             let points: Vec<Vec2> = pts.iter().map(|p| projected.point(*p).unwrap()).collect();
@@ -96,6 +96,71 @@ fn tilted_spline_projection_keeps_one_exact_curve() {
             }
             if reversed {
                 projected.reverse_spline(ci).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn projecting_a_fit_spline_keeps_edited_tangent_handles_on_parallel_and_tilted_planes() {
+    use solidcraft_sketch::{CurveKind, LinkGeom};
+
+    let from = Plane::XY.offset(9.);
+    let tilted = Plane::new(Vec3::new(-2., 3., 1.), Vec3::new(0.8, 0., 0.6), Vec3::Y).unwrap();
+    for periodic in [false, true] {
+        let mut sketch = Sketch::default();
+        let mut points = vec![Vec2::new(0., 0.), Vec2::new(8., 13.), Vec2::new(20., -2.)];
+        if periodic {
+            points.push(points[0]);
+        }
+        let pts = points.iter().map(|p| sketch.add_point(*p, None).unwrap()).collect();
+        let curve = sketch
+            .add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic, nurbs: None, handles: Vec::new() }, Some("source"))
+            .unwrap();
+        sketch.add_spline_handles(curve).unwrap();
+        let CurveKind::Spline { handles, .. } = &sketch.curves[curve].kind else { panic!("not a spline") };
+        let handle = handles[1];
+        sketch.points[handle].pos += Vec2::new(3., -2.);
+        for reversed in [false, true] {
+            let mut source = sketch.clone();
+            if reversed {
+                source.reverse_spline(curve).unwrap();
+            }
+            let report = solidcraft_sketch::solve(&mut source);
+            let CurveKind::Spline { pts, handles, .. } = &source.curves[curve].kind else { panic!("not a spline") };
+            let points: Vec<_> = pts.iter().map(|p| source.point(*p).unwrap()).collect();
+            let handles: Vec<_> = handles.iter().map(|p| source.point(*p).unwrap()).collect();
+            let expected = solidcraft_sketch::fit_beziers_with_handles(&points, &handles, periodic).unwrap();
+            let mut state = ModelState::default();
+            state.sketches.push(Arc::new(crate::eval::SolvedSketch {
+                feature: 1,
+                name: "Source".into(),
+                plane: from,
+                sketch: source,
+                report,
+                profiles: Vec::new(),
+                profiles_3d: Vec::new(),
+                ends: Default::default(),
+            }));
+            for to in [Plane::XY, tilted] {
+                let resolved = crate::project::resolve(
+                    &Document::default(),
+                    &BTreeMap::new(),
+                    &state,
+                    &to,
+                    LinkKind::Project,
+                    &LinkSource::SketchCurve { sketch: 1, curve: "source".into() },
+                )
+                .unwrap();
+                assert_eq!(resolved.geom.len(), expected.len(), "one exact curve per handled span");
+                for (actual, span) in resolved.geom.iter().zip(&expected) {
+                    let LinkGeom::Spline { pts, control: true, degree: 3, .. } = actual else { panic!("not an exact cubic: {actual:?}") };
+                    assert_eq!(pts.len(), 4);
+                    for (actual, point) in pts.iter().zip(span) {
+                        let expected = to.to_local(from.to_world(*point));
+                        assert!(actual.dist(expected) < 1e-10, "periodic={periodic}, reversed={reversed}: {actual:?} != {expected:?}");
+                    }
+                }
             }
         }
     }
