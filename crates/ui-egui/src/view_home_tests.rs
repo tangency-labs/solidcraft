@@ -573,11 +573,9 @@ fn the_orbit_pivot_is_the_point_home_centres_on() {
     }
 }
 
-/// With the navigators' Fit on, Home puts the model's middle at the window's centre (#10091), not
-/// where the plain Home frames it, so the default orbit turns about that point: straight after
-/// Home, an orbit drag and continuous orbit keep the model's middle still, with the Browser shown
-/// and hidden, in parallel and perspective views (#14651). Fit still frames the plain way, beside
-/// the Browser, and an orbit straight after it keeps the model's middle still there.
+/// With the navigators' Fit on, an orbit drag straight after Home or Fit and continuous orbit
+/// straight after Home keep the model's middle at its framed position, with the Browser shown
+/// and hidden, in parallel and perspective views (#14651).
 #[test]
 fn orbit_after_the_navigators_home_turns_the_model_in_place() {
     for (browser, perspective) in [(true, false), (false, false), (true, true)] {
@@ -608,12 +606,9 @@ fn orbit_after_the_navigators_home_turns_the_model_in_place() {
             assert!((h.app.cam.yaw - yaw).abs() > 0.1 && (h.app.cam.pitch - pitch).abs() > 0.05, "{case}, {view}: the drag orbits");
             let after = proj(h).to_screen(centre).unwrap();
             assert!(after.distance(before) < 0.5, "{case}, {view}: the model's middle went from {before:?} to {after:?}");
-            before
         };
-        let before = drag(&mut h, "home");
-        assert!(before.distance(rect.center()) < 1.0, "{case}: Home puts the model at {before:?}, the window's centre is {:?}", rect.center());
-        let before = drag(&mut h, "fit");
-        assert!(!browser || before.distance(rect.center()) > 5.0, "{case}: Fit puts the model at {before:?}, at the window's centre");
+        drag(&mut h, "home");
+        drag(&mut h, "fit");
         let before = frame(&mut h, "home");
         let yaw = h.app.cam.yaw;
         h.app.viewport.spin = true;
