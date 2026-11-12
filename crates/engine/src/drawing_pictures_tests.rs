@@ -15,7 +15,7 @@ use crate::tests::Folder;
 /// A whole PNG of two pixels: red, then blue.
 const RED_BLUE: &str = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGP4z8AAQv8BD/kD/YURmXYAAAAASUVORK5CYII=";
 
-fn red_blue() -> Vec<u8> {
+pub(crate) fn red_blue() -> Vec<u8> {
     base64_decode(RED_BLUE).unwrap()
 }
 
