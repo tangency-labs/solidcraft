@@ -56,7 +56,13 @@ fn capability_refusals_are_plain_and_name_solidcraft() {
 }
 #[test]
 fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
-    let host = SolidCraftHost { session: Session::default(), transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+    let host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+    };
     let catalog = host.command_catalog();
     let built = crate::command_specs().into_iter().filter(|c| c.planned.is_none()).count();
     assert_eq!(catalog.len(), built, "the plugin catalog is the whole MCP catalog");
@@ -97,7 +103,13 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
     let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-groups-{}", std::process::id()));
     let granted = root.join("granted");
     std::fs::create_dir_all(&granted).unwrap();
-    let mut host = SolidCraftHost { session: Session::default(), transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+    };
     host.begin_transaction().unwrap();
     s_box(&mut host);
     let save = |host: &mut SolidCraftHost, path: &std::path::Path| host.run_command("file.save_as", &json!({"path": path.to_string_lossy()}));
@@ -584,7 +596,8 @@ mod native {
                     });
                     assert_eq!(std::fs::read(&target).unwrap(), b"private contents");
                 }
-                let host = SolidCraftHost { session: s, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+                let host =
+                    SolidCraftHost { session: s, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
                     assert!(host.authorize_file_path(&target, write).is_ok(), "explicit scope grants hidden access");
                 });
@@ -701,7 +714,13 @@ fn host_resource_policy_is_exact_user_state_and_never_design_data() {
 
 #[test]
 fn command_effects_are_explicit_and_independent_of_undo() {
-    let host = SolidCraftHost { session: Session::default(), transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+    let host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+    };
     let catalog = host.command_catalog();
     for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Edit, "{command}");

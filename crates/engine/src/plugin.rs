@@ -61,10 +61,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
             if let Some(group) = command_group(command)
                 && !runtime.permissions.command_groups.contains(group)
             {
-                return Err(refuse(
-                    "runtime.commands",
-                    format!("`{command}` needs \"{group}\" in runtime.permissions.command_groups"),
-                ));
+                return Err(refuse("runtime.commands", format!("`{command}` needs \"{group}\" in runtime.permissions.command_groups")));
             }
         }
     }
@@ -163,13 +160,7 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
             .filter(|g| g.read && g.write && rt.permissions.files.iter().any(|r| r.name == g.name && r.read && r.write))
             .map(|g| g.folder)
             .collect();
-        let (host, result) = craft_plugin_wasm::run(
-            SolidCraftHost { file_folders, ..host },
-            &package.manifest,
-            &package.component,
-            entry,
-            params,
-        );
+        let (host, result) = craft_plugin_wasm::run(SolidCraftHost { file_folders, ..host }, &package.manifest, &package.component, entry, params);
         let value = result?;
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch

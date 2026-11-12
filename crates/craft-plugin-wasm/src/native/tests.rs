@@ -1,8 +1,8 @@
 use super::*;
 
 use craft_plugin::{API, FileGrant, FilePermission};
-use std::collections::BTreeSet;
 use serde_json::json;
+use std::collections::BTreeSet;
 
 #[derive(Default)]
 struct App {
@@ -160,13 +160,11 @@ fn a_grouped_command_runs_only_when_the_manifest_asks_and_the_app_grants() {
         manifest.runtime.as_mut().unwrap().permissions.command_groups = groups.iter().map(|g| g.to_string()).collect();
         manifest
     };
-    let granted = |groups: &[&str]| App { write_group: Some("file".into()), groups: groups.iter().map(|g| g.to_string()).collect(), ..Default::default() };
+    let granted =
+        |groups: &[&str]| App { write_group: Some("file".into()), groups: groups.iter().map(|g| g.to_string()).collect(), ..Default::default() };
     for (manifest, mut app) in [(asks(&[]), granted(&["file"])), (asks(&["file"]), granted(&[])), (asks(&["doc"]), granted(&["doc"]))] {
         let failure = run(&mut app, &manifest, &component("call $box"), "make", &json!({})).unwrap_err();
-        assert!(
-            matches!(&failure, HostError::PermissionDenied { permission } if permission.contains("needs the `file` permission")),
-            "{failure}"
-        );
+        assert!(matches!(&failure, HostError::PermissionDenied { permission } if permission.contains("needs the `file` permission")), "{failure}");
         assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
     }
     let mut app = granted(&["file"]);

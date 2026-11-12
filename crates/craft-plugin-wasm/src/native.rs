@@ -38,9 +38,7 @@ fn wit_error(error: HostError) -> PluginError {
         HostError::InvalidInput { field, reason } => PluginError::InvalidInput(types::FieldFailure { field, reason }),
         HostError::Trap { reason } => PluginError::Trap(reason),
         HostError::Cancelled => PluginError::Cancelled,
-        HostError::UnsupportedCapability { reason, .. } => {
-            PluginError::InvalidManifest(types::FieldFailure { field: "capabilities".into(), reason })
-        }
+        HostError::UnsupportedCapability { reason, .. } => PluginError::InvalidManifest(types::FieldFailure { field: "capabilities".into(), reason }),
     }
 }
 fn host_error(error: PluginError) -> HostError {
