@@ -59,6 +59,8 @@ mod issue_1038_tests;
 #[cfg(test)]
 mod issue_1080_tests;
 #[cfg(test)]
+mod issue_12126_tests;
+#[cfg(test)]
 mod issue_1510_tests;
 #[cfg(test)]
 mod issue_2005_tests;

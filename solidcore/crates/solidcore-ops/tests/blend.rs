@@ -1027,11 +1027,13 @@ fn slot() -> Body {
 /// The slot's top outline is one tangent chain: from its front straight, all four top edges;
 /// a box edge runs on into nothing. Indices are checked before the kernel.
 #[test]
-fn the_tangent_chain_is_the_kernels() {
+fn the_tangent_chain_runs_round_the_slot() {
     all_fixes();
     let b = slot();
     let front = edge_at(&b, [5.0, 0.0, 2.0]);
-    let chain = tangent_chain(&b, &[front], HALF_DEGREE).unwrap();
+    let chain = tangent_chain(&b, None, &[front], &[], HALF_DEGREE).unwrap();
+    assert!(chain.undecided.is_empty(), "{chain:?}");
+    let chain = chain.members;
     assert_eq!(chain.len(), 4, "{chain:?}");
     assert_eq!(chain[0], front);
     for p in [[5.0, 4.0, 2.0], [12.0, 2.0, 2.0], [-2.0, 2.0, 2.0]] {
@@ -1039,10 +1041,11 @@ fn the_tangent_chain_is_the_kernels() {
     }
     let bx = block();
     let e = top_front(&bx);
-    assert_eq!(tangent_chain(&bx, &[e], HALF_DEGREE).unwrap(), vec![e]);
-    assert_eq!(tangent_chain(&bx, &[99], 0.01), Err(Error::Argument));
-    assert_eq!(tangent_chain(&bx, &[e], 0.0), Err(Error::Argument));
-    assert_eq!(tangent_chain(&bx, &[], 0.01), Err(Error::Argument));
+    let chain = |edges: &[usize], angle: f64| tangent_chain(&bx, None, edges, &[], angle);
+    assert_eq!(chain(&[e], HALF_DEGREE).unwrap().members, vec![e]);
+    assert_eq!(chain(&[99], 0.01), Err(Error::Argument));
+    assert_eq!(chain(&[e], 0.0), Err(Error::Argument));
+    assert_eq!(chain(&[], 0.01), Err(Error::Argument));
 }
 
 /// The slot's seam, where its straight side runs into its round end, has no blend: its faces
@@ -1281,7 +1284,9 @@ fn a_cancelled_long_fillet_stops_promptly() {
             d(a).total_cmp(&d(b))
         })
         .unwrap();
-    let chain = tangent_chain(&coil, &[edge], 0.1).unwrap();
+    let chain = tangent_chain(&coil, None, &[edge], &[], 0.1)
+        .unwrap()
+        .members;
     let token = CancelToken::new();
     let watched = token.clone();
     let worker = std::thread::spawn(move || {

@@ -150,7 +150,7 @@ fn geom_rail(pseudo: &FilletBrep, g: FilletGeomId, i: usize) -> Result<EdgeId> {
     pseudo
         .geom(g)?
         .rail(i)
-        .ok_or_else(|| SolidError::null_pointer(OP))
+        .ok_or_else(|| SolidError::blend_missing(OP, "the fillet geometry's rail"))
 }
 
 /// An object referenced by [`FilletSolver::record_fillet_error_in`] in an executive
@@ -206,7 +206,7 @@ fn invalid(reason: &'static str) -> SolidError {
 }
 
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::blend_failed(OP, "the solver has no fillet geometry for this case")
 }
 
 /// The analytic fillet geometry a `Calc*FilletGeom` method builds before storing it into
@@ -358,7 +358,7 @@ fn checked_edge_curve(k: &Kernel, s: &FilletSolver, b: &Brep, e: EdgeId) -> Resu
     // NER(pCurve)
     edge::curve(b, e)?
         .cloned()
-        .ok_or_else(|| SolidError::null_pointer(OP))
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))
 }
 
 fn is_circular_fsg(s: &FilletSolver) -> Result<bool> {
@@ -454,7 +454,7 @@ fn bspline_part(curve: &Curve) -> Result<&BSplineCurve> {
         CurveKind::Ellipse(c) => Ok(c.base()),
         CurveKind::Hyperbola(c) => Ok(c.base()),
         CurveKind::Parabola(c) => Ok(c.base()),
-        _ => Err(SolidError::null_pointer(OP)),
+        _ => Err(SolidError::blend_missing(OP, "the curve's B-spline form")),
     }
 }
 
@@ -1294,7 +1294,7 @@ impl FilletSolver {
             None => s.first_fillet_geom()?,
         };
         let fillet_geom_id = fillet_geom;
-        let null_ptr = || SolidError::null_pointer(OP);
+        let null_ptr = |what: &'static str| SolidError::blend_missing(OP, what);
 
         // Get rotation point and axis for surf-of-revolution creation
         let mut axis_of_revolution = ref_frame.z_axis();
@@ -1464,7 +1464,8 @@ impl FilletSolver {
                     // for both rail ends
                     for jj in 0..2 {
                         let rail = geom_rail(pseudo, fillet_geom_id, jj)?;
-                        let rail_end_v = edge::vertex(pseudo.brep(), rail)?.ok_or_else(null_ptr)?;
+                        let rail_end_v = edge::vertex(pseudo.brep(), rail)?
+                            .ok_or_else(|| null_ptr("the rail's vertex"))?;
                         // skip redundant ends
                         let rail_end = pseudo.fillet_vertex(rail_end_v)?;
                         if rail_end.fillet_vertex_type() != FilletVertexType::RailXEdgeuse
@@ -1492,7 +1493,7 @@ impl FilletSolver {
                         let rail = geom_rail(pseudo, fillet_geom_id, jj)?;
                         let rail_start_v = edge::vertex(pseudo.brep(), rail)?;
                         let rail_end_v = edge::other_vertex(pseudo.brep(), rail, rail_start_v)?
-                            .ok_or_else(null_ptr)?;
+                            .ok_or_else(|| null_ptr("the rail's other vertex"))?;
                         // skip redundant endPoints
                         let rail_end = pseudo.fillet_vertex(rail_end_v)?;
                         if rail_end.fillet_vertex_type() != FilletVertexType::RailXEdgeuse
@@ -1730,7 +1731,8 @@ impl FilletSolver {
 
         // the edge's ends, and where the ball touches each cylinder in their cross-sections
         let e = filleted_edge(ops.solver(), b)?;
-        let curve = edge::curve(b, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve = edge::curve(b, e)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's curve"))?;
         let ivl = edge::interval(b, e)?;
         let ends = [
             curve_pv(k, curve, ivl.min())?.0,
@@ -2512,7 +2514,7 @@ impl FilletSolver {
         extension_dist: f64,
     ) -> Result<Option<FilletGeomId>> {
         const OP_C: &str = "blend::fillet_solver::p2::create_cliff_roll_over_side_fg";
-        let nul = || SolidError::null_pointer(OP_C);
+        let nul = |what: &'static str| SolidError::blend_missing(OP_C, what);
 
         // locals
         let rail_start_v = edge::vertex(pseudo.brep(), rail_on_cliff)?;
@@ -2538,7 +2540,7 @@ impl FilletSolver {
                 .set_original_face(Some(side_face));
             adj_surface
         } else {
-            let adj = adj_surface.ok_or_else(nul)?;
+            let adj = adj_surface.ok_or_else(|| nul("the adjacent side surface"))?;
             let new_surface = adj
                 .extended_sides(
                     k,
@@ -2570,12 +2572,13 @@ impl FilletSolver {
                     _ => {}
                 }
             }
-            let cross_section = cross_section.ok_or_else(nul)?;
+            let cross_section =
+                cross_section.ok_or_else(|| nul("the corner's cross section edge"))?;
 
             // CrossSection curve locals
             let mut cs_curve = edge::curve(pseudo.brep(), cross_section)?
                 .cloned()
-                .ok_or_else(nul)?;
+                .ok_or_else(|| nul("the cross section's curve"))?;
             let mut trim_ivl = cs_curve.natural_interval();
 
             // Intersect the cross section with the extended side surface
@@ -2663,7 +2666,8 @@ impl FilletSolver {
                     .set_fillet_edge_type(FilletEdgeType::SplitFace);
 
                 // drop the corner point to the side curve
-                let side_curve = edge::curve(b, side_edge)?.ok_or_else(nul)?;
+                let side_curve =
+                    edge::curve(b, side_edge)?.ok_or_else(|| nul("the side edge's curve"))?;
                 let sols = side_curve.global_point_solve(
                     k,
                     &edge::interval(b, side_edge)?,
@@ -2705,7 +2709,9 @@ impl FilletSolver {
                     SrfSrfOptions::default(),
                 )?;
                 // p3DCurve->SetOwner dereferences the curve
-                let curve_3d = curves.curve_3d.ok_or_else(nul)?;
+                let curve_3d = curves
+                    .curve_3d
+                    .ok_or_else(|| nul("the intersection's 3D curve"))?;
                 // SetCurve(p3DCurve, TRUE) (the edge owns the curve: SetOwner(pSplitEdge));
                 // the UV curves are deleted unused
                 set_edge_curve(pseudo.brep_mut(), new_split, Some(curve_3d))?;
@@ -3043,7 +3049,7 @@ pub fn find_rollover_side_edge<O: ClassObject>(
     let orig_face = pseudo
         .fillet_edge(rail)?
         .original_face()
-        .ok_or_else(|| SolidError::null_pointer(OP_R))?;
+        .ok_or_else(|| SolidError::blend_missing(OP_R, "the rail's original face"))?;
     // pStartV->IsProcessed(), pEndV->IsProcessed() (a NULL vertex is dereferenced)
     let is_processed = |v: Option<VertexId>| -> Result<bool> {
         let v = v.ok_or_else(|| invalid("rail without vertex"))?;
@@ -3799,7 +3805,14 @@ mod tests {
         let cc = classification(&k, &[(PointClassType::Edge, PointClassType::Unknown)]);
         let r = run(&k, &pseudo, rail, &cc, &mut RolloverSideEdge::default());
         // GetOriginalFace is NER'd: a null pointer, not an unported stub
-        assert!(matches!(r, Err(SolidError::Upstream { code: 1006, .. })));
+        let e = r.unwrap_err();
+        assert_eq!(e.upstream_status(), Some(1006));
+        assert_eq!(
+            e.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the rail's original face"
+            ))
+        );
     }
 
     #[test]
@@ -3817,7 +3830,7 @@ mod tests {
         );
         let mut io = RolloverSideEdge::default();
         let r = run(&k, &pseudo, rail, &cc, &mut io);
-        assert!(matches!(r, Err(SolidError::Upstream { code: 1001, .. })));
+        assert_eq!(r.unwrap_err().upstream_status(), Some(1001));
         assert_eq!(io.curr_index, 1);
         assert!(!io.trim_side_faces);
 
@@ -3856,7 +3869,7 @@ mod tests {
             ],
         );
         let r = run(&k, &pseudo, rail, &cc, &mut RolloverSideEdge::default());
-        assert!(matches!(r, Err(SolidError::Upstream { code: 1001, .. })));
+        assert_eq!(r.unwrap_err().upstream_status(), Some(1001));
     }
 
     #[test]

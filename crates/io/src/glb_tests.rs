@@ -18,6 +18,7 @@ fn model(body_count: usize) -> (Document, Model) {
                 width: "20".into(),
                 height: "30".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )

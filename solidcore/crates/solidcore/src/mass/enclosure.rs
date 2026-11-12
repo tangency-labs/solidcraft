@@ -170,6 +170,8 @@ pub fn enclose_volume(k: &Kernel, b: &mut Brep, width: f64) -> Result<VolumeEncl
 ///
 /// Those of [`enclose_volume`].
 pub fn volume_sign(k: &Kernel, b: &mut Brep) -> Result<VolumeSign> {
+    // each decision a call of this scope (feature `profile`; nothing without it)
+    crate::profile::profile_scope!(k, "mass::enclosure::volume_sign");
     volume_sign_within(k, b, CELL_BUDGET)
 }
 

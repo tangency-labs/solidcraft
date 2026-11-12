@@ -85,7 +85,7 @@ impl Srf {
 }
 
 fn err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::blend_failed(OP, "an index past the mixed corner's polynomial tables")
 }
 
 fn g<T>(v: &[T], i: usize) -> Result<&T> {

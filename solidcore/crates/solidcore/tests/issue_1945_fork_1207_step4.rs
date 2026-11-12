@@ -103,8 +103,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.uv_trim_joins_drop_pieces = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.cone_parallel_line_midpoint = true;
-    k.fixes.cone_parallel_line_domains = true;
     k.fixes.cylinder_plane_tangent_within_tolerance = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.slice_coincident_faces_sheet_side = true;
@@ -148,7 +146,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_extension_from_base = true;
     k.fixes.corner_blend_stays_inside_neighbours = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
-    k.fixes.fillet_cleanup_removes_input_slits = true;
     k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
     k.fixes.fillet_rails_meet_at_one_end_point = true;

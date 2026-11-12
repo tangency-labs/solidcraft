@@ -2840,6 +2840,9 @@ pub struct FaceCurves {
     /// consecutive edge uses of a loop end at one vertex at two parameters (a pole), so
     /// they stand for no edge of the face.
     pub filled_gaps: Vec<usize>,
+    /// (not upstream) The edge of each curve of `curves_3d`, in the same order (filled
+    /// only when 3D curves are asked for).
+    pub edges: Vec<EdgeId>,
 }
 
 /// `CreateCurvesFromFace`: copies of the face's loop curves (3D and/or UV) of the face
@@ -2965,6 +2968,7 @@ pub fn create_curves_from_face(
                 copy.trim(k, &mut ivl, TrimMode::Notify)?;
                 if let Some(list) = out.curves_3d.as_mut() {
                     list.push(copy);
+                    out.edges.push(e);
                 }
             }
         }

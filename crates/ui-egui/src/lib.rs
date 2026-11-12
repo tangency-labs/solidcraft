@@ -818,6 +818,9 @@ pub struct SolveApp {
     control_held: std::collections::VecDeque<ControlRequest>,
     /// An agent's design change computing off the window thread ([`control_job`]).
     control_job: Option<control_job::ControlJob>,
+    /// Replies of agents' commands run after computing off the window thread, on their way to
+    /// the agent ([`control_job`]): each is passed on as it comes, its outcome noted.
+    agent_replies: Vec<(std::sync::mpsc::Receiver<serde_json::Value>, std::sync::mpsc::Sender<serde_json::Value>)>,
     /// Agent exports computing on copies of the design.
     control_answering: Vec<control_job::ControlJob>,
     /// The agent cursor acting out control requests.
@@ -1022,6 +1025,7 @@ impl SolveApp {
             ai_connect: Default::default(),
             control_held: Default::default(),
             control_job: None,
+            agent_replies: Vec::new(),
             control_answering: Vec::new(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
@@ -1356,6 +1360,7 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
+        print_face_ui::sync(&mut self.session, &self.preferences);
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
             let action = serde_json::from_value(reply["action"].clone()).map_err(|e| e.to_string())?;
@@ -1506,7 +1511,11 @@ impl SolveApp {
                 _ => {}
             }
             if id == "view.render_inspector" {
-                render_workspace::set_inspector_visible(self, v.get("visible").and_then(Value::as_bool).unwrap_or(true));
+                if v.get("visible").and_then(Value::as_bool).unwrap_or(true) {
+                    render_workspace::reveal_inspector(self);
+                } else {
+                    render_workspace::request_inspector_visibility(self, false);
+                }
             }
             if id == "view.render_live"
                 && let Some(paused) = v.get("paused").and_then(Value::as_bool)
@@ -1691,6 +1700,7 @@ impl SolveApp {
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
                     dim_view::cancel();
+                    self.bom = None;
                     design_properties::close_object(self);
                     timeline::stop_playback(self);
                     self.menu.props = None;
@@ -2201,7 +2211,11 @@ impl SolveApp {
             return;
         }
         if id == "assembly.bom" {
-            bom_panel::open(self);
+            if panel_runtime::production_active(self) && bom_panel::available(self) {
+                bom_panel::set_focus_pending(self, true);
+            } else {
+                bom_panel::open(self);
+            }
             return;
         }
         // Inspect → Measure → Properties: the window, not a reply nobody sees (#8095).
@@ -3703,6 +3717,9 @@ impl SolveApp {
                 });
         }
         if render_workspace::active(self) {
+            if panel_runtime::production_active(self) {
+                render_workspace::inspector_panel::owner_overlays(self, ui.ctx());
+            }
             render_ui::overlays(self, ui);
         }
         // Refresh persistent chrome before the host's early confirmation pair.
@@ -3727,7 +3744,9 @@ impl SolveApp {
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
-        bom_panel::show(self, ui.ctx());
+        if !panel_runtime::production_active(self) {
+            bom_panel::show(self, ui.ctx());
+        }
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());
