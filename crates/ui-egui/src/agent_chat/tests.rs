@@ -4063,6 +4063,71 @@ fn a_long_message_keeps_the_buttons_in_the_window() {
     }
 }
 
+/// The chat's text size: the preference within its range, and A− / A+ under the input change it
+/// a step at a time.
+#[test]
+fn the_chat_text_size_follows_the_preference_and_its_buttons() {
+    assert_eq!(panel::text_scale(1.25), 1.25);
+    assert_eq!(panel::text_scale(9.0), 2.0);
+    assert_eq!(panel::text_scale(0.1), 0.7);
+    assert_eq!(panel::text_scale(f32::NAN), 1.0);
+    assert_eq!(panel::text_step(1.0, 1), 1.1);
+    assert_eq!(panel::text_step(1.25, -1), 1.2, "back on whole steps");
+    assert_eq!(panel::text_step(1.25, 1), 1.3, "up to the next whole step");
+    assert_eq!(panel::text_step(1.1, 1), 1.2);
+    assert_eq!(panel::text_step(2.0, 1), 2.0);
+    assert_eq!(panel::text_step(0.7, -1), 0.7);
+    let normal = solidcraft_theme::Tokens::get().font_body;
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width": 1600.0, "height": 1000.0}));
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(8);
+    assert_eq!(h.app.preferences.agent_chat_text_scale, 1.0, "the usual size at first");
+    h.app.agent_chat.push(Item::User {
+        text: "Make the plate thicker".into(),
+        image: false,
+        pictures: Vec::new(),
+        files: Vec::new(),
+        context: Context::default(),
+    });
+    h.app.agent_chat.push(Item::Agent { thought: false, text: "## Done\n\nThe plate is **12 mm** now, see `plate.thickness`.".into() });
+    h.frames(2);
+    // Three lines in the input: its height follows the line height, so the text size shows in it.
+    h.app.agent_chat.input = "one\ntwo\nthree".into();
+    h.frames(2);
+    let input_usual = crate::scenario::rect_of("agent_chat:input").expect("the input is drawn").height();
+    let switcher_usual = crate::scenario::rect_of("workspace_switcher").expect("the toolbar is drawn");
+    let click = |h: &mut crate::scenario::Harness, button: &str| {
+        let at = crate::scenario::handle_at(&format!("agent_chat:{button}")).unwrap_or_else(|| panic!("{button} is drawn"));
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(2);
+    };
+    for _ in 0..3 {
+        click(&mut h, "text_bigger");
+    }
+    assert!((h.app.preferences.agent_chat_text_scale - 1.3).abs() < 1e-4, "{}", h.app.preferences.agent_chat_text_scale);
+    assert!(crate::scenario::rect_of("agent_chat:input").is_some_and(|r| r.height() > input_usual + 2.0), "the input grows with the text");
+    assert_eq!(crate::scenario::rect_of("workspace_switcher"), Some(switcher_usual), "the rest of the window does not");
+    click(&mut h, "text_smaller");
+    assert!((h.app.preferences.agent_chat_text_scale - 1.2).abs() < 1e-4, "{}", h.app.preferences.agent_chat_text_scale);
+    for _ in 0..12 {
+        click(&mut h, "text_bigger");
+    }
+    assert_eq!(h.app.preferences.agent_chat_text_scale, 2.0, "no bigger than the range");
+    h.app.agent_chat.input = "Please add a fillet on every outside edge.\n".repeat(20);
+    h.frames(4);
+    let [_, y] = h.widget("Send").expect("Send is drawn with big text");
+    assert!(y < 1000.0, "Send is in the window at {y}");
+    assert!(crate::scenario::handle_at("agent_chat:text_smaller").is_some_and(|p| p.y < 1000.0), "A− stays in the window");
+    assert_eq!(solidcraft_theme::Tokens::get().font_body, normal, "the rest of the window keeps the usual sizes");
+    // The narrowest panel still has both buttons in its footer, in order.
+    h.app.preferences.agent_chat_width = 280.0;
+    h.frames(4);
+    let (smaller, bigger) = (crate::scenario::handle_at("agent_chat:text_smaller"), crate::scenario::handle_at("agent_chat:text_bigger"));
+    let input = crate::scenario::rect_of("agent_chat:input").expect("the input is drawn");
+    assert!(smaller.zip(bigger).is_some_and(|(s, b)| input.min.x <= s.x && s.x < b.x && b.x <= input.max.x), "{smaller:?} {bigger:?} in {input:?}");
+}
+
 fn test_png(colour: [u8; 4], width: u32) -> Vec<u8> {
     let mut png = Vec::new();
     let image = image::RgbaImage::from_pixel(width, 4, image::Rgba(colour));

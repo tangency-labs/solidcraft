@@ -1,0 +1,50 @@
+{
+  "en": {
+    "ui.agent_chat_text_bigger": "Bigger text",
+    "ui.agent_chat_text_size": "Text size",
+    "ui.agent_chat_text_size_note": "The size of the chat's messages and input. The A− and A+ buttons under the input change it too.",
+    "ui.agent_chat_text_smaller": "Smaller text"
+  },
+  "ar": {
+    "ui.agent_chat_text_bigger": "نص أكبر",
+    "ui.agent_chat_text_size": "حجم النص",
+    "ui.agent_chat_text_size_note": "حجم رسائل المحادثة وحقل الإدخال. يغيّره أيضًا الزرّان A− وA+ أسفل حقل الإدخال.",
+    "ui.agent_chat_text_smaller": "نص أصغر"
+  },
+  "de": {
+    "ui.agent_chat_text_bigger": "Größerer Text",
+    "ui.agent_chat_text_size": "Textgröße",
+    "ui.agent_chat_text_size_note": "Die Größe der Nachrichten und der Eingabe im Chat. Die Schaltflächen A− und A+ unter der Eingabe ändern sie ebenfalls.",
+    "ui.agent_chat_text_smaller": "Kleinerer Text"
+  },
+  "he": {
+    "ui.agent_chat_text_bigger": "טקסט גדול יותר",
+    "ui.agent_chat_text_size": "גודל טקסט",
+    "ui.agent_chat_text_size_note": "גודל ההודעות ושדה הקלט בצ'אט. גם הכפתורים A− ו־A+ שמתחת לשדה הקלט משנים אותו.",
+    "ui.agent_chat_text_smaller": "טקסט קטן יותר"
+  },
+  "ja": {
+    "ui.agent_chat_text_bigger": "文字を大きく",
+    "ui.agent_chat_text_size": "文字サイズ",
+    "ui.agent_chat_text_size_note": "チャットのメッセージと入力欄の文字の大きさです。入力欄の下の A− と A+ ボタンでも変更できます。",
+    "ui.agent_chat_text_smaller": "文字を小さく"
+  },
+  "ko": {
+    "ui.agent_chat_text_bigger": "텍스트 크게",
+    "ui.agent_chat_text_size": "텍스트 크기",
+    "ui.agent_chat_text_size_note": "채팅 메시지와 입력란의 텍스트 크기입니다. 입력란 아래의 A−, A+ 버튼으로도 바꿀 수 있습니다.",
+    "ui.agent_chat_text_smaller": "텍스트 작게"
+  },
+  "vi": {
+    "ui.agent_chat_text_bigger": "Chữ lớn hơn",
+    "ui.agent_chat_text_size": "Cỡ chữ",
+    "ui.agent_chat_text_size_note": "Cỡ chữ của tin nhắn và ô nhập trong khung trò chuyện. Các nút A− và A+ bên dưới ô nhập cũng thay đổi cỡ chữ này.",
+    "ui.agent_chat_text_smaller": "Chữ nhỏ hơn"
+  },
+  "zh": {
+    "ui.agent_chat_text_bigger": "放大文字",
+    "ui.agent_chat_text_size": "文字大小",
+    "ui.agent_chat_text_size_note": "聊天中消息和输入框的文字大小。输入框下方的 A− 和 A+ 按钮也可以调整。",
+    "ui.agent_chat_text_smaller": "缩小文字"
+  }
+}
