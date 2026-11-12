@@ -662,6 +662,50 @@ fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
     assert!(angle.abs() > east, "the seam at {angle} rad crosses the hole");
 }
 
+/// A seam's angle test (`seams::angular_sign`): a ruling's angular speed is 0, and rounding
+/// leaves its one coefficient a few 1e-17 either way; that is not one way. An arc's is.
+#[test]
+fn a_ruling_is_not_certified_one_way_by_its_rounding() {
+    let ruling = [[0.1, 0.7], [0.3, 2.1]];
+    let raw = ruling[0][0] * (ruling[1][1] - ruling[0][1]) - ruling[0][1] * (ruling[1][0] - ruling[0][0]);
+    assert_ne!(raw, 0.0, "the case needs a rounded coefficient");
+    assert_eq!(seams::angular_sign(&ruling), None);
+    // A quarter circle's rational quadratic, homogeneous: counterclockwise.
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    assert_eq!(seams::angular_sign(&[[1.0, 0.0], [w, w], [0.0, 1.0]]), Some(1));
+    assert_eq!(seams::angular_sign(&[[0.0, 1.0], [w, w], [1.0, 0.0]]), Some(-1));
+}
+
+/// The arcs a seam must keep clear of are widened by their rounding and by the tolerance at their
+/// radius: a vertex a rounding past a ruling's angle, or a loop within the tolerance of the seam,
+/// is not clear.
+#[test]
+fn blocked_arcs_keep_a_seam_off_by_the_tolerance() {
+    let frame = seams::Perpendicular::about(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+    let tol = 1e-3;
+    // A ruling at angle 0, radius 1.
+    let ruling = BCurve::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[1.0, 0.0, 0.0], [1.0, 0.0, 1.0]] };
+    let blocked = seams::Blocked { arcs: frame.pieces(&ruling, [0.0, 1.0], tol).iter().map(seams::Piece::blocked).collect() };
+    assert!(!blocked.clear(1e-12), "a rounding off the ruling");
+    assert!(!blocked.clear(0.5 * tol), "within the tolerance of the ruling");
+    assert!(blocked.clear(2.0 * tol));
+    // A hole's arc of radius 2 from 0.1 to 0.3 rad round the axis: clear only beyond tol / 2.
+    let arc = BCurve::Circle { frame: Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: 2.0 };
+    let blocked = seams::Blocked { arcs: frame.pieces(&arc, [0.1, 0.3], tol).iter().map(seams::Piece::blocked).collect() };
+    assert!(!blocked.clear(0.3 + 0.25 * tol));
+    assert!(blocked.clear(0.3 + 0.75 * tol / 2.0 + 0.5 * tol));
+}
+
+/// A control point that is not a number gives no arc (the whole turn is blocked), never one
+/// that leaves it out.
+#[test]
+fn an_arc_of_points_not_finite_is_none() {
+    let frame = seams::Perpendicular::about(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+    let points = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(f64::NAN, 1.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
+    assert!(frame.span(&points, 0.0).is_none());
+    assert!(frame.span(&[Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)], 0.0).is_some());
+}
+
 /// A half torus between its rims (a fillet round a bore, `torus_ring` of the step-conformance
 /// set): its face winds around the axis between two circles about it, and gets a seam round the
 /// tube on the face's side, closing the solid with the annulus.

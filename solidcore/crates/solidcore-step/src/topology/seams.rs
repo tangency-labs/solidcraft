@@ -24,6 +24,7 @@ use crate::vec::Vec3Geom as _;
 use std::f64::consts::{PI, TAU};
 
 use crate::kernel::{CurveEval, SurfaceEval};
+use solidcore::nurbs::math::gamma;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface, Vertex};
 
@@ -1202,8 +1203,10 @@ impl Builder<'_, '_> {
     /// Bernstein coefficients of its angular speed all have one sign. Blocked: every piece of the
     /// other loops; of the two loops, a piece whose angle is not monotone, and where two pieces
     /// reach the same angles (save two pieces one after the other running the same way, which
-    /// meet at their shared end only). `None` round a torus's tube, where the loops wind in v
-    /// and the angle about the axis does not part them.
+    /// meet at their shared end only). Each blocked arc is widened by its rounding and by the
+    /// tolerance at the piece's smallest radius (`tol / r`), so a vertex that lies off its curve's
+    /// end by a rounding, or a loop within the tolerance of the seam, is not clear. `None` round a
+    /// torus's tube, where the loops wind in v and the angle about the axis does not part them.
     fn blocked_angles(&self, fi: usize, la: usize, lb: usize, ax: &Axis) -> R<Option<Blocked>> {
         if ax.kind.winds_in() != 0 {
             return Ok(None);
@@ -1214,8 +1217,7 @@ impl Builder<'_, '_> {
         for (li, l) in face.loops.iter().enumerate() {
             let es = match l {
                 LoopB::Vertex(v) => {
-                    let a = frame.angle(self.vpoint(*v)?);
-                    arcs.push([a, a]);
+                    arcs.push(frame.point_arc(self.vpoint(*v)?, self.tol));
                     continue;
                 }
                 LoopB::Edges(es) => es,
@@ -1224,7 +1226,7 @@ impl Builder<'_, '_> {
             let mut pieces: Vec<Piece> = Vec::new();
             for &(e, forward) in es {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
-                let mut own = frame.pieces(&edge.curve, edge.interval);
+                let mut own = frame.pieces(&edge.curve, edge.interval, self.tol);
                 if !forward {
                     own.reverse();
                     for p in &mut own {
@@ -1234,20 +1236,20 @@ impl Builder<'_, '_> {
                 pieces.extend(own);
             }
             if li != la && li != lb {
-                arcs.extend(pieces.iter().map(|p| p.arc));
+                arcs.extend(pieces.iter().map(Piece::blocked));
                 continue;
             }
             let n = pieces.len();
             for (i, p) in pieces.iter().enumerate() {
                 if p.runs.is_none() {
-                    arcs.push(p.arc);
+                    arcs.push(p.blocked());
                 }
                 for (j, q) in pieces.iter().enumerate().skip(i + 1) {
                     let next = j == i + 1 || (i == 0 && j + 1 == n);
                     if next && p.runs.is_some() && p.runs == q.runs {
                         continue;
                     }
-                    arcs.extend(overlap(p.arc, q.arc));
+                    arcs.extend(overlap(p.arc, q.arc).into_iter().map(|a| padded(a, p.pad.max(q.pad))));
                 }
             }
         }
@@ -1342,7 +1344,7 @@ fn remove_loop(face: &mut super::FaceB, gone: usize, kept: usize) {
 }
 
 /// Directions square to an axis, to measure angles about it.
-struct Perpendicular {
+pub(super) struct Perpendicular {
     origin: Vec3,
     x: Vec3,
     y: Vec3,
@@ -1350,7 +1352,11 @@ struct Perpendicular {
 
 impl Perpendicular {
     fn new(ax: &Axis) -> Self {
-        let z = ax.z;
+        Self::about(ax.origin, ax.z)
+    }
+
+    /// Directions square to the axis through `origin` along unit `z`.
+    pub(super) fn about(origin: Vec3, z: Vec3) -> Self {
         let pick = if z.x.abs() <= z.y.abs() && z.x.abs() <= z.z.abs() {
             Vec3::new(1.0, 0.0, 0.0)
         } else if z.y.abs() <= z.z.abs() {
@@ -1359,7 +1365,7 @@ impl Perpendicular {
             Vec3::new(0.0, 0.0, 1.0)
         };
         let x = (pick - z * pick.dot(z)).normalized().unwrap_or(Vec3::new(1.0, 0.0, 0.0));
-        Perpendicular { origin: ax.origin, x, y: z.cross(x) }
+        Perpendicular { origin, x, y: z.cross(x) }
     }
 
     /// `p`'s angle about the axis, right-handed.
@@ -1371,8 +1377,8 @@ impl Perpendicular {
     /// The Bézier pieces of a curve's NURBS form on `interval` (a line, circle or ellipse on its
     /// form, [`crate::kernel::form::curve`]): each piece's arc of angles, the whole turn where its
     /// hull is not clear of the axis, and the way its angle runs.
-    fn pieces(&self, curve: &BCurve, interval: [f64; 2]) -> Vec<Piece> {
-        let whole = || vec![Piece { arc: [0.0, TAU], runs: None }];
+    pub(super) fn pieces(&self, curve: &BCurve, interval: [f64; 2], tol: f64) -> Vec<Piece> {
+        let whole = || vec![Piece { arc: [0.0, TAU], pad: 0.0, runs: None }];
         let form = match curve {
             BCurve::Spline { .. } | BCurve::RationalSpline { .. } => Some((curve.clone(), interval)),
             other => crate::kernel::form::curve(other, interval),
@@ -1403,7 +1409,7 @@ impl Perpendicular {
                 return whole();
             }
             let points: Vec<Vec3> = piece.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect();
-            let Some(arc) = self.span(&points) else { return whole() };
+            let Some((arc, pad)) = self.span(&points, tol) else { return whole() };
             // The homogeneous coordinates square to the axis: the angle of the piece's points.
             let flat: Vec<[f64; 2]> = piece
                 .iter()
@@ -1412,59 +1418,110 @@ impl Perpendicular {
                     [d.dot(self.x), d.dot(self.y)]
                 })
                 .collect();
-            out.push(Piece { arc, runs: angular_sign(&flat) });
+            out.push(Piece { arc, pad, runs: angular_sign(&flat) });
         }
         out
     }
 
     /// The arc of angles `[from, to]` (to − from under π) that points spanning less than half a
-    /// turn reach, measured from the first; `None` when they reach the axis or half a turn.
-    fn span(&self, points: &[Vec3]) -> Option<[f64; 2]> {
+    /// turn reach, measured from the first, and how far to widen it where it blocks a seam: its
+    /// rounding (each angle's `atan2` and coordinates, `γ` of the operations at the points'
+    /// distance over their radius) and `tol` at the smallest radius the points' hull reaches (the
+    /// least radius times the cosine of half the arc, as their convex hull lies within the wedge).
+    /// `None` when a point is not finite or on the axis, or they reach half a turn.
+    pub(super) fn span(&self, points: &[Vec3], tol: f64) -> Option<([f64; 2], f64)> {
         let first = *points.first()?;
         let a0 = self.angle(first);
-        let (mut lo, mut hi) = (0.0f64, 0.0f64);
+        let (mut lo, mut hi, mut least, mut far) = (0.0f64, 0.0f64, f64::INFINITY, 0.0f64);
         for p in points {
-            let d = *p - self.origin;
-            if d.dot(self.x) == 0.0 && d.dot(self.y) == 0.0 {
+            if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
                 return None;
             }
-            let r = wrap(self.angle(*p) - a0);
-            (lo, hi) = (lo.min(r), hi.max(r));
+            let d = *p - self.origin;
+            let r = d.dot(self.x).hypot(d.dot(self.y));
+            if !(r > 0.0) {
+                return None;
+            }
+            let t = wrap(self.angle(*p) - a0);
+            if !t.is_finite() {
+                return None;
+            }
+            (lo, hi, least, far) = (lo.min(t), hi.max(t), least.min(r), far.max(d.len() / r));
         }
-        (hi - lo < PI).then_some([a0 + lo, a0 + hi])
+        if !(hi - lo < PI) {
+            return None;
+        }
+        let r = least * (0.5 * (hi - lo)).cos();
+        let pad = gamma(16) * (PI + far) + if tol > 0.0 { tol / r } else { 0.0 };
+        (pad.is_finite() && r > 0.0).then_some(([a0 + lo, a0 + hi], pad))
+    }
+
+    /// A vertex loop's point as a blocked arc: its angle, widened as [`Self::span`] widens one.
+    fn point_arc(&self, p: Vec3, tol: f64) -> [f64; 2] {
+        match self.span(&[p], tol) {
+            Some((arc, pad)) => padded(arc, pad),
+            None => [0.0, TAU],
+        }
     }
 }
 
 /// A Bézier piece of a loop's edge: the arc of angles about the axis it lies within, and the
 /// way its angle runs along the loop (1 up, -1 down; `None` where it is not certainly one way).
-struct Piece {
+pub(super) struct Piece {
     arc: [f64; 2],
+    /// How far its arc is widened where it blocks a seam ([`Perpendicular::span`]).
+    pad: f64,
     runs: Option<i8>,
+}
+
+impl Piece {
+    /// The arc the piece blocks: its own, widened by its pad.
+    pub(super) fn blocked(&self) -> [f64; 2] {
+        padded(self.arc, self.pad)
+    }
+}
+
+/// `arc` widened by `pad` at both ends; the whole turn where that reaches round.
+fn padded([a, b]: [f64; 2], pad: f64) -> [f64; 2] {
+    if !(b - a + 2.0 * pad < TAU) {
+        return [0.0, TAU];
+    }
+    [a - pad, b + pad]
 }
 
 /// The sign of the angular speed of the planar Bézier curve with homogeneous control points
 /// `a` (x·w, y·w about the axis; the angle of the point is the angle of these): `A × A'`, a
 /// polynomial of degree 2n − 1 whose Bernstein coefficients are
 /// `Σ_{i+j=k} C(n,i) C(n−1,j) / C(2n−1,k) · n (a_i × (a_{j+1} − a_j))`. All of one strict sign:
-/// the angle runs that way over the whole piece.
-fn angular_sign(a: &[[f64; 2]]) -> Option<i8> {
+/// the angle runs that way over the whole piece. A coefficient's sign counts only where it
+/// exceeds its rounding, `γ_K` of the sum of its terms' magnitudes (a ruling's coefficients
+/// are 0, computed as a rounding either way): otherwise `None`.
+pub(super) fn angular_sign(a: &[[f64; 2]]) -> Option<i8> {
     let n = a.len().checked_sub(1).filter(|n| *n > 0)?;
     let binomial = |n: usize, k: usize| -> f64 { (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64) };
-    let cross = |p: [f64; 2], q: [f64; 2]| p[0] * q[1] - p[1] * q[0];
+    // Each coefficient: n + 1 terms of a binomial ratio (3n operations at most), a difference, a
+    // cross product and the sum.
+    let bound = gamma(6 * n + 8);
     let mut sign = 0i8;
     for k in 0..2 * n {
-        let mut c = 0.0;
+        let (mut c, mut size) = (0.0, 0.0);
         for i in 0..=n.min(k) {
             let j = k - i;
             if j > n - 1 {
                 continue;
             }
             let (Some(&ai), Some(&aj), Some(&aj1)) = (a.get(i), a.get(j), a.get(j + 1)) else { return None };
-            c += binomial(n, i) * binomial(n - 1, j) / binomial(2 * n - 1, k) * n as f64 * cross(ai, [aj1[0] - aj[0], aj1[1] - aj[1]]);
+            let f = binomial(n, i) * binomial(n - 1, j) / binomial(2 * n - 1, k) * n as f64;
+            let (d0, d1) = (aj1[0] - aj[0], aj1[1] - aj[1]);
+            c += f * (ai[0] * d1 - ai[1] * d0);
+            size += f * (ai[0].abs() * (aj1[1].abs() + aj[1].abs()) + ai[1].abs() * (aj1[0].abs() + aj[0].abs()));
         }
-        let s = if c > 0.0 {
+        if !(c.is_finite() && size.is_finite()) {
+            return None;
+        }
+        let s = if c > bound * size {
             1
-        } else if c < 0.0 {
+        } else if c < -bound * size {
             -1
         } else {
             return None;
@@ -1493,13 +1550,13 @@ fn overlap(p: [f64; 2], q: [f64; 2]) -> Vec<[f64; 2]> {
 }
 
 /// Arcs of angle about an axis that a face's other loops can reach ([`Builder::blocked_angles`]).
-struct Blocked {
-    arcs: Vec<[f64; 2]>,
+pub(super) struct Blocked {
+    pub(super) arcs: Vec<[f64; 2]>,
 }
 
 impl Blocked {
     /// `angle` is outside every arc.
-    fn clear(&self, angle: f64) -> bool {
+    pub(super) fn clear(&self, angle: f64) -> bool {
         self.arcs.iter().all(|[a, b]| (angle - a).rem_euclid(TAU) > b - a)
     }
 
