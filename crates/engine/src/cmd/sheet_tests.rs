@@ -645,6 +645,14 @@ fn contour_flange_takes_tangent_arcs_and_develops_their_bends() {
     assert!((bends[0]["radius"].as_f64().unwrap_or(0.0) - 8.0).abs() < 1e-9, "{f}");
     assert!((bends[0]["angle_deg"].as_f64().unwrap_or(0.0) - 90.0).abs() < 1e-9, "{f}");
     assert!((bends[0]["allowance"].as_f64().unwrap_or(0.0) - FRAC_PI_2 * 9.0).abs() < 1e-9, "{f}");
+    // The same chain listed out of order builds the same flange: the curves are put in chain
+    // order before their segments are joined.
+    run(&mut s, "edit.undo", json!({}));
+    let r = run(&mut s, "sheet.flange", json!({"sketch": "Arc", "curves": ["l1", "l2", "a1"], "distance": 50, "rule": "R"}));
+    assert!(r.get("error").is_none(), "{r}");
+    let f = flat(&mut s);
+    let got = f["flat_size_mm"][0].as_f64().unwrap_or(f64::NAN);
+    assert!((got - want).abs() < 1e-6, "{got} vs {want}: {f}");
     // A 180° half pipe alone: outer radius 56 and 1.5 thick, with no flat panel before or
     // after it.
     let mut s = Session::default();
