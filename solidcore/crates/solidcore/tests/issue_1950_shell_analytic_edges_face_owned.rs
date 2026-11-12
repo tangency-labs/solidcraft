@@ -85,7 +85,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_chamfer_cone_on_arc = true;
     f.offset_excess_faces_after_merge = true;
     f.offset_clip_right_side_out = true;
-    f.revolution_offset_axis_both_sides = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
