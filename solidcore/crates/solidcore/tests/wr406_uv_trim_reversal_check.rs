@@ -175,7 +175,7 @@ fn measure_turn(turn: f64) -> Measured {
 }
 
 #[test]
-fn wr406_bored_plate_check_reverses_or_keeps_the_hole_trims() {
+fn wr406_bored_plate_check_keeps_the_hole_trims() {
     // every trimmed face is one of the plate's 60 x 4 sides
     let mut k = Kernel::default();
     let body = bored_plate(&mut k);

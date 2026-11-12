@@ -1644,27 +1644,27 @@ mod issue_891_tests {
                 );
             }
 
-            let tf = run(false);
-            let tt = run(true);
+            let made = run(false);
+            let no_new = run(true);
 
-            for r in [&tf, &tt] {
+            for r in [&made, &no_new] {
                 assert_eq!(r.status, SUCCESS);
             }
 
             // The default check creates at least one UV trim on the chord.
             assert!(
-                tf.after.iter().any(|id| chord.contains(id)),
+                made.after.iter().any(|id| chord.contains(id)),
                 "the default check created no UV trim on the chord"
             );
 
             // With the fix no chord trim is made, and nothing present is removed.
-            assert_eq!(tt.before, tt.after, "the fix created or removed a UV trim");
-            assert!(tt.after.iter().all(|id| !chord.contains(id)));
+            assert_eq!(no_new.before, no_new.after, "the fix created or removed a UV trim");
+            assert!(no_new.after.iter().all(|id| !chord.contains(id)));
 
             // The new flag leaves the existing arc trims as they are.
-            assert_eq!(tf.arc_after, tt.arc_after);
+            assert_eq!(made.arc_after, no_new.arc_after);
             // And it does not change the trims present before the check.
-            assert_eq!(tf.arc_before, tt.arc_before);
+            assert_eq!(made.arc_before, no_new.arc_before);
         }
 
         /// Provide every edge use's trim through the public evaluator once, as setup.
