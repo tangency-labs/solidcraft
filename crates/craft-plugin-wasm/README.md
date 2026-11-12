@@ -36,7 +36,9 @@ The [WIT](../craft-plugin/wit/plugin.wit) imports engine commands, logging, prog
 cancellation, named files and a clock. No WASI is linked. Commands are intersected with
 the host catalog; read entries cannot invoke commands marked edit. File access requires
 matching approved grants and `PluginHost::authorize_file_path` approval for each complete
-path. There is no ambient filesystem access. Wall time requires clock permission.
+path. A symbolic link (or Windows junction) anywhere in a requested path inside a granted
+folder is refused, not followed. There is no ambient filesystem access. Wall time requires
+clock permission.
 Requests for `net` and reserved socket, HTTP and fetch imports are refused.
 
 Fuel, epoch interruption and store limits bound guest execution. Defaults are
