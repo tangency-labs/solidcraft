@@ -1617,7 +1617,9 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                         } else if let Some(summary) = crate::timeline::import_status(app, &made.result) {
                             summary
                         } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
-                            format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
+                            // A design file is opened; a STEP or mesh file (opened or inserted) is imported.
+                            let done = if solidcraft_engine::io::is_design_path(&request.path) { "opened" } else { "imported" };
+                            format!("{done} with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
                             // Built here, outside the window's language scope: in the language
                             // chosen, as the other statuses of this file are.

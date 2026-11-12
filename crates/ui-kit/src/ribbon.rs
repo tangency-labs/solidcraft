@@ -449,6 +449,8 @@ pub struct Button<'a> {
     pub app_paints: bool,
     /// The other commands it stands for (a split button's variants), in the search's eyes.
     pub covers: &'a [&'a str],
+    /// Something waits for the user (a linked design changed): the shared mark in its corner.
+    pub attention: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -732,6 +734,12 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             let icon_rect =
                 Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
             crate::icons::paint_icon(&painter, icon_rect, b.icon, if b.enabled { 1.0 } else { 0.35 });
+            if b.attention {
+                // In the button's top-right corner, as far in from its edges as its label's padding.
+                let corner = whole.shrink(t.space_6);
+                crate::attention_mark(&painter, corner, None);
+                solidcraft_ui_registry::publish_handle(&format!("attention:{}", b.id), crate::attention_at(corner));
+            }
             if !b.app_paints {
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && b.enabled, b.name));
             }

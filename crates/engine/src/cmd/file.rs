@@ -668,6 +668,9 @@ fn opened_design(
         app: lock.app,
         opened: lock.opened,
     });
+    // Linked designs whose file can't be found or read, and names a merged file holds twice.
+    let mut warnings = s.doc.newer_file.as_ref().map(|file| file.warnings()).unwrap_or_default();
+    warnings.extend(super::parameters_link::open_warnings(s));
     reply(OpenResult::Design(OpenedDesign {
         path: path.to_string(),
         features: s.doc.features.len(),
@@ -682,7 +685,7 @@ fn opened_design(
             not_understood: file.not_understood.clone(),
             notice: file.notice(),
         }),
-        warnings: s.doc.newer_file.as_ref().map(|file| file.warnings()),
+        warnings: (!warnings.is_empty()).then_some(warnings),
         param_warnings: Vec::new(),
     }))
 }
@@ -955,6 +958,9 @@ impl Session {
         validation: solidcraft_kernel::Validation,
     ) -> Self {
         super::component_link::resolve_design_links(&mut doc, path);
+        if let Some(path) = path {
+            super::parameters_link::opened(&mut doc, path);
+        }
         Self::opened_validating(doc, saved, validation).located(path)
     }
 
@@ -1028,6 +1034,13 @@ impl Session {
             let links = super::design_link::rebased(&self.doc, self.path.as_deref(), path);
             if links != self.doc.links {
                 design.to_mut().links = links;
+            }
+        }
+        // Linked designs are resolved in memory too; the file keeps them relative to its folder.
+        if !self.doc.linked_designs.is_empty() {
+            let linked = super::parameters_link::file_form(&self.doc, path);
+            if linked != self.doc.linked_designs {
+                design.to_mut().linked_designs = linked;
             }
         }
         if !self.visibility.is_empty() {
@@ -1257,7 +1270,7 @@ fn export_to(
         if !bodies.is_empty() {
             return Err(bad(cmd, "design JSON exports the complete document; omit bodies"));
         }
-        solidcraft_io::write_design(&s.design())
+        solidcraft_io::write_design(&s.design_at(Some(path)))
     } else if format == Format::Step && bodies.is_empty() && !s.doc.occurrences.is_empty() {
         solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
     } else {

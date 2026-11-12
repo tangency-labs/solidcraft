@@ -675,8 +675,12 @@ pub struct ParameterRow {
     /// Why it can't be worked out, when it can't.
     pub error: Option<String>,
     pub comment: String,
-    /// `user`, `sketch` (a dimension) or `feature` (a feature's named input).
+    /// `user`, `sketch` (a dimension), `feature` (a feature's named input) or `linked` (from
+    /// another design).
     pub source: String,
+    /// For a linked parameter: its linked design's file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub design: Option<String>,
     /// For a feature input: the feature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feature: Option<String>,
@@ -704,6 +708,7 @@ impl From<ParamRow> for ParameterRow {
             error: r.error,
             comment: r.comment,
             source: r.source.to_string(),
+            design: r.design,
             feature: r.feature,
             input: r.input.map(str::to_string),
             favorite: r.favorite,
