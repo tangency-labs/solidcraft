@@ -13,6 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use super::cam_adaptive::{AdaptiveOp, AdaptiveReport, AdaptiveRoughingOp};
 use super::types::SketchRef;
 
 #[path = "cam_leads.rs"]
@@ -254,6 +255,8 @@ macro_rules! operation {
         }
     };
 }
+
+pub(crate) use operation;
 
 /// What every operation has.
 #[derive(Clone, Copy, Debug)]
@@ -602,6 +605,8 @@ pub use xrotary::{IndexedPatternOp, WrapContourOp, WrapPocketOp};
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Op3Spec {
+    Adaptive(AdaptiveOp),
+    AdaptiveRoughing(AdaptiveRoughingOp),
     Contour(ContourOp),
     Pocket(PocketOp),
     Parallel(ParallelOp),
@@ -619,6 +624,8 @@ impl Op3Spec {
     /// What every operation has.
     pub fn common(&self) -> Common<'_> {
         match self {
+            Op3Spec::Adaptive(o) => o.common(),
+            Op3Spec::AdaptiveRoughing(o) => o.common(),
             Op3Spec::Contour(o) => o.common(),
             Op3Spec::Pocket(o) => o.common(),
             Op3Spec::Parallel(o) => o.common(),
@@ -660,8 +667,9 @@ pub struct IndexedOp {
     pub enabled: Option<bool>,
     /// The A angle, degrees.
     pub a_deg: f64,
-    /// The 3-axis operation (`contour`, `pocket`, `parallel`, `roughing`, `waterline`,
-    /// `scallop`, `steep_shallow`, `pencil`, `rest_finish`, `drill` or `chamfer`).
+    /// The 3-axis operation (`adaptive`, `adaptive_roughing`, `contour`, `pocket`, `parallel`,
+    /// `roughing`, `waterline`, `scallop`, `steep_shallow`, `pencil`, `rest_finish`, `drill` or
+    /// `chamfer`).
     pub operation: Box<Op3Spec>,
 }
 
@@ -689,6 +697,8 @@ pub enum OperationSpec {
     Chamfer(ChamferOp),
     Bore(BoreOp),
     ThreadMill(ThreadMillOp),
+    Adaptive(AdaptiveOp),
+    AdaptiveRoughing(AdaptiveRoughingOp),
 }
 
 impl OperationSpec {
@@ -716,6 +726,8 @@ impl OperationSpec {
             OperationSpec::Chamfer(o) => o.common(),
             OperationSpec::Bore(o) => o.common(),
             OperationSpec::ThreadMill(o) => o.common(),
+            OperationSpec::Adaptive(o) => o.common(),
+            OperationSpec::AdaptiveRoughing(o) => o.common(),
         }
     }
 }
@@ -790,6 +802,10 @@ pub struct OperationReport {
     pub gouge_at: Option<GougeAt>,
     /// Moves with a holder collision.
     pub holder_collisions: usize,
+    /// An adaptive operation's engagement, measured along its path, and the plain pocket it is
+    /// compared with.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adaptive: Option<AdaptiveReport>,
     pub warnings: Vec<String>,
 }
 

@@ -134,8 +134,9 @@ pub struct IndexedPatternOp {
     /// With `count`: the first angle, degrees. Default: 0.
     #[serde(default)]
     pub start_deg: Option<f64>,
-    /// The 3-axis operation (`contour`, `pocket`, `parallel`, `roughing`, `waterline`,
-    /// `scallop`, `steep_shallow`, `pencil`, `rest_finish`, `drill` or `chamfer`), its heights,
-    /// polygon and boundary in the frame each angle brings under the tool.
+    /// The 3-axis operation (`adaptive`, `adaptive_roughing`, `contour`, `pocket`, `parallel`,
+    /// `roughing`, `waterline`, `scallop`, `steep_shallow`, `pencil`, `rest_finish`, `drill` or
+    /// `chamfer`), its heights, polygon and boundary in the frame each angle brings under the
+    /// tool.
     pub operation: Box<Op3Spec>,
 }

@@ -123,6 +123,8 @@ pub(super) fn name3_mut(op: &mut Op3Spec) -> &mut String {
         Op3Spec::RestFinish(o) => &mut o.name,
         Op3Spec::Drill(o) => &mut o.name,
         Op3Spec::Chamfer(o) => &mut o.name,
+        Op3Spec::Adaptive(o) => &mut o.name,
+        Op3Spec::AdaptiveRoughing(o) => &mut o.name,
     }
 }
 
@@ -140,6 +142,8 @@ fn op3_clearance(op: &Op3Spec) -> f64 {
         Op3Spec::RestFinish(o) => o.heights.clearance,
         Op3Spec::Drill(o) => o.heights.clearance,
         Op3Spec::Chamfer(o) => o.heights.clearance,
+        Op3Spec::Adaptive(o) => o.heights.clearance,
+        Op3Spec::AdaptiveRoughing(o) => o.heights.clearance,
     }
 }
 

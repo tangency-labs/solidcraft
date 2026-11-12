@@ -45,6 +45,8 @@ use crate::schema::cam::{
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+#[path = "cam_adaptive.rs"]
+mod adaptive;
 #[path = "cam_chamfer.rs"]
 mod chamfer;
 #[path = "cam_drill.rs"]
@@ -81,7 +83,9 @@ pub static COMMANDS: &[CommandSpec] = &[
              circles?, diameter_range?, sketch_points? | points, cycle?: simple | dwell | peck | chip_break, peck?, …} | chamfer \
              {sketch | polygon | holes, heights: {clearance, retract, top}, width, tip_offset?, side?} | bore {sketch + diameter_range? \
              | holes, pitch? | ramp_angle_deg?, stepover?, finish_passes?} | thread_mill {sketch | centers, pitch, thread_diameter, \
-             internal?, right_hand?, thread_depth?, radial_passes?, spring_pass?} | parallel | \
+             internal?, right_hand?, thread_depth?, radial_passes?, spring_pass?} | adaptive {sketch + profiles? | polygon, \
+             optimal_load?, min_engagement_deg?, max_engagement_deg?, helix_diameter?, compare?} | adaptive_roughing {boundary?, \
+             optimal_load?, flats?, step_up?, …} | parallel | \
              roughing | waterline | scallop | steep_shallow | pencil | rest_finish (boundary?: {rect?, polygon?, holes?}, stepover?, \
              step?, …) | indexed {a_deg, operation, name?} | indexed_pattern {a_deg: [..] | count, start_deg?, operation, name?} | \
              rotary_finish | rotary_roughing (pattern: lines | helix | rings, clearance, retract, stock_radius?) | wrap | wrap_pocket | \
@@ -89,7 +93,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              feeds?: {cut, plunge, descent?}, coolant?, gouge_check? (false: not against the part, still against fixtures), enabled?}]; unknown keys are refused); output: G-code path (required unless dry_run); preview?: \
              HTML path, another file than output (the part and toolpaths, self-contained); dry_run?: plan and check, write nothing; \
              allow_unsafe?: write even when a check fails (its first line then says so) → name, machine, post, operations: [{name, \
-             kind, tool, moves, cut_length, cut_minutes, rewinds, max_tilt_deg, a_deg?, gouge, gouge_at?, holder_collisions, warnings}], program_lines, program_head, readback: {max_tip_deviation, \
+             kind, tool, moves, cut_length, cut_minutes, rewinds, max_tilt_deg, a_deg?, gouge, gouge_at?, holder_collisions, adaptive? (the engagement measured \
+             along its path: max_engagement_deg, full_slot_share, levels, helices, …, pocket?: the plain pocket compared), warnings}], program_lines, program_head, readback: {max_tip_deviation, \
              max_axis_deviation_deg, allowed_tip, allowed_axis_deg, cut_minutes, pass}, gouge: {worst, tolerance, tessellation, \
              allowed, hits, at?: {operation, move_index, line?, xyz}, skipped, pass}, holder_collisions, cut_minutes, passed, failures, dry_run, outputs: \
              {gcode?, preview?}, notes. Without dry_run or allow_unsafe a failed check refuses and nothing is written",
@@ -672,6 +677,8 @@ struct Ctx<'a> {
     /// The band a chamfer mill is told to cut into what the model shows (a chamfer, a V-trace,
     /// a spotted hole), handed from its planning to [`Planned::band`].
     band: std::cell::Cell<Option<f64>>,
+    /// What an adaptive operation adds to its report, handed from its planning to the report.
+    adaptive: std::cell::RefCell<Option<(crate::schema::cam_adaptive::AdaptiveReport, Vec<String>)>>,
 }
 
 impl<'a> Ctx<'a> {
@@ -809,7 +816,9 @@ fn takes_kind(ty: &str, kind: ToolKind) -> Option<&'static str> {
         "thread_mill" => (matches!(kind, ThreadMill), "a thread mill"),
         // A chamfer mill traces a line to a depth (`side: on`).
         "contour" => (matches!(kind, FlatEndmill | BullNose | BallEndmill | FaceMill | Chamfer), "an end mill, a face mill or a chamfer mill"),
-        "roughing" | "rotary_roughing" => (matches!(kind, FlatEndmill | BullNose | BallEndmill), "a flat end mill, a ball end mill or a bull nose"),
+        "roughing" | "rotary_roughing" | "adaptive_roughing" => {
+            (matches!(kind, FlatEndmill | BullNose | BallEndmill), "a flat end mill, a ball end mill or a bull nose")
+        }
         _ => (matches!(kind, FlatEndmill | BullNose | BallEndmill | FaceMill), "a flat end mill, a ball end mill, a bull nose or a face mill"),
     };
     (!ok).then_some(takes)
@@ -831,6 +840,8 @@ fn type_of(spec: &OperationSpec) -> &'static str {
         OperationSpec::Chamfer(_) => "chamfer",
         OperationSpec::Bore(_) => "bore",
         OperationSpec::ThreadMill(_) => "thread_mill",
+        OperationSpec::Adaptive(_) => "adaptive",
+        OperationSpec::AdaptiveRoughing(_) => "adaptive_roughing",
         OperationSpec::RotaryFinish(_) => "rotary_finish",
         OperationSpec::RotaryRoughing(_) => "rotary_roughing",
         OperationSpec::Wrap(_) => "wrap",
@@ -855,6 +866,8 @@ fn type_of3(op: &Op3Spec) -> &'static str {
         Op3Spec::RestFinish(_) => "rest_finish",
         Op3Spec::Drill(_) => "drill",
         Op3Spec::Chamfer(_) => "chamfer",
+        Op3Spec::Adaptive(_) => "adaptive",
+        Op3Spec::AdaptiveRoughing(_) => "adaptive_roughing",
     }
 }
 
@@ -970,6 +983,8 @@ fn plan_raw(ctx: &Ctx<'_>, spec: &Op3Spec, frame: &Frame) -> Result<Planned3> {
             let (path, r) = chamfer::plan(ctx, o, frame)?;
             Ok((path, r, "chamfer", None))
         }
+        Op3Spec::Adaptive(o) => adaptive::plan(ctx, o, frame).map(|(path, r, kind)| (path, r, kind, None)),
+        Op3Spec::AdaptiveRoughing(o) => adaptive::plan_roughing(ctx, o, frame).map(|(path, r, kind)| (path, r, kind, None)),
         Op3Spec::Parallel(o) => {
             let c = o.common();
             let r = ctx.resolve(&c)?;
@@ -1077,6 +1092,7 @@ fn plan_indexed(ctx: &Ctx<'_>, op: &Op3Spec, rotary: Vec<f64>, a_deg: Option<f64
     let frame = frame_for_index(ctx.machine, &rotary).map_err(|e| ctx.bad(c.name, e))?;
     ctx.op_type.set(type_of3(op));
     ctx.band.set(None);
+    ctx.adaptive.borrow_mut().take();
     let (path, r, kind) = plan_path(ctx, op, &frame)?;
     let band = ctx.band.take();
     let stats = path.stats();
@@ -1093,6 +1109,11 @@ fn plan_indexed(ctx: &Ctx<'_>, op: &Op3Spec, rotary: Vec<f64>, a_deg: Option<f64
         a_deg,
         ..OperationReport::default()
     };
+    let mut report = report;
+    if let Some((extra, warnings)) = ctx.adaptive.borrow_mut().take() {
+        report.adaptive = Some(extra);
+        report.warnings.extend(warnings);
+    }
     let axes = match a_deg {
         Some(a) => format!("3+1 A{}°", num(a)),
         None => "3-axis".into(),
@@ -1123,6 +1144,8 @@ fn plan(ctx: &Ctx<'_>, spec: &OperationSpec) -> Result<Planned> {
         OperationSpec::Chamfer(o) => plan_indexed(ctx, &Op3Spec::Chamfer(o.clone()), zero(), None),
         OperationSpec::Bore(o) => helical::bore_op(ctx, o),
         OperationSpec::ThreadMill(o) => helical::thread_mill_op(ctx, o),
+        OperationSpec::Adaptive(o) => plan_indexed(ctx, &Op3Spec::Adaptive(o.clone()), zero(), None),
+        OperationSpec::AdaptiveRoughing(o) => plan_indexed(ctx, &Op3Spec::AdaptiveRoughing(o.clone()), zero(), None),
         OperationSpec::Indexed(o) => {
             // The inner operation's name, else the wrapper's.
             let name = spec_name(spec).to_string();
@@ -1258,6 +1281,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         all: Some(&surfaces.all),
         op_type: std::cell::Cell::new(""),
         band: std::cell::Cell::new(None),
+        adaptive: Default::default(),
     };
     let mut planned: Vec<Planned> = Vec::with_capacity(job.operations.len());
     for spec in job.operations.iter().filter(|o| op_enabled(o)) {
