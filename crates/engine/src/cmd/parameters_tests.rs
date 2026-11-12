@@ -1407,3 +1407,49 @@ fn exports_round_reported_numbers() {
     let vals: Vec<f64> = rows.iter().filter_map(|r| r["value"].as_f64()).collect();
     assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
 }
+
+/// A plain number on its own takes the design's unit. Feature evaluation now reads a number
+/// inside an expression that way too (#9015), so `w + 1` in an inch design is 3 in. The warning
+/// stays off unless a path still used millimetres (#5887), and the geometry is whatever
+/// evaluation already made.
+#[test]
+fn an_expression_says_when_its_plain_numbers_are_read_as_mm() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "2 in"}));
+    run(&mut s, "document.units", json!({"units": "in"}));
+    // `w + 1` adds an inch to two inches: 50.8 + 25.4. A millimetre reading would be 51.8.
+    let r = run(&mut s, "solid.box", json!({"length": "w + 1", "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    assert!(r.get("unit_warnings").is_none(), "the feature reads the 1 as in: {r}");
+    let v = volume(&mut s);
+    assert!(rel(v, 76.2 * 254.0 * 254.0) < 1e-9, "the warning changed the model: {v}");
+    // A plain multiplier reads the same either way, so it is not reported.
+    let r = run(&mut s, "solid.box", json!({"length": "w * 2", "width": 10, "height": 10, "corner": [500, 0, 0]}));
+    assert!(r.get("unit_warnings").is_none(), "a multiplier means the same in any unit: {r}");
+    // A bare number on its own already takes the design's unit, so it is not reported either.
+    let r = run(&mut s, "solid.box", json!({"length": 3, "width": 10, "height": 10, "corner": [1000, 0, 0]}));
+    assert!(r.get("unit_warnings").is_none(), "a bare number takes the design unit: {r}");
+    // In a millimetre design there is nothing to say.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "2 in"}));
+    let r = run(&mut s, "solid.box", json!({"length": "w + 1", "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    assert!(r.get("unit_warnings").is_none(), "a mm design reads plain numbers as mm anyway: {r}");
+}
+
+/// Editing a feature's input through the parameters table stores the expression just as
+/// creating the feature did, so it says the same thing about plain numbers read as mm (#5887).
+#[test]
+fn editing_a_feature_input_says_when_its_plain_numbers_are_read_as_mm() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "2 in"}));
+    run(&mut s, "document.units", json!({"units": "in"}));
+    // A plain length to start with: nothing to say, it takes the design's unit.
+    let r = run(&mut s, "solid.box", json!({"length": 3, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    assert!(r.get("unit_warnings").is_none(), "a bare number takes the design unit: {r}");
+    // Editing it to an expression follows the design's unit too (#9015), so there is still
+    // nothing to say.
+    let r = run(&mut s, "parameters.change", json!({"name": "d1", "expression": "w + 1"}));
+    assert!(r.get("unit_warnings").is_none(), "the edit reads the 1 as in: {r}");
+    // Editing it to something unambiguous is silent as well.
+    let r = run(&mut s, "parameters.change", json!({"name": "d1", "expression": "w + 1 in"}));
+    assert!(r.get("unit_warnings").is_none(), "a number with its unit is unambiguous: {r}");
+}

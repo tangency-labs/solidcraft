@@ -1707,6 +1707,14 @@ impl SolveApp {
         {
             render_workspace::assign::assigned(self, value);
         }
+        // Somebody driving the app never sees the command's reply, so the status line says when
+        // an input's plain numbers were read as mm (#5887). After `finish_command`, which sets
+        // the status this replaces.
+        if let Ok(v) = &r
+            && let Some(said) = v.get("unit_warnings").and_then(Value::as_array).and_then(|w| w.first()).and_then(Value::as_str)
+        {
+            self.set_status(said.to_string(), false);
+        }
         r
     }
 

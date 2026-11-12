@@ -1029,3 +1029,17 @@ fn a_point_selected_in_the_open_sketch_still_places_the_sphere_when_the_sketch_e
     assert!(h.app.session.active_sketch.is_none(), "the sphere ends the sketch");
     assert_eq!(sent(&h)["center"], json!([12.0, 7.0, 20.0]));
 }
+
+/// Somebody driving the app never sees a command's reply, so the status line says when an
+/// input's plain numbers were read as mm (#5887, raised in review of #6017).
+#[test]
+fn the_status_line_says_when_an_expression_is_read_as_mm() {
+    let mut h = design("in");
+    h.app.run("parameters.add", json!({"name": "w", "expression": "2 in"})).unwrap();
+    // A bare number takes the design's unit, so there is nothing to say.
+    h.app.run("solid.box", json!({"length": 3, "width": 10, "height": 10, "corner": [0, 0, 0]})).unwrap();
+    assert!(h.app.status.as_ref().is_none_or(|s| !s.0.contains("read as mm")), "a bare number takes the design unit: {:?}", h.app.status);
+    // An expression follows the design's unit too (#9015), so the status line stays quiet.
+    h.app.run("parameters.change", json!({"name": "d1", "expression": "w + 1"})).unwrap();
+    assert!(h.app.status.as_ref().is_none_or(|s| !s.0.contains("read as mm")), "the feature reads the 1 as in: {:?}", h.app.status);
+}

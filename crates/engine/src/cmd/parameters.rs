@@ -164,7 +164,10 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(n) = str_(p, "delete") {
         s.doc_mut().remove_param(n.trim())?;
         s.settle_value_edit(&solved)?;
-        return reply(cmd, ParamChanged { body: ParamChangedBody::Deleted { deleted: n.trim().to_string() }, param_warnings: Vec::new() });
+        return reply(
+            cmd,
+            ParamChanged { body: ParamChangedBody::Deleted { deleted: n.trim().to_string() }, param_warnings: Vec::new(), unit_warnings: Vec::new() },
+        );
     }
     let mut name = param_name(cmd, p)?.to_string();
     let mut renamed: Option<ParamRename> = None;
@@ -232,6 +235,9 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.settle_value_edit(&solved)?;
     let (vals, _) = s.doc.param_values();
+    // An edit stores the expression just as creating the feature does, so it says the same
+    // thing about plain numbers read as mm (#5887).
+    let unit_warnings = super::features::unit_warning_for_param(&s.doc, &name).into_iter().collect();
     let one = ParamChangedOne {
         renamed,
         changed_through,
@@ -245,7 +251,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         name,
         expression: e,
     };
-    reply(cmd, ParamChanged { body: ParamChangedBody::One(Box::new(one)), param_warnings: Vec::new() })
+    reply(cmd, ParamChanged { body: ParamChangedBody::One(Box::new(one)), param_warnings: Vec::new(), unit_warnings })
 }
 
 /// Points a driving dimension keeps when its own parameter changes. A length keeps the first
@@ -389,8 +395,9 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     s.settle_value_edit(solved)?;
     let (vals, _) = s.doc.param_values();
     let changed = list.iter().map(|(n, _)| (n.clone(), vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v))))).collect();
+    let unit_warnings: Vec<String> = list.iter().filter_map(|(n, _)| super::features::unit_warning_for_param(&s.doc, n)).collect();
     let body = ParamChangedBody::Many { changed, recomputed: s.model.last_recomputed, restored: s.model.last_restored, errors: failing(s), switched };
-    reply(cmd, ParamChanged { body, param_warnings: Vec::new() })
+    reply(cmd, ParamChanged { body, param_warnings: Vec::new(), unit_warnings })
 }
 
 /// The configuration rules that switch a feature's suppression and read a parameter this edit
