@@ -632,6 +632,18 @@ fn a_note_off_the_paper_is_listed() {
     assert_eq!(of_kind(&reply, "outside_sheet"), [named("note", &off)], "{reply}");
 }
 
+/// A note that prints nothing, its one field having no value, isn't on the paper or off it: it is never
+/// outside the sheet.
+#[test]
+fn a_note_that_prints_nothing_is_not_outside_the_sheet() {
+    let (mut s, _) = plate();
+    let (sheet, _) = drawn(&mut s);
+    let content = json!([{"field": {"source": "component", "key": "part_number"}}]);
+    run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": [20, 20], "content": content}));
+    let reply = checked(&mut s, json!({}));
+    assert!(of_kind(&reply, "outside_sheet").is_empty(), "{reply}");
+}
+
 /// [`plate`] with a component, Bolt, a 10 mm cube above it, on revolute joint Turn about Z, and an
 /// exploded view, Apart, that moves the Bolt up 50 mm; [`drawn`]'s sheet and front view, with what
 /// `annotate` adds on that view; then the view set by `apart` as a file can hold it (the commands

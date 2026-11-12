@@ -174,11 +174,22 @@ pub struct NoteState {
 pub struct SheetObject {
     pub object: u64,
     pub kind: ObjectKind,
-    /// The box round what it draws, along its lines' paths; with no lines, its boundary.
+    /// The box round what it draws, along its lines' paths; with no lines, its boundary. Never empty
+    /// ([`SheetObject::on_paper`]).
     pub bounds_mm: Aabb2,
     /// A view's boundary ([`crate::drawing_view::on_sheet`]), so a view that can't be drawn can
     /// still be picked.
     pub boundary_mm: Option<Aabb2>,
+}
+
+impl SheetObject {
+    /// `object` where it sits on paper: round what it draws (`drawn`), else at its boundary. What
+    /// draws nothing and has no boundary, such as a note whose one field has no value, isn't on the
+    /// paper or off it, so it is no object: nothing picks it, marks it or finds it off the sheet.
+    fn on_paper(object: u64, kind: ObjectKind, drawn: Aabb2, boundary_mm: Option<Aabb2>) -> Option<Self> {
+        let bounds_mm = Some(drawn).filter(|b| !b.is_empty()).or(boundary_mm)?;
+        Some(Self { object, kind, bounds_mm, boundary_mm })
+    }
 }
 
 /// One sheet drawn at once ([`build`]).
@@ -187,7 +198,8 @@ pub struct SheetScene {
     pub scene: Scene,
     /// Each view on the sheet, in id order.
     pub views: Vec<ViewState>,
-    /// The sheet's border, then each view on it, then each dimension drawn, in paint order.
+    /// The sheet's border, then each view on it, then each dimension and note drawn, in paint order:
+    /// each that is on paper ([`SheetObject::on_paper`]).
     pub objects: Vec<SheetObject>,
     /// Each dimension of a view on the sheet, by view and id.
     pub dimensions: Vec<DimensionState>,
@@ -814,7 +826,7 @@ impl Assembly {
                 (Some(centre), Some(group)) => match self.add(group, &one.fonts, centre) {
                     Ok(bounds_mm) => {
                         drawn = true;
-                        self.objects.push(SheetObject { object: one.dimension, kind: one.kind, bounds_mm, boundary_mm: None });
+                        self.objects.extend(SheetObject::on_paper(one.dimension, one.kind, bounds_mm, None));
                     }
                     Err(LeftOut::TooManyRecords) => {
                         why = Some(format!("with its lines the sheet is more than a paper scene's {MAX_RECORDS} records"))
@@ -838,7 +850,7 @@ impl Assembly {
             let mut why = one.why.clone();
             let drawn = match self.add(&one.group, &one.fonts, Vec2::ZERO) {
                 Ok(bounds_mm) => {
-                    self.objects.push(SheetObject { object: one.note, kind: ObjectKind::Note, bounds_mm, boundary_mm: None });
+                    self.objects.extend(SheetObject::on_paper(one.note, ObjectKind::Note, bounds_mm, None));
                     true
                 }
                 Err(LeftOut::TooManyRecords) => {
@@ -891,13 +903,10 @@ fn assemble<D: Borrow<Drawn>>(
         }
         _ => (None, Vec::new()),
     };
-    let mut objects = Vec::new();
-    if !border.is_empty() {
-        // The border's groups are one object, measured before the images painted with them join
-        // them: an image isn't one of the objects a sheet's commands pick.
-        let bounds_mm = border.iter().map(|group| group_bounds(group, &[])).fold(Aabb2::EMPTY, |all, one| all.union(&one));
-        objects.push(SheetObject { object: record.id, kind: ObjectKind::DrawingBorder, bounds_mm, boundary_mm: None });
-    }
+    // The border's groups are one object, measured before the images painted with them join them:
+    // an image isn't one of the objects a sheet's commands pick.
+    let bounds_mm = border.iter().map(|group| group_bounds(group, &[])).fold(Aabb2::EMPTY, |all, one| all.union(&one));
+    let objects: Vec<SheetObject> = SheetObject::on_paper(record.id, ObjectKind::DrawingBorder, bounds_mm, None).into_iter().collect();
     border.extend_from_slice(images);
     let records = border.iter().chain(&block).map(Group::records).fold(0usize, usize::saturating_add);
     let mut scene = Scene::new(size_mm, border);
@@ -928,9 +937,7 @@ fn assemble<D: Borrow<Drawn>>(
             }
         }
         let boundary_mm = drawn.boundary.map(|b| Aabb2 { min: b.min + centre, max: b.max + centre });
-        if let Some(bounds_mm) = lines.filter(|b| !b.is_empty()).or(boundary_mm) {
-            assembly.objects.push(SheetObject { object: view, kind: ObjectKind::View, bounds_mm, boundary_mm });
-        }
+        assembly.objects.extend(SheetObject::on_paper(view, ObjectKind::View, lines.unwrap_or(Aabb2::EMPTY), boundary_mm));
         assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone() });
     }
     Ok(assembly)
