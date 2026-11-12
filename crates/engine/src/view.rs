@@ -1439,6 +1439,18 @@ pub fn construction_points(s: &Session) -> Vec<(u64, String, Vec3)> {
         .collect()
 }
 
+/// Coordinate systems (#14644), as evaluated, where their component's first placement shows
+/// them: (feature id, name, origin, X, Y, Z), the axes unit length.
+pub fn construction_frames(s: &Session) -> Vec<(u64, String, Vec3, Vec3, Vec3, Vec3)> {
+    constructs(s)
+        .into_iter()
+        .filter_map(|(id, name, g)| match g {
+            solidcraft_doc::construct::ConstructGeom::Frame { origin, x, y } => Some((id, name, origin, x, y, x.cross(y))),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Construction geometry of unsuppressed features, shown where its component is placed.
 fn constructs(s: &Session) -> Vec<(u64, String, solidcraft_doc::construct::ConstructGeom)> {
     use solidcraft_doc::construct::ConstructGeom;
@@ -1456,6 +1468,7 @@ fn constructs(s: &Session) -> Vec<(u64, String, solidcraft_doc::construct::Const
                 ConstructGeom::Plane(p) => ConstructGeom::Plane(Plane::new(pt(p.origin), v(p.x), v(p.y)).unwrap_or(*p)),
                 ConstructGeom::Axis { origin, dir } => ConstructGeom::Axis { origin: pt(*origin), dir: v(*dir) },
                 ConstructGeom::Point(p) => ConstructGeom::Point(pt(*p)),
+                ConstructGeom::Frame { origin, x, y } => ConstructGeom::Frame { origin: pt(*origin), x: v(*x), y: v(*y) },
             };
             Some((c.feature, c.name.clone(), g))
         })

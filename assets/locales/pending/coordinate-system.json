@@ -1,0 +1,58 @@
+{
+  "en": {
+    "X direction": "X direction",
+    "Z direction": "Z direction",
+    "cmd.construct.coordinate_system": "Coordinate System",
+    "help.construct.coordinate_system": "Creates a coordinate system: an origin and axes of your own on a corner, edge or face, kept up to date as the model changes. Use it to sketch, join parts or export from a point other than the component's origin.",
+    "ui.construct_frames": "Coordinate Systems"
+  },
+  "ar": {
+    "X direction": "اتجاه X",
+    "Z direction": "اتجاه Z",
+    "cmd.construct.coordinate_system": "نظام إحداثيات",
+    "help.construct.coordinate_system": "ينشئ نظام إحداثيات: نقطة أصل ومحاور خاصة بك على زاوية أو حافة أو وجه، وتُحدَّث مع تغيّر النموذج. استخدمه للرسم أو ربط الأجزاء أو التصدير من نقطة غير نقطة أصل المكوّن.",
+    "ui.construct_frames": "أنظمة الإحداثيات"
+  },
+  "de": {
+    "X direction": "X-Richtung",
+    "Z direction": "Z-Richtung",
+    "cmd.construct.coordinate_system": "Koordinatensystem",
+    "help.construct.coordinate_system": "Erstellt ein Koordinatensystem: einen eigenen Ursprung mit Achsen an einer Ecke, Kante oder Fläche, der sich mit dem Modell aktualisiert. Verwenden Sie es zum Skizzieren, Verbinden von Teilen oder Exportieren von einem anderen Punkt als dem Ursprung der Komponente.",
+    "ui.construct_frames": "Koordinatensysteme"
+  },
+  "he": {
+    "X direction": "כיוון X",
+    "Z direction": "כיוון Z",
+    "cmd.construct.coordinate_system": "מערכת צירים",
+    "help.construct.coordinate_system": "יוצר מערכת צירים: ראשית וצירים משלך על פינה, קצה או פאה, שמתעדכנת עם שינויי המודל. השתמשו בה כדי לשרטט, לחבר חלקים או לייצא מנקודה שאינה ראשית הרכיב.",
+    "ui.construct_frames": "מערכות צירים"
+  },
+  "ja": {
+    "X direction": "X 方向",
+    "Z direction": "Z 方向",
+    "cmd.construct.coordinate_system": "座標系",
+    "help.construct.coordinate_system": "角、エッジ、面の上に独自の原点と軸を作成し、モデルの変更に合わせて更新します。コンポーネントの原点以外の点からスケッチ、パーツの結合、エクスポートを行うときに使います。",
+    "ui.construct_frames": "座標系"
+  },
+  "ko": {
+    "X direction": "X 방향",
+    "Z direction": "Z 방향",
+    "cmd.construct.coordinate_system": "좌표계",
+    "help.construct.coordinate_system": "모서리, 꼭짓점 또는 면에 자신만의 원점과 축을 만들고 모델이 바뀌면 함께 갱신합니다. 구성요소 원점이 아닌 점에서 스케치하거나 부품을 연결하거나 내보낼 때 사용합니다.",
+    "ui.construct_frames": "좌표계"
+  },
+  "vi": {
+    "X direction": "Hướng X",
+    "Z direction": "Hướng Z",
+    "cmd.construct.coordinate_system": "Hệ tọa độ",
+    "help.construct.coordinate_system": "Tạo một hệ tọa độ: gốc và các trục của riêng bạn trên một góc, cạnh hoặc mặt, được cập nhật khi mô hình thay đổi. Dùng nó để phác thảo, nối chi tiết hoặc xuất từ một điểm khác gốc của thành phần.",
+    "ui.construct_frames": "Hệ tọa độ"
+  },
+  "zh": {
+    "X direction": "X 方向",
+    "Z direction": "Z 方向",
+    "cmd.construct.coordinate_system": "坐标系",
+    "help.construct.coordinate_system": "在角点、边或面上创建自己的原点和坐标轴，并随模型的更改而更新。用于从组件原点以外的点绘制草图、连接零件或导出。",
+    "ui.construct_frames": "坐标系"
+  }
+}

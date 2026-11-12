@@ -271,6 +271,11 @@ impl crate::Feature {
                     checked_geo(r, 0)?;
                 }
             }
+            K::CoordinateSystem { origin, z, x, .. } => {
+                for r in std::iter::once(origin).chain(z.as_ref()).chain(x.as_ref()) {
+                    checked_geo(r, 0)?;
+                }
+            }
             K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => checked_geo(geo, 0)?,
@@ -343,6 +348,11 @@ impl crate::Feature {
             }
             K::ConstructionPoint { def } => {
                 for r in def.refs_mut() {
+                    remap_geo(r, ids, bodies, 0, occurrences, doc)?;
+                }
+            }
+            K::CoordinateSystem { origin, z, x, .. } => {
+                for r in std::iter::once(origin).chain(z.as_mut()).chain(x.as_mut()) {
                     remap_geo(r, ids, bodies, 0, occurrences, doc)?;
                 }
             }

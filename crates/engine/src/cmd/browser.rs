@@ -450,7 +450,13 @@ enum Shown {
 }
 
 fn is_construction(k: &FeatureKind) -> bool {
-    matches!(k, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+    matches!(
+        k,
+        FeatureKind::ConstructionPlane { .. }
+            | FeatureKind::ConstructionAxis { .. }
+            | FeatureKind::ConstructionPoint { .. }
+            | FeatureKind::CoordinateSystem { .. }
+    )
 }
 
 /// The item a key names, or `None` when it names none; bodies are looked for in the placed model

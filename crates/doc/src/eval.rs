@@ -662,6 +662,11 @@ fn show_mm(v: f64) -> String {
 }
 
 impl ModelState {
+    /// Coordinate system `feature`'s frame in its own component's coordinates, once evaluated.
+    pub fn frame_of(&self, feature: u64) -> Option<Mat> {
+        self.frames.get(&feature).copied()
+    }
+
     /// The smallest radius fillet `feature` used when it reduced a radius too large for its edges.
     pub fn fitted_radius(&self, feature: u64) -> Option<f64> {
         self.fitted_range(feature).map(|(lo, _)| lo)
@@ -715,6 +720,10 @@ pub struct ModelState {
     pub sheets: Vec<crate::sheet::SheetBody>,
     /// Construction planes, axes and points as evaluated (by feature).
     pub construct: Vec<crate::construct::Construct>,
+    /// Each coordinate system's frame in its own component's coordinates, by feature id
+    /// (#14644). Unlike `construct`, never mapped into another frame: datums of a coordinate
+    /// system are placed from it through their exact placement.
+    pub frames: BTreeMap<u64, Mat>,
     /// Evaluation-cache keys of the sketches (by sketch feature id).
     sketch_keys: BTreeMap<u64, u64>,
     /// The edges each fillet or chamfer blended, as found in this evaluation (by feature id):
@@ -1772,7 +1781,13 @@ fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureId]) -> Vec
 
 /// A construction plane, axis or point.
 fn is_construction(f: &Feature) -> bool {
-    matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+    matches!(
+        f.kind,
+        FeatureKind::ConstructionPlane { .. }
+            | FeatureKind::ConstructionAxis { .. }
+            | FeatureKind::ConstructionPoint { .. }
+            | FeatureKind::CoordinateSystem { .. }
+    )
 }
 
 /// Every string in `v` (names of planes, axes, bodies and features among them).
@@ -1832,6 +1847,14 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
                 ids.insert(id.0);
             }
         });
+        // And a coordinate system by its datum key (#14644), whatever it is called now.
+        for key in &names {
+            if let Some(crate::construct::DatumRef { source: crate::construct::DatumSource::Frame(id), .. }) =
+                crate::construct::DatumRef::parse_key(key)
+            {
+                ids.insert(id);
+            }
+        }
         for c in doc.features.iter().filter(|c| is_construction(c) && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str()))) {
             if !seen.insert(c.id) {
                 continue;
@@ -9677,6 +9700,21 @@ fn eval_feature(
             });
             Ok(())
         }
+        FeatureKind::CoordinateSystem { .. } => {
+            let cst = construction_state(doc, st, f.component)?;
+            let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0, component: f.component };
+            let (origin, x, y) = crate::construct::resolve_frame(&ctx, &f.kind)?;
+            let refs = crate::construct::frame_refs(&f.kind);
+            let bodies = crate::construct::source_bodies(&ctx, &refs);
+            st.frames.insert(f.id, crate::construct::frame_matrix(origin, x, y));
+            st.construct.push(crate::construct::Construct {
+                feature: f.id,
+                name: f.name.clone(),
+                geom: crate::construct::ConstructGeom::Frame { origin, x, y },
+                bodies,
+            });
+            Ok(())
+        }
         FeatureKind::ConstructionPoint { def } => {
             let cst = construction_state(doc, st, f.component)?;
             let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0, component: f.component };
@@ -10491,6 +10529,10 @@ fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::
     }
     for (k, geom) in placed {
         if let Some(c) = st.construct.get_mut(k) {
+            // A coordinate system's frame goes with it.
+            if let Some(m) = geom.frame() {
+                st.frames.insert(c.feature, m);
+            }
             c.geom = geom;
         }
     }
@@ -11075,6 +11117,7 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
                 let geom = if ident { c.geom.clone() } else { c.geom.placed(&m) };
                 out.construct.push(crate::construct::Construct { geom, ..c.clone() });
             }
+            out.frames.clone_from(&st.frames);
         }
         // Unlike editable sketch guides, cosmetic surfaces belong to every occurrence.
         for (t, (_, offset)) in st.threads.iter().zip(&tap_frames).filter(|(_, (owner, _))| *owner == comp) {

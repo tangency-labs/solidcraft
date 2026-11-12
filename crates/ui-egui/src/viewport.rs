@@ -2586,6 +2586,15 @@ pub fn construction_points(app: &SolveApp) -> Vec<(String, Vec3)> {
         .collect()
 }
 
+/// Coordinate systems as drawn (#14644): (name, origin, X, Y, Z), the shown ones.
+pub fn construction_frames(app: &SolveApp) -> Vec<(String, Vec3, Vec3, Vec3, Vec3)> {
+    solidcraft_engine::view::construction_frames(&app.session)
+        .into_iter()
+        .filter(|(_, n, ..)| app.session.construction_visible(n))
+        .map(|(_, n, o, x, y, z)| (n, o, x, y, z))
+        .collect()
+}
+
 /// Construction planes as drawn and picked: (name, normal, quad). A plane is a square of a fixed
 /// share of the view round its origin, grown past the edges of every body it passes through:
 /// zoomed in, the square alone fits inside the part and the body hides it (#13318). A component's
@@ -2792,7 +2801,12 @@ pub(crate) fn screen_box(proj: &Proj, b: &solidcraft_engine::geom::Aabb3, px: f3
 /// Mesh outlines have no B-rep identity, but their points and lengths can be measured.
 /// Keep them out of modeling operands and invalidate hover picks when Measure opens/closes.
 fn measuring_mesh_edges(app: &SolveApp) -> bool {
-    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Measure { .. }))
+    app.dialog.as_ref().is_some_and(|d| {
+        matches!(d.kind, crate::dialogs::Kind::Measure { .. })
+            // A coordinate system's origin (#14644): an imported mesh's corner is what most
+            // often needs one.
+            || (matches!(d.kind, crate::dialogs::Kind::Construct { command: "construct.coordinate_system", .. }) && d.active == 0)
+    })
 }
 
 /// Unsupported dialogs must not let wire nodes displace usable planar point hits.
@@ -4723,6 +4737,17 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             let r = size * 0.04;
             for d in [Vec3::X, Vec3::Y, Vec3::Z] {
                 sc.line((p - d * r).to_f32(), (p + d * r).to_f32(), col, 2.0, true);
+            }
+        }
+        // Coordinate systems (#14644): a small triad in the axis colours, drawn over the model as
+        // construction points are (it often sits on a part's corner, along its edges), thicker
+        // when picked.
+        for (name, o, x, y, z) in construction_frames(app) {
+            let on = sel.iter().any(|s| matches!(s, Sel::Plane { name: n } if *n == name));
+            let (len, w) = (size * 1.2, if on { 3.5 } else { 2.5 });
+            for (d, c) in [(x, t.axis_x), (y, t.axis_y), (z, t.axis_z)] {
+                let col = sc.color(c4(c));
+                sc.line(o.to_f32(), (o + d * len).to_f32(), col, w, true);
             }
         }
     }
@@ -8097,6 +8122,44 @@ mod tests {
         app.fit_view();
         let proj = projection(&app, rect);
         assert!(!origin_hidden_by_body(&app, &proj), "a body away from the origin does not cover it");
+    }
+
+    /// #14644: a coordinate system's origin input snaps to an imported mesh's corners, which are
+    /// no picks for modelling otherwise; its Z and X may be left empty (the component's axes).
+    #[test]
+    fn a_coordinate_system_origin_snaps_to_an_imported_meshs_corner() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-cs-pick-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stl = dir.join("cabinet.stl").to_string_lossy().to_string();
+        let mut maker = solidcraft_engine::Session::default();
+        maker.execute("solid.box", &json!({"length": 30, "width": 20, "height": 45, "corner": [40, 60, 0]})).unwrap();
+        maker.execute("file.export", &json!({"path": stl})).unwrap();
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("file.insert_mesh", &json!({"path": stl})).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.fit_view();
+        let corner = Vec3::new(70.0, 80.0, 45.0);
+        let proj = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(800., 600.)));
+        let at = proj.to_screen(corner).unwrap();
+        let on_corner = |h: &Hit| matches!(h, Hit::Vertex { point, .. } if point.dist(corner) < 1e-6);
+        assert!(!pick_all(&app, &proj, at).iter().any(on_corner), "a mesh's corner is no pick otherwise");
+        app.start("construct.coordinate_system");
+        let hits = pick_all(&app, &proj, at);
+        let hit = hits.iter().find(|h| on_corner(h)).unwrap_or_else(|| panic!("{hits:?}"));
+        let mut d = app.dialog.clone().unwrap();
+        let sel = d.candidate(&app.session, hit).unwrap();
+        d.inputs[0].items = vec![sel];
+        let cmds = crate::dialogs::apply_commands(&app, &d).unwrap();
+        app.dialog = None;
+        for (c, p) in cmds {
+            app.run(&c, p).unwrap();
+        }
+        let frames = solidcraft_engine::view::construction_frames(&app.session);
+        let (_, _, o, x, _, z) = frames.first().unwrap();
+        assert!(o.dist(corner) < 1e-6 && x.dist(Vec3::X) < 1e-9 && z.dist(Vec3::Z) < 1e-9, "{frames:?}");
+        // Hidden until shown, as an Origin folder's items are.
+        assert!(construction_frames(&app).is_empty());
     }
 
     #[test]

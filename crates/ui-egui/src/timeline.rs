@@ -289,6 +289,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
             PointDef::EdgeAndPlane { .. } => "point_edge_plane",
             PointDef::AlongPath { .. } => "point_along_path",
         },
+        FeatureKind::CoordinateSystem { .. } => "coordinate_system",
         FeatureKind::Hole { .. } => "hole",
         FeatureKind::Loft { .. } => "loft",
         FeatureKind::Sweep { .. } => "sweep",

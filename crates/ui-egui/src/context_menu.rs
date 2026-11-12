@@ -2454,7 +2454,13 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         }
         // Construction geometry, as the browser's Construction folder lists it.
         Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
-            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+            matches!(
+                f.kind,
+                FeatureKind::ConstructionPlane { .. }
+                    | FeatureKind::ConstructionAxis { .. }
+                    | FeatureKind::ConstructionPoint { .. }
+                    | FeatureKind::CoordinateSystem { .. }
+            )
         }),
         Target::Feature { id } => feature(*id),
         // The browser lists History while it is docked there and the design has features.

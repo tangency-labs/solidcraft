@@ -1274,10 +1274,27 @@ fn translation(t: Vec3) -> crate::Mat {
 /// The seven datum items parse their names without regard to case, and a datum key is strict:
 /// canonical non-zero decimal occurrence ids, at most 64 of them, at most 2048 characters. The
 /// root keeps its own controls, so nothing that names the design's origin parses as a datum.
+/// A coordinate system's datums (#14644): `o:<ids>/cs:<feature id>/<item>`, and `cs:<id>/<item>`
+/// for one of the design's own; strict as origin keys are, and an origin key is unchanged.
+#[test]
+fn coordinate_system_datum_keys_parse_strictly() {
+    use construct::{DatumItem, DatumRef, DatumSource};
+    let placed = DatumRef::frame(vec![2, 3], 17, DatumItem::XZ);
+    assert_eq!(placed.key(), "o:2/3/cs:17/XZ");
+    assert_eq!(DatumRef::parse_key("o:2/3/cs:17/XZ"), Some(placed));
+    let own = DatumRef::frame(Vec::new(), 9, DatumItem::Z);
+    assert_eq!(own.key(), "cs:9/Z");
+    assert_eq!(DatumRef::parse_key("cs:9/z"), Some(own));
+    assert_eq!(DatumRef::parse_key("o:2/origin/XY").map(|d| d.source), Some(DatumSource::Origin));
+    for invalid in ["cs:0/X", "cs:09/X", "cs:/X", "cs:9", "cs:9/Q", "o:2/cs:0/X", "o:2/cs:7", "o:/cs:7/X", "o:2/cs:7/X/", "cs:9/X/Y"] {
+        assert!(DatumRef::parse_key(invalid).is_none(), "{invalid}");
+    }
+}
+
 #[test]
 fn datum_refs_parse_strictly() {
     use construct::{DatumItem, DatumRef};
-    assert_eq!(DatumRef { path: vec![2, 3], item: DatumItem::XY }.key(), "o:2/3/origin/XY");
+    assert_eq!(DatumRef::origin(vec![2, 3], DatumItem::XY).key(), "o:2/3/origin/XY");
     let parsed = DatumRef::parse_key("o:2/3/origin/XY").unwrap();
     assert_eq!(parsed.path, vec![2, 3]);
     assert_eq!(parsed.item, DatumItem::XY);
@@ -1285,7 +1302,7 @@ fn datum_refs_parse_strictly() {
     assert_eq!(DatumRef::parse_key("o:5/origin/xy").unwrap().item, DatumItem::XY);
     assert_eq!(DatumRef::parse_key("o:5/origin/o").unwrap().item, DatumItem::O);
     for item in ["O", "X", "Y", "Z", "XY", "XZ", "YZ"] {
-        let key = DatumRef { path: vec![5], item: DatumItem::parse(item).unwrap() }.key();
+        let key = DatumRef::origin(vec![5], DatumItem::parse(item).unwrap()).key();
         assert_eq!(DatumRef::parse_key(&key).unwrap().item, DatumItem::parse(item).unwrap(), "{item}");
     }
     // The Plane::named aliases stay root-only.
@@ -1342,13 +1359,13 @@ fn resolve_datum_places_nested_and_repeated() {
     doc.occurrences.iter_mut().find(|o| o.id == child).unwrap().transform = translation(Vec3::new(20.0, 0.0, 0.0));
     let second = doc.add_occurrence(assembly, 0, translation(Vec3::new(150.0, 0.0, 0.0))).unwrap();
     let origins = |doc: &Document| {
-        let datum = |path: &[u64]| construct::DatumRef { path: path.to_vec(), item: construct::DatumItem::XY };
+        let datum = |path: &[u64]| construct::DatumRef::origin(path.to_vec(), construct::DatumItem::XY);
         let plane = |g: construct::ConstructGeom| match g {
             construct::ConstructGeom::Plane(p) => p,
             other => panic!("a plane datum resolves to a plane, got {other:?}"),
         };
-        let one = construct::resolve_datum(doc, &datum(&[first, child])).unwrap();
-        let two = construct::resolve_datum(doc, &datum(&[second, child])).unwrap();
+        let one = construct::resolve_datum(doc, None, &datum(&[first, child])).unwrap();
+        let two = construct::resolve_datum(doc, None, &datum(&[second, child])).unwrap();
         (plane(one), plane(two))
     };
     let (a, b) = origins(&doc);

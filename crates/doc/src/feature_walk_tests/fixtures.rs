@@ -116,6 +116,14 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "construction_point_along",
             json!({"type": "construction_point", "def": {"type": "along_path", "path": {"type": "edge", "at": o}, "t": "pt.t"}}),
         ),
+        (
+            "coordinate_system_refs",
+            json!({"type": "coordinate_system", "origin": {"type": "vertex", "at": o}, "z": geo_plane("cs_z"), "x": {"type": "edge", "at": o}, "x_flip": true}),
+        ),
+        (
+            "coordinate_system_typed",
+            json!({"type": "coordinate_system", "origin": {"type": "point", "p": [1, 2, 3]}, "z_dir": [0, 0, 1], "x_dir": [1, 0, 0]}),
+        ),
         ("split_face", json!({"type": "split_face", "faces": [o], "plane": plane("split_face")})),
         ("scale", json!({"type": "scale", "bodies": ["B"], "factor": "scale.factor", "factors": ["scale.x", "scale.y", "scale.z"]})),
         ("offset_face", json!({"type": "offset_face", "faces": [o], "distance": "offset_face.distance"})),

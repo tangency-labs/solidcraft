@@ -583,11 +583,26 @@ fn occurrence_path(s: &Session, occurrence: u64) -> Vec<u64> {
     path
 }
 
+/// A coordinate system's datum named by a joint side, seen through the side's placement
+/// (`occurrence`, 0 for the design); datum keys keep their own placement.
+fn frame_datum(
+    s: &Session,
+    name: &str,
+    default: solidcraft_doc::construct::DatumItem,
+    occurrence: u64,
+) -> Option<solidcraft_doc::construct::DatumRef> {
+    if solidcraft_doc::construct::DatumRef::parse_key(name.trim()).is_some() {
+        return None;
+    }
+    let path = if occurrence == 0 { Vec::new() } else { occurrence_path(s, occurrence) };
+    super::construct::datum_param(s, name, default, Some(path))
+}
+
 /// The side's own origin plane: the root keeps `PlaneRef::Origin` ("XY" of the design, as
 /// before), a placement saves its exact datum, re-resolved at every solve.
 fn own_plane(s: &Session, occurrence: u64, name: &str) -> solidcraft_doc::PlaneRef {
     match solidcraft_doc::construct::DatumItem::parse(name).filter(|_| occurrence != 0) {
-        Some(item) => solidcraft_doc::PlaneRef::Datum { datum: solidcraft_doc::construct::DatumRef { path: occurrence_path(s, occurrence), item } },
+        Some(item) => solidcraft_doc::PlaneRef::Datum { datum: solidcraft_doc::construct::DatumRef::origin(occurrence_path(s, occurrence), item) },
         None => solidcraft_doc::PlaneRef::Origin { name: name.to_string() },
     }
 }
@@ -597,6 +612,13 @@ fn own_plane(s: &Session, occurrence: u64, name: &str) -> solidcraft_doc::PlaneR
 /// component's datum (the root's own when `occurrence` is 0).
 fn plane_side(s: &Session, name: &str, occurrence: u64, cmd: &str) -> Result<solidcraft_doc::PlaneRef> {
     let trimmed = name.trim();
+    // A coordinate system's plane (`CS1` is its XY), seen through the side's placement.
+    if let Some(datum) = frame_datum(s, trimmed, solidcraft_doc::construct::DatumItem::XY, occurrence) {
+        return match super::construct::is_plane(datum.item) {
+            true => Ok(solidcraft_doc::PlaneRef::Datum { datum }),
+            false => Err(bad(cmd, format!("`{trimmed}` is not a plane"))),
+        };
+    }
     let st = s.model.state();
     if let Some(c) = st.construct.iter().find(|c| c.name == trimmed) {
         if matches!(c.geom, solidcraft_doc::construct::ConstructGeom::Plane(_)) {
@@ -616,8 +638,15 @@ fn plane_side(s: &Session, name: &str, occurrence: u64, cmd: &str) -> Result<sol
 
 /// A side's axis from a name, in the same order: the feature named exactly, then the datum key,
 /// then the origin axes. A bare "X"/"Y"/"Z" is the side's own component's axis.
-fn axis_side(s: &Session, name: &str, cmd: &str) -> Result<solidcraft_doc::joints::AxisRef> {
+fn axis_side(s: &Session, name: &str, occurrence: u64, cmd: &str) -> Result<solidcraft_doc::joints::AxisRef> {
     let trimmed = name.trim();
+    // A coordinate system's axis (`CS1` is its Z), seen through the side's placement.
+    if let Some(datum) = frame_datum(s, trimmed, solidcraft_doc::construct::DatumItem::Z, occurrence) {
+        return match super::construct::is_axis(datum.item) {
+            true => Ok(solidcraft_doc::joints::AxisRef::datum(datum)),
+            false => Err(bad(cmd, format!("`{trimmed}` is not an axis"))),
+        };
+    }
     let st = s.model.state();
     if let Some(c) = st.construct.iter().find(|c| c.name == trimmed) {
         if matches!(c.geom, solidcraft_doc::construct::ConstructGeom::Axis { .. }) {
@@ -660,6 +689,23 @@ fn side_occurrence(s: &Session, name: &str, world_pick: Option<Vec3>) -> u64 {
 /// axes ("X", "Y", "Z"). A named joint origin is the caller's.
 fn origin_from_name(s: &Session, name: &str, occurrence: Option<u64>, cmd: &str) -> Result<Option<JointOrigin>> {
     let name_trim = name.trim();
+    // A coordinate system (#14644): its whole frame, as its XY plane with that plane's X; one of
+    // its planes or axes by `CS1/XZ`, `CS1/Z`. The side sits on its component's first placement
+    // unless one is given.
+    let cs = s.doc.find_feature(name_trim.rsplit_once('/').map_or(name_trim, |(n, _)| n.trim()));
+    if let Some(f) = cs.filter(|f| matches!(f.kind, solidcraft_doc::FeatureKind::CoordinateSystem { .. })) {
+        let occ = occurrence.unwrap_or_else(|| if f.component == 0 { 0 } else { s.doc.occurrence_of(f.component).map_or(0, |o| o.id) });
+        let datum = frame_datum(s, name_trim, solidcraft_doc::construct::DatumItem::XY, occ)
+            .ok_or_else(|| bad(cmd, format!("no coordinate system item `{name_trim}`")))?;
+        let snap = if super::construct::is_axis(datum.item) {
+            Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::datum(datum)), pick: None, x: None }
+        } else if super::construct::is_plane(datum.item) {
+            Snap::Plane { plane: Box::new(solidcraft_doc::PlaneRef::Datum { datum }), pick: None, x: None }
+        } else {
+            return Err(bad(cmd, format!("`{name_trim}`: a joint takes a coordinate system's frame, a plane or an axis, not its point")));
+        };
+        return settle(s, JointOrigin::new(occ, snap), &json!({}), cmd).map(Some);
+    }
     // A construction plane or axis feature, by name, bound to its component: the side sits on
     // that component's first occurrence unless an explicit one is given.
     let st = s.model.state();
@@ -741,7 +787,7 @@ fn axis_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
     let component = component_of(s, occurrence);
 
     let axis_ref = match a_val {
-        Value::String(name) => axis_side(s, name, cmd)?,
+        Value::String(name) => axis_side(s, name, occurrence, cmd)?,
         Value::Object(_) => serde_json::from_value(a_val.clone()).map_err(|e| bad(cmd, format!("invalid axis definition: {e}")))?,
         _ => return Err(bad(cmd, "`axis` must be an axis name (e.g. \"Z\", \"o:2/origin/X\", \"Axis1\") or an axis definition object")),
     };

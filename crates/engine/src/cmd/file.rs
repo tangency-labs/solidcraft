@@ -101,7 +101,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); frame?: a coordinate system (#14644) by name or datum key: the bodies are written in its frame, not the world's (not for urdf or json)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -110,25 +110,25 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_STEP_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body; a design with components then exports as a STEP assembly) → {path, bytes, format}: STEP, whatever the path's extension"),
+        .params("path; bodies?: [names] (default: every body; a design with components then exports as a STEP assembly) → {path, bytes, format}: STEP, whatever the path's extension; frame?: a coordinate system (#14644) by name or datum key: the bodies are written in its frame, not the world's (not for urdf or json)"),
     CommandSpec::new("file.export_stl", "Export STL", crate::checked!("file.export_stl", export_stl))
         .icon("mesh_export")
         .noundo()
         .contract(&EXPORT_STL_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: binary STL, whatever the path's extension"),
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: binary STL, whatever the path's extension; frame?: a coordinate system (#14644) by name or datum key: the bodies are written in its frame, not the world's (not for urdf or json)"),
     CommandSpec::new("file.export_3mf", "Export 3MF", crate::checked!("file.export_3mf", export_3mf))
         .icon("mesh_export")
         .noundo()
         .contract(&EXPORT_3MF_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); objects?: body|component (as file.export); lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: 3MF, whatever the path's extension"),
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); objects?: body|component (as file.export); lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: 3MF, whatever the path's extension; frame?: a coordinate system (#14644) by name or datum key: the bodies are written in its frame, not the world's (not for urdf or json)"),
     CommandSpec::new("file.export_obj", "Export OBJ", crate::checked!("file.export_obj", export_obj_cmd))
         .icon("export")
         .noundo()
         .contract(&EXPORT_OBJ_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it; frame?: a coordinate system (#14644) by name or datum key: the bodies are written in its frame, not the world's (not for urdf or json)"),
     CommandSpec::new("file.export_urdf", "Export URDF", crate::checked!("file.export_urdf", export_urdf_cmd))
         .icon("export")
         .noundo()
@@ -141,7 +141,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SAVE_MESH_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::save_mesh::SaveMeshResult>)
-        .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id or name from file.slicers, the program path it lists, or a program the user added under Custom… (send the saved file there, through the same steps as file.send_to_slicer: a slicer that has to be started first is waited for; may be deprecated later in favour of file.send_to_slicer or a Send to App workflow, kept for scripts); single_instance?: bool (default true; see file.send_to_slicer); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (default false: each body with a print face (body.print_face) is saved laid on it; a file sent to `slicer` is laid on them whatever this says)"),
+        .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id or name from file.slicers, the program path it lists, or a program the user added under Custom… (send the saved file there, through the same steps as file.send_to_slicer: a slicer that has to be started first is waited for; may be deprecated later in favour of file.send_to_slicer or a Send to App workflow, kept for scripts); single_instance?: bool (default true; see file.send_to_slicer); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (default false: each body with a print face (body.print_face) is saved laid on it; a file sent to `slicer` is laid on them whatever this says); frame?: a coordinate system (#14644) by name or datum key: the bodies are written in its frame, not the world's (not with slicer)"),
     CommandSpec::new("file.send_to_slicer", "Send to Slicer", send_to_slicer)
         .enabled(starts_programs)
         .at("INSERT", "FILES")
@@ -1243,10 +1243,14 @@ fn export_to(
     bodies: &[String],
     parts: &[(String, Vec<String>)],
     quality: solidcraft_io::MeshQuality,
+    frame: Option<solidcraft_doc::Mat>,
 ) -> Result<Value> {
+    if frame.is_some() && matches!(format, Format::Design | Format::Urdf) {
+        return Err(bad(cmd, "`frame` applies to STEP, STL, 3MF and OBJ, not the design file or URDF"));
+    }
     if format == Format::Obj {
         // The colours of the bodies go in a material library beside the mesh file.
-        return export_obj(s, path, bodies, quality);
+        return export_obj(s, path, bodies, quality, frame);
     }
     if format == Format::Glb {
         return export_glb(s, cmd, path, bodies, quality);
@@ -1259,12 +1263,18 @@ fn export_to(
         }
         solidcraft_io::write_design(&s.design())
     } else if format == Format::Step && bodies.is_empty() && !s.doc.occurrences.is_empty() {
-        solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
+        match frame {
+            None => solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?,
+            Some(m) => {
+                let (doc, st) = assembly_in_frame(s, &m)?;
+                solidcraft_io::step_assembly(&doc, &st, &name)?
+            }
+        }
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
         solidcraft_io::export_with_parts(
-            &s.doc.painted(&*s.world_state()?),
+            &in_frame(s.doc.painted(&*s.world_state()?), frame)?,
             bodies,
             parts,
             format,
@@ -1277,6 +1287,52 @@ fn export_to(
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// The coordinate system an export is written in (`frame`, #14644), as the matrix that takes
+/// the world into it: a coordinate system by name or datum key, where the active placement (else
+/// its component's first) shows it. `None` without `frame`: the world.
+fn export_frame(s: &Session, p: &Value, cmd: &str) -> Result<Option<solidcraft_doc::Mat>> {
+    let Some(v) = p.get("frame").filter(|v| !v.is_null()) else { return Ok(None) };
+    let name = v.as_str().ok_or_else(|| bad(cmd, "`frame` must be a coordinate system's name"))?;
+    let datum = super::construct::datum_param(s, name, solidcraft_doc::construct::DatumItem::O, None)
+        .filter(|d| d.item == solidcraft_doc::construct::DatumItem::O);
+    let Some(solidcraft_doc::construct::DatumRef { path, source: solidcraft_doc::construct::DatumSource::Frame(id), .. }) = datum else {
+        return Err(bad(cmd, format!("no coordinate system `{name}`")));
+    };
+    let local = s.model.state().frame_of(id).ok_or_else(|| bad(cmd, format!("`{name}` has not been evaluated (it may have failed)")))?;
+    let placement = if path.is_empty() { solidcraft_doc::IDENTITY } else { s.doc.placement_frame(&path).map_err(|e| bad(cmd, e.to_string()))? };
+    let world = solidcraft_doc::mat_mul(&placement, &local);
+    solidcraft_doc::mat_inverse(&world).map(Some).ok_or_else(|| bad(cmd, format!("`{name}` is singular")))
+}
+
+/// The bodies as `frame` sees them: each moved by it (the world as it is without one).
+fn in_frame(mut st: solidcraft_doc::ModelState, frame: Option<solidcraft_doc::Mat>) -> Result<solidcraft_doc::ModelState> {
+    if let Some(m) = frame {
+        for b in &mut st.bodies {
+            b.body = solidcraft_kernel::transform_matrix(&b.body, m)?;
+        }
+    }
+    Ok(st)
+}
+
+/// A STEP assembly as `m` sees it: the design's own bodies and its top-level placements moved by
+/// it, everything below them as it is.
+fn assembly_in_frame(s: &Session, m: &solidcraft_doc::Mat) -> Result<(solidcraft_doc::Document, solidcraft_doc::ModelState)> {
+    let mut doc: solidcraft_doc::Document = (*s.doc).clone();
+    let mut st = s.doc.painted(&s.model.state());
+    for o in doc.occurrences.iter_mut().filter(|o| o.parent == 0) {
+        o.transform = solidcraft_doc::mat_mul(m, &o.transform);
+    }
+    for b in &mut st.bodies {
+        if s.doc.model_body_component(b) == 0 {
+            // A body handed to the design keeps its offset: moved after it, then the offset dropped.
+            let offset = s.doc.model_body_offset(b).copied().unwrap_or(solidcraft_doc::IDENTITY);
+            b.body = solidcraft_kernel::transform_matrix(&b.body, solidcraft_doc::mat_mul(m, &offset))?;
+            doc.body_offsets.remove(&b.name);
+        }
+    }
+    Ok((doc, st))
 }
 
 /// A picture of the part, drawn only for a format that has a place for it.
@@ -1367,31 +1423,42 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
         }
+        if p.get("frame").is_some_and(|v| !v.is_null()) {
+            return Err(bad(cmd, "`frame` applies to STEP, STL, 3MF and OBJ, not URDF"));
+        }
         return export_urdf(s, cmd, path, p);
     }
     let quality = mesh_quality(p, cmd)?;
     let parts = mesh_parts(s, p, cmd, format)?;
     let bodies = string_list(cmd, p, "bodies")?;
+    let frame = export_frame(s, p, cmd)?;
     if lay_on_print_faces(p, cmd, format)? {
+        if frame.is_some() {
+            return Err(bad(cmd, "a body laid on its print face has no frame of its own: give `frame` or `lay_on_print_faces`, not both"));
+        }
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
-    export_to(s, cmd, path, format, &bodies, &parts, quality)
+    export_to(s, cmd, path, format, &bodies, &parts, quality, frame)
 }
 
 fn export_step(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_step";
     let path = path_arg(p, cmd)?;
-    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default())
+    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default(), export_frame(s, p, cmd)?)
 }
 
 fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_stl";
     let path = path_arg(p, cmd)?;
     let (bodies, quality) = (string_list(cmd, p, "bodies")?, mesh_quality(p, cmd)?);
+    let frame = export_frame(s, p, cmd)?;
     if lay_on_print_faces(p, cmd, Format::StlBinary)? {
+        if frame.is_some() {
+            return Err(bad(cmd, "a body laid on its print face has no frame of its own: give `frame` or `lay_on_print_faces`, not both"));
+        }
         return export_laid(s, path, Format::StlBinary, &bodies, &[], quality);
     }
-    export_to(s, cmd, path, Format::StlBinary, &bodies, &[], quality)
+    export_to(s, cmd, path, Format::StlBinary, &bodies, &[], quality, frame)
 }
 
 fn export_3mf(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1399,16 +1466,20 @@ fn export_3mf(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, cmd)?;
     let parts = mesh_parts(s, p, cmd, Format::ThreeMf)?;
     let (bodies, quality) = (string_list(cmd, p, "bodies")?, mesh_quality(p, cmd)?);
+    let frame = export_frame(s, p, cmd)?;
     if lay_on_print_faces(p, cmd, Format::ThreeMf)? {
+        if frame.is_some() {
+            return Err(bad(cmd, "a body laid on its print face has no frame of its own: give `frame` or `lay_on_print_faces`, not both"));
+        }
         return export_laid(s, path, Format::ThreeMf, &bodies, &parts, quality);
     }
-    export_to(s, cmd, path, Format::ThreeMf, &bodies, &parts, quality)
+    export_to(s, cmd, path, Format::ThreeMf, &bodies, &parts, quality, frame)
 }
 
 fn export_obj_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_obj";
     let path = path_arg(p, cmd)?;
-    export_to(s, cmd, path, Format::Obj, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?)
+    export_to(s, cmd, path, Format::Obj, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?, export_frame(s, p, cmd)?)
 }
 
 fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1419,10 +1490,10 @@ fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 /// The OBJ export: the mesh file and the material library beside it, with the colours of the
 /// bodies. Every path is checked before anything is written; the library goes first and the
 /// mesh file last, so a mesh file never names a library that is not there.
-fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
+fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, frame: Option<solidcraft_doc::Mat>) -> Result<Value> {
     let mtl_path = std::path::Path::new(path).with_extension("mtl");
     let mtl_name = mtl_path.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| String::from("model.mtl"));
-    let files = solidcraft_io::export_obj(&s.doc.painted(&*s.world_state()?), bodies, &mtl_name, quality)?;
+    let files = solidcraft_io::export_obj(&in_frame(s.doc.painted(&*s.world_state()?), frame)?, bodies, &mtl_name, quality)?;
     let mut targets: Vec<(String, &[u8])> = Vec::new();
     if !files.mtl.is_empty() {
         targets.push((mtl_path.to_string_lossy().to_string(), files.mtl.as_bytes()));
@@ -1546,6 +1617,13 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     // Read before `slicer`, so a wrong value is refused there too; a file sent to a slicer is laid
     // on its print faces whatever this says.
     let lay = lay_on_print_faces(p, cmd, format)?;
+    let frame = export_frame(s, p, cmd)?;
+    if frame.is_some() && p.get("slicer").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "a mesh sent to a slicer is laid on its print face: give `frame` or `slicer`, not both"));
+    }
+    if frame.is_some() && lay {
+        return Err(bad(cmd, "a body laid on its print face has no frame of its own: give `frame` or `lay_on_print_faces`, not both"));
+    }
     if let Some(spec) = str_(p, "slicer") {
         #[cfg(target_arch = "wasm32")]
         {
@@ -1573,7 +1651,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     if lay {
         return export_laid_to(s, path, format, &bodies, &parts, quality);
     }
-    export_to(s, cmd, path, format, &bodies, &parts, quality)
+    export_to(s, cmd, path, format, &bodies, &parts, quality, frame)
 }
 
 /// The browser build can't start a program.
