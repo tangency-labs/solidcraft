@@ -1050,7 +1050,7 @@ preference_settings! {
     /// Share shading and Continuity; false preserves their independent legacy behavior.
     single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.graphics_page.single_surface_analysis");
     /// Linux: the window system the app opens with at its next start (#3083): `auto` (XWayland
-    /// whenever there is an X display, native Wayland on niri), `wayland` or `x11`.
+    /// whenever there is an X display, native Wayland on niri and Hyprland), `wayland` or `x11`.
     window_system: String = "auto".into(), PAGE_GRAPHICS;
     /// Graphics API for the next start; Automatic preserves the platform startup order.
     graphics_backend: String = "auto".into(), PAGE_GRAPHICS;
@@ -1149,6 +1149,10 @@ preference_settings! {
     /// a double-click in the browser activates every component and one in the view does nothing,
     /// as before.
     double_click_components: bool = true, PAGE_DESIGN => check_id("settings.double_click_components");
+    /// Snap points (#5912): wherever a point is picked (Move, Align and Measure so far, #5881),
+    /// hovering an edge, face or sketch curve shows its centre, middle and end points to snap to. On by default; off, a pick takes only
+    /// what is under the pointer, as before.
+    snap_points: bool = true, PAGE_TOOLS => check_id("settings.snap_points");
     /// Insert Design lists the designs open in other tabs, each inserted with one click, then
     /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
     insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
@@ -1157,6 +1161,9 @@ preference_settings! {
     /// #13262). Off: the grabbed point goes to the pointer and the part may spin about it, as
     /// before.
     joint_drag_trackball: bool = true, PAGE_DESIGN => check_id("prefs.joint_drag_trackball");
+    /// A saved design's tab and its Browser top row are named after its file, so a Save As or a
+    /// renamed file shows (#7267). Off: both show the name stored in the design, as before.
+    names_from_file: bool = true, PAGE_DESIGN => check_id("settings.names_from_file");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Ask separately when closing several unsaved designs, as before grouped saving.
@@ -1372,6 +1379,8 @@ preference_settings! {
     zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
     smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
+    /// The face under the pointer keeps its highlight while the view moves under it (#2130).
+    keep_hover_while_navigating: bool = true, PAGE_NAVIGATION;
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
     trackpad_pan: bool = true, PAGE_NAVIGATION;
     /// Hold this modifier alone to zoom with vertical wheel or two-finger scroll.
@@ -6645,6 +6654,7 @@ mod tests {
             ("space_mouse_speed", json!(2.0), PAGE_MOUSE3D),
             ("nav", json!("blender"), PAGE_NAVIGATION),
             ("look_at_anim", json!(false), PAGE_NAVIGATION),
+            ("keep_hover_while_navigating", json!(false), PAGE_NAVIGATION),
             ("selection_shift_add_only", json!(true), PAGE_SKETCH),
             ("select_other_hidden", json!(false), PAGE_SKETCH),
             ("select_hidden_edges", json!(true), PAGE_SKETCH),
@@ -13104,6 +13114,28 @@ mod settings_search_tests {
         h.app.prefs_window.shell.filter = "zzzz-no-setting".into();
         h.frames(4);
         assert!(!drawn(&h, "Status bar"), "a miss shows nothing");
+    }
+
+    /// The Placed features row is found by the name of every feature that has the marker, not
+    /// only by its own label.
+    #[test]
+    fn preferences_search_finds_placement_handles_by_each_placed_feature() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_TOOLS);
+        h.frames(2);
+        let drawn = |h: &crate::scenario::Harness, label: &str| {
+            let body = crate::scenario::rect_of("dialog:page_body");
+            h.widget(label).is_some_and(|[x, y]| body.is_none_or(|body| body.contains(egui::pos2(x as f32, y as f32))))
+        };
+        for query in ["Placed features", "Rest", "Boss", "Snap Fit", "Box", "Cylinder", "Cone", "Sphere", "Torus", "Coil"] {
+            h.app.prefs_window.shell.filter = query.into();
+            h.frames(4);
+            assert!(drawn(&h, "Placement handles"), "searching '{query}' should show Placement handles");
+        }
+        h.app.prefs_window.shell.filter = "zzzz-no-setting".into();
+        h.frames(4);
+        assert!(!drawn(&h, "Placement handles"), "a miss shows nothing");
     }
 
     #[test]

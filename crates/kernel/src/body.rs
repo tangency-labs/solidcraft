@@ -400,6 +400,15 @@ pub enum PointClass {
     OnBoundary,
 }
 
+/// SMLib's class of a point as the kernel's.
+fn point_class(c: solidcraft_smlib::PointClass) -> PointClass {
+    match c {
+        solidcraft_smlib::PointClass::Inside => PointClass::Inside,
+        solidcraft_smlib::PointClass::Outside => PointClass::Outside,
+        solidcraft_smlib::PointClass::OnBoundary => PointClass::OnBoundary,
+    }
+}
+
 /// The kind of surface a face lies on, as a person modelling would name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurfaceKind {
@@ -443,7 +452,7 @@ impl SurfaceKind {
             S::Cone { .. } => SurfaceKind::Cone,
             S::Sphere { .. } | S::BallPatch { .. } => SurfaceKind::Sphere,
             S::Torus { .. } => SurfaceKind::Torus,
-            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } => SurfaceKind::Freeform,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } => SurfaceKind::Freeform,
         }
     }
 }
@@ -1416,11 +1425,23 @@ impl Body {
             });
         }
         let class = self.smlib()?.classify_point([p.x, p.y, p.z]).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
-        Ok(match class {
-            solidcraft_smlib::PointClass::Inside => PointClass::Inside,
-            solidcraft_smlib::PointClass::Outside => PointClass::Outside,
-            solidcraft_smlib::PointClass::OnBoundary => PointClass::OnBoundary,
-        })
+        Ok(point_class(class))
+    }
+
+    /// [`Body::classify_point`] for each of `points`, in order, through one classification of
+    /// the body: SMLib's copy of it and its search structures are made once for all the points,
+    /// where a call a point makes them again each time (on a large body far more work than a
+    /// point's own solve). The first point that cannot be classified fails them all.
+    pub fn classify_points(&self, points: &[Vec3]) -> Result<Vec<PointClass>> {
+        if let Some(p) = points.iter().find(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
+            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+        }
+        if self.mesh.is_some() || points.len() < 2 {
+            return points.iter().map(|&p| self.classify_point(p)).collect();
+        }
+        let at: Vec<[f64; 3]> = points.iter().map(|p| [p.x, p.y, p.z]).collect();
+        let classes = self.smlib()?.classify_points(&at).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
+        classes.into_iter().map(|c| c.map(point_class).map_err(|e| KernelError::smlib("SMLib point classification", e))).collect()
     }
 
     /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).

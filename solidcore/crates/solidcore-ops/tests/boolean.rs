@@ -7,7 +7,7 @@ use std::io::Read as _;
 use serde_json::Value;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
 use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
-use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error};
+use solidcore_ops::{make_box, make_sphere, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::brep::Brep as Record;
 
 fn all_fixes() {
@@ -63,6 +63,66 @@ fn boxes_touching_along_an_edge_union_to_a_closed_body() {
     let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
     assert!(near(volume(&u), 2.0), "{}", volume(&u));
     assert_eq!(u.solid_count().unwrap(), 2);
+}
+
+/// A 20 mm box with a closed void at its middle: a 10 mm cube void, or a sphere void of radius 5.
+fn box_with_void(cube: bool) -> Body {
+    let tool = if cube {
+        make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap()
+    } else {
+        make_sphere([10.0, 10.0, 10.0], 5.0).unwrap()
+    };
+    let b = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]).unwrap();
+    boolean(b, tool, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+#[test]
+fn a_union_that_fills_a_void_is_the_whole_box() {
+    all_fixes();
+    // Every face of the void is deleted, and the region they joined is material. The tool's
+    // faces lie on the void's, or inside the box's material, so none of them is copied in.
+    let fillers = [
+        (true, make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap()),
+        (true, make_box([4.0, 4.0, 4.0], [12.0, 12.0, 12.0]).unwrap()),
+        (true, make_box([5.0, 4.0, 4.0], [12.0, 12.0, 12.0]).unwrap()),
+        (false, make_sphere([10.0, 10.0, 10.0], 5.0).unwrap()),
+        (false, make_sphere([10.0, 10.0, 10.0], 6.0).unwrap()),
+        (
+            false,
+            make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap(),
+        ),
+    ];
+    for (n, (cube, filler)) in fillers.into_iter().enumerate() {
+        let u = boolean(box_with_void(cube), filler, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        assert!(near(volume(&u), 8000.0), "filler {n}: {}", volume(&u));
+        assert_eq!(u.counts().unwrap(), [6, 12, 8], "filler {n}");
+        assert!(u.is_manifold_solid().unwrap(), "filler {n}");
+        assert!(u.to_record().is_ok(), "filler {n}");
+    }
+    // A filler that leaves part of the void keeps that part: 20³ − 10 · 10 · 1.
+    let part = make_box([6.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    let u = boolean(box_with_void(true), part, BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    assert!(near(volume(&u), 7900.0), "{}", volume(&u));
+}
+
+#[test]
+fn a_cube_on_a_void_is_kept_out_by_a_difference_and_shares_nothing_with_it() {
+    all_fixes();
+    let cube = || make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    // The faces bound material on opposite sides: a difference keeps them, so the box is
+    // unchanged, and an intersection deletes them and leaves nothing.
+    let d = boolean(box_with_void(true), cube(), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    assert!(near(volume(&d), 7000.0), "{}", volume(&d));
+    assert_eq!(d.counts().unwrap(), [12, 24, 16]);
+    assert!(boolean(box_with_void(true), cube(), BooleanOp::Intersect)
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -255,15 +315,16 @@ fn a_dome_1e_8_off_its_circle_joins_to_its_mirror() {
 
 /// Cancel stops the full check of a long coil cut (solidcore#3247): a 20-turn square coil cut
 /// from a cylinder, the case of tangency-labs/solidcraft#3962, whose check takes seconds (most
-/// of the cut's time, in the edges' curve analyses). Cancelled from another thread part way,
-/// the check returns `Cancelled` within 500 ms (a few ms on a desktop; the bound leaves room
-/// for shared CI runners). nextest runs each test in a process of its own, so no other test's
-/// call holds the session's kernel meanwhile.
+/// of the cut's time, in the edges' curve analyses). Measured in the token's polls, not in
+/// time: a counting token (`CancelToken::after_polls`) first counts the polls of the whole
+/// check, `whole`; a token cancelled from a quarter of them then stops a second check there.
+/// It returns `Cancelled`, and the token is polled exactly once after the poll that cancelled
+/// it: by the session as the call returns, asking whether it was cancelled (`run_with`, after
+/// the kernel's call). Any further poll would be work done after the cancel.
 #[test]
 fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    use std::time::{Duration, Instant};
     let corners = [
         [19.0, 0.0, 12.0],
         [32.0, 0.0, 12.0],
@@ -288,23 +349,20 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     .unwrap();
     let stock = solidcore_ops::make_cylinder([0.0; 3], 20.0, 304.5).unwrap();
     let cut = boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap();
-    let token = CancelToken::new();
-    let watched = token.clone();
-    let worker = std::thread::spawn(move || {
-        let r = within(&watched, || cut.check(CheckLevel::All));
-        (r.map(|_| ()), Instant::now())
-    });
-    std::thread::sleep(Duration::from_millis(300));
-    let cancelled = Instant::now();
-    token.cancel();
-    let (r, returned) = worker.join().unwrap();
-    let took = returned.saturating_duration_since(cancelled);
-    eprintln!("the check returned {took:?} after Cancel");
-    assert_eq!(r, Err(Error::Cancelled));
-    assert!(
-        took < Duration::from_millis(500),
-        "returned {took:?} after Cancel"
+    let probe = CancelToken::after_polls(u64::MAX);
+    within(&probe, || cut.check(CheckLevel::All)).unwrap();
+    let whole = probe.polls().unwrap();
+    let n = whole / 4;
+    // cancelled well inside the check, not at its last poll
+    assert!(n >= 1 && whole >= 2 * n, "the check polls {whole} times");
+    let token = CancelToken::after_polls(n);
+    let r = within(&token, || cut.check(CheckLevel::All));
+    eprintln!(
+        "the check polls {whole} times; cancelled at {n}, polled {:?}",
+        token.polls()
     );
+    assert_eq!(r.map(|_| ()), Err(Error::Cancelled));
+    assert_eq!(token.polls(), Some(n + 1));
 }
 
 /// #13295: a bar of L section (100 long; its step's top edge along x at y 12.527, z 19.567)

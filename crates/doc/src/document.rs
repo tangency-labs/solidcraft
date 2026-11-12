@@ -1197,6 +1197,10 @@ pub enum FeatureKind {
         tool: Option<FaceAt>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sketch: Option<SketchId>,
+        /// With `sketch`: its curves joined end to end first, so a closed loop cuts along itself
+        /// only. Off (each curve on its own, an open one extended past its ends) in older designs.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        loops: bool,
     },
     /// Scale bodies about a point (uniform, or per axis).
     Scale {
@@ -1436,7 +1440,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
     },
-    /// Sheet metal contour flange: a sheet bent along an open chain of sketch lines.
+    /// Sheet metal contour flange: a sheet bent along an open chain of sketch lines and tangent arcs.
     SheetContour {
         sketch: SketchId,
         curves: Vec<String>,

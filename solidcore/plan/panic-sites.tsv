@@ -1007,7 +1007,7 @@ crates/solidcore/src/sweep/loft_rails.rs	certify	windows	1	proven	windows(2)	con
 crates/solidcore/src/sweep/loft_rails.rs	certify	with_capacity	1	proven	Vec::with_capacity(wires.len())	the length of an existing Vec (the wires made)
 crates/solidcore/src/sweep/loft_rails.rs	certify	with_capacity	2	proven	Vec::with_capacity(wires.len())	the length of an existing Vec (the wires made)
 crates/solidcore/src/sweep/loft_rails.rs	interpolate_g	f64::clamp	1	proven	clamp(0.0, n)	n is a usize cast to f64: never NaN and never below 0.0, so min <= max
-crates/solidcore/src/sweep/loft_rails.rs	loft_rails	Vec::drain	1	proven	drain(..)	a full range, never out of bounds
+crates/solidcore/src/sweep/loft_rails.rs	skin_and_certify	Vec::drain	1	proven	drain(..)	a full range, never out of bounds
 crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
 crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	with_capacity	1	proven	Vec::with_capacity(4)	constant capacity
 crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	with_capacity	2	proven	Vec::with_capacity(4)	constant capacity

@@ -8,7 +8,7 @@
 //! which the neighbouring face shares.
 
 use crate::vec::VecExt as _;
-use std::collections::HashMap;
+use crate::hash::BitsMap;
 
 use solidcore::Vec3;
 
@@ -37,13 +37,13 @@ pub(crate) fn refine(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[V
     // No side is split below this length: a surface whose parameters bend sharply (at a pole) is
     // not chased to the last bit.
     let shortest = tol * 1e-3;
-    let mut sides: HashMap<(u32, u32), Vec<u32>> = HashMap::with_capacity(tris.len() * 2);
+    let mut sides: BitsMap<(u32, u32), Vec<u32>> = BitsMap::with_capacity_and_hasher(tris.len() * 2, std::hash::BuildHasherDefault::default());
     for (ti, t) in tris.iter().enumerate() {
         for [a, b, _] in (0..3).map(|k| rot3(*t, k)) {
             sides.entry(key(a, b)).or_default().push(ti as u32);
         }
     }
-    let mut sag_of: HashMap<(u32, u32), f64> = HashMap::new();
+    let mut sag_of: BitsMap<(u32, u32), f64> = BitsMap::default();
     let limit = uv.len().saturating_add(max_points);
     let mut queue: Vec<u32> = (0..tris.len() as u32).rev().collect();
     while let Some(ti) = queue.pop() {
@@ -151,7 +151,7 @@ pub(crate) struct Poles<'a> {
     s: &'a super::poles::Face,
     reach: f64,
     /// The answers so far, by the node's parameters bit for bit.
-    flags: std::cell::RefCell<HashMap<[u64; 2], [bool; 2]>>,
+    flags: std::cell::RefCell<BitsMap<[u64; 2], [bool; 2]>>,
     /// Pole questions asked of the surface, for the tests.
     #[cfg(test)]
     pub(crate) asked: std::cell::Cell<usize>,
@@ -160,7 +160,7 @@ pub(crate) struct Poles<'a> {
 impl<'a> Poles<'a> {
     /// The poles of `s`, a node within `reach` mm of one taken as one.
     pub(crate) fn new(s: &'a super::poles::Face, reach: f64) -> Self {
-        Poles { s, reach, flags: std::cell::RefCell::new(HashMap::new()), #[cfg(test)] asked: std::cell::Cell::new(0) }
+        Poles { s, reach, flags: std::cell::RefCell::new(BitsMap::default()), #[cfg(test)] asked: std::cell::Cell::new(0) }
     }
 
     /// Whether each direction is collapsed at the node of parameters `q`.
@@ -192,7 +192,7 @@ impl<'a> Poles<'a> {
 
 /// The longest side of triangle `t` when the angle opposite it is past `degrees` and the side lies
 /// inside the face (two triangles on it) and is long enough to split.
-fn flat_long_side(t: &[u32; 3], pos: &[Vec3], sides: &HashMap<(u32, u32), Vec<u32>>, shortest: f64, degrees: f64) -> Option<(u32, u32)> {
+fn flat_long_side(t: &[u32; 3], pos: &[Vec3], sides: &BitsMap<(u32, u32), Vec<u32>>, shortest: f64, degrees: f64) -> Option<(u32, u32)> {
     let p = |i: u32| pos.get(i as usize).copied();
     let len = |i: u32, j: u32| p(i).zip(p(j)).map(|(a, b)| a.dist(b));
     let [t0, t1, t2] = *t;
@@ -211,7 +211,7 @@ fn key(a: u32, b: u32) -> (u32, u32) {
 }
 
 /// Move triangle `from` to `to` in the list of side `(a, b)`.
-fn retag(sides: &mut HashMap<(u32, u32), Vec<u32>>, a: u32, b: u32, from: u32, to: u32) {
+fn retag(sides: &mut BitsMap<(u32, u32), Vec<u32>>, a: u32, b: u32, from: u32, to: u32) {
     if let Some(ts) = sides.get_mut(&key(a, b)) {
         for t in ts.iter_mut().filter(|t| **t == from) {
             *t = to;
@@ -221,7 +221,7 @@ fn retag(sides: &mut HashMap<(u32, u32), Vec<u32>>, a: u32, b: u32, from: u32, t
 
 /// Split side `e` at the new point `m`: each triangle on it becomes two, in its own winding.
 /// The triangles touched, old and new.
-fn split_side(tris: &mut Vec<[u32; 3]>, sides: &mut HashMap<(u32, u32), Vec<u32>>, e: (u32, u32), m: u32) -> Vec<u32> {
+fn split_side(tris: &mut Vec<[u32; 3]>, sides: &mut BitsMap<(u32, u32), Vec<u32>>, e: (u32, u32), m: u32) -> Vec<u32> {
     let on = sides.remove(&e).unwrap_or_default();
     let mut touched = Vec::with_capacity(4);
     for ti in on {
@@ -306,7 +306,7 @@ pub(crate) fn flip(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[Vec
         (Some(a), Some(b), Some(c), Some(qa), Some(qb), Some(qc)) => off(mean(&[qa, qb, qc]), (a + b + c) * (1.0 / 3.0)),
         _ => f64::INFINITY,
     };
-    let mut sides: HashMap<(u32, u32), Vec<u32>> = HashMap::with_capacity(tris.len() * 2);
+    let mut sides: BitsMap<(u32, u32), Vec<u32>> = BitsMap::with_capacity_and_hasher(tris.len() * 2, std::hash::BuildHasherDefault::default());
     for (ti, t) in tris.iter().enumerate() {
         for [a, b, _] in (0..3).map(|k| rot3(*t, k)) {
             sides.entry(key(a, b)).or_default().push(ti as u32);

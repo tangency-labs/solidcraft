@@ -18,7 +18,7 @@ use crate::schema::inspect::{
     FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
     MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
     ModelThread, ModelThreads, ModelThreadsParams, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile,
-    SketchWire, TimelineEntry, TimelineSummary, WireArcInfo,
+    SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -360,12 +360,27 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
                 CurveKind::Ellipse { c: cc, m, r } => {
                     CurveShape::Ellipse { center: pid(cc), major: pid(m), center_at: at(cc), major_at: at(m), minor_radius: r }
                 }
-                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs } => CurveShape::Spline {
+                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs, ref handles } => CurveShape::Spline {
                     points: pts.iter().map(|q| pid(*q)).collect(),
                     points_at: pts.iter().map(|q| at(*q)).collect(),
                     control,
                     degree,
                     periodic,
+                    tangent_handles: handles
+                        .iter()
+                        .map(|&point| SplineTangentHandle {
+                            point: pid(point),
+                            at: at(point),
+                            curve: sk
+                                .curves
+                                .iter()
+                                .find(|candidate| {
+                                    candidate.spline_handle_of.as_deref() == Some(c.id.as_str())
+                                        && matches!(candidate.kind, CurveKind::Line { a, b } if a == point || b == point)
+                                })
+                                .map(|candidate| candidate.id.clone()),
+                        })
+                        .collect(),
                     // A control spline with its own knots (a projected free-form edge) says them.
                     knots: nurbs.as_ref().map(|n| n.knots.clone()),
                     weights: nurbs.as_ref().filter(|n| !n.weights.is_empty()).map(|n| n.weights.clone()),

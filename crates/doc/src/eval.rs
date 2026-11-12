@@ -3409,7 +3409,7 @@ impl Model {
                 // feature names, when it names one and the face is there).
                 let renamed;
                 let mut frame_error: Option<String> = None;
-                let f = match with_named_face_points(doc, &state, f) {
+                let f = match with_named_face_points(doc, &vals, &state, f) {
                     Ok(Some((g, notes))) => {
                         if !notes.is_empty() {
                             warning = Some(notes.join("; "));
@@ -8557,8 +8557,9 @@ fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelSta
 /// `f` with each face point moved onto its named face (on the body the feature names, when it
 /// names one and the face is there) in `state`, and notes on how the faces were found. `None`
 /// when `f` names no face; an error when a name no longer finds its face (the feature asks for
-/// it to be picked again), or when the frame the faces are looked up in cannot be made.
-fn with_named_face_points(doc: &Document, state: &ModelState, f: &Feature) -> Result<Option<(Feature, Vec<String>)>> {
+/// it to be picked again), or when the frame the faces are looked up in cannot be made. A hole
+/// placed by length expressions is looked up where they evaluate in `vals`, not where it was made.
+fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state: &ModelState, f: &Feature) -> Result<Option<(Feature, Vec<String>)>> {
     // Cylindrical emboss resolves its named face in the selected body's frame
     // and certifies an analytic anchor; mesh projection here would undo that.
     let explicit_emboss = matches!(&f.kind, FeatureKind::Emboss { face: Some(_), .. });
@@ -8574,24 +8575,29 @@ fn with_named_face_points(doc: &Document, state: &ModelState, f: &Feature) -> Re
         FeatureKind::Hole { direction, points: None | Some(crate::SketchPoints { single: true, .. }), .. } => direction.normalized(),
         _ => None,
     };
+    let placed = match &f.kind {
+        FeatureKind::Hole { position, at: at @ Some(_), .. } => hole_position(vals, position, at).ok(),
+        _ => None,
+    };
     let fst = face_point_state(doc, state, &f.kind, f.component)?;
     for (k, (p, n)) in g.kind.face_points_mut().into_iter().zip(&f.face_names).enumerate() {
         if n.is_empty() {
             continue;
         }
-        match crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, *p) {
+        let from = if k == 0 { placed.unwrap_or(*p) } else { *p };
+        match crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, from) {
             Some(hit) => {
                 if let Some(note) = hit.note(n) {
                     notes.push(note);
                 }
                 match (k, hole_axis) {
-                    (0, Some(axis)) => match hit.along(&fst, *p, axis) {
+                    (0, Some(axis)) => match hit.along(&fst, from, axis) {
                         Some(q) => *p = q,
                         // The place still lies on the face (the axis may run along it).
                         None if hit.on_point => {}
                         None => notes.push(format!(
                             "the hole's position [{}, {}, {}] is no longer on face `{n}`: it stays where it was placed",
-                            p.x, p.y, p.z
+                            from.x, from.y, from.z
                         )),
                     },
                     _ => *p = hit.pick_point(&fst, *p),
@@ -8876,7 +8882,7 @@ fn replay(
             // Each copy's faces are named as the source feature's, with the instance. Its face
             // points follow their named faces, as the feature's own did (#2121): a To Object
             // extrude's copies reach the face where it is now, not where it was picked.
-            let moved = with_named_face_points(doc, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g);
+            let moved = with_named_face_points(doc, vals, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g);
             let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
@@ -9715,7 +9721,7 @@ fn eval_feature(
             }
             apply_traced(doc, st, f, made, *operation, &[])
         }
-        FeatureKind::SplitFace { faces, body, plane, tool, sketch } => {
+        FeatureKind::SplitFace { faces, body, plane, tool, sketch, loops } => {
             let i = body_at(st, body, &crate::plain(faces))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mut picked: Vec<usize> = Vec::new();
@@ -9735,12 +9741,18 @@ fn eval_feature(
                 }
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
-                    // Each curve's exact segments (lines and arcs split by their own plane and cylinder).
-                    let curves: Vec<Vec<solidcore_record::Seg2>> = (0..ss.sketch.curves.len())
-                        .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
-                        .map(|ci| ss.sketch.segs(ci))
-                        .filter(|segs| !segs.is_empty())
-                        .collect();
+                    // Each curve's exact segments (lines and arcs split by their own plane and cylinder),
+                    // or with `loops` the curves joined end to end: a closed chain is not extended.
+                    let curves: Vec<Vec<solidcore_record::Seg2>> = if *loops {
+                        let ids: Vec<String> = ss.sketch.curves.iter().filter(|c| !c.construction).map(|c| c.id.clone()).collect();
+                        surface::curve_chains(ss, &ids)?
+                    } else {
+                        (0..ss.sketch.curves.len())
+                            .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
+                            .map(|ci| ss.sketch.segs(ci))
+                            .filter(|segs| !segs.is_empty())
+                            .collect()
+                    };
                     if curves.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
                     }
