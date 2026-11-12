@@ -12,7 +12,11 @@ use solidcore_record::brep;
 
 use crate::{Mesh, MeshSpec, PlanStats, TessError, TessPlan, WeldedMesh};
 
-use super::{SplitSide, edges, on_edges, size};
+use solidcore::Vec3;
+
+use crate::vec::VecExt as _;
+
+use super::{PoleCap, SplitSide, cap_ring, edges, on_edges, size};
 
 fn record(body: &solidcore_ops::Body) -> brep::Brep {
     body.to_record().expect("the body's record").0
@@ -342,3 +346,49 @@ fn a_spec_out_of_range_is_refused() {
         }
     }
 }
+
+/// A rational spline sphere of radius 10, as a kernel writes one: u round the axis in four
+/// quarter arcs, v from the south pole to the north in two, each arc's middle weight 1/2^(1/2).
+/// Its parameters run unevenly round each arc.
+fn spline_sphere() -> EvalSurface {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let round: [([f64; 2], f64); 9] =
+        [([1.0, 0.0], 1.0), ([1.0, 1.0], w), ([0.0, 1.0], 1.0), ([-1.0, 1.0], w), ([-1.0, 0.0], 1.0), ([-1.0, -1.0], w), ([0.0, -1.0], 1.0), ([1.0, -1.0], w), ([1.0, 0.0], 1.0)];
+    let meridian: [([f64; 2], f64); 5] = [([0.0, -1.0], 1.0), ([1.0, -1.0], w), ([1.0, 0.0], 1.0), ([1.0, 1.0], w), ([0.0, 1.0], 1.0)];
+    let mut ctrl = Vec::new();
+    for ([r, z], wv) in meridian {
+        for ([x, y], wu) in round {
+            let wt = wu * wv;
+            ctrl.push([10.0 * x * r * wt, 10.0 * y * r * wt, 10.0 * z * wt, wt]);
+        }
+    }
+    let knots_u = vec![0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0];
+    let knots_v = vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0];
+    EvalSurface::nurbs([2, 2], [knots_u, knots_v], [9, 5], ctrl)
+}
+
+/// A pole's ring on a rational spline sphere, a full turn round its north pole from the seam
+/// back to it, at 25 degrees: 14 segments, and every neighbour pair, the pair across the seam
+/// included, seen from the pole at 25 degrees or more in 3D. (At 83e819468f the ring was even in
+/// its parameter, and one pair turned 19.7 degrees.)
+#[test]
+fn a_pole_ring_is_even_round_the_pole_in_3d() {
+    let s = spline_sphere();
+    let v = 0.985;
+    let point = |q: [f64; 2]| s.derivs(q[0], q[1]).expect("evaluates").0;
+    // The seam's node at the ring, from both sides, and the pole.
+    let (before, after, pole) = ([1.0, v], [0.0, v], [0.0, 1.0]);
+    let uvs = vec![before, after, pole];
+    let fixed = vec![point(before), point(after), point(pole)];
+    assert!(fixed[0].dist(fixed[1]) < 1e-9, "the seam's two copies are one point");
+    let cap = PoleCap { lp: 0, copies: vec![2], before: 0, after: 1 };
+    let min_angle = 25f64.to_radians();
+    let Ok(inner) = cap_ring(&s, &cap, &uvs, &fixed, 1.0, min_angle) else { panic!("a ring") };
+    assert_eq!(inner.len() + 1, 14, "segments");
+    let ring: Vec<Vec3> = std::iter::once(fixed[0]).chain(inner.iter().map(|(_, p)| *p)).chain(std::iter::once(fixed[1])).collect();
+    for (k, w) in ring.windows(2).enumerate() {
+        let turn = edges::turn(w[0] - fixed[2], w[1] - fixed[2]).to_degrees();
+        assert!(turn >= 25.0, "pair {k} turns {turn} degrees at the pole");
+    }
+}
+

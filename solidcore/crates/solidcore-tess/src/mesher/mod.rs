@@ -1618,7 +1618,9 @@ fn ring_too_far(cap: &PoleCap, fixed: &[Vec3], reach: f64) -> Vec<SplitSide> {
 
 /// The inner nodes of the ring of `cap`: the line in (u, v) from the boundary node before the
 /// pole to the one after it (both ends count among its segments: a seam's two nodes are its
-/// ends), divided evenly into [`ring_segments`] for the spec's angle `min_angle`, then fewer while
+/// ends, one point), divided evenly by the turn round the pole in 3D, not by its parameter (a
+/// rational spline's runs unevenly round its arcs), into [`ring_segments`] for the spec's angle
+/// `min_angle`, then fewer while
 /// the fan's angle at the pole between two neighbours falls short of it in 3D (down to one per
 /// quarter turn), so the fan keeps the angle. Where the ring lies farther out than its chords can
 /// keep the tolerance `tol` (the planner could not put nodes nearer the pole), it is divided more
@@ -1633,26 +1635,57 @@ fn cap_ring(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], to
         let q = at(t);
         s.derivs(q[0], q[1]).map(|d| d.0).ok_or_else(|| format!("the surface does not evaluate on a pole's ring at {q:?}"))
     };
-    let nodes = |n: usize| -> std::result::Result<Vec<([f64; 2], Vec3)>, String> {
-        (0..=n).map(|i| {
-            let t = i as f64 / n as f64;
-            Ok((at(t), point(t)?))
-        }).collect()
+    // The turn round the pole from the ring's start, sampled along it: each node is placed by
+    // its share of the whole turn, then bisected between the samples either side of it.
+    const SAMPLES: usize = 256;
+    const BISECTIONS: usize = 48;
+    let mut table: Vec<(f64, Vec3, f64)> = Vec::new();
+    let mut so_far = 0.0;
+    for i in 0..=SAMPLES {
+        let t = i as f64 / SAMPLES as f64;
+        let p = point(t)?;
+        if let Some(&(_, last, _)) = table.last() {
+            so_far += edges::turn(last - pole, p - pole);
+        }
+        table.push((t, p, so_far));
+    }
+    let whole = so_far;
+    let place = |share: f64| -> std::result::Result<f64, String> {
+        let goal = whole * share;
+        let Some(k) = table.windows(2).position(|w| matches!(w, [_, (_, _, b)] if *b >= goal)) else { return Ok(1.0) };
+        let (Some(&(t0, p0, c0)), Some(&(t1, _, _))) = (table.get(k), table.get(k + 1)) else { return Ok(1.0) };
+        let (mut lo, mut hi) = (t0, t1);
+        for _ in 0..BISECTIONS {
+            let mid = 0.5 * (lo + hi);
+            if c0 + edges::turn(p0 - pole, point(mid)? - pole) < goal {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        Ok(0.5 * (lo + hi))
+    };
+    let nodes = |n: usize| -> std::result::Result<Vec<(f64, [f64; 2], Vec3)>, String> {
+        (0..=n)
+            .map(|i| {
+                let t = if i == 0 { 0.0 } else if i == n { 1.0 } else { place(i as f64 / n as f64)? };
+                Ok((t, at(t), point(t)?))
+            })
+            .collect()
     };
     let least = ring_segments(turn, std::f64::consts::FRAC_PI_2);
     let mut n = ring_segments(turn, min_angle);
     let mut ring = nodes(n)?;
     // Fewer while a neighbour pair's angle at the pole in 3D falls short of the spec's.
-    while n > least && ring.windows(2).any(|w| matches!(w, [x, y] if edges::turn(x.1 - pole, y.1 - pole) < min_angle)) {
+    while n > least && ring.windows(2).any(|w| matches!(w, [x, y] if edges::turn(x.2 - pole, y.2 - pole) < min_angle)) {
         n -= 1;
         ring = nodes(n)?;
     }
     // More finely where a chord sags past the tolerance.
     for _ in 0..MAX_FINER {
-        let sags = ring.windows(2).enumerate().any(|(k, w)| {
+        let sags = ring.windows(2).any(|w| {
             let [x, y] = w else { return false };
-            let (t0, t1) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
-            [0.25, 0.5, 0.75].iter().any(|f| point(t0 + f * (t1 - t0)).is_ok_and(|p| p.dist_to_segment(x.1, y.1) > tol))
+            [0.25, 0.5, 0.75].iter().any(|f| point(x.0 + f * (y.0 - x.0)).is_ok_and(|p| p.dist_to_segment(x.2, y.2) > tol))
         });
         if !sags || n >= edges::MAX_EDGE_NODES {
             break;
@@ -1661,7 +1694,7 @@ fn cap_ring(s: &EvalSurface, cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], to
         ring = nodes(n)?;
     }
     // The inner nodes: the ends are the boundary's.
-    Ok(ring.into_iter().skip(1).take(n.saturating_sub(1)).collect())
+    Ok(ring.into_iter().skip(1).take(n.saturating_sub(1)).map(|(_, q, p)| (q, p)).collect())
 }
 
 /// The fan of a pole's cap: the triangles from the pole's `copies` (boundary nodes, in loop
