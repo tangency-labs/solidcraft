@@ -189,6 +189,7 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
     home_rect: &["titlebar:home", "appbar:home"],
     file: &["appbar:file", "appbar:folder"],
     file_rect: &["appbar:file"],
+    plugins: "appbar:plugins",
     button: &["appbar:", "titlebar:"],
     separator: "titlebar:separator:",
     search: "titlebar:search",
@@ -234,6 +235,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
+                // The web build runs no plugins: no Plugins menu there.
+                plugins: (!cfg!(target_arch = "wasm32")).then(|| (app.tr("ui.plugins"), app.plugin_menu.open)),
                 actions: vec![
                     action("save", "save", &save_tip, shown, false),
                     action("undo", "undo", &undo_tip, shown, true),
@@ -258,8 +261,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             for action in &out.actions {
                 match action {
                     app_bar::BarAction::Home => app.home.show(app.session.revision),
+                    app_bar::BarAction::Plugins { rect } => {
+                        app.ui.palette_open = false;
+                        crate::plugin_menu::toggle(app, &ui.ctx().clone(), *rect);
+                    }
                     app_bar::BarAction::File { .. } => {
                         app.ui.palette_open = false;
+                        app.plugin_menu.open = false;
                         let ctx = ui.ctx().clone();
                         let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
                         let pass = ctx.cumulative_pass_nr();
@@ -313,6 +321,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     file_menu(app, ui.ctx());
+    crate::plugin_menu::menu(app, &ui.ctx().clone());
     let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::unique("sc_help_anchor")).unwrap_or(300.0));
     crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, APP_BAR_HEIGHT));
 }
