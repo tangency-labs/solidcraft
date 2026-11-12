@@ -23,7 +23,8 @@
 //! Deviations:
 //! - **Analytic contacts.** A clipped line or ellipse whose whole extent is below
 //!   the geometric tolerance is returned as a point curve at the interval midpoint,
-//!   including a trailing interval at the source curve's end.
+//!   including a trailing interval at the source curve's end. The extent bound
+//!   includes arithmetic rounding.
 //! - **Plane first with a torus (opt-in, not upstream).** With
 //!   `fixes.plane_first_torus_section_exact` (WR-721, #2405) `GlobalSurfaceIntersect` takes a
 //!   torus's own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV
@@ -78,6 +79,7 @@ use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::surface::SurfaceFailure;
 use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_WARNING};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::certified::{self, next_up};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -1153,18 +1155,25 @@ impl Plane {
             ignore_status(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
             // A full circle has coincident endpoints. Bound the whole analytic
             // interval using its diameter and arc length, with signed sizes by magnitude.
+            // Round each computed upper bound outward, including norm underflow.
             let extent = match new_curve.kind() {
-                CurveKind::Line(line) => Some(
-                    line.line_vector().length()
-                        * line.line_scale().abs()
-                        * line.step_interval().length().abs(),
-                ),
+                CurveKind::Line(line) => {
+                    let length = certified::distance(Vec3::ZERO, line.line_vector());
+                    let length_upper = next_up(length.value + length.bound);
+                    let interval = line.step_interval();
+                    let span_upper = next_up((interval.max() - interval.min()).abs());
+                    let scaled_length_upper = next_up(length_upper * line.line_scale().abs());
+                    Some(next_up(scaled_length_upper * span_upper))
+                }
                 CurveKind::Ellipse(ellipse) => {
                     let radius = max2(ellipse.x_radius().abs(), ellipse.y_radius().abs());
-                    Some(min2(
-                        2.0 * radius,
-                        radius * ellipse.step_interval().length().abs() * (PI / 180.0),
-                    ))
+                    let interval = ellipse.step_interval();
+                    let angle_upper = next_up((interval.max() - interval.min()).abs());
+                    let radians_per_degree_upper = next_up(next_up(PI) / 180.0);
+                    let radius_angle_upper = next_up(radius * angle_upper);
+                    let arc_length_upper = next_up(radius_angle_upper * radians_per_degree_upper);
+                    // Multiplication by two is exact when the diameter is finite.
+                    Some(min2(2.0 * radius, arc_length_upper))
                 }
                 _ => None,
             };
@@ -2043,6 +2052,45 @@ mod tests {
                 let b = result[0].evaluate_point(&k, interval.mid()).unwrap();
                 assert!(a.distance(b) > 1.0, "the signed curve retains its extent");
             }
+        }
+    }
+
+    #[test]
+    fn clipping_retains_a_curve_at_the_extent_rounding_boundary() {
+        let k = Kernel::default();
+        let tolerance = 0.91;
+        // The computed line extent is below 0.91. Its exact extent from the f64
+        // inputs exceeds 0.91, so the curve must stay when the bound is uncertain.
+        let line = Curve::from(Line::bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            &Extent1d::from_min_max(-0.3, 0.4),
+            &BoundedLineOptions {
+                scale: 1.3,
+                ..BoundedLineOptions::default()
+            },
+        ));
+        let circle = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 360.0),
+                tolerance / 2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        for curve in [line, circle] {
+            let output = rect()
+                .trim_curve_to_plane_domain(&k, &dom(), &curve, tolerance)
+                .unwrap();
+            assert_eq!(output.len(), 1);
+            assert!(matches!(
+                output[0].kind(),
+                CurveKind::Line(_) | CurveKind::Ellipse(_)
+            ));
         }
     }
 
