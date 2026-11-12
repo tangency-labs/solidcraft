@@ -8048,7 +8048,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, angle, copy } => {
+        FeatureKind::Move { bodies, translate, rotate_axis, angle, copy, leave, .. } => {
             let mut d = start("solid.move")?;
             // Move stores distances in the first body's frame, which can differ from the
             // feature's component. Refill the world distances that the command accepts.
@@ -8074,6 +8074,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 rotate_axis.map(Vec3::from),
                 angle.as_ref(),
                 *copy,
+                !leave.is_empty(),
             );
             d
         }

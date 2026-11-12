@@ -351,6 +351,52 @@ mod tests {
         assert_eq!(h.app.session.doc.features.len(), before + 1);
     }
 
+    /// Where the pole made last stands: its line's point at z = 0.
+    fn pole_foot(h: &Harness) -> (f64, f64) {
+        let st = h.app.session.model.state();
+        let c = st.construct.last().expect("a pole");
+        let solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } = c.geom else { panic!("not an axis") };
+        let t = -origin.z / dir.z;
+        (origin.x + t * dir.x, origin.y + t * dir.y)
+    }
+
+    /// Move Body1 30 mm along X with the Move window, Keep Axes With Body set to `keep`.
+    fn move_body1(h: &mut Harness, keep: bool) {
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        h.app.start("solid.move");
+        let d = h.app.dialog.as_mut().unwrap();
+        if let crate::dialogs::Kind::Move { x, .. } = &mut d.kind {
+            *x = "30 mm".into();
+        }
+        d.extra.insert("keep_axes".into(), json!(keep));
+        let d = h.app.dialog.take().unwrap();
+        let p = crate::dialogs_move::params(&h.app, &d).unwrap();
+        h.app.run("solid.move", p).unwrap();
+        h.settle();
+    }
+
+    #[test]
+    fn moving_a_body_takes_its_center_pole_along_unless_told_not_to() {
+        for (keep, foot) in [(true, 40.0), (false, 10.0)] {
+            let mut h = two_boxes(40.0);
+            h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+            click_pole(&mut h);
+            move_body1(&mut h, keep);
+            let (x, y) = pole_foot(&h);
+            assert!((x - foot).abs() < 1e-6 && (y - 10.0).abs() < 1e-6, "keep {keep}: the pole stands at ({x}, {y})");
+        }
+    }
+
+    #[test]
+    fn a_face_pole_goes_with_its_body_too() {
+        let mut h = two_boxes(40.0);
+        h.app.run("select.set", json!({"items": [{"type": "face", "body": "Body1", "point": [3, 4, 10]}]})).unwrap();
+        click_pole(&mut h);
+        move_body1(&mut h, true);
+        let (x, _) = pole_foot(&h);
+        assert!((x - 40.0).abs() < 1e-6, "the face pole moved: {x}");
+    }
+
     #[test]
     fn two_bodies_or_an_edge_get_no_pole() {
         let mut h = two_boxes(40.0);

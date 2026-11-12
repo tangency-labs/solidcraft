@@ -206,7 +206,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("presspull")
         .key("Q")
         .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet)"),
-    CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch).params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr; copy?: bool (default false: keeps the original bodies and transforms a new copy instead of moving them in place); occurrences?: [occurrence paths, root first] (only with copy: each component is copied as an independent component, as Paste New copies it, and the copy moves by the same translate, axis and angle in the world; the reply lists the copies in occurrences)"),
+    CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch).params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr; copy?: bool (default false: keeps the original bodies and transforms a new copy instead of moving them in place); carry?: [construction names or ids] (also moved with the bodies, e.g. a Center Pole at fixed points); leave?: [construction names or ids] (built on the bodies but left where they are); occurrences?: [occurrence paths, root first] (only with copy: each component is copied as an independent component, as Paste New copies it, and the copy moves by the same translate, axis and angle in the world; the reply lists the copies in occurrences)"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -2499,6 +2499,8 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
             rotate_axis: p.get("axis").and_then(vec3).map(Dir),
             angle,
             copy,
+            carry: construction_ids(s, cmd, p, "carry")?,
+            leave: construction_ids(s, cmd, p, "leave")?,
         },
     )?;
     if copy {
@@ -2506,6 +2508,32 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
     }
     Ok(reply)
+}
+
+/// The construction features listed under `key` (names or feature ids), by id; empty when absent.
+fn construction_ids(s: &Session, cmd: &str, p: &Value, key: &str) -> Result<Vec<u64>> {
+    let Some(list) = p.get(key) else { return Ok(Vec::new()) };
+    let Some(list) = list.as_array() else { return Err(bad(cmd, format!("`{key}` must list construction features"))) };
+    list.iter()
+        .map(|v| {
+            let f = match v {
+                Value::Number(n) => n.as_u64().and_then(|id| s.doc.feature(id)),
+                Value::String(name) => s.doc.find_feature(name),
+                _ => None,
+            };
+            match f {
+                Some(f)
+                    if matches!(
+                        f.kind,
+                        FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } | FeatureKind::ConstructionPlane { .. }
+                    ) =>
+                {
+                    Ok(f.id)
+                }
+                _ => Err(bad(cmd, format!("`{key}`: {v} is not a construction feature"))),
+            }
+        })
+        .collect()
 }
 
 /// A copy keeps the look and the material of the body it came from (#6423): the copy is the same

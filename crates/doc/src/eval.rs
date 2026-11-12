@@ -10160,7 +10160,7 @@ fn eval_feature(
             st.bodies.push(ModelBody::traced_new(name, b, f.id));
             Ok(())
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, angle, copy } => {
+        FeatureKind::Move { bodies, translate, rotate_axis, angle, copy, carry, leave } => {
             let t =
                 Vec3::new(val(vals, &translate[0], Kind::Length)?, val(vals, &translate[1], Kind::Length)?, val(vals, &translate[2], Kind::Length)?);
             let ang = match angle {
@@ -10186,7 +10186,7 @@ fn eval_feature(
                 }
             }
             if !*copy {
-                move_constructions_with(doc, st, bodies, &crate::rigid(t, Vec3::ZERO, axis, ang));
+                move_constructions_with(doc, st, bodies, &crate::rigid(t, Vec3::ZERO, axis, ang), carry, leave);
             }
             Ok(())
         }
@@ -10448,9 +10448,10 @@ fn construction_state<'a>(doc: &Document, st: &'a ModelState, comp: u64) -> Resu
 /// Construction axes and points built on bodies a Move moves go with them (#10127): an axis
 /// through a cylinder turns with the cylinder, as its faces do. Only those built from the moved
 /// bodies alone (`Construct::bodies`) follow; one also held by a fixed point, a plane or another
-/// body stays. `m` is the move in the bodies' own frame; each construction is kept in its
+/// body stays. The Move's `carry` list takes others along too, and its `leave` list keeps
+/// some of those built on the bodies where they are. `m` is the move in the bodies' own frame; each construction is kept in its
 /// component's frame (`construction_state`), so the move is carried over into that frame.
-fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::BodyName], m: &Mat) {
+fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::BodyName], m: &Mat, carry: &[u64], leave: &[u64]) {
     let frame_of = |feature: u64| {
         let comp = doc.feature(feature).map(|f| f.component).unwrap_or(0);
         if comp == 0 && !doc.occurrences.is_empty() { crate::IDENTITY } else { doc.component_transform(comp) }
@@ -10459,10 +10460,18 @@ fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::
         st.bodies.iter().filter(|b| moved.iter().any(|n| *n == b.name)).map(|b| (b.name.as_str(), body_world(doc, b))).collect();
     let mut placed = Vec::new();
     for (k, c) in st.construct.iter().enumerate() {
-        let Some(body) = c.bodies.first().and_then(|b| world.get(b.as_str())) else { continue };
-        if !c.bodies.iter().all(|b| world.contains_key(b.as_str())) {
+        if leave.contains(&c.feature) {
             continue;
         }
+        // A carried construction moves in the frame of the first moved body.
+        let body = if carry.contains(&c.feature) {
+            moved.first().and_then(|n| world.get(AsRef::<str>::as_ref(n)))
+        } else if c.bodies.iter().all(|b| world.contains_key(b.as_str())) {
+            c.bodies.first().and_then(|b| world.get(b.as_str()))
+        } else {
+            None
+        };
+        let Some(body) = body else { continue };
         let frame = frame_of(c.feature);
         let (Some(body_inv), Some(frame_inv)) = (crate::mat_inverse(body), crate::mat_inverse(&frame)) else { continue };
         let in_frame = crate::mat_mul(&crate::mat_mul(&frame_inv, body), &crate::mat_mul(m, &crate::mat_mul(&body_inv, &frame)));

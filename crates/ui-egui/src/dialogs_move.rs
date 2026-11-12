@@ -379,8 +379,69 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     };
     if d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false) {
         p["copy"] = json!(true);
+    } else {
+        let (built_on, through) = body_axes(app, &names(&p));
+        if keeps_axes(d) {
+            if !through.is_empty() {
+                p["carry"] = json!(through);
+            }
+        } else if !built_on.is_empty() {
+            p["leave"] = json!(built_on);
+        }
     }
     Ok(p)
+}
+
+/// The body names a solid.move parameter set lists.
+fn names(p: &Value) -> Vec<String> {
+    p.get("bodies").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
+}
+
+/// The bodies the dialog moves.
+pub(crate) fn moved_bodies(app: &SolveApp, d: &Dialog) -> Vec<String> {
+    names(&targets_json(app, d))
+}
+
+/// Whether Keep Axes With Body is ticked (it starts ticked).
+pub(crate) fn keeps_axes(d: &Dialog) -> bool {
+    d.extra.get("keep_axes").and_then(Value::as_bool).unwrap_or(true)
+}
+
+/// The construction axes that go with `bodies`, by feature id: those built on them alone, which
+/// a move takes along unless told to leave them, and the others whose line runs through one of
+/// the bodies (a Center Pole placed at fixed points), which a move takes along only when told.
+pub(crate) fn body_axes(app: &SolveApp, bodies: &[String]) -> (Vec<u64>, Vec<u64>) {
+    let st = app.session.model.state();
+    let world = crate::open_meshing::session_world(&app.session);
+    let boxes: Vec<_> = bodies.iter().filter_map(|n| world.body(n).map(|b| b.mesh().bounds())).collect();
+    let (mut built_on, mut through) = (Vec::new(), Vec::new());
+    for c in &st.construct {
+        let solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } = c.geom else { continue };
+        if !c.bodies.is_empty() && c.bodies.iter().all(|b| bodies.contains(b)) {
+            built_on.push(c.feature);
+        } else if c.bodies.is_empty() && boxes.iter().any(|b| line_meets_box(origin, dir, b.min, b.max)) {
+            through.push(c.feature);
+        }
+    }
+    (built_on, through)
+}
+
+/// Whether the endless line through `o` along `d` passes through the box `lo`..`hi`.
+fn line_meets_box(o: Vec3, d: Vec3, lo: Vec3, hi: Vec3) -> bool {
+    let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (o, d, lo, hi) in [(o.x, d.x, lo.x, hi.x), (o.y, d.y, lo.y, hi.y), (o.z, d.z, lo.z, hi.z)] {
+        let tol = 1e-6 * (hi - lo).abs().max(1.0);
+        if d.abs() < 1e-12 {
+            if o < lo - tol || o > hi + tol {
+                return false;
+            }
+        } else {
+            let (a, b) = ((lo - tol - o) / d, (hi + tol - o) / d);
+            t0 = t0.max(a.min(b));
+            t1 = t1.min(a.max(b));
+        }
+    }
+    t0 <= t1
 }
 
 /// The current type's move, or what it still needs picked.
@@ -640,6 +701,7 @@ pub fn for_feature(
     axis: Option<Vec3>,
     angle: Option<&solidcraft_engine::doc::Expr>,
     copy: bool,
+    leaves: bool,
 ) {
     let [x, y, z] = translate.clone().map(String::from);
     let mut k = kind(FREE, doc);
@@ -674,6 +736,9 @@ pub fn for_feature(
     }
     if copy {
         d.extra.insert("copy".into(), json!(true));
+    }
+    if leaves {
+        d.extra.insert("keep_axes".into(), json!(false));
     }
 }
 

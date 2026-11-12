@@ -13,6 +13,7 @@
     "creative_mode.intersect": "Intersect",
     "creative_mode.intersect_tip": "Keep only where {target} and {tools} overlap.",
     "creative_mode.pole": "Center Pole",
-    "creative_mode.pole_tip": "Add a center pivot pole: a construction axis through the middle of {target}, to revolve, pattern or rotate around."
+    "creative_mode.pole_tip": "Add a center pivot pole: a construction axis through the middle of {target}, to revolve, pattern or rotate around.",
+    "move.keep_axes": "Keep Axes With Body"
   }
 }
