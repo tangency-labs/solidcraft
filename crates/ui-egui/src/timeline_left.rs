@@ -1045,48 +1045,29 @@ fn timeline_group_name(
     faint: bool,
     t: &Tokens,
 ) -> bool {
-    let editing =
-        matches!(app.menu.rename.as_ref().map(|rename| &rename.what), Some(crate::context_menu::RenameWhat::TimelineGroup(id)) if *id == group.id);
-    if !editing {
-        if !names {
-            return false;
-        }
+    // The folder's name is edited in its row as a browser row's is, however the rename began.
+    let row = folder_row_id(group.id);
+    crate::row_rename::adopt(app, &crate::context_menu::RenameWhat::TimelineGroup(group.id), row);
+    let label_left = rect.left() + 40.0 + offset;
+    let label = Rect::from_min_max(pos2(label_left, rect.top() + 1.0), pos2(rect.right() - 3.0, rect.bottom() - 1.0));
+    if crate::row_rename::editor(app, ui, row, label, &format!("timeline-folder-rename:{}", group.name)).is_some() {
+        return true;
+    }
+    if names {
         ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())).text(
-            pos2(rect.left() + 40.0 + offset, rect.center().y),
+            pos2(label_left, rect.center().y),
             egui::Align2::LEFT_CENTER,
             &group.name,
             egui::FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             if faint { t.text.gamma_multiply(0.42) } else { t.text },
         );
-        return false;
     }
+    false
+}
 
-    let Some(mut rename) = app.menu.rename.take() else { return false };
-    let left = rect.left() + 38.0 + offset;
-    let edit_rect = Rect::from_min_max(pos2(left, rect.top() + 1.0), pos2(rect.right() - 3.0, rect.bottom() - 1.0));
-    let edit_id = ui.scope_id().with(("timeline_group_rename", group.id));
-    let response = crate::ui_kit::inline_name(ui, edit_rect, edit_id, &mut rename.text);
-    crate::panel_runtime::register_content_focus(ui.ctx(), &response);
-    crate::scenario::publish_handle(&format!("timeline-folder-rename:{}", group.name), edit_rect.center());
-    if !rename.focused {
-        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit_id) {
-            let end = rename.text.chars().count();
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
-            state.store(ui.ctx(), edit_id);
-        }
-        response.request_focus();
-        rename.focused = true;
-    }
-    let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-    let commit = ui.input(|input| input.key_pressed(egui::Key::Enter)) || response.lost_focus();
-    if escape {
-        // Dropping the shared state cancels the edit and leaves the old name intact.
-    } else if commit {
-        let _ = crate::context_menu::commit_rename(app, &rename);
-    } else {
-        app.menu.rename = Some(rename);
-    }
-    true
+/// The History folder row `group`, for renaming it in place (`row_rename`).
+fn folder_row_id(group: u64) -> egui::Id {
+    egui::Id::unique(("history_folder_row", group))
 }
 
 fn vertical_group_row(
@@ -1161,9 +1142,16 @@ fn vertical_group_row(
     let fold_rect = Rect::from_min_max(pos2(rect.left() + offset, rect.top()), pos2(rect.left() + offset + 18.0, rect.bottom()));
     crate::scenario::publish_handle(&format!("timeline-folder-fold:{}", group.name), fold_rect.center());
     let fold = ui.interact(fold_rect, ui.scope_id().with(("timeline_group_fold", group.id)), Sense::click());
+    // A slower second click on the name renames the folder in its row, as in the browser; so does
+    // a double-click, as before.
+    let pressed = !renaming && !fold.clicked() && response.clicked();
+    let click = crate::row_rename::slow_click(ui, folder_row_id(group.id), pressed, pressed, response.double_clicked(), names);
     if fold.clicked() {
         crate::timeline_folders::set_open(app, group.id, !open);
-    } else if !renaming && response.clicked() {
+    } else if click.rename {
+        select_only(app, TimelineItem::Group(group.id));
+        crate::row_rename::start(app, crate::context_menu::RenameWhat::TimelineGroup(group.id), folder_row_id(group.id), rect.left_bottom());
+    } else if click.clicked {
         select_item(app, ui, TimelineItem::Group(group.id), order);
     }
     if !renaming && response.drag_started() {
@@ -1659,12 +1647,25 @@ fn feature_row_body(
             crate::ui_kit::text(ui, &listed, crate::ui_kit::Text::Value("history_listed_under", false));
         }
     });
+    // A slower second click on the name renames the feature in its row, as a browser row does
+    // (`row_rename`); a sketch listed under its feature has its own row for that.
+    let pressed = response.clicked() && !on_fold;
+    let row_id = egui::Id::unique(("history_feature_row", id));
+    let click = crate::row_rename::slow_click(ui, row_id, pressed, pressed, response.double_clicked(), names && !reference);
     if response.clicked() && on_fold {
         if let Some((key, default)) = fold {
             crate::browser::toggle(app, key, *default);
         }
-    } else if response.clicked() && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
+    } else if click.rename {
+        select_only(app, TimelineItem::Feature(id));
+        crate::row_rename::start(app, crate::context_menu::RenameWhat::Feature(id), row_id, rect.left_bottom());
+    } else if click.clicked && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
         select_item(app, ui, TimelineItem::Feature(id), order);
+    }
+    if names && !reference {
+        let label =
+            Rect::from_min_max(pos2(crate::ui_kit::HistoryChip::name_left(chip), chip.top() + 1.0), pos2(chip.right() - 3.0, chip.bottom() - 1.0));
+        crate::row_rename::editor(app, ui, row_id, label, &format!("history-rename:{name}"));
     }
     if response.double_clicked() && !on_fold {
         rows.edit = Some(id);
@@ -2558,6 +2559,66 @@ mod tests {
         harness.step(&json!({"text": "Again"})).unwrap();
         harness.step(&json!({"key": "Enter"})).unwrap();
         assert_eq!(harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()), Some("Again"));
+    }
+
+    /// #15331: a slower second click on a feature's name in the History edits it in the row, as
+    /// a browser row does; the whole name is selected, so typing replaces it. A double-click
+    /// still edits the feature.
+    #[test]
+    fn a_history_feature_renames_in_its_row_on_a_slow_second_click() {
+        let mut harness = Harness::new();
+        harness.app.preferences.timeline_left = true;
+        let feature =
+            harness.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Feature"})).unwrap()["feature"].as_u64().unwrap();
+        harness.frames(4);
+
+        harness.step(&json!({"click": {"handle": "timeline:Feature"}})).unwrap();
+        assert!(harness.app.menu.rename.is_none(), "the first click only selects the feature");
+        harness.frames(30);
+        harness.step(&json!({"click": {"handle": "timeline:Feature"}})).unwrap();
+        assert!(harness.app.menu.rename.is_none(), "the rename waits out the double-click delay");
+        harness.frames(30);
+        assert!(matches!(
+            harness.app.menu.rename.as_ref(),
+            Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(id), inline: true, .. }) if *id == feature
+        ));
+        assert!(handle_at("history-rename:Feature").is_some(), "the name is edited in its History row");
+        harness.step(&json!({"text": "Renamed"})).unwrap();
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        harness.frames(2);
+        assert!(harness.app.menu.rename.is_none());
+        assert_eq!(harness.app.session.doc.feature(feature).map(|f| f.name.as_str()), Some("Renamed"));
+
+        harness.frames(30);
+        harness.step(&json!({"click": {"handle": "timeline:Renamed"}, "double": true})).unwrap();
+        harness.frames(30);
+        assert!(harness.app.menu.rename.is_none(), "a double-click does not rename");
+        assert!(harness.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == feature)), "a double-click edits the feature");
+    }
+
+    /// #15331: a slower second click on a History folder's name edits it in the row.
+    #[test]
+    fn a_history_folder_renames_in_its_row_on_a_slow_second_click() {
+        let mut harness = Harness::new();
+        harness.app.preferences.timeline_left = true;
+        harness.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Feature"})).unwrap();
+        let group = harness.app.run("timeline.group", json!({"name": "Folder", "features": ["Feature"]})).unwrap()["group"].as_u64().unwrap();
+        harness.frames(4);
+
+        harness.step(&json!({"click": {"handle": "timeline-folder:Folder"}})).unwrap();
+        assert!(harness.app.menu.rename.is_none(), "the first click only selects the folder");
+        harness.frames(30);
+        harness.step(&json!({"click": {"handle": "timeline-folder:Folder"}})).unwrap();
+        harness.frames(30);
+        assert!(matches!(
+            harness.app.menu.rename.as_ref(),
+            Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::TimelineGroup(id), inline: true, .. }) if *id == group
+        ));
+        assert!(handle_at("timeline-folder-rename:Folder").is_some(), "the name is edited in the folder's row");
+        harness.step(&json!({"text": "Parts"})).unwrap();
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        harness.frames(2);
+        assert_eq!(harness.app.session.doc.timeline_groups.first().map(|g| g.name.as_str()), Some("Parts"));
     }
 
     #[test]

@@ -109,6 +109,43 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
     }
 }
 
+/// #15331: F2 renames the saved view whose row under Named Views was clicked last, and the
+/// view's menu shows F2. A click on another row drops the view.
+#[test]
+fn f2_on_a_clicked_saved_view_renames_the_view() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    let new_view = crate::context_menu::items(&h.app, &crate::context_menu::Target::NamedViews)
+        .into_iter()
+        .find(|i| i.label == "New Named View")
+        .expect("Named Views offers New Named View");
+    crate::context_menu::run_item(&mut h.app, &new_view, pos2(0.0, 0.0));
+    let name = h.app.session.doc.named_views.first().map(|v| v.name.clone()).expect("a saved view");
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::NamedView { name: name.clone() });
+    assert_eq!(items.iter().find(|i| i.label == "Rename").map(|i| i.shortcut.as_str()), Some("F2"));
+    h.app.tree.expanded.insert("namedviews".into());
+    h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
+    h.settle();
+
+    h.step(&json!({"click":{"handle":format!("row:{name}")}})).unwrap();
+    h.step(&json!({"key":"F2"})).unwrap();
+    h.frames(2);
+    let what = h.app.menu.rename.as_ref().map(|r| (r.what.clone(), r.text.clone()));
+    assert_eq!(what, Some((crate::context_menu::RenameWhat::View(name.clone()), name.clone())), "F2 renames the clicked view");
+    h.step(&json!({"text":"Front detail"})).unwrap();
+    h.frames(1);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    let names: Vec<&str> = h.app.session.doc.named_views.iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(names, ["Front detail"]);
+
+    // A click on a body row picks the body instead: F2 renames the body, not the view.
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    h.step(&json!({"key":"F2"})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.menu.rename.as_ref().map(|r| &r.what), Some(crate::context_menu::RenameWhat::Body(b)) if b == "One"));
+}
+
 /// #10654: a refused inline rename keeps the editor open and says why, instead of closing
 /// silently and leaving the old name.
 #[test]
