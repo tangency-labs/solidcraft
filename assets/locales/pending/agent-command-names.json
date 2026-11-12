@@ -1,0 +1,27 @@
+{
+  "en": {
+    "ui.agent_tool.batch": "Batch",
+    "ui.agent_tool.batch_of": "Batch: {names}",
+    "ui.agent_tool.body_topology": "List edges and faces",
+    "ui.agent_tool.cancel": "Cancel",
+    "ui.agent_tool.check_parameters": "Try parameter values",
+    "ui.agent_tool.compare_picture": "Compare with a picture",
+    "ui.agent_tool.crash_reports": "Crash reports",
+    "ui.agent_tool.describe_command": "Describe a command",
+    "ui.agent_tool.execute": "Run a command",
+    "ui.agent_tool.export": "Export",
+    "ui.agent_tool.inspect_design": "Inspect design",
+    "ui.agent_tool.list_commands": "List commands",
+    "ui.agent_tool.measure": "Measure",
+    "ui.agent_tool.new_design": "New design",
+    "ui.agent_tool.open": "Open",
+    "ui.agent_tool.pending": "Result of a running request",
+    "ui.agent_tool.redo": "Redo",
+    "ui.agent_tool.running": "What is running",
+    "ui.agent_tool.save": "Save",
+    "ui.agent_tool.screenshot": "Screenshot",
+    "ui.agent_tool.set_parameter": "Set parameter",
+    "ui.agent_tool.skill_reference": "Skill reference",
+    "ui.agent_tool.undo": "Undo"
+  }
+}

@@ -4711,6 +4711,7 @@ dependencies = [
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-look",
+ "solidcraft-mcp",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-kit",
