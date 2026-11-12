@@ -48,8 +48,8 @@ const EDGE_VANISHES: &str = "a vertex moved past the other end of an edge";
 /// vertex moved past an edge's other end ([`Error::Unsupported`]); the rest as
 /// [`crate::error::status`].
 fn status(e: SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
-    if let Some((Reason::Offset(o), entity)) = e.failure().map(|f| (&f.reason, f.entity)) {
-        return offset_refused(*o, entity, index);
+    if let Some(Reason::Offset(o)) = e.failure().map(|f| &f.reason) {
+        return offset_refused(*o, e.entity(), index);
     }
     match e.kind() {
         ErrorKind::OffsetWallsTouch => Error::WallsTouch,
@@ -64,8 +64,9 @@ fn status(e: SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
 /// largest wall the kernel names), a vertex moved past an edge's other end
 /// ([`Error::Unsupported`]), and every other reason as [`Error::OffsetRefused`] (#14783): why,
 /// and the face the failure is about (`entity`, the reason's own unless the kernel set another)
-/// through `index` (`None` where it names none, or one `index` does not find). The match names
-/// every reason, so one the kernel adds does not build until it is named here (#15035).
+/// through `index` (`None` where it names none, or one `index` does not find). A phrase, or a
+/// reason this version does not name yet, by its class and in the kernel's words
+/// ([`unnamed`], #15035).
 fn offset_refused(
     o: OffsetFailure,
     entity: Option<EntityRef>,
@@ -106,12 +107,21 @@ fn offset_refused(
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => OffsetRefusal::Unsound { what },
-        OffsetFailure::Failed(what) => OffsetRefusal::Failed { what },
-        OffsetFailure::Missing(what) => OffsetRefusal::Missing { what },
-        OffsetFailure::InvalidValue(what) => OffsetRefusal::InvalidValue { what },
-        OffsetFailure::Inconsistent(what) => OffsetRefusal::Inconsistent { what },
+        // the kernel's phrase causes (`OffsetFailure::is_phrase`), and a reason the kernel adds
+        // later: still classed and said, never a bare status
+        other => unnamed(&other),
     };
     Error::OffsetRefused { face, why }
+}
+
+/// A kernel offset failure ops does not name, as [`OffsetRefusal::Phrase`]: the kernel's class
+/// of it, whether it is a defect, and its own statement of it.
+fn unnamed(o: &OffsetFailure) -> OffsetRefusal {
+    OffsetRefusal::Phrase {
+        class: o.kind(),
+        defect: o.is_defect(),
+        phrase: o.to_string(),
+    }
 }
 
 /// A face's record index through `order`, the [`Order`] of the call's body.

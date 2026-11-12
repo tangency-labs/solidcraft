@@ -200,10 +200,14 @@ away, as upstream does (`offset_face_prefix`, `p2.rs`).
 **In ops**, `Folds` becomes `Error::WallFolds { largest }` (`solidcore-ops/src/offset.rs`,
 `offset_refused`), the touching walls and the vanishing edge their own errors, and every other
 reason a named `OffsetRefusal` with the face it names: `Collapses` passes on the distance and the
-radius. The match names every `OffsetFailure`, so a reason the kernel adds does not build until
-ops names it. The sheet offset and the symmetric thicken do not reach it yet: `offset_brep` wraps
-whatever its executive fails with in a failure of its own (`collapse_offset_status`), so ops sees
-no offset reason there and passes the kernel's status. That mapping is open.
+radius. `OffsetFailure` is `#[non_exhaustive]`, so ops matches it with a wildcard: a reason ops
+does not name yet, and the routines' phrase causes (`OffsetFailure::is_phrase`), arrive as the
+transitional `OffsetRefusal::Phrase`, with the kernel's class, whether it is a defect
+(`OffsetFailure::is_defect`) and the kernel's words. In the sheet offset and the symmetric
+thicken, a refusal `offset_brep` returns before its executive runs (`DistanceUnresolved`) and the
+merge check's `Unsound` reach ops with their reasons; what the executive itself fails with is
+wrapped in a failure of its own (`collapse_offset_status`), so ops sees no offset reason there and
+passes the kernel's status. That mapping is open.
 
 ### 4.3 Room for an inward wall
 

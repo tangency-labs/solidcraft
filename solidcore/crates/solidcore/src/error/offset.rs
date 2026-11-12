@@ -41,9 +41,12 @@ use crate::topology::{EdgeId, FaceId};
 
 /// Why an offset, shell, thicken or local operation is refused.
 ///
-/// Exhaustive on purpose: a caller names every reason, so a reason added here does not build
-/// until each caller names it too.
+/// A caller outside the crate matches it with a wildcard: a reason it does not name yet still
+/// has its class ([`OffsetFailure::kind`]) and says whether it is a phrase
+/// ([`OffsetFailure::is_phrase`]) or a defect ([`OffsetFailure::is_defect`]), which every reason
+/// must answer here.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum OffsetFailure {
     /// The offset of `face` by `distance` folds: the wall is thicker than a radius of
     /// curvature of the face on its side (WR-718; every offset but the local operation).
@@ -289,6 +292,61 @@ impl OffsetFailure {
             self,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_)
         )
+    }
+
+    /// True for a phrase cause ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
+    /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]): a routine's failure
+    /// not yet given a cause of its own, told apart only by its words. Its class is its status's
+    /// kind; each moves to a cause of its own, as the blend's phrase causes do
+    /// ([`crate::error::blend::BlendFailure`]).
+    #[must_use]
+    pub const fn is_phrase(&self) -> bool {
+        match self {
+            Self::Folds { .. }
+            | Self::NotCertified { .. }
+            | Self::Collapses { .. }
+            | Self::WallsTouch { .. }
+            | Self::LoopsCross { .. }
+            | Self::EdgeVanishes { .. }
+            | Self::DistanceUnresolved { .. }
+            | Self::ToleranceUnresolved { .. }
+            | Self::SeamOpened { .. }
+            | Self::ExactCurveUncut
+            | Self::FacesApart { .. }
+            | Self::ReachUncertified { .. }
+            | Self::LoopGapUncertified { .. }
+            | Self::Unsound { .. } => false,
+            Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
+                true
+            }
+        }
+    }
+
+    /// True for a failure that is the kernel's fault, not a fact of the input: a consistency
+    /// check of a routine's own data that did not hold ([`OffsetFailure::Inconsistent`]).
+    /// Report it.
+    #[must_use]
+    pub const fn is_defect(&self) -> bool {
+        match self {
+            Self::Inconsistent(_) => true,
+            Self::Folds { .. }
+            | Self::NotCertified { .. }
+            | Self::Collapses { .. }
+            | Self::WallsTouch { .. }
+            | Self::LoopsCross { .. }
+            | Self::EdgeVanishes { .. }
+            | Self::DistanceUnresolved { .. }
+            | Self::ToleranceUnresolved { .. }
+            | Self::SeamOpened { .. }
+            | Self::ExactCurveUncut
+            | Self::FacesApart { .. }
+            | Self::ReachUncertified { .. }
+            | Self::LoopGapUncertified { .. }
+            | Self::Unsound { .. }
+            | Self::Failed(_)
+            | Self::Missing(_)
+            | Self::InvalidValue(_) => false,
+        }
     }
 
     /// The status the C++ reports for the refusal (difftest's comparison detail).
