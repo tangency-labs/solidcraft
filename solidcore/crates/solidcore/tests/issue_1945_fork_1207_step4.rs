@@ -83,7 +83,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.loops_go_on_round_the_vertex = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.join_touching_loops = true;
-    k.fixes.uv_trim_reversal_on_surface = true;
     k.fixes.offset_resolve_crossing_loops = true;
     k.fixes.local_operation_box_holds_new_surfaces = true;
     k.fixes.offset_walls_touch_refused = true;
@@ -95,13 +94,11 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.fillet_nx1_end_rib_global_merge = true;
     k.fixes.uv_trim_corner_end_points_only = true;
-    k.fixes.uv_trim_joins_drop_pieces = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.cylinder_plane_tangent_within_tolerance = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.boolean_outer_shell_first = true;
-    k.fixes.edge_reversal_keeps_failed_edge = true;
     k.fixes.iso_curve_sliver_domain_is_degenerate = true;
     k.fixes.topology_failed_evaluations_propagate = true;
     k.fixes.heal_stage3_failures_propagate = true;
@@ -155,7 +152,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.curve_tight_box_interval_knots = true;
     k.fixes.boolean_skips_faces_apart = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
-    k.fixes.boolean_wire_edge_keeps_faceuse_shell = true;
     k.fixes.boolean_new_face_closure_both_sides = true;
     k.fixes.stitch_solid_nests_cavities = true;
     k.fixes.glue_vertices_joins_every_region = true;
