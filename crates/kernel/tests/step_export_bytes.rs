@@ -85,6 +85,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-conformance/torus_ring_nurbs.step", "c8a6072ee96edbe9"),
     ("tests/step-conformance/washer.step", "490ba83889e1002f"),
     ("tests/step-regressions/rod_doubled_edge.step", "8432fa140e74c146"),
+    ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "d2c476d6163c1863"),
     ("(assembly)", "45b6ef6cf64529e2"),
 ];
 
