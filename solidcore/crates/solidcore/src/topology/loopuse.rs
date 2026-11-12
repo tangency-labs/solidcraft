@@ -91,7 +91,7 @@
 //!   (tangency-labs/smlib 7a35f33): a trim curve that cannot be made is none (the 3D
 //!   ends are dropped), an edge use whose ends cannot be evaluated adds no boundary,
 //!   and failed drops stay ignored. Upstream ignores the failed endpoint evaluations
-//!   too, so an edge use can reuse the preceding one's endpoints.
+//!   as well, so there an edge use can reuse the preceding one's endpoints.
 //! - The `std::unordered_set` overloads of `GetEdges` / `GetVertices`,
 //!   `GetEdgeusesAndVertexuses`, `CalculateBoundingBox`, `GetTurningAngDeg`,
 //!   `SmLoop::GetMaxSameDimGap3d`, `IsLamina`, `IsManifold`,
