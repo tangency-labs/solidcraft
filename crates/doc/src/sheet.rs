@@ -4618,25 +4618,52 @@ impl SheetBody {
                 return Err(fail("would cut the sheet apart; reduce its depth".into()));
             }
         }
-        // A tear parts the blank when its slit runs from one edge of the material to another,
-        // which no single flat pattern can be. Rather than reason about boundaries, distances and
-        // tolerances, ask the kernel: cut a slit-thin strip along the tear on a copy of the flat
-        // material and see whether the piece count grows. That decision is the same geometry the
-        // flat pattern itself is built from, so a vertex contact, an overlapping edge or a curve
-        // cannot slip past a tolerance test (judge rounds 5 to 9).
-        if depth >= room - 1e-9 && outer > inner - depth {
-            let flat = self.flat_material().map_err(|error| fail(error.to_string()))?;
-            let (v0, v1) = (inner - depth, outer);
-            let eps = 1e-3;
-            let at = |uu: f64, vv: f64| d * uu + n * vv;
-            let strip = Loop2::polygon(&[at(u - eps / 2.0, v0), at(u + eps / 2.0, v0), at(u + eps / 2.0, v1 + eps), at(u - eps / 2.0, v1 + eps)]);
-            let tool = planar_region(&Region2 { outer: strip.ccw(), holes: Vec::new() })?;
-            let mut work = FlatWork::new();
-            let cut = material_boolean(&flat, std::slice::from_ref(&tool), kernel::BoolOp::Cut, &mut work)
-                .map_err(|error| fail(format!("the tear could not be tried on the flat pattern: {error}")))?;
-            if cut.len() > flat.len() {
+        // A tear parts the blank when the slits it makes, together with the slits already in the
+        // design, cut the flat material in two. The sheet's slits are not part of its flat regions,
+        // so cut every slit as a slit-thin strip on a copy and count the pieces, before and after
+        // this relief: a relief that adds a piece refuses, one that only deepens a junction does
+        // not. Probing the whole set at once is what catches two tears from opposite edges whose
+        // slits overlap in the middle, neither of which parts anything on its own, and it shares
+        // the geometry the flat pattern is built from, so a vertex contact, an overlapping edge or
+        // a curve cannot slip past a tolerance test (judge rounds 5 to 10).
+        {
+            let mut probe = self.clone();
+            if let Some(g) = probe.flanges.get_mut(i) {
+                g.relief = Some(r);
+            }
+            let count = |body: &Self| -> Result<usize> {
+                let flat = body.flat_material().map_err(|error| fail(error.to_string()))?;
+                let slits = body.junction_slits();
+                if slits.is_empty() {
+                    return Ok(flat.len());
+                }
+                let eps = 1e-3;
+                let mut tools = Vec::new();
+                for (a, b) in slits {
+                    let dir = b - a;
+                    let len = dir.dot(dir).sqrt();
+                    if len < 1e-9 {
+                        continue;
+                    }
+                    let unit = dir * (1.0 / len);
+                    let side = Vec2::new(-unit.y, unit.x) * (eps / 2.0);
+                    let tip = b + unit * eps;
+                    let ring = Loop2::polygon(&[a + side, tip + side, tip - side, a - side]);
+                    tools.push(planar_region(&Region2 { outer: ring.ccw(), holes: Vec::new() })?);
+                }
+                if tools.is_empty() {
+                    return Ok(flat.len());
+                }
+                let mut work = FlatWork::new();
+                let cut = material_boolean(&flat, &tools, kernel::BoolOp::Cut, &mut work)
+                    .map_err(|error| fail(format!("the junction cuts could not be tried on the flat pattern: {error}")))?;
+                Ok(cut.len())
+            };
+            let before = count(self)?;
+            let after = count(&probe)?;
+            if after > before {
                 return Err(fail(format!(
-                    "a depth of {depth:.3} mm runs the tear from one edge of the blank to another ({room:.3} mm of material inboard); it would part the blank"
+                    "a depth of {depth:.3} mm runs the tear from one edge of the blank to another, together with the junction cuts already there; it would part the blank"
                 )));
             }
         }

@@ -1623,3 +1623,31 @@ fn a_tear_reaching_a_hole_that_touches_the_edge_refuses_naming_the_segment() {
     assert!(error.contains("it would part the blank"), "{error}");
     assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
 }
+/// Two tears from opposing edges, neither deep enough to part anything alone, whose slits overlap
+/// in the middle: together they cut the blank in two, so the second refuses (judge round 10, #5942).
+#[test]
+fn two_tears_from_opposing_edges_that_overlap_refuse_the_second() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50.0, 0.0, 2.0],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":{"shape":"tear","width":"2 mm","depth":"30 mm"}},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    let before = s.doc.to_json();
+    let error = s
+        .execute(
+            "sheet.flange",
+            &json!({"type":"edge","edges":[{"point":[50.0, 60.0, 2.0],"segments":[
+                {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":true,"relief":{"shape":"tear","width":"2 mm","depth":"30 mm"}},
+                {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm","flip":true}]}],
+                "height":"20 mm","angle":"90 deg"}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("edges[0].segments[0].relief"), "{error}");
+    assert!(error.contains("it would part the blank"), "{error}");
+    assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
+}
