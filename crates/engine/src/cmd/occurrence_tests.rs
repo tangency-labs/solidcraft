@@ -2628,3 +2628,47 @@ fn skeleton_refuses_solid_bodies_and_set_kind_checks() {
     run(&mut s, "component.set_kind", json!({"component": empty, "kind": "normal"}));
     assert!(!s.doc.is_skeleton(empty));
 }
+
+#[test]
+fn public_geometry_groups_a_skeletons_references_and_follows_deletes() {
+    let mut s = Session::default();
+    let (part, _) = created(&mut s, "Part");
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "InPart"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let skeleton = run(&mut s, "component.create_skeleton", json!({}))["component"].as_u64().unwrap();
+    let top = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 40, "name": "Deck"}))["feature"].as_u64().unwrap();
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 10, "name": "Side"}));
+
+    let made = run(&mut s, "geometry.publish", json!({"name": "Layout", "items": [top, "side"]}));
+    assert_eq!(made["items"].as_array().unwrap().len(), 2);
+    assert_eq!(made["items"][1]["name"], "Side", "published under the feature's own name: {made}");
+    let refused = |s: &mut Session, p: Value| s.execute("geometry.publish", &p).unwrap_err().to_string();
+    assert!(refused(&mut s, json!({"name": "layout", "items": ["Deck"]})).contains("already exists"));
+    assert!(refused(&mut s, json!({"name": "Again", "items": ["Deck"]})).contains("already published"));
+    assert!(refused(&mut s, json!({"name": "Other", "items": ["InPart"]})).contains("not in a skeleton"));
+    assert!(refused(&mut s, json!({"name": "Other", "items": ["Nowhere"]})).contains("no feature"));
+    assert!(refused(&mut s, json!({"name": "Other", "items": []})).contains("items"));
+    assert_eq!(s.doc.public_geometry.len(), 1, "a refusal publishes nothing");
+
+    // It is saved and read back, and a skeleton that shares geometry stays a skeleton.
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&s.doc)).unwrap();
+    assert_eq!(reopened.public_geometry, s.doc.public_geometry);
+    assert!(s.execute("component.set_kind", &json!({"component": skeleton, "kind": "normal"})).is_err());
+    assert!(!s.doc.is_skeleton(part));
+
+    // Deleting a published feature takes it out; the last one takes the group with it.
+    run(&mut s, "timeline.delete", json!({"feature": top}));
+    let list = run(&mut s, "geometry.publications", json!({}));
+    assert_eq!(list["publications"][0]["items"].as_array().unwrap().len(), 1, "{list}");
+    assert_eq!(list["publications"][0]["items"][0]["name"], "Side");
+    run(&mut s, "timeline.delete", json!({"feature": "Side"}));
+    assert!(s.doc.public_geometry.is_empty());
+
+    // Unpublishing removes the group and keeps the feature.
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 3, "name": "Nose"}));
+    run(&mut s, "geometry.publish", json!({"name": "Faces", "items": ["Nose"]}));
+    let gone = run(&mut s, "geometry.unpublish", json!({"name": "FACES"}));
+    assert_eq!(gone["removed"], 1);
+    assert!(s.doc.public_geometry.is_empty() && s.doc.features.iter().any(|f| f.name == "Nose"));
+    assert!(s.execute("geometry.unpublish", &json!({"name": "Faces"})).is_err());
+}

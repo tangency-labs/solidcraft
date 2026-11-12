@@ -2614,6 +2614,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         browser_order,
         named_views,
         notes,
+        public_geometry,
         visibility,
         next_component_color_index,
         plugin_data,
@@ -2653,6 +2654,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *browser_order == b.browser_order
         && *named_views == b.named_views
         && *notes == b.notes
+        && *public_geometry == b.public_geometry
         && *visibility == b.visibility
         && *next_component_color_index == b.next_component_color_index
 }

@@ -116,6 +116,7 @@ mod parameter_sweep;
 mod parameters;
 mod plastic;
 mod print_face;
+mod public_geometry;
 mod render;
 pub(crate) use render::{
     PreparedCapture, prepare_capture_with_metadata, read_render_request, render_cancel_params, render_form_refusal, render_saved_job_refusal,
@@ -379,6 +380,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(frame::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
+    v.extend(public_geometry::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
     v.extend(joints::constraint::COMMANDS.iter());

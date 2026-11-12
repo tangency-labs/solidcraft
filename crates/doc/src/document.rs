@@ -2626,6 +2626,22 @@ impl ComponentKind {
     }
 }
 
+/// A public geometry: reference elements of a skeleton component (sketches, construction planes,
+/// axes and points) shared as one named group.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicGeometry {
+    pub name: String,
+    pub items: Vec<PublishedItem>,
+}
+
+/// One element of a public geometry. `name` is the name it is shared under; `feature` only says
+/// which element it is, so renaming the feature changes nothing here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishedItem {
+    pub name: String,
+    pub feature: u64,
+}
+
 impl Document {
     /// Whether `id` is a skeleton component.
     pub fn is_skeleton(&self, id: u64) -> bool {
@@ -3567,6 +3583,10 @@ pub struct Document {
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
+    /// Public geometries: named groups of a skeleton component's reference elements, shared
+    /// for other parts to build from.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub public_geometry: Vec<PublicGeometry>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -3868,6 +3888,7 @@ impl Document {
             param_comments: Default::default(),
             browser_groups: Vec::new(),
             timeline_groups: Vec::new(),
+            public_geometry: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
             notes: Vec::new(),
@@ -4577,6 +4598,11 @@ impl Document {
             .rules
             .retain(|rule| !rule.references_features(&gone) && !rule.parameter_references().iter().any(|name| gone_params.contains(name)));
         self.features.retain(|f| !gone.contains(&f.id));
+        // A deleted feature leaves its public geometry; a public geometry left empty goes too.
+        for group in &mut self.public_geometry {
+            group.items.retain(|item| !gone.contains(&item.feature));
+        }
+        self.public_geometry.retain(|group| !group.items.is_empty());
         for group in &mut self.timeline_groups {
             group.features.retain(|feature| !gone.contains(feature));
         }

@@ -487,6 +487,10 @@ fn set_kind(s: &mut Session, p: &Value) -> Result<Value> {
     if kind == solidcraft_doc::ComponentKind::Skeleton && s.doc.features.iter().any(|f| f.component == id && !f.kind.is_reference()) {
         return Err(bad(cmd, "not supported yet: a component with solid features cannot become a skeleton"));
     }
+    let shares = |g: &solidcraft_doc::PublicGeometry| g.items.iter().any(|i| s.doc.feature(i.feature).is_some_and(|f| f.component == id));
+    if kind == solidcraft_doc::ComponentKind::Normal && s.doc.public_geometry.iter().any(shares) {
+        return Err(bad(cmd, "this skeleton has public geometry: remove it first (geometry.unpublish)"));
+    }
     if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id) {
         c.kind = kind;
     }

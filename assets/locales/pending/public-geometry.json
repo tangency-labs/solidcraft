@@ -1,0 +1,47 @@
+{
+  "en": {
+    "cmd.geometry_publish": "Public Geometry",
+    "cmd.geometry_unpublish": "Remove Public Geometry",
+    "cmd.geometry_publications": "Public Geometries"
+  },
+  "ar": {
+    "cmd.geometry_publish": "هندسة عامة",
+    "cmd.geometry_unpublish": "إزالة الهندسة العامة",
+    "cmd.geometry_publications": "الهندسات العامة"
+  },
+  "de": {
+    "cmd.geometry_publish": "Öffentliche Geometrie",
+    "cmd.geometry_unpublish": "Öffentliche Geometrie entfernen",
+    "cmd.geometry_publications": "Öffentliche Geometrien"
+  },
+  "fr": {
+    "cmd.geometry_publish": "Géométrie publique",
+    "cmd.geometry_unpublish": "Supprimer la géométrie publique",
+    "cmd.geometry_publications": "Géométries publiques"
+  },
+  "he": {
+    "cmd.geometry_publish": "גאומטריה ציבורית",
+    "cmd.geometry_unpublish": "הסרת גאומטריה ציבורית",
+    "cmd.geometry_publications": "גאומטריות ציבוריות"
+  },
+  "ja": {
+    "cmd.geometry_publish": "公開ジオメトリ",
+    "cmd.geometry_unpublish": "公開ジオメトリを削除",
+    "cmd.geometry_publications": "公開ジオメトリ一覧"
+  },
+  "ko": {
+    "cmd.geometry_publish": "공개 형상",
+    "cmd.geometry_unpublish": "공개 형상 제거",
+    "cmd.geometry_publications": "공개 형상 목록"
+  },
+  "vi": {
+    "cmd.geometry_publish": "Hình học công khai",
+    "cmd.geometry_unpublish": "Xóa hình học công khai",
+    "cmd.geometry_publications": "Các hình học công khai"
+  },
+  "zh": {
+    "cmd.geometry_publish": "公开几何",
+    "cmd.geometry_unpublish": "移除公开几何",
+    "cmd.geometry_publications": "公开几何列表"
+  }
+}
