@@ -596,12 +596,12 @@ pub enum HistorySketches {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SectionHatch {
-    /// Each body in its own hatch (`solidcraft_viewport::hatch`): 45 or 135 degrees in one of the
-    /// theme's hatch colours, touching bodies never alike. Also what a value this version doesn't
-    /// know reads as (`lenient`).
+    /// Each body in its own hatch (`solidcraft_viewport::hatch`): one of the theme's hatch
+    /// colours, at its section plane's angle or a quarter turn round, touching bodies never alike.
+    /// Also what a value this version doesn't know reads as (`lenient`).
     #[default]
     ByPart,
-    /// Every cut face in the cap colour at 45 degrees (how it was before by part).
+    /// Every cut face in the cap colour at its section plane's angle (how it was before by part).
     One,
 }
 
@@ -11224,7 +11224,7 @@ mod tests {
             assert_eq!(s.continuity.len(), 1);
             assert_eq!(s.status_items().len(), 2);
             assert_eq!(s.status_items()[0].command, "inspect.continuity");
-            assert!(s.section.is_some());
+            assert!(!s.section.is_empty());
             assert!(!s.is_dirty());
         }
         assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
