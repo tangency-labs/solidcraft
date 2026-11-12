@@ -90,6 +90,10 @@ pub use path::PathMotion;
 const OP_CREATE: &str = "surface::procedural_sweep::ProceduralSweep::create";
 const OP_MOTION: &str = "surface::procedural_sweep::ScrewMotion::new";
 const OP_LAW: &str = "surface::procedural_sweep::RadialLaw::new";
+/// A screw definition's `S`, `S_w`, `S_t` and `S_wt` at one `(w, t)`.
+type ScrewPartials = (Vec3, Vec3, Vec3, Vec3);
+/// The checked turn and rotation a screw evaluation took.
+type TurnedBy = (checked::Turn, checked::Rotation);
 const OP_EVAL: &str = "surface::procedural_sweep::ProceduralSweep::evaluate_definition";
 const OP_EXACT: &str = "surface::procedural_sweep::SweepRef::evaluate";
 
@@ -729,26 +733,29 @@ impl ProceduralSweep {
         }
         let wt = self.definition_parameters(uv);
         let first = highest_u_deriv + highest_v_deriv > 0;
-        let (s, s_w, s_t, s_wt) = match &self.motion {
-            Motion::Screw(m) => self.screw_partials(m, wt, first, left)?,
-            Motion::Path(m) => self.path_partials(m, wt, first, left)?,
+        let ((s, s_w, s_t, s_wt), turned) = match &self.motion {
+            Motion::Screw(m) => {
+                let (partials, turned) = self.screw_partials(m, wt, first, left)?;
+                (partials, Some(turned))
+            }
+            Motion::Path(m) => (self.path_partials(m, wt, first, left)?, None),
         };
-        if self.screw().is_some() {
-            // the turn the partials took, kept by its bits ([`Self::checked_turn_rotation`])
-            let (turn, rotation) = self.checked_turn_rotation(wt.y, left)?;
+        if let Some((turn, rotation)) = turned {
+            // the point checked with the turn and rotation the partials took
             self.verify_turned_point(uv, s, &turn, &rotation)?;
         }
         Ok(self.assemble(s, s_w, s_t, s_wt, highest_u_deriv, highest_v_deriv))
     }
 
-    /// The screw definition's `S`, `S_w`, `S_t` and `S_wt` at `(w, t)`.
+    /// The screw definition's `S`, `S_w`, `S_t` and `S_wt` at `(w, t)`, and the checked
+    /// turn and rotation they took ([`Self::checked_turn_rotation`]).
     fn screw_partials(
         &self,
         m: &ScrewMotion,
         wt: Point2,
         first: bool,
         left: bool,
-    ) -> Result<(Vec3, Vec3, Vec3, Vec3)> {
+    ) -> Result<(ScrewPartials, TurnedBy)> {
         let domain = self.profile.natural_interval();
         let ordered = domain.min() <= domain.max();
         if !ordered {
@@ -791,7 +798,7 @@ impl ProceduralSweep {
             (m.axis.cross(arm) + rotation.turn(m.axis, shift_rate) + m.axis * (m.pitch / TAU))
                 * rate;
         let s_wt = m.axis.cross(s_w) * rate;
-        Ok((s, s_w, s_t, s_wt))
+        Ok(((s, s_w, s_t, s_wt), (turn, rotation)))
     }
 
     /// The path definition's `S`, `S_w`, `S_t` and `S_wt` at `(w, v)`, `v` the net's
