@@ -1729,6 +1729,30 @@ mod tests {
         assert!(s.execute("surface.trim", &json!({"body": "Sheet"})).is_err());
     }
 
+    /// #9867: a cut or an intersect whose named target is a surface body is refused, and the
+    /// reason says what to do (Trim, or Thicken first). The surface body is left as it was.
+    #[test]
+    fn a_cut_on_a_surface_body_is_refused_and_says_why() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "C", "distance": 40, "body_name": "Tube"}));
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "R"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 10], "p1": [15, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = area(&s, "Tube");
+        for op in ["cut", "intersect"] {
+            let params = json!({"sketch": "R", "distance": 30, "direction": "symmetric", "operation": op, "targets": ["Tube"]});
+            let err = s.execute("solid.extrude", &params).unwrap_err().to_string();
+            assert!(err.contains("Tube is a surface body") && err.contains("Trim"), "{op}: {err}");
+        }
+        let st = s.world_state().unwrap();
+        assert!(st.body("Tube").unwrap().body.is_surface());
+        assert_eq!(st.body("Tube").unwrap().body.face_count(), 1);
+        assert!((area(&s, "Tube") - before).abs() < 1e-9, "{before}");
+    }
+
     /// `surface.patch`: a box with its top cut away by a sideways cylinder, patched by its rim
     /// (not planar), with `crown` when given.
     fn saddle_cover(crown: Option<f64>) -> (Session, Value) {
