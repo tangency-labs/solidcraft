@@ -587,13 +587,21 @@ fn a_band_narrower_than_its_tolerance_at_a_vertex_gets_its_seam_where_it_is_wide
         let s = one_solid(&w.file_with_uncertainty(&[model], 0.1));
         assert!(s.sheet);
         assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
-        // Every edge is longer than its tolerance: the seam starts at a vertex of the loop below
-        // where the band is 0.45 mm high, the rim split there in two.
+        // Every edge is longer than its tolerance. The loop's vertices at ±60 degrees end its
+        // rulings, where a seam would run along an edge: the seam goes in the middle of the low
+        // stretch, at 180 degrees where the band is 0.45 mm high, the low arc and the rim split
+        // there.
         for e in &s.brep.edges {
             let [a, b] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
             assert!(a == b || len3(sub3(a, b)) > e.tolerance, "an edge {:?} shorter than its tolerance {}", [a, b], e.tolerance);
         }
-        assert_eq!(counts(&s.brep), [1, 1, 1, 4 + 2 + 1, 4 + 2], "same_sense {same_sense}");
+        assert_eq!(counts(&s.brep), [1, 1, 1, 5 + 2 + 1, 5 + 2], "same_sense {same_sense}");
+        let seam = s.brep.edges.iter().find(|e| {
+            let [a, b] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+            (a[2] - b[2]).abs() > 0.475
+        });
+        let [a, b] = seam.unwrap().vertices.map(|v| s.brep.vertices[v as usize].point);
+        assert!(a[1].atan2(a[0]).abs() > 2.0 * t && b[1].atan2(b[0]).abs() > 2.0 * t, "seam at {a:?} {b:?}");
     }
 }
 

@@ -1194,12 +1194,16 @@ impl Builder<'_, '_> {
         Err("the split vertex is not on its loop".into())
     }
 
-    /// The angles about the axis that the loops of face `fi` other than the two it winds
-    /// between (`la`, `lb`) can reach: each edge's within the angles of the control points of
-    /// its NURBS form's piece on its interval (the piece lies in their convex hull, and a hull
-    /// clear of the axis spans less than half a turn about it), a vertex loop at its point's
-    /// angle. `None` round a torus's tube, where the loops wind in v and the angle about the
-    /// axis does not part them.
+    /// The angles about the axis a seam of face `fi` between its loops `la` and `lb` must not
+    /// take. A seam is an edge of the face only where it meets each of the two loops once and no
+    /// other loop at all, and that is decided on the Bézier pieces of the edges' NURBS forms:
+    /// each piece lies within the angles of its control points (the convex hull; a hull clear of
+    /// the axis spans less than half a turn about it), and its angle runs one way where the
+    /// Bernstein coefficients of its angular speed all have one sign. Blocked: every piece of the
+    /// other loops; of the two loops, a piece whose angle is not monotone, and where two pieces
+    /// reach the same angles (save two pieces one after the other running the same way, which
+    /// meet at their shared end only). `None` round a torus's tube, where the loops wind in v
+    /// and the angle about the axis does not part them.
     fn blocked_angles(&self, fi: usize, la: usize, lb: usize, ax: &Axis) -> R<Option<Blocked>> {
         if ax.kind.winds_in() != 0 {
             return Ok(None);
@@ -1208,27 +1212,42 @@ impl Builder<'_, '_> {
         let face = self.faces.get(fi).ok_or("face reference")?;
         let mut arcs = Vec::new();
         for (li, l) in face.loops.iter().enumerate() {
-            if li == la || li == lb {
-                continue;
-            }
-            match l {
+            let es = match l {
                 LoopB::Vertex(v) => {
                     let a = frame.angle(self.vpoint(*v)?);
                     arcs.push([a, a]);
+                    continue;
                 }
-                LoopB::Edges(es) => {
-                    for &(e, _) in es {
-                        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
-                        let points = match &edge.curve {
-                            BCurve::Spline { .. } | BCurve::RationalSpline { .. } => hull(&edge.curve, edge.interval),
-                            other => crate::kernel::form::curve(other, edge.interval).and_then(|(form, i)| hull(&form, i)),
-                        };
-                        match points.and_then(|ps| frame.span(&ps)) {
-                            Some(arc) => arcs.push(arc),
-                            // No hull clear of the axis: the edge may be at any angle.
-                            None => arcs.push([0.0, TAU]),
-                        }
+                LoopB::Edges(es) => es,
+            };
+            // The loop's pieces in its order, each with the way its angle runs along the loop.
+            let mut pieces: Vec<Piece> = Vec::new();
+            for &(e, forward) in es {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let mut own = frame.pieces(&edge.curve, edge.interval);
+                if !forward {
+                    own.reverse();
+                    for p in &mut own {
+                        p.runs = p.runs.map(|r| -r);
                     }
+                }
+                pieces.extend(own);
+            }
+            if li != la && li != lb {
+                arcs.extend(pieces.iter().map(|p| p.arc));
+                continue;
+            }
+            let n = pieces.len();
+            for (i, p) in pieces.iter().enumerate() {
+                if p.runs.is_none() {
+                    arcs.push(p.arc);
+                }
+                for (j, q) in pieces.iter().enumerate().skip(i + 1) {
+                    let next = j == i + 1 || (i == 0 && j + 1 == n);
+                    if next && p.runs.is_some() && p.runs == q.runs {
+                        continue;
+                    }
+                    arcs.extend(overlap(p.arc, q.arc));
                 }
             }
         }
@@ -1349,6 +1368,55 @@ impl Perpendicular {
         d.dot(self.y).atan2(d.dot(self.x))
     }
 
+    /// The Bézier pieces of a curve's NURBS form on `interval` (a line, circle or ellipse on its
+    /// form, [`crate::kernel::form::curve`]): each piece's arc of angles, the whole turn where its
+    /// hull is not clear of the axis, and the way its angle runs.
+    fn pieces(&self, curve: &BCurve, interval: [f64; 2]) -> Vec<Piece> {
+        let whole = || vec![Piece { arc: [0.0, TAU], runs: None }];
+        let form = match curve {
+            BCurve::Spline { .. } | BCurve::RationalSpline { .. } => Some((curve.clone(), interval)),
+            other => crate::kernel::form::curve(other, interval),
+        };
+        let Some((form, [a, b])) = form else { return whole() };
+        let (knots, homogeneous): (&Vec<f64>, Vec<[f64; 4]>) = match &form {
+            BCurve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
+            BCurve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+            _ => return whole(),
+        };
+        let Some(degree) = knots.len().checked_sub(homogeneous.len() + 1) else { return whole() };
+        let (Some(&k0), Some(&k1)) = (knots.get(degree), knots.get(homogeneous.len())) else { return whole() };
+        // The interval within the knots (a file's end parameter a rounding past them).
+        let (a, b) = (a.min(b).max(k0), a.max(b).min(k1));
+        if !(a < b) || degree == 0 {
+            return whole();
+        }
+        // The knot spans inside the interval: one Bézier piece each.
+        let mut cuts = vec![a];
+        cuts.extend(knots.iter().copied().filter(|k| *k > a && *k < b));
+        cuts.push(b);
+        cuts.dedup();
+        let mut out = Vec::new();
+        for w in cuts.windows(2) {
+            let &[s, t] = w else { continue };
+            let Ok((_, piece)) = solidcore::eval::pcurve::segment(degree, knots, &homogeneous, s, t) else { return whole() };
+            if piece.len() != degree + 1 || piece.iter().any(|h| !(h[3] > 0.0)) {
+                return whole();
+            }
+            let points: Vec<Vec3> = piece.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect();
+            let Some(arc) = self.span(&points) else { return whole() };
+            // The homogeneous coordinates square to the axis: the angle of the piece's points.
+            let flat: Vec<[f64; 2]> = piece
+                .iter()
+                .map(|h| {
+                    let d = Vec3::new(h[0], h[1], h[2]) - self.origin * h[3];
+                    [d.dot(self.x), d.dot(self.y)]
+                })
+                .collect();
+            out.push(Piece { arc, runs: angular_sign(&flat) });
+        }
+        out
+    }
+
     /// The arc of angles `[from, to]` (to − from under π) that points spanning less than half a
     /// turn reach, measured from the first; `None` when they reach the axis or half a turn.
     fn span(&self, points: &[Vec3]) -> Option<[f64; 2]> {
@@ -1367,21 +1435,61 @@ impl Perpendicular {
     }
 }
 
-/// The control points of a NURBS form's piece on `[a, b]` (cut there exactly,
-/// [`solidcore::eval::pcurve::segment`]), the points that piece lies in the convex hull of: a
-/// polynomial spline's, or a rational one's with every weight positive.
-fn hull(c: &BCurve, [a, b]: [f64; 2]) -> Option<Vec<Vec3>> {
-    let (knots, homogeneous): (&Vec<f64>, Vec<[f64; 4]>) = match c {
-        BCurve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
-        BCurve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
-        _ => return None,
-    };
-    let degree = knots.len().checked_sub(homogeneous.len() + 1)?;
-    // The interval within the knots (a file's end parameter a rounding past them).
-    let (k0, k1) = (*knots.get(degree)?, *knots.get(homogeneous.len())?);
-    let (a, b) = (a.min(b).max(k0), a.max(b).min(k1));
-    let (_, piece) = solidcore::eval::pcurve::segment(degree, knots, &homogeneous, a, b).ok()?;
-    piece.iter().map(|h| (h[3] > 0.0).then(|| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]))).collect()
+/// A Bézier piece of a loop's edge: the arc of angles about the axis it lies within, and the
+/// way its angle runs along the loop (1 up, -1 down; `None` where it is not certainly one way).
+struct Piece {
+    arc: [f64; 2],
+    runs: Option<i8>,
+}
+
+/// The sign of the angular speed of the planar Bézier curve with homogeneous control points
+/// `a` (x·w, y·w about the axis; the angle of the point is the angle of these): `A × A'`, a
+/// polynomial of degree 2n − 1 whose Bernstein coefficients are
+/// `Σ_{i+j=k} C(n,i) C(n−1,j) / C(2n−1,k) · n (a_i × (a_{j+1} − a_j))`. All of one strict sign:
+/// the angle runs that way over the whole piece.
+fn angular_sign(a: &[[f64; 2]]) -> Option<i8> {
+    let n = a.len().checked_sub(1).filter(|n| *n > 0)?;
+    let binomial = |n: usize, k: usize| -> f64 { (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64) };
+    let cross = |p: [f64; 2], q: [f64; 2]| p[0] * q[1] - p[1] * q[0];
+    let mut sign = 0i8;
+    for k in 0..2 * n {
+        let mut c = 0.0;
+        for i in 0..=n.min(k) {
+            let j = k - i;
+            if j > n - 1 {
+                continue;
+            }
+            let (Some(&ai), Some(&aj), Some(&aj1)) = (a.get(i), a.get(j), a.get(j + 1)) else { return None };
+            c += binomial(n, i) * binomial(n - 1, j) / binomial(2 * n - 1, k) * n as f64 * cross(ai, [aj1[0] - aj[0], aj1[1] - aj[1]]);
+        }
+        let s = if c > 0.0 {
+            1
+        } else if c < 0.0 {
+            -1
+        } else {
+            return None;
+        };
+        if sign != 0 && s != sign {
+            return None;
+        }
+        sign = s;
+    }
+    Some(sign)
+}
+
+/// The angles two arcs both reach (none, one arc, or two where they meet round both ends).
+fn overlap(p: [f64; 2], q: [f64; 2]) -> Vec<[f64; 2]> {
+    let w1 = p[1] - p[0];
+    let s = (q[0] - p[0]).rem_euclid(TAU);
+    let e = s + (q[1] - q[0]);
+    let mut out = Vec::new();
+    for shift in [0.0, -TAU] {
+        let (lo, hi) = ((s + shift).max(0.0), (e + shift).min(w1));
+        if lo <= hi {
+            out.push([p[0] + lo, p[0] + hi]);
+        }
+    }
+    out
 }
 
 /// Arcs of angle about an axis that a face's other loops can reach ([`Builder::blocked_angles`]).
