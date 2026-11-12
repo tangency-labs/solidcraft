@@ -62,6 +62,16 @@ All are `create_canonical` surfaces whose profile interval holds parameter 0 (an
 generator and the axis are unchanged, so the surface is the same point set; only the frame's
 X axis, where u = 0, turns. The rows record parameters, NURB nets and iso curves measured from it.
 
+- `to_nurbs` rows whose second coordinate moves (`surf_of_revolution_p3` gen0637, gen0650, gen0808)
+  have `swap_uv`: their second coordinate is the angle.
+- `blend.fillet_solver_p4` gen0189 and gen0281 solve a fillet point on revolutions of lines at
+  coordinates near 1e6, given by surface parameters. In each, one line starts on the axis to
+  rounding (3.3e-11 and 5.8e-11 from it, 5.5e5 and 8.1e5 from the axis point). Main's test (within 1° of
+  the axis direction) calls it on the axis and turns to the 45% point; WR-738's test
+  (`|Z x (P - O)|` below `SM_EFF_ZERO` = 1e-12, an absolute bound) does not, so the frame's X axis
+  points along the rounding residue. Every X axis perpendicular to the axis gives the same full
+  turn, so the surfaces are the same; the given parameters name other points of them. A bound
+  relative to the coordinates would keep main's frame here; that is outside this retirement.
 - Check on `surf_of_revolution_p1/gen0052` (`to_step`): the angle moves from 180.84860962° to
   171.10481566°, the profile parameter stays at -93.2734222°. The X axes of main (towards the arc's
   start, -145.97°) and of the fix (towards its point at 0°) are 9.74379395938° apart about the axis;
@@ -83,7 +93,11 @@ Rows of `surf_of_revolution_p2` (11 `offset` ops, among them the review cases
 fixtures). Their offset generators cross the axis below the frame's origin, where main's axis
 segment (from the origin along +z only) did not reach: main kept a stretch of negative radius,
 the fix cuts it at the axis and keeps the generatrix's side. `issue_973_offset_cut_at_axis_below_origin`
-checks that no end of the offset generator is past the axis.
+checks all four end points of its two offset generators against the closed form.
+
+![The meridian plane of the issue 973 surface: the axis, the frame origin on it, the generator from (0, 0, -1) to (4, 0, -5), its offset away from the axis, and its offset towards the axis, which crosses the axis at z = -1 - sqrt(2). Upstream's axis segment runs up from the origin and misses the crossing; the fix's spans the offset's whole height.](surface.surf_of_revolution--offset-cut-at-the-axis-below-the-origin.svg)
+
+*The offset towards the axis is cut where it crosses it; upstream keeps the dashed part past it.*
 
 ## Every row
 
