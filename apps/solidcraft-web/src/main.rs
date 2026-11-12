@@ -341,6 +341,7 @@ mod web {
     const JAPANESE_FONT_PATH: &str = "./fonts/BIZUDPGothic-Regular.ttf";
     const CHINESE_SC_FONT_PATH: &str = "./fonts/CraftUI-SC.otf";
     const CHINESE_TC_FONT_PATH: &str = "./fonts/CraftUI-TC.otf";
+    const KOREAN_FONT_PATH: &str = "./fonts/CraftUI-KR.otf";
 
     type FontLoadResult = Rc<std::cell::RefCell<Option<Result<(String, Vec<u8>), String>>>>;
 
@@ -369,7 +370,9 @@ mod web {
         chinese_bytes: Option<Vec<u8>>,
         /// Which Chinese face `chinese_bytes` is: `"zh"` or `"zh-TW"`.
         chinese_kind: Option<&'static str>,
-        /// Kind requested by the in-flight fetch (`"ja"`, `"zh"`, or `"zh-TW"`).
+        /// The fetched Korean font's bytes: kept so a language change can re-order the fallbacks.
+        korean_bytes: Option<Vec<u8>>,
+        /// Kind requested by the in-flight fetch (`"ja"`, `"zh"`, `"zh-TW"` or `"ko"`).
         font_fetch_kind: Option<&'static str>,
         /// The language the fonts were last set up for (a CJK UI leads with the CJK face).
         font_language: String,
@@ -1021,6 +1024,7 @@ mod web {
                 Some("zh") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh"),
                 Some("zh-TW") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh-TW"),
                 Some("ja") => self.cjk_bytes.is_some(),
+                Some("ko") => self.korean_bytes.is_some(),
                 _ => true,
             }
         }
@@ -1042,6 +1046,9 @@ mod web {
                                 self.chinese_bytes = Some(bytes);
                                 self.chinese_kind = Some("zh-TW");
                             }
+                            Some("ko") => {
+                                self.korean_bytes = Some(bytes);
+                            }
                             _ => {
                                 self.cjk_bytes = Some(bytes);
                             }
@@ -1053,6 +1060,7 @@ mod web {
                         let path = match kind {
                             Some("zh") => CHINESE_SC_FONT_PATH,
                             Some("zh-TW") => CHINESE_TC_FONT_PATH,
+                            Some("ko") => KOREAN_FONT_PATH,
                             _ => JAPANESE_FONT_PATH,
                         };
                         log::warn!("failed to fetch script font from {path}: {err}");
@@ -1080,13 +1088,20 @@ mod web {
         }
 
         /// Set up the UI fonts for the live language, keeping fetched script fonts as fallbacks
-        /// (Chinese leads a Chinese UI; see [`solidcraft_ui_egui::fonts::install_web_script_fonts`]).
+        /// (Chinese leads a Chinese UI, Korean a Korean one; see
+        /// [`solidcraft_ui_egui::fonts::install_web_script_fonts`]).
         fn apply_fonts(&mut self, ctx: &egui::Context) {
             let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
-            if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() {
+            if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() && self.korean_bytes.is_none() {
                 solidcraft_ui_egui::fonts::setup_fonts(ctx);
             } else {
-                solidcraft_ui_egui::fonts::install_web_script_fonts(ctx, self.cjk_bytes.clone(), self.chinese_bytes.clone(), effective);
+                solidcraft_ui_egui::fonts::install_web_script_fonts(
+                    ctx,
+                    self.cjk_bytes.clone(),
+                    self.chinese_bytes.clone(),
+                    self.korean_bytes.clone(),
+                    effective,
+                );
             }
             self.font_language = effective.to_owned();
         }
@@ -1103,6 +1118,7 @@ mod web {
             let path = match kind {
                 "zh" => CHINESE_SC_FONT_PATH,
                 "zh-TW" => CHINESE_TC_FONT_PATH,
+                "ko" => KOREAN_FONT_PATH,
                 _ => JAPANESE_FONT_PATH,
             };
             self.font_fetch_kind = Some(kind);
@@ -1375,6 +1391,7 @@ mod web {
                             cjk_bytes: None,
                             chinese_bytes: None,
                             chinese_kind: None,
+                            korean_bytes: None,
                             font_fetch_kind: None,
                             font_language,
                             space_mouse: SpaceMouse::default(),
