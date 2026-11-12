@@ -1746,6 +1746,8 @@ fn plan_face(
         let caps = pole_caps(s, &uvs, &fixed, &ranges, reach).map_err(|why| fail(&why))?;
         let (mut nodes, mut pos): (Vec<[f64; 2]>, Vec<Vec3>) = (uvs.clone(), fixed.clone());
         let mut fan: Vec<[u32; 3]> = Vec::new();
+        // The rings' sides, in the face's numbering.
+        let mut ring_sides: Vec<(u32, u32)> = Vec::new();
         // Each loop as the rest of the face runs it: its nodes, a cap's copies of its pole
         // replaced by the cap's ring.
         let mut runs: Vec<Vec<usize>> = ranges.iter().map(|r| r.clone().collect()).collect();
@@ -1759,6 +1761,7 @@ fn plan_face(
             // The ring from the node before the pole to the one after it.
             let ring_ids: Vec<usize> = std::iter::once(cap.before).chain(first..nodes.len()).chain(std::iter::once(cap.after)).collect();
             fan.extend(cap_fan(&cap.copies, &ring_ids, &nodes).ok_or_else(|| fail("a pole's cap cannot be fanned in (u, v)"))?);
+            ring_sides.extend(ring_ids.windows(2).filter_map(|w| Some((u32::try_from(*w.first()?).ok()?, u32::try_from(*w.get(1)?).ok()?))));
             if let Some(run) = runs.get_mut(cap.lp) {
                 // Started at the node after the pole, the loop ends with the node before it and
                 // the copies; the copies leave it, and the ring's inner nodes take their place.
@@ -1808,6 +1811,7 @@ fn plan_face(
             let (Some(a), Some(b), Some(c)) = (global(t[0]), global(t[1]), global(t[2])) else { return Err(fail("a triangle's node is missing")) };
             tris.push([a, b, c]);
         }
+        let fans = tris.len()..tris.len() + fan.len();
         tris.extend(fan);
         for q in &meshed.extra {
             nodes.push(*q);
@@ -1827,8 +1831,9 @@ fn plan_face(
             budget: MAX_MESH_REFINE.saturating_sub(meshed.extra.len()),
             whole: whole_sides,
         };
-        // Shaped whole, the fans included; only the face's own boundary sides are kept.
-        match shape::shape(&mut nodes, &mut pos, &mut tris, &ranges, &point, &shaping) {
+        // Shaped whole: the fans kept as they are, the rings split in the face where they must,
+        // the face's own boundary sides on their edges.
+        match shape::shape(&mut nodes, &mut pos, &mut tris, &ranges, (ring_sides.as_slice(), fans), &point, &shaping) {
             // The sides its shaping would split go on their edges first ([`plan_at`]).
             shape::Shaped::Split(split) => {
                 let sides = split.into_iter().filter_map(|(i, j, at)| Some(SplitSide { from: *fixed.get(i)?, to: *fixed.get(j)?, at })).collect();

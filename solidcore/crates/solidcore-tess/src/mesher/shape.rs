@@ -16,8 +16,14 @@
 //!   since the side is an edge's segment its neighbour shares. The sides are returned, to be put
 //!   on their edges ([`super::plan_at`]), or, where the face may not split them, kept whole.
 //! - The surface's poles are no concern of it: the planner fans each pole's cap on its own
-//!   ([`super::pole_caps`]), so the triangles here meet a pole only as the fan's corner, one
-//!   point.
+//!   ([`super::pole_caps`]). The fans are kept as they are: never flipped or refined, since in
+//!   (u, v) a pole is a side and a fan's middles and maps there are not the surface's. A ring
+//!   side a point would encroach on is split in the face, the fan triangle on it halved at the
+//!   pole, while the halves keep the angle; past that the point is not added.
+//!
+//! Every loop is bounded: the points added (`budget`, reported as [`ShapeLimit::Points`]), the
+//! flips per pass ([`FLIPS_PER_TRIANGLE`] per triangle at the start, [`FLIPS_PER_POINT`] after
+//! each point) and the steps of each walk ([`WALK_STEPS`]).
 
 use std::collections::VecDeque;
 
@@ -31,10 +37,12 @@ use super::size::{SizeAt, local};
 
 /// A side is split once it is this many times the side asked (as [`super::cdt`]'s refinement).
 const LONG: f64 = 1.5;
-/// Flips per triangle a pass of Lawson flips may make.
+/// Flips per triangle the first pass of Lawson flips may make.
 const FLIPS_PER_TRIANGLE: usize = 8;
-/// Steps of the walk to a new point, per triangle.
-const WALK: usize = 4;
+/// Flips the pass after one new point may make.
+const FLIPS_PER_POINT: usize = 256;
+/// Steps of the walk to a new point; past them it is lost and not added.
+const WALK_STEPS: usize = 4096;
 
 /// What the shaping asks of a face.
 pub(crate) struct Rules<'a> {
@@ -76,6 +84,11 @@ struct Mesh<'a> {
     fixed: BitsMap<(u32, u32), (u32, u32)>,
     /// Triangles shaping gave up on until they change.
     stuck: Vec<bool>,
+    /// The sides of the pole caps' rings, by their two nodes in index order: kept like the
+    /// boundary, but split in the face ([`split_ring`]).
+    ring: BitsMap<(u32, u32), ()>,
+    /// The triangles of the pole caps' fans: never flipped or refined.
+    frozen: Vec<bool>,
 }
 
 fn key(a: u32, b: u32) -> (u32, u32) {
@@ -94,6 +107,15 @@ fn angle(o: Vec3, a: Vec3, b: Vec3) -> f64 {
 }
 
 impl Mesh<'_> {
+    /// Whether side `e` is kept: a boundary side or a ring side.
+    fn kept(&self, e: &(u32, u32)) -> bool {
+        self.fixed.contains_key(e) || self.ring.contains_key(e)
+    }
+
+    fn is_frozen(&self, ti: u32) -> bool {
+        self.frozen.get(ti as usize).copied().unwrap_or(false)
+    }
+
     fn node(&self, i: u32) -> Option<(Vec3, [f64; 2])> {
         Some((*self.pos.get(i as usize)?, *self.uv.get(i as usize)?))
     }
@@ -145,6 +167,7 @@ impl Mesh<'_> {
         } else {
             self.tris.push(t);
             self.stuck.push(false);
+            self.frozen.push(false);
         }
         self.link(ti);
     }
@@ -163,10 +186,13 @@ impl Mesh<'_> {
             if left == 0 {
                 break;
             }
-            if self.fixed.contains_key(&e) {
+            if self.kept(&e) {
                 continue;
             }
             let Some(&[t1, t2]) = self.sides.get(&e).map(Vec::as_slice) else { continue };
+            if self.is_frozen(t1) || self.is_frozen(t2) {
+                continue;
+            }
             let (Some(&ta), Some(&tb)) = (self.tris.get(t1 as usize), self.tris.get(t2 as usize)) else { continue };
             // [a, b, c] on one side of a -> b, [b, a, d] on the other.
             let Some([a, b, c]) = (0..3).map(|k| super::rot3(ta, k)).find(|[a, b, _]| key(*a, *b) == e) else { continue };
@@ -196,7 +222,7 @@ impl Mesh<'_> {
     /// Where the walk from triangle `from` to (u, v) point `q` ends.
     fn locate(&self, from: u32, q: [f64; 2]) -> Located {
         let mut t = from;
-        for _ in 0..self.tris.len().saturating_mul(WALK).max(16) {
+        for _ in 0..WALK_STEPS {
             let (Some(&tri), Some(ps)) = (self.tris.get(t as usize), self.tris.get(t as usize).and_then(|t| self.params(*t))) else {
                 return Located::Lost;
             };
@@ -228,7 +254,7 @@ impl Mesh<'_> {
             match out {
                 None => return on.map_or(Located::Inside(t), |(a, b)| Located::OnSide(t, a, b)),
                 Some((a, b)) => {
-                    if self.fixed.contains_key(&key(a, b)) {
+                    if self.kept(&key(a, b)) {
                         return Located::Beyond(a, b);
                     }
                     match self.across(a, b, t) {
@@ -257,7 +283,7 @@ impl Mesh<'_> {
                 Some((vec![ti, t2, t3], vec![key(a, b), key(b, c), key(c, a)]))
             }
             Located::OnSide(ti, x, y) => {
-                if self.fixed.contains_key(&key(x, y)) {
+                if self.kept(&key(x, y)) {
                     return None;
                 }
                 let tj = self.across(x, y, ti)?;
@@ -297,9 +323,11 @@ pub(crate) fn shape(
     pos: &mut Vec<Vec3>,
     tris: &mut Vec<[u32; 3]>,
     loops: &[std::ops::Range<usize>],
+    caps: (&[(u32, u32)], std::ops::Range<usize>),
     point: Point<'_>,
     rules: &Rules,
 ) -> Shaped {
+    let (ring_sides, fans) = caps;
     let mut fixed: BitsMap<(u32, u32), (u32, u32)> = BitsMap::default();
     for r in loops {
         let n = r.len();
@@ -311,7 +339,9 @@ pub(crate) fn shape(
         }
     }
     let stuck = vec![false; tris.len()];
-    let mut m = Mesh { uv, pos, tris, sides: BitsMap::default(), fixed, stuck };
+    let frozen: Vec<bool> = (0..tris.len()).map(|t| fans.contains(&t)).collect();
+    let ring: BitsMap<(u32, u32), ()> = ring_sides.iter().map(|&(a, b)| (key(a, b), ())).collect();
+    let mut m = Mesh { uv, pos, tris, sides: BitsMap::default(), fixed, stuck, ring, frozen };
     for ti in 0..m.tris.len() {
         if let Ok(ti) = u32::try_from(ti) {
             m.link(ti);
@@ -331,7 +361,7 @@ pub(crate) fn shape(
     let mut queue: VecDeque<u32> = (0..m.tris.len()).filter_map(|t| u32::try_from(t).ok()).collect();
     while let Some(ti) = queue.pop_front() {
         let Some(&t) = m.tris.get(ti as usize) else { continue };
-        if m.stuck.get(ti as usize).copied().unwrap_or(true) || m.collapsed(t) {
+        if m.stuck.get(ti as usize).copied().unwrap_or(true) || m.is_frozen(ti) || m.collapsed(t) {
             continue;
         }
         let (Some([a, b, c]), Some([qa, qb, qc])) = (m.corners(t), m.params(t)) else { continue };
@@ -346,7 +376,7 @@ pub(crate) fn shape(
             || (0..3).any(|k| {
                 let [i, j, _] = super::rot3(t, k);
                 let ([pi, pj, _], [ui, uj, _]) = (super::rot3([a, b, c], k), super::rot3([qa, qb, qc], k));
-                !m.fixed.contains_key(&key(i, j)) && off([(ui[0] + uj[0]) * 0.5, (ui[1] + uj[1]) * 0.5], (pi + pj) * 0.5) > rules.tol
+                !m.kept(&key(i, j)) && off([(ui[0] + uj[0]) * 0.5, (ui[1] + uj[1]) * 0.5], (pi + pj) * 0.5) > rules.tol
             });
         let sharp = sharpest < rules.min_angle;
         if !(sharp || long || sags) {
@@ -354,7 +384,7 @@ pub(crate) fn shape(
         }
         // A corner of the boundary sharper than the angle, between two of its sides, stays.
         let [i, j, k] = super::rot3(t, at);
-        if sharp && !long && !sags && m.fixed.contains_key(&key(i, j)) && m.fixed.contains_key(&key(k, i)) {
+        if sharp && !long && !sags && m.kept(&key(i, j)) && m.kept(&key(k, i)) {
             give_up(&mut m, ti, Some(ShapeLimit::Corner), &mut limits);
             continue;
         }
@@ -406,7 +436,7 @@ pub(crate) fn shape(
                         for k in 0..3 {
                             let [x, y, _] = super::rot3(tk, k);
                             let e = key(x, y);
-                            if !m.fixed.contains_key(&e) || near.contains(&e) {
+                            if !m.kept(&e) || near.contains(&e) {
                                 continue;
                             }
                             let (Some((px, _)), Some((py, _))) = (m.node(x), m.node(y)) else { continue };
@@ -420,9 +450,26 @@ pub(crate) fn shape(
             Located::Lost => {}
         }
         if !near.is_empty() {
+            let (edge_sides, ring_sides): (Vec<(u32, u32)>, Vec<(u32, u32)>) = near.into_iter().partition(|e| m.fixed.contains_key(e));
+            if edge_sides.is_empty() {
+                // Only ring sides: the first is split in the face, where its fan's halves keep
+                // the angle; otherwise the ring is kept whole there.
+                let split = if added < rules.budget { ring_sides.first().and_then(|&e| split_ring(&mut m, e, point, rules.min_angle)) } else { None };
+                match split {
+                    Some((made, facing)) => {
+                        added += 1;
+                        let flipped = m.flip(facing, FLIPS_PER_POINT);
+                        queue.extend(made);
+                        queue.extend(flipped);
+                        queue.push_back(ti);
+                    }
+                    _ => give_up(&mut m, ti, Some(ShapeLimit::SidesOnNoEdge), &mut limits),
+                }
+                continue;
+            }
             match rules.whole {
                 None => {
-                    for e in near {
+                    for e in edge_sides {
                         if let Some(&side) = m.fixed.get(&e) {
                             encroached.insert(e, side);
                         }
@@ -442,7 +489,7 @@ pub(crate) fn shape(
             continue;
         };
         added += 1;
-        let flipped = m.flip(facing, per);
+        let flipped = m.flip(facing, FLIPS_PER_POINT);
         queue.extend(made);
         queue.extend(flipped);
     }
@@ -451,6 +498,49 @@ pub(crate) fn shape(
     }
     // The triangles still too sharp, by why they stayed.
     Shaped::Done(limits)
+}
+
+/// Split ring side `e` in the face at its middle in (u, v) (the ring is straight there), on the
+/// surface: the triangle beyond it in two, and the fan triangle on it in two at the pole, where
+/// the halves of the fan's angle at the pole keep `min_angle`. The triangles made and the sides
+/// facing the new node; `None` (nothing changed) where the halves would be sharper, or the side
+/// is not one ring side between a fan and another triangle.
+fn split_ring(m: &mut Mesh<'_>, e: (u32, u32), point: Point<'_>, min_angle: f64) -> Option<(Vec<u32>, Vec<(u32, u32)>)> {
+    let ts: Vec<u32> = m.sides.get(&e)?.clone();
+    let [t1, t2] = ts.as_slice() else { return None };
+    let (fan, other) = match (m.is_frozen(*t1), m.is_frozen(*t2)) {
+        (true, false) => (*t1, *t2),
+        (false, true) => (*t2, *t1),
+        _ => return None,
+    };
+    let tri = *m.tris.get(other as usize)?;
+    // The side in the other triangle's order.
+    let [x, y, _] = (0..3).map(|k| super::rot3(tri, k)).find(|[a, b, _]| key(*a, *b) == e)?;
+    let ftri = *m.tris.get(fan as usize)?;
+    let apex = ftri.iter().copied().find(|&v| v != x && v != y)?;
+    let ((pa, _), (px, qx), (py, qy)) = (m.node(apex)?, m.node(x)?, m.node(y)?);
+    if !(0.5 * angle(pa, px, py) >= min_angle) {
+        return None;
+    }
+    let q = [0.5 * (qx[0] + qy[0]), 0.5 * (qx[1] + qy[1])];
+    let p = point(q)?;
+    m.ring.remove(&e);
+    let Some((made, facing)) = m.insert(Located::OnSide(other, x, y), q, p) else {
+        m.ring.insert(e, ());
+        return None;
+    };
+    let n = u32::try_from(m.uv.len().checked_sub(1)?).ok()?;
+    m.ring.insert(key(x, n), ());
+    m.ring.insert(key(n, y), ());
+    // The fan triangle's two halves stay fans: the insert put them in its slot and the last one.
+    if let Some(&last) = made.last() {
+        for t in [fan, last] {
+            if let Some(f) = m.frozen.get_mut(t as usize) {
+                *f = true;
+            }
+        }
+    }
+    Some((made, facing))
 }
 
 /// `why`, in `limits` once.
