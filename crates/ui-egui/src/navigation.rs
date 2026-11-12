@@ -907,7 +907,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         }
         if touch.zoom.is_finite() && touch.zoom > 0.0 && touch.zoom != 1.0 {
             let anchor = zoom_anchor(app, rect, touch.centre, caps.orbit);
-            app.cam.zoom_at(1.0 / f64::from(touch.zoom), anchor);
+            app.cam.zoom_at(f64::from(touch.zoom).powf(-crate::prefs::zoom_sign(app)), anchor);
         }
     } else if let Some((mode, delta)) = motion {
         if delta != egui::Vec2::ZERO {
@@ -3323,6 +3323,28 @@ mod tests {
         events.push(finger(1, Move, 320.0, 350.0));
         touchscreen_frame(&mut app, &ctx, events, &mut time, true);
         assert_eq!(app.cam, pinched, "remaining finger cannot become an accidental orbit");
+    }
+
+    #[test]
+    fn touchscreen_pinch_respects_reverse_zoom() {
+        use egui::TouchPhase::{Move, Start};
+        for reverse in [false, true] {
+            let mut app = crate::SolveApp::new(Default::default(), Default::default());
+            app.preferences.zoom_to_cursor = false;
+            app.preferences.zoom_reverse = reverse;
+            let ctx = crate::fonts::test_context();
+            let mut time = 0.0;
+            touchscreen_frame(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, true);
+            let before = app.cam;
+            let mut events = pointer(300.0, 300.0, Some(true));
+            events.extend([finger(1, Start, 300.0, 300.0), finger(2, Start, 400.0, 300.0)]);
+            touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+            let mut events = pointer(300.0, 300.0, None);
+            events.extend([finger(1, Move, 250.0, 300.0), finger(2, Move, 450.0, 300.0), egui::Event::Zoom(2.0)]);
+            touchscreen_frame(&mut app, &ctx, events, &mut time, true);
+            let expected = if reverse { before.distance * 2.0 } else { before.distance / 2.0 };
+            assert!((app.cam.distance - expected).abs() < 1e-6, "reverse={reverse}: {} vs {expected}", app.cam.distance);
+        }
     }
 
     #[test]
