@@ -86,7 +86,7 @@ An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 ## The segment contract
 
 `segments` splits one picked edge's bend into stretches. Each is
-`{from, to, angle?, height?, flip?}`; no other key. `from` and `to` are unit-less fractions of the
+`{from, to, angle?, height?, flip?, relief?}`; no other key. `from` and `to` are unit-less fractions of the
 stretch the sheet still has there after cut-outs, `0` one end and `1` the other. A value left out
 falls back to the edge's own value, then the feature's.
 
@@ -248,8 +248,10 @@ Before handing a part to a shop, check:
 1. `sheet.flat_pattern`: the flat size fits the stock; the outline and cut-outs are what you
    planned; each bend's length, angle and direction match the plan.
 2. `sheet.export_bend_table {"format":"json"}`: one row per bend, with its flat centre line; the
-   allowances follow from the rule. A junction relief shortens both bends of that junction by half
-   its width; angle, radius and allowance do not change.
+   allowances follow from the rule. A junction relief that removes material (`straight`,
+   `rectangular`, `obround`) shortens both bends of that junction by half its width; `tear` cuts
+   nothing in the flat plane and `notch` is no relief, so neither shortens a bend, and angle,
+   radius and allowance do not change.
 3. `inspect.interference` and `inspect.clearance` against the mating bodies: zero overlap, the
    rule's gap or more.
 4. `sheet.export_dxf`: layers and bend notes; `bend_lines: false` when the cutter would cut them.

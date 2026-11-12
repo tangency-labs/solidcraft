@@ -3853,6 +3853,28 @@ impl SheetBody {
         Ok(())
     }
 
+    /// A stretch's panel that is exactly the rectangle its bend line, allowance and leg already
+    /// describe carries no `shape`: `corners` skips shaped panels, so setting one would leave the
+    /// outer end of a relieved split edge unclosed against another edge's flange (CodeRabbit on
+    /// #15357). The geometry is unchanged, because the rectangle is what the shape was.
+    fn drop_plain_shape(&mut self, i: usize) {
+        let Some(f) = self.flanges.get(i).cloned() else { return };
+        let Some(shape) = f.shape.clone() else { return };
+        if f.exact.is_some() {
+            return;
+        }
+        let ba = self.allowance(&f);
+        let a = f.p + f.n * ba - f.d * f.ext.0;
+        let b = f.p + f.n * ba + f.d * (f.len + f.ext.1);
+        let want = [a, b, b + f.n * f.leg + f.d * (f.slope.1 * f.leg), a + f.n * f.leg - f.d * (f.slope.0 * f.leg)];
+        let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+        let plain = shape.len() == 4 && want.iter().all(|w| shape.iter().any(|s| near(*s, *w)));
+        if plain && let Some(g) = self.flanges.get_mut(i) {
+            g.shape = None;
+            g.exact = None;
+        }
+    }
+
     /// Trim a panel's edge a→b back by `by` (toward the panel interior). Where a→b is what a
     /// cut-out left of a longer edge, `cut_at` says at which of its ends (start, end) the
     /// cut-out is: the base keeps its edge beyond such an end, and so does a flange panel when
@@ -4409,6 +4431,11 @@ impl SheetBody {
             });
             made.push(self.flanges.len() - 1);
         }
+        // A stretch whose panel is the plain rectangle its bend line and leg describe carries no
+        // `shape`, so `corners` can still close its outer end against another edge's flange.
+        for &i in &made {
+            self.drop_plain_shape(i);
+        }
         let mut notes = Vec::new();
         // The reliefs the stretches ask for at the junctions between them. Cut here: every stretch
         // has its bend and the base is trimmed back (so the notch reaches the stretch's own bend
@@ -4544,6 +4571,31 @@ impl SheetBody {
     /// stretches hang off) and of both stretches' panels. Each bend zone follows: `zone_span`
     /// measures a bend against its panel's root, which the notch interrupts. A relief that cannot
     /// be cut refuses the feature, naming the segment the caller wrote; nothing is clamped.
+    /// The stretch that starts at this one's end: the junction between two stretches of one split
+    /// edge. They meet along the junction line, so their bend lines are offset by the difference of
+    /// their setbacks while their starts share a place along the edge. A parallel edge of the same
+    /// parent can offer a start at the same place too, which is why the offset along the flange has
+    /// to stay within a setback to count (CodeRabbit on #15357).
+    fn junction_partner(&self, i: usize) -> Option<usize> {
+        let f = self.flanges.get(i)?;
+        let d = f.d.normalized()?;
+        let n = f.n.normalized()?;
+        let u = f.p.dot(d) + f.len;
+        let end = f.p + d * f.len;
+        self.flanges
+            .iter()
+            .enumerate()
+            .filter(|(j, b)| {
+                *j != i
+                    && b.parent == f.parent
+                    && b.d.normalized().is_some_and(|db| db.dot(d) > 1.0 - 1e-9)
+                    && (b.p.dot(d) - u).abs() < 1e-6
+                    && (b.p - end).dot(n).abs() <= self.allowance(f).max(self.allowance(b)) + 1e-6
+            })
+            .min_by(|(_, x), (_, y)| (x.p - end).dot(n).abs().total_cmp(&(y.p - end).dot(n).abs()))
+            .map(|(j, _)| j)
+    }
+
     fn cut_junction_relief(&mut self, i: usize, r: JunctionRelief) -> Result<()> {
         let (edge, seg) = r.at;
         let named = format!("edges[{edge}].segments[{seg}].relief");
@@ -4555,10 +4607,7 @@ impl SheetBody {
         // The stretch that starts where this one ends: one bend butt to the other along the split
         // edge, which is the junction `junction_slits` parts.
         let u = f.p.dot(d) + f.len;
-        let partner = self.flanges.iter().enumerate().position(|(j, b)| {
-            j != i && b.parent == f.parent && b.d.normalized().is_some_and(|db| db.dot(d) > 1.0 - 1e-9) && (b.p.dot(d) - u).abs() < 1e-6
-        });
-        let Some(j) = partner else {
+        let Some(j) = self.junction_partner(i) else {
             return Err(fail("no stretch starts where this one ends, so there is no junction to relieve".into()));
         };
         let Some(b) = self.flanges.get(j).cloned() else { return Err(fail("the stretch after it is missing".into())) };
@@ -6973,6 +7022,13 @@ impl SheetBody {
 
     /// Everything in flat coordinates mirrored across the flat's y axis (x → −x).
     fn flip_flat(&mut self) {
+        // A stretch carries its relief at its far end, and mirroring turns every stretch round, so
+        // the relief has to move to the stretch that now ends at that junction. Pair the stretches
+        // first, from the geometry the sheet still has, and move the reliefs after flipping
+        // (CodeRabbit on #15357).
+        let moves: Vec<(usize, usize)> = (0..self.flanges.len()).filter_map(|i| self.junction_partner(i).map(|j| (i, j))).collect();
+        let carried: Vec<Option<JunctionRelief>> = self.flanges.iter().map(|f| f.relief.clone()).collect();
+        let carried: Vec<(usize, JunctionRelief)> = carried.into_iter().enumerate().filter_map(|(i, r)| r.map(|r| (i, r))).collect();
         self.base = flip_x_region(&self.base);
         for f in &mut self.flanges {
             // The bend line runs the other way, from its far end, so the flange still lies on
@@ -7010,6 +7066,15 @@ impl SheetBody {
         }
         for (_, a, b) in &mut self.base_curves {
             (*a, *b) = (flip_x(*b), flip_x(*a));
+        }
+        for f in &mut self.flanges {
+            f.relief = None;
+        }
+        for (i, r) in carried {
+            let to = moves.iter().find(|(from, _)| *from == i).map(|(_, to)| *to).unwrap_or(i);
+            if let Some(f) = self.flanges.get_mut(to) {
+                f.relief = Some(r);
+            }
         }
     }
 }

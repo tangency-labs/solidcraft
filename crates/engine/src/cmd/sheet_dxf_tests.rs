@@ -1345,9 +1345,10 @@ fn a_junction_relief_on_a_flange_owned_edge_cuts_the_parent_panel() {
     let sh = &with.model.state().sheets[0];
     let child = sh.flanges.last().cloned().unwrap_or_else(|| panic!("no stretch"));
     assert_eq!(child.parent, Some(0), "the stretches sit on a flange's edge");
-    let n = child.n.normalized().unwrap_or_else(|| panic!("no normal"));
-    let inner = child.p.dot(n);
-    let outer = inner + sh.allowance(&child) + child.leg;
+    // Fixed by the fixture: the junction line the stretches sit on and the far edge their `20 mm`
+    // height at 90 degrees on the `2 mm` AL2 rule leaves. Written out rather than read back from
+    // the stretch, so a stretch built in the wrong place moves the notch without moving these.
+    let (inner, outer) = (14.141592654, 29.283185307589793);
     let (deep, far) = (-(inner - depth), -outer);
     let (ld, rd) = (Vec2::new(49.0, deep), Vec2::new(51.0, deep));
     let (lf, rf) = (Vec2::new(49.0, far), Vec2::new(51.0, far));
