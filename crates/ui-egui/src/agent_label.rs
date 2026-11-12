@@ -10,20 +10,6 @@ use solidcraft_ui_text::Locale;
 /// The most commands a batch's name lists before it ends with an ellipsis.
 const BATCH_NAMES: usize = 3;
 
-/// Tools with a command of their own: the tool reads as that command's label.
-const TOOL_COMMANDS: &[(&str, &str)] = &[
-    ("crash_reports", "diagnostics.crash_reports"),
-    ("export", "file.export"),
-    ("inspect_design", "document.inspect"),
-    ("measure", "inspect.measure"),
-    ("new_design", "file.new"),
-    ("open", "doc.open"),
-    ("redo", "edit.redo"),
-    ("save", "file.save"),
-    ("set_parameter", "parameters.change"),
-    ("undo", "edit.undo"),
-];
-
 /// Control methods whose name has a message of its own.
 const METHOD_MESSAGES: &[(&str, &str)] = &[("ui.prefs", "ui.preferences"), ("ui.screenshot", "ui.agent_tool.screenshot")];
 
@@ -82,9 +68,7 @@ fn command_of(id: &str) -> Option<&'static solidcraft_engine::CommandSpec> {
 /// What a command, tool or control method is called for a person, in `language`.
 pub fn name_in(language: Locale, raw: &str) -> String {
     let id = tool_of(raw);
-    if let Some((_, tool)) = TOOL_COMMANDS.iter().find(|(t, _)| *t == id)
-        && let Some(c) = solidcraft_engine::find_command(tool)
-    {
+    if let Some(c) = solidcraft_engine::agent_tools::tool_command(id).and_then(solidcraft_engine::find_command) {
         return language.label(c.label).to_string();
     }
     if let Some(c) = command_of(id) {
@@ -180,19 +164,25 @@ mod tests {
         assert_eq!(batch_in(english(), &steps), "Batch: Fillet, Chamfer, Hole, …");
     }
 
-    /// Every tool the MCP server offers has a name a person can read, never its id.
+    /// Every tool the engine lists has a name a person can read, never its id.
     #[test]
-    fn every_mcp_tool_has_a_readable_name() {
-        let tools = solidcraft_mcp::tool_definitions();
-        assert!(tools.len() > 10);
-        for tool in &tools {
-            let id = tool["name"].as_str().expect("a tool has a name");
+    fn every_listed_tool_has_a_readable_name() {
+        use solidcraft_engine::agent_tools::{MESSAGE_TOOLS, TOOL_COMMANDS};
+        let ids = TOOL_COMMANDS.iter().map(|(t, _)| *t).chain(MESSAGE_TOOLS.iter().copied());
+        for id in ids {
             for raw in [id.to_string(), format!("mcp__solidcraft-app__{id}"), format!("mcp.solidcraft_{id}")] {
                 let shown = name_in(english(), &raw);
                 assert!(!shown.trim().is_empty(), "{raw} has no name");
                 assert!(!shown.contains("mcp") && !shown.contains("__") && !shown.contains('_'), "{raw} reads {shown:?}");
                 assert_ne!(shown, id, "{raw} reads as its id");
             }
+        }
+        for tool in MESSAGE_TOOLS {
+            let message = format!("ui.agent_tool.{tool}");
+            assert_ne!(english().text(&message), message, "{message} is not in the catalog");
+        }
+        for (_, command) in TOOL_COMMANDS {
+            assert!(solidcraft_engine::find_command(command).is_some(), "{command} is no command");
         }
         assert_eq!(name_in(english(), "mcp__solidcraft-app__undo"), "Undo");
     }
