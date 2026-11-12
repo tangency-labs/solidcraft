@@ -2325,8 +2325,19 @@ fn faces_to_delete(
 
         let mut face_right_side = i32::from(right_votes >= left_votes);
 
-        if right_votes == left_votes {
-            // Make a face shape with the face and its edges and vertices.
+        // (not upstream, #13697, WR-781) A face with votes on both sides is one the
+        // curve does not cut through: the curve ends inside it, or beside it. Upstream
+        // gives such a face to the side with more votes, so the count of its corners
+        // decides, and the face under the reference point can go to the other side. It
+        // is judged like a tie, by its point nearest the reference point.
+        let straddles = right_votes > 0 && left_votes > 0;
+        if right_votes == left_votes || straddles {
+            // Make a face shape with the face and its edges and vertices. The edges
+            // were collected only for a face without a vertex vote; upstream's list
+            // otherwise still holds the edges of an earlier face (not upstream, WR-781).
+            if right_votes > 0 || left_votes > 0 {
+                edges = face_edges(b, face)?;
+            }
             let edge_keys: Vec<_> = edges.iter().map(|&e| (env.brep_id, e)).collect();
             let vertex_keys: Vec<_> = vertices.iter().map(|&v| (env.brep_id, v)).collect();
             let shape = Shape::new(
@@ -3584,5 +3595,69 @@ mod tests {
         assert_eq!(side_vote(&k, &narrow, on_curve, Vec3::Z, 1e-6), Ok(None));
         assert_eq!(side_vote(&k, &wide, below, Vec3::Z, 1e-6), Ok(Some(1)));
         assert!(side_vote(&k, &narrow, below, Vec3::Z, 1e-6).is_err());
+    }
+
+    /// #13697: a cutting line that ends inside a face does not cut the face in two, so
+    /// the face holds the reference point whichever side of the line that point is on,
+    /// and a trim that keeps the reference point's side keeps the face. The line runs
+    /// along x = 0.5 and ends at y = 0.5, half-way up each outline. The hexagon is the
+    /// square with two more corners right of the line: it has one corner left of the
+    /// line and three right of it, and was deleted for a reference point on the left.
+    #[test]
+    fn a_face_the_curve_ends_inside_is_kept_with_the_reference_point() {
+        use crate::primitive::{api_curves, api_trim_ops};
+        let segment = |a: (f64, f64), b: (f64, f64), z: f64| {
+            let line =
+                api_curves::create_line_segment(Point3::new(a.0, a.1, z), Point3::new(b.0, b.1, z));
+            Curve::from(line.unwrap())
+        };
+        // the number of faces left, and the x range of their vertices
+        let trim = |outline: &[(f64, f64)], end: f64, reference: (f64, f64)| {
+            let mut k = Kernel::default();
+            let sides: Vec<Curve> = (0..outline.len())
+                .map(|i| segment(outline[i], outline[(i + 1) % outline.len()], 0.0))
+                .collect();
+            let mut b = api_trim_ops::create_planar_faces(&mut k, &sides).unwrap();
+            let cutter = segment((0.5, -1.0), (0.5, end), 1.0);
+            let reference = Point3::new(reference.0, reference.1, 0.0);
+            api_trim_ops::project_and_trim(&mut k, &mut b, &cutter, Vec3::Z, reference).unwrap();
+            let faces = p1::faces(&b, None).unwrap();
+            let mut range = (f64::MAX, f64::MIN);
+            for &face in &faces {
+                for vertex in face_vertices(&b, face).unwrap() {
+                    let x = b.vertex(vertex).unwrap().point.x;
+                    range = (range.0.min(x), range.1.max(x));
+                }
+            }
+            (faces.len(), range)
+        };
+        let square = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let hexagon = [
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (1.2, 0.1),
+            (1.2, 0.3),
+            (1.0, 1.0),
+            (0.0, 1.0),
+        ];
+        let (left, right) = ((0.25, 0.25), (0.75, 0.25));
+        // the line ends inside the face: the whole face is kept
+        for reference in [left, right] {
+            assert_eq!(
+                trim(&square, 0.5, reference),
+                (1, (0.0, 1.0)),
+                "{reference:?}"
+            );
+            assert_eq!(
+                trim(&hexagon, 0.5, reference),
+                (1, (0.0, 1.2)),
+                "{reference:?}"
+            );
+        }
+        // the line crosses the face: the part on the reference point's side is kept
+        assert_eq!(trim(&square, 2.0, left), (1, (0.0, 0.5)));
+        assert_eq!(trim(&square, 2.0, right), (1, (0.5, 1.0)));
+        assert_eq!(trim(&hexagon, 2.0, left), (1, (0.0, 0.5)));
+        assert_eq!(trim(&hexagon, 2.0, right), (1, (0.5, 1.2)));
     }
 }
