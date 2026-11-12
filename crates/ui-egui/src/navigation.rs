@@ -1447,12 +1447,21 @@ fn view_middle_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
 /// the free view's middle (turning about it keeps it there), else the point under it now, as after
 /// a pan or a zoom in the same gesture.
 fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>) -> Option<Vec3> {
-    let middle = app.viewport.layout.as_ref().map(|l| l.middle.center());
+    let middle = home_centre(app);
     let proj = || projection(app, rect);
     match kept.zip(middle) {
         Some((p, m)) if proj().to_screen(p).is_some_and(|s| s.distance(m) < 0.5) => Some(p),
         _ => view_middle(app, rect),
     }
+}
+
+/// The screen point Home and Fit centre the model on, through the one function they use
+/// ([`crate::viewport_layout::framing_centre`]), so the pivot is exactly where Home leaves the model; the free
+/// view's middle (`Layout::middle`) when there is no model to frame.
+fn home_centre(app: &SolveApp) -> Option<Pos2> {
+    let layout = app.viewport.layout.as_ref()?;
+    let bounds = crate::viewport::view_bounds(app);
+    crate::viewport_layout::framing_centre(app.cam, &bounds, layout).or_else(|| Some(layout.middle.center()))
 }
 
 /// What orbit around the view's centre turns about: the point at the camera target's depth under
@@ -1467,7 +1476,7 @@ pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
     if crate::render_workspace::active(app) {
         return None;
     }
-    let middle = app.viewport.layout.as_ref()?.middle.center();
+    let middle = home_centre(app)?;
     if !middle.is_finite() || middle.distance(rect.center()) < 0.5 {
         return None;
     }
