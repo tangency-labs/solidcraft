@@ -1,0 +1,38 @@
+{
+  "en": {
+    "prefs.fade_other_component_sketches": "Fade sketches of other components",
+    "prefs.fade_other_component_sketches_help": "With a component active, draw sketches that belong to other components greyed out, like their bodies"
+  },
+  "de": {
+    "prefs.fade_other_component_sketches": "Skizzen anderer Komponenten abblenden",
+    "prefs.fade_other_component_sketches_help": "Bei aktiver Komponente Skizzen anderer Komponenten ausgegraut zeichnen, wie ihre Körper"
+  },
+  "nl": {
+    "prefs.fade_other_component_sketches": "Schetsen van andere componenten vervagen",
+    "prefs.fade_other_component_sketches_help": "Teken schetsen van andere componenten grijs wanneer een component actief is, net als hun lichamen"
+  },
+  "ja": {
+    "prefs.fade_other_component_sketches": "他のコンポーネントのスケッチを淡色表示",
+    "prefs.fade_other_component_sketches_help": "コンポーネントがアクティブなとき、他のコンポーネントのスケッチをボディと同様にグレーで表示します"
+  },
+  "zh": {
+    "prefs.fade_other_component_sketches": "淡化其他组件的草图",
+    "prefs.fade_other_component_sketches_help": "组件处于活动状态时，将属于其他组件的草图以灰色绘制，与其实体相同"
+  },
+  "ko": {
+    "prefs.fade_other_component_sketches": "다른 구성요소의 스케치 흐리게 표시",
+    "prefs.fade_other_component_sketches_help": "구성요소가 활성화되면 다른 구성요소에 속한 스케치를 바디처럼 회색으로 그립니다"
+  },
+  "vi": {
+    "prefs.fade_other_component_sketches": "Làm mờ phác thảo của các thành phần khác",
+    "prefs.fade_other_component_sketches_help": "Khi một thành phần đang hoạt động, vẽ các phác thảo thuộc thành phần khác bằng màu xám, giống như các khối của chúng"
+  },
+  "ar": {
+    "prefs.fade_other_component_sketches": "تعتيم رسومات المكونات الأخرى",
+    "prefs.fade_other_component_sketches_help": "عند تنشيط مكوّن، ارسم الرسومات التابعة للمكونات الأخرى باللون الرمادي، مثل أجسامها"
+  },
+  "he": {
+    "prefs.fade_other_component_sketches": "עמעום סקיצות של רכיבים אחרים",
+    "prefs.fade_other_component_sketches_help": "כאשר רכיב פעיל, ציור סקיצות השייכות לרכיבים אחרים באפור, כמו הגופים שלהם"
+  }
+}

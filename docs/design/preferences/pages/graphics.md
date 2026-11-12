@@ -57,6 +57,7 @@ Four toggle tiles, then a chip row.
 |---|---|---|---|---|---|---|
 | Cosmetic thread markings | Checkbox | `Prefs.cosmetic_threads` | `false` | none | none | |
 | Halo under sketch curves | Checkbox | `Prefs.sketch_halo` | `false` | none | none | |
+| Fade sketches of other components | Checkbox | `Prefs.fade_other_component_sketches` | `true` | none | none | |
 | Reference geometry through bodies | Checkbox | `Prefs.reference_geometry_through_bodies` | `false` | none | none | |
 | Grid follows the view | Checkbox | `Prefs.grid_follows_view` (no page id in the table today) | `false` | "Side views show the grid on the facing plane." | none | |
 | Single surface analysis | Checkbox | `Prefs.single_surface_analysis` | `true` | "Shading and Continuity share one analysis." | none | |
