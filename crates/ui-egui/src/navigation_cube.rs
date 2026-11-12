@@ -719,6 +719,7 @@ mod tests {
             assert!(projected.distance(expected) < 1.5, "frames the model at {expected:?}, got {projected:?}");
             assert!(h.app.cam.distance < from.distance / 2.0, "{handle}: {} vs {}", h.app.cam.distance, from.distance);
         }
+        h.call("ui.prefs", json!({"navigator_fit":false}));
         // Home, then a face, a corner or an arrow: the zoom and the centre stay; only the
         // direction changes.
         let click = |h: &mut crate::scenario::Harness, handle: &str| {

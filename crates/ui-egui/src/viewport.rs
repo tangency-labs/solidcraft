@@ -13138,6 +13138,7 @@ mod tests {
         let projected = crate::viewport::projection(&h.app, layout.viewport).to_screen(bounds.center()).unwrap();
         assert!(projected.distance(expected) < 1.5, "frames the model at {expected:?}, got {projected:?}");
         assert!(h.app.cam.distance < from.distance / 2.0, "{} vs {}", h.app.cam.distance, from.distance);
+        h.call("ui.prefs", json!({"navigator_fit":false}));
         // Home, then an axis: the zoom and the centre stay.
         let home = crate::scenario::rect_of("axis_view:home").unwrap().center();
         h.call("ui.click", json!({"x":home.x,"y":home.y}));
@@ -13150,6 +13151,7 @@ mod tests {
             assert!((h.app.cam.distance - framed.distance).abs() < 1e-6, "{axis}: {} vs Home's {}", h.app.cam.distance, framed.distance);
             assert!(h.app.cam.target.dist(framed.target) < 1e-6, "{axis}: {:?} vs Home's {:?}", h.app.cam.target, framed.target);
         }
+        h.call("ui.prefs", json!({"navigator_fit":true}));
         h.call("ui.prefs", json!({"open":"Navigation"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
         assert!(!h.app.preferences.navigator_fit, "Navigation defaults restore the in-place turn");
