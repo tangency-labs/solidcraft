@@ -1818,6 +1818,8 @@ fn plan_face(
         let mut fan: Vec<[u32; 3]> = Vec::new();
         // The rings' sides, in the face's numbering.
         let mut ring_sides: Vec<(u32, u32)> = Vec::new();
+        // The poles' copies, the fans' corners at the poles.
+        let pole_ids: std::collections::BTreeSet<u32> = caps.iter().flat_map(|c| c.copies.iter().filter_map(|&k| u32::try_from(k).ok())).collect();
         // Each loop as the rest of the face runs it: its nodes, a cap's copies of its pole
         // replaced by the cap's ring.
         let mut runs: Vec<Vec<usize>> = ranges.iter().map(|r| r.clone().collect()).collect();
@@ -1911,7 +1913,7 @@ fn plan_face(
         };
         // Shaped whole: the fans kept as they are, the rings split in the face where they must,
         // the face's own boundary sides on their edges.
-        match shape::shape(&mut nodes, &mut pos, &mut tris, &ranges, (ring_sides.as_slice(), fans), &point, &shaping) {
+        match shape::shape(&mut nodes, &mut pos, &mut tris, &ranges, (ring_sides.as_slice(), fans, &pole_ids), &point, &shaping) {
             // The sides its shaping would split go on their edges first ([`plan_at`]).
             shape::Shaped::Split(split) => {
                 let sides = split.into_iter().filter_map(|(i, j, at)| Some(SplitSide { from: *fixed.get(i)?, to: *fixed.get(j)?, at })).collect();

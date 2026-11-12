@@ -40,6 +40,9 @@ use super::size::{SizeAt, local};
 const LONG: f64 = 1.5;
 /// Flips per triangle the first pass of Lawson flips may make.
 const FLIPS_PER_TRIANGLE: usize = 8;
+/// Times a ring side may be halved in the face, its halves in turn: the fan's angle at the pole
+/// over four at most.
+const MAX_RING_SPLITS: u8 = 2;
 /// Flips the pass after one new point may make.
 const FLIPS_PER_POINT: usize = 256;
 /// Steps of the walk to a new point; past them it is lost and not added.
@@ -95,9 +98,12 @@ struct Mesh<'a> {
     fixed: BitsMap<(u32, u32), (u32, u32)>,
     /// Triangles shaping gave up on until they change.
     stuck: Vec<bool>,
-    /// The sides of the pole caps' rings, by their two nodes in index order: kept like the
-    /// boundary, but split in the face ([`split_ring`]).
-    ring: std::collections::BTreeSet<(u32, u32)>,
+    /// The sides of the pole caps' rings, by their two nodes in index order, each with how often
+    /// it was halved from a side of the ring as made: kept like the boundary, but split in the
+    /// face ([`split_ring`]) at most [`MAX_RING_SPLITS`] times.
+    ring: std::collections::BTreeMap<(u32, u32), u8>,
+    /// The poles' copies: the fans' corners at the poles.
+    poles: &'a std::collections::BTreeSet<u32>,
     /// The triangles of the pole caps' fans: never flipped or refined.
     frozen: Vec<bool>,
 }
@@ -120,7 +126,7 @@ fn angle(o: Vec3, a: Vec3, b: Vec3) -> f64 {
 impl Mesh<'_> {
     /// Whether side `e` is kept: a boundary side or a ring side.
     fn kept(&self, e: (u32, u32)) -> bool {
-        self.fixed.contains_key(&e) || self.ring.contains(&e)
+        self.fixed.contains_key(&e) || self.ring.contains_key(&e)
     }
 
     fn is_frozen(&self, ti: u32) -> bool {
@@ -334,11 +340,11 @@ pub(crate) fn shape(
     pos: &mut Vec<Vec3>,
     tris: &mut Vec<[u32; 3]>,
     loops: &[std::ops::Range<usize>],
-    caps: (&[(u32, u32)], std::ops::Range<usize>),
+    caps: (&[(u32, u32)], std::ops::Range<usize>, &std::collections::BTreeSet<u32>),
     point: Point<'_>,
     rules: &Rules,
 ) -> Shaped {
-    let (ring_sides, fans) = caps;
+    let (ring_sides, fans, poles) = caps;
     let mut fixed: BitsMap<(u32, u32), (u32, u32)> = BitsMap::default();
     for r in loops {
         let n = r.len();
@@ -351,8 +357,8 @@ pub(crate) fn shape(
     }
     let stuck = vec![false; tris.len()];
     let frozen: Vec<bool> = (0..tris.len()).map(|t| fans.contains(&t)).collect();
-    let ring: std::collections::BTreeSet<(u32, u32)> = ring_sides.iter().map(|&(a, b)| key(a, b)).collect();
-    let mut m = Mesh { uv, pos, tris, sides: BitsMap::default(), fixed, stuck, ring, frozen };
+    let ring: std::collections::BTreeMap<(u32, u32), u8> = ring_sides.iter().map(|&(a, b)| (key(a, b), 0)).collect();
+    let mut m = Mesh { uv, pos, tris, sides: BitsMap::default(), fixed, stuck, ring, frozen, poles };
     for ti in 0..m.tris.len() {
         if let Ok(ti) = u32::try_from(ti) {
             m.link(ti);
@@ -479,18 +485,22 @@ pub(crate) fn shape(
             if edge_sides.is_empty() {
                 // Only ring sides: the first is split in the face, where its fan's halves keep
                 // the angle; otherwise the ring is kept whole there.
-                let split = if added < rules.budget { ring_sides.first().and_then(|&e| split_ring(&mut m, e, point, rules.min_angle)) } else { None };
+                let split = match ring_sides.first() {
+                    Some(&e) if added < rules.budget => split_ring(&mut m, e, point, rules.min_angle, CROWDED * longest),
+                    Some(_) => Err(ShapeLimit::Points),
+                    None => Err(ShapeLimit::SidesOnNoEdge),
+                };
                 match split {
-                    Some((made, facing)) => {
+                    Ok((made, facing)) => {
                         added += 1;
                         let flipped = m.flip(facing, FLIPS_PER_POINT);
                         queue.extend(made);
                         queue.extend(flipped);
                         queue.push_back(ti);
                     }
-                    None => {
+                    Err(why) => {
                         dead.insert(sorted(t));
-                        give_up(&mut m, ti, Some(ShapeLimit::SidesOnNoEdge), &mut limits);
+                        give_up(&mut m, ti, Some(why), &mut limits);
                     }
                 }
                 continue;
@@ -547,37 +557,50 @@ pub(crate) fn shape(
 }
 
 /// Split ring side `e` in the face at its middle in (u, v) (the ring is straight there), on the
-/// surface: the triangle beyond it in two, and the fan triangle on it in two at the pole, where
-/// the halves of the fan's angle at the pole keep `min_angle`. The triangles made and the sides
-/// facing the new node; `None` (nothing changed) where the halves would be sharper, or the side
-/// is not one ring side between a fan and another triangle.
-fn split_ring(m: &mut Mesh<'_>, e: (u32, u32), point: Point<'_>, min_angle: f64) -> Option<(Vec<u32>, Vec<(u32, u32)>)> {
-    let ts: Vec<u32> = m.sides.get(&e)?.clone();
-    let [t1, t2] = ts.as_slice() else { return None };
+/// surface: the triangle beyond it in two, and the fan triangle on it in two at the pole. Under
+/// the same rules as every point the shaping adds: not nearer a node of the two triangles than
+/// `crowd` ([`ShapeLimit::Crowded`]), and only while the halves of the fan's angle at its pole
+/// (a pole's copy, checked) keep `min_angle` and the side was halved fewer than
+/// [`MAX_RING_SPLITS`] times ([`ShapeLimit::SidesOnNoEdge`]). The triangles made and the sides
+/// facing the new node; nothing changed on a refusal.
+fn split_ring(m: &mut Mesh<'_>, e: (u32, u32), point: Point<'_>, min_angle: f64, crowd: f64) -> Result<(Vec<u32>, Vec<(u32, u32)>), ShapeLimit> {
+    let refuse = ShapeLimit::SidesOnNoEdge;
+    let depth = *m.ring.get(&e).ok_or(refuse)?;
+    if depth >= MAX_RING_SPLITS {
+        return Err(refuse);
+    }
+    let ts: Vec<u32> = m.sides.get(&e).ok_or(refuse)?.clone();
+    let [t1, t2] = ts.as_slice() else { return Err(refuse) };
     let (fan, other) = match (m.is_frozen(*t1), m.is_frozen(*t2)) {
         (true, false) => (*t1, *t2),
         (false, true) => (*t2, *t1),
-        _ => return None,
+        _ => return Err(refuse),
     };
-    let tri = *m.tris.get(other as usize)?;
+    let tri = *m.tris.get(other as usize).ok_or(refuse)?;
     // The side in the other triangle's order.
-    let [x, y, _] = (0..3).map(|k| super::rot3(tri, k)).find(|[a, b, _]| key(*a, *b) == e)?;
-    let ftri = *m.tris.get(fan as usize)?;
-    let apex = ftri.iter().copied().find(|&v| v != x && v != y)?;
-    let ((pa, _), (px, qx), (py, qy)) = (m.node(apex)?, m.node(x)?, m.node(y)?);
+    let [x, y, c] = (0..3).map(|k| super::rot3(tri, k)).find(|[a, b, _]| key(*a, *b) == e).ok_or(refuse)?;
+    let ftri = *m.tris.get(fan as usize).ok_or(refuse)?;
+    let apex = ftri.iter().copied().find(|&v| v != x && v != y).ok_or(refuse)?;
+    if !m.poles.contains(&apex) {
+        return Err(refuse);
+    }
+    let ((pa, _), (px, qx), (py, qy), (pc, _)) = (m.node(apex).ok_or(refuse)?, m.node(x).ok_or(refuse)?, m.node(y).ok_or(refuse)?, m.node(c).ok_or(refuse)?);
     if !(0.5 * angle(pa, px, py) >= min_angle) {
-        return None;
+        return Err(refuse);
     }
     let q = [0.5 * (qx[0] + qy[0]), 0.5 * (qx[1] + qy[1])];
-    let p = point(q)?;
+    let p = point(q).ok_or(refuse)?;
+    if [pa, px, py, pc].iter().any(|o| o.dist(p) < crowd) {
+        return Err(ShapeLimit::Crowded);
+    }
     m.ring.remove(&e);
     let Some((made, facing)) = m.insert(Located::OnSide(other, x, y), q, p) else {
-        m.ring.insert(e);
-        return None;
+        m.ring.insert(e, depth);
+        return Err(refuse);
     };
-    let n = u32::try_from(m.uv.len().checked_sub(1)?).ok()?;
-    m.ring.insert(key(x, n));
-    m.ring.insert(key(n, y));
+    let n = u32::try_from(m.uv.len().checked_sub(1).ok_or(refuse)?).map_err(|_| refuse)?;
+    m.ring.insert(key(x, n), depth + 1);
+    m.ring.insert(key(n, y), depth + 1);
     // The fan triangle's two halves stay fans: the insert put them in its slot and the last one.
     if let Some(&last) = made.last() {
         for t in [fan, last] {
@@ -586,7 +609,7 @@ fn split_ring(m: &mut Mesh<'_>, e: (u32, u32), point: Point<'_>, min_angle: f64)
             }
         }
     }
-    Some((made, facing))
+    Ok((made, facing))
 }
 
 /// `why`, in `limits` once.
