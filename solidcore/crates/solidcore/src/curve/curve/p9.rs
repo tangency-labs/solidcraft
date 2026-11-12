@@ -2049,8 +2049,7 @@ mod tests {
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::nurbs::math::{CPoint, NOW};
         // Existing native gen0415: the reference culls this entire sub-domain.
-        let mut k = Kernel::default();
-        k.fixes.perspective_sphere_offsets = true;
+        let k = Kernel::default();
         let end = 3.066334533625111;
         let a = Curve::from(
             BSplineCurve::from_data(

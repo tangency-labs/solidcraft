@@ -223,7 +223,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.glue_vertices_joins_every_region = true;
     k.fixes.good_drop_result_distances_in_order = true;
-    k.fixes.heal_stage3_failures_propagate = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.internal_pole_row_through_knot = true;
@@ -254,7 +253,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.planar_path_profile_placement_statuses = true;
     k.fixes.planar_path_sweep_statuses = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
-    k.fixes.precise_properties_body_length_scale = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
@@ -274,7 +272,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.stitch_solid_nests_cavities = true;
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.torus_check_reads_v_interval = true;
