@@ -1288,6 +1288,7 @@ mod tests {
 
     use crate::geom::attribute::{AttributeStore, ObjectKey};
     use crate::geom::object::ObjectRef;
+    use crate::kernel::UpstreamFixes;
     use crate::topology::topology::Topology;
 
     #[test]
@@ -2946,10 +2947,18 @@ mod tests {
         0.5 * (u * (radius * radius - u * u).sqrt() + radius * radius * (u / radius).asin())
     }
 
-    /// The cube's round r 5 given the coaxial cylinder r 5.1 (moved out 0.1).
-    fn round_moved_out(k: &mut Kernel) -> (Brep, Option<OffsetFailure>) {
+    /// The fix sets the tangent-edge cases run with: none (the kernel's default) and every
+    /// one (as an application turns them on, `offset_analytic_mate_edges` among them).
+    fn tangent_edge_fixes() -> [UpstreamFixes; 2] {
+        [UpstreamFixes::default(), UpstreamFixes::all()]
+    }
+
+    /// The cube's round r 5 given the coaxial cylinder r 5.1 (moved out 0.1), the operation
+    /// run with `fixes`.
+    fn round_moved_out(k: &mut Kernel, fixes: UpstreamFixes) -> (Brep, Option<OffsetFailure>) {
         use crate::primitive::api_primitives as ap;
         let mut b = cube_rounded_r5(k);
+        k.fixes = fixes;
         let round = curved_face(&b);
         let wider = Surface::from(
             ap::create_cylinder_surface(k, Point3::new(15.0, 15.0, -1.0), 5.1, 22.0).unwrap(),
@@ -2958,32 +2967,33 @@ mod tests {
         (b, why)
     }
 
-    /// The cube's side x = 20, tangent to the round, moved into the body by 0.1.
-    fn side_moved_into_its_round(k: &mut Kernel) -> (Brep, Option<OffsetFailure>) {
+    /// The cube's side x = 20, tangent to the round, moved into the body by 0.1, the
+    /// operation run with `fixes`.
+    fn side_moved_into_its_round(
+        k: &mut Kernel,
+        fixes: UpstreamFixes,
+    ) -> (Brep, Option<OffsetFailure>) {
         let mut b = cube_rounded_r5(k);
+        k.fixes = fixes;
         let side = face_on_x(k, &b, 20.0);
         let moved = Surface::from(Plane::from_normal(Vec3::new(19.9, 0.0, 0.0), Vec3::X));
         let why = refused_unchanged_or_returned(k, &mut b, &[side], vec![moved]);
         (b, why)
     }
 
-    /// Each of `wants` is a vertex of `b`, within that vertex's own tolerance (the mated
-    /// edges are intersections of the extended surfaces, within the B-rep's tolerance).
+    /// Each of `wants` is a vertex of `b`, within the input's tolerance 1e-5 (the mated
+    /// edges are intersections of the extended surfaces, within the B-rep's tolerance; a
+    /// vertex's own tolerance grows with the fixes on, so it would let a stray vertex pass).
     fn assert_vertices_at(b: &Brep, wants: &[Point3]) {
         use crate::topology::vertex;
-        let points: Vec<(Point3, f64)> = b
+        let points: Vec<Point3> = b
             .vertices()
             .ids()
-            .map(|v| {
-                (
-                    vertex::point(b, v).unwrap(),
-                    vertex::tolerance(b, v).unwrap(),
-                )
-            })
+            .map(|v| vertex::point(b, v).unwrap())
             .collect();
         for want in wants {
             assert!(
-                points.iter().any(|(p, tol)| p.distance(*want) <= *tol),
+                points.iter().any(|p| p.distance(*want) <= 1e-5),
                 "no vertex at {want:?} in {points:?}"
             );
         }
@@ -2996,18 +3006,20 @@ mod tests {
     /// `A` the part of the corner square [15, 20]² inside the circle.
     #[test]
     fn tangent_edges_a_round_moved_out_has_its_closed_form_volume() {
-        let mut k = Kernel::default();
-        let (mut b, why) = round_moved_out(&mut k);
-        assert_eq!(why, None);
-        let r = 5.1_f64;
-        let w = (r * r - 25.0).sqrt();
-        let p = Point3::new;
-        let ends = [0.0, 20.0].map(|z| [p(20.0, 15.0 + w, z), p(15.0 + w, 20.0, z)]);
-        assert_vertices_at(&b, ends.as_flattened());
-        let inside = 5.0 * w + quarter_disc_area(r, 5.0) - quarter_disc_area(r, w);
-        let want = 20.0 * (375.0 + inside);
-        let (v, manifold) = volume_and_manifold(&k, &mut b);
-        assert!(manifold && (v - want).abs() <= 1e-6 * want, "{v} vs {want}");
+        for fixes in tangent_edge_fixes() {
+            let mut k = Kernel::default();
+            let (mut b, why) = round_moved_out(&mut k, fixes);
+            assert_eq!(why, None);
+            let r = 5.1_f64;
+            let w = (r * r - 25.0).sqrt();
+            let p = Point3::new;
+            let ends = [0.0, 20.0].map(|z| [p(20.0, 15.0 + w, z), p(15.0 + w, 20.0, z)]);
+            assert_vertices_at(&b, ends.as_flattened());
+            let inside = 5.0 * w + quarter_disc_area(r, 5.0) - quarter_disc_area(r, w);
+            let want = 20.0 * (375.0 + inside);
+            let (v, manifold) = volume_and_manifold(&k, &mut b);
+            assert!(manifold && (v - want).abs() <= 1e-6 * want, "{v} vs {want}");
+        }
     }
 
     /// The side moved into its round: the plane x = 19.9 cuts the round r 5 at
@@ -3016,14 +3028,16 @@ mod tests {
     /// `20 (19.9 · 20 − 4.9 · 5 + ∫₀^4.9 √(25 − u²) du)`.
     #[test]
     fn tangent_edges_a_side_moved_into_its_round_has_its_closed_form_volume() {
-        let mut k = Kernel::default();
-        let (mut b, why) = side_moved_into_its_round(&mut k);
-        assert_eq!(why, None);
-        let y = 15.0 + 0.99_f64.sqrt();
-        assert_vertices_at(&b, &[0.0, 20.0].map(|z| Point3::new(19.9, y, z)));
-        let want = 20.0 * (19.9 * 20.0 - 4.9 * 5.0 + quarter_disc_area(5.0, 4.9));
-        let (v, manifold) = volume_and_manifold(&k, &mut b);
-        assert!(manifold && (v - want).abs() <= 1e-6 * want, "{v} vs {want}");
+        for fixes in tangent_edge_fixes() {
+            let mut k = Kernel::default();
+            let (mut b, why) = side_moved_into_its_round(&mut k, fixes);
+            assert_eq!(why, None);
+            let y = 15.0 + 0.99_f64.sqrt();
+            assert_vertices_at(&b, &[0.0, 20.0].map(|z| Point3::new(19.9, y, z)));
+            let want = 20.0 * (19.9 * 20.0 - 4.9 * 5.0 + quarter_disc_area(5.0, 4.9));
+            let (v, manifold) = volume_and_manifold(&k, &mut b);
+            assert!(manifold && (v - want).abs() <= 1e-6 * want, "{v} vs {want}");
+        }
     }
 
     /// The 10 mm cube's round r 2 about (8, 8) given a wider coaxial cylinder `R`. The sides
@@ -3031,13 +3045,21 @@ mod tests {
     /// (the corner square [8, 10]²). The tangent edges are met there, at (10, 8 + w) and
     /// (8 + w, 10), and the arcs that end the new round at the top and bottom end at those
     /// vertices: ten vertices in all. The body is the cube with its corner cut by the
-    /// circle R: `10 (96 + A)`, `A` the part of the corner square inside the circle.
+    /// circle R: `10 (96 + A)`, `A` the part of the corner square inside the circle. The
+    /// new round faces out as the old one did, its outer loop running the surface's way:
+    /// the cylinder's domain middle is across the axis, where its normal opposes the old
+    /// round's (with every fix on, the face's UV trims are checked and its volume read on
+    /// them, so a round turned inside out is refused).
     #[test]
     fn tangent_edges_a_round_given_a_wider_coaxial_cylinder_meets_its_sides_on_the_corner_side() {
         use crate::primitive::api_primitives as ap;
-        for radius in [2.3_f64, 2.05] {
+        for (radius, fixes) in [2.3_f64, 2.05]
+            .into_iter()
+            .flat_map(|r| tangent_edge_fixes().map(|f| (r, f)))
+        {
             let mut k = Kernel::default();
             let (mut b, round) = box_rounded_r2(&mut k);
+            k.fixes = fixes;
             let s = Surface::from(
                 ap::create_cylinder_surface(&k, Point3::new(8.0, 8.0, -1.0), radius, 12.0).unwrap(),
             );
@@ -3055,6 +3077,13 @@ mod tests {
                 manifold && (v - want).abs() <= 1e-6 * want,
                 "{radius}: {v} vs {want}"
             );
+            let round = curved_face(&b);
+            let outer = face_ops::loops(&b, round, false, None).unwrap()[0];
+            let along = crate::topology::face::p3::compute_loop_orientation(
+                &k, &mut b, round, outer, None, false,
+            );
+            let same = crate::nurbs::b_spline_surface_n_lib::p2::OrientType::Same;
+            assert_eq!(along.unwrap(), same, "{radius}");
         }
     }
 
