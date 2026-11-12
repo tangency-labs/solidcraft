@@ -46,6 +46,7 @@ pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_P
 pub use construct_auto::{construct_method, construct_methods, is_construct_tool};
 pub use design_link::{LinkProblem, LinkState};
 pub(crate) use face::{FaceRefForm, face_ref_form};
+pub(crate) use features::move_matrix_params;
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
 pub use features::{auto_operation, extrude_reach, shown_scope};
