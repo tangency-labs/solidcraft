@@ -7285,7 +7285,11 @@ mod tests {
         control(&mut h.app, &json!({"theme_import":theme("Open",true)})).unwrap();
         h.frames(3);
         assert_eq!(solidcraft_theme::Tokens::get().accent, pink, "a theme that accepts one takes the saved accent");
-        assert!(crate::scenario::rect_of("prefs:accent:theme").is_some(), "and shows the Accent row");
+        let chip = crate::scenario::rect_of("prefs:accent:theme").expect("and shows the Accent row");
+        // The chip keeps its own height inside the row: one as tall as the row spills out of the
+        // frame it is given, pushes the colour field down, and the row clips both (seen at 150 %).
+        let t = solidcraft_theme::Tokens::get();
+        assert!(chip.height() <= t.space_24 - t.space_2 + 0.01, "the Theme's own chip is {} tall in a {} row", chip.height(), t.control_height);
         assert!(h.app.prefs().contains("\"accent\""), "kept with the preferences");
         assert!(control(&mut h.app, &json!({"accent": "pink"})).is_err());
         assert!(control(&mut h.app, &json!({"accent": "#ec489980"})).is_err(), "an accent is opaque");

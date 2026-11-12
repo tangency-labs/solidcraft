@@ -7,6 +7,11 @@ const ACCENTS: [&str; 8] = ["#3b82f6", "#44d62c", "#14b8a6", "#8b5cf6", "#ec4899
 /// Accent: the theme's own, a preset, or any colour from the shared picker, for a theme that accepts one.
 fn accent_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::row(ui, app.tr("prefs.accent"), |ui| {
+        // The chip at its own height: at the button's minimum (the row's) or with the settings
+        // page's vertical padding it spills out of its frame and pushes the colour field below
+        // the row, which clips them.
+        ui.spacing_mut().interact_size.y = 0.0;
+        ui.spacing_mut().button_padding.y = 0.0;
         let own = app.preferences.accent.is_empty();
         let chip = ui_kit::choice_chip(ui, "accent_theme", app.tr("prefs.accent_theme"), own);
         crate::scenario::publish_target("prefs:accent:theme", chip.rect);
