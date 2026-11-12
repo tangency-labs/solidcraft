@@ -5591,7 +5591,8 @@ mod glass_tests {
         };
         let take = |r: &mut Renderer, key: u64, sc: GpuScene| {
             let slot: SceneSlot = Arc::new(Mutex::new(Some(sc)));
-            r.product.take(&device, &queue, &r.uniform, &r.uniform_bgl, key, &slot, None, false);
+            let uploaded = r.product.take(&device, &queue, &r.uniform, &r.uniform_bgl, key, &slot, None, false);
+            assert!(uploaded.is_ok(), "the scene uploads: {uploaded:?}");
             r.product.uploads
         };
         let first = take(&mut r, 1, scene(material(0.2)));
