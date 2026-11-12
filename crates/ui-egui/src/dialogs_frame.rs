@@ -173,7 +173,7 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
 
 /// The dialog editing a frame member feature, filled from it.
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, body_name, .. } = kind else { return None };
+    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, up, body_name, .. } = kind else { return None };
     let (_, mut inputs) = start(app, "frame.member")?;
     let st = app.session.model.state();
     let mut m = Member::new();
@@ -212,6 +212,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     let mut extra = Map::new();
     if let Some(at) = locate {
         extra.insert("locate".into(), json!(at));
+    }
+    // Nor for the up axis: an edit keeps the member's own.
+    if !up.is_z() {
+        extra.insert("up".into(), json!(up));
     }
     Some((Kind::Frame(m), inputs, extra))
 }

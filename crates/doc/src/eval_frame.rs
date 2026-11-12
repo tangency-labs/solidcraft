@@ -28,10 +28,10 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
     let FeatureKind::FrameMember { body_name, names, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { segments, regions, description, at, turn } = layout(doc, vals, f, st)?;
+    let Layout { segments, regions, description, at, turn, up } = layout(doc, vals, f, st)?;
     let mut made = Vec::with_capacity(segments.len());
     for (id, a, b) in &segments {
-        let (x, y) = frame::member_axes(*b - *a, turn).ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
+        let (x, y) = frame::member_axes(*b - *a, turn, up).ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
         let plane = Plane::new(*a - x * at.x - y * at.y, x, y).ok_or_else(|| DocError::Invalid(format!("line `{id}`: no plane square to it")))?;
         let mut bodies = kernel::extrude(&plane, &regions, 0.0, a.dist(*b))?;
         let body = match (bodies.pop(), bodies.is_empty()) {
@@ -58,17 +58,18 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
 }
 
 /// A member feature's lines (in its component frame), profile regions, default name, the
-/// profile point that sits on the lines and the profile's turn about them.
+/// profile point that sits on the lines, the profile's turn about them and the axis it takes as up.
 struct Layout {
     segments: Vec<(String, Vec3, Vec3)>,
     regions: Vec<Region2>,
     description: String,
     at: Vec2,
     turn: f64,
+    up: frame::UpAxis,
 }
 
 fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, .. } = &f.kind else {
+    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, up, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
     let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
@@ -99,7 +100,7 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
         Some(e) => val(vals, e, Kind::Angle)?,
         None => 0.0,
     };
-    Ok(Layout { segments, regions, description, at, turn })
+    Ok(Layout { segments, regions, description, at, turn, up: *up })
 }
 
 /// The member of feature `f` on line `line`, as its body was made: the plane square to the line
@@ -111,9 +112,9 @@ pub(crate) fn member_section(
     st: &ModelState,
     line: &str,
 ) -> Result<(Plane, f64, Region2)> {
-    let Layout { segments, regions, at, turn, .. } = layout(doc, vals, f, st)?;
+    let Layout { segments, regions, at, turn, up, .. } = layout(doc, vals, f, st)?;
     let (_, a, b) = segments.iter().find(|(id, _, _)| id == line).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
-    let (x, y) = frame::member_axes(*b - *a, turn).ok_or_else(|| DocError::Invalid(format!("line `{line}` has no length")))?;
+    let (x, y) = frame::member_axes(*b - *a, turn, up).ok_or_else(|| DocError::Invalid(format!("line `{line}` has no length")))?;
     let plane = Plane::new(*a - x * at.x - y * at.y, x, y).ok_or_else(|| DocError::Invalid(format!("line `{line}`: no plane square to it")))?;
     let region = regions.into_iter().next().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
     Ok((plane, a.dist(*b), region))
