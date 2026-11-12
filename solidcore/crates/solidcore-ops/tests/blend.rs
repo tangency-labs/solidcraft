@@ -1238,15 +1238,19 @@ fn a_setback_too_long_at_a_corner_is_refused_by_the_kernel() {
 }
 
 /// Cancel stops a long fillet promptly (solidcore#3247): a 2 mm round along one helical edge of
-/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Cancelled
-/// from another thread a second in, the call returns `Cancelled` within 500 ms (about 5 ms
-/// measured on a desktop; the bound leaves room for shared CI runners). nextest runs each test
-/// in a process of its own, so no other test's call holds the session's kernel meanwhile.
+/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Measured in
+/// the token's polls, not in time: a token cancelled from its `m`-th poll
+/// (`CancelToken::after_polls`) stops the fillet there. It returns `Cancelled`, which also shows
+/// the fillet was still running at poll `m`, and the token is polled exactly once after the poll
+/// that cancelled it: by the session as the call returns, asking whether it was cancelled
+/// (`session::run_with`, or `with_body` deciding whether to keep its edit). Any further poll
+/// would be work done after the cancel. `m` is a quarter of the 15,473 polls the fillet made in
+/// its first second, measured on SolidCraft 9a342278 (cancel-timing round 1). Should the fillet
+/// get fast enough to finish before `m`, this fails with `Ok`: then pick a longer case.
 #[test]
 fn a_cancelled_long_fillet_stops_promptly() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    use std::time::{Duration, Instant};
     all_fixes();
     let corners = [
         [19.0, 0.0, 0.0],
@@ -1287,23 +1291,12 @@ fn a_cancelled_long_fillet_stops_promptly() {
     let chain = tangent_chain(&coil, None, &[edge], &[], 0.1)
         .unwrap()
         .members;
-    let token = CancelToken::new();
-    let watched = token.clone();
-    let worker = std::thread::spawn(move || {
-        let r = within(&watched, || {
-            blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
-        });
-        (r.map(|_| ()), Instant::now())
+    let m: u64 = 15_473 / 4;
+    let token = CancelToken::after_polls(m);
+    let r = within(&token, || {
+        blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
     });
-    std::thread::sleep(Duration::from_secs(1));
-    let cancelled = Instant::now();
-    token.cancel();
-    let (r, returned) = worker.join().unwrap();
-    let took = returned.saturating_duration_since(cancelled);
-    eprintln!("the fillet returned {took:?} after Cancel");
-    assert_eq!(r, Err(Error::Cancelled));
-    assert!(
-        took < Duration::from_millis(500),
-        "returned {took:?} after Cancel"
-    );
+    eprintln!("the fillet cancelled at {m}, polled {:?}", token.polls());
+    assert_eq!(r.map(|_| ()), Err(Error::Cancelled));
+    assert_eq!(token.polls(), Some(m + 1));
 }
