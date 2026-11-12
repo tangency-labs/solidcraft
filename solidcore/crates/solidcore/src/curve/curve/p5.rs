@@ -428,7 +428,8 @@ impl CurveMemoKey {
 /// curves. Iso curves, curves in volumes and curves on other surfaces hold a surface or
 /// volume with cache state of its own (the shared surface cache slot, made kinds, lazy
 /// offset caches), so they are never memoised. A curve on a retained screw surface
-/// ([`crate::surface::surface::Surface::retained_screw`]) whose UV curve is pure is: that
+/// ([`crate::surface::surface::Surface::retained_screw`]) whose UV curve is pure is, and so
+/// is an iso curve of one (its direction, iso parameter, side and restriction values): that
 /// surface is a B-spline net with its definition, both plain values that only an edit
 /// through `&mut` changes, and its lazy breaks are derived from them alone; its
 /// evaluation also reads the kernel's blend net tolerance, so `Some(true)` asks the key
@@ -457,6 +458,10 @@ fn memo_pure(curve: &Curve) -> Option<bool> {
             CurveKind::CrvOnSurf(cs) if cs.surface().retained_screw().is_some() => {
                 holds_screw = true;
                 stack.push((cs.uv_curve(), depth + 1));
+            }
+            // its direction, iso parameter, side and restriction are plain values
+            CurveKind::Iso(iso) if iso.surface().retained_screw().is_some() => {
+                holds_screw = true;
             }
             CurveKind::Iso(_)
             | CurveKind::CrvOnSurf(_)
