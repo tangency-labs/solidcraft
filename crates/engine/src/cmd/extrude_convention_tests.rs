@@ -326,7 +326,7 @@ fn through_all_reach_uses_exact_body_bounds() {
 mod targets {
     #![allow(clippy::unwrap_used, clippy::panic)]
 
-    use crate::{Session, auto_operation, join_face_body, join_sketch_face_body, scope_bodies};
+    use crate::{JoinStart, Session, auto_operation, join_start_body, scope_bodies};
     use serde_json::{Value, json};
 
     fn run(s: &mut Session, command: &str, params: Value) -> Value {
@@ -438,7 +438,7 @@ mod targets {
     /// The body a Join defaults to: the picked face's, else the face its sketch lies on, which an
     /// edit of a Join saved without targets stores.
     #[test]
-    fn join_face_body_is_the_face_or_sketch_face_body() {
+    fn join_start_body_is_the_face_or_sketch_face_body() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Base"}));
         run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 10]}, "name": "OnTop"}));
@@ -447,18 +447,17 @@ mod targets {
         run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "Free"}));
         run(&mut s, "sketch.circle.center", json!({"center": [5, 5], "radius": 2}));
         run(&mut s, "sketch.finish", json!({}));
-        assert_eq!(join_face_body(&s, &json!({"sketch": "OnTop"})).as_deref(), Some("Base"));
-        assert_eq!(join_face_body(&s, &json!({"sketch": "Free"})), None);
-        assert_eq!(join_face_body(&s, &json!({"face": [10, 10, 10], "face_body": "Base"})).as_deref(), Some("Base"));
-        assert_eq!(join_face_body(&s, &json!({"face": [10, 10, 10]})), None);
         let id = |name: &str| s.doc.find_feature(name).unwrap().id;
-        assert_eq!(join_sketch_face_body(&s, id("OnTop"), 0).as_deref(), Some("Base"));
-        assert_eq!(join_sketch_face_body(&s, id("Free"), 0), None);
+        assert_eq!(join_start_body(&s, JoinStart::Sketch(id("OnTop")), 0).as_deref(), Some("Base"));
+        assert_eq!(join_start_body(&s, JoinStart::Sketch(id("Free")), 0), None);
+        assert_eq!(join_start_body(&s, JoinStart::Face("Base"), 0).as_deref(), Some("Base"));
+        assert_eq!(join_start_body(&s, JoinStart::Face("Nothing"), 0), None);
     }
 
-    /// A sketch's face body is looked up in the component given, whichever one is active.
+    /// The body is looked up in the component given, whichever one is active: a sketch's face
+    /// body or a face's body in that component or one inside it, and none outside it.
     #[test]
-    fn join_sketch_face_body_is_looked_up_in_the_component_given() {
+    fn join_start_body_is_looked_up_in_the_component_given() {
         let mut s = Session::default();
         run(&mut s, "component.create", json!({"name": "Part"}));
         let part = s.active_component;
@@ -468,9 +467,13 @@ mod targets {
         run(&mut s, "sketch.finish", json!({}));
         let sketch = s.doc.find_feature("OnTop").unwrap().id;
         run(&mut s, "component.create", json!({"name": "Other", "parent": 0}));
-        assert_ne!(s.active_component, part);
-        assert_eq!(join_sketch_face_body(&s, sketch, s.active_component), None);
-        assert_eq!(join_sketch_face_body(&s, sketch, part).as_deref(), Some("Base"));
+        let other = s.active_component;
+        assert_ne!(other, part);
+        for start in [JoinStart::Sketch(sketch), JoinStart::Face("Base")] {
+            assert_eq!(join_start_body(&s, start, other), None, "{start:?}");
+            assert_eq!(join_start_body(&s, start, part).as_deref(), Some("Base"), "{start:?}");
+            assert_eq!(join_start_body(&s, start, 0).as_deref(), Some("Base"), "{start:?} from the top level");
+        }
     }
 
     /// The bodies the active component works on: its own, else those of the components inside
@@ -481,8 +484,8 @@ mod targets {
         run(&mut s, "component.create", json!({"name": "Base"}));
         run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"}));
         run(&mut s, "component.activate", json!({"component": 0}));
-        assert_eq!(scope_bodies(&s), ["Plate"]);
+        assert_eq!(scope_bodies(&s, 0), ["Plate"]);
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "operation": "new", "body_name": "Own"}));
-        assert_eq!(scope_bodies(&s), ["Own"]);
+        assert_eq!(scope_bodies(&s, 0), ["Own"]);
     }
 }

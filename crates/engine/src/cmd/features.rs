@@ -1195,26 +1195,33 @@ fn hole_face_names(s: &Session, p: &Value, kind: &FeatureKind) -> Result<Vec<Str
     Ok(own.into_iter().zip(all).map(|(own, any)| if own.is_empty() { any } else { own }).collect())
 }
 
-/// The body a Join takes without targets: the picked face's, or the one its sketch lies on.
-pub fn join_face_body(s: &Session, p: &Value) -> Option<String> {
-    if let Some(body) = str_(p, "face_body") {
-        return Some(body.to_string());
-    }
-    if p.get("face").is_some() || p.get("faces").is_some() {
-        return None;
-    }
-    sketch_face_body(s, feature_sketch(s, p, "solid.extrude").ok()?)
+/// What an extrude from a pick starts on: a face of a body, or a profile's sketch.
+#[derive(Clone, Copy, Debug)]
+pub enum JoinStart<'a> {
+    Face(&'a str),
+    Sketch(u64),
 }
 
-/// The body a Join of `component` from `sketch` with no targets or participants stores, as
-/// `solid.extrude` picks it ([`face_body_reached`]); `None` when it picks none or is refused.
-pub fn join_sketch_face_body(s: &Session, sketch: u64, component: u64) -> Option<String> {
-    face_body_reached_in(s, sketch, component).ok().flatten()
+/// The body a Join made in `component` takes when it names no targets: the picked face's body,
+/// or the one the sketch lies on ([`face_body_reached_in`]), when `component` works on it or it
+/// lies in a component inside `component` (#5679). `None` otherwise, or where the change is
+/// refused.
+pub fn join_start_body(s: &Session, start: JoinStart<'_>, component: u64) -> Option<String> {
+    match start {
+        JoinStart::Sketch(sketch) => face_body_reached_in(s, sketch, component).ok().flatten(),
+        JoinStart::Face(name) => {
+            let st = s.model.state();
+            let body = st.body(name)?;
+            let reached = active_scope_in(s, &st, component).iter().any(|b| b.name == body.name)
+                || s.doc.component_within(s.doc.model_body_component(body), component);
+            reached.then(|| body.name.clone())
+        }
+    }
 }
 
-/// The bodies the active component works on when a feature names none ([`active_scope`]).
-pub fn scope_bodies(s: &Session) -> Vec<String> {
-    active_scope(s, &s.model.state()).into_iter().map(|b| b.name.clone()).collect()
+/// The bodies `component` works on when a feature names none ([`active_scope`]).
+pub fn scope_bodies(s: &Session, component: u64) -> Vec<String> {
+    active_scope_in(s, &s.model.state(), component).into_iter().map(|b| b.name.clone()).collect()
 }
 
 /// The body whose face `sketch` is attached to (on the face itself, not offset from it), when

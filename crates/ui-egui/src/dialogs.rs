@@ -10,6 +10,7 @@ use std::hash::{Hash, Hasher};
 use egui::{RichText, vec2};
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_engine::JoinStart;
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
@@ -4784,8 +4785,10 @@ fn enter_applies(d: &Dialog) -> bool {
 pub(crate) fn right_click(app: &mut SolveApp) {
     let Some(mut d) = app.dialog.take() else { return };
     if enter_applies(&d) && app.applying.is_none() {
-        // As a pick moves on ([`Dialog::advance`]), Targets is not the next input.
-        let empty = |i: &usize| d.inputs.get(*i).is_some_and(|input| input.items.is_empty() && input.label != TARGETS);
+        // Targets is the next input only while the dialog can't apply without it: not for a New
+        // Body, whose row is hidden, nor for an edit kept without targets.
+        let targets_needed = apply_commands(app, &d).err().is_some_and(|e| e == pick_targets());
+        let empty = |i: &usize| d.inputs.get(*i).is_some_and(|input| input.items.is_empty() && (input.label != TARGETS || targets_needed));
         let next = (d.active.saturating_add(1)..d.inputs.len()).chain(0..d.active.min(d.inputs.len())).find(empty);
         match d.active_input().filter(|input| input.items.is_empty()) {
             // An empty input is optional when the dialog makes its feature without it.
@@ -4882,23 +4885,36 @@ enum TargetScope {
     Auto,
 }
 
-/// The bodies `solid.extrude` changes on its own, less hidden bodies and meshes.
+/// Why a Join, Cut or Intersect with an empty Targets row can't apply.
+fn pick_targets() -> String {
+    tr("Pick the bodies to change, or choose New Body").to_string()
+}
+
+/// The component an extrude's Targets default in: the edited feature's, which its edit runs
+/// in, else the active one.
+fn targets_component(s: &Session, d: &Dialog) -> u64 {
+    d.editing.and_then(|(id, _)| s.doc.feature(id)).map_or(s.active_component, |f| f.component)
+}
+
+/// The bodies `solid.extrude` changes on its own, less hidden bodies and meshes. A face of a
+/// body outside the extrude's component adds none.
 fn default_targets(s: &Session, d: &Dialog, scope: TargetScope) -> Vec<Sel> {
+    let component = targets_component(s, d);
     let picked = d.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
-    let in_scope = solidcraft_engine::scope_bodies(s);
-    if scope == TargetScope::Op(1) {
-        let face = match picked.first() {
-            // Another component's body is not one the Join changes on its own.
-            Some(Sel::Face { body, .. }) => Some(body.clone()).filter(|b| in_scope.contains(b)),
-            Some(Sel::Profile { sketch, .. }) => solidcraft_engine::join_face_body(s, &json!({"sketch": sketch})),
-            _ => None,
-        };
-        if let Some(body) = face.filter(|b| s.body_visible(b)) {
-            return vec![Sel::Body { name: body }];
-        }
+    let in_scope = solidcraft_engine::scope_bodies(s, component);
+    let started = match picked.first() {
+        Some(Sel::Face { body, .. }) => solidcraft_engine::join_start_body(s, JoinStart::Face(body), component),
+        Some(Sel::Profile { sketch, .. }) => solidcraft_engine::join_start_body(s, JoinStart::Sketch(*sketch), component),
+        _ => None,
+    }
+    .filter(|b| s.body_visible(b));
+    if scope == TargetScope::Op(1)
+        && let Some(body) = &started
+    {
+        return vec![Sel::Body { name: body.clone() }];
     }
     let st = s.model.state();
-    let has_own = st.bodies.iter().any(|b| s.doc.model_body_component(b) == s.active_component);
+    let has_own = st.bodies.iter().any(|b| s.doc.model_body_component(b) == component);
     // Faces of one body, which the command takes as a group.
     let first_body = match picked.first() {
         Some(Sel::Face { body, .. }) => Some(body),
@@ -4919,7 +4935,16 @@ fn default_targets(s: &Session, d: &Dialog, scope: TargetScope) -> Vec<Sel> {
             return Vec::new();
         }
     }
-    shown.into_iter().map(|b| Sel::Body { name: b.name.clone() }).collect()
+    let mut listed: Vec<Sel> = shown.into_iter().map(|b| Sel::Body { name: b.name.clone() }).collect();
+    // A Cut or Intersect also changes the body it starts on in a component inside this one, as
+    // the command's `cut_scope` adds it; Auto probes it too.
+    if matches!(scope, TargetScope::Op(2 | 3) | TargetScope::Auto)
+        && let Some(name) = started
+        && !listed.iter().any(|x| matches!(x, Sel::Body { name: n } if *n == name))
+    {
+        listed.push(Sel::Body { name });
+    }
+    listed
 }
 
 /// A selection chip's text without the catalog's pick arrow.
@@ -4949,7 +4974,7 @@ pub(crate) fn kept_without_targets(s: &Session, editing: Option<(u64, Option<usi
 fn join_face_target(s: &Session, f: &solidcraft_engine::doc::Feature) -> Option<String> {
     match &f.kind {
         FeatureKind::Extrude { sketch, operation: Operation::Join, targets, .. } if targets.is_empty() && f.participants.is_empty() => {
-            solidcraft_engine::join_sketch_face_body(s, sketch.0, f.component)
+            solidcraft_engine::join_start_body(s, JoinStart::Sketch(sketch.0), f.component)
         }
         _ => None,
     }
@@ -5870,7 +5895,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             // An edit of a feature stored without targets may keep having none.
             if op != "new" && targets.is_empty() && !d.extra.contains_key("targets") && !kept_without_targets(s, d.editing) {
-                return Err(tr("Pick the bodies to change, or choose New Body").to_string());
+                return Err(pick_targets());
             }
             let with = |extra: Value| -> Value {
                 let mut p = common.clone();

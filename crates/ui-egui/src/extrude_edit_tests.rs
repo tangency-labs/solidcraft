@@ -981,8 +981,10 @@ mod targets {
     use crate::dialogs::{Kind, TARGETS, apply_commands};
     use crate::scenario::Harness;
     use serde_json::{Value, json};
+    use solidcore_record::Vec3;
     use solidcraft_engine::Sel;
     use solidcraft_engine::doc::FeatureKind;
+    use solidcraft_engine::geom::prelude::*;
 
     /// A 40 x 40 x 5 plate, a copy of it where it is, and a rim sketched over the plate's top: on
     /// the plate's face, or on a plane at its height.
@@ -1541,6 +1543,138 @@ mod targets {
         h.step(&json!({"key":"Enter"})).unwrap();
         let d = h.app.dialog.as_ref().expect("the window stays open");
         assert_eq!(d.error.as_deref(), Some("Pick the bodies to change, or choose New Body"));
+    }
+
+    /// #5679's part: a 10 mm cube `Stock` in component Part, moved to (30, 5, 2) and turned 35
+    /// degrees about (1, 2, 0), with the top level active; with `base`, the top level has a body
+    /// of its own, `Base`. Returns the world point at the middle of Stock's top.
+    fn turned_part(h: &mut Harness, base: bool) -> Vec3 {
+        let part = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"})).unwrap();
+        h.app.run("component.activate", json!({"component":"root"})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence":part["occurrence"],"translate":[30,5,2],"axis":[1,2,0],"angle":"35 deg"})).unwrap();
+        h.app.run("component.capture_position", json!({})).unwrap();
+        if base {
+            h.app.run("solid.box", json!({"length":20,"width":20,"height":5,"corner":[-40,-40,0],"operation":"new","body_name":"Base"})).unwrap();
+        }
+        let placed = h.app.session.doc.component_transform(part["component"].as_u64().unwrap());
+        solidcraft_engine::doc::apply_point(&placed, Vec3::new(5.0, 5.0, 10.0))
+    }
+
+    /// The window on what is selected with `op` chosen at `distance`: the targets it sends.
+    fn chosen(h: &mut Harness, distance: &str, op: usize) -> Value {
+        h.app.start("solid.extrude");
+        if let Kind::Extrude { distance: d, operation, auto_op, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+            (*d, *operation, *auto_op) = (distance.into(), op, false);
+        }
+        h.frames(3);
+        h.settle();
+        params(h).get("targets").cloned().unwrap_or(Value::Null)
+    }
+
+    /// From the top level, a Join or Cut from a sketch on the top of a part in a moved and turned
+    /// sub-component lists that part, and so does a Join from a face of it, as `solid.extrude`
+    /// reaches it (#5679). OK changes the part in its own frame. The top level's own body is no
+    /// target of the Join; a Cut lists it as before and leaves it whole.
+    #[test]
+    fn a_turned_sub_components_body_is_reached_from_the_top_level() {
+        let hole = std::f64::consts::PI * 4.0 * 3.0;
+        for base in [false, true] {
+            for (distance, op, want) in [("3 mm", 1, 1000.0 + hole), ("-3 mm", 2, 1000.0 - hole)] {
+                let case = format!("base {base}, {distance}");
+                let mut h = Harness::new();
+                let top = turned_part(&mut h, base);
+                h.app.run("sketch.create", json!({"plane":{"face":[top.x,top.y,top.z]},"project_edges":false,"name":"Pick"})).unwrap();
+                let plane = h.app.session.doc.features.iter().rev().find_map(|f| match &f.kind {
+                    FeatureKind::Sketch { plane: solidcraft_engine::doc::PlaneRef::Face { plane, .. }, .. } => Some(*plane),
+                    _ => None,
+                });
+                let c = plane.unwrap().to_local(top);
+                h.app.run("sketch.circle.center", json!({"center":[c.x,c.y],"radius":2})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+                let st = h.app.session.world_state().unwrap();
+                let sketch = st.sketches.iter().find(|ss| ss.name == "Pick").unwrap().feature;
+                h.app.session.selection = vec![Sel::Profile { sketch, index: 0 }];
+                let targets = if base && op == 2 { json!(["Base", "Stock"]) } else { json!(["Stock"]) };
+                assert_eq!(chosen(&mut h, distance, op), targets, "{case}");
+                h.step(&json!({"key":"Enter"})).unwrap();
+                h.settle();
+                assert!(h.app.dialog.is_none(), "{case}: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+                assert!((volume(&h, "Stock") - want).abs() < 1e-3 * hole, "{case}: Stock {}", volume(&h, "Stock"));
+                if base {
+                    assert!((volume(&h, "Base") - 2000.0).abs() < 1e-6, "{case}: Base {}", volume(&h, "Base"));
+                }
+            }
+
+            let mut h = Harness::new();
+            let top = turned_part(&mut h, base);
+            let st = h.app.session.world_state().unwrap();
+            let face = st
+                .body("Stock")
+                .unwrap()
+                .body
+                .faces(0.01)
+                .unwrap()
+                .into_iter()
+                .min_by(|a, b| (a.centroid - top).len().total_cmp(&(b.centroid - top).len()))
+                .unwrap();
+            h.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
+            assert_eq!(chosen(&mut h, "3 mm", 1), json!(["Stock"]), "base {base}, a face of Stock");
+        }
+    }
+
+    /// An edit's defaults come from the edited feature's component, which its edit runs in, also
+    /// while an empty sibling is active: a New Body edited into a Cut lists that component's
+    /// bodies, not every body in the design, and one edited into a Join lists its sketch's face
+    /// body (#2464).
+    #[test]
+    fn a_new_body_edited_from_an_empty_sibling_lists_its_own_components_bodies() {
+        for (op, distance, want) in [(2, -3, vec!["Plate", "Plate (2)"]), (1, 3, vec!["Plate"])] {
+            let mut h = Harness::new();
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[100,0,0],"body_name":"Far"})).unwrap();
+            h.app.run("component.create", json!({"name":"Part"})).unwrap();
+            let mut h = plate_and_copy_on(h, true);
+            h.app.run("solid.extrude", json!({"sketch":"Rim","profiles":[0],"distance":distance,"operation":"new","name":"Step"})).unwrap();
+            let feature = h.app.session.doc.find_feature("Step").unwrap().id;
+            h.app.run("component.create", json!({"name":"Other","parent":0})).unwrap();
+            assert_ne!(h.app.session.active_component, h.app.session.doc.feature(feature).unwrap().component);
+            h.app.edit_feature(feature);
+            h.frames(2);
+            operation(&mut h, op);
+            let want: Vec<Sel> = want.iter().map(|b| Sel::Body { name: b.to_string() }).collect();
+            assert_eq!(listed(&h), want, "operation {op}");
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.settle();
+            assert!(h.app.dialog.is_none(), "operation {op}: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            let FeatureKind::Extrude { targets, .. } = &h.app.session.doc.feature(feature).unwrap().kind else { panic!("an extrude") };
+            let stored: Vec<Sel> = targets.iter().map(|t| Sel::Body { name: t.to_string() }).collect();
+            assert_eq!(stored, want, "operation {op}");
+            assert!((volume(&h, "Far") - 1000.0).abs() < 1e-6, "operation {op}: Far {}", volume(&h, "Far"));
+        }
+    }
+
+    /// With "Right-click confirms dialog inputs" on, a right-click on a Join whose Targets row
+    /// was emptied goes on to Targets, the input it needs, and stays there; it never runs an OK
+    /// that is refused.
+    #[test]
+    fn a_right_click_on_a_join_with_an_emptied_targets_row_stays_on_targets() {
+        let mut h = plate_and_copy(true);
+        h.app.preferences.right_click_confirms = true;
+        start_join(&mut h);
+        let features = h.app.session.doc.features.len();
+        h.step(&json!({"click":{"handle":"dialog:clear:Targets"}})).unwrap();
+        h.frames(2);
+        assert!(listed(&h).is_empty());
+        let targets = h.app.dialog.as_ref().unwrap().inputs.iter().position(|i| i.label == TARGETS).unwrap();
+        h.app.dialog.as_mut().unwrap().active = 0;
+        for _ in 0..2 {
+            crate::dialogs::right_click(&mut h.app);
+            h.frames(2);
+            let d = h.app.dialog.as_ref().expect("the window stays open");
+            assert_eq!(d.active, targets);
+            assert!(!d.confirm);
+        }
+        assert_eq!(h.app.session.doc.features.len(), features, "no OK");
     }
 
     /// A face picked before Extrude is still extruded (Press Pull style), not taken as a target.

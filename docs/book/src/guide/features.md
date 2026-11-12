@@ -106,9 +106,11 @@ has an approximately 11.75 × 11.75 mm far face; with `taper: "-5 deg"`, it is a
 A Join, Cut or Intersect changes the bodies listed under **Targets**, just under Operation in the
 Extrude dialog (a New Body has none). The list starts with the bodies the extrude would change on
 its own, leaving out hidden ones: for a Join from a body's face or a sketch on one, that body, when
-the active component works on it (a face of another component's body adds none); for a Cut or
-Intersect in a component with no bodies of its own, every body; otherwise the bodies of
-the active component. A component with no bodies of its own works on those of the components
+it lies in the active component or a component inside it, moved or turned (a face of a body
+outside the active component adds none, though `solid.extrude` given that face joins it); for a Cut
+or Intersect in a component with no bodies of its own, every body; otherwise the bodies of the
+active component, and for a Cut or Intersect also the body its face or sketch lies on in a
+component inside it. While you edit an extrude, the list starts from the extrude's own component. A component with no bodies of its own works on those of the components
 inside it, placed where it is (an opened STEP assembly's parts); a Join lists them only when one
 component holds them all. Automatic operation decides from that list, and with nothing listed it
 makes a new body.
