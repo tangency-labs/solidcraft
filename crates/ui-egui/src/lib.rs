@@ -225,6 +225,7 @@ pub mod params_dialog;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+pub mod plugin_install;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
@@ -630,6 +631,8 @@ pub struct SolveApp {
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
     /// Open with EasyPrint: the upload in flight and the question before the first one.
     pub(crate) easyprint: easyprint_ui::State,
+    /// Install plugin…: the plugin waiting for the user's answer.
+    pub(crate) plugin_install: plugin_install::State,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
     pub viewport: viewport::ViewportState,
@@ -943,6 +946,7 @@ impl SolveApp {
             file_picker: None,
             slicer_wait: None,
             easyprint: Default::default(),
+            plugin_install: Default::default(),
             saving: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
@@ -3839,6 +3843,7 @@ impl SolveApp {
         mouse_gesture::show(self, ui.ctx());
         delete::show(self, ui.ctx());
         easyprint_ui::show(self, ui.ctx());
+        plugin_install::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         joint_handles::show_warning(self, ui.ctx());
         shortcut_box::show(self, ui.ctx());
