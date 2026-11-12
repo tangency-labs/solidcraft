@@ -2063,33 +2063,17 @@ pub(crate) fn snap_name(k: SnapKind) -> &'static str {
 
 // ---- timeline and browser ----
 
-/// A joint's menu (timeline and browser): Edit, Drive, Suppress, Delete.
-fn joint_menu(
-    app: &SolveApp,
-    ui: &mut egui::Ui,
-    (id, kind, suppressed): (u64, JointKind, bool),
-    open: &mut Option<Dialog>,
-    run: &mut Option<(&'static str, Value)>,
-) {
-    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Edit Joint"), crate::ui_kit::Button::Normal).clicked() {
-        *open = edit_joint(app, id);
-        ui.close();
+/// A History joint's right-click: the joint is picked and the browser's joint menu opens
+/// (`context_menu::joint_items`), so the two are the same.
+fn joint_context_menu(app: &mut SolveApp, response: &egui::Response, id: u64) {
+    if !response.secondary_clicked() {
+        return;
     }
-    if kind != JointKind::Rigid && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Drive Joint"), crate::ui_kit::Button::Normal).clicked() {
-        *open = drive_joint(app, id);
-        ui.close();
+    if !app.tree.picked_joints.contains(&id) {
+        pick_joint(app, id, false);
     }
-    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label(if suppressed { "Unsuppress" } else { "Suppress" }), crate::ui_kit::Button::Normal)
-        .clicked()
-    {
-        *run = Some(("joint.edit", json!({"joint": id, "suppressed": !suppressed})));
-        ui.close();
-    }
-    ui.separator();
-    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete"), crate::ui_kit::Button::Normal).clicked() {
-        *run = Some(("selection.delete", json!({ "joints": [id] })));
-        ui.close();
-    }
+    let at = response.interact_pointer_pos().unwrap_or(response.rect.left_bottom());
+    crate::context_menu::open_for(app, at, crate::context_menu::Target::Joint { id });
 }
 
 /// Membership is indexed once so a collapsed folder with hundreds of joints stays cheap.
@@ -2239,7 +2223,6 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
         }
     }
     let mut open: Option<Dialog> = None;
-    let mut run: Option<(&'static str, Value)> = None;
     for (id, name, kind, suppressed) in joints {
         let br = egui::Rect::from_min_size(egui::pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
         crate::scenario::publish_handle(&format!("timeline-joint:{name}"), br.center());
@@ -2262,18 +2245,8 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
         } else if resp.clicked() {
             pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
-        if resp.secondary_clicked() && !app.tree.picked_joints.contains(&id) {
-            pick_joint(app, id, false);
-        }
-        crate::ui_kit::Menu::context(&resp, |ui| joint_menu(app, ui, (id, kind, suppressed), &mut open, &mut run));
+        joint_context_menu(app, &resp, id);
         x += 32.0;
-    }
-    if let Some((c, prm)) = run {
-        if c == "selection.delete" {
-            crate::delete::request(app, prm);
-        } else {
-            let _ = app.run(c, prm);
-        }
     }
     if let Some(d) = open {
         app.tool = None;
@@ -2321,7 +2294,6 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
         }
     }
     let mut open = None;
-    let mut run = None;
     for (id, name, kind, suppressed) in joints {
         let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), egui::Sense::click());
         crate::scenario::publish_handle(&format!("timeline-joint:{name}"), rect.center());
@@ -2348,22 +2320,21 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
             if suppressed { t.text_dim } else { t.text },
         );
         let response = response.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
+        // A slower second click on the name renames the joint in its row, as in the browser
+        // (`row_rename`).
+        let row = egui::Id::unique(("history_joint_row", id));
+        let click = crate::row_rename::slow_click(ui, row, response.clicked(), response.clicked(), response.double_clicked(), true);
         if response.double_clicked() {
             open = edit_joint(app, id);
-        } else if response.clicked() {
+        } else if click.rename {
+            app.tree.picked_joints = vec![id];
+            crate::row_rename::start(app, crate::context_menu::RenameWhat::Joint(id), row, rect.left_bottom());
+        } else if click.clicked {
             pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
-        if response.secondary_clicked() && !app.tree.picked_joints.contains(&id) {
-            pick_joint(app, id, false);
-        }
-        crate::ui_kit::Menu::context(&response, |ui| joint_menu(app, ui, (id, kind, suppressed), &mut open, &mut run));
-    }
-    if let Some((command, params)) = run {
-        if command == "selection.delete" {
-            crate::delete::request(app, params);
-        } else {
-            let _ = app.run(command, params);
-        }
+        let label = egui::Rect::from_min_max(egui::pos2(icon.right() + 7.0, rect.top() + 1.0), egui::pos2(rect.right() - 3.0, rect.bottom() - 1.0));
+        crate::row_rename::editor(app, ui, row, label, &format!("history-joint-rename:{name}"));
+        joint_context_menu(app, &response, id);
     }
     if let Some(dialog) = open {
         app.tool = None;
@@ -2515,6 +2486,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
                 label: &j.name,
                 secondary: &j.other,
                 name: true,
+                rename: true,
                 selected,
                 dim: j.suppressed || !visible || !folder_shown,
                 ..Default::default()
@@ -2528,12 +2500,16 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
-        } else if r.clicked {
+        // The slower second click on the only selected joint renames it and keeps it selected.
+        } else if r.clicked && !(r.slow_rename && app.tree.picked_joints == [id]) {
             pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
-        if r.double {
+        if r.slow_rename {
+            crate::browser::start_inline_rename(app, crate::context_menu::RenameWhat::Joint(id), &r);
+        } else if r.double {
             dialog = edit_joint(app, id);
         }
+        crate::browser::inline_rename(app, ui, &r, &j.name);
         if let Some(at) = r.secondary {
             if !app.tree.picked_joints.contains(&id) {
                 pick_joint(app, id, false);

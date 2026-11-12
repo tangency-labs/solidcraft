@@ -641,3 +641,88 @@ fn edit_joint_limits_opens_the_limits_and_has_its_own_id() {
         assert_eq!(h.widget("Angle limits").is_some(), limits, "{item}: the Limits section open");
     }
 }
+
+/// #15331: a joint in the History renames in its row on a slower second click, as its browser
+/// row does, and its right-click opens the browser's joint menu.
+#[test]
+fn a_history_joint_renames_in_its_row_and_opens_the_browsers_menu() {
+    let mut h = harness();
+    h.app.preferences.timeline_left = true;
+    h.frames(3);
+    let hinge = id(&h, "Hinge");
+
+    click(&mut h, "timeline-joint:Hinge");
+    assert_eq!(h.app.tree.picked_joints, [hinge]);
+    assert!(h.app.menu.rename.is_none(), "the first click only picks the joint");
+    h.frames(30);
+    click(&mut h, "timeline-joint:Hinge");
+    h.frames(30);
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(context_menu::Rename { what: context_menu::RenameWhat::Joint(j), inline: true, .. }) if *j == hinge
+    ));
+    assert!(crate::scenario::handle_at("history-joint-rename:Hinge").is_some(), "the name is edited in the History row");
+    h.step(&json!({"text": "Pivot"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(3);
+    assert!(h.app.menu.rename.is_none());
+    assert_eq!(id(&h, "Pivot"), hinge);
+    assert_eq!(h.app.tree.picked_joints, [hinge], "the renamed joint stays picked");
+
+    h.step(&json!({"click": {"handle": "timeline-joint:Pivot"}, "button": "right"})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.menu.target, Target::Joint { id: hinge }, "the browser's joint menu opens");
+    assert!(h.app.viewport.context_menu.is_some());
+    for entry in ["Edit Joint Limits", "Find in Window", "Rename", "Show/Hide"] {
+        assert!(h.widget(entry).is_some(), "the History joint menu offers {entry}");
+    }
+}
+
+/// #15331: a joint in a placement's own Joints folder renames in its row on a slower second
+/// click, as in the root's Joints folder.
+#[test]
+fn a_joint_in_a_placements_folder_renames_on_a_slow_second_click() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let b = h.app.session.doc.occurrences.iter().find(|o| o.name == "B:1").unwrap().id;
+    // Only B's folder lists Hinge besides the root's, and `row:Hinge` is B's row (drawn last).
+    h.app.tree.expanded.insert(format!("o:{b}/joints"));
+    h.frames(3);
+
+    click(&mut h, "row:Hinge");
+    assert!(h.app.menu.rename.is_none(), "the first click only picks the joint");
+    h.frames(30);
+    click(&mut h, "row:Hinge");
+    h.frames(30);
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(context_menu::Rename { what: context_menu::RenameWhat::Joint(j), inline: true, .. }) if *j == hinge
+    ));
+    assert!(crate::scenario::handle_at("rename:Hinge").is_some(), "the name is edited in B's row");
+    h.step(&json!({"text": "Pivot"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(3);
+    assert_eq!(id(&h, "Pivot"), hinge);
+}
+
+/// #15331: F2 renames the one joint picked in the browser, and the joint's menu shows F2.
+#[test]
+fn f2_renames_a_picked_joint() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let items = context_menu::items(&h.app, &Target::Joint { id: hinge });
+    let rename = items.iter().find(|i| i.label == "Rename").unwrap_or_else(|| panic!("no Rename in {items:?}"));
+    assert_eq!(rename.shortcut, "F2");
+
+    click(&mut h, "row:Hinge");
+    assert_eq!(h.app.tree.picked_joints, [hinge]);
+    h.step(&json!({"key": "F2"})).unwrap();
+    h.frames(2);
+    let what = h.app.menu.rename.as_ref().map(|r| (r.what.clone(), r.text.clone()));
+    assert_eq!(what, Some((context_menu::RenameWhat::Joint(hinge), "Hinge".to_string())));
+    h.step(&json!({"text": "Pivot"})).unwrap();
+    h.frames(1);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(id(&h, "Pivot"), hinge);
+}

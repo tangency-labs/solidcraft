@@ -958,7 +958,7 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
         cmd(app, "joint.edit", if j.suppressed { "Unsuppress" } else { "Suppress" }).with(json!({ "joint": id, "suppressed": !j.suppressed })),
         Item::sep(),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "joints": [id] })),
-        act("ui.rename", "Rename", "rename").with(json!({ "joint": id })),
+        act("ui.rename", "Rename", "rename").key("F2").with(json!({ "joint": id })),
         Item::sep(),
         // Hiding a joint hides only its glyph: it still constrains and moves the parts.
         act("browser.visibility", "Show/Hide", "eye").key("V").with(json!({ "joints": joints, "visible": hidden })),
@@ -2187,12 +2187,26 @@ pub fn toggle_visibility(app: &mut SolveApp) {
     }
 }
 
-/// Rename what is selected (F2): one body, sketch or feature, construction plane, component
-/// picked in the browser, canvas, or a group whose Browser row was clicked.
+/// Rename what is selected (F2): one body, sketch or feature, construction plane, component,
+/// canvas or joint picked in the browser, or a group or saved view whose Browser row was clicked.
 pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
-    // A clicked group row takes precedence, as it does for V: groups have no selection of their own.
+    // A clicked group or saved view row takes precedence, as it does for V: they have no
+    // selection of their own.
     if let Some(g) = crate::browser::picked_group(app) {
         start_rename(app, RenameWhat::Group(g), at);
+        return true;
+    }
+    if let Some(v) = crate::browser::picked_view(app) {
+        start_rename(app, RenameWhat::View(v), at);
+        return true;
+    }
+    // One joint picked in the browser or the History, with nothing else selected.
+    if app.session.selection.is_empty()
+        && app.tree.picked_components.is_empty()
+        && app.tree.picked_canvases.is_empty()
+        && let [j] = app.tree.picked_joints.as_slice()
+    {
+        start_rename(app, RenameWhat::Joint(*j), at);
         return true;
     }
     let what = match (app.session.selection.as_slice(), app.tree.picked_components.as_slice(), app.tree.picked_canvases.as_slice()) {
@@ -2296,7 +2310,13 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) -> Result<(), String
         }
         RenameWhat::TimelineGroup(g) => app.run("timeline.rename_group", json!({ "group": g, "name": name })).map(|_| ()),
         RenameWhat::Canvas(c) => app.run("canvas.edit", json!({ "canvas": c, "name": name })).map(|_| ()),
-        RenameWhat::View(v) => app.run("view.rename", json!({ "view": v, "name": name })).map(|_| ()),
+        RenameWhat::View(v) => {
+            let renamed = app.run("view.rename", json!({ "view": v, "name": name })).map(|_| ());
+            if renamed.is_ok() {
+                crate::browser::follow_renamed_view(app, v, &name);
+            }
+            renamed
+        }
         RenameWhat::Joint(j) => app.run("joint.edit", json!({ "joint": j, "name": name })).map(|_| ()),
     };
     // The command's own status line explains a refusal; the caller decides whether to keep the

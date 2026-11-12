@@ -255,6 +255,7 @@ mod revolve_manipulator_tests;
 pub use solidcraft_ui_kit::ribbon;
 #[cfg(test)]
 mod round_pick_tests;
+mod row_rename;
 mod rule_editor;
 #[cfg(test)]
 mod rule_editor_tests;
