@@ -2807,6 +2807,33 @@ fn a_converted_meshs_face_extrudes_on_a_fixed_plane_when_asked() {
     assert!(not_a_bool.contains("`fixed` must be true or false"), "{not_a_bool}");
 }
 
+/// #6612, revolve: a fixed plane keeps no attachment to the face, so the face's body can't be
+/// found from the sketch again. A Join that names no body still joins the picked face's body,
+/// as an extrude from a face does, and stores it as the target.
+#[test]
+fn a_converted_meshs_face_revolved_on_a_fixed_plane_joins_that_body() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-6612-revolve-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Block.stl");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let [name] = names.as_slice() else { panic!("{names:?}") };
+    run(&mut s, "mesh.convert", json!({"body": name}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "Other"}));
+    run(&mut s, "solid.revolve", json!({"face": [10, 10, 10], "fixed": true, "axis": {"origin": [0, 0, 10], "dir": [1, 0, 0]}, "angle": "90 deg", "operation": "join"}));
+    let Some(solidcraft_doc::Feature { kind: solidcraft_doc::FeatureKind::Revolve { targets, .. }, .. }) = s.doc.features.last() else {
+        panic!("a revolve")
+    };
+    let targets: Vec<&str> = targets.iter().map(|t| t.0.as_str()).collect();
+    assert_eq!(targets, [name.as_str()], "the join keeps to the picked face's body");
+}
+
 /// A 40 x 10 stadium (two lines, two tangent arcs) extruded 10 mm. The top rim runs on smoothly
 /// through the points where a line meets an arc, so picking one of those points names the rim,
 /// not an ambiguous corner (#12215).
