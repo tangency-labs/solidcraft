@@ -1180,11 +1180,11 @@ impl FilletSolver {
     /// `Kernel::fixes.fillet_chamfer_cone_stored_as_cone` as well (WR-572) that revolution
     /// is stored as the cone `CopyAndAddAnalytics` finds in its NURBS form, the rails made on
     /// it.
-    /// With `Kernel::fixes.fillet_torus_center_on_axis` (WR-422), a section centred on the
-    /// arc's axis has its rail points turned into the half-planes through the edge's ends and
-    /// takes the edge's start for the nearest point.
-    /// With `Kernel::fixes.fillet_torus_rail_on_axis` (WR-592), a start rail point within
-    /// the solver's tolerance of the arc's axis is moved onto the axis.
+    /// Not upstream: a section centred on the arc's axis has its rail points turned into
+    /// the half-planes through the edge's ends and takes the edge's start for the nearest
+    /// point (WR-422); a start rail point within the solver's tolerance of the arc's axis
+    /// is moved onto the axis (WR-592); the span is the turn from the start section to the
+    /// end one, without `IsArc`'s start angle (WR-568).
     ///
     /// `SM_ERR` when the generator is not circular, the edge curve is not an arc, the
     /// radius is tiny or changes, or the nearest point on the edge is not unique; those
@@ -1214,8 +1214,8 @@ impl FilletSolver {
     /// and `IsArc` gates. The frame is the class axis with its origin where the axis meets
     /// the plane through the edge's start square to it, its x axis the world x (y when the
     /// axis is within `acos(0.9)` of x) made square to the axis; there is no `IsArc` start
-    /// angle, so the span is the turn from the start section (as with
-    /// `fillet_torus_span_from_start_section`).
+    /// angle, so the span is the turn from the start section, as in
+    /// [`FilletSolver::torus_fillet_geom_parts`].
     ///
     /// # Errors
     ///
@@ -1255,11 +1255,12 @@ impl FilletSolver {
 
         // no work - not a circular cross-section on a circular arc (with
         // `fixes.fillet_chamfer_cone_on_arc`, or a linear one: its revolution is a cone)
-        // Side effect: get circular arc RefFrame, Radius, StartAng, and EndAng.
+        // Side effect: get circular arc RefFrame, Radius, StartAng, and EndAng (only the
+        // frame is used: the span is the turn from the start section, WR-568).
         let section = fsg_type(s)?;
         let linear_section =
             k.fixes.fillet_chamfer_cone_on_arc && section == FilletSurfaceGeneratorType::Linear;
-        let (ref_frame, start_ang) = if let Some(class) = class {
+        let ref_frame = if let Some(class) = class {
             // WR-669: the circular or linear cross-section turned about the faces' common
             // axis (the class's); the frame's origin: the centre of the edge's circle, where
             // the axis meets the edge's plane
@@ -1275,17 +1276,17 @@ impl FilletSolver {
             let x = x.unitize()?;
             let mut frame = Axis2Placement::default();
             frame.set_canonical(centre, x, z.cross(x))?;
-            (frame, 0.0)
+            frame
         } else {
             if section != FilletSurfaceGeneratorType::Circular && !linear_section {
                 return Err(sm_err());
             }
-            let Some((ref_frame, _arc_radius, start_ang, _end_ang)) =
+            let Some((ref_frame, _arc_radius, _start_ang, _end_ang)) =
                 curve.is_arc(k, 11, ANALYTIC_TOL)?
             else {
                 return Err(sm_err());
             };
-            (ref_frame, start_ang)
+            ref_frame
         };
 
         // select new fillet surface storage spot
@@ -1323,14 +1324,13 @@ impl FilletSolver {
         let mut p1 = eval_offset(k, s, 1, start_uv1)?; // sP1 = rail2 point
         s.reload_surface_offsets()?;
 
-        // `fixes.fillet_torus_center_on_axis` (WR-422): when the section's centre lies on
-        // the arc's axis the rail points carry no angle, so turn them into the half-planes
-        // through the edge's ends.
+        // Not upstream (WR-422): when the section's centre lies on the arc's axis the rail
+        // points carry no angle, so turn them into the half-planes through the edge's ends.
         let ivl = edge::interval(b, e)?;
         let unit_axis = ref_frame.z_axis().unitize()?;
         let axis_pnt = ref_frame.origin();
         let center_tol = ops.solver().approx_tol_3d;
-        let center_on_axis = k.fixes.fillet_torus_center_on_axis && {
+        let center_on_axis = {
             let off = arc_center - axis_pnt;
             (off - unit_axis * off.dot(unit_axis)).length() < center_tol
         };
@@ -1344,16 +1344,14 @@ impl FilletSolver {
             None
         };
 
-        // `fixes.fillet_torus_rail_on_axis` (WR-592): a rail point within the tolerance of
-        // the axis turns round it in a circle smaller than the tolerance, a point: it is
-        // the axis's point, so the surface is exactly singular there.
-        if k.fixes.fillet_torus_rail_on_axis {
-            for rail_pnt in [&mut p0, &mut p1] {
-                let off = *rail_pnt - axis_pnt;
-                let on_axis = axis_pnt + unit_axis * off.dot(unit_axis);
-                if on_axis.distance(*rail_pnt) < center_tol {
-                    *rail_pnt = on_axis;
-                }
+        // Not upstream (WR-592): a rail point within the tolerance of the axis turns round
+        // it in a circle smaller than the tolerance, a point: it is the axis's point, so the
+        // surface is exactly singular there.
+        for rail_pnt in [&mut p0, &mut p1] {
+            let off = *rail_pnt - axis_pnt;
+            let on_axis = axis_pnt + unit_axis * off.dot(unit_axis);
+            if on_axis.distance(*rail_pnt) < center_tol {
+                *rail_pnt = on_axis;
             }
         }
 
@@ -1438,16 +1436,11 @@ impl FilletSolver {
             span_ang += 2.0 * PI;
         }
 
-        let end_ang = rad_to_deg(span_ang);
         // Not upstream (WR-568, the fork's tangency-labs/smlib@985faae): the span is the
         // turn from the start section to the end one; the start angle `IsArc` gives is
         // measured from the arc's own frame (an `SmCircle`'s analytic domain, which need
         // not start at 0), not from the start section, so it is no part of that turn
-        let mut angle_span = if k.fixes.fillet_torus_span_from_start_section {
-            end_ang
-        } else {
-            end_ang - start_ang
-        };
+        let mut angle_span = rad_to_deg(span_ang);
 
         // Determine if we need to extend the span even when 'm_bExtendBefore' is FALSE
         if !curve.is_closed(k, &ivl, 0.0)? && !s.extend_after {

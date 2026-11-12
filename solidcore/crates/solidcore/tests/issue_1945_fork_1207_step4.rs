@@ -36,7 +36,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_trim_status = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_retry_radius_as_first = true;
-    k.fixes.fillet_rail_rim_on_face = true;
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
@@ -44,13 +43,10 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_vertex_error_diagnostics = true;
     k.fixes.fillet_corner_ball_patch = true;
     k.fixes.fillet_corner_ball_center_from_axes = true;
-    k.fixes.fillet_torus_span_from_start_section = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.corner_blend_coons_patch_tangent_to_sides = true;
     k.fixes.corner_patch_face_side_twist = true;
-    k.fixes.fillet_torus_center_on_axis = true;
-    k.fixes.fillet_torus_rail_on_axis = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_knife_edge_rounds = true;
@@ -139,9 +135,7 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.fillet_point_step_per_point = true;
-    k.fixes.fillet_trace_from_tangent_point_toward_next = true;
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.fillet_tangent_point_one_sided_step = true;
     k.fixes.precise_properties_body_length_scale = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.corner_blend_stays_inside_neighbours = true;

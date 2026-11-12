@@ -209,7 +209,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_rail_rim_on_face = true;
     k.fixes.fillet_rails_meet_at_one_end_point = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_non_manifold_result = true;
@@ -219,11 +218,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_retry_radius_as_first = true;
     k.fixes.fillet_run_on_past_far_end_only = true;
     k.fixes.fillet_split_edge_keeps_near_half = true;
-    k.fixes.fillet_tangent_point_one_sided_step = true;
-    k.fixes.fillet_torus_center_on_axis = true;
-    k.fixes.fillet_torus_rail_on_axis = true;
-    k.fixes.fillet_torus_span_from_start_section = true;
-    k.fixes.fillet_trace_from_tangent_point_toward_next = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_trim_status = true;
