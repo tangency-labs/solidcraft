@@ -1096,7 +1096,7 @@
 {"case":"trees_two_trees","deferred":null,"error":null,"ints":{"record":{"blocks":[[168,2292]],"n":33},"status":[0]},"topology":null,"values":{}}
 {"case":"trees_union","deferred":null,"error":null,"ints":{"record":{"blocks":[[96,656]],"n":17},"status":[0]},"topology":null,"values":{}}
 {"case":"with_options_cookie_cutter","deferred":null,"error":null,"ints":{"record":{"blocks":[[48,390]],"n":18},"status":[0]},"topology":null,"values":{}}
-{"case":"with_options_difference","deferred":null,"error":null,"ints":{"record":{"blocks":[[61,538]],"n":23},"status":[0]},"topology":null,"values":{}}
+{"case":"with_options_difference","deferred":null,"error":null,"ints":{"record":{"blocks":[[63,549]],"n":23},"status":[0]},"topology":null,"values":{}}
 {"case":"with_options_extract_separate_rejected","deferred":null,"error":null,"ints":{"record":[],"status":[1007]},"topology":null,"values":{}}
 {"case":"with_options_keep_other","deferred":null,"error":null,"ints":{"record":{"blocks":[[68,838]],"n":33},"status":[0]},"topology":null,"values":{}}
 {"case":"wr254_slice_box_by_its_top_face","deferred":null,"error":null,"ints":{"record":[1,1,0,1,4,4,1,0,1,1,1,2,0],"status":[0]},"topology":null,"values":{}}

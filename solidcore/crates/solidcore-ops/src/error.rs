@@ -272,10 +272,16 @@ pub enum Error {
     /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
     /// `BlendRefusal::SetbackTooShort`, whose `why` says which).
     SetbackTooShort {
-        /// The corner's vertex index.
-        vertex: usize,
+        /// The corner's vertex index; `None` where the vertex is no longer the body's.
+        vertex: Option<usize>,
         /// The least setback.
         least: f64,
+        /// The corner's point, where the kernel's session notes it.
+        at: Option<[f64; 3]>,
+        /// Whether a setback of `least` builds the corner: its fill's test named it (not the
+        /// rails', which `least` passes only), and the kernel's fill is the corner (no other
+        /// patch replaces it).
+        builds: bool,
     },
     /// A corner's setback that does not fit on its edges, or on its rounds where a far
     /// corner cuts one (the kernel's `BlendRefusal::SetbackTooLong`): one below `largest`
@@ -490,6 +496,45 @@ pub enum FitKind {
     Chord,
 }
 
+impl RoomReason {
+    /// The reason in words, as a fillet's message gives it.
+    #[must_use]
+    pub const fn words(self) -> &'static str {
+        match self {
+            RoomReason::BallDoesNotFit => "the rolling ball does not fit a face it rolls on",
+            RoomReason::RailLeavesFace => "a contact line leaves the face it rolls on",
+            RoomReason::FaceConsumed => "the blends take the whole of a face they roll on",
+            RoomReason::BandsOverlap => {
+                "one blend runs inside the band another takes off a face they share"
+            }
+            RoomReason::BallsFold => "the rolling ball folds over itself along the edge",
+            RoomReason::OffsetFolds => "a face curves tighter than the offset along it",
+            RoomReason::CutsThePart => "the blend would cut the part in pieces",
+            RoomReason::BreaksThrough => {
+                "the blend would break through a wall into the hollow behind it"
+            }
+            RoomReason::OffsetCollapses => {
+                "the ball is as wide as a face it rolls on, so its centre stays put and the round cannot end at the edge's end"
+            }
+            RoomReason::CornersTakeWholeEdge => "its corners take the whole of the edge",
+            RoomReason::RunsIntoMaterial => "the blend runs off a face into the material",
+        }
+    }
+}
+
+impl FitKind {
+    /// The size's name, as a fillet's message names it ("the largest radius that fits").
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            FitKind::Radius => "radius",
+            FitKind::Distance => "distance",
+            FitKind::Scale => "scale",
+            FitKind::Chord => "chord width",
+        }
+    }
+}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -631,9 +676,18 @@ impl std::fmt::Display for Error {
                 f,
                 "the round of edge {edge} is too small to change the part: the smallest is {smallest}"
             ),
-            Error::SetbackTooShort { vertex, least } => {
+            Error::SetbackTooShort {
+                vertex: Some(vertex),
+                least,
+                ..
+            } => {
                 write!(f, "the setback at vertex {vertex} is shorter than {least}")
             }
+            Error::SetbackTooShort {
+                vertex: None,
+                least,
+                ..
+            } => write!(f, "the setback at a corner is shorter than {least}"),
             Error::SetbackTooLong { vertex, largest } => {
                 write!(f, "the setback at vertex {vertex} does not fit: below {largest} fits")
             }

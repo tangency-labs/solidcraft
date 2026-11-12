@@ -26,6 +26,7 @@ pub mod cutting;
 pub mod enclosing;
 pub mod local_operation;
 pub mod mirror;
+pub mod outer_shells;
 pub mod p1;
 pub mod p10;
 pub mod p2;

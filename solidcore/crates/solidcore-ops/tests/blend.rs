@@ -1238,15 +1238,19 @@ fn a_setback_too_long_at_a_corner_is_refused_by_the_kernel() {
 }
 
 /// Cancel stops a long fillet promptly (solidcore#3247): a 2 mm round along one helical edge of
-/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Cancelled
-/// from another thread a second in, the call returns `Cancelled` within 500 ms (about 5 ms
-/// measured on a desktop; the bound leaves room for shared CI runners). nextest runs each test
-/// in a process of its own, so no other test's call holds the session's kernel meanwhile.
+/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Measured in
+/// the token's polls, not in time: a token cancelled from its `m`-th poll
+/// (`CancelToken::after_polls`) stops the fillet there. It returns `Cancelled`, which also shows
+/// the fillet was still running at poll `m`, and the token is polled exactly once after the poll
+/// that cancelled it: by the session as the call returns, asking whether it was cancelled
+/// (`session::run_with`, or `with_body` deciding whether to keep its edit). Any further poll
+/// would be work done after the cancel. `m` is a quarter of the 15,473 polls the fillet made in
+/// its first second, measured on SolidCraft 9a342278 (cancel-timing round 1). Should the fillet
+/// get fast enough to finish before `m`, this fails with `Ok`: then pick a longer case.
 #[test]
 fn a_cancelled_long_fillet_stops_promptly() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    use std::time::{Duration, Instant};
     all_fixes();
     let corners = [
         [19.0, 0.0, 0.0],
@@ -1287,23 +1291,75 @@ fn a_cancelled_long_fillet_stops_promptly() {
     let chain = tangent_chain(&coil, None, &[edge], &[], 0.1)
         .unwrap()
         .members;
-    let token = CancelToken::new();
-    let watched = token.clone();
-    let worker = std::thread::spawn(move || {
-        let r = within(&watched, || {
-            blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
-        });
-        (r.map(|_| ()), Instant::now())
+    let m: u64 = 15_473 / 4;
+    let token = CancelToken::after_polls(m);
+    let r = within(&token, || {
+        blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
     });
-    std::thread::sleep(Duration::from_secs(1));
-    let cancelled = Instant::now();
-    token.cancel();
-    let (r, returned) = worker.join().unwrap();
-    let took = returned.saturating_duration_since(cancelled);
-    eprintln!("the fillet returned {took:?} after Cancel");
-    assert_eq!(r, Err(Error::Cancelled));
-    assert!(
-        took < Duration::from_millis(500),
-        "returned {took:?} after Cancel"
-    );
+    eprintln!("the fillet cancelled at {m}, polled {:?}", token.polls());
+    assert_eq!(r.map(|_| ()), Err(Error::Cancelled));
+    assert_eq!(token.polls(), Some(m + 1));
+}
+
+/// A failure the kernel types as not supported, after the session noted no room with a fit
+/// (or an unsupported vertex), is its own cause: [`solidcore_ops::blend::session_refusal`]
+/// gives it back rather than sizing it from the earlier note (SolidCraft's own mapping made it
+/// `TooLarge` before it took ops'). The note is real: a 20 cube's three corner edges rounded
+/// 20, refused naming 19.99 (the case of SolidCraft's `a_cliff_overflow_the_fork_refuses_has_no_room`).
+#[test]
+fn a_kernel_unsupported_after_a_no_room_note_is_its_own_cause() {
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+    use solidcore::kernel::UpstreamFixes;
+    use solidcore::SolidError;
+    use solidcore_ops::blend::{session_refusal, Refusal, SessionCall};
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let mut b = create_box(&mut k, Vec3::ZERO, 20.0, 20.0, 20.0).unwrap();
+    let at = [
+        Vec3::new(10.0, 0.0, 0.0),
+        Vec3::new(0.0, 10.0, 0.0),
+        Vec3::new(0.0, 0.0, 10.0),
+    ];
+    let edges: Vec<EdgeId> = at
+        .iter()
+        .map(|&q| {
+            b.edges()
+                .ids()
+                .min_by(|&x, &y| {
+                    let d = |e| edge_closest_point(&k, &b, e, q).unwrap().closest.distance;
+                    d(x).total_cmp(&d(y))
+                })
+                .unwrap()
+        })
+        .collect();
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    let circular = [FilletSurfaceGeneratorType::Circular];
+    s.prepare_per_edge_constant_radius(&mut k, &edges, &[20.0; 3], &circular, 1, 1.0)
+        .unwrap();
+    s.create_corners(&k, None).unwrap();
+    let refused = s.do_filleting(&mut k, None).unwrap_err();
+    // the note: no room, with the fit
+    let sized = session_refusal(&s, refused, SessionCall::default()).unwrap();
+    let Refusal::TooLarge { size, .. } = sized.on(&k, s.target()).unwrap() else {
+        panic!("not sized")
+    };
+    assert!((size - 19.99).abs() < 1e-9, "{size}");
+    let unsupported = SolidError::Unsupported {
+        operation: "test",
+        reason: "a construction the kernel does not build",
+    };
+    for corner in [false, true] {
+        let call = SessionCall {
+            corner,
+            ..SessionCall::default()
+        };
+        assert_eq!(
+            session_refusal(&s, unsupported.clone(), call).map(|_| ()),
+            Err(unsupported.clone()),
+            "corner {corner}"
+        );
+    }
 }
