@@ -937,7 +937,11 @@ fn the_grooves_of_a_two_start_thread_unite_as_both() {
 /// left-handed one (the same turn about the reversed axis, rising by a negative pitch, its
 /// profile wound the other way so its walls face out) cross each other twice a turn. The
 /// boolean copies and trims the walls' exact boundary curves where they cross, and the union
-/// and the intersection hold their volumes: V(a ∪ b) + V(a ∩ b) = V(a) + V(b).
+/// and the intersection hold their volumes: V(a ∪ b) + V(a ∩ b) = V(a) + V(b). Where the walls
+/// meet along their boundaries the union's edges are the walls' iso curves; the record takes
+/// each as the curve on its screw along its UV line, so the union goes to the record and comes
+/// back the same solid (SolidCraft's export of the thread), not refused as a curve with no
+/// B-spline form.
 #[test]
 fn the_grooves_of_a_thread_cut_both_ways_unite() {
     use solidcore_ops::boolean::{boolean, union_all, BooleanOp};
@@ -981,6 +985,11 @@ fn the_grooves_of_a_thread_cut_both_ways_unite() {
         (vu + vi - (vr + vl)).abs() <= 1e-6 * (vr + vl),
         "{vu} + {vi} vs {vr} + {vl}"
     );
+    let (record, _) = either.to_record().unwrap();
+    let (back, _) = Body::from_record(&record, true).unwrap();
+    let vb = back.volume(1e-8).unwrap();
+    assert_eq!(back.counts().unwrap(), either.counts().unwrap());
+    assert!((vb - vu).abs() <= 1e-8 * vu, "{vb} back, {vu} made");
 }
 
 /// An M10 groove with a runout (its law moves the profile out 0.887 mm over the last two of four

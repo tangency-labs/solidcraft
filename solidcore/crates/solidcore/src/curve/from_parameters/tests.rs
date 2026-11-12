@@ -552,3 +552,65 @@ fn an_unevenly_parameterised_closed_form_is_the_whole_turn() {
     let d = e.step_interval();
     assert_eq!(d.max() - d.min(), 360.0, "{d:?}");
 }
+
+/// A curve on a cylinder along a ruling (a UV line of constant sweep coordinate, as the
+/// boolean's seam of a merged cylinder face) is the straight line through its ends, in the
+/// edge's own parameter: its record is that degree-1 spline, and it reads back as the same
+/// curve point for point. A UV line across the turn (a helix) has no exact record.
+#[test]
+fn a_ruling_of_a_cylinder_goes_as_its_line_and_a_helix_is_refused() {
+    use crate::curve::crv_on_surf::CrvOnSurf;
+    use crate::geom::vector2d::Point2;
+    use crate::surface::cone::Cone;
+    use crate::surface::surface::p2::Surface;
+    let k = k();
+    let cylinder = Surface::from(Cone::new_cylinder_bounded(
+        Point3::new(0.0, 0.0, -1.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        5.075,
+        0.0,
+        360.0,
+        10.0,
+        false,
+        false,
+        false,
+    ));
+    let domain = cylinder.natural_uv_domain_with_nurb(&k).unwrap();
+    let (u0, u1) = (domain.u_min(), domain.u_max());
+    let (v0, v1) = (domain.v_min(), domain.v_max());
+    let on = |a: Point2, b: Point2| {
+        Curve::from(CrvOnSurf::from_uv_line(&k, a, b, cylinder.clone(), None, 0).unwrap())
+    };
+    for u in [u0, u0 + 0.3 * (u1 - u0)] {
+        let ruling = on(
+            Point2::new(u, v0 + 0.2 * (v1 - v0)),
+            Point2::new(u, v0 + 0.7 * (v1 - v0)),
+        );
+        let natural = ruling.natural_interval();
+        let (lo, hi) = (
+            natural.min() + 0.1 * natural.length(),
+            natural.max() - 0.2 * natural.length(),
+        );
+        let made = record_of(&k, &ruling, &Extent1d::from_min_max(lo, hi)).unwrap();
+        let Record::Spline { knots, points } = &made.curve else {
+            panic!("a ruling goes as a spline: {:?}", made.curve)
+        };
+        assert_eq!((knots.as_slice(), points.len()), (&[lo, lo, hi, hi][..], 2));
+        let back = from_parameters(&k, &made.curve, made.interval).unwrap();
+        for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let t = lo + f * (hi - lo);
+            let (a, b) = (at(&k, &ruling, t), at(&k, &back.curve, t));
+            assert!(
+                a.distance(b) <= 1e-12 * (1.0 + a.length()),
+                "{a:?} vs {b:?} at {t}"
+            );
+        }
+    }
+    let helix = on(Point2::new(u0, v0), Point2::new(u1, v1));
+    let natural = helix.natural_interval();
+    assert!(matches!(
+        record_of(&k, &helix, &natural),
+        Err(SolidError::Unsupported { .. })
+    ));
+}

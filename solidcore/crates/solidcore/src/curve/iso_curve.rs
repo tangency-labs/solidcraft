@@ -331,6 +331,26 @@ impl IsoCurve {
         Ok(new_line(line_point, line_unit_vec, &line_ivl, 1.0, 2))
     }
 
+    /// The UV line of this curve in its own parameter, over its interval
+    /// ([`IsoCurve::natural_interval`]): `(iso, t)` for constant `u`, `(t, iso)` otherwise, as
+    /// [`IsoCurve::evaluate_point`] reads it. The surface along it is this curve point for point
+    /// (a curve on the surface with the same parameter), which is how an iso curve of a
+    /// retained screw goes to the record.
+    pub(crate) fn uv_line(&self) -> Curve {
+        let (point, direction) = if self.surf_param == SurfParamType::U {
+            (
+                Point3::new(self.iso_parameter, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            )
+        } else {
+            (
+                Point3::new(0.0, self.iso_parameter, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+            )
+        };
+        new_line(point, direction, &self.natural_interval(), 1.0, 2)
+    }
+
     /// The minimum continuity and the continuities at the knots, inherited from the
     /// surface along the varying coordinate (`CalculateContinuities`).
     ///

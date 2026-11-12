@@ -406,6 +406,11 @@ pub struct RecordCurve {
 /// - **B-spline, hyperbola, parabola:** its NURBS as a spline or rational spline, homogeneous
 ///   points copied, over the kernel's interval; an interval past the knots by the rounding of
 ///   the kernel's parameter (10⁻¹² of its size) ends on them.
+/// - **On a retained screw:** a curve on the screw, or an iso curve of it (the curve on it
+///   along its UV line in the same parameter), as the screw's definition and the UV curve's
+///   spline, over the kernel's interval.
+/// - **On a cone or cylinder along a ruling:** the straight line through its ends, a degree-1
+///   spline over the kernel's interval (the cone is affine in its linear coordinate).
 ///
 /// # Errors
 ///
@@ -420,39 +425,32 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
         return Err(bad("the interval is not finite and increasing"));
     }
     match c.kind() {
-        CurveKind::CrvOnSurf(cos)
-            if cos
-                .surface()
-                .procedural_sweep()
-                .is_some_and(|s| s.definition().screw().is_some()) =>
-        {
-            let face =
-                crate::surface::face_surface::record_face(k, cos.surface(), cos.uv_domain())?;
-            if face.scale != [1.0, 1.0] {
-                return Err(bad("curve owner requires a non-identity UV map"));
-            }
-            let uv_interval = cos.uv_curve().natural_interval();
-            // An interval past the UV curve's ends by the rounding of the kernel's parameter
-            // ends on them, as a spline's does on its knots.
-            let (lo, hi) = (
-                onto_ends(lo, [lo, hi], &uv_interval),
-                onto_ends(hi, [lo, hi], &uv_interval),
-            );
-            if !(lo >= uv_interval.min() && hi <= uv_interval.max() && lo < hi) {
-                return Err(bad("edge interval outside UV curve"));
-            }
-            let uv_curve = record_trim(
+        CurveKind::CrvOnSurf(cos) if cos.surface().retained_screw().is_some() => {
+            return on_screw(k, cos.surface(), cos.uv_domain(), cos.uv_curve(), [lo, hi]);
+        }
+        // A retained screw's iso curve is the curve on it along its UV line in the same
+        // parameter ([`IsoCurve::uv_line`](crate::curve::iso_curve::IsoCurve)): the same
+        // surface evaluated at the same points, so it goes as that curve on the screw.
+        CurveKind::Iso(iso) if iso.surface().retained_screw().is_some() => {
+            let surface = iso.surface();
+            return on_screw(
                 k,
-                cos.uv_curve(),
-                &uv_interval,
-                [uv_interval.min(), uv_interval.max()],
-                [1.0, 1.0],
-            )?;
+                surface,
+                &surface.natural_uv_domain_if_built(),
+                &iso.uv_line(),
+                [lo, hi],
+            );
+        }
+        // A curve on a cone or cylinder along one of its rulings (a UV line whose sweep
+        // coordinate is constant): the cone is affine in its linear coordinate, so the curve
+        // is the straight line through its ends, affine in the edge's parameter; it goes as
+        // that line's spline (degree 1) over the edge interval.
+        CurveKind::CrvOnSurf(cos) if is_cone_ruling(cos) => {
+            let (a, b) = (c.evaluate_point(k, lo)?, c.evaluate_point(k, hi)?);
             return Ok(RecordCurve {
-                curve: Record::OnSurface {
-                    surface: Box::new(face.surface),
-                    uv_curve,
-                    domain: face.domain,
+                curve: Record::Spline {
+                    knots: vec![lo, lo, hi, hi],
+                    points: vec![[a.x, a.y, a.z], [b.x, b.y, b.z]],
                 },
                 nurbs: None,
                 interval: [lo, hi],
@@ -538,6 +536,69 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
             onto_ends(lo, [lo, hi], &knots),
             onto_ends(hi, [lo, hi], &knots),
         ],
+    })
+}
+
+/// Whether `cos` runs along a ruling of a cone or cylinder: its UV curve a line whose step in
+/// the cone's sweep (polar) coordinate is zero, so only the linear coordinate varies along it
+/// ([`cone_convert_uv_from_nurbs_to_step`](crate::surface::cone) maps that coordinate affinely).
+fn is_cone_ruling(cos: &crate::curve::crv_on_surf::CrvOnSurf) -> bool {
+    use crate::curve::curve::CurveKind;
+    use crate::surface::surface::SurfaceKind;
+    let (SurfaceKind::Cone(cone), CurveKind::Line(l)) =
+        (cos.surface().kind(), cos.uv_curve().kind())
+    else {
+        return false;
+    };
+    let v = l.canonical().vector;
+    let (sweep, linear) = if cone.rev.swap_uv {
+        (v.y, v.x)
+    } else {
+        (v.x, v.y)
+    };
+    sweep == 0.0 && linear != 0.0 && linear.is_finite()
+}
+
+/// The record of the curve on the retained screw `surface` along `uv_curve` over the edge
+/// interval `[lo, hi]` (its parameter, which the UV curve's is): the screw as its definition's
+/// record over `uv_domain`, the UV curve as its spline over its own interval.
+fn on_screw(
+    k: &Kernel,
+    surface: &crate::surface::surface::p2::Surface,
+    uv_domain: &crate::geom::extent2d::Extent2d,
+    uv_curve: &Curve,
+    [lo, hi]: [f64; 2],
+) -> Result<RecordCurve> {
+    let bad = |reason: &'static str| SolidError::invalid_input(OP_BACK, reason);
+    let face = crate::surface::face_surface::record_face(k, surface, uv_domain)?;
+    if face.scale != [1.0, 1.0] {
+        return Err(bad("curve owner requires a non-identity UV map"));
+    }
+    let uv_interval = uv_curve.natural_interval();
+    // An interval past the UV curve's ends by the rounding of the kernel's parameter
+    // ends on them, as a spline's does on its knots.
+    let (lo, hi) = (
+        onto_ends(lo, [lo, hi], &uv_interval),
+        onto_ends(hi, [lo, hi], &uv_interval),
+    );
+    if !(lo >= uv_interval.min() && hi <= uv_interval.max() && lo < hi) {
+        return Err(bad("edge interval outside UV curve"));
+    }
+    let uv_curve = record_trim(
+        k,
+        uv_curve,
+        &uv_interval,
+        [uv_interval.min(), uv_interval.max()],
+        [1.0, 1.0],
+    )?;
+    Ok(RecordCurve {
+        curve: Record::OnSurface {
+            surface: Box::new(face.surface),
+            uv_curve,
+            domain: face.domain,
+        },
+        nurbs: None,
+        interval: [lo, hi],
     })
 }
 
