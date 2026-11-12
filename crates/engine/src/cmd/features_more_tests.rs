@@ -2603,6 +2603,64 @@ fn an_imported_assembly_with_a_repeated_part_moves_as_one() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #13382: a design saved by a version whose STEP reader numbered the file's bodies otherwise
+/// opens with each body where it was and with its own shape. Here the older reader left the
+/// file's first body out, so every stored name and tree index after it is one lower. The names
+/// went by index: each body took the next one's name, and that name put it in the next part's
+/// component.
+#[test]
+fn an_import_saved_by_an_older_step_reader_opens_with_its_bodies_in_place() {
+    use solidcraft_doc::FeatureKind;
+    use solidcraft_doc::kernel::StepNode;
+    let dir = std::env::temp_dir().join(format!("solidcraft-13382-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("parts.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    // Three parts of different sizes, each in its own component and placed apart.
+    for (k, (name, size)) in [("Small", [10, 10, 10]), ("Long", [40, 6, 6]), ("Tall", [8, 8, 30])].into_iter().enumerate() {
+        let made = run(&mut src, "component.create", json!({"name": name}));
+        run(&mut src, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "body_name": name}));
+        run(&mut src, "component.activate", json!({"component": 0}));
+        // The first part is grounded where it is made.
+        if k > 0 {
+            run(&mut src, "occurrence.move", json!({"occurrence": made["occurrence"], "translate": [100 * k, 0, 0], "space": "world"}));
+        }
+    }
+    run(&mut src, "file.export", json!({"path": path}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 3, "{names:?}");
+    let before: Vec<_> = names.iter().map(|n| placed_bounds(&s, n)).collect();
+
+    // The design as the older reader saved it: no body 0, the others numbered from 0.
+    let mut doc = (*s.doc).clone();
+    let f = doc.features.iter_mut().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+    let first = f.body_names.remove(0);
+    fn renumber(nodes: &mut [StepNode]) {
+        for n in nodes {
+            n.bodies = n.bodies.iter().filter(|b| **b != 0).map(|b| b - 1).collect();
+            renumber(&mut n.children);
+        }
+    }
+    if let FeatureKind::Import { components, skip, .. } = &mut f.kind {
+        renumber(components);
+        assert!(skip.is_empty(), "no part is placed twice: {skip:?}");
+    }
+
+    let opened = Session::opened(doc, None);
+    let now: Vec<String> = opened.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(now.len(), 3, "the body the older reader left out is built too: {now:?}");
+    for (n, b) in names.iter().zip(&before) {
+        if *n == first {
+            continue;
+        }
+        let got = placed_bounds(&opened, n);
+        assert!(shifted(*b, got, [0.0; 3]), "{n} opened at {got:?}, was at {b:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A 20 × 30 × 8 plate made in its own component and stood up by its placement (turned
 /// `angle` degrees about X), the way an imported part set upright is: in the world it lies
 /// flat at `x0`..`x0 + 20`, y 0..30, z 0..8. The design is active again afterwards.
@@ -2714,6 +2772,44 @@ fn an_emboss_that_works_has_no_warning() {
     }
 }
 
+/// A 40 x 10 stadium (two lines, two tangent arcs) extruded 10 mm. The top rim runs on smoothly
+/// through the points where a line meets an arc, so picking one of those points names the rim,
+/// not an ambiguous corner (#12215).
+fn stadium_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.line", json!({"points":[[5.0,0.0],[35.0,0.0]],"closed":false}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[35.0,5.0],"start":[35.0,0.0],"end":[35.0,10.0]}));
+    run(&mut s, "sketch.line", json!({"points":[[35.0,10.0],[5.0,10.0]],"closed":false}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[5.0,5.0],"start":[5.0,10.0],"end":[5.0,0.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":10.0}));
+    s
+}
+
+#[test]
+fn chamfer_picked_where_a_line_meets_a_tangent_arc_takes_the_whole_rim() {
+    let mut s = stadium_block();
+    let before = volume(&mut s);
+    run(&mut s, "solid.chamfer", json!({"edges": [[35.0, 0.0, 10.0]], "distance": 0.2}));
+    let rim = 2.0 * 30.0 + 2.0 * std::f64::consts::PI * 5.0;
+    let removed = before - volume(&mut s);
+    let want = 0.5 * 0.2 * 0.2 * rim;
+    assert!((removed - want).abs() < 0.02 * want, "removed {removed} vs {want}");
+}
+
+/// A box corner is not a tangent join: a pick there still says several edges meet (#5173).
+#[test]
+fn chamfer_picked_at_a_box_corner_is_still_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0.0,0.0],"p1":[20.0,10.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":10.0}));
+    let err = s.execute("solid.chamfer", &json!({"edges": [[20.0, 0.0, 10.0]], "distance": 0.2})).unwrap_err().to_string();
+    assert!(err.contains("edges meet"), "{err}");
+}
+
 /// #9969: a cut whose tool lies clear of the body reported "operation complete" and changed
 /// nothing, with no warning. It now says it removed no material; a cut that works says nothing.
 #[test]
@@ -2783,4 +2879,32 @@ fn align_by_a_frame_picked_on_another_copy_moves_the_part_in_its_own_coordinates
     run(&mut s, "solid.align", json!({"bodies": ["Peg"], "from_frame": {"face": [21, 1, 0]}, "to_frame": top}));
     assert_bounds(&mut s, "Peg", [4., 4., 10.], [6., 6., 12.]);
     assert_bounds(&mut s, "Peg (Board:2/Header:1)", [104., 4., 10.], [106., 6., 12.]);
+}
+
+/// A coil cut from a sketch follows that sketch when its points move, and the body it cuts when
+/// that changes upstream: its cached result is not taken back while either differs.
+#[test]
+fn a_sketch_coil_cut_follows_its_profile_and_target() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Shaft", "name": "ShaftFeature"}));
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Groove"}));
+    // A 1 x 1 mm square, 18..19 mm from the axis.
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [18, 1], "p1": [19, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = volume(&mut s);
+    run(&mut s, "solid.coil", json!({"sketch": "Groove", "revolutions": 3, "pitch": 8, "operation": "cut", "targets": ["Shaft"]}));
+    let removed = before - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 18.5) < 1e-3, "{removed}");
+    // Widen the square inward to 17..19 mm: twice the area, centroid at 18 mm.
+    run(&mut s, "sketch.edit", json!({"sketch": "Groove"}));
+    run(&mut s, "sketch.move_point", json!({"point": "p1", "to": [17, 1]}));
+    run(&mut s, "sketch.move_point", json!({"point": "p4", "to": [17, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let removed = before - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 2.0 * 18.0) < 1e-3, "the groove kept the old profile: {removed}");
+    // A thinner shaft upstream (radius 18): the groove now cuts only 17..18 mm of it.
+    run(&mut s, "timeline.edit", json!({"feature": "ShaftFeature", "set": {"radius": "18"}}));
+    let removed = PI * 18.0 * 18.0 * 40.0 - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 17.5) < 1e-3, "the groove kept the old shaft: {removed}");
 }

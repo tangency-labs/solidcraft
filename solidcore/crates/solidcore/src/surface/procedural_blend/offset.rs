@@ -220,7 +220,12 @@ pub fn procedural_offset(
         Some(b) => {
             b.recertify(k)?;
         }
-        None => return Err(SolidError::sm_err(OP)),
+        None => {
+            return Err(SolidError::surface_failed(
+                OP,
+                "the offset round is not a procedural blend",
+            ))
+        }
     }
     Ok(Some(BlendOffset::Round(Box::new(made))))
 }
@@ -236,7 +241,10 @@ fn into_parameters_of(k: &Kernel, made: &mut Surface, like: &ProceduralBlend) ->
         made.swap_uv(k)?;
     }
     let SurfaceKind::ProceduralBlend(pb) = made.kind_mut() else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(
+            OP,
+            "the made surface is not a procedural blend",
+        ));
     };
     // (p, q) drive (s, t): u and v, or v and u when swapped
     for (c, (&ac, &bc)) in a.iter().zip(&b).enumerate() {
@@ -253,7 +261,10 @@ fn into_parameters_of(k: &Kernel, made: &mut Surface, like: &ProceduralBlend) ->
         }
         let (now_a, now_b, _) = pb.definition_map();
         let (Some(&na), Some(&nb)) = (now_a.get(c), now_b.get(c)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::surface_failed(
+                OP,
+                "the definition map has no entry for the parameter",
+            ));
         };
         // the net's range in this parameter, then the same s in like's parameter
         let dom = pb.net().natural_uv_domain();
@@ -303,7 +314,9 @@ pub fn exact_offset(
     let mut inputs = *round.inputs();
     let mut supports = Vec::new();
     for (i, o) in inputs.offsets.iter_mut().enumerate() {
-        let support = round.support(i).ok_or_else(|| SolidError::sm_err(OP))?;
+        let support = round
+            .support(i)
+            .ok_or_else(|| SolidError::surface_failed(OP, "the round has no support to offset"))?;
         // the centre's signed offset from the support is side_i r; the support moves by
         // -tau side_i d, so the centre's offset from it is side_i r'
         let side = if *o >= 0.0 { 1.0 } else { -1.0 };
@@ -311,7 +324,10 @@ pub fn exact_offset(
         *o = side * moved;
     }
     let (Some(s0), Some(s1)) = (supports.first(), supports.get(1)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(
+            OP,
+            "the round has fewer than two supports",
+        ));
     };
     let moved_round =
         ExactRound::create(k, round.class(), [s0, s1], moved, round.leader(), inputs)?;

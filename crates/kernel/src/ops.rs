@@ -26,6 +26,11 @@ pub enum BoolOp {
 /// SMLib's own tags, or none where a body's order cannot be matched to SMLib's. A cut by a tool
 /// apart from the body is the body itself (its faces and edges kept), and their intersection empty.
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
+    // Stopped by its watch (an agent's request cancelled while it computes, #1989): no more
+    // booleans. One SMLib already runs to its end.
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("boolean"));
+    }
     crate::profile::timed(crate::profile::Kind::Boolean, "boolean", || {
         // A tool apart from the body (their exact boxes, grown by the tolerances, do not meet)
         // leaves a cut the body itself and an intersection nothing, with no intersection work.
@@ -47,6 +52,9 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
 /// what the operands' faces stood for (their regularization protection and the planar roles on
 /// supports it kept).
 pub fn union_all(bodies: &[&Body]) -> Result<Body> {
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("union"));
+    }
     crate::profile::timed(crate::profile::Kind::Boolean, "union_all", || {
         if bodies.is_empty() {
             return Err(KernelError::Invalid("a union of no bodies".into()));
@@ -168,7 +176,8 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
     }
     let sources = body.transformed_sources(m)?;
     let exact = match Rigid::of_matrix(&m) {
-        Some(motion) => Some(solidcraft_geom::brep::placement::moved(body.record(), &motion)),
+        // (a body with a blend by its definition is moved by the kernel, the definition with it)
+        Some(motion) => solidcraft_geom::brep::placement::moved(body.record(), &motion),
         None => solidcraft_geom::brep::placement::mapped(body.record(), &m),
     };
     let (placed, sources, paint) = match exact {

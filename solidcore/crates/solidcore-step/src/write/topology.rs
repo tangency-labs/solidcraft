@@ -306,13 +306,14 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
         }
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(profile, *origin, *axis, matrix, *forward)?,
         BSurface::BallPatch { .. } => return Err("a ball patch's label (its face is written as its NURBS form)".into()),
+        BSurface::Blend { .. } => return Err("a blend's label (its face is written as its NURBS form)".into()),
     })
 }
 
-/// Whether a face is written as its NURBS form, pcurves and all: a ball patch, which STEP has no
-/// entity for, is the B-spline surface it is parameterised on.
+/// Whether a face is written as its NURBS form, pcurves and all: a ball patch or a blend by its
+/// definition, which STEP has no entity for, is the B-spline surface it is parameterised on.
 fn as_form(face: &Face) -> bool {
-    face.nurbs.is_some() && matches!(face.surface, BSurface::BallPatch { .. })
+    face.nurbs.is_some() && matches!(face.surface, BSurface::BallPatch { .. } | BSurface::Blend { .. })
 }
 
 /// A record pcurve in the STEP surface's parameters: its control points through `map` (a linear
@@ -443,7 +444,7 @@ pub fn brep(g: &mut GeomWriter<'_>, b: &Brep, name: &str) -> R<Written> {
 pub fn outer_loop(b: &Brep, face: &Face) -> Option<usize> {
     let mut ccw = face.loops.iter().enumerate().filter_map(|(li, l)| match l {
         Loop::Edges { edges } => {
-            let mut ring = Vec::with_capacity(edges.len() * AREA_SAMPLES);
+            let mut ring = Vec::new();
             for u in edges {
                 let [t0, t1] = edge_of(b, u.edge).ok()?.interval;
                 for k in 0..AREA_SAMPLES {

@@ -866,6 +866,7 @@ pub enum FeatureKind {
         tangent_chain: bool,
     },
     Box {
+        /// The box's lowest corner, or its centre when `centred` is set.
         #[serde(with = "point_expr")]
         #[walk(placement)]
         corner: PointExpr,
@@ -877,6 +878,10 @@ pub enum FeatureKind {
         height: Expr,
         #[serde(default)]
         operation: Operation,
+        /// Placed by its centre: `corner` is the centre, so a new length, width or height grows the box
+        /// on both sides and it stays centred (#14487).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        centred: bool,
     },
     Cylinder {
         #[serde(with = "point_expr")]
@@ -1019,6 +1024,12 @@ pub enum FeatureKind {
         /// part changes. `position` keeps where it was placed.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         references: Vec<HoleReference>,
+        /// Holes at sketch points as older builds drilled them: a point inside a body moves back
+        /// to the body's surface whatever plane the sketch lies on. Designs saved before #11538
+        /// carry it, so their holes rebuild where they were; new holes leave it off, and Edit
+        /// Hole keeps it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        old_surface_start: bool,
     },
     /// A thread on a cylindrical face. Cosmetic by default (no geometry change; drawn and
     /// exported as an annotation); `modeled` cuts the real helical ISO profile into the face.
@@ -1087,13 +1098,19 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "RailFit::is_scale")]
         rail_fit: RailFit,
     },
-    /// Sweep profiles along a chain of sketch curves.
+    /// Sweep profiles along a chain of sketch curves, or along a chain of a body's edges.
     Sweep {
         sketch: SketchId,
         #[walk(profiles_of = sketch)]
         profiles: ProfileSel,
         path_sketch: SketchId,
         path: Vec<String>,
+        /// The path on a body's edges, instead of the curves of `path_sketch` (#2216): the body
+        /// and a point on each edge of the chain.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path_body: Option<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path_edges: Vec<Position>,
         /// How the profile turns along the path (default: perpendicular to it).
         #[serde(default, skip_serializing_if = "SweepOrientation::is_perpendicular")]
         orientation: SweepOrientation,
@@ -1180,6 +1197,10 @@ pub enum FeatureKind {
         tool: Option<FaceAt>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sketch: Option<SketchId>,
+        /// With `sketch`: its curves joined end to end first, so a closed loop cuts along itself
+        /// only. Off (each curve on its own, an open one extended past its ends) in older designs.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        loops: bool,
     },
     /// Scale bodies about a point (uniform, or per axis).
     Scale {
@@ -1419,7 +1440,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
     },
-    /// Sheet metal contour flange: a sheet bent along an open chain of sketch lines.
+    /// Sheet metal contour flange: a sheet bent along an open chain of sketch lines and tangent arcs.
     SheetContour {
         sketch: SketchId,
         curves: Vec<String>,
@@ -1704,6 +1725,10 @@ pub enum FeatureKind {
         #[serde(default = "all_profiles")]
         #[walk(profiles_of = sketch)]
         profiles: ProfileSel,
+        /// Indices into the sketch's planar 3D loops (`sketch.inspect`'s `profiles_3d`): each is
+        /// patched in the plane it lies in (#741).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        profiles_3d: Vec<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1811,6 +1836,12 @@ pub enum FeatureKind {
         curves: Vec<String>,
         path_sketch: SketchId,
         path: Vec<String>,
+        /// The path on a body's edges, instead of the curves of `path_sketch` (#2216): the body
+        /// and a point on each edge of the chain.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path_body: Option<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path_edges: Vec<Position>,
         /// How the profile turns along the path (default: perpendicular to it).
         #[serde(default, skip_serializing_if = "SweepOrientation::is_perpendicular")]
         orientation: SweepOrientation,
@@ -3395,6 +3426,9 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<crate::notes::Note>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -3424,6 +3458,9 @@ pub struct Visibility {
     /// The browser's Origin folder is hidden (`None`: the app's preference decides).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin_hidden: Option<bool>,
+    /// Component Origin folders explicitly shown, by complete occurrence path. Hidden by default.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shown_component_origins: Vec<Vec<u64>>,
     /// Finished sketches whose closed profiles are not shaded, by feature id.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_profiles: Vec<u64>,
@@ -3451,6 +3488,7 @@ impl Visibility {
             && self.shown_sketches.is_empty()
             && self.hidden_joints.is_empty()
             && self.origin_hidden.is_none()
+            && self.shown_component_origins.is_empty()
             && self.hidden_profiles.is_empty()
             && self.shown_dimensions.is_empty()
             && self.locked_bodies.is_empty()
@@ -3633,10 +3671,12 @@ impl Document {
             .chain(self.timeline_groups.iter().map(|g| g.id))
             .chain(self.canvases.iter().map(|c| c.id))
             .chain(self.point_clouds.iter().map(|c| c.id))
+            .chain(self.notes.iter().map(|n| n.id))
             .chain(a.joints.iter().map(|j| j.id))
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
             .chain(a.exploded.iter().map(|v| v.id))
+            .chain(self.configs.rows.iter().map(|r| r.id))
             .max()
             .unwrap_or(0);
         let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
@@ -3688,6 +3728,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            notes: Vec::new(),
             visibility: Visibility::default(),
         }
     }
@@ -3891,10 +3932,14 @@ impl Document {
         for b in &mut st.bodies {
             let c = self.body_color(b);
             let face_colors = if authored_faces { self.face_colors(b) } else { self.imported_face_colors(b) };
-            let faces: Vec<solidcraft_kernel::FacePaint> =
-                face_colors.into_iter().map(|(face, l)| solidcraft_kernel::FacePaint { face, color: l.rgb(), opacity: l.opacity as f32 }).collect();
+            let faces: Vec<solidcraft_kernel::FacePaint> = face_colors
+                .into_iter()
+                .map(|(face, l)| solidcraft_kernel::FacePaint { face, color: l.rgb(), opacity: l.opacity as f32, name: l.file_name() })
+                .collect();
             let opacity = self.model_body_opacity(b) as f32;
-            let paint = solidcraft_kernel::Paint { opacity, faces };
+            // The look's name goes with its colour (a STEP `COLOUR_RGB` name), so it comes back on import.
+            let name = c.and_then(|_| self.model_display_look(b)).and_then(|l| l.file_name());
+            let paint = solidcraft_kernel::Paint { opacity, faces, name };
             if c != b.body.color() || b.body.paint() != Some(&paint) {
                 b.body = b.body.clone().with_color(c).with_paint(Some(paint));
             }

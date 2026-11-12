@@ -186,7 +186,7 @@ impl<C: RailClassificationContext> SplitCorners for ContextCorners<'_, C> {
         &mut self,
         _id: FilletCornerId,
     ) -> Result<&mut crate::blend::fillet_corner::p3::FilletCorner> {
-        Err(SolidError::null_pointer(OP))
+        Err(SolidError::blend_missing(OP, "a corner to change"))
     }
     fn corner_type(&self, id: FilletCornerId) -> Result<FilletCornerType> {
         self.0.corner_type(id)
@@ -341,9 +341,7 @@ impl FilletSolver {
                 fillets.with_rail_classification(rail, |pseudo, cc| {
                     context.classify(k, target, pseudo, face, cc)
                 })?;
-                if k.fixes.fillet_rail_rim_on_face {
-                    join_intervals_on_face(fillets, rail)?;
-                }
+                join_intervals_on_face(fillets, rail)?;
                 finish_classification(
                     solver,
                     k,
@@ -439,7 +437,7 @@ fn join_intervals_on_face(fillets: &mut FilletBrep, rail: EdgeId) -> Result<()> 
         .fillet_edge_mut(rail)?
         .curve_class
         .as_mut()
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?;
     for index in (1..cc.size()).rev() {
         let this = cc.at(index)?.mid;
         let prev = cc.at(index - 1)?.mid;
@@ -470,7 +468,7 @@ trait ClassificationOps {
             .fillet_edge_mut(rail)?
             .curve_class
             .as_mut()
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?
             .connect_intervals(
                 interval,
                 if at_end {
@@ -496,7 +494,7 @@ trait ClassificationOps {
             .fillet_edge_mut(rail)?
             .curve_class
             .take()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?;
         let result = super::p3::refine_rail_curve_classification_scoped_with_ops(
             solver,
             k,
@@ -543,7 +541,7 @@ fn squeeze_rail(
     let count = fillets
         .fillet_edge(rail)?
         .curve_class()
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?
         .size();
     let mut small = Vec::new();
     if count > 1 {
@@ -551,10 +549,10 @@ fn squeeze_rail(
             let interval = fillets
                 .fillet_edge(rail)?
                 .curve_class()
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?
                 .sub_interval(index)?;
-            let curve =
-                edge::curve(fillets.brep(), rail)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curve = edge::curve(fillets.brep(), rail)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?;
             let start = curve.evaluate_point(k, interval.min())?;
             let end = curve.evaluate_point(k, interval.max())?;
             if start.distance(end) > 50.0 * tolerance {

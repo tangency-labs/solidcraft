@@ -70,7 +70,7 @@
 //! - **Errors.** `AddSortedSolution` returns `Result` because the solution
 //!   queries it makes can fail (counts past the fixed arrays, calls into
 //!   unported geometry). `FindBestSubdivisionNode`'s `SM_ERR` is
-//!   [`SolidError::Upstream`] with code `1001`.
+//!   [`GeomFailure`](crate::error::geom::GeomFailure) with code `1001`.
 //! - **Recursion bound.** [`GlobalSolve::solve_it`] first checks the trees
 //!   ([`GlobalSolver::check_solve_depth`]): cyclic child links (unbounded
 //!   recursion upstream) or trees whose heights add up to more than
@@ -1362,7 +1362,7 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Upstream`] (`SM_ERR`) when no node can be subdivided;
+    /// [`GeomFailure`](crate::error::geom::GeomFailure) (`SM_ERR`) when no node can be subdivided;
     /// [`SolidError::InvalidInput`] for a null tree or node of `branch`, a missing optional vector or a
     /// two-tree ordering applied to a third tree.
     pub fn find_best_subdivision_node(&self, branch: &Branch) -> Result<(usize, bool)> {
@@ -1370,7 +1370,7 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
         self.check_num_trees(OP)?;
         // check for failure
         let Some(best) = self.find_largest_non_leaf(branch)? else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::geom_failed(OP, "no node can be subdivided"));
         };
 
         if self.operation == SolverOperation::Rayfire {
@@ -2082,24 +2082,21 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
         // for every current solution
         let num_sols = self.solver().solutions.len();
         for ii in 0..num_sols {
-            let test = self.solver().solutions.get_at(ii)?;
+            // read in place: a copy per stored solution per insertion cost a memcpy each
+            let test = self.solver().solutions.at(ii)?;
 
             // don't add duplicate solutions (SolValues within ZeroSqrt and ParamValues within ScaledZero)
-            let (pair, preferred) = self.identical_solutions(solution, &test)?;
+            let (pair, preferred) = self.identical_solutions(solution, test)?;
             if pair == SolutionPairType::Identical {
                 // save the preferred solution if possible, else better solution - improve tolerances
+                // (keeping the stored one, `Second`, is writing it back unchanged: nothing to do)
                 let keep = match preferred {
-                    Some(PreferredSolution::First) => Some(solution),
-                    Some(PreferredSolution::Second) => Some(&test),
-                    None if solution.start.solution_value.abs()
-                        < test.start.solution_value.abs() =>
-                    {
-                        Some(solution)
-                    }
-                    None => None,
+                    Some(PreferredSolution::First) => true,
+                    Some(PreferredSolution::Second) => false,
+                    None => solution.start.solution_value.abs() < test.start.solution_value.abs(),
                 };
-                if let Some(keep) = keep {
-                    self.solver_mut().solutions.set_at(ii, keep)?;
+                if keep {
+                    self.solver_mut().solutions.set_at(ii, solution)?;
                 }
                 return Ok(());
             }
@@ -2253,10 +2250,11 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
                     //   points contained in intervals get absorbed.
                     //   disjoint intervals remain disjoint.
                     //   point solutions remain distinct.
-                    let mut min = s.solutions.get_at(k)?;
-                    let mut max = s.solutions.get_at(j)?;
-                    let combined =
-                        combine_min_max(op, &mut min, &mut max, combine_contiguous_ranges)?;
+                    // in place: combine_min_max changes the pair only on its split path,
+                    // after every fallible step, so an error leaves both as they were, as
+                    // the copies did
+                    let (min, max) = s.solutions.pair_mut(k, j)?;
+                    let combined = combine_min_max(op, min, max, combine_contiguous_ranges)?;
                     if let Some(combined) = combined {
                         s.solutions.set_at(k, &combined)?;
                         s.solutions.remove_at(j, 1);
@@ -2264,8 +2262,6 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
                         break;
                     }
                     // (the split of a range around a tight point is made in place)
-                    s.solutions.set_at(k, &min)?;
-                    s.solutions.set_at(j, &max)?;
                     j += 1;
                 }
 

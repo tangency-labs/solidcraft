@@ -1,10 +1,87 @@
 //! Menus share one popup surface and one row painter. Command dispatch stays with callers.
-use crate::{Container, Surface};
+use crate::{Container, Icon, Surface};
 use crate::{icons, type_face::RichTextExt as _};
-use egui::{Color32, FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use egui::{Color32, FontId, Rect, Response, Sense, Stroke, TextureId, Ui, pos2, vec2};
 use serde::Serialize;
 use serde_json::Value;
 use solidcraft_theme::Tokens;
+use std::sync::Arc;
+
+/// The picture on an [`Item`]: a name in the kit's icon set, or a host's own picture. An item
+/// owns its data, so it cannot hold a borrowed [`Icon`]. It reads as the kit name, which is empty
+/// for a host's picture, so reports and the surfaces that only draw kit icons stay as they were.
+#[derive(Clone, Default)]
+pub struct ItemIcon {
+    name: String,
+    host: Option<HostIcon>,
+}
+
+#[derive(Clone)]
+enum HostIcon {
+    Texture(TextureId),
+    Paint(Arc<dyn Fn(&egui::Painter, Rect, f32) + Send + Sync>),
+}
+
+impl ItemIcon {
+    /// A texture the host made.
+    pub fn texture(texture: TextureId) -> Self {
+        Self { name: String::new(), host: Some(HostIcon::Texture(texture)) }
+    }
+    /// The host's own painter, called with the icon's rect and opacity.
+    pub fn paint(paint: impl Fn(&egui::Painter, Rect, f32) + Send + Sync + 'static) -> Self {
+        Self { name: String::new(), host: Some(HostIcon::Paint(Arc::new(paint))) }
+    }
+    pub(crate) fn as_icon(&self) -> Icon<'_> {
+        match &self.host {
+            Some(HostIcon::Texture(texture)) => Icon::Texture(*texture),
+            Some(HostIcon::Paint(paint)) => Icon::Paint(&**paint),
+            None => Icon::Kit(&self.name),
+        }
+    }
+}
+
+impl std::ops::Deref for ItemIcon {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.name
+    }
+}
+
+impl From<&str> for ItemIcon {
+    fn from(name: &str) -> Self {
+        Self { name: name.into(), host: None }
+    }
+}
+
+impl From<String> for ItemIcon {
+    fn from(name: String) -> Self {
+        Self { name, host: None }
+    }
+}
+
+impl PartialEq<&str> for ItemIcon {
+    fn eq(&self, other: &&str) -> bool {
+        self.name == *other
+    }
+}
+
+impl std::fmt::Display for ItemIcon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.name.fmt(f)
+    }
+}
+
+impl std::fmt::Debug for ItemIcon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.name.fmt(f)
+    }
+}
+
+impl Serialize for ItemIcon {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.name)
+    }
+}
 
 /// One menu entry: a command id (run with `params` when given, else started like a toolbar
 /// click) or a `ui.*` action. `-` is a separator, `#…` a section heading.
@@ -14,7 +91,7 @@ pub struct Item {
     pub label: String,
     pub shortcut: String,
     pub enabled: bool,
-    pub icon: String,
+    pub icon: ItemIcon,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -47,7 +124,7 @@ impl Item {
             label: String::new(),
             shortcut: String::new(),
             enabled: false,
-            icon: String::new(),
+            icon: ItemIcon::default(),
             params: None,
             children: Vec::new(),
             swatch: None,
@@ -60,7 +137,7 @@ impl Item {
             label: label.into(),
             shortcut: String::new(),
             enabled: false,
-            icon: String::new(),
+            icon: ItemIcon::default(),
             params: None,
             children: Vec::new(),
             swatch: None,
@@ -365,7 +442,7 @@ impl Menu {
 pub struct MenuItem<'a> {
     pub id: &'a str,
     pub label: &'a str,
-    pub icon: &'a str,
+    pub icon: Icon<'a>,
     pub shortcut: &'a str,
     pub enabled: bool,
     pub highlighted: bool,
@@ -376,8 +453,19 @@ pub struct MenuItem<'a> {
 }
 
 impl<'a> MenuItem<'a> {
-    pub fn new(id: &'a str, label: &'a str, icon: &'a str) -> Self {
-        Self { id, label, icon, shortcut: "", enabled: true, highlighted: false, checked: None, swatch: None, danger: false, submenu: false }
+    pub fn new(id: &'a str, label: &'a str, icon: impl Into<Icon<'a>>) -> Self {
+        Self {
+            id,
+            label,
+            icon: icon.into(),
+            shortcut: "",
+            enabled: true,
+            highlighted: false,
+            checked: None,
+            swatch: None,
+            danger: false,
+            submenu: false,
+        }
     }
 
     /// The row for a menu entry, `lit` when it is chosen with the keys or its flyout is open. A
@@ -386,7 +474,7 @@ impl<'a> MenuItem<'a> {
         Self {
             id: &item.id,
             label: &item.label,
-            icon: &item.icon,
+            icon: item.icon.as_icon(),
             shortcut: if item.shortcut == "current" { "" } else { &item.shortcut },
             enabled: item.enabled,
             highlighted: lit,
@@ -450,13 +538,11 @@ impl<'a> MenuItem<'a> {
             }
         } else if let Some(color) = self.swatch {
             painter.rect(icon, t.radius_sm, color, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
-        } else if !self.icon.is_empty() {
-            if self.danger {
-                icons::paint_danger(&painter, icon, self.icon, 1.0);
-            } else if hot {
-                icons::paint_ink(&painter, icon, self.icon, dim);
-            } else {
-                icons::paint_icon(&painter, icon, self.icon, 1.0);
+        } else if !self.icon.is_blank() {
+            match self.icon {
+                Icon::Kit(name) if self.danger => icons::paint_danger(&painter, icon, name, 1.0),
+                Icon::Kit(name) if hot => icons::paint_ink(&painter, icon, name, dim),
+                plain => plain.paint_plain(&painter, icon, 1.0),
             }
         }
         let label = solidcraft_ui_text::tr_label(self.label);
@@ -491,6 +577,94 @@ impl<'a> MenuItem<'a> {
 /// A list menu's popup surface, [`LIST_W`] wide, around `add`.
 pub fn menu_frame<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     Menu::show(ui, LIST_W, add)
+}
+
+/// Points per second a scroll bar of [`scroll_rows`] moves the rows while the pointer rests on it.
+const SCROLL_BAR_SPEED: f32 = 480.0;
+
+/// What [`scroll_rows`] remembers between frames under its id: the rows' measured height and
+/// how far they are scrolled.
+#[derive(Clone, Copy, Default)]
+struct ScrollRows {
+    content: f32,
+    offset: f32,
+}
+
+/// `add`'s rows in at most `room` points of height. Rows that fit are drawn as they are. Taller
+/// rows (`estimate` high until they have been measured once) scroll: a full-width bar with an
+/// up chevron above them and one with a down chevron below them scroll while the pointer rests
+/// on them and by a page when clicked, and the wheel scrolls too. A bar is dimmed at its end.
+/// `id` keeps the scroll position, so a menu opened afresh should use a new one.
+pub fn scroll_rows<R>(ui: &mut Ui, id: egui::Id, room: f32, estimate: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let t = Tokens::get();
+    let mut state = ui.ctx().data(|d| d.get_temp::<ScrollRows>(id)).unwrap_or(ScrollRows { content: estimate, offset: 0.0 });
+    let room = if room.is_finite() { room.max(0.0) } else { 0.0 };
+    if !(state.content.is_finite() && state.content > room + 0.5) {
+        // Measure the rows as they are, so a list that grows past the room starts scrolling.
+        let rows = ui.scope(add);
+        state.content = rows.response.rect.height();
+        ui.ctx().data_mut(|d| d.insert_temp(id, state));
+        return rows.inner;
+    }
+    let bar = t.control_height;
+    let view = (room - 2.0 * bar).max(bar);
+    let end = (state.content - view).max(0.0);
+    let dt = ui.input(|i| i.stable_dt).clamp(0.0, 0.1);
+    let mut offset = state.offset.clamp(0.0, end);
+    let up = scroll_bar(ui, id.with("up"), true, offset > 0.5);
+    if up.hovered() {
+        offset -= SCROLL_BAR_SPEED * dt;
+    }
+    if up.clicked() {
+        offset -= view * 0.8;
+    }
+    let offset = offset.clamp(0.0, end);
+    let out = egui::ScrollArea::vertical()
+        .id_salt(id.with("rows"))
+        .max_height(view)
+        .min_scrolled_height(view)
+        .vertical_scroll_offset(offset)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .show(ui, add);
+    let mut offset = out.state.clamped_offset().y;
+    let down = scroll_bar(ui, id.with("down"), false, offset < end - 0.5);
+    if down.hovered() {
+        offset += SCROLL_BAR_SPEED * dt;
+    }
+    if down.clicked() {
+        offset += view * 0.8;
+    }
+    if up.hovered() || down.hovered() {
+        ui.ctx().request_repaint();
+    }
+    let content = out.content_size.y;
+    let content = if content.is_finite() && content > 0.0 { content } else { state.content };
+    ui.ctx().data_mut(|d| d.insert_temp(id, ScrollRows { content, offset: offset.clamp(0.0, (content - view).max(0.0)) }));
+    out.inner
+}
+
+/// One of [`scroll_rows`]' full-width bars: a chevron pointing `up` or down, inert and dimmed
+/// when the rows cannot scroll that way.
+fn scroll_bar(ui: &mut Ui, id: egui::Id, up: bool, active: bool) -> Response {
+    let t = Tokens::get();
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), Sense::hover());
+    let response = ui.interact(r, id, if active { Sense::click() } else { Sense::hover() });
+    let hot = active && response.hovered();
+    if hot {
+        ui.painter().rect_filled(r, t.control_radius, t.accent_soft);
+    }
+    let ink = if hot { t.form_primary } else { t.form_dim };
+    let ink = if active { ink } else { ink.gamma_multiply(0.4) };
+    let c = r.center();
+    let (w, h) = (t.space_8, if up { -t.space_4 } else { t.space_4 });
+    ui.painter().add(egui::Shape::line(vec![c + vec2(-w, -h / 2.0), c + vec2(0.0, h / 2.0), c + vec2(w, -h / 2.0)], Stroke::new(1.5, ink)));
+    let label = if up { "Scroll up" } else { "Scroll down" };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, active, label));
+    solidcraft_ui_registry::publish_target(&format!("menu:scroll_{}", if up { "up" } else { "down" }), r);
+    if active && response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
 }
 
 /// A menu row that acts as a button.
@@ -594,8 +768,10 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                     vec2(t.space_24 + t.space_16 + t.space_4, t.space_24 + t.space_16 + t.space_4),
                 );
                 ui.painter().rect_filled(tile, t.radius_xl.saturating_sub(1), if planned { t.panel_header } else { soft });
-                if !item.icon.is_empty() {
-                    icons::paint_icon(ui.painter(), tile.shrink(t.space_6 + 1.0), &item.icon, if item.enabled { 1.0 } else { 0.35 });
+                let opacity = if item.enabled { 1.0 } else { 0.35 };
+                let icon = item.icon.as_icon();
+                if !icon.is_blank() {
+                    icon.paint_plain(ui.painter(), tile.shrink(t.space_6 + 1.0), opacity);
                 }
                 let text = if item.enabled { t.text } else { t.text_dim };
                 let name = solidcraft_ui_text::tr_label(&item.label);
@@ -701,6 +877,22 @@ pub fn rename_menu(ui: &mut Ui, value: &mut String, focused: &mut bool) -> Optio
 mod tests {
     use super::*;
     use crate::test_support::{key, pointer};
+
+    #[test]
+    fn a_menu_row_draws_a_hosts_texture_and_an_item_still_reads_as_its_kit_name() {
+        const HOST: TextureId = TextureId::User(7);
+        let item = Item { icon: ItemIcon::texture(HOST), ..Item::action("id", "Label", "") };
+        let mut output = crate::test_support::context().run_ui(egui::RawInput::default(), |ui| {
+            MenuItem::new(&item.id, &item.label, item.icon.as_icon()).show(ui);
+        });
+        output.textures_delta.clear();
+        assert!(output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == HOST)));
+
+        assert_eq!(serde_json::to_value(&item.icon).unwrap(), serde_json::json!(""), "a host's picture has no name to report");
+        let named = ItemIcon::from("delete");
+        assert!(named == "delete" && matches!(named.as_icon(), Icon::Kit("delete")));
+        assert_eq!(serde_json::to_value(&named).unwrap(), serde_json::json!("delete"));
+    }
 
     #[test]
     fn menu_navigation_skips_disabled_rows_and_wraps() {

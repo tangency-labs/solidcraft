@@ -429,6 +429,75 @@ impl JointKind {
     }
 }
 
+/// The assembly constraint a joint was made as (`assembly.constraint.create`): the rule in the
+/// words of the Constrain dialog. The joint itself is an ordinary joint of the kind the rule needs
+/// (a mate is planar, a concentric constraint cylindrical); the solver never reads this.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Constraint {
+    /// Two planes against each other (planar), `offset` apart.
+    Mate,
+    /// Two planes facing the same way (planar, flipped), `offset` apart.
+    Flush,
+    /// A plane `offset` from a plane (planar) or a point `offset` from a plane (point on plane).
+    Distance,
+    /// Two axes on one line (cylindrical): B slides and turns along it.
+    Concentric,
+    /// Two round edges at one centre on one axis (revolute): B only turns.
+    Insert,
+    /// Two planes or axes parallel.
+    Parallel,
+    /// Two planes or axes square to each other.
+    Perpendicular,
+    /// Two planes or axes at `angle`.
+    Angle,
+    /// A cylinder resting on a plane (line on plane, `offset` its radius).
+    Tangent,
+    /// A point on an axis (point on line).
+    PointOnAxis,
+}
+
+impl Constraint {
+    pub const ALL: [Constraint; 10] = [
+        Constraint::Mate,
+        Constraint::Flush,
+        Constraint::Distance,
+        Constraint::Concentric,
+        Constraint::Insert,
+        Constraint::Parallel,
+        Constraint::Perpendicular,
+        Constraint::Angle,
+        Constraint::Tangent,
+        Constraint::PointOnAxis,
+    ];
+
+    /// The rule's command name (`mate`, `point_on_axis`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Constraint::Mate => "mate",
+            Constraint::Flush => "flush",
+            Constraint::Distance => "distance",
+            Constraint::Concentric => "concentric",
+            Constraint::Insert => "insert",
+            Constraint::Parallel => "parallel",
+            Constraint::Perpendicular => "perpendicular",
+            Constraint::Angle => "angle",
+            Constraint::Tangent => "tangent",
+            Constraint::PointOnAxis => "point_on_axis",
+        }
+    }
+
+    /// Case, spaces, `_` and `-` are ignored; `coincident` and `axis` are also taken.
+    pub fn parse(s: &str) -> Option<Constraint> {
+        let key = s.to_ascii_lowercase().replace([' ', '_', '-'], "");
+        match key.as_str() {
+            "coincident" => Some(Constraint::Mate),
+            "axis" => Some(Constraint::Concentric),
+            _ => Constraint::ALL.into_iter().find(|c| c.name().replace('_', "") == key),
+        }
+    }
+}
+
 /// A joint between two occurrences.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Joint {
@@ -458,6 +527,21 @@ pub struct Joint {
     /// again whenever the design changes, so a joint follows the parameters it is defined by.
     #[serde(default, skip_serializing_if = "JointExprs::is_empty")]
     pub exprs: JointExprs,
+    /// The values Capture Position saved, which Revert Position puts the joint back to. None in
+    /// files from before captured joint values: such a joint keeps its values on Revert Position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured: Option<Vec<f64>>,
+    /// The assembly constraint it was made as; `None` for a joint made as a joint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<Constraint>,
+}
+
+impl Joint {
+    /// Whether its values start where its parts are when it is made or changed, so B moves no
+    /// further than the joint needs: a relation, or any joint made as an assembly constraint.
+    pub fn starts_where_it_is(&self) -> bool {
+        self.kind.is_relation() || self.constraint.is_some()
+    }
 }
 
 /// Expressions a joint's numbers follow (over the design's parameters): the offset (a length),
@@ -1997,6 +2081,27 @@ fn close_group(
     let bounds = limit_bounds(tree, &vars);
     // Closer than the conflict check needs: 1e-7 mm, and turns of 1e-10 rad across the loop.
     let tol = (1e-10 * scale).min(1e-7);
+    let stored: Vec<f64> = vars.iter().map(|(id, i)| vals.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0)).collect();
+    // A ball joint moves by a turn from where it starts, as in a reach (`BallTurn`), not by its
+    // angles: at pitch 0, where a ball made as built starts, they can't tilt it about its x, and a
+    // loop that needs that tilt can't move (#14852).
+    let balls = reach::ball_turns(tree, &vars, &stored, &bounds);
+    let (mut x0, mut free) = (stored, bounds.clone());
+    for k in balls.iter().flat_map(|b| b.at..b.at + 3) {
+        if let (Some(x), Some(b)) = (x0.get_mut(k), free.get_mut(k)) {
+            (*x, *b) = (0.0, (f64::NEG_INFINITY, f64::INFINITY));
+        }
+    }
+    // The values for the solve's `x`.
+    let values = |x: &[f64]| -> Vec<f64> {
+        let mut v = x.to_vec();
+        for b in &balls {
+            if let (Some(q), Some(slot)) = (b.values(x), v.get_mut(b.at..b.at + 3)) {
+                slot.copy_from_slice(&q);
+            }
+        }
+        v
+    };
     // The values with the held ones `t` of the way along (and the unknowns at `x`).
     let place = |work: &mut Values, x: &[f64], t: f64| {
         for (id, i, from, to) in moves {
@@ -2004,20 +2109,27 @@ fn close_group(
                 *slot = from + (to - from) * t;
             }
         }
-        for ((id, i), (v, (lo, hi))) in vars.iter().zip(x.iter().zip(&bounds)) {
+        for ((id, i), (v, (lo, hi))) in vars.iter().zip(values(x).iter().zip(&bounds)) {
             if let Some(slot) = work.get_mut(id).and_then(|q| q.get_mut(*i)) {
                 *slot = v.max(*lo).min(*hi);
             }
         }
         apply_links(asm, work);
     };
-    let x0: Vec<f64> = vars.iter().map(|(id, i)| vals.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0)).collect();
     // Steps that move no value around the loops (links included) more than 5 degrees or a
     // twentieth of the loops' size.
     // How many such steps apart two sets of values are, over the loops' values.
     let stride = |a: &Values, b: &Values| -> f64 {
         let mut most = 0.0f64;
         for j in around.iter().filter_map(|id| tree.joints.get(id)) {
+            if j.kind == JointKind::Ball {
+                // A ball joint by how far it turns.
+                let three = |v: &Values| v.get(&j.id).and_then(|q| Some([*q.first()?, *q.get(1)?, *q.get(2)?]));
+                if let (Some(p), Some(q)) = (three(a), three(b)) {
+                    most = most.max(reach::ball_turn_between(p, q) / 5f64.to_radians());
+                }
+                continue;
+            }
             for i in 0..j.kind.dofs().len() {
                 let (Some(p), Some(q)) = (a.get(&j.id).and_then(|v| v.get(i)), b.get(&j.id).and_then(|v| v.get(i))) else { continue };
                 let step = if j.kind.is_angle(i) { 5f64.to_radians() } else { 0.05 * scale };
@@ -2060,7 +2172,7 @@ fn close_group(
     let mut x = x0;
     let start = largest(&gaps(&x, 0.0)?);
     let loose = loose_gap(scale);
-    let tol = match close_within(&mut |x| gaps(x, 0.0), &mut x, &bounds, tol, loose)? {
+    let tol = match close_within(&mut |x| gaps(x, 0.0), &mut x, &free, tol, loose)? {
         t if t > tol && moves.is_empty() && start <= t => return Some(BTreeMap::new()),
         t => t,
     };
@@ -2074,7 +2186,7 @@ fn close_group(
         let mut trial = x.clone();
         // Each step as closed as the start, or within the conflict check where the loop's gap
         // grows as it moves (axes a hair out of parallel, #6211).
-        if close_within(&mut |x| gaps(x, t1), &mut trial, &bounds, tol, loose).is_some() {
+        if close_within(&mut |x| gaps(x, t1), &mut trial, &free, tol, loose).is_some() {
             // A step that moved some loop value too far (through a link and a limit, or close to
             // a dead point) is taken again in halves.
             let next = effective(&trial, t1);
@@ -2095,7 +2207,7 @@ fn close_group(
     // The values that changed from what is stored.
     let moved = vars
         .iter()
-        .zip(&x)
+        .zip(&values(&x))
         .filter(|((id, i), v)| tree.joints.get(id).is_some_and(|j| j.values.get(*i).is_none_or(|s| (s - *v).abs() > 1e-12)))
         .map(|(var, v)| (*var, *v))
         .collect();
@@ -2523,6 +2635,11 @@ impl Document {
         let t = if o.occurrence == 0 { IDENTITY } else { occurrence_world(self, o.occurrence) };
         Ok(mat_mul(&t, &f))
     }
+
+    /// The radius of the round face a circle origin is on (mm; an error when it is on none).
+    pub fn origin_radius(&self, st: &ModelState, o: &JointOrigin) -> Result<f64> {
+        circle_at(self, st, o).map(|c| c.radius)
+    }
 }
 
 #[path = "joints_cam.rs"]
@@ -2751,6 +2868,8 @@ mod tests {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                captured: None,
+                constraint: None,
             })
             .collect();
         let links =

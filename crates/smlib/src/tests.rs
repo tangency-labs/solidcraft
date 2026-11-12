@@ -95,7 +95,7 @@ const NO_KERNEL: [&str; 14] = [
     "hold_a_kernel",
 ];
 
-const ANSWERING: [&str; 64] = [
+const ANSWERING: [&str; 66] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -133,6 +133,7 @@ const ANSWERING: [&str; 64] = [
     "stitch",
     "offset_sheet",
     "classify_point",
+    "classify_points",
     "mass_properties",
     "bounds",
     "edge_face_distance",
@@ -141,6 +142,7 @@ const ANSWERING: [&str; 64] = [
     "tagged",
     "history",
     "check",
+    "check_owned",
     "make_cylinder",
     "make_sphere",
     "make_cone",
@@ -250,6 +252,7 @@ fn every_entry_point_answers() {
     says("stitch", sheet.stitch(0.1));
     says("offset_sheet", sheet.offset_sheet(1.0));
     says("classify_point", a.classify_point([1.0; 3]));
+    says("classify_points", a.classify_points(&[[1.0; 3], [f64::NAN; 3]]));
     says("mass_properties", a.mass_properties(1e-6));
     says("bounds", a.bounds());
     says("edge_face_distance", a.edge_face_distance(0, 0));
@@ -257,6 +260,7 @@ fn every_entry_point_answers() {
     says("is_manifold_solid", a.is_manifold_solid());
     says("history", says("tagged", a.tagged(0)).unwrap().history());
     says("check", a.check(CheckLevel::All));
+    says("check_owned", a.try_clone().and_then(|c| c.check_owned(CheckLevel::All)));
     says("make_cylinder", Brep::make_cylinder([0.0; 3], 1.0, 1.0));
     says("make_sphere", Brep::make_sphere([0.0; 3], 1.0));
     says("make_cone", Brep::make_cone([0.0; 3], 2.0, 1.0, 1.0));

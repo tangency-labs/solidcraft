@@ -4,9 +4,10 @@
 //! cache to the exact document, and to the source, platform and geometry kernel that computed it
 //! (docs/design-container.md).
 use super::*;
+use sha2::{Digest, Sha256};
 use solidcraft_doc::{ModelState, SavedModel};
 
-const FORMAT: &str = "solidcraft-model-cache/9";
+const FORMAT: &str = "solidcraft-model-cache/10";
 const PRODUCER: &str = "solidcraft-truck-adapter/4";
 const MANIFEST: &str = "cache/model.json";
 const PAYLOAD: &str = "cache/bodies.bin";

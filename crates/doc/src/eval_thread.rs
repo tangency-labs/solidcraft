@@ -883,7 +883,7 @@ fn cut_with_flanks(
             kernel::boolean(&input.body, &sleeve, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("narrowing the hole removed everything".into()))?;
         let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
         let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&filled, &[&l, &unnamed]));
-        input = Traced { body: filled, lineage };
+        input = Traced { body: filled, lineage, recipe: None };
         groove_radius = r_min;
     }
     // The exact grooves: SMLib's screw sweeps, cut by one B-rep boolean.
@@ -905,7 +905,7 @@ fn cut_with_flanks(
                     kernel::boolean(&input.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
                 let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
                 let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&cut, &[&l, &unnamed]));
-                input = Traced { body: cut, lineage };
+                input = Traced { body: cut, lineage, recipe: None };
             }
         }
         Ok(input)
@@ -957,10 +957,10 @@ fn cut_with_flanks(
     // The groove's faces have no role to name them by.
     let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
     let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
-    let nb = Traced { body: nb, lineage };
+    let nb = Traced { body: nb, lineage, recipe: None };
     let nb = if continuous_flanks { nb } else { chamfer(nb)? };
     if let Some(slot) = st.bodies.get_mut(i) {
-        *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+        *slot = mb.remade(nb);
     }
     Ok(note)
 }

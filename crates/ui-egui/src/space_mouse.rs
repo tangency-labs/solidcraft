@@ -199,7 +199,7 @@ fn buttons_active(app: &SolveApp, ctx: &egui::Context, focused: bool) -> bool {
         && app.space_mouse.calibrating.is_none()
         && !app.home.open
         && !app.file_picker_busy()
-        && !app.file_load.busy()
+        && !app.file_load_holds()
         // The keyboard shortcuts wait for a report draft too (`SolveApp::logic`).
         && app.issue_report.draft.is_none()
         && !crate::keymap::capturing(app)

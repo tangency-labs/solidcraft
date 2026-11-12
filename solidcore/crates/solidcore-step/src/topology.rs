@@ -421,7 +421,7 @@ fn read_with<'a>(
         skipped |= any;
         shells.push(faces);
     }
-    b.finish(item, name, shells, if skipped { Kind::Open } else { kind })
+    b.finish(item, name, shells, if skipped { Kind::Open { voids: kind == Kind::Voids } } else { kind })
 }
 
 /// A face of a solid read on its own ([`read_faces_with`]).
@@ -550,8 +550,12 @@ enum Kind {
     Solid,
     Voids,
     Model,
-    /// A solid with faces left out ([`read_solid_without`]): its shells are sheets only.
-    Open,
+    /// A solid with faces left out ([`read_solid_without`]): its shells are sheets, but for a
+    /// shell still closed, which bounds a region of its own (a void's cavity, where `voids`: the
+    /// solid's shells after the first are its voids).
+    Open {
+        voids: bool,
+    },
 }
 
 /// A curve the edge can be read on, and how its parameter relates to its vertices.
@@ -1335,9 +1339,16 @@ impl<'b, 'a> Builder<'b, 'a> {
                     regions.push(Region { shells: vec![index(v)?], void: true });
                 }
             }
-            Kind::Open => {
+            Kind::Open { voids } => {
                 if let Some(r) = regions.first_mut() {
                     r.shells = (0..index(shells.len())?).collect();
+                }
+                // A closed shell bounds two regions: the cavity inside a void still whole, or
+                // the inside of an outer shell or a model's shell still whole.
+                for (k, c) in closed.iter().enumerate() {
+                    if *c {
+                        regions.push(Region { shells: vec![index(k)?], void: voids && k > 0 });
+                    }
                 }
             }
             Kind::Model => {
@@ -1351,7 +1362,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 }
             }
         }
-        let sheet = kind == Kind::Open || !closed.iter().any(|c| *c);
+        let sheet = matches!(kind, Kind::Open { .. }) || !closed.iter().any(|c| *c);
 
         // Canonical order: faces walking regions → shells → oriented faces.
         let nf = self.faces.len();
@@ -1548,21 +1559,32 @@ impl<'b, 'a> Builder<'b, 'a> {
         std::iter::once(outer).chain((0..face.loops.len()).filter(|l| *l != outer)).collect()
     }
 
-    /// A face's box on its label over its edge loops (`crate::kernel::form::extent`); `None` where the
-    /// boundary does not project onto it.
+    /// A face's box on its label over its edge loops (`crate::kernel::form::extent`), a boundary
+    /// point on a pole within the face's tolerance (the largest of its edges' and vertices': a
+    /// cone's apex or a sphere's pole a file places a few µm off); `None` where the boundary does
+    /// not project onto it.
     fn face_extent(&self, fi: usize) -> R<Option<[[f64; 2]; 2]>> {
         let face = self.faces.get(fi).ok_or("face reference")?;
-        let mut boundary = Vec::with_capacity(face.loops.len());
+        let vertex_tolerance = |v: u32| self.vertices.get(v as usize).map(|x| x.tolerance).ok_or("vertex reference");
+        let (mut boundary, mut reach) = (Vec::with_capacity(face.loops.len()), self.tol);
         for l in &face.loops {
-            let LoopB::Edges(es) = l else { continue };
+            let es = match l {
+                LoopB::Edges(es) => es,
+                LoopB::Vertex(v) => {
+                    reach = reach.max(vertex_tolerance(*v)?);
+                    continue;
+                }
+            };
             let mut b = Vec::with_capacity(es.len());
             for &(e, forward) in es {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let [v0, v1] = edge.vertices;
+                reach = reach.max(edge.tolerance).max(vertex_tolerance(v0)?).max(vertex_tolerance(v1)?);
                 b.push((&edge.curve, edge.interval, forward));
             }
             boundary.push(b);
         }
-        Ok(crate::kernel::form::extent(&face.surface, &boundary))
+        Ok(crate::kernel::form::extent(&face.surface, &boundary, reach))
     }
 
     /// The pcurves of a face's edge loops (in its edge-loop order), its domain, whether it was
@@ -1593,13 +1615,14 @@ impl<'b, 'a> Builder<'b, 'a> {
                     None => self.face_extent(fi)?,
                 };
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                Some(crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
+                let (f, d) = crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?;
+                Some((f, d, extent))
             }
             None => None,
         };
-        let (form, box_on_form) = match form {
-            Some((f, d)) => (Some(f), Some(d)),
-            None => (None, None),
+        let (form, box_on_form, extent) = match form {
+            Some((f, d, e)) => (Some(f), Some(d), Some(e)),
+            None => (None, None, None),
         };
         let surface = form.clone().unwrap_or_else(|| label.clone());
         // How far each edge lies off this surface, so its closed form is checked at that.
@@ -1618,8 +1641,14 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             _ => None,
         };
-        let pcs =
+        let mut pcs =
             pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
+        // A form ends on a quarter line its face's boundary runs past by up to the tolerance: the
+        // pcurves are put on its range, as the face's domain is ([`face_domain`]), and the edges'
+        // tolerances cover the move.
+        if let (Some(f), Some(e)) = (&form, extent) {
+            onto_form(f, &label, e, tol, &mut pcs);
+        }
         self.raise_edges(&surface, &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
@@ -1871,6 +1900,72 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
     (area.abs() > 1e-9 * magnitude && magnitude > 0.0).then_some(0.5 * area)
 }
 
+/// The angles `tolerance` (mm) makes along the two directions of a face on `label` over the
+/// height `v`: on the widest circle of the face about the axis (a cylinder or cone), and on a
+/// sphere's meridian or a torus's tube. `form::surface_within` ends a face's form on a quarter
+/// line its domain ends within these angles of; zero along a direction that is no angle.
+fn form_reach(label: &BSurface, v: [f64; 2], tolerance: f64) -> [f64; 2] {
+    let reach = |radius: f64| if tolerance > 0.0 && radius > 0.0 && radius.is_finite() { tolerance / radius } else { 0.0 };
+    match label {
+        BSurface::Cylinder { radius, .. } => [reach(radius.abs()), 0.0],
+        BSurface::Cone { radius_at_origin, half_angle, .. } => {
+            let slope = half_angle.tan();
+            [reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), 0.0]
+        }
+        BSurface::Sphere { radius, .. } => [reach(radius.abs()), reach(radius.abs())],
+        BSurface::Torus { major_radius, minor_radius, .. } => [reach(major_radius.abs() + minor_radius.abs()), reach(minor_radius.abs())],
+        _ => [0.0, 0.0],
+    }
+}
+
+/// A face's pcurves on the form `form::surface_within` made for it (`form`, over `domain` on
+/// the label `label`), put on the form's range. Where the domain ends within `tolerance` of a
+/// quarter's end the form ends there, but the boundary still lies where its edges do, as much as
+/// `tolerance` past it: a pcurve control point past the form's end by no more than the form
+/// parameter of that angle (less than the angle: a quarter's parameter changes by at most 1/√2
+/// per radian, [`form_reach`]) is moved onto the end. A B-spline is a convex combination of its
+/// control points, so each pcurve then lies on the form, and the face's domain, which ends at
+/// the form's, holds it; the pcurve moves by no more than its points did, a gap the edges'
+/// tolerances are measured to cover (`raise_edges`). A point further out is left as it is, for
+/// the record check to refuse. The number of control point coordinates moved.
+fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2], tolerance: f64, pcs: &mut [Vec<Curve2>]) -> usize {
+    let reach = form_reach(label, domain[1], tolerance);
+    let ranges = solidcore_ops::label::surface_natural(form);
+    let mut moved = 0;
+    let mut onto = |p: &mut [f64; 2]| {
+        for (d, reach) in reach.iter().enumerate() {
+            let (Some(Natural::Range(a, b)), Some(x)) = (ranges.get(d), p.get_mut(d)) else { continue };
+            let end = if *x < *a {
+                *a
+            } else if *x > *b {
+                *b
+            } else {
+                continue;
+            };
+            if (*x - end).abs() <= *reach {
+                *x = end;
+                moved += 1;
+            }
+        }
+    };
+    for c in pcs.iter_mut().flatten() {
+        match c {
+            Curve2::Spline { points, .. } => points.iter_mut().for_each(&mut onto),
+            Curve2::RationalSpline { homogeneous, .. } => {
+                for h in homogeneous.iter_mut().filter(|h| h[2] > 0.0) {
+                    let mut p = [h[0] / h[2], h[1] / h[2]];
+                    let before = p;
+                    onto(&mut p);
+                    if p != before {
+                        (h[0], h[1]) = (p[0] * h[2], p[1] * h[2]);
+                    }
+                }
+            }
+        }
+    }
+    moved
+}
+
 /// The parameter box around every pcurve's control points, padded a little, within the
 /// surface's natural domain (at most one turn where periodic).
 fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
@@ -1915,7 +2010,15 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
                 y = y.min(*n1);
                 if x < y && y - x < OPEN_DOMAIN_SPAN {
                     let span = OPEN_DOMAIN_SPAN.min(*n1 - *n0);
-                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, *n1 - span);
+                    // the box's latest start: the range's own where the range is narrower than
+                    // the span (`n1 - span` there is `n0`, which rounding may put below it)
+                    let last = if span < OPEN_DOMAIN_SPAN { *n0 } else { *n1 - span };
+                    // the range is the surface's, from the file: refused where it leaves no
+                    // room (crossed, or not a number), never clamped into one
+                    if !(*n0 <= last) {
+                        return Err(format!("a face's natural range [{n0}, {n1}] leaves no room for a box {span} across"));
+                    }
+                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, last);
                     (x, y) = (lo, (lo + span).min(*n1));
                 }
             }
@@ -1968,23 +2071,47 @@ fn map_bspline_curve(b: &BSplineCurve) -> R<BCurve> {
             b.points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect()
         }
     };
-    // An unclamped knot vector (a periodic curve written with uniform knots, its first points
-    // repeated at its end) is the same curve over [knots[p], knots[n]] clamped there, exactly
-    // (knot insertion): its parameters unchanged, its ends its own points, as every evaluator
-    // and pcurve takes a spline.
-    let (p, n) = (b.degree, homogeneous.len());
-    let (lo, hi) = (knots.get(p).copied(), knots.get(n).copied());
-    let clamped = |at: &[f64], x: Option<f64>| x.is_some_and(|x| at.iter().all(|k| *k == x));
-    let (knots, homogeneous) = match (knots.get(..=p), knots.get(n..), lo, hi) {
-        (Some(head), Some(tail), Some(a), Some(z)) if !(clamped(head, lo) && clamped(tail, hi)) => {
-            solidcore::eval::pcurve::segment(p, &knots, &homogeneous, a, z).map_err(|e| format!("an unclamped B-spline curve: {e}"))?
-        }
-        _ => (knots, homogeneous),
-    };
+    let (knots, homogeneous) = clamped(b.degree, knots, homogeneous).map_err(|e| format!("an unclamped B-spline curve: {e}"))?;
     Ok(match &b.weights {
         None => BCurve::Spline { knots, points: homogeneous.iter().map(|h| [h[0], h[1], h[2]]).collect() },
         Some(_) => BCurve::RationalSpline { knots, homogeneous },
     })
+}
+
+/// A spline of `degree` on `knots` over `homogeneous` control points with an unclamped knot
+/// vector (a periodic spline written with uniform knots, its first points repeated at its end) as
+/// the same spline over [knots[degree], knots[n]] clamped there, exactly (knot insertion): its
+/// parameters unchanged, its ends its own points, as every evaluator and pcurve takes a spline,
+/// and a closed one's first and last points one. A clamped one comes back as it is.
+fn clamped(degree: usize, knots: Vec<f64>, homogeneous: Vec<[f64; 4]>) -> Result<(Vec<f64>, Vec<[f64; 4]>), String> {
+    let (p, n) = (degree, homogeneous.len());
+    let (lo, hi) = (knots.get(p).copied(), knots.get(n).copied());
+    let repeats = |at: &[f64], x: Option<f64>| x.is_some_and(|x| at.iter().all(|k| *k == x));
+    match (knots.get(..=p), knots.get(n..), lo, hi) {
+        (Some(head), Some(tail), Some(a), Some(z)) if !(repeats(head, lo) && repeats(tail, hi)) => {
+            solidcore::eval::pcurve::segment(p, &knots, &homogeneous, a, z).map_err(|e| e.to_string())
+        }
+        _ => Ok((knots, homogeneous)),
+    }
+}
+
+/// Each of `lines`, a spline of `degree` on `knots`, clamped ([`clamped`]), and the knots they
+/// share after it.
+fn clamped_lines(degree: usize, knots: Vec<f64>, lines: Vec<Vec<[f64; 4]>>) -> R<(Vec<f64>, Vec<Vec<[f64; 4]>>)> {
+    let mut out = Vec::new();
+    let mut shared = None;
+    for line in lines {
+        let (k, c) = clamped(degree, knots.clone(), line).map_err(|e| format!("an unclamped B-spline surface: {e}"))?;
+        shared = Some(k);
+        out.push(c);
+    }
+    Ok((shared.unwrap_or(knots), out))
+}
+
+/// `grid`'s columns as rows.
+fn transposed(grid: &[Vec<[f64; 4]>]) -> Vec<Vec<[f64; 4]>> {
+    let width = grid.first().map_or(0, Vec::len);
+    (0..width).map(|j| grid.iter().filter_map(|r| r.get(j).copied()).collect()).collect()
 }
 
 fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
@@ -1995,16 +2122,28 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
     if b.points.iter().any(|r| r.len() != nv) {
         return Err("ragged B-spline surface".into());
     }
+    if let Some(w) = &b.weights
+        && (w.len() != nu || w.iter().any(|r| r.len() != nv))
+    {
+        return Err("B-spline surface weights and points differ in number".into());
+    }
+    // Control point (i, j) is row i (along u), entry j (along v), homogeneous.
+    let weight = |i: usize, j: usize| b.weights.as_ref().and_then(|w| w.get(i)?.get(j).copied()).unwrap_or(1.0);
+    let homogeneous = |i: usize, j: usize, p: &[f64; 3]| {
+        let w = weight(i, j);
+        [p[0] * w, p[1] * w, p[2] * w, w]
+    };
+    let rows: Vec<Vec<[f64; 4]>> =
+        b.points.iter().enumerate().map(|(i, r)| r.iter().enumerate().map(|(j, p)| homogeneous(i, j, p)).collect()).collect();
+    // Unclamped knots in either direction are clamped exactly, line by line: every row is a
+    // spline in v on the v knots, every column one in u on the u knots, and inserting the same
+    // knots into each gives the surface's.
+    let (v_knots, rows) = clamped_lines(b.v_degree, v_knots, rows)?;
+    let (u_knots, columns) = clamped_lines(b.u_degree, u_knots, transposed(&rows))?;
+    let rows = transposed(&columns);
     Ok(match &b.weights {
-        None => BSurface::Spline { u_knots, v_knots, points: b.points.clone() },
-        Some(w) => {
-            if w.len() != nu || w.iter().any(|r| r.len() != nv) {
-                return Err("B-spline surface weights and points differ in number".into());
-            }
-            let homogeneous =
-                b.points.iter().zip(w).map(|(row, wr)| row.iter().zip(wr).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect()).collect();
-            BSurface::RationalSpline { u_knots, v_knots, homogeneous }
-        }
+        None => BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() },
+        Some(_) => BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows },
     })
 }
 

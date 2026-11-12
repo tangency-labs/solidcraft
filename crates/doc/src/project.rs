@@ -618,7 +618,8 @@ fn circular(samples: &[Vec2]) -> Option<(LinkGeom, f64)> {
         sweep += d;
     }
     let turn = sweep.abs();
-    if turn > std::f64::consts::TAU + 1e-6 || turn < CIRCLE_MIN_TURN {
+    // A NaN turn is not refused here, as before.
+    if !turn.is_nan() && !(CIRCLE_MIN_TURN..=std::f64::consts::TAU + 1e-6).contains(&turn) {
         return None;
     }
     if first.dist(last) <= tol {
@@ -1341,7 +1342,16 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Vec
             (Some(c), Some(m)) => vec![LinkGeom::Ellipse { c: map(c), major: map(m), minor: *r }],
             _ => Vec::new(),
         },
-        Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) if parallel => {
+        Some(CurveKind::Spline { pts, control: false, periodic, nurbs: None, handles, .. }) if parallel && !handles.is_empty() => {
+            let p: Option<Vec<Vec2>> = pts.iter().map(|q| sk.point(*q).map(map)).collect();
+            let tangent_handles: Option<Vec<Vec2>> = handles.iter().map(|q| sk.point(*q).map(map)).collect();
+            let Some((p, tangent_handles)) = p.zip(tangent_handles) else { return Vec::new() };
+            // One curve per span whether or not a handle has been moved, so turning a handle keeps
+            // the projected layout and what is constrained to it (#6502).
+            let Ok(pieces) = solidcraft_sketch::fit_beziers_with_handles(&p, &tangent_handles, *periodic) else { return Vec::new() };
+            pieces.into_iter().map(|piece| LinkGeom::Spline { pts: piece.to_vec(), control: true, degree: 3, periodic: false, nurbs: None }).collect()
+        }
+        Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, handles, .. }) if parallel && handles.is_empty() => {
             let p: Option<Vec<Vec2>> = pts.iter().map(|q| sk.point(*q).map(map)).collect();
             p.map(|pts| vec![LinkGeom::Spline { pts, control: *control, degree: *degree, periodic: *periodic, nurbs: nurbs.clone() }])
                 .unwrap_or_default()
@@ -1488,9 +1498,15 @@ const MESH_POLYGON_CORNERS: usize = 12;
 /// [`MESH_POLYGON_CORNERS`], all on one circle, is a tessellated circle, an ellipse on a slanted
 /// plane; and the sides of a polygon stay lines, never one fitted spline (#13464). A mesh file
 /// keeps its corners in single precision, so they lie on the circle within about 1e-7 of their
-/// size, not of the circle's.
+/// distance from the origin, not of the circle's size; and never more loosely than 1e-4 of the
+/// outline's own size, so a small outline far from the origin is not taken for a circle it misses.
 fn fit_mesh_outline(plane: &Plane, pts: &[Vec3]) -> Vec<LinkGeom> {
-    let within = pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6;
+    let (lo, hi) = pts.iter().fold(
+        (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY)),
+        |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+    );
+    let size = lo.dist(hi);
+    let within = (pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6).min(size * 1e-4);
     if pts.len() > MESH_POLYGON_CORNERS + 1
         && let Some(e) = tilted_circle(plane, pts, Some(within))
     {

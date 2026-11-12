@@ -63,7 +63,10 @@
 //! piece whose bound exceeds the tolerance is halved at the rail's middle parameter, and its new
 //! node is the rail's point there found on the surface (by projection, not trusted), so the
 //! correspondence follows the rail piece by piece; at most [`MAX_HALVINGS`] halvings, and at
-//! most [`MAX_SEGMENTS`] pieces in all. The largest bound over the pieces is returned: the
+//! most [`MAX_SEGMENTS`] pieces in all (past them the span is not proved: an infinite bound).
+//! A piece whose rail middle is itself farther than the tolerance from the surface (by its
+//! projection, which only steers here) is not halved: no correspondence brings it within the
+//! tolerance, and its bound stands. The largest bound over the pieces is returned: the
 //! caller decides (a station there, or a refusal).
 //!
 //! Deviations: not upstream. No recursion: the intervals wait on a work list.
@@ -454,9 +457,12 @@ pub fn span_bound(
     }];
     let mut budget = MAX_SEGMENTS;
     while let Some(seg) = work.pop() {
-        budget = budget
-            .checked_sub(1)
-            .ok_or_else(|| failed("a span's correspondence past its most pieces"))?;
+        // past its most pieces the span is not proved: an infinite bound (the caller adds a
+        // station there, or refuses)
+        let Some(left) = budget.checked_sub(1) else {
+            return Ok(f64::INFINITY);
+        };
+        budget = left;
         if let Some(parts) = cut(seg, &pieces, &rail_knots) {
             work.extend(parts);
             continue;
@@ -480,9 +486,16 @@ pub fn span_bound(
         )? + slack;
         if bound > tol && seg.depth < MAX_HALVINGS {
             // the rail's middle found on the surface: the new node (its line midpoint where the
-            // projection fails)
+            // projection fails). Where the rail's middle is itself farther than the tolerance
+            // from the surface, no correspondence can bring the piece within it: halving would
+            // only spend pieces, so the piece's bound stands (the caller adds a station there).
             let q = rail_curve.evaluate_point(k, t_mid)?;
-            let uv = node_on(k, surf, q).map_or(uv_mid, |(uv, _)| uv);
+            let found = node_on(k, surf, q).ok();
+            if found.is_some_and(|(_, d)| d > tol) {
+                worst = worst.max(bound);
+                continue;
+            }
+            let uv = found.map_or(uv_mid, |(uv, _)| uv);
             let depth = seg.depth + 1;
             work.push(Segment {
                 uv0: seg.uv0,

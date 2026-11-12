@@ -20,6 +20,8 @@ appearance.paste                  appearance only: colours and textures
 appearance.pick_up                appearance only: colours and textures
 appearance.replace                appearance only: colours and textures
 assembly.bom                      a bill of materials report
+assembly.constraint.create        assembly placement: tested in joints_relations_tests.rs
+assembly.constraint.edit          assembly placement: tested in joints_relations_tests.rs
 body.rename                       a body name
 browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
@@ -54,6 +56,9 @@ component.replace_with_link       component links
 component.show_history            the History bar: which features it lists
 component.unlock                  component locking
 component.update_links            component links
+construct.axis                    builds with the first construct.axis.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
+construct.plane                   builds with the first construct.plane.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
+construct.point                   builds with the first construct.point.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
 diagnostics.crash_report          crash reports
 diagnostics.crash_reports         crash reports
 diagnostics.crash_reports.clear   crash reports
@@ -118,6 +123,10 @@ motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
 motion.export_animation           writes an animation
 motion.list                       a listing of motion studies
+note.add                          notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
+note.delete                       notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
+note.list                         notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
+note.update                       notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
 panel.action                      controller actions; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
 panel.activate                    application panel layout; no geometry (engine/UI/MCP tests)
 panel.close                       application panel layout; no geometry (engine/UI/MCP tests)
@@ -319,8 +328,10 @@ sketch.slot.arc_three_point       2D sketch only (the sketch solver and engine t
 sketch.slot.center_point          2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.snap                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.solve                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.spline.handles             2D sketch only (crates/engine/src/cmd/sketch_create.rs: fit_spline_handles_are_visible_lines_and_accept_existing_constraints); no kernel operation
 sketch.spline.insert_point        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.remove_point        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.spline.reset_handles       2D sketch only (crates/engine/src/cmd/sketch_create.rs: blend_tests::reset_tangent_handles_gives_back_the_spline_through_its_fit_points); no kernel operation
 sketch.spline.reverse             2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.toggle_diameter            2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.toggle_driven              2D sketch only (the sketch solver and engine tests); no kernel operation

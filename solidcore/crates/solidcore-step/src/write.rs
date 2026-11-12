@@ -30,7 +30,8 @@ pub fn real(x: f64) -> String {
     }
 }
 
-/// A string literal: quotes doubled, non-ASCII as `\X2\` UTF-16 runs.
+/// A string literal: quotes doubled, non-ASCII as `\X2\` runs (UCS-2, four hex digits) for the
+/// Basic Multilingual Plane and `\X4\` runs (eight hex digits) above it.
 pub fn string(s: &str) -> String {
     let mut o = String::from("'");
     for c in s.chars() {
@@ -39,13 +40,11 @@ pub fn string(s: &str) -> String {
             '\\' => o.push_str("\\\\"),
             c if c.is_ascii() && !c.is_ascii_control() => o.push(c),
             c if c.is_ascii_control() => {}
+            c if u32::from(c) <= 0xFFFF => {
+                let _ = write!(o, "\\X2\\{:04X}\\X0\\", u32::from(c));
+            }
             c => {
-                o.push_str("\\X2\\");
-                let mut buf = [0u16; 2];
-                for u in c.encode_utf16(&mut buf) {
-                    let _ = write!(o, "{u:04X}");
-                }
-                o.push_str("\\X0\\");
+                let _ = write!(o, "\\X4\\{:08X}\\X0\\", u32::from(c));
             }
         }
     }

@@ -208,7 +208,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
         let action = chrome.show(ui, r, |ui, content| {
             // While a file loads the design waits: no menus or commands from the bar.
-            let idle = !app.file_load.busy();
+            let idle = !app.file_load_holds();
             // Save, Undo and Redo use the same actions as the File menu and shortcuts.
             let shown = design_shown(app) && idle;
             let tip = |id: &str, key: &str| {
@@ -370,13 +370,13 @@ impl FileAction {
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
-        !app.file_picker_busy() && !app.file_load.busy() && !behind_report && (!needs_design || design_shown(app)) && available
+        !app.file_picker_busy() && !app.file_load_holds() && !behind_report && (!needs_design || design_shown(app)) && available
     }
 
     /// Whether the native menu offers this action: while a widget has keyboard focus (a report's
     /// text field too), its Undo and Redo go to that widget instead of the design.
     pub fn menu_enabled(&self, app: &SolveApp, keyboard_focus: bool) -> bool {
-        self.enabled(app) || (matches!(self, Self::Undo | Self::Redo) && keyboard_focus && !app.file_picker_busy() && !app.file_load.busy())
+        self.enabled(app) || (matches!(self, Self::Undo | Self::Redo) && keyboard_focus && !app.file_picker_busy() && !app.file_load_holds())
     }
 
     /// Execute through the same document, save-job and preferences paths as the toolbar.
@@ -459,18 +459,18 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     recent.push(FileRow::Separator);
     recent.push(button("clear_recent", app.tr("ui.clear_recent"), "delete", None));
     rows.push(FileRow::Sub { label: app.tr("ui.open_recent").to_string(), rows: recent });
-    rows.push(row("file.insert_step", "Insert STEP…", "", "import", shown));
-    rows.push(row("file.insert_mesh", "Insert Mesh…", "", "import", shown));
+    rows.push(row("file.insert_step", &format!("{}…", app.tr_label("Insert STEP")), "", "import", shown));
+    rows.push(row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown));
     rows.push(row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown));
     rows.push(row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown));
     rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown));
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
-    rows.push(row("save_json", "Save As JSON…", "", "save", true));
+    rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
     // The browser build: a copy as a downloaded file, whatever Save does.
     if app.services.download_design.is_some() {
-        rows.push(row("download", "Download design", "", "export", shown));
+        rows.push(row("download", app.tr_label("Download design"), "", "export", shown));
     }
     if app.services.browser_files.is_some() {
         rows.push(row("browser_files", "Files in this browser…", "", "open", true));
@@ -478,14 +478,15 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     // Each format's item runs its own command, so it shows that command's key.
     let key = |id: &str| crate::keymap::effective(app, id).unwrap_or_default();
-    rows.push(row("file.export_stl", "Export STL…", &key("file.export_stl"), "mesh_export", shown));
-    rows.push(row("file.export_3mf", "Export 3MF…", &key("file.export_3mf"), "mesh_export", shown));
-    rows.push(row("file.send_to_slicer", "Send to Slicer", "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)));
-    rows.push(row("file.export_step", "Export STEP…", &key("file.export_step"), "export", shown));
+    rows.push(row("file.export_stl", app.tr_label("Export STL…"), &key("file.export_stl"), "mesh_export", shown));
+    rows.push(row("file.export_3mf", app.tr_label("Export 3MF…"), &key("file.export_3mf"), "mesh_export", shown));
+    rows.push(row("file.send_to_slicer", app.tr("cmd.file_send_to_slicer"), "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)));
+    rows.push(row("file.export_step", app.tr_label("Export STEP…"), &key("file.export_step"), "export", shown));
     rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
-    rows.push(row("file.export_obj", "Export OBJ…", &key("file.export_obj"), "export", shown));
-    rows.push(row("file.export_urdf", "Export URDF…", &key("file.export_urdf"), "export", shown));
-    rows.push(row("export_json", "Export Design as JSON…", "", "export", true));
+    rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
+    rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
+    rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
+    rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
@@ -531,6 +532,7 @@ fn run_file_row(app: &mut SolveApp, id: &str) {
                 show();
             }
         }
+        "export_glb" => FileAction::Export("glb").run(app),
         "export_json" => FileAction::Export("json").run(app),
         "install" => {
             if let Some(offer) = crate::install::offered(app) {
@@ -2228,7 +2230,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         app.viewport.key_hold = None;
     }
-    if app.file_load.busy() {
+    if app.file_load_holds() {
         return;
     }
     if crate::viewport_status::enabled(app)

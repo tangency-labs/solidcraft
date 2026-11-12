@@ -145,6 +145,7 @@ fn kind(s: &brep::Surface) -> &'static str {
         brep::Surface::Spline { .. } => "spline",
         brep::Surface::RationalSpline { .. } => "rational spline",
         brep::Surface::PlacedRevolution { .. } => "revolution",
+        brep::Surface::Blend { .. } => "blend",
     }
 }
 
@@ -179,10 +180,109 @@ pub fn plan(b: &brep::Brep, t: &crate::MeshTolerance, size: f64) -> Result<(Tess
     plan_at(b, tol, turn)
 }
 
+/// What the planner reads of a body before it plans any face, in the record's order: each face's
+/// surface (in the evaluator's parameters), target size and boundary loops in (u, v), every
+/// edge's shared nodes, and why each face left out is. [`plan_at`] plans the faces from it.
+pub(crate) struct Prepared {
+    /// The rules every edge was sampled to.
+    pub(crate) rules: size::Rules,
+    /// Whether each face's normal is its surface's natural normal.
+    pub(crate) forward: Vec<bool>,
+    /// The faces each edge bounds.
+    pub(crate) edge_faces: Vec<Vec<usize>>,
+    /// Each face's surface (a plane in the place of a face left out).
+    pub(crate) evals: Vec<poles::Face>,
+    /// Each face's target side length and its surface's mean speed along u and v.
+    pub(crate) sizes: Vec<(f64, [f64; 2])>,
+    /// Every edge's shared nodes.
+    pub(crate) nodes: Vec<edges::Nodes>,
+    /// The edges that bound no face and could not be sampled.
+    pub(crate) unsampled_edges: Vec<crate::RefusedEdge>,
+    /// The edges kept to the strict rules though their faces are crowded.
+    pub(crate) kept_strict: Vec<crate::RefusedEdge>,
+    boundaries: Vec<Boundary>,
+    /// Why each face is left out, where it is.
+    pub(crate) why: Vec<Option<TessError>>,
+    /// The faces whose boundary still crosses itself, and why.
+    pub(crate) tangled: Vec<(usize, String)>,
+}
+
 /// Plan the tessellation of `b` with chord tolerance `tol` and, when given, a facet angle no
 /// facet may turn more than (where it sags above the angle's floor). Faces and edges are the
 /// record's, in its order.
 pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPlan, PlanStats)> {
+    let faces = &b.faces;
+    let Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled } = prepare(b, tol, turn)?;
+    let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
+    let indexed: Vec<usize> = (0..faces.len()).collect();
+    let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
+        if let Some(Some(e)) = why.get(fi) {
+            return Err(e.clone());
+        }
+        let (Some(face), Some(eval), Some(size), Some(fb)) = (faces.get(fi), evals.get(fi), sizes.get(fi), boundaries.get(fi)) else {
+            return Err(unsupported(format!("face {fi}: missing")));
+        };
+        let refused = tangled.iter().find(|(f, _)| *f == fi).map(|(_, why)| why.as_str());
+        let result = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, fb.reach, refused);
+        // A point whose poles the kernel could not tell refuses the face: nothing is taken for
+        // its answer. Read before the plan's own error, which may be a later symptom of it.
+        if let Some(why) = eval.refusal() {
+            return Err(unsupported(format!("face {fi} ({}): {why}", kind(&face.surface))));
+        }
+        let (fp, stats) = result?;
+        let fwd = forward.get(fi).copied().unwrap_or(true);
+        let fp =
+            FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };
+        // Its poles of higher order and the normals they get, on the oriented triangles, by the
+        // kernel's evaluator ([`crate::pole`]).
+        let (poles, averaged) = crate::pole::plan_poles(fi, eval.kernel(), &fp, fb.reach);
+        let mut stats = stats;
+        stats.averaged_poles = averaged;
+        Ok((FacePlan { poles, ..fp }, stats))
+    });
+    let mut plan = TessPlan::default();
+    let mut stats = PlanStats { unsampled_edges, kept_strict, ..PlanStats::default() };
+    // A face no method plans is left out, named in the stats, and the rest of the body is
+    // meshed; a body none of whose faces plan is the first face's error.
+    let mut first_error: Option<TessError> = None;
+    for (fi, (r, eval)) in planned.into_iter().zip(evals.into_iter().map(poles::Face::into_eval)).enumerate() {
+        let surface = u32::try_from(plan.surfaces.len()).map_err(|_| unsupported("too many faces"))?;
+        plan.surfaces.push(eval);
+        let (fp, s) = match r {
+            Ok(done) => done,
+            Err(e) => {
+                stats.unmeshed.push(RefusedFace { face: fi, reason: e.to_string() });
+                first_error.get_or_insert(e);
+                (FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), ..FacePlan::default() }, PlanStats::default())
+            }
+        };
+        plan.faces.push(FacePlan { surface: Some(surface), ..fp });
+        stats.planar += s.planar;
+        stats.structured += s.structured;
+        stats.delaunay += s.delaunay;
+        stats.lenient.extend(s.lenient);
+        stats.averaged_poles.extend(s.averaged_poles);
+        stats.over_tolerance.extend(s.over_tolerance);
+    }
+    if let Some(e) = first_error
+        && stats.unmeshed.len() == faces.len()
+    {
+        return Err(e);
+    }
+    // Edges a bound of their sampling stopped, named with how far their chords lie off them.
+    for (edge, n) in nodes.iter().enumerate() {
+        if let Some((cap, sag, excess)) = n.capped {
+            stats.edges_capped.push(crate::CappedEdge { edge, cap, sag, excess, tol: rules.tol, within: sag <= rules.tol });
+        }
+    }
+    plan.edges = nodes.into_iter().map(|n| n.points.into_iter().map(kernel::record_vec3).collect()).collect();
+    plan.edge_faces = edge_faces.into_iter().map(|fs| fs.into_iter().map(|f| u32::try_from(f).unwrap_or(u32::MAX)).collect()).collect();
+    Ok((plan, stats))
+}
+
+/// Every face's surface, size and boundary and every edge's nodes, as [`plan_at`] reads them
+/// ([`Prepared`]), with chord tolerance `tol` and the facet angle `turn`.
+pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<Prepared> {
     let faces = &b.faces;
     let forward = forward_faces(b);
     // The faces each edge bounds, each once, in the order of the edge's uses.
@@ -310,69 +410,7 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         });
     }
     let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why)?;
-    let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
-        if let Some(Some(e)) = why.get(fi) {
-            return Err(e.clone());
-        }
-        let (Some(face), Some(eval), Some(size), Some(fb)) = (faces.get(fi), evals.get(fi), sizes.get(fi), boundaries.get(fi)) else {
-            return Err(unsupported(format!("face {fi}: missing")));
-        };
-        let refused = tangled.iter().find(|(f, _)| *f == fi).map(|(_, why)| why.as_str());
-        let result = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, fb.reach, refused);
-        // A point whose poles the kernel could not tell refuses the face: nothing is taken for
-        // its answer. Read before the plan's own error, which may be a later symptom of it.
-        if let Some(why) = eval.refusal() {
-            return Err(unsupported(format!("face {fi} ({}): {why}", kind(&face.surface))));
-        }
-        let (fp, stats) = result?;
-        let fwd = forward.get(fi).copied().unwrap_or(true);
-        let fp =
-            FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };
-        // Its poles of higher order and the normals they get, on the oriented triangles, by the
-        // kernel's evaluator ([`crate::pole`]).
-        let (poles, averaged) = crate::pole::plan_poles(fi, eval.kernel(), &fp, fb.reach);
-        let mut stats = stats;
-        stats.averaged_poles = averaged;
-        Ok((FacePlan { poles, ..fp }, stats))
-    });
-    let mut plan = TessPlan::default();
-    let mut stats = PlanStats { unsampled_edges, kept_strict, ..PlanStats::default() };
-    // A face no method plans is left out, named in the stats, and the rest of the body is
-    // meshed; a body none of whose faces plan is the first face's error.
-    let mut first_error: Option<TessError> = None;
-    for (fi, (r, eval)) in planned.into_iter().zip(evals.into_iter().map(poles::Face::into_eval)).enumerate() {
-        let surface = u32::try_from(plan.surfaces.len()).map_err(|_| unsupported("too many faces"))?;
-        plan.surfaces.push(eval);
-        let (fp, s) = match r {
-            Ok(done) => done,
-            Err(e) => {
-                stats.unmeshed.push(RefusedFace { face: fi, reason: e.to_string() });
-                first_error.get_or_insert(e);
-                (FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), ..FacePlan::default() }, PlanStats::default())
-            }
-        };
-        plan.faces.push(FacePlan { surface: Some(surface), ..fp });
-        stats.planar += s.planar;
-        stats.structured += s.structured;
-        stats.delaunay += s.delaunay;
-        stats.lenient.extend(s.lenient);
-        stats.averaged_poles.extend(s.averaged_poles);
-        stats.over_tolerance.extend(s.over_tolerance);
-    }
-    if let Some(e) = first_error
-        && stats.unmeshed.len() == faces.len()
-    {
-        return Err(e);
-    }
-    // Edges a bound of their sampling stopped, named with how far their chords lie off them.
-    for (edge, n) in nodes.iter().enumerate() {
-        if let Some((cap, sag, excess)) = n.capped {
-            stats.edges_capped.push(crate::CappedEdge { edge, cap, sag, excess, tol: rules.tol, within: sag <= rules.tol });
-        }
-    }
-    plan.edges = nodes.into_iter().map(|n| n.points.into_iter().map(kernel::record_vec3).collect()).collect();
-    plan.edge_faces = edge_faces.into_iter().map(|fs| fs.into_iter().map(|f| u32::try_from(f).unwrap_or(u32::MAX)).collect()).collect();
-    Ok((plan, stats))
+    Ok(Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled })
 }
 
 /// Face `fi`'s boundary, loop by loop: the shared edge nodes (each edge's last node is the next
@@ -1135,28 +1173,47 @@ fn plan_or_fill(
     }
 }
 
-/// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
-/// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
-/// `reach`: how near a pole a point is taken as one ([`Boundary::reach`]). `lenient`: the last resort
-/// for a face no method could plan (see [`Lenient`]).
-#[allow(clippy::too_many_arguments)]
-fn plan_face(
-    fi: usize,
-    kind: &str,
-    s: &poles::Face,
-    loops: &[seam::Loop],
-    rules: &size::Rules,
-    size: (f64, [f64; 2]),
-    reach: f64,
-    stats: &mut PlanStats,
-    lenient: Lenient,
-) -> Result<FacePlan> {
-    let tol = rules.tol;
-    let (h, speed) = size;
-    // The memory bounds that limit this face, if any ([`crate::Cap`]).
-    let mut caps: Vec<crate::Cap> = Vec::new();
+/// The triangles of a fan over the loop `range` of `uvs` from its first node, leaving out each
+/// one with two corners on one node (`same`) or no area in (u, v), each counter-clockwise.
+fn fan(range: std::ops::Range<usize>, uvs: &[[f64; 2]], same: &dyn Fn(u32, u32) -> bool) -> Vec<[u32; 3]> {
+    let (Ok(start), Ok(end)) = (u32::try_from(range.start), u32::try_from(range.end)) else { return Vec::new() };
+    let at = |i: u32| uvs.get(i as usize).copied();
+    (start + 1..end.saturating_sub(1))
+        .filter_map(|i| {
+            let t = [start, i, i + 1];
+            let (a, b, c) = (at(t[0])?, at(t[1])?, at(t[2])?);
+            let area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
+            if same(t[0], t[1]) || same(t[1], t[2]) || same(t[2], t[0]) || area == 0.0 || !area.is_finite() {
+                return None;
+            }
+            Some(if area > 0.0 { t } else { [t[0], t[2], t[1]] })
+        })
+        .collect()
+}
+
+/// A face's boundary loops as closed polygons in its surface's (u, v), as the planner
+/// triangulates them: every node in order, the
+/// 3D point each stands for, and each loop's range.
+pub(crate) struct Polygons {
+    /// Each node's (u, v).
+    pub(crate) uvs: Vec<[f64; 2]>,
+    /// Each node's 3D point (the shared edge node it stands for).
+    pub(crate) fixed: Vec<Vec3>,
+    /// Each loop's nodes.
+    pub(crate) ranges: Vec<std::ops::Range<usize>>,
+    /// Whether the face was cut along a seam into one period.
+    pub(crate) seamed: bool,
+}
+
+/// Face loops `loops` on `s` made closed polygons in (u, v): a loop
+/// up a seam to a pole and back down it opened at the pole; a face whose boundary winds round a
+/// closed direction cut along a parameter line into one period ([`seam::cut`], at side `h`); a
+/// loop from pole to pole and back along one seam opened, and holes moved by whole periods
+/// beside the outer loop; and at a pole (within `reach`, [`Boundary::reach`]) the free parameter
+/// split into the previous node's value and the next one's, so the polygon runs along the
+/// collapsed side. Why not, where the boundary winds round the surface and cannot be cut.
+pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rules, h: f64, reach: f64) -> std::result::Result<Polygons, &'static str> {
     let dom = uv::domain(s);
-    let fail = |why: &str| unsupported(format!("face {fi} ({kind}): {why}"));
     let mut projected: Vec<seam::Loop> = loops.to_vec();
     // A loop that winds around a periodic direction does not close in (u, v): the face is cut
     // along a parameter line into one period (a seamless cylinder face, a helical trim).
@@ -1174,9 +1231,9 @@ fn plan_face(
         [] => {}
         [d] => {
             let per = dom.period.get(*d).copied().flatten().unwrap_or(std::f64::consts::TAU);
-            projected = seam::cut(s, &projected, *d, per, rules, h).ok_or_else(|| fail("boundary winds around the surface"))?;
+            projected = seam::cut(s, &projected, *d, per, rules, h).ok_or("boundary winds around the surface")?;
         }
-        _ => return Err(fail("boundary winds around the surface both ways")),
+        _ => return Err("boundary winds around the surface both ways"),
     }
     // A loop from pole to pole and back along one seam (a whole sphere as one face, as another
     // kernel writes it) projects onto one parameter line: its second run is a period along.
@@ -1223,6 +1280,31 @@ fn plan_face(
         }
         ranges.push(start..uvs.len());
     }
+    Ok(Polygons { uvs, fixed, ranges, seamed })
+}
+
+/// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
+/// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
+/// `reach`: how near a pole a point is taken as one ([`Boundary::reach`]). `lenient`: the last resort
+/// for a face no method could plan (see [`Lenient`]).
+#[allow(clippy::too_many_arguments)]
+fn plan_face(
+    fi: usize,
+    kind: &str,
+    s: &poles::Face,
+    loops: &[seam::Loop],
+    rules: &size::Rules,
+    size: (f64, [f64; 2]),
+    reach: f64,
+    stats: &mut PlanStats,
+    lenient: Lenient,
+) -> Result<FacePlan> {
+    let tol = rules.tol;
+    let (h, speed) = size;
+    // The memory bounds that limit this face, if any ([`crate::Cap`]).
+    let mut caps: Vec<crate::Cap> = Vec::new();
+    let fail = |why: &str| unsupported(format!("face {fi} ({kind}): {why}"));
+    let Polygons { uvs, fixed, ranges, seamed } = polygons(s, loops, rules, h, reach).map_err(fail)?;
     if uvs.len() < 3 {
         return Err(fail("degenerate boundary"));
     }
@@ -1354,6 +1436,14 @@ fn plan_face(
     let pole_pair = |i: u32, j: u32| i != j && fixed.get(i as usize).zip(fixed.get(j as usize)).is_some_and(|(p, q)| p == q);
     let mut triangles = triangles;
     triangles.retain(|t| !(pole_pair(t[0], t[1]) || pole_pair(t[1], t[2]) || pole_pair(t[2], t[0])));
+    // A lenient fill left with nothing (a sliver below the tolerance whose boundary nodes are
+    // few points in space, each twice, its pcurves apart in (u, v) where its edges meet: every
+    // Delaunay triangle had two corners on one point): the outer loop fanned from its first node, the
+    // triangles with no two corners on one node, counter-clockwise in (u, v). The face is drawn
+    // between its own edges' nodes, and still named in the stats as a defect upstream.
+    if lenient == Lenient::Yes && triangles.is_empty() {
+        triangles = fan(ranges.first().cloned().unwrap_or(0..0), &uvs, &pole_pair);
+    }
     // A lenient fill leaves out the sides that cross: the boundary is followed everywhere else.
     if lenient == Lenient::No && !closed_boundary(&ranges, &fixed, &uvs, &triangles) {
         return Err(fail("triangulation does not follow the boundary"));

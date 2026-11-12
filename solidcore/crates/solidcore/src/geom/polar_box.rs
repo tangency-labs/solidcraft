@@ -49,7 +49,7 @@
 //!   count (undefined behaviour). [`PolarBox::union`] returns the error instead.
 //! - `ComputePolarCoord` on an uninitialised or unbounded box returns the
 //!   uninitialised point `SmPoint2d()` (and logs `SM_ERR`);
-//!   [`PolarBox::compute_polar_coord`] returns `SM_ERR` ([`SolidError::Upstream`]),
+//!   [`PolarBox::compute_polar_coord`] returns `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)),
 //!   internal callers use the `(SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE)` point as upstream.
 //! - `GetBasis(lIndex)` returns a pointer to one basis vector;
 //!   [`PolarBox::basis`] returns all three.
@@ -236,11 +236,14 @@ impl PolarBox {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) for uninitialised and unbounded boxes
+    /// `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)) for uninitialised and unbounded boxes
     /// (upstream returns `SmPoint2d()`).
     pub fn compute_polar_coord(&self, v: Vec3) -> Result<Point2> {
         if self.state.is_unknown() {
-            return Err(SolidError::sm_err("geom::polar_box::compute_polar_coord"));
+            return Err(SolidError::geom_failed(
+                "geom::polar_box::compute_polar_coord",
+                "the polar box is not set up",
+            ));
         }
         Ok(self.polar_coord_raw(v))
     }

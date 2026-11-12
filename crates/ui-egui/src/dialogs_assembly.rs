@@ -80,7 +80,7 @@ pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
 /// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, a
 /// sketch point (so a joint can be placed on the design origin or a hole centre, like Fusion's),
 /// and the design's planes, axes and construction points.
-pub const SNAPS: u16 = FACES | EDGES | VERTICES | ORIGIN | POINTS | PLANES | AXES | CONSTRUCTION_POINTS;
+pub const SNAPS: crate::selection::Accept = FACES | EDGES | VERTICES | ORIGIN | POINTS | PLANES | AXES | CONSTRUCTION_POINTS;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
 const MOVES: &[&str] = &[
     "joint.create",
@@ -2404,6 +2404,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
                 icon: "joint",
                 label: &name,
                 name: true,
+                rename: true,
                 selected,
                 dim: suppressed || !visible || !folder_shown,
                 ..Default::default()
@@ -2417,12 +2418,16 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
-        } else if r.clicked {
+        // The slower second click on the only selected joint renames it and keeps it selected.
+        } else if r.clicked && !(r.slow_rename && app.tree.picked_joints == [id]) {
             pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
-        if r.double {
+        if r.slow_rename {
+            crate::browser::start_inline_rename(app, crate::context_menu::RenameWhat::Joint(id), &r);
+        } else if r.double {
             dialog = edit_joint(app, id);
         }
+        crate::browser::inline_rename(app, ui, &r, &name);
         // The same menus as the rest of the browser.
         if let Some(at) = r.secondary {
             if !app.tree.picked_joints.contains(&id) {

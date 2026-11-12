@@ -3,7 +3,7 @@
 use serde_json::json;
 use solidcraft_engine::geom::prelude::*;
 
-use super::{BOX, in_view};
+use super::{BOX, apart, in_view};
 use crate::scenario::Harness;
 
 fn drawing(command: &str) -> Harness {
@@ -430,7 +430,8 @@ fn a_line_end_on_a_spline_snaps_on_it_and_stays_on_it() {
     let b = sk
         .curves
         .iter()
-        .find_map(|c| if let CurveKind::Line { b, .. } = c.kind { Some(b) } else { None })
+        // The line drawn, not a tangent handle line of the spline (#6502).
+        .find_map(|c| if let CurveKind::Line { b, .. } = c.kind { c.spline_handle_of.is_none().then_some(b) } else { None })
         .unwrap_or_else(|| panic!("no line, {:?}", h.app.status));
     assert!(
         sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c } if p == b && c == spline)),
@@ -1074,5 +1075,47 @@ fn a_definition_in_a_box_that_is_not_a_dimension_is_refused() {
         let status = h.app.status.as_ref().expect("the refusal is reported");
         assert!(status.2 && status.0.starts_with(says), "{command} {text}: {status:?}");
         assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "{command} {text}: the first point stays down");
+    }
+}
+
+/// #10543: in a tilted view the Length and Angle boxes of a line landed on each other on the
+/// screen (only the last digit of the length showed). Boxes that overlap are moved apart; boxes
+/// already apart, and the first of an overlapping pair, stay where they are.
+#[test]
+fn overlapping_value_boxes_are_moved_apart_on_the_screen() {
+    let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let first = egui::pos2(300.0, 200.0);
+    let out = apart(&[Some(first), Some(egui::pos2(310.0, 205.0))], Some(view));
+    let (a, b) = (out[0].unwrap(), out[1].unwrap());
+    assert_eq!(a, first);
+    assert_eq!(b, egui::pos2(310.0, 200.0 + BOX.y + 2.0));
+    // Already apart: untouched. A box not shown stays absent.
+    let apart_already = [Some(egui::pos2(100.0, 100.0)), None, Some(egui::pos2(300.0, 300.0))];
+    assert_eq!(apart(&apart_already, Some(view)), apart_already.to_vec());
+    // At the bottom edge the second box goes above instead of leaving the view.
+    let low = egui::pos2(300.0, 600.0 - BOX.y);
+    let out = apart(&[Some(low), Some(egui::pos2(305.0, low.y + 3.0))], Some(view));
+    assert_eq!(out[1].unwrap(), egui::pos2(305.0, low.y - BOX.y - 2.0));
+}
+
+/// In an isometric view the Length and Angle boxes of a line, placed apart in the sketch, must
+/// not land on each other on the screen (#10543). Lines of several lengths and directions from
+/// the origin: no end point leaves the two boxes overlapping.
+#[test]
+fn a_lines_length_and_angle_boxes_do_not_overlap_in_an_isometric_view() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.view", json!({"view":"iso"}));
+    h.step(&json!({"start":"sketch.line"})).unwrap();
+    h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+    for length in [4.0, 8.0, 15.0] {
+        for deg in (0..360).step_by(15) {
+            let t = f64::from(deg).to_radians();
+            h.step(&json!({"move":{"sketch":[length * t.cos(), length * t.sin()]}})).unwrap();
+            h.frames(3);
+            let boxes: Vec<_> =
+                (0..2usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).expect("value box shown")).collect();
+            assert!(!boxes[0].intersects(boxes[1]), "line of {length} at {deg} deg: the boxes overlap {boxes:?}");
+        }
     }
 }

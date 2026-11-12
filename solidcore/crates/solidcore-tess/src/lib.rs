@@ -11,6 +11,7 @@
 //! - [`plan`]: the face planner and its display entry point, at a [`MeshTolerance`];
 //! - [`TessPlan`], [`FacePlan`]: the plan, and [`TessPlan::transformed`] for a placed copy;
 //! - [`Mesh`]: an indexed triangle mesh with its edge polylines and their display flags;
+//! - [`curve_points`]: a free curve's points at a [`MeshTolerance`], by the edge rules;
 //! - [`simplify`]: display levels of detail of a large mesh;
 //! - [`preview`]: a bounded coarse mesh of a decoded body.
 //!
@@ -19,8 +20,11 @@
 //! Library code never panics, unwraps or indexes on input-derived data: a face the planner
 //! cannot mesh is named in its [`PlanStats`], and the rest of the body is meshed.
 
+mod curve;
 #[cfg(test)]
 mod fixtures;
+mod hash;
+mod iso;
 mod mesh;
 // SolidCraft's mesher, moved here (RFC 0003, item 1.1) and kept in SolidCraft's formatting so it
 // reads the same as its history.
@@ -36,6 +40,8 @@ mod stats;
 mod tolerance;
 mod vec;
 
+pub use curve::curve_points;
+pub use iso::{MAX_ISOPARMS, isoparms};
 pub use mesh::Mesh;
 pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
 pub use par::guarded;

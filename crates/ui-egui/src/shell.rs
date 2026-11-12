@@ -261,6 +261,20 @@ pub(crate) fn tool_drag_rect(app: &SolveApp, placement: Rect) -> Rect {
     bounds
 }
 
+/// Initial placement for floating editor windows in the shared-panel workspace.
+pub(crate) fn floating_editor_anchor(app: &SolveApp, ctx: &egui::Context) -> Option<(egui::Align2, egui::Pos2)> {
+    if !crate::panel_runtime::production_active(app) {
+        return None;
+    }
+    let viewport = crate::agent_chat::tool_space(app, content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
+    let side = crate::frame::Side::Right;
+    Some((egui::Align2::RIGHT_TOP, pos2(side.anchor_x(viewport), panel_top(app, viewport, viewport.bottom(), side))))
+}
+
+pub(crate) fn floating_editor_side(app: &SolveApp, use_left: bool) -> crate::frame::Side {
+    if use_left && !crate::panel_runtime::production_active(app) { crate::frame::Side::Left } else { crate::frame::Side::Right }
+}
+
 pub(crate) fn panel_top(app: &SolveApp, viewport: Rect, bottom: f32, side: crate::frame::Side) -> f32 {
     let content = content_rect(app, viewport);
     if side == crate::frame::Side::Right {

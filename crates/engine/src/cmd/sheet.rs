@@ -45,7 +45,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FLANGE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines) + distance (rule?, flip?, reverse?) | \
+        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines and tangent arcs) + distance (rule?, flip?, reverse?) | \
          edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?, segments?} for an edge with its own angle and height, \
          or split into 1…64 segments [{from, to, angle?, height?, flip?}] that tile the stretch the sheet still has there (from, to are \
          fractions 0…1 of it, first from 0, last to 1; consecutive segments that match make one bend)] + \
@@ -67,7 +67,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PATH_FLANGE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "edge: [x,y,z] on a top or bottom edge of the sheet; sketch + curves: an open chain of sketch lines drawn on a plane across \
+        "edge: [x,y,z] on a top or bottom edge of the sheet; sketch + curves: an open chain of sketch lines and tangent arcs drawn on a plane across \
          that edge, from the edge out (each line one flange as long as the line, to the outer face from the virtual sharp; each \
          corner one bend, turning the way the lines turn); radius? (default: rule); body?. One feature, one body",
     ),
@@ -421,7 +421,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
             let curves = string_list(cmd, p, "curves")?;
             if curves.is_empty() || curves.len() > 1000 {
-                return Err(bad(cmd, "`curves` must list the open chain's lines"));
+                return Err(bad(cmd, "`curves` must list the open chain's lines and arcs"));
             }
             let distance = req_expr(cmd, p, "distance")?;
             check_expr(s, &distance, Kind::Length, cmd, "distance")?;
