@@ -191,7 +191,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLIT_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-            "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal)",
+            "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal; each curve on its own, an open one extended past its ends) and loops?: bool (default false: true joins the curves end to end first, so a closed loop cuts along itself only)",
         ),
     CommandSpec::new("solid.split_body", "Split Body", crate::checked!("solid.split_body", split_body))
         .at("SOLID", "MODIFY")
@@ -2946,6 +2946,7 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             plane: xy(),
             tool: Some(solidcraft_doc::FaceAt { body: BodyName(tb), point: Position(point) }),
             sketch: None,
+            loops: false,
         }
     } else if p.get("sketch").is_some_and(|v| !v.is_null()) {
         let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
@@ -2955,6 +2956,7 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             plane: xy(),
             tool: None,
             sketch: Some(SketchId(sketch)),
+            loops: bool_(p, "loops").unwrap_or(false),
         }
     } else {
         let plane = plane_param(s, p.get("plane"), cmd)?;
@@ -2964,6 +2966,7 @@ fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
             plane,
             tool: None,
             sketch: None,
+            loops: false,
         }
     };
     add_face_feature(&picked, s, p, kind)

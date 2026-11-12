@@ -9715,7 +9715,7 @@ fn eval_feature(
             }
             apply_traced(doc, st, f, made, *operation, &[])
         }
-        FeatureKind::SplitFace { faces, body, plane, tool, sketch } => {
+        FeatureKind::SplitFace { faces, body, plane, tool, sketch, loops } => {
             let i = body_at(st, body, &crate::plain(faces))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mut picked: Vec<usize> = Vec::new();
@@ -9735,12 +9735,18 @@ fn eval_feature(
                 }
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
-                    // Each curve's exact segments (lines and arcs split by their own plane and cylinder).
-                    let curves: Vec<Vec<solidcore_record::Seg2>> = (0..ss.sketch.curves.len())
-                        .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
-                        .map(|ci| ss.sketch.segs(ci))
-                        .filter(|segs| !segs.is_empty())
-                        .collect();
+                    // Each curve's exact segments (lines and arcs split by their own plane and cylinder),
+                    // or with `loops` the curves joined end to end: a closed chain is not extended.
+                    let curves: Vec<Vec<solidcore_record::Seg2>> = if *loops {
+                        let ids: Vec<String> = ss.sketch.curves.iter().filter(|c| !c.construction).map(|c| c.id.clone()).collect();
+                        surface::curve_chains(ss, &ids)?
+                    } else {
+                        (0..ss.sketch.curves.len())
+                            .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
+                            .map(|ci| ss.sketch.segs(ci))
+                            .filter(|segs| !segs.is_empty())
+                            .collect()
+                    };
                     if curves.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
                     }
