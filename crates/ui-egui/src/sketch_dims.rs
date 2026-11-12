@@ -653,7 +653,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     let Some(mut t) = app.tool.take() else { return };
     sync(&mut t);
     let place = if t.dims.is_empty() { None } else { boxes(app, ui, proj, &mut t) };
-    crate::sketch_construction::line_type_switch(ui, &mut t);
     app.tool = Some(t);
     if let Some(p) = place {
         crate::tools::place(app, (p, None));
@@ -700,10 +699,16 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let view = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive());
     let field_frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(tk.space_3 as i8, 1));
     let construction = solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some();
+    // A construction line's untyped length is infinite, unless it is a segment drawn to the
+    // pointer (#15066).
+    let segment_length = if construction { hover.as_ref().and_then(|h| crate::sketch_construction::pointer_segment_length(app, t, h)) } else { None };
     for (b, (v, _)) in t.dims.iter_mut().zip(&lv) {
         if !b.locked {
-            // A construction line's untyped length is infinite, whatever the pointer does.
-            b.value = if construction && b.label == "Length" { INFINITE.to_owned() } else { fmt(app, b.label, b.kind, *v) };
+            b.value = match (construction && b.label == "Length", segment_length) {
+                (true, Some(length)) => fmt(app, b.label, b.kind, length),
+                (true, None) => INFINITE.to_owned(),
+                _ => fmt(app, b.label, b.kind, *v),
+            };
         }
     }
     // Polygon values used to sit inside the radius, so both boxes covered a small polygon
@@ -972,13 +977,12 @@ fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Optio
 /// About the size of a value box, for keeping it in view.
 pub(crate) const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
 
-/// Whether `p` is over the active tool's own floating boxes: a value box or the construction
-/// line's construction/normal switch. #10600: these must not swallow a click that lands on a
-/// sketch point, so the viewport asks before letting one take the click.
+/// Whether `p` is over the active tool's own floating value boxes. #10600: these must not
+/// swallow a click that lands on a sketch point, so the viewport asks before letting one take
+/// the click.
 pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2) -> bool {
     let Some(t) = app.tool.as_ref() else { return false };
     (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
-        || ctx.memory(|m| m.area_rect(egui::Id::unique("sc_construction_switch"))).is_some_and(|r| r.contains(p))
 }
 
 /// The boxes at `positions` (top left, `None` for one not shown) with none covering another: a

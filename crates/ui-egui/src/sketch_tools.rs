@@ -966,7 +966,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         arc_turn: 0.0,
         lined: Vec::new(),
         chain: Default::default(),
-        normal: false,
+        line_type: 3,
     })
 }
 
