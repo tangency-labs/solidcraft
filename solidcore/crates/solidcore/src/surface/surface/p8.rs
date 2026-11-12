@@ -625,6 +625,27 @@ impl Surface {
         }
     }
 
+    /// Not upstream: whether `other` is of another kind than this surface among plane, cone
+    /// (a cylinder is a cone of semi-angle 0), sphere and torus. Two such surfaces share no
+    /// region: where they touch tangentially they part as the square of the distance from
+    /// the contact, and they count as one only over a patch on which they stay within the
+    /// tolerance (a sphere cap thinner than it on a plane), which is a distance for the
+    /// caller to measure, never a property of their directions at the contact. `false` for
+    /// two surfaces of one kind ([`Surface::same_analytic_surface`] compares those), for a
+    /// kind with no definition to compare, and for a sphere against a torus (a torus with no
+    /// hole is a sphere).
+    #[must_use]
+    pub fn is_other_analytic_kind(&self, other: &Self) -> bool {
+        // plane, cone, then the two a torus with no hole joins
+        let rank = |s: &Self| match s.kind() {
+            SurfaceKind::Plane(_) => Some(0_u8),
+            SurfaceKind::Cone(_) => Some(1),
+            SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => Some(2),
+            _ => None,
+        };
+        rank(self).zip(rank(other)).is_some_and(|(a, b)| a != b)
+    }
+
     /// `SmSurface::CoincidenceCheck` (the base body): a plane `other` runs its own
     /// check. The same object is coincident. Disjoint boxes are not. For whole
     /// surfaces the four corners must match (in either orientation of the

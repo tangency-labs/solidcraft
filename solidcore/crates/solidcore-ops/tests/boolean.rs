@@ -7,7 +7,9 @@ use std::io::Read as _;
 use serde_json::Value;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
 use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
-use solidcore_ops::{make_box, make_sphere, session, Body, BooleanOp, CheckLevel, Error};
+use solidcore_ops::{
+    make_box, make_cylinder, make_sphere, session, Body, BooleanOp, CheckLevel, Error,
+};
 use solidcore_record::brep::Brep as Record;
 
 fn all_fixes() {
@@ -123,6 +125,66 @@ fn a_cube_on_a_void_is_kept_out_by_a_difference_and_shares_nothing_with_it() {
     assert!(boolean(box_with_void(true), cube(), BooleanOp::Intersect)
         .unwrap()
         .is_none());
+}
+
+/// A cylinder lying along a box's edge, tangent there to the box's face. The two faces leave the
+/// edge together and part as the square of the distance over the cylinder's diameter, by less
+/// the larger the cylinder, so the fixed steps off the edge took a large one's faces for
+/// parallel (a zero sector, from 10 times the size) and for one surface (coincident faces,
+/// from 100 times). The union is the two solids touching along that line, at 1 to 1000 times
+/// the size, in either order.
+#[test]
+fn a_large_cylinder_resting_on_a_box_edge_unions() {
+    all_fixes();
+    for k in [1.0, 10.0, 40.0, 100.0, 1000.0] {
+        let cylinder = || make_cylinder([0.0, 15.0 * k, 2.5 * k], 7.5 * k, 25.0 * k).unwrap();
+        let block = || make_box([0.0, 0.0, 0.0], [5.0 * k, 7.5 * k, 5.0 * k]).unwrap();
+        let want = (PI * 7.5 * 7.5 * 25.0 + 5.0 * 7.5 * 5.0) * (k * k * k);
+        for (a, b) in [(cylinder(), block()), (block(), cylinder())] {
+            let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+            let report = u.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{k}: {}", report.text);
+            assert_eq!(u.solid_count().unwrap(), 2, "{k}");
+            assert!(
+                near(volume(&u), want),
+                "{k}: {}, closed form {want}",
+                volume(&u)
+            );
+            u.to_record().unwrap();
+        }
+    }
+}
+
+/// Two equal cylinders side by side, touching along a line. Their faces leave the line
+/// together and part as the square of the distance over the radius, so the fixed steps off
+/// the line took two large ones for one surface, and the union failed (100 times the size)
+/// or the intersection was a whole cylinder (1000 times). The union is the two solids
+/// touching along the line and nothing is common, in either order.
+#[test]
+fn two_large_cylinders_touching_along_a_line_union() {
+    all_fixes();
+    for k in [1.0, 100.0, 1000.0] {
+        let left = || make_cylinder([0.0; 3], 7.5 * k, 25.0 * k).unwrap();
+        let right = || make_cylinder([15.0 * k, 0.0, 2.5 * k], 7.5 * k, 25.0 * k).unwrap();
+        let want = 2.0 * PI * 7.5 * 7.5 * 25.0 * (k * k * k);
+        for (a, b) in [(left(), right()), (right(), left())] {
+            let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+            let report = u.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{k}: {}", report.text);
+            assert_eq!(u.solid_count().unwrap(), 2, "{k}");
+            assert!(
+                near(volume(&u), want),
+                "{k}: {}, closed form {want}",
+                volume(&u)
+            );
+        }
+        assert!(
+            boolean(left(), right(), BooleanOp::Intersect)
+                .unwrap()
+                .is_none(),
+            "{k}"
+        );
+    }
 }
 
 #[test]
@@ -347,7 +409,7 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
         15.24e-4,
     )
     .unwrap();
-    let stock = solidcore_ops::make_cylinder([0.0; 3], 20.0, 304.5).unwrap();
+    let stock = make_cylinder([0.0; 3], 20.0, 304.5).unwrap();
     let cut = boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap();
     let probe = CancelToken::after_polls(u64::MAX);
     within(&probe, || cut.check(CheckLevel::All)).unwrap();
