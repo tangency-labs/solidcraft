@@ -323,6 +323,10 @@ pub trait MeshGeom {
     /// (angle between the end tangents below `max_angle`), including `e` itself.
     fn tangent_chain(&self, e: usize, max_angle: f64) -> Vec<usize>;
 
+    /// Whether the two faces at edge `i` meet tangentially (within `max_angle` radians) there: the
+    /// join [`MeshGeom::tangent_chain`] passes through. A crease the model protects is never one.
+    fn tangent_join(&self, i: usize, max_angle: f64) -> bool;
+
     fn bounds(&self) -> Aabb3;
 
     /// Signed volume (divergence theorem), surface area and volume centroid.
@@ -594,6 +598,11 @@ impl MeshGeom for Mesh {
         }
         rim.sort_unstable();
         rim
+    }
+    /// Whether the two faces at edge `i` meet tangentially (within `max_angle` radians) there: the
+    /// join [`MeshGeom::tangent_chain`] passes through. A crease the model protects is never one.
+    fn tangent_join(&self, i: usize, max_angle: f64) -> bool {
+        smooth_seam(self, i, max_angle.cos())
     }
 
     fn tangent_chain(&self, e: usize, max_angle: f64) -> Vec<usize> {

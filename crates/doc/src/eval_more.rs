@@ -980,8 +980,9 @@ pub(super) fn sheet_eval(
         FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
             // The profile as the sketch draws it, exactly, end to end, and the sketch curve each
-            // of its pieces was drawn on with the piece's key.
-            let (segs, drawn) = contour_profile(&ss, curves)?;
+            // of its pieces was drawn on with the piece's key, the curves put in chain order first
+            // (main's #15364).
+            let (segs, drawn) = contour_profile(&ss, &ss.chain_order(curves)?)?;
             let w = val(vals, distance, Kind::Length)?;
             if !(w > 0.0) {
                 return Err(DocError::Invalid("the contour flange distance must be positive".into()));

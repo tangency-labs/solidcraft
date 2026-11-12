@@ -9,9 +9,8 @@
 //! Deviations: owned copies retain the original inputs; matrices and partial
 //! outputs are explicit. Scaling sampling is bounded to 1,000,000 points; no
 //! recursion. Null/non-B-spline profiles are skipped, as the upstream cast does.
-//! **A planar path's frame starts on the plane's normal** (opt-in
-//! `Kernel::fixes.sweep_frame_on_planar_path_normal`, WR-407; SolidCraft change,
-//! tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434; see
+//! **A planar path's frame starts on the plane's normal** (WR-407; SolidCraft change,
+//! tangency-labs/smlib e960ca1 (was 1b6f5fa), tangency-labs/solidcore#434; see
 //! [`prepare_curve_sweep`]).
 //! **The profile can be swept where it lies** (`SweepOptions::profile_at_path_start`,
 //! the SolidCraft fork's `bProfileAtPathStart`, tangency-labs/smlib 2dd71a0, WR-522,
@@ -278,24 +277,21 @@ pub fn prepare_curve_sweep(
     // out with its control points spread about its plane (2.8e-5 mm in the #434 case against a
     // 1e-5 zone tolerance), which a boolean with another wall on that plane cannot resolve. So
     // a planar path starts the frame with its z on the plane's normal; the top is then flat to
-    // the rounding. Opt-in (`Kernel::fixes.sweep_frame_on_planar_path_normal`, WR-407);
-    // upstream keeps the `MakeUnitOrthoVectors` frame.
-    if k.fixes.sweep_frame_on_planar_path_normal {
-        let plane = path.is_planar(ZONE_TOL_3D)?;
-        // `SmCurve::IsPlanar(SM_ZONE_TOL_3D, NULL, &sPlaneNormal)` with
-        // `sPlaneNormal.Unitize()` in place before the test.
-        if let Some(plane_normal) = plane.is_planar.then_some(plane.normal) {
-            if let Ok(normal) = plane_normal.unitize() {
-                if normal.dot(from_x).abs() < EFF_ZERO_SQRT {
-                    let from_z = normal - normal.dot(from_x) * from_x;
-                    if from_z.unitize().is_ok() {
-                        from_y = from_z.cross(from_x);
-                    } else if let Some([x, y, _]) =
-                        ignored(passed_on(tangent.make_unit_ortho_vectors(None), p)?)?
-                    {
-                        from_x = x;
-                        from_y = y;
-                    }
+    // the rounding (WR-407); upstream keeps the `MakeUnitOrthoVectors` frame.
+    let plane = path.is_planar(ZONE_TOL_3D)?;
+    // `SmCurve::IsPlanar(SM_ZONE_TOL_3D, NULL, &sPlaneNormal)` with
+    // `sPlaneNormal.Unitize()` in place before the test.
+    if let Some(plane_normal) = plane.is_planar.then_some(plane.normal) {
+        if let Ok(normal) = plane_normal.unitize() {
+            if normal.dot(from_x).abs() < EFF_ZERO_SQRT {
+                let from_z = normal - normal.dot(from_x) * from_x;
+                if from_z.unitize().is_ok() {
+                    from_y = from_z.cross(from_x);
+                } else if let Some([x, y, _]) =
+                    ignored(passed_on(tangent.make_unit_ortho_vectors(None), p)?)?
+                {
+                    from_x = x;
+                    from_y = y;
                 }
             }
         }
@@ -463,13 +459,13 @@ mod tests {
         Ok((max_z, end - start))
     }
 
-    /// With `fixes.sweep_frame_on_planar_path_normal` (WR-407, #434) the frame's z is the
-    /// path plane's normal: the path is turned into the global XY plane and the wall's
-    /// height is the frame's fixed z.
+    /// The frame's z is the path plane's normal (WR-407, #434): the path is turned into the
+    /// global XY plane and the wall's height is the frame's fixed z. Upstream's
+    /// `MakeUnitOrthoVectors` of the +Y start tangent put the frame's z in the path's plane
+    /// instead, so the path stayed off z = 0.
     #[test]
     fn issue_434_planar_path_frame_keeps_the_plane_normal_as_the_frame_z() -> Result<()> {
-        let mut k = Kernel::default();
-        k.fixes.sweep_frame_on_planar_path_normal = true;
+        let k = Kernel::default();
         let (max_z, height) = issue_434_half_circle_frame(&k)?;
         assert!(max_z < 1e-12, "path leaves the frame's plane by {max_z}");
         // (the frame's handedness may turn the height down; the sweep frame it is carried
@@ -478,21 +474,6 @@ mod tests {
         assert!(
             height.x.abs() < 1e-12 && height.y.abs() < 1e-12,
             "{height:?}"
-        );
-        Ok(())
-    }
-
-    /// Default (pinned SMLib `c9c5979`): `MakeUnitOrthoVectors` of the +Y start tangent
-    /// puts the frame's z in the path's plane, so the path is not turned into the global
-    /// XY plane (upstream behaviour, WR-407).
-    #[test]
-    fn issue_434_default_keeps_the_upstream_sweep_frame() -> Result<()> {
-        let k = Kernel::default();
-        assert!(!k.fixes.sweep_frame_on_planar_path_normal);
-        let (max_z, _) = issue_434_half_circle_frame(&k)?;
-        assert!(
-            max_z > 1.0,
-            "upstream's frame keeps the path off z = 0: {max_z}"
         );
         Ok(())
     }

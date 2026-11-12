@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="600" height="520" viewBox="0 0 600 520">
+  <title>surface.surf_of_revolution--offset-cut-at-the-axis-below-the-origin</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="600" height="520" fill="#ffffff"/>
+    <rect id="axis_segment_of_the_fix" data-name="axis segment of the fix" x="164" y="70" width="12" height="410" fill="#dce9f5"/>
+    <line id="axis" x1="170" y1="64" x2="170" y2="493" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="upstream_axis_segment" data-name="upstream axis segment" x1="170" y1="130" x2="170" y2="70" fill="none" stroke="#555555" stroke-width="4" stroke-miterlimit="10"/>
+    <line id="generator" x1="170" y1="185" x2="390" y2="405" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="offset_outward" data-name="offset outward" x1="208.9" y1="146.1" x2="428.9" y2="366.1" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="offset_inward__kept" data-name="offset inward, kept" x1="170" y1="262.8" x2="351.1" y2="443.9" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="stretch_past_the_axis" data-name="stretch past the axis" x1="131.1" y1="223.9" x2="170" y2="262.8" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <circle id="cut_point" data-name="cut point" cx="170" cy="262.8" r="5" fill="#555555"/>
+    <circle id="frame_origin" data-name="frame origin" cx="170" cy="130" r="5" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 20 32)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">WR-343: an offset crossing the axis below the origin</tspan></text>
+    <text transform="matrix(1 0 0 1 20 52)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Meridian plane of the issue 973 test (x right, z up); offsets by 1</tspan></text>
+    <text transform="matrix(1 0 0 1 180 90)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">upstream&apos;s axis segment</tspan></text>
+    <text transform="matrix(1 0 0 1 158 135)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="end"><tspan x="0" y="0">frame origin</tspan></text>
+    <text transform="matrix(1 0 0 1 410 388)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">offset away from the axis</tspan></text>
+    <text transform="matrix(1 0 0 1 340 470)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">offset towards the axis</tspan></text>
+    <text transform="matrix(1 0 0 1 158 290)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="end"><tspan x="0" y="0">cut here: z = -1 - √2</tspan></text>
+    <text transform="matrix(1 0 0 1 125 200)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="end"><tspan x="0" y="0">upstream keeps</tspan></text>
+    <text transform="matrix(1 0 0 1 125 217)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="end"><tspan x="0" y="0">the part past the axis</tspan></text>
+    <text transform="matrix(1 0 0 1 158 462)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">axis segment of the fix:</tspan></text>
+    <text transform="matrix(1 0 0 1 158 477)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">the offset&apos;s whole height</tspan></text>
+    <text transform="matrix(1 0 0 1 398 422)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">generator</tspan></text>
+  </g>
+</svg>

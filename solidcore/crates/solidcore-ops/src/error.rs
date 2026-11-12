@@ -272,10 +272,16 @@ pub enum Error {
     /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
     /// `BlendRefusal::SetbackTooShort`, whose `why` says which).
     SetbackTooShort {
-        /// The corner's vertex index.
-        vertex: usize,
+        /// The corner's vertex index; `None` where the vertex is no longer the body's.
+        vertex: Option<usize>,
         /// The least setback.
         least: f64,
+        /// The corner's point, where the kernel's session notes it.
+        at: Option<[f64; 3]>,
+        /// Whether a setback of `least` builds the corner: its fill's test named it (not the
+        /// rails', which `least` passes only), and the kernel's fill is the corner (no other
+        /// patch replaces it).
+        builds: bool,
     },
     /// A corner's setback that does not fit on its edges, or on its rounds where a far
     /// corner cuts one (the kernel's `BlendRefusal::SetbackTooLong`): one below `largest`
@@ -307,6 +313,19 @@ pub enum Error {
         face: Option<usize>,
         /// Why.
         why: OffsetRefusal,
+    },
+    /// A fillet or chamfer the kernel fails with a reason it states in words (its
+    /// `BlendFailure`, which replaced a bare status): the kernel's class of the failure, the
+    /// status it stands for, and the kernel's statement of it. Transitional, as
+    /// [`OffsetRefusal::Phrase`] is: each reason gets a type of its own once the kernel gives
+    /// it a cause of its own.
+    BlendFailed {
+        /// The kernel's class of the failure.
+        class: solidcore::error::ErrorKind,
+        /// The status the failure stands for (1001 `SM_ERR`, ...).
+        status: i32,
+        /// The kernel's statement of it.
+        phrase: String,
     },
 }
 
@@ -395,9 +414,10 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "its offset by {distance} collapses (a radius of curvature {radius})"
             ),
-            OffsetRefusal::LoopsCross { crossing } => {
-                write!(f, "its offset's loops cross ({crossing:?})")
-            }
+            OffsetRefusal::LoopsCross { crossing } => write!(
+                f,
+                "its offset's loops cross in a way the offset cannot resolve: {crossing}"
+            ),
             OffsetRefusal::DistanceUnresolved {
                 distance,
                 resolution,
@@ -430,7 +450,7 @@ impl std::fmt::Display for OffsetRefusal {
                     "a gap in its offset's loops cannot be bridged within tolerance"
                 )
             }
-            OffsetRefusal::Unsound { what } => write!(f, "the body built is unsound ({what:?})"),
+            OffsetRefusal::Unsound { what } => write!(f, "{what}"),
             OffsetRefusal::Phrase { phrase, .. } => f.write_str(phrase),
         }
     }
@@ -488,6 +508,45 @@ pub enum FitKind {
     Scale,
     /// A chord round's width.
     Chord,
+}
+
+impl RoomReason {
+    /// The reason in words, as a fillet's message gives it.
+    #[must_use]
+    pub const fn words(self) -> &'static str {
+        match self {
+            RoomReason::BallDoesNotFit => "the rolling ball does not fit a face it rolls on",
+            RoomReason::RailLeavesFace => "a contact line leaves the face it rolls on",
+            RoomReason::FaceConsumed => "the blends take the whole of a face they roll on",
+            RoomReason::BandsOverlap => {
+                "one blend runs inside the band another takes off a face they share"
+            }
+            RoomReason::BallsFold => "the rolling ball folds over itself along the edge",
+            RoomReason::OffsetFolds => "a face curves tighter than the offset along it",
+            RoomReason::CutsThePart => "the blend would cut the part in pieces",
+            RoomReason::BreaksThrough => {
+                "the blend would break through a wall into the hollow behind it"
+            }
+            RoomReason::OffsetCollapses => {
+                "the ball is as wide as a face it rolls on, so its centre stays put and the round cannot end at the edge's end"
+            }
+            RoomReason::CornersTakeWholeEdge => "its corners take the whole of the edge",
+            RoomReason::RunsIntoMaterial => "the blend runs off a face into the material",
+        }
+    }
+}
+
+impl FitKind {
+    /// The size's name, as a fillet's message names it ("the largest radius that fits").
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            FitKind::Radius => "radius",
+            FitKind::Distance => "distance",
+            FitKind::Scale => "scale",
+            FitKind::Chord => "chord width",
+        }
+    }
 }
 
 impl std::fmt::Display for Error {
@@ -631,9 +690,18 @@ impl std::fmt::Display for Error {
                 f,
                 "the round of edge {edge} is too small to change the part: the smallest is {smallest}"
             ),
-            Error::SetbackTooShort { vertex, least } => {
+            Error::SetbackTooShort {
+                vertex: Some(vertex),
+                least,
+                ..
+            } => {
                 write!(f, "the setback at vertex {vertex} is shorter than {least}")
             }
+            Error::SetbackTooShort {
+                vertex: None,
+                least,
+                ..
+            } => write!(f, "the setback at a corner is shorter than {least}"),
             Error::SetbackTooLong { vertex, largest } => {
                 write!(f, "the setback at vertex {vertex} does not fit: below {largest} fits")
             }
@@ -649,6 +717,9 @@ impl std::fmt::Display for Error {
                 Some(face) => write!(f, "the offset is refused at face {face}: {why}"),
                 None => write!(f, "the offset is refused: {why}"),
             },
+            Error::BlendFailed { status, phrase, .. } => {
+                write!(f, "the blend failed (status {status}): {phrase}")
+            }
         }
     }
 }

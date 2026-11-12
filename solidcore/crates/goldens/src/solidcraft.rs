@@ -1754,7 +1754,6 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
 /// resolve the same fields).
 fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
     let field = match name {
-        "sweep_frame_on_planar_path_normal" => &mut k.fixes.sweep_frame_on_planar_path_normal,
         "imprint_extends_edge_to_proto_vertex" => &mut k.fixes.imprint_extends_edge_to_proto_vertex,
         "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,
         "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
@@ -2505,10 +2504,10 @@ mod tests {
     #[test]
     fn fixes_are_enabled_by_name() {
         let mut k = Kernel::default();
-        enable_fix(&mut k, "sweep_frame_on_planar_path_normal").unwrap();
+        enable_fix(&mut k, "imprint_extends_edge_to_proto_vertex").unwrap();
         enable_fix(&mut k, "cover_refuses_folded_continuation").unwrap();
         enable_fix(&mut k, "fillet_refuse_non_manifold_result").unwrap();
-        assert!(k.fixes.sweep_frame_on_planar_path_normal);
+        assert!(k.fixes.imprint_extends_edge_to_proto_vertex);
         assert!(k.fixes.cover_refuses_folded_continuation);
         assert!(k.fixes.fillet_refuse_non_manifold_result);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());

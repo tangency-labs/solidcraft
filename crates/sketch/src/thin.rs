@@ -381,7 +381,7 @@ fn outline_sketch(boundary: &[Seg2]) -> Result<Sketch> {
             }
             Seg2::Cubic { p0, p1, p2, p3 } => {
                 let pts = [p0, p1, p2, p3].iter().map(|p| sk.add_point(*p, None)).collect::<Result<Vec<_>>>()?;
-                sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None }, None)?;
+                sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)?;
             }
             _ => return Err(bad("not supported yet: this kind of wall curve")),
         }

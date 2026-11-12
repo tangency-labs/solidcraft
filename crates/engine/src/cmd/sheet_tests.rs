@@ -719,10 +719,11 @@ fn contour_flange_takes_tangent_arcs_and_develops_their_bends() {
     run(&mut s, "sketch.finish", json!({}));
     let r = run(&mut s, "sheet.flange", json!({"sketch": "Arc", "curves": ["l1", "a1", "l2"], "distance": 50, "rule": "R"}));
     assert!(r.get("error").is_none(), "{r}");
-    let f = flat(&mut s);
+    // The developed length is the flat's longer side, whichever axis it lies on; the other is
+    // the flange's 50.
+    let (f, [across, got]) = contour_flat(&mut s);
     let want = 50.0 + FRAC_PI_2 * (8.0 + 0.5 * 2.0);
-    let got = f["flat_size_mm"][0].as_f64().unwrap_or(f64::NAN);
-    assert!((got - want).abs() < 1e-6, "{got} vs {want}: {f}");
+    assert!((got - want).abs() < 1e-6 && (across - 50.0).abs() < 1e-6, "{got} vs {want}: {f}");
     // One roll, no bend: inside radius 8, a quarter turn, as wide in the flat as its neutral arc.
     assert_eq!(f["bends"].as_array().map(Vec::len), Some(0), "{f}");
     let rolls = f["roll_table"].as_array().cloned().unwrap_or_default();
@@ -730,6 +731,13 @@ fn contour_flange_takes_tangent_arcs_and_develops_their_bends() {
     assert!((rolls[0]["radius"].as_f64().unwrap_or(0.0) - 8.0).abs() < 1e-9, "{f}");
     assert!((rolls[0]["angle_deg"].as_f64().unwrap_or(0.0) - 90.0).abs() < 1e-9, "{f}");
     assert!((rolls[0]["width"].as_f64().unwrap_or(0.0) - FRAC_PI_2 * 9.0).abs() < 1e-9, "{f}");
+    // Main's #15364: the same chain listed out of order builds the same flange, the curves put
+    // in chain order before their segments are joined.
+    run(&mut s, "edit.undo", json!({}));
+    let r = run(&mut s, "sheet.flange", json!({"sketch": "Arc", "curves": ["l1", "l2", "a1"], "distance": 50, "rule": "R"}));
+    assert!(r.get("error").is_none(), "{r}");
+    let (f, [across, got]) = contour_flat(&mut s);
+    assert!((got - want).abs() < 1e-6 && (across - 50.0).abs() < 1e-6, "{got} vs {want}: {f}");
     // A 180° half pipe alone: outer radius 56 and 1.5 thick, with no flat panel before or
     // after it.
     let mut s = Session::default();
@@ -744,9 +752,9 @@ fn contour_flange_takes_tangent_arcs_and_develops_their_bends() {
     let b = bbox(&mut s);
     assert!((b["min"][1].as_f64().unwrap_or(f64::NAN) + 56.0).abs() < 1e-6, "{b}");
     assert!(b["max"][1].as_f64().unwrap_or(f64::NAN).abs() < 1e-6, "{b}");
-    let f = flat(&mut s);
+    let (f, [across, got]) = contour_flat(&mut s);
     let want = PI * (54.5 + 0.5 * 1.5);
-    assert!((f["flat_size_mm"][0].as_f64().unwrap_or(f64::NAN) - want).abs() < 1e-6, "{f}");
+    assert!((got - want).abs() < 1e-6 && (across - 100.0).abs() < 1e-6, "{got} vs {want}: {f}");
 }
 
 /// The rule the curved contour flanges below are made under: 2 thick, K 0.4 (its bend radius, 2,
@@ -1678,6 +1686,26 @@ fn fold_on_a_flange_panel() {
     assert!(b["max"][2].as_f64().unwrap_or(99.0) < 25.0, "{b}");
     // Folding across the flange's own bend is refused.
     assert!(s.execute("sheet.fold", &json!({"points": [[50, y, 2], [50, y, 25]]})).is_err());
+}
+
+/// Main's #15365, on a sheet made from surfaces (#6748): a bend radius far below the sheet's
+/// thickness but above 0 (0.0005 on a 1.2 sheet) keeps both its cylindrical faces, inner and
+/// outer, and the body stays one closed shell. (Its radius-0 half is refused here: see
+/// `a_bend_radius_of_0_is_refused_wherever_it_is_given`.)
+#[test]
+fn a_tiny_bend_radius_keeps_both_cylindrical_faces() {
+    let (t, k, w) = (1.2, 0.44, 60.0);
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Tiny", "thickness": t, "k_factor": k, "bend_radius": 0.0005, "active": true}));
+    base(&mut s, 100.0, w);
+    let fixed = json!([10, 30, t]);
+    run(&mut s, "sheet.fold", json!({"points": [[80, 0, t], [80, w, t]], "fixed": fixed, "flip": false, "radius": 0.0005}));
+    let failing: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(failing.is_empty(), "{failing:?}");
+    let body = &s.model.state().bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1, "{:?}", body.validity());
+    let cylinders = body.faces(1e-6).map(|f| f.iter().filter(|f| f.plane_normal.is_none()).count()).unwrap_or(0);
+    assert_eq!(cylinders, 2, "a tiny radius keeps both cylindrical faces");
 }
 
 #[test]
@@ -8918,4 +8946,59 @@ fn flange_segments_stored_bounds_outside_the_partition_are_refused() {
         let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
         assert!(errors.iter().any(|e| e == want), "{what}: {errors:?}");
     }
+}
+
+/// A through-all cut that passes a hair off the top corner of a flange where it meets the mitre
+/// of the next flange (#15269). A 60 × 100 plate (2 mm sheet, R 2) gets 30 mm flanges on its
+/// x = 0 and y = 100 edges; a cut in the YZ plane tapers the first flange from its mitre corner,
+/// y = 98 − √2 at z = 30, down to z = 10 at y = 0. With the cut's corner 0.00001 to 0.0001 mm
+/// along the top edge from the flange's corner, or its taper passing that close to the corner,
+/// SMLib's 2D boolean took the two for one point and the flange's outline came back open ("sew:
+/// the faces do not close"), or with an edge that short, which SMLib refused. Every offset builds,
+/// and the flange loses its part above the taper.
+#[test]
+fn a_cut_passing_a_hair_off_a_flange_corner_builds() {
+    // The flange's flat panel runs 26 from its bend (z = 4) to its top (z = 30) and c along y. The
+    // taper runs from (y 0, z 10) at slope k; the flange loses what lies above it.
+    let c = 98.0 - 2f64.sqrt();
+    let removed = |k: f64, end: f64| {
+        let y = (20.0 / k).min(end);
+        20.0 * y - k * y * y / 2.0
+    };
+    let mut failed = Vec::new();
+    for d in [0.0, 1e-5, -1e-5, 3e-5, -3e-5, 1e-4, -1e-4, 1.2e-4, -1.2e-4, 1e-3, -1e-3, 96.5858 - c] {
+        for along in [true, false] {
+            let mut s = Session::default();
+            run(
+                &mut s,
+                "sheet.manage_rules",
+                json!({"name": "Steel 2mm", "thickness": "2 mm", "bend_radius": "2 mm", "k_factor": "0.4", "active": true}),
+            );
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 100]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Part"}));
+            run(&mut s, "sheet.flange", json!({"edges": [[0, 50, 2], [30, 100, 2]], "height": 30}));
+            let before = volume(&mut s);
+            // Along: the cut's corner on the flange's top edge, d from its corner. Past: the taper
+            // runs on 1 mm past the mitre, d above the corner there.
+            let (corner, k) = if along { ([c + d, 30.0], 20.0 / (c + d)) } else { ([c + 1.0, 10.0 + (c + 1.0) * (20.0 + d) / c], (20.0 + d) / c) };
+            run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Cut"}));
+            run(&mut s, "sketch.line", json!({"points": [corner, [0, 10], [-5, 10], [-5, 35], [corner[0], 35]], "closed": true}));
+            run(&mut s, "sketch.finish", json!({}));
+            let what = format!("{d:e}, {}", if along { "corner along the top edge" } else { "taper past the corner" });
+            let cut = json!({"sketch": "Cut", "profiles": "all", "through_all": true, "direction": "symmetric", "operation": "cut"});
+            if let Err(e) = s.execute("solid.extrude", &cut) {
+                failed.push(format!("{what}: {e}"));
+                continue;
+            }
+            // The cut passes through the corner when it passes within the sew's tolerance of it
+            // (under 0.00016 mm here). The taper then turns about its far end by that much at
+            // most, which moves the volume by under 2 mm × c × 0.00016 / 2 = 0.016 mm³.
+            let want = before - 2.0 * removed(k, c.min(corner[0]));
+            let got = volume(&mut s);
+            assert!((got - want).abs() < 0.016, "{what}: {got} vs {want}");
+        }
+    }
+    assert!(failed.is_empty(), "{failed:?}");
 }

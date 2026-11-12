@@ -36,9 +36,10 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::record_face;
 use solidcore::surface::procedural_blend::convert::face_definition;
+use solidcore::topology::brep::outer_shells::outer_shells;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep_data::{BrepData, NO_OBJECT, UNDEF_ULONG};
-use solidcore::topology::brep_data_write::FromBrepEnv;
+use solidcore::topology::brep_data_write::{data_regions, FromBrepEnv};
 use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::topology::NotifyRecords;
@@ -260,24 +261,47 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
         faces.push(face);
     }
 
-    // Regions, shells and faceuses as blocks of the data's lists.
+    // Regions, shells and faceuses as blocks of the data's lists. Each region's shells are
+    // listed with its outer shell first, the one mated to the region enclosing it
+    // ([`outer_shells`]): the kernel's list order does not say which it is (a union that
+    // seals a void can leave the void's shell first), and the record takes a region's first
+    // shell as its outer one.
     let n_shells = bd.shells.len();
-    let mut region_shells = Vec::new();
+    let kernel_regions = data_regions(b)?;
+    let outer = outer_shells(b)?;
+    let mut region_shells: Vec<Vec<usize>> = Vec::new();
     let mut region_of = vec![0usize; n_shells];
+    let mut first_start = None;
     for (ri, rd) in bd.regions.iter().enumerate() {
         let start = data_index(rd.start_shell)?;
         let end = start
             .checked_add(data_index(rd.num_shells)?)
             .filter(|e| *e <= n_shells)
             .ok_or(Unsupported::Invalid("region shells"))?;
+        first_start.get_or_insert(start);
         for s in start..end {
             if let Some(slot) = region_of.get_mut(s) {
                 *slot = ri;
             }
         }
-        region_shells.push(start..end);
+        let region = *at(&kernel_regions, ri)?;
+        let kernel_shells = &b.region(region)?.shells;
+        if kernel_shells.len() != end - start {
+            return Err(Unsupported::Invalid(
+                "the kernel's data lists differ from its body's",
+            ));
+        }
+        let mut shells: Vec<usize> = (start..end).collect();
+        let outer_at = outer
+            .get(&region)
+            .and_then(|o| kernel_shells.iter().position(|s| s == o));
+        if let Some(p) = outer_at.filter(|p| *p > 0) {
+            let s = shells.remove(p);
+            shells.insert(0, s);
+        }
+        region_shells.push(shells);
     }
-    if region_shells.first().map(|s| s.start) != Some(0) {
+    if first_start != Some(0) {
         return Err(Unsupported::Invalid(
             "the kernel's data has no infinite region first",
         ));
@@ -548,7 +572,7 @@ fn find(root: &[usize], mut r: usize) -> usize {
 /// boundary faces together are one record region: the infinite region where it is among them,
 /// otherwise the void whose outer shell bounds it alone.
 fn record_regions(
-    region_shells: &[std::ops::Range<usize>],
+    region_shells: &[Vec<usize>],
     region_of: &[usize],
     groups: &[Group],
     material: impl Fn(usize) -> bool,
@@ -580,10 +604,7 @@ fn record_regions(
     // A region's outer runtime shell bounds it alone when every solid it faces faces no
     // region but this one.
     let alone = |r: usize| -> R<bool> {
-        let Some(outer) = region_shells
-            .get(r)
-            .and_then(|s| (s.start < s.end).then_some(s.start))
-        else {
+        let Some(outer) = region_shells.get(r).and_then(|s| s.first().copied()) else {
             return Ok(false);
         };
         for g in groups.iter().filter(|g| g.empty.contains(&outer)) {
@@ -642,7 +663,7 @@ fn record_regions(
             Ok(())
         };
         if material(r) {
-            for s in block.clone() {
+            for &s in block {
                 list(s, &mut listed)?;
             }
         } else {

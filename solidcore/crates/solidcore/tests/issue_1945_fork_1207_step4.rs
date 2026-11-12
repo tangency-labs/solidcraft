@@ -55,7 +55,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_split_edge_keeps_near_half = true;
     k.fixes.offset_point_vertex_caps = true;
     k.fixes.offset_clip_right_side_out = true;
-    k.fixes.revolution_offset_axis_both_sides = true;
     k.fixes.offset_extended_edges_mated = true;
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.keep_operand_uv_trims = true;
@@ -93,7 +92,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_missing_surface_fails = true;
-    k.fixes.approximate_surface_bezier_starter = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.fillet_nx1_end_rib_global_merge = true;
     k.fixes.uv_trim_corner_end_points_only = true;
@@ -107,7 +105,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.iso_curve_sliver_domain_is_degenerate = true;
     k.fixes.topology_failed_evaluations_propagate = true;
     k.fixes.heal_stage3_failures_propagate = true;
-    k.fixes.sweep_frame_on_planar_path_normal = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.boolean2d_plane_covers_far_faces = true;
@@ -128,7 +125,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.internal_pole_row_through_knot = true;
     k.fixes.extrusion_origin_scaled_zero = true;
-    k.fixes.sheet_sweep_joins_profile_wires = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.imprint_trims_edge_to_proto_vertex = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
