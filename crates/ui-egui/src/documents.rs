@@ -1142,6 +1142,9 @@ fn tab_security(app: &SolveApp) -> Vec<Option<String>> {
         .into_iter()
         .map(|session| {
             if let Some(report) = &session.provenance {
+                if session.is_dirty() {
+                    return Some(solidcraft_ui_text::tr("ui.open_signature_changed").to_string());
+                }
                 let trusted = report.newest().is_some_and(|record| signer_trusted(app, record));
                 return Some(signature_line(report, trusted));
             }
@@ -1173,6 +1176,9 @@ fn tab_badges(app: &SolveApp) -> Vec<Option<crate::app_bar::TabBadge>> {
         .into_iter()
         .map(|session| {
             if let Some(report) = &session.provenance {
+                if session.is_dirty() {
+                    return Some(TabBadge::Signed);
+                }
                 return Some(match &report.status {
                     solidcraft_engine::io::ProvenanceStatus::Valid => {
                         if report.newest().is_some_and(|record| signer_trusted(app, record)) {
@@ -1821,12 +1827,36 @@ mod tests {
     fn tab_badges_show_the_last_check_or_that_the_file_is_signed() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
+        let record = solidcraft_engine::io::ProvenanceRecord {
+            signer: solidcraft_engine::io::ProvenanceSigner::OpenPgp { fingerprint: "0123456789ABCDEF".into(), user_id: None },
+            author: None,
+            tool: None,
+            note: None,
+            created: None,
+            app: "test".into(),
+            format: "solidcraft/55".into(),
+            pending: Vec::new(),
+            document: [0; 32],
+            container: [0; 32],
+            parts: 0,
+            signature_valid: true,
+            covered: true,
+        };
         h.app.session.provenance = Some(solidcraft_engine::io::ProvenanceReport {
             chain: Default::default(),
-            records: Vec::new(),
+            records: vec![record],
             status: solidcraft_engine::io::ProvenanceStatus::Valid,
         });
+        h.app.session.mark_saved();
+        h.app.preferences.trusted_signing_keys = "0123456789ABCDEF".into();
         assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Verified)]);
+        h.app.session.provenance = Some(solidcraft_engine::io::ProvenanceReport {
+            chain: Default::default(),
+            records: vec![],
+            status: solidcraft_engine::io::ProvenanceStatus::Valid,
+        });
+        h.app.preferences.trusted_signing_keys.clear();
+        assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Signed)]);
         h.app.session.provenance = None;
         h.app.session.provenance_chain = Some(solidcraft_engine::io::ProvenanceChain { records: vec![vec![1]], truncated: false });
         assert_eq!(tab_badges(&h.app), vec![Some(crate::app_bar::TabBadge::Signed)]);
