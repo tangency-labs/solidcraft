@@ -125,7 +125,6 @@ crates/engine/src/cmd/measure_sel.rs:describe measures a selection on the displa
 crates/engine/src/cmd/measure_sel.rs:face_slot finds a slot from mesh triangles
 crates/engine/src/cmd/measure_sel.rs:face_tris reads a face's mesh triangles for measuring
 crates/engine/src/cmd/measure_sel.rs:resolve_pick resolves a face or edge pick by the display mesh
-crates/engine/src/cmd/motion.rs:centres centres occurrences by meshes
 crates/engine/src/cmd/motion.rs:overlap measures how deep bodies overlap by meshes
 crates/engine/src/cmd/motion.rs:tris reads mesh triangles for motion contact
 crates/engine/src/cmd/motion_analysis.rs:shared_volume measures the volume parts share by the display mesh
