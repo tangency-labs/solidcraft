@@ -7,6 +7,7 @@
 //! boxes and depth 48; windings and pcurve spans have fixed resource budgets.
 
 mod certificate;
+pub(crate) mod corner;
 mod cylinder;
 mod groove;
 pub(super) mod seam;
