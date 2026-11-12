@@ -26,36 +26,109 @@ fn navigating_and_selecting_reuse_placements_but_rows_read_live_view_state() {
 fn pending_and_reverted_moves_replace_cached_transforms() {
     let (mut h, _, occurrence) = fixture();
     let first = super::model_placement(&mut h.app, &[occurrence]).unwrap();
+    rows_find_what_the_session_finds(&mut h);
     h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[20,0,0],"capture":false})).unwrap();
     let moved = super::model_placement(&mut h.app, &[occurrence]).unwrap();
     assert!(!Arc::ptr_eq(&first, &moved));
     assert!((solidcraft_engine::doc::apply_point(&moved.world, solidcore_record::Vec3::ZERO).x - 20.0).abs() < 1e-9);
+    rows_find_what_the_session_finds(&mut h);
     h.app.run("component.revert_position", json!({"occurrences":[occurrence]})).unwrap();
     let reverted = super::model_placement(&mut h.app, &[occurrence]).unwrap();
     assert!(!Arc::ptr_eq(&moved, &reverted));
     assert_eq!(first.world, reverted.world);
+    rows_find_what_the_session_finds(&mut h);
+}
+
+/// #14850: what the Browser's model gives the feature rows is what the session itself gives:
+/// each feature's place, mark and bodies (in each placement, and in every one), each component's
+/// History rows, and each folded folder's worst mark and its message.
+fn rows_find_what_the_session_finds(h: &mut crate::scenario::Harness) {
+    use std::collections::BTreeSet;
+    super::prepare_model(&mut h.app);
+    let app = &mut h.app;
+    let doc = app.session.doc.clone();
+    let mut placements: Vec<Option<(u64, Vec<u64>)>> = vec![Some((0, Vec::new())), None];
+    placements.extend(doc.placements().into_iter().map(|(component, path, _)| Some((component, path))));
+    for feature in &doc.features {
+        let id = feature.id;
+        let model = app.tree.model.as_ref().unwrap();
+        assert_eq!(model.position(&app.session, id), doc.feature_index(id), "{}", feature.name);
+        assert_eq!(model.status(app, id), crate::timeline::feature_status(app, id), "{}", feature.name);
+        for placement in &placements {
+            let placement = placement.as_ref().map(|(component, path)| (*component, path.as_slice()));
+            let made = app.session.feature_bodies(&[id], placement);
+            assert_eq!(app.tree.model.as_mut().unwrap().feature_bodies(id, placement), made.as_slice(), "{} in {placement:?}", feature.name);
+        }
+    }
+    let components: BTreeSet<u64> = doc.features.iter().map(|f| f.component).chain([0]).collect();
+    for component in components {
+        let model = app.tree.model.as_ref().unwrap();
+        let listed: Vec<usize> = doc.features.iter().enumerate().filter(|(_, f)| f.component == component).map(|(i, _)| i).collect();
+        assert_eq!(model.history_features(&app.session, component), listed.as_slice(), "component {component}");
+        for history in [false, true] {
+            let ids: Vec<u64> = doc
+                .features
+                .iter()
+                .filter(|f| f.component == component && (history || !matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. })))
+                .map(|f| f.id)
+                .collect();
+            let worst = model.folder_status(app, component, history);
+            let mark = (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_message(app, id)));
+            assert_eq!(mark, crate::timeline::worst_status(app, &ids), "component {component}, history {history}");
+        }
+    }
 }
 
 #[test]
 fn feature_indices_follow_component_edits_and_undo() {
-    let (mut h, component, _) = fixture();
+    let (mut h, component, occurrence) = fixture();
     super::prepare_model(&mut h.app);
     assert!(super::model_feature_indices(&h.app, 0, true).is_empty());
+    rows_find_what_the_session_finds(&mut h);
     h.app.run("sketch.create", json!({"plane":"XY", "name":"Root sketch"})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     super::prepare_model(&mut h.app);
     assert_eq!(super::entries(&h.app, 0, "sketches")[0].label, "Root sketch");
     assert!(super::entries(&h.app, component, "sketches").is_empty());
+    rows_find_what_the_session_finds(&mut h);
     h.app.run("component.activate", json!({"component":component})).unwrap();
     h.app.run("sketch.create", json!({"plane":"YZ", "name":"Part sketch"})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     super::prepare_model(&mut h.app);
     assert_eq!(super::entries(&h.app, component, "sketches")[0].label, "Part sketch");
     assert_eq!(super::entries(&h.app, 0, "sketches").len(), 1);
+    rows_find_what_the_session_finds(&mut h);
     h.app.run("edit.undo", json!({})).unwrap();
     super::prepare_model(&mut h.app);
     assert!(super::entries(&h.app, component, "sketches").is_empty());
     assert_eq!(super::entries(&h.app, 0, "sketches").len(), 1);
+    rows_find_what_the_session_finds(&mut h);
+
+    // #14850: a box made in the design and one more in the part, placed twice, then rolled back,
+    // suppressed, and with results changed in place.
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let plate = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.run("component.activate", json!({"component":component})).unwrap();
+    h.app.run("solid.box", json!({"length":4,"width":4,"height":4,"corner":[20,0,0],"body_name":"Lug"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.app.run("occurrence.copy", json!({"occurrence":occurrence,"translate":[50,0,0]})).unwrap();
+    rows_find_what_the_session_finds(&mut h);
+    h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+    rows_find_what_the_session_finds(&mut h);
+    h.app.run("timeline.roll_to", json!({})).unwrap();
+    h.app.run("timeline.suppress", json!({"feature":plate,"suppressed":true})).unwrap();
+    rows_find_what_the_session_finds(&mut h);
+    h.app.run("timeline.suppress", json!({"feature":plate,"suppressed":false})).unwrap();
+    rows_find_what_the_session_finds(&mut h);
+    // In place, with the same model, which found the results already: an error and a warning
+    // set, and two results swapped, so their places are no longer where the model found them.
+    let results = &mut h.app.session.model.results;
+    assert!(results.len() > 2, "the last result, which holds the model's state, stays where it is");
+    results.iter_mut().find(|r| r.id == plate).unwrap().error = Some("the blend is larger than the neighbouring faces".into());
+    results[0].warning = Some("edge 3 no longer exists; using the edge at the picked point".into());
+    results.swap(0, 1);
+    rows_find_what_the_session_finds(&mut h);
+    assert!(h.app.tree.model.as_ref().unwrap().matches(&h.app.session), "the same model read the results changed in place");
 }
 
 #[test]

@@ -331,7 +331,8 @@ mod tests {
         let extruded = crate::extrude(&Plane::XY, &[region], 0., 5.).unwrap().remove(0);
         assert!(extruded.face_sources().is_some_and(|s| s.iter().any(Option::is_some)), "an extrusion carries its face sources");
         assert!(cut.history().is_some(), "a cut carries its history");
-        let paint = crate::Paint { opacity: 0.5, faces: vec![crate::FacePaint { face: 1, color: [0.9, 0.1, 0.2], opacity: 0.75 }] };
+        let paint =
+            crate::Paint { opacity: 0.5, faces: vec![crate::FacePaint { face: 1, color: [0.9, 0.1, 0.2], opacity: 0.75, name: None }], name: None };
         let painted = cube.clone().with_color(Some([0.1, 0.5, 0.9])).with_paint(Some(paint));
         let top = (0..cube.face_count()).find(|f| cube.planar_face(*f).is_some_and(|p| p.normal().z > 0.5 && p.origin.z > 9.)).unwrap();
         let split =
@@ -452,9 +453,11 @@ mod tests {
 
     #[test]
     fn native_preserves_face_appearance_and_authored_boundaries() {
-        let mut body = crate::box_solid(Vec3::new(1., 2., 3.), Vec3::new(10., 20., 30.))
-            .unwrap()
-            .with_paint(Some(crate::Paint { opacity: 0.7, faces: vec![crate::FacePaint { face: 2, color: [0.25, 0.5, 0.75], opacity: 0.6 }] }));
+        let mut body = crate::box_solid(Vec3::new(1., 2., 3.), Vec3::new(10., 20., 30.)).unwrap().with_paint(Some(crate::Paint {
+            opacity: 0.7,
+            faces: vec![crate::FacePaint { face: 2, color: [0.25, 0.5, 0.75], opacity: 0.6, name: None }],
+            name: None,
+        }));
         body.splits = Some(Arc::new(vec![vec![Vec3::new(1., 2., 3.), Vec3::new(11., 2., 3.)]]));
         body.regularization_protected = true;
         let restored = decode_native_body(&encode_native_body(&body).unwrap()).unwrap();

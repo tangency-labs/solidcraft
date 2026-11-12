@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 use super::types::Point3;
 
 /// Mark the flat face of a body at a point as the body's print face, or clear it. A slicer
-/// export (`file.send_to_slicer`, `file.save_mesh` with `slicer`, `file.open_in_easyprint`) lays
-/// the body on its print face: turned so the face points down and lies at Z = 0, the centre of
-/// mass over the origin. A body has one print face at most; marking another replaces it.
+/// export (`file.send_to_slicer`, `file.save_mesh` with `slicer`, `file.open_in_easyprint`), and an
+/// STL or 3MF export with `lay_on_print_faces` (`file.export`, `file.export_stl`, `file.export_3mf`,
+/// `file.save_mesh`), lays the body on its print face: turned so the face points down and lies at
+/// Z = 0, the centre of mass over the origin. A body has one print face at most; marking another
+/// replaces it.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PrintFaceParams {

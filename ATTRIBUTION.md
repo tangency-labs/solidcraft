@@ -845,6 +845,18 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | `assets/locales/pending/hole-group-folder.json` | SolidCraft contributors | Original Hole grouping preference labels and translations | MIT OR Apache-2.0 |
 | assets/locales/pending/press-pull-dialog-title.json | SolidCraft contributors | Original Press Pull dialog title translations for SolidCraft's English catalog; no external text used | MIT OR Apache-2.0 |
 | docs/layers/layers.svg | SolidCraft contributors | original diagram of SolidCraft's crate layers for docs/layers.md, written as SVG in solidcore's docs/layers diagram style | MIT OR Apache-2.0 |
+| assets/locales/pending/agent-chat-select-all.json | SolidCraft contributors | Original assistant chat select-all strings and translations | MIT OR Apache-2.0 |
+| docs/book/src/media/ui-tour/window.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`solidcraft --sample`, light theme, software renderer, 1280x800) with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/sketching/parts.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (light theme, software renderer, 1280x800) showing a fully constrained sketch, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/parameters/dialog.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (light theme, software renderer) showing the Parameters dialog, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/getting-started/start.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (light theme, software renderer, 1280x800) showing the start page with its built-in sample thumbnails, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| docs/book/src/media/files/menu.light.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`--sample`, light theme, software renderer) showing the File menu, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py --light | MIT OR Apache-2.0 |
+| assets/locales/pending/constraint-glyph-size.json | SolidCraft contributors | Original constraint glyph size preference label and help text | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/plane_auto.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/end_cap.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/end_cap_inward.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/end_cap_outward.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/locales/lv.json | SolidCraft contributors | Original Latvian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

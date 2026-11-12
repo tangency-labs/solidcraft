@@ -2391,6 +2391,9 @@ pub struct ReachResult {
     pub stopped_by_limit: Option<Vec<LimitStop>>,
     /// The closed loop that stopped it (its chain alone gets closer); `null` when none.
     pub stopped_by_loop: Option<ReachLoopStop>,
+    /// With contact sets on: the pair of a set that stopped it where they touch, as `joint.drive`
+    /// says; `null` when none.
+    pub stopped_by_contact: Option<ContactStop>,
     /// Why nothing can move. Left out when the reach worked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,

@@ -181,10 +181,16 @@ impl Nurbs {
         let v = full_knots(&kv, &mv);
         if p < 1 || q < 1 || u.len() != lnu + p + 1 || v.len() != lnv + q + 1 {
             // "SmGnSectionFSG: a face's NURBS data do not agree"
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "a face's NURBS data do not agree",
+            ));
         }
         if cps.len() != lnu * lnv {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "a face's control net does not match its knots",
+            ));
         }
         let mut pw = Vec::new();
         for c in &cps {
@@ -194,7 +200,10 @@ impl Nurbs {
             let positive = w > 0.0;
             if !positive {
                 // "SmGnSectionFSG: a face's weights are not positive"
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "a face's weights are not positive",
+                ));
             }
         }
         Ok(Self {
@@ -514,7 +523,10 @@ pub fn surface_partials_pinned(
     sides: [i32; 2],
 ) -> Result<Partials<f64>> {
     if lk > MAX_K {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the order is past the most the series hold",
+        ));
     }
     let definition = matches!(s.kind(), SurfaceKind::ProceduralBlend(_));
     let bs = if definition { None } else { as_b_spline(k, s)? };
@@ -543,11 +555,9 @@ pub fn surface_partials_pinned(
     let mut out = Partials::default();
     for a in 0..=lk {
         for b in 0..=(lk - a) {
-            let v = d
-                .get(a)
-                .and_then(|r| r.get(b))
-                .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let v = d.get(a).and_then(|r| r.get(b)).copied().ok_or_else(|| {
+                SolidError::blend_failed(OP, "the surface has no partial of this order")
+            })?;
             out.set(a, b, V3::from_vec3(v));
         }
     }
@@ -637,7 +647,10 @@ pub fn gn_evaluate_vn<T: GnScalar>(
     let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
     for (f, ((xf, pf), (&rf, sidef))) in rows.enumerate() {
         let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the station's system has no foot for the face",
+            ));
         };
         let mut du = *xu;
         let mut dv = *xv;
@@ -650,7 +663,10 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         let mut pv = vec![Ser::constant(T::of(1.0))];
         for a in 1..=top {
             let (Some(lu), Some(lv)) = (pu.last().copied(), pv.last().copied()) else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the face's powers are missing",
+                ));
             };
             pu.push(lu.mul_valued(&du, a - 1, 1, tr));
             pv.push(lv.mul_valued(&dv, a - 1, 1, tr));
@@ -864,7 +880,10 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
         let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
         for (fs, ((xf, pf), (&rf, sidef))) in self.faces.iter_mut().zip(rows) {
             let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the station's system has no foot for the face",
+                ));
             };
             let mut du = *xu;
             let mut dv = *xv;
@@ -872,7 +891,10 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
             dv.set(0, 0, T::of(0.0));
             for a in 1..=top {
                 let (Some(lu), Some(lv)) = (fs.pu.get(a - 1), fs.pv.get(a - 1)) else {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the face's powers are missing",
+                    ));
                 };
                 let (nu, nv) = (
                     lu.mul_valued(&du, a - 1, 1, btr),
@@ -883,7 +905,10 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
                     fs.pv.push(zero);
                 }
                 let (Some(pua), Some(pva)) = (fs.pu.get_mut(a), fs.pv.get_mut(a)) else {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the face's powers are missing",
+                    ));
                 };
                 pua.merge_computed(&nu, btr);
                 pva.merge_computed(&nv, btr);
@@ -1060,7 +1085,10 @@ pub fn solve4(ca: &[[f64; 4]; 4], cb: &[f64; 4]) -> Result<[f64; 4]> {
         let regular = a.at(p, c).abs() > 1.0e-13 * scale;
         if !regular {
             // "the blend's system is singular at a station (its faces' normals agree there)"
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the blend's system is singular at a station (its faces' normals agree there)",
+            ));
         }
         for j in 0..5 {
             let t = a.at(c, j);
@@ -1210,9 +1238,12 @@ pub fn leader_series_sided(
         derivs = derivs.min(c.degree()?);
     }
     // "SmGnSectionFSG: the leader's derivatives of this order are not evaluated"
-    let mut d = c
-        .evaluate(s, derivs, !before, false)
-        .map_err(|_| SolidError::sm_err(OP))?;
+    let mut d = c.evaluate(s, derivs, !before, false).map_err(|_| {
+        SolidError::blend_failed(
+            OP,
+            "the leader's derivatives of this order are not evaluated",
+        )
+    })?;
     d.resize(tr.s() + 2, Vec3::ZERO);
     let zero = V3 {
         x: 0.0,
@@ -1227,7 +1258,10 @@ pub fn leader_series_sided(
             fact *= j as f64;
         }
         let (Some(dj), Some(dj1)) = (d.get(j), d.get(j + 1)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the leader has no derivative of this order",
+            ));
         };
         let cl = [dj.x, dj.y, dj.z];
         let cd = [dj1.x, dj1.y, dj1.z];
@@ -1327,7 +1361,10 @@ fn solve_station_body(
     let law = opts.law;
     let sides = opts.sides.unwrap_or([0, 0, 0, 0]);
     if tr.s() > MAX_S {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the order is past the most the series hold",
+        ));
     }
     let lk = tr.s() + tr.e() + 1;
     let (l, t) = leader_series_sided(leader, s, tr, opts.before)?;
@@ -1394,7 +1431,10 @@ fn solve_station_body(
         it += 1;
     }
     if !converged {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the feet of a station did not converge",
+        ));
     }
 
     // the series, order by order: each coefficient of G is J x[i][k] plus the lower ones'
@@ -2097,5 +2137,17 @@ mod tests {
             "{inc} computed, at most twice each of {full}"
         );
         assert_eq!((inc, whole), (19, 35));
+    }
+
+    #[test]
+    fn an_order_past_the_series_is_a_typed_failure() {
+        let k = Kernel::default();
+        let s = plane(Vec3::X, Vec3::Y);
+        let error = surface_partials(&k, &s, Point2::new(0.5, 0.5), MAX_K + 1).unwrap_err();
+        assert_eq!(
+            error,
+            SolidError::blend_failed(OP, "the order is past the most the series hold")
+        );
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }
 }

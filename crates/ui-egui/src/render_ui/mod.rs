@@ -21,7 +21,10 @@ pub(crate) fn compact(app: &SolveApp, width: f32) -> bool {
 }
 
 pub(crate) fn focus_shortcut(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if crate::render_workspace::active(app) && !ui.ctx().text_edit_focused() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+    if crate::render_workspace::active(app)
+        && !ui.ctx().text_edit_focused()
+        && (!crate::panel_runtime::production_active(app) || !ui.ctx().egui_wants_keyboard_input())
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
     {
         ui.ctx().memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
         app.start("view.render_focus");

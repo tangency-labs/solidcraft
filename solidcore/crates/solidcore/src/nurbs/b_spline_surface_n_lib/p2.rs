@@ -105,13 +105,14 @@ use crate::nurbs::b_spline_curve::{
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, SurfParamType};
 use crate::nurbs::crv_basic::Boundary;
 use crate::nurbs::crv_basic::Curve;
+use crate::nurbs::crv_tool::p2::KnotMap;
 use crate::nurbs::geom::Rectangle;
 use crate::nurbs::index::at;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{srf_power_basis_eval_derivs, MAX_DERIVATIVE};
 use crate::nurbs::srf_adv::p1::{create_skin_spine, SkinDerivs, SkinSpineOptions, SpineAlignment};
 use crate::nurbs::srf_adv::p5::{
-    create_skin_srf_boundary_continuity, BoundaryContinuity, SkinBoundaryOptions,
+    create_skin_srf_boundary_continuity_mapped, BoundaryContinuity, SkinBoundaryOptions,
 };
 use crate::nurbs::srf_basic::{Direction, Surface};
 use crate::nurbs::srf_tool::p1::extract_patch;
@@ -220,6 +221,10 @@ pub struct SkinnedSurfaceOptions<'a> {
     pub deriv_surfs: Option<[Option<&'a BSplineSurface>; 2]>,
     /// Degree in the sweep direction (`lDegree`, upstream default 3).
     pub degree: usize,
+    /// Not upstream: the skinning parameter of each cross section, increasing from 0 to 1,
+    /// used where there are no rails (with rails, `intersections_with_rails` governs);
+    /// `None` takes the chord-length parameters, as upstream.
+    pub section_params: Option<&'a [f64]>,
 }
 
 impl Default for SkinnedSurfaceOptions<'_> {
@@ -234,6 +239,7 @@ impl Default for SkinnedSurfaceOptions<'_> {
             intersections_with_rails: None,
             deriv_surfs: None,
             degree: 3,
+            section_params: None,
         }
     }
 }
@@ -1018,6 +1024,23 @@ impl BSplineSurface {
         cross_sections: &[BSplineCurve],
         opts: SkinnedSurfaceOptions<'_>,
     ) -> Result<Self> {
+        Self::create_skinned_surface_mapped(k, cross_sections, opts, false).map(|(s, _)| s)
+    }
+
+    /// [`BSplineSurface::create_skinned_surface`], also saying, when `want_maps`, where each
+    /// cross section's knots went in the surface's knots across the sections ([`KnotMap`],
+    /// one per section; `None` for a section whose map a step broke, and for every section on
+    /// the spine path, which this does not trace). The surface is the one made without.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineSurface::create_skinned_surface`].
+    pub(crate) fn create_skinned_surface_mapped(
+        k: &crate::kernel::Kernel,
+        cross_sections: &[BSplineCurve],
+        opts: SkinnedSurfaceOptions<'_>,
+        want_maps: bool,
+    ) -> Result<(Self, Option<Vec<Option<KnotMap>>>)> {
         const OP: &str = OP_SKIN;
         let SkinnedSurfaceOptions {
             synchronized,
@@ -1029,6 +1052,7 @@ impl BSplineSurface {
             intersections_with_rails,
             deriv_surfs,
             degree,
+            section_params,
         } = opts;
         let num_sections = cross_sections.len();
 
@@ -1191,6 +1215,13 @@ impl BSplineSurface {
             .iter()
             .map(create_nlib_curve)
             .collect::<Result<_>>()?;
+        // (the maps: each section's knots as given to the skinning, to themselves)
+        let mut maps: Option<Vec<Option<KnotMap>>> = want_maps.then(|| {
+            curves
+                .iter()
+                .map(|c| Some(KnotMap::identity(c.knots())))
+                .collect()
+        });
 
         // load start and end skin surface Cross-boundary derivatives
         let mut dir_array: Option<[Option<Surface>; 2]> = None;
@@ -1270,6 +1301,12 @@ impl BSplineSurface {
             let params = int_params.as_deref().ok_or_else(|| {
                 SolidError::b_spline(OP, BSplineFailure::Missing("the rail intersections"))
             })?;
+            // (the spine path makes the sections compatible its own way: not traced)
+            if let Some(m) = maps.as_mut() {
+                for x in m.iter_mut() {
+                    *x = None;
+                }
+            }
             create_skin_spine(
                 &mut curves,
                 spine,
@@ -1303,10 +1340,19 @@ impl BSplineSurface {
                 deg: nl_deg,
                 es: approx_tol,
                 dir: nl_dir,
-                ts: int_params,
+                // Not upstream: without rails, the caller's section parameters (if any).
+                ts: if has_rails {
+                    int_params
+                } else {
+                    int_params.or_else(|| section_params.map(<[f64]>::to_vec))
+                },
                 kns: nl_knots,
             };
-            match create_skin_srf_boundary_continuity(&mut curves, &mut sk) {
+            match create_skin_srf_boundary_continuity_mapped(
+                &mut curves,
+                &mut sk,
+                maps.as_deref_mut(),
+            ) {
                 Ok(s) => s,
                 Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
                     return Err(e)
@@ -1314,7 +1360,11 @@ impl BSplineSurface {
                 Err(_) => {
                     // If not successful try without knots.
                     sk.kns = None;
-                    match create_skin_srf_boundary_continuity(&mut curves, &mut sk) {
+                    match create_skin_srf_boundary_continuity_mapped(
+                        &mut curves,
+                        &mut sk,
+                        maps.as_deref_mut(),
+                    ) {
                         Ok(s) => s,
                         Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
                             return Err(e)
@@ -1323,8 +1373,12 @@ impl BSplineSurface {
                             // It failed with derivative fields try it without them
                             if has_dir_array {
                                 sk.der = None;
-                                create_skin_srf_boundary_continuity(&mut curves, &mut sk)
-                                    .map_err(SolidError::nurbs_routine(OP))?
+                                create_skin_srf_boundary_continuity_mapped(
+                                    &mut curves,
+                                    &mut sk,
+                                    maps.as_deref_mut(),
+                                )
+                                .map_err(SolidError::nurbs_routine(OP))?
                             } else {
                                 // its not working - signal an error
                                 return Err(SolidError::b_spline(
@@ -1339,7 +1393,7 @@ impl BSplineSurface {
         };
 
         // set output
-        Ok(Self::from_gw_nurb(&nl_surf))
+        Ok((Self::from_gw_nurb(&nl_surf), maps))
     }
 
     // ---- TrimWithDomain -------------------------------------------------------------

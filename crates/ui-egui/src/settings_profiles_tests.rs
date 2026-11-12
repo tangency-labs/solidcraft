@@ -33,7 +33,7 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 105, "Appearance system-theme slots and Maya zoom are included");
+    assert_eq!(keys.len(), 106, "Appearance system-theme slots and Maya zoom are included");
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -819,6 +819,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "history_sketches",
         "home_fit_size",
         "invert_navigator_arrows",
+        "keep_hover_while_navigating",
         "keep_work_on_tab_switch",
         "language",
         "layout",
@@ -905,7 +906,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 105);
+    assert_eq!(expected.len(), 106);
     assert_eq!(actual, expected);
 }
 
