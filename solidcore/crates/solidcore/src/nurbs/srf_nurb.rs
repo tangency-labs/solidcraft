@@ -26,7 +26,7 @@
 //! | [`Surface::reverse`] / [`Surface::reversed`] | `N_SrfReverse` (in place / into a new surface; knots by `NI_ReverseKnots`) |
 //! | [`Surface::surface_type`], [`SurfaceType`], [`SurfaceKind`] | `N_SrfType`            |
 //! | [`Surface::reparam`]                         | `N_SrfReparam`                        |
-//! | [`Surface::is_closed_smooth`], [`Surface::is_closed_smooth_flag`], `_with_fixes` forms | `N_SrfIsClosedSmooth` |
+//! | [`Surface::is_closed_smooth`], [`Surface::is_closed_smooth_flag`] | `N_SrfIsClosedSmooth` |
 //! | [`Surface::eval_pt_deriv_normal_pole`]       | `N_SrfEvalPtPtDerivNormalPole`        |
 //! | [`Surface::eval_pt_normal_at_pole`]          | `N_SrfEvalPtNormalAtPole`             |
 //! | [`cone_elliptic_ends`], [`EllipticCone`]     | `N_ConeEllipticEnds`                  |
@@ -66,10 +66,9 @@
 //!   `usize` (`n < 0` cannot be expressed), missing tolerances are `InvalidInput`.
 //!   `N_SrfIsClosedSmooth` returns its error flag after a failed `N_VectorsAngle`
 //!   when no later evaluation clears it; the port returns that error.
-//! - `N_SrfIsClosedSmooth` with
-//!   [`UpstreamFixes::closed_smooth_pole_tangent_limit`] (opt-in, WR-725, #2521): at a
-//!   station where the derivative across the seam vanishes (a pole on the seam) the
-//!   G1 test takes its limit, the mixed derivative, instead of the angle of two
+//! - `N_SrfIsClosedSmooth` (not upstream, WR-725, #2521; the default since its flag
+//!   was retired): at a station where the derivative across the seam vanishes (a pole
+//!   on the seam) the G1 test takes its limit, the mixed derivative, instead of the angle of two
 //!   vanishing vectors; the stations are then evaluated with the mixed derivative
 //!   (the lower orders are the same bits).
 //! - `NL_MTOL` is [`MODEL_TOL`] and `NL_LTOL` is [`LINE_TOL`]
@@ -85,7 +84,6 @@
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::a_object::reverse_knots;
-use crate::kernel::UpstreamFixes;
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::{curves_are_coincident, ConicType, Curve};
 use crate::nurbs::crv_nurb::{line_from_pt_and_vector, CurveType};
@@ -1544,31 +1542,16 @@ impl Surface {
     /// Errors with [`NurbsFailure::Input`] for `level > 1`, with [`NurbsFailure::Knots`] when
     /// the knot vector has no next span, with the errors of [`Surface::derivs`], and
     /// with the error of a failed derivative angle when nothing clears it.
+    ///
+    /// Not upstream (WR-725): a station where the derivative across the seam vanishes
+    /// (a pole on the seam) is tested by its limit direction.
     pub fn is_closed_smooth(
         &self,
         level: usize,
         tols: &[f64],
         dflg: Direction,
     ) -> Result<Option<Direction>> {
-        self.is_closed_smooth_with_fixes(&UpstreamFixes::default(), level, tols, dflg)
-    }
-
-    /// [`Surface::is_closed_smooth`] with `fixes`: with
-    /// [`UpstreamFixes::closed_smooth_pole_tangent_limit`], a station where the
-    /// derivative across the seam vanishes (a pole on the seam) is tested by its limit
-    /// direction (WR-725).
-    ///
-    /// # Errors
-    ///
-    /// Those of [`Surface::is_closed_smooth`].
-    pub fn is_closed_smooth_with_fixes(
-        &self,
-        fixes: &UpstreamFixes,
-        level: usize,
-        tols: &[f64],
-        dflg: Direction,
-    ) -> Result<Option<Direction>> {
-        match self.is_closed_smooth_flag_with_fixes(fixes, level, tols, dflg)? {
+        match self.is_closed_smooth_flag(level, tols, dflg)? {
             (_, Some(e)) => Err(e),
             (closed, None) => Ok(closed),
         }
@@ -1588,24 +1571,7 @@ impl Surface {
         tols: &[f64],
         dflg: Direction,
     ) -> Result<(Option<Direction>, Option<SolidError>)> {
-        self.is_closed_smooth_flag_with_fixes(&UpstreamFixes::default(), level, tols, dflg)
-    }
-
-    /// [`Surface::is_closed_smooth_flag`] with `fixes` (see
-    /// [`Surface::is_closed_smooth_with_fixes`]).
-    ///
-    /// # Errors
-    ///
-    /// Those of [`Surface::is_closed_smooth_flag`].
-    pub fn is_closed_smooth_flag_with_fixes(
-        &self,
-        fixes: &UpstreamFixes,
-        level: usize,
-        tols: &[f64],
-        dflg: Direction,
-    ) -> Result<(Option<Direction>, Option<SolidError>)> {
         const OP: &str = "nurbs::srf_nurb::Surface::is_closed_smooth";
-        let pole_limit = fixes.closed_smooth_pole_tangent_limit;
         let tol = |i: usize| -> Result<f64> {
             tols.get(i)
                 .copied()
@@ -1642,9 +1608,9 @@ impl Surface {
         let vk = self.v_knots();
         let (t0, t1) = (tol(0)?, tol(1)?);
         let mut pending: Option<SolidError> = None;
-        // The mixed derivative is the limit direction at a pole (WR-725): evaluate it
-        // too then (`upper` leaves it zero; the lower orders are the same either way).
-        let upper = !pole_limit;
+        // The mixed derivative is the limit direction at a pole (WR-725): every station
+        // evaluates it too (`derivs`' `upper` is `false`; `true` would leave it zero, and
+        // the lower orders are the same either way).
         let dom = self.parameter_bounds();
 
         // Loop through knot spans and check continuity.
@@ -1657,16 +1623,16 @@ impl Surface {
                     let (x, d1, d2) = if jj == q {
                         let v = get(vk, ii + 1, OP)?;
                         let d1 =
-                            self.derivs(get(uk, 0, OP)?, v, Side::Left, Side::Right, upper, 1, 1)?;
+                            self.derivs(get(uk, 0, OP)?, v, Side::Left, Side::Right, false, 1, 1)?;
                         let d2 =
-                            self.derivs(get(uk, r, OP)?, v, Side::Right, Side::Right, upper, 1, 1)?;
+                            self.derivs(get(uk, r, OP)?, v, Side::Right, Side::Right, false, 1, 1)?;
                         (v, d1, d2)
                     } else {
                         let v = get(vk, ii, OP)? + jj as f64 * dv;
                         let d1 =
-                            self.derivs(get(uk, 0, OP)?, v, Side::Left, Side::Left, upper, 1, 1)?;
+                            self.derivs(get(uk, 0, OP)?, v, Side::Left, Side::Left, false, 1, 1)?;
                         let d2 =
-                            self.derivs(get(uk, r, OP)?, v, Side::Right, Side::Left, upper, 1, 1)?;
+                            self.derivs(get(uk, r, OP)?, v, Side::Right, Side::Left, false, 1, 1)?;
                         (v, d1, d2)
                     };
                     pending = None;
@@ -1679,15 +1645,11 @@ impl Surface {
                     }
 
                     // check G1
-                    let (a, b) = if pole_limit {
-                        let end = x == dom.vt;
-                        (
-                            seam_tangent(&d1, Direction::U, end, OP)?,
-                            seam_tangent(&d2, Direction::U, end, OP)?,
-                        )
-                    } else {
-                        (sd_at(&d1, 1, 0, OP)?, sd_at(&d2, 1, 0, OP)?)
-                    };
+                    let end = x == dom.vt;
+                    let (a, b) = (
+                        seam_tangent(&d1, Direction::U, end, OP)?,
+                        seam_tangent(&d2, Direction::U, end, OP)?,
+                    );
                     match vectors_angle(a, b) {
                         Err(e) => {
                             pending = Some(e);
@@ -1728,16 +1690,16 @@ impl Surface {
                     let (x, d1, d2) = if jj == p {
                         let u = get(uk, ii + 1, OP)?;
                         let d1 =
-                            self.derivs(u, get(vk, 0, OP)?, Side::Right, Side::Left, upper, 1, 1)?;
+                            self.derivs(u, get(vk, 0, OP)?, Side::Right, Side::Left, false, 1, 1)?;
                         let d2 =
-                            self.derivs(u, get(vk, s, OP)?, Side::Right, Side::Right, upper, 1, 1)?;
+                            self.derivs(u, get(vk, s, OP)?, Side::Right, Side::Right, false, 1, 1)?;
                         (u, d1, d2)
                     } else {
                         let u = get(uk, ii, OP)? + jj as f64 * du;
                         let d1 =
-                            self.derivs(u, get(vk, 0, OP)?, Side::Left, Side::Left, upper, 1, 1)?;
+                            self.derivs(u, get(vk, 0, OP)?, Side::Left, Side::Left, false, 1, 1)?;
                         let d2 =
-                            self.derivs(u, get(vk, s, OP)?, Side::Left, Side::Right, upper, 1, 1)?;
+                            self.derivs(u, get(vk, s, OP)?, Side::Left, Side::Right, false, 1, 1)?;
                         (u, d1, d2)
                     };
                     pending = None;
@@ -1750,15 +1712,11 @@ impl Surface {
                     }
 
                     // check G1
-                    let (a, b) = if pole_limit {
-                        let end = x == dom.ur;
-                        (
-                            seam_tangent(&d1, Direction::V, end, OP)?,
-                            seam_tangent(&d2, Direction::V, end, OP)?,
-                        )
-                    } else {
-                        (sd_at(&d1, 0, 1, OP)?, sd_at(&d2, 0, 1, OP)?)
-                    };
+                    let end = x == dom.ur;
+                    let (a, b) = (
+                        seam_tangent(&d1, Direction::V, end, OP)?,
+                        seam_tangent(&d2, Direction::V, end, OP)?,
+                    );
                     match vectors_angle(a, b) {
                         Err(e) => {
                             pending = Some(e);
@@ -1912,7 +1870,7 @@ const POLE_DERIV_TOL: f64 = 0.001 * MODEL_TOL;
 
 /// The direction across the seam of `seam` (`U`: the u seam, `S_u`; `V`: `S_v`) from
 /// the first derivatives `sd` (with the mixed one) at a station of
-/// [`Surface::is_closed_smooth_flag_with_fixes`]. Where it vanishes (shorter than
+/// [`Surface::is_closed_smooth_flag`]. Where it vanishes (shorter than
 /// [`POLE_DERIV_TOL`]: a row collapsed to a pole) it is its limit along the seam,
 /// the mixed derivative `S_uv`, negated at the end of the domain along the seam
 /// (`end`), where the row is approached from below (WR-725; the pole normal of
@@ -3395,13 +3353,6 @@ mod tests {
         Surface::new(net, 2, 2, u, v).unwrap()
     }
 
-    fn pole_fix() -> UpstreamFixes {
-        UpstreamFixes {
-            closed_smooth_pole_tangent_limit: true,
-            ..UpstreamFixes::default()
-        }
-    }
-
     /// #2521 (WR-725): at the poles `S_u` is exactly zero on both sides of the seam,
     /// so upstream fails the angle with `NL_GEO_ERR`; by its limit `S_uv` the seam is
     /// smooth there as everywhere else.
@@ -3413,14 +3364,9 @@ mod tests {
                 .derivs(0.0, 0.0, Side::Left, Side::Left, true, 1, 1)
                 .unwrap();
             assert_eq!(d[1][0], Vec3::ZERO);
-            let upstream = s.is_closed_smooth(1, &tols, Direction::U);
-            assert!(matches!(
-                upstream,
-                Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Geometry))
-            ));
-            let fixed = s.is_closed_smooth_with_fixes(&pole_fix(), 1, &tols, Direction::U);
-            assert_eq!(fixed.unwrap(), Some(Direction::U));
-            let flag = s.is_closed_smooth_flag_with_fixes(&pole_fix(), 1, &tols, Direction::UV);
+            let closed = s.is_closed_smooth(1, &tols, Direction::U);
+            assert_eq!(closed.unwrap(), Some(Direction::U));
+            let flag = s.is_closed_smooth_flag(1, &tols, Direction::UV);
             assert_eq!(flag.unwrap(), (Some(Direction::U), None));
         }
     }
@@ -3447,8 +3393,7 @@ mod tests {
         let (a, b) = (d1[1][0], d2[1][0]);
         assert!(a != Vec3::ZERO && a.length() < 1e-14 && b.length() < 1e-14);
         assert!(vectors_angle(a, b).unwrap() > 90.0);
-        assert_eq!(s.is_closed_smooth(1, &tols, Direction::U).unwrap(), None);
-        let fixed = s.is_closed_smooth_with_fixes(&pole_fix(), 1, &tols, Direction::U);
-        assert_eq!(fixed.unwrap(), Some(Direction::U));
+        let closed = s.is_closed_smooth(1, &tols, Direction::U);
+        assert_eq!(closed.unwrap(), Some(Direction::U));
     }
 }

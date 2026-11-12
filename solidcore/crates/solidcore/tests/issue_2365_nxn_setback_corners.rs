@@ -49,16 +49,11 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel, SolidError};
 
-/// The corpus's fix list (`tests/kernel_cases/fixes.json`, SolidCraft's), and
-/// `closed_smooth_pole_tangent_limit`, which the rig run turned on too.
+/// The corpus's fix list (`tests/kernel_cases/fixes.json`, SolidCraft's).
 fn solidcraft_fixes() -> Kernel {
     let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
     let mut f = UpstreamFixes::default();
-    for name in names
-        .iter()
-        .map(String::as_str)
-        .chain(["closed_smooth_pole_tangent_limit"])
-    {
+    for name in names.iter().map(String::as_str) {
         if let Some(flag) = f.flag_mut(name) {
             *flag = true;
         }

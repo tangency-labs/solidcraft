@@ -66,7 +66,6 @@ fn solidcraft_kernel() -> Kernel {
     for name in names.iter().map(String::as_str).chain([
         "planar_section_face_tolerance",
         "face_swap_uv_transposes_trims",
-        "closed_smooth_pole_tangent_limit",
         "fillet_setback_beside_curved_faces",
         "fillet_chamfer_corner",
     ]) {
