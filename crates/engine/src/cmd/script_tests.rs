@@ -51,8 +51,8 @@ fn same(a: &mut Session, b: &mut Session) {
     assert_eq!(errors(a), errors(b), "feature results");
     assert_eq!(volume(a), volume(b), "volume");
     assert_eq!(a.doc.components, b.doc.components, "components");
-    assert_eq!(a.doc.occurrences, b.doc.occurrences, "occurrences");
     assert_eq!(a.doc.assembly.joints, b.doc.assembly.joints, "joints");
+    assert_eq!(a.doc.occurrences, b.doc.occurrences, "occurrences");
     assert_eq!(a.doc.assembly.origins, b.doc.assembly.origins, "named joint origins");
     assert_eq!(a.doc.assembly.links, b.doc.assembly.links, "motion links");
 }
