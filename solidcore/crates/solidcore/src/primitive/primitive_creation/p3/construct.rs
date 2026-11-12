@@ -230,10 +230,15 @@ fn align_section_loop(
             best_shift = shift;
             best = candidate;
         }
-        segments.rotate_left(1);
+        // Move the first segment to the end, without a call that can panic.
+        let mut rest = std::mem::take(&mut segments).into_iter();
+        let first = rest.next();
+        segments = rest.chain(first).collect();
     }
     if edges.len() == segments.len() {
-        edges.rotate_left(best_shift);
+        let mut rest = std::mem::take(edges).into_iter();
+        let head: Vec<_> = rest.by_ref().take(best_shift).collect();
+        *edges = rest.chain(head).collect();
     } else {
         // Missing provenance must only disable the trace, never the geometry.
         edges.clear();
