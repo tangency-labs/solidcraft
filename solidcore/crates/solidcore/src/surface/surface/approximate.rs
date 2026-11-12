@@ -113,8 +113,10 @@ impl Default for CubicBezierSurface {
 #[derive(Debug, Clone)]
 pub struct ApproximatedSurface {
     /// `rpNewBSplineSurface`: the approximating surface with the fewest subdivisions
-    /// within the tolerance; `None` when the finest allowed one is still out of it
-    /// (and in the cases the module deviations list).
+    /// within the tolerance; `None` after a failure, which only
+    /// [`Surface::approximate_surface_ignoring_status`] returns as a result (the
+    /// finest allowed subdivision still out of the tolerance, among others), and when
+    /// the copy of `just_copy_b_splines` fails with `query_statuses_pass_on` off.
     pub surface: Option<Surface>,
     /// `dAchievedTol`: the largest sampled distance of the last test (`0` for a copied
     /// B-spline, `-1` when nothing was tested).
@@ -135,8 +137,10 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when no subdivision level is within the tolerance, or the starter
-    /// surface's degree is above 3; those of the evaluations, of the starter surface's
+    /// `SM_ERR` when no subdivision level is within the tolerance, the starter
+    /// surface's degree is above 3, or a Bezier patch runs past the starter's control
+    /// net (a starter whose end knots are not of full multiplicity); those of the
+    /// evaluations, of the starter surface's
     /// construction and of knot insertion; `InvalidInput` for a root surface chain
     /// deeper than [`MAX_GEOMETRY_NESTING`].
     pub fn approximate_surface(
@@ -1013,8 +1017,50 @@ mod tests {
             .approximate_surface_ignoring_status(&k, tol, 0, false)
             .unwrap();
         assert!(r.surface.is_none());
-        assert!(r.failure.is_some());
+        assert_eq!(
+            r.failure,
+            Some(SolidError::surface_failed(
+                OP_APPROX,
+                "the approximation did not converge"
+            ))
+        );
         assert!(r.achieved_tol > tol, "{}", r.achieved_tol);
+    }
+
+    #[test]
+    fn a_starter_with_simple_end_knots_overruns_its_net() {
+        // a cubic whose end knots are simple too (0 1 .. 7, 4 control points): its
+        // Bezier patches between knots run past the control net even with the inner
+        // knots raised to full multiplicity, an error (upstream: success with no
+        // surface)
+        let pts: Vec<Point3> = (0..4)
+            .flat_map(|i| {
+                let x = f64::from(i);
+                [
+                    Point3::new(x, 0.0, 0.1 * x * x),
+                    Point3::new(x, 1.0, 0.1 * x * x),
+                ]
+            })
+            .collect();
+        let s = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 1,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[1; 8],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let r = Surface::from(s).approximate_surface(&kernel(), 1e-3, 3, false);
+        assert_eq!(
+            r.unwrap_err(),
+            SolidError::surface_failed(OP_APPROX, "a Bezier starter index is past the control net")
+        );
     }
 
     #[test]

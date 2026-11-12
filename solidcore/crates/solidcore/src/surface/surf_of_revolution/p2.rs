@@ -1279,12 +1279,11 @@ mod tests {
     use crate::nurbs::crv_basic::Curve as NurbCurve;
     use crate::nurbs::math::{CPoint, NOW};
 
-    /// The generator's radius (along the frame's x axis) at both ends of the offset
-    /// surface's generator.
-    fn end_radii(k: &Kernel, offset: &SurfOfRevolution) -> [f64; 2] {
+    /// The end points of the offset surface's generator.
+    fn end_points(k: &Kernel, offset: &SurfOfRevolution) -> [Point3; 2] {
         let gen = offset.gen().unwrap();
         let ivl = gen.natural_interval();
-        [ivl.min(), ivl.max()].map(|t| gen.evaluate_point(k, t).unwrap().x)
+        [ivl.min(), ivl.max()].map(|t| gen.evaluate_point(k, t).unwrap())
     }
 
     /// tangency-labs/solidcore#973: a surface of revolution about +z through the origin
@@ -1321,12 +1320,27 @@ mod tests {
         )
         .unwrap();
         surface.make_nurb(&k).unwrap();
-        let min_radius = [1.0, -1.0]
+        // the generator (0, 0, -1)-(4, 0, -5) moved by 1 along (1, 0, 1)/sqrt(2) either
+        // way: the one moved towards -x crosses the axis at z = -1 - sqrt(2) and is cut
+        // there, its end on the axis (upstream keeps it reaching to x = -1/sqrt(2))
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        let ends: Vec<Point3> = [1.0, -1.0]
             .into_iter()
-            .flat_map(|d| end_radii(&k, &surface.create_offset_surface(&k, d, 1e-6).unwrap()))
-            .fold(f64::INFINITY, f64::min);
-        // neither offset keeps a stretch past the axis (upstream's does, below -0.1)
-        assert!(min_radius > -1e-6, "{min_radius}");
+            .flat_map(|d| end_points(&k, &surface.create_offset_surface(&k, d, 1e-6).unwrap()))
+            .collect();
+        let want = [
+            Vec3::new(h, 0.0, -1.0 + h),
+            Vec3::new(4.0 + h, 0.0, -5.0 + h),
+            Vec3::new(0.0, 0.0, -1.0 - 2.0 * h),
+            Vec3::new(4.0 - h, 0.0, -5.0 - h),
+        ];
+        assert_eq!(ends.len(), 4);
+        for w in want {
+            assert!(
+                ends.iter().any(|e| e.distance(w) <= 1e-6),
+                "{w:?} is no end of {ends:?}"
+            );
+        }
     }
 
     /// #13790: a typed `SM_ERR` that replaced the inversion's off-generator `Upstream` is
