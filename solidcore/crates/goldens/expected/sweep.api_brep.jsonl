@@ -20,7 +20,7 @@
 {"case":"box_face0_line_no_cap","deferred":null,"error":null,"ints":{"volume_status":[0]},"topology":null,"values":{"counts":[4.0,12.0,8.0],"faces":[0.0,4.0,0.0],"has":[1.0],"status":[0.0],"volume":[0.0]}}
 {"case":"box_face0_line_null_opts","deferred":null,"error":null,"ints":{"volume_status":[0]},"topology":null,"values":{"counts":[4.0,12.0,8.0],"faces":[0.0,4.0,0.0],"has":[1.0],"status":[0.0],"volume":[0.0]}}
 {"case":"box_face0_offset_scaled_cap","deferred":null,"error":null,"ints":{"volume_status":[0]},"topology":null,"values":{"counts":[6.0,12.0,8.0],"faces":[1.0,4.0,1.0],"has":[1.0],"status":[0.0],"volume":[0.00002999999999999518]}}
-{"case":"box_face1_curve_path_cap","deferred":null,"error":null,"ints":{"volume_status":[0]},"topology":null,"values":{"counts":[6.0,12.0,8.0],"faces":[1.0,4.0,1.0],"has":[1.0],"status":[0.0],"volume":[30.2282600710325]}}
+{"case":"box_face1_curve_path_cap","deferred":null,"error":null,"ints":{"volume_status":[0]},"topology":null,"values":{"counts":[6.0,12.0,8.0],"faces":[1.0,4.0,1.0],"has":[1.0],"status":[0.0],"volume":[30.228259877867142]}}
 {"case":"box_face1_curve_path_cap_translational","deferred":null,"error":null,"ints":{"volume_status":[0]},"topology":null,"values":{"counts":[6.0,12.0,8.0],"faces":[1.0,4.0,1.0],"has":[1.0],"status":[0.0],"volume":[30.00000000000004]}}
 {"case":"box_face1_line_cap","deferred":null,"error":null,"ints":{"volume_status":[0]},"topology":null,"values":{"counts":[6.0,12.0,8.0],"faces":[1.0,4.0,1.0],"has":[1.0],"status":[0.0],"volume":[29.999999999999993]}}
 {"case":"box_face1_line_no_cap","deferred":null,"error":null,"ints":{"volume_status":[0]},"topology":null,"values":{"counts":[4.0,12.0,8.0],"faces":[0.0,4.0,0.0],"has":[1.0],"status":[0.0],"volume":[0.0]}}
@@ -458,9 +458,9 @@
 {"case":"hang13_linear_circle_cap1_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"counts":[3.0,3.0,2.0],"has":[1.0],"status":[0.0]}}
 {"case":"hang13_linear_reps1_circle_cap1_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"counts":[3.0,3.0,2.0],"has":[1.0],"status":[0.0]}}
 {"case":"hang13_linear_reps2_circle_cap1_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"counts":[4.0,5.0,3.0],"has":[1.0],"status":[0.0]}}
-{"case":"issue1463_drilled_hole_mz_120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"status":[1001.0]}}
+{"case":"issue1463_drilled_hole_mz_120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"counts":[2.0,6.0,5.0],"has":[1.0],"status":[0.0]}}
 {"case":"issue1463_drilled_hole_mz_360","deferred":null,"error":null,"ints":{},"topology":null,"values":{"counts":[2.0,4.0,3.0],"has":[1.0],"status":[0.0]}}
-{"case":"issue1463_drilled_hole_pz_120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"status":[1001.0]}}
+{"case":"issue1463_drilled_hole_pz_120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"counts":[2.0,6.0,5.0],"has":[1.0],"status":[0.0]}}
 {"case":"issue1463_drilled_hole_pz_360","deferred":null,"error":null,"ints":{},"topology":null,"values":{"counts":[2.0,4.0,3.0],"has":[1.0],"status":[0.0]}}
 {"case":"issue1463_rig4008_tool_ccw_180","deferred":null,"error":null,"ints":{},"topology":null,"values":{"counts":[6.0,12.0,8.0],"has":[1.0],"status":[0.0]}}
 {"case":"issue1463_rig4008_tool_cw_180","deferred":null,"error":null,"ints":{},"topology":null,"values":{"counts":[6.0,12.0,8.0],"has":[1.0],"status":[0.0]}}
