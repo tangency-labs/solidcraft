@@ -92,10 +92,11 @@
 //!   ([`FilletSolverOps::skins_varying_balls`]), `FlushCurve` measures the built skin in
 //!   each span's middle against the balls' envelope there (`skin_splits`) and adds the
 //!   middle section as a station where it is farther than the tolerance, then builds
-//!   again. The geometry builder of steps 5b to 10 is `build_flush_geometry`, step 5
-//!   `equalise_spans` and step 5a `solve_mid_point`; the pieces a round whose law has
-//!   corners keeps are handed to the solver once, for the final skin
-//!   ([`FilletSolverOps::keep_law_corner_pieces`]).
+//!   again. That measure is a sampled refinement heuristic, not a certificate (§7.6;
+//!   the certified form is #15657). The geometry builder of steps 5b to 10 is
+//!   `build_flush_geometry`, step 5 `equalise_spans` and step 5a `solve_mid_point`; the
+//!   pieces a round whose law has corners keeps are handed to the solver once, for the
+//!   final skin ([`FilletSolverOps::keep_law_corner_pieces`]).
 //! - **Loops.** `FlushCurve`'s span equalisation stops once the knot count exceeds
 //!   three times its start, as upstream; each pass at most doubles it. The skin's
 //!   stations are added in at most `SKIN_ROUNDS` rounds and to at most
@@ -245,6 +246,25 @@ impl EnvelopeCone {
             r,
             axis: Some((cent_d / speed, cos, sqrt(sin_sq))),
         })
+    }
+
+    /// The point of the section's touch circle (centre `c + r cos a`, radius `r sin`,
+    /// square to `a`) nearest `x`'s direction about its axis: `x` projected onto the
+    /// circle. Without a moving centre, `x` projected onto the ball.
+    fn touch_circle_point_near(&self, x: Point3) -> Point3 {
+        // the circle's centre and radius, and the plane `x` is dropped into
+        let (o, radius, axis) = match self.axis {
+            Some((a, cos, sin)) => (self.c + a * (self.r * cos), self.r * sin, Some(a)),
+            None => (self.c, self.r, None),
+        };
+        let q = x - o;
+        let w = axis.map_or(q, |a| q - a * q.dot(a));
+        let len = w.length();
+        if len > EFF_ZERO {
+            o + w * (radius / len)
+        } else {
+            x
+        }
     }
 
     /// The signed distance from `x` to the cone (positive outside the balls), in closed
@@ -1978,7 +1998,14 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             else {
                 break built;
             };
-            let splits = self.skin_splits(solver, k, &pnts, skin)?;
+            // (the pieces of a round whose law has corners each skin their own stations:
+            // the joined surface averages the pieces' rows at each corner, where the session
+            // builds the corner from the pieces)
+            let skins: Vec<&Surface> = match built.kept.as_ref() {
+                Some(kept) => kept.pieces.iter().collect(),
+                None => vec![skin],
+            };
+            let splits = self.skin_splits(solver, k, &pnts, &skins)?;
             if splits.is_empty() {
                 break built;
             }
@@ -2052,47 +2079,73 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             && solver.self_intersection_handler()? != Some(HandlingAlgorithmType::Smoothing))
     }
 
-    /// The spans of `skin` (built on the stations `pnts`) farther than the tolerance
-    /// from the balls in their middle (#15256), each with its middle knot and the
+    /// The spans of the skins (built on the stations `pnts`: one skin, or the pieces of
+    /// a round whose law has corners, together over the stations' parameters) farther
+    /// than the tolerance from the balls in their middle (#15256), each with the
     /// solver's section there ([`Self::solve_mid_point`], the section the span
-    /// equalisation adds). The skin's iso-curve at the middle knot is measured at
-    /// [`SKIN_SHARES`] against [`EnvelopeCone`], the envelope of the section's ball
-    /// family to first order, by its closed-form distance.
+    /// equalisation adds) and that section's parameter on the skin. The parameter is
+    /// where the skin passes the section's touch circle (the circle's point nearest the
+    /// skin's middle iso-curve, projected onto the skin), so the section, added as a
+    /// station there, keeps the skin's own parametrisation: at the middle knot it would
+    /// sit where the stations' Hermite centre line puts it, up to 2e-2 along the trace
+    /// from where the skin does, and bend the skin through its neighbours. The skin's
+    /// iso-curve at that parameter is measured at [`SKIN_SHARES`] against
+    /// [`EnvelopeCone`], the envelope of the section's ball family to first order, by its
+    /// closed-form distance.
     ///
     /// What this is and is not (`docs/definitions-and-certificates.md` §7): the
-    /// section is the solver's converged Newton solution, not an enclosure; the cone
-    /// touches the balls' envelope along that section's whole touch circle, and departs
-    /// from it only to second order in the distance from the circle along the trace;
-    /// the points measured are a sample (nine on the middle iso-curve of each span), so
-    /// the test refines the construction but certifies nothing. Only a B-spline skin is
-    /// measured: a definition's net is certified against its definition. Leaves the
-    /// solver's offsets loaded.
+    /// section is the solver's converged Newton solution and its parameter a converged
+    /// projection, not enclosures; the cone touches the balls' envelope along that
+    /// section's whole touch circle, and departs from it only to second order in the
+    /// distance from the circle along the trace; the points measured are a sample (nine
+    /// on one iso-curve of each span). So this is a refinement heuristic, not a
+    /// certificate (§7.6, "No sampled certificate"). It decides where to add stations and
+    /// claims nothing about the skin between the points it measures, and nothing marks a
+    /// round it accepts as certified. The certified form of a variable round is its
+    /// definition with a certified net (#15657). Only B-spline skins are measured: a
+    /// definition's net is certified against its definition. Leaves the solver's offsets
+    /// loaded.
     ///
     /// # Errors
     ///
-    /// Those of [`Self::solve_mid_point`], the rails' evaluations and
-    /// [`EnvelopeCone::at_section`]; `InvalidInput` for a skin that does not run over
-    /// its stations' parameters.
+    /// Those of [`Self::solve_mid_point`], the rails' evaluations, the projection and
+    /// [`EnvelopeCone::at_section`]; `SM_ERR` for a section that does not project into
+    /// its span; `InvalidInput` for skins that do not run over the stations' parameters.
     fn skin_splits<S: FilletSolverOps<FilletGeom = G>>(
         &self,
         solver: &mut S,
         k: &Kernel,
         pnts: &[TsectPnt],
-        skin: &Surface,
+        skins: &[&Surface],
     ) -> Result<Vec<(usize, f64, TsectPnt)>> {
-        let SurfaceKind::BSpline(net) = skin.kind() else {
-            solver.reload_surface_offsets()?;
-            return Ok(Vec::new());
-        };
-        let domain = net.natural_uv_domain();
         let tol = self.base.base.this_approx_tol_3d;
         let (Some(first), Some(last)) = (pnts.first(), pnts.last()) else {
             solver.reload_surface_offsets()?;
             return Ok(Vec::new());
         };
+        // the B-spline skins and their domains, which together run over the stations'
+        // parameters (one skin, or the pieces of a round whose law has corners)
         let size = 1.0 + first.curve_parameter.abs().max(last.curve_parameter.abs());
-        if (domain.min().x - first.curve_parameter).abs() > EFF_ZERO * size
-            || (domain.max().x - last.curve_parameter).abs() > EFF_ZERO * size
+        let near = |a: f64, b: f64| (a - b).abs() <= EFF_ZERO * size;
+        let mut nets = Vec::new();
+        for skin in skins {
+            let SurfaceKind::BSpline(net) = skin.kind() else {
+                solver.reload_surface_offsets()?;
+                return Ok(Vec::new());
+            };
+            nets.push((*skin, net.natural_uv_domain()));
+        }
+        let joined = nets.windows(2).all(|w| match w {
+            [(_, a), (_, b)] => near(a.max().x, b.min().x),
+            _ => true,
+        });
+        let (Some((_, d0)), Some((_, d1))) = (nets.first(), nets.last()) else {
+            solver.reload_surface_offsets()?;
+            return Ok(Vec::new());
+        };
+        if !joined
+            || !near(d0.min().x, first.curve_parameter)
+            || !near(d1.max().x, last.curve_parameter)
         {
             return Err(SolidError::invalid_input(
                 OP_FLUSH,
@@ -2112,10 +2165,21 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             mids.push((j, knot, self.solve_mid_point(solver, k, pj, pj1, frac)?));
         }
 
-        // its rail points and derivatives on the faces, and the skin against its circle
+        // its rail points and derivatives on the faces, and the skin against its cone
         solver.set_surfaces_to_zero_offset()?;
         let mut splits = Vec::new();
         for (j, knot, mid) in mids {
+            // the skin over the span (a span's middle is never a piece's end: the pieces
+            // end at stations)
+            let Some(&(skin, domain)) = nets
+                .iter()
+                .find(|(_, d)| d.min().x < knot && knot < d.max().x)
+            else {
+                return Err(SolidError::invalid_input(
+                    OP_FLUSH,
+                    "no skin runs over a span's middle",
+                ));
+            };
             let mut rails = [(Point3::ZERO, Vec3::ZERO); 2];
             for ((rail, s), slot) in SRFS.into_iter().enumerate().zip(rails.iter_mut()) {
                 let uv_d = mid.uv_deriv(s);
@@ -2124,17 +2188,46 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                 *slot = (pnt, du * uv_d.x + dv * uv_d.y);
             }
             let cone = EnvelopeCone::at_section(mid.crv_pos(), mid.crv_deriv(), rails)?;
+            // the section's parameter on the skin: where the skin passes its touch
+            // circle's middle, so the skin is measured there and, added as a station at
+            // that parameter, the section keeps the skin's own parametrisation (the
+            // middle knot is where the stations' centre line, not the skin, puts it)
+            let v_mid = 0.5 * (domain.min().y + domain.max().y);
+            let near_mid = skin.evaluate_point(k, Point2::new(knot, v_mid))?;
+            let on_circle = cone.touch_circle_point_near(near_mid);
+            let (lo, hi) = (
+                pnts.get(j).map_or(knot, |p| p.curve_parameter),
+                pnts.get(j + 1).map_or(knot, |p| p.curve_parameter),
+            );
+            let solved = skin.local_point_solve::<()>(
+                k,
+                &domain,
+                SolverOperation::Minimize,
+                on_circle,
+                Point2::new(knot, v_mid),
+            )?;
+            let at = solved.solution.start.param(0)?;
+            // (written to accept: a section off its span, or none found, refuses)
+            let in_span = solved.found && lo < at && at < hi;
+            if !in_span {
+                return Err(SolidError::blend_failed(
+                    OP_FLUSH,
+                    "a span's middle section is not on its skin",
+                ));
+            }
             let mut held = true;
             for share in SKIN_SHARES {
                 let v = domain.min().y + share * (domain.max().y - domain.min().y);
                 let off = cone
-                    .distance(skin.evaluate_point(k, Point2::new(knot, v))?)
+                    .distance(skin.evaluate_point(k, Point2::new(at, v))?)
                     .abs();
                 // (written to accept: a NaN distance splits the span)
                 held &= off <= tol;
             }
             if !held {
-                splits.push((j, knot, mid));
+                let mut mid = mid;
+                mid.curve_parameter = at;
+                splits.push((j, at, mid));
             }
         }
         solver.reload_surface_offsets()?;
