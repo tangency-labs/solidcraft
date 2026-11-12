@@ -5053,8 +5053,12 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 let m = drawn(b);
                 for i in m.circular_rim(*index) {
                     let selected = sel.iter().any(|x| matches!(x, Sel::Edge { body: b, index: j, .. } if b == body && *j == i));
-                    if !selected && let Some(e) = if i == *index { edge_of(&m, i, *mid) } else { m.edges.get(i) } {
-                        edge_lines(&mut feedback, e, hover_edge, 2.0, &edge_normals(&m, e));
+                    if let Some(e) = if i == *index { edge_of(&m, i, *mid) } else { m.edges.get(i) } {
+                        // A hovered edge that is picked keeps its selection highlight and only
+                        // thickens one step; redrawing it in the hover colour would read as if
+                        // the pick had come off.
+                        let (cols, w) = if selected { (selected_edge, 4.0) } else { (hover_edge, 2.0) };
+                        edge_lines(&mut feedback, e, cols, w, &edge_normals(&m, e));
                     }
                 }
             }
