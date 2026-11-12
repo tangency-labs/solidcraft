@@ -1088,3 +1088,34 @@ fn a_radial_laws_corners_bound_a_joined_screw_sweeps_walls() {
     let (swept, _, _) = walls(3.2, &[(0.0, 0.0), (0.65, 0.0), (1.9, 0.4), (3.2, 0.4)]);
     assert_eq!(swept, 8);
 }
+
+/// A screw sweep refuses, as an argument error, what SMLib's own screw sweep refused: no pitch,
+/// more turns than it takes, a radial law whose turns go back, and an empty law.
+#[test]
+fn a_screw_sweep_refuses_bad_arguments() {
+    let sq = polygon(&[
+        [5.0, 0.0, 0.0],
+        [6.0, 0.0, 0.0],
+        [6.0, 0.0, 1.0],
+        [5.0, 0.0, 1.0],
+    ]);
+    let refused = |pitch: f64, turns: f64, law: Option<&[(f64, f64)]>| {
+        screw_sweep(&sq, [0.0; 3], Z, pitch, turns, law, 1e-3).err()
+    };
+    assert_eq!(refused(0.0, 1.0, None), Some(Error::Argument), "no pitch");
+    assert_eq!(
+        refused(1.0, 300.0, None),
+        Some(Error::Argument),
+        "too many turns"
+    );
+    assert_eq!(
+        refused(1.0, 1.0, Some(&[(0.5, 0.0), (0.2, 0.0)])),
+        Some(Error::Argument),
+        "a law going back"
+    );
+    assert_eq!(
+        refused(1.0, 1.0, Some(&[])),
+        Some(Error::Argument),
+        "an empty law"
+    );
+}
