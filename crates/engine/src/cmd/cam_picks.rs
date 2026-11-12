@@ -1,6 +1,7 @@
-//! Picks (a child of `cmd/cam.rs`): an operation's geometry stored as persistent face and edge
-//! names (`schema/cam_picks.rs`), found again each time the job is planned and read as the keys
-//! the planners take (a pocket's or contour's `feature`).
+//! Picks (a child of `cmd/cam.rs`): an operation's geometry stored as persistent face, edge and
+//! sketch names (`schema/cam_picks.rs`), found again each time the job is planned and read as the
+//! keys the planners take (a pocket's or contour's `feature`, or its `sketch` and `profiles`);
+//! heights that follow a face, read as numbers; and each feature of `cam.features` as picks.
 //!
 //! A pick is found by its name first (`naming::locate_face_named`, `locate_edge_named`), else by
 //! the exact face or edge its stored point lies on (the B-rep's surfaces and exact extents, never
@@ -21,13 +22,15 @@ use super::features::{BodyFaces, FeatureSet, Lazy};
 use super::num;
 use crate::params::bad;
 use crate::schema::cam::CamJob;
-use crate::schema::cam_picks::{OpRef, Pick, PickResolved};
+use crate::schema::cam_picks::{HeightRef, HeightSource, OpRef, Pick, PickResolved};
 use crate::{Result, Session};
 
 /// Most picks one operation holds.
 pub(crate) const MAX_PICKS: usize = 1000;
 /// The keys of an operation that picks take the place of.
 const GEOMETRY_KEYS: &[&str] = &["sketch", "profiles", "polygon", "feature"];
+/// The height keys of a `heights` object.
+const HEIGHT_KEYS: &[&str] = &["clearance", "retract", "top", "bottom"];
 
 /// A face or edge found again.
 #[derive(Clone, Debug)]
@@ -56,19 +59,24 @@ fn finite3(p: &[f64; 3]) -> bool {
     p.iter().all(|x| x.is_finite() && x.abs() <= super::MAX_COORD)
 }
 
-/// Checks a pick's shape: a face or an edge of a body (with a finite point), or a point alone.
+/// Checks a pick's shape: a face or an edge of a body (with a finite point), a point alone, or a
+/// sketch's profile.
 pub(crate) fn check_pick(p: &Pick) -> std::result::Result<(), String> {
     let text_ok =
         |t: &Option<String>| t.as_deref().is_none_or(|t| !t.trim().is_empty() && t.chars().count() <= 400 && !t.chars().any(char::is_control));
-    if ![&p.body, &p.face, &p.edge].iter().all(|t| text_ok(t)) {
+    if ![&p.body, &p.face, &p.edge, &p.sketch].iter().all(|t| text_ok(t)) {
         return Err("a pick's names must be 1 to 400 characters, without control characters".into());
     }
     if p.at.as_ref().is_some_and(|a| !finite3(a)) {
         return Err("a pick's `at` must be a finite point [x, y, z] within 1000 m".into());
     }
-    match (p.face.is_some(), p.edge.is_some()) {
-        (true, true) => Err("a pick names a `face` or an `edge`, not both".into()),
-        (false, false) if p.at.is_none() => Err("a pick needs a `face` or an `edge` (with `at`)".into()),
+    let solid = p.face.is_some() || p.edge.is_some();
+    match (solid, p.sketch.is_some()) {
+        (true, true) => Err("a pick is a face or edge of a body, or a sketch's profile, not both".into()),
+        (true, false) if p.face.is_some() && p.edge.is_some() => Err("a pick names a `face` or an `edge`, not both".into()),
+        (false, false) if p.at.is_none() => Err("a pick needs a `face`, an `edge` (with `at`), or a `sketch`".into()),
+        (false, true) if p.at.is_some() || p.body.is_some() => Err("a sketch pick names its `sketch` and `profile` only".into()),
+        _ if p.profile.is_some() && p.sketch.is_none() => Err("a pick's `profile` goes with its `sketch`".into()),
         _ => Ok(()),
     }
 }
@@ -336,6 +344,7 @@ fn wanted(ty: &str) -> &'static [&'static str] {
 /// Picks of an operation found again: the hits, their features, and what each reports.
 struct Found {
     hits: Vec<(usize, Hit, Option<String>)>,
+    sketches: Vec<Pick>,
     report: Vec<PickResolved>,
     lost: Vec<(usize, String)>,
 }
@@ -369,13 +378,33 @@ impl<'a> Model<'a> {
     pub(crate) fn find(&self, p: &Pick) -> std::result::Result<Hit, String> {
         find(&self.st, &self.part, p, self.tol)
     }
+
+    /// The part's top and bottom along `frame`'s Z (exact extents of its faces).
+    fn part_range(&self, frame: &Frame) -> Option<(f64, f64)> {
+        let mut r: Option<(f64, f64)> = None;
+        for b in &self.part {
+            let mb = self.st.bodies.get(*b)?;
+            let faces = BodyFaces::new(&mb.name, &mb.body);
+            for f in 0..faces.face_count() {
+                if let Some([lo, hi]) = faces.extent(f, self.origin, frame) {
+                    r = Some(r.map_or((lo[2], hi[2]), |(a, b)| (a.min(lo[2]), b.max(hi[2]))));
+                }
+            }
+        }
+        r
+    }
 }
 
 /// Finds an operation's picks again.
 fn find_all(m: &Model<'_>, op: Option<&OpRef>, picks: &[Pick], ty: &str) -> Found {
-    let mut found = Found { hits: Vec::new(), report: Vec::new(), lost: Vec::new() };
-    let set = m.set();
+    let mut found = Found { hits: Vec::new(), sketches: Vec::new(), report: Vec::new(), lost: Vec::new() };
+    let set = if picks.iter().any(|p| p.sketch.is_none()) { m.set() } else { None };
     for (k, p) in picks.iter().enumerate() {
+        if p.sketch.is_some() {
+            found.sketches.push(p.clone());
+            found.report.push(PickResolved { op: op.cloned(), pick: k, by: "name".into(), ..PickResolved::default() });
+            continue;
+        }
         match m.find(p) {
             Ok(h) => {
                 let ids = set.map(|set| features_of_hit(set, &m.st, &h, m.origin, m.tol)).unwrap_or_default();
@@ -416,6 +445,24 @@ fn a_of(set: &FeatureSet, id: &str) -> f64 {
 
 /// The geometry the hits give an operation of type `ty`: keys written into `op`.
 fn apply(m: &Model<'_>, ty: &str, op: &mut Map<String, Value>, found: &Found) -> std::result::Result<(), String> {
+    // Sketch picks: the sketch and its profiles.
+    if !found.sketches.is_empty() {
+        let mut names: Vec<&str> = found.sketches.iter().filter_map(|p| p.sketch.as_deref()).collect();
+        names.sort_unstable();
+        names.dedup();
+        let [sketch] = names.as_slice() else { return Err("the picks are in more than one sketch: give one operation each".into()) };
+        if !found.hits.is_empty() {
+            return Err("the picks are a sketch's profiles and faces or edges of the part: give one operation each".into());
+        }
+        if !matches!(ty, "pocket" | "contour") {
+            return Err(format!("a `{ty}` operation takes no sketch: pick faces or edges of the part"));
+        }
+        op.insert("sketch".into(), json!(sketch));
+        let profiles: Vec<usize> = found.sketches.iter().filter_map(|p| p.profile).collect();
+        if !profiles.is_empty() {
+            op.insert("profiles".into(), json!(profiles));
+        }
+    }
     if found.hits.is_empty() {
         return Ok(());
     }
@@ -457,10 +504,104 @@ fn apply(m: &Model<'_>, ty: &str, op: &mut Map<String, Value>, found: &Found) ->
     }
 }
 
+/// A height that follows the model, in `frame`: a picked planar face's height (with a note when
+/// the face was found by its point or has moved), or the part's top or bottom, plus the offset.
+fn height_of(m: &Model<'_>, r: &HeightRef, frame: &Frame) -> std::result::Result<(f64, Option<String>), String> {
+    let offset = r.offset.unwrap_or(0.0);
+    if !(offset.is_finite() && offset.abs() <= super::MAX_COORD) {
+        return Err("a height's `offset` must be a finite number of mm".into());
+    }
+    let (z, note) = match &r.from {
+        HeightSource::Named(n) => match n.as_str() {
+            "part_top" => (m.part_range(frame).ok_or("the part has no extent")?.1, None),
+            "part_bottom" => (m.part_range(frame).ok_or("the part has no extent")?.0, None),
+            other => return Err(format!("a height is from `part_top`, `part_bottom` or a picked face, not `{other}`")),
+        },
+        HeightSource::Face(p) => {
+            check_pick(p)?;
+            if p.sketch.is_some() {
+                return Err("a height follows a face, not a sketch".into());
+            }
+            let h = m.find(p)?;
+            let f = h.face.ok_or("a height follows a face, not an edge")?;
+            let mb = m.st.bodies.get(h.body).ok_or("its body is gone")?;
+            let faces = BodyFaces::new(&mb.name, &mb.body);
+            match faces.surface(f) {
+                Some(FaceSurface::Plane { normal, .. }) if normal.vec().dot(frame.z).abs() >= 1.0 - 1e-6 => {
+                    let [lo, _] = faces.extent(f, m.origin, frame).ok_or("the face has no extent")?;
+                    (lo[2], h.note)
+                }
+                _ => return Err("a height follows a planar face square to the tool axis".into()),
+            }
+        }
+    };
+    Ok((super::round(z + offset, 1e9), note))
+}
+
+/// Replaces the height references of `op` (`heights.*`) with the heights they give in `frame`.
+fn heights_in(m: &Model<'_>, op: &mut Map<String, Value>, frame: &Frame, notes: &mut Vec<String>) -> std::result::Result<(), String> {
+    let Some(Value::Object(h)) = op.get_mut("heights") else { return Ok(()) };
+    for k in HEIGHT_KEYS {
+        let Some(v) = h.get_mut(*k) else { continue };
+        if !v.is_object() {
+            continue;
+        }
+        let r: HeightRef = serde_json::from_value(v.clone()).map_err(|e| format!("`heights.{k}`: {e}"))?;
+        let (z, note) = height_of(m, &r, frame).map_err(|e| format!("`heights.{k}`: {e}"))?;
+        notes.extend(note.map(|n| format!("`heights.{k}`'s face {n}")));
+        *v = json!(z);
+    }
+    Ok(())
+}
+
+/// Whether `v` (a job) has picks or heights that follow the model.
+pub(crate) fn has_refs(v: &Value) -> bool {
+    let refs = |o: &Value| o.get("picks").is_some() || o.get("heights").and_then(Value::as_object).is_some_and(|h| h.values().any(Value::is_object));
+    v.get("operations").and_then(Value::as_array).is_some_and(|ops| ops.iter().any(refs))
+}
+
+/// `job` as the schema reads it without the model: picks checked and taken out, and heights that
+/// follow the model checked and read as 0. What a job with picks would be once they are found,
+/// for checking its every other key.
+pub(crate) fn placeholders(job: &Value) -> std::result::Result<Value, String> {
+    let mut out = job.clone();
+    let Some(Value::Array(ops)) = out.get_mut("operations") else { return Ok(out) };
+    for (i, op) in ops.iter_mut().enumerate() {
+        let at = format!("operations[{i}]");
+        let Some(map) = op.as_object_mut() else { continue };
+        if let Some(v) = map.remove("picks").filter(|v| !v.is_null()) {
+            let picks: Vec<Pick> = serde_json::from_value(v).map_err(|e| format!("`{at}.picks`: {e}"))?;
+            if picks.len() > MAX_PICKS {
+                return Err(format!("`{at}.picks`: at most {MAX_PICKS} picks"));
+            }
+            for (k, p) in picks.iter().enumerate() {
+                check_pick(p).map_err(|e| format!("`{at}.picks[{k}]`: {e}"))?;
+            }
+            if let Some(k) = GEOMETRY_KEYS.iter().find(|k| map.contains_key(**k)) {
+                return Err(format!("`{at}`: give `picks` or `{k}`, not both"));
+            }
+        }
+        if let Some(Value::Object(h)) = map.get_mut("heights") {
+            for k in HEIGHT_KEYS {
+                let Some(v) = h.get_mut(*k) else { continue };
+                if v.is_object() {
+                    let r: HeightRef = serde_json::from_value(v.clone()).map_err(|e| format!("`{at}.heights.{k}`: {e}"))?;
+                    if let HeightSource::Face(p) = &r.from {
+                        check_pick(p).map_err(|e| format!("`{at}.heights.{k}`: {e}"))?;
+                    }
+                    *v = json!(0.0);
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Finds the picks of every operation of `job` again and writes the geometry they give into it
-/// (a pocket's or contour's `feature`), in place of `picks`. An operation turned off keeps its
-/// picks unread. A pick that is lost, or that is no feature the operation reads, refuses the job
-/// with every operation that has one named.
+/// (a pocket's or contour's `feature`, or its `sketch` and `profiles`), in place of `picks`, and
+/// its heights that follow the model as numbers. An operation turned off keeps its picks and
+/// heights unread. A pick that is lost, or that is no feature the operation reads, refuses the
+/// job with every operation that has one named.
 pub(crate) fn resolve_job(m: &Model<'_>, job: &mut Map<String, Value>) -> Result<Vec<PickResolved>> {
     let mut report: Vec<PickResolved> = Vec::new();
     let mut refused: Vec<String> = Vec::new();
@@ -474,6 +615,18 @@ pub(crate) fn resolve_job(m: &Model<'_>, job: &mut Map<String, Value>) -> Result
             continue;
         }
         let ty = inner.get("type").and_then(Value::as_str).unwrap_or_default().to_string();
+        let refuse = |why: String| format!("operation {i} `{name}`: {why}");
+        let r = OpRef { index: i, name: name.clone() };
+        // The heights that follow the model, read in the operation's frame (the job's operations
+        // run with every rotary at 0: work coordinates).
+        let mut notes = Vec::new();
+        if let Err(e) = heights_in(m, inner, &Frame::IDENTITY, &mut notes) {
+            refused.push(refuse(e));
+            continue;
+        }
+        for n in notes {
+            report.push(PickResolved { op: Some(r.clone()), pick: 0, by: "point".into(), note: Some(n), ..PickResolved::default() });
+        }
         let picks: Vec<Pick> = match inner.remove("picks") {
             None | Some(Value::Null) => continue,
             Some(v) => serde_json::from_value(v).map_err(|e| bad(m.cmd, format!("operation {i} `{name}`: `picks`: {e}")))?,
@@ -481,7 +634,6 @@ pub(crate) fn resolve_job(m: &Model<'_>, job: &mut Map<String, Value>) -> Result
         if picks.is_empty() {
             continue;
         }
-        let refuse = |why: String| format!("operation {i} `{name}`: {why}");
         if picks.len() > MAX_PICKS {
             refused.push(refuse(format!("at most {MAX_PICKS} picks")));
             continue;
@@ -494,7 +646,6 @@ pub(crate) fn resolve_job(m: &Model<'_>, job: &mut Map<String, Value>) -> Result
             refused.push(refuse(format!("give `picks` or `{k}`, not both")));
             continue;
         }
-        let r = OpRef { index: i, name: name.clone() };
         let found = find_all(m, Some(&r), &picks, &ty);
         report.extend(found.report.iter().cloned());
         if !found.lost.is_empty() {
@@ -510,6 +661,48 @@ pub(crate) fn resolve_job(m: &Model<'_>, job: &mut Map<String, Value>) -> Result
         return Err(bad(m.cmd, format!("the job was not planned: {}. Nothing was written.", refused.join("; "))));
     }
     Ok(report)
+}
+
+/// A face's or edge's persistent-name pick, with a point on it.
+pub(crate) fn pick_of(st: &ModelState, body: usize, face: Option<usize>, edge: Option<usize>, at: Option<Vec3>) -> Option<Pick> {
+    let b = st.bodies.get(body)?;
+    let r = |p: Vec3| [super::round(p.x, 1e6), super::round(p.y, 1e6), super::round(p.z, 1e6)];
+    if let Some(f) = face {
+        let name = solidcraft_doc::naming::face_names(b).get(f).cloned()?;
+        let at = at.or_else(|| BodyFaces::new(&b.name, &b.body).point_on(f));
+        return Some(Pick { body: Some(b.name.clone()), face: Some(name), at: at.map(r), ..Pick::default() });
+    }
+    let e = edge?;
+    let name = solidcraft_doc::naming::edge_names(b).get(e).cloned()?;
+    Some(Pick { body: Some(b.name.clone()), edge: Some(name), at: at.map(r), ..Pick::default() })
+}
+
+/// The faces of feature `id` as picks: a hole's wall, a pocket's floor, a face, a profile's face,
+/// the faces of a round, chamfer, curved area or turned diameter.
+pub(crate) fn feature_picks(set: &FeatureSet, st: &ModelState, id: &str) -> Vec<Pick> {
+    let r = &set.reply;
+    let (body, faces): (&str, Vec<usize>) = if let Some(h) = r.holes.iter().find(|h| h.id == id) {
+        (&h.body, h.faces.iter().take(1).copied().collect())
+    } else if let Some(p) = r.pockets.iter().find(|p| p.id == id) {
+        (&p.body, vec![p.floor_face])
+    } else if let Some(f) = r.faces.iter().find(|f| f.id == id) {
+        (&f.body, vec![f.face])
+    } else if let Some(p) = r.profiles.iter().find(|p| p.id == id) {
+        match r.faces.iter().find(|f| f.id == p.face_id) {
+            Some(f) => (&p.body, vec![f.face]),
+            None => return Vec::new(),
+        }
+    } else if let Some(x) = r.fillets.iter().chain(&r.chamfers).find(|x| x.id == id) {
+        (&x.body, x.faces.clone())
+    } else if let Some(x) = r.surfaces.iter().find(|x| x.id == id) {
+        (&x.body, x.faces.clone())
+    } else if let Some(x) = r.turned.iter().find(|x| x.id == id) {
+        (&x.body, x.faces.clone())
+    } else {
+        return Vec::new();
+    };
+    let Some(b) = st.bodies.iter().position(|mb| mb.name == body) else { return Vec::new() };
+    faces.into_iter().take(MAX_PICKS).filter_map(|f| pick_of(st, b, Some(f), None, None)).collect()
 }
 
 #[cfg(test)]

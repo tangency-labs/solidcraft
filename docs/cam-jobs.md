@@ -1277,7 +1277,8 @@ the part.
 
 Every key is optional: the bodies default to every visible body, `origin` to the design's origin
 (the job's work zero), `axis` to `"z"` and `tolerance` to 0.01 mm (how close two sizes or
-positions must be to count as equal). With `axis: "a"` (a 4th axis about work X) every side whose
+positions must be to count as equal). `picks: true` also gives each feature's faces as picks (see
+[Picks](#picks)). With `axis: "a"` (a 4th axis about work X) every side whose
 normal is square to X is a setup of its own, at the A angle the machine turns to bring that side
 up, so A = 0 is the 3-axis setup and the other sides follow it round.
 
@@ -1355,13 +1356,15 @@ have no outline: a 2D operation on one is refused, saying where the area is.
 ### Picks
 
 An operation can name its geometry by the design's persistent face and edge names instead of a
-sketch, a polygon or a feature id (which renumber when the model gains or loses a hole):
+sketch, a polygon or a feature id (which renumber when the model gains or loses a hole), or by a
+sketch's profiles:
 
 ```json
 "picks": [
   {"body": "Bracket", "face": "F12:side:c3", "at": [10.0, -4.0, 7.5]},
   {"body": "Bracket", "edge": "F2:top|F7:side:l4", "at": [-20.0, 15.0, 20.0]}
 ]
+"picks": [{"sketch": "Outline", "profile": 0}]
 ```
 
 `face` and `edge` are the names `model.faces` and `model.edges` give; `at` is a point on the face
@@ -1380,8 +1383,18 @@ stored keeps the picks; what the planners read is worked out from them:
 
 | Operation | A pick means |
 | --- | --- |
-| `pocket` | the feature the face or edge is part of, a pocket first, then a hole, then a face: `feature` |
-| `contour` | the same, an outline first (the part's side or top), then a pocket, a hole, a face: `feature` |
+| `pocket` | the feature the face or edge is part of, a pocket first, then a hole, then a face: `feature`; a sketch's profiles: `sketch` and `profiles` |
+| `contour` | the same, an outline first (the part's side or top), then a pocket, a hole, a face: `feature`; a sketch's profiles: `sketch` and `profiles` |
 
-The picks of one operation must be on one feature and one side of the part. `picks` with
-`sketch`, `polygon` or `feature` is refused.
+The picks of one operation must be on one feature and one side of the part, or in one sketch.
+`picks` with `sketch`, `polygon` or `feature` is refused.
+
+Any of an operation's `heights` can follow the model: `{"from": <pick of a planar face square to
+the tool> | "part_top" | "part_bottom", "offset": -0.1}`, worked out in the operation's frame each
+time it is planned. The job keeps the reference, not the number. A face found by its point, or
+one that has moved, gives a note as a pick does.
+
+`cam.features {picks: true}` gives each feature as picks (`picks` by feature id: a hole's wall, a
+pocket's floor, a face, the face of an outline, the faces of a round, chamfer, curved area or
+turned diameter), so an operation can store them in place of the feature's id and follow the
+model.

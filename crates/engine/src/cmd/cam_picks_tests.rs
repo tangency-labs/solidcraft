@@ -205,3 +205,120 @@ fn hostile_picks_are_refused() {
     assert!(s.execute("cam.job", &pocket(json!("not a list"))).is_err());
     assert!(s.execute("cam.job", &pocket(json!([5]))).is_err());
 }
+
+/// The picks `cam.features` gives feature `id`.
+fn feature_picks(s: &mut Session, id: &str) -> Value {
+    let r = run(s, "cam.features", json!({"picks": true}));
+    r["picks"][id].clone()
+}
+
+#[test]
+fn features_given_as_picks_plan_as_the_features() {
+    let mut s = block();
+    let floor = feature_picks(&mut s, "pocket:0");
+    assert_eq!(floor.as_array().map(Vec::len), Some(1), "the floor alone: {floor}");
+    assert!(floor[0]["face"].as_str().is_some_and(|n| !n.is_empty()) && floor[0]["at"].is_array(), "{floor}");
+    let wall = feature_picks(&mut s, "hole:0");
+    assert_eq!(wall.as_array().map(Vec::len), Some(1), "the hole's wall: {wall}");
+    let ops = json!([
+        {"name": "by pick", "type": "pocket", "tool": 4, "picks": floor},
+        {"name": "by id", "type": "pocket", "tool": 4, "feature": "pocket:0"},
+        {"name": "hole", "type": "contour", "tool": 4, "picks": wall}
+    ]);
+    let r = dry(&mut s, ops);
+    assert_eq!(r["operations"][0]["moves"], r["operations"][1]["moves"], "{r}");
+    assert_eq!(r["picks_resolved"][1]["feature"], "hole:0", "{r}");
+    assert_eq!(r["passed"], true, "{r}");
+    // Without `picks: true` there are none.
+    assert!(run(&mut s, "cam.features", json!({})).get("picks").is_none());
+}
+
+#[test]
+fn a_height_from_a_face_follows_the_model() {
+    let mut s = block();
+    let feats = run(&mut s, "cam.features", json!({"picks": true}));
+    let top_id = feats["faces"].as_array().unwrap().iter().find(|x| x["role"] == "top").unwrap_or_else(|| panic!("{feats}"))["id"].clone();
+    let top = feats["picks"][top_id.as_str().unwrap()][0].clone();
+    let square = json!([[-20, -15], [20, -15], [20, 15], [-20, 15]]);
+    let heights = json!({"clearance": 40, "retract": 30, "top": {"from": top}, "bottom": {"from": top, "offset": -6}});
+    let ops = json!([{"name": "outline", "type": "contour", "tool": 4, "polygon": square, "heights": heights}]);
+    let low = |s: &mut Session| {
+        let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-cam-heights-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("outline.ngc").to_string_lossy().into_owned();
+        run(s, "cam.job", json!({"job": job(ops.clone()), "output": out}));
+        let c = run(s, "cam.gcode.check", json!({"path": out}));
+        let _ = std::fs::remove_dir_all(&dir);
+        f(&c["bounds"][0][2])
+    };
+    assert!((low(&mut s) - 14.0).abs() < 1e-6);
+    // The block 2 mm taller: the contour's bottom follows its top face.
+    run(&mut s, "parameters.change", json!({"name": "d3", "expression": "22 mm"}));
+    assert!((low(&mut s) - 16.0).abs() < 1e-6);
+    // From the part's top and bottom too.
+    let named = json!({"clearance": 40, "retract": 30, "top": {"from": "part_top"}, "bottom": {"from": "part_bottom", "offset": 20}});
+    let r = dry(&mut s, json!([{"name": "outline", "type": "contour", "tool": 4, "polygon": square, "heights": named}]));
+    assert_eq!(r["passed"], true, "{r}");
+    // A height from a face that is not square to the tool is refused when planned, and so is a
+    // source that is not one.
+    let wall = json!({"body": "Block", "at": [20, 0, 10]});
+    let side = json!({"clearance": 40, "retract": 30, "top": 22, "bottom": {"from": wall}});
+    let e = refused(
+        &mut s,
+        "cam.job",
+        json!({"job": job(json!([{"name": "o", "type": "contour", "tool": 4, "polygon": square, "heights": side}])), "dry_run": true}),
+    );
+    assert!(e.contains("square to the tool axis"), "{e}");
+    let bad = json!({"clearance": 40, "retract": 30, "top": 22, "bottom": {"from": "stock_middle"}});
+    let e = refused(
+        &mut s,
+        "cam.job",
+        json!({"job": job(json!([{"name": "o", "type": "contour", "tool": 4, "polygon": square, "heights": bad}])), "dry_run": true}),
+    );
+    assert!(e.contains("part_top"), "{e}");
+    let junk = json!({"clearance": 40, "retract": 30, "top": 22, "bottom": {"from": wall, "offset": "x"}});
+    let e = refused(
+        &mut s,
+        "cam.job",
+        json!({"job": job(json!([{"name": "o", "type": "contour", "tool": 4, "polygon": square, "heights": junk}])), "dry_run": true}),
+    );
+    assert!(e.contains("heights.bottom"), "{e}");
+    let huge = json!({"clearance": 40, "retract": 30, "top": 22, "bottom": {"from": "part_top", "offset": 1e300}});
+    let e = refused(
+        &mut s,
+        "cam.job",
+        json!({"job": job(json!([{"name": "o", "type": "contour", "tool": 4, "polygon": square, "heights": huge}])), "dry_run": true}),
+    );
+    assert!(e.contains("offset"), "{e}");
+}
+
+#[test]
+fn a_sketch_profile_picked_is_machined() {
+    let mut s = block();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 20, "name": "Clear"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-25, 3], "p1": [25, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let heights = json!({"clearance": 30, "retract": 22, "top": 20, "bottom": 18});
+    let ops = json!([
+        {"name": "by pick", "type": "pocket", "tool": 4, "heights": heights, "picks": [{"sketch": "Clear", "profile": 0}]},
+        {"name": "by sketch", "type": "pocket", "tool": 4, "heights": heights, "sketch": "Clear", "profiles": [0]}
+    ]);
+    let r = dry(&mut s, ops);
+    assert_eq!(r["operations"][0]["moves"], r["operations"][1]["moves"], "{r}");
+    assert_eq!(r["picks_resolved"][0]["by"], "name", "{r}");
+    // Two sketches, or a sketch with a face, are one operation each; a sketch pick takes no body.
+    let two = json!([{"name": "p", "type": "pocket", "tool": 4, "heights": heights,
+        "picks": [{"sketch": "Clear", "profile": 0}, {"sketch": "Other", "profile": 0}]}]);
+    let e = refused(&mut s, "cam.job", json!({"job": job(two), "dry_run": true}));
+    assert!(e.contains("more than one sketch"), "{e}");
+    let floor = floor_pick(&mut s, 15.0);
+    let mixed = json!([{"name": "p", "type": "pocket", "tool": 4, "heights": heights, "picks": [{"sketch": "Clear", "profile": 0}, floor]}]);
+    let e = refused(&mut s, "cam.job", json!({"job": job(mixed), "dry_run": true}));
+    assert!(e.contains("one operation each"), "{e}");
+    let bodied = json!([{"name": "p", "type": "pocket", "tool": 4, "heights": heights, "picks": [{"sketch": "Clear", "body": "Block"}]}]);
+    let e = refused(&mut s, "cam.job", json!({"job": job(bodied), "dry_run": true}));
+    assert!(e.contains("`sketch` and `profile` only"), "{e}");
+    let lone = json!([{"name": "p", "type": "pocket", "tool": 4, "heights": heights, "picks": [{"profile": 0, "at": [0, 0, 20]}]}]);
+    let e = refused(&mut s, "cam.job", json!({"job": job(lone), "dry_run": true}));
+    assert!(e.contains("goes with its `sketch`"), "{e}");
+}

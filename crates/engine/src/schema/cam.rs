@@ -256,22 +256,28 @@ pub struct HeightsSpec {
 }
 
 /// The Z levels of a contour or pocket, any of them left out: an operation on a `feature`
-/// takes the rest from it; one on a sketch or polygon needs all four.
+/// takes the rest from it; one on a sketch or polygon needs all four. Each is a number or
+/// `{from, offset?}`, a height that follows the model (`cmd/cam_picks.rs` reads it as a number
+/// each time the job is planned).
 #[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HeightsPartial {
     /// Where the tool travels between cuts. Default (on a feature): 10 mm above the material.
     #[serde(default)]
+    #[schemars(with = "Option<super::cam_picks::HeightValue>")]
     pub clearance: Option<f64>,
     /// Where rapid motion towards the material stops and feed begins. Default (on a feature):
     /// 3 mm above the material.
     #[serde(default)]
+    #[schemars(with = "Option<super::cam_picks::HeightValue>")]
     pub retract: Option<f64>,
     /// Top of the material to cut. Default (on a feature): the feature's top.
     #[serde(default)]
+    #[schemars(with = "Option<super::cam_picks::HeightValue>")]
     pub top: Option<f64>,
     /// Final depth. Default (on a feature): the feature's bottom.
     #[serde(default)]
+    #[schemars(with = "Option<super::cam_picks::HeightValue>")]
     pub bottom: Option<f64>,
 }
 
@@ -376,9 +382,10 @@ macro_rules! operation {
             /// still run. Default: true.
             #[serde(default)]
             pub gouge_check: Option<bool>,
-            /// The faces or edges of the part it works on, by their persistent names: found
-            /// again each time the job is planned and read as its `feature`, in place of
-            /// `sketch`, `polygon` or `feature`. Default: none.
+            /// The faces or edges of the part it works on, by their persistent names, or a
+            /// sketch's profiles: found again each time the job is planned and read as its
+            /// `feature` (or `sketch` and `profiles`), in place of `sketch`, `polygon` or
+            /// `feature`. Default: none.
             #[serde(default)]
             pub picks: Option<Vec<crate::schema::cam_picks::Pick>>,
             $($(#[$fdoc])* pub $field: $ty,)*

@@ -13,7 +13,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<CamFeaturesParams>(), &["axis", "bodies", "origin", "tolerance"]);
+    assert_keys(input_schema_for::<CamFeaturesParams>(), &["axis", "bodies", "origin", "picks", "tolerance"]);
 }
 
 /// The command replies as its output schema says, in Warn without warnings; strict refuses a
@@ -31,6 +31,7 @@ fn replies_match_the_output_schema() {
     run(&mut s, "solid.box", json!({"length": 16, "width": 12, "height": 4, "corner": [4, -6, -4], "operation": "cut"}));
     matches(output_schema_for::<CamFeaturesReply>(), &run(&mut s, "cam.features", json!({})));
     matches(output_schema_for::<CamFeaturesReply>(), &run(&mut s, "cam.features", json!({"axis": "a"})));
+    matches(output_schema_for::<CamFeaturesReply>(), &run(&mut s, "cam.features", json!({"picks": true})));
     let mut strict = Session { param_check: ParamCheck::Strict, ..Session::default() };
     let e = strict.execute("cam.features", &json!({"axes": "z"})).unwrap_err();
     assert!(e.to_string().contains("axes"), "{e}");

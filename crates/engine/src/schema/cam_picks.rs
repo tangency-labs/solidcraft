@@ -1,12 +1,12 @@
 //! Picks: the pieces of the design a machining operation works on, stored by their persistent
-//! names (`cmd/cam_picks.rs` finds them again each time the job is planned). docs/cam-jobs.md,
-//! "Picks", describes them.
+//! names (`cmd/cam_picks.rs` finds them again each time the job is planned), and heights that
+//! follow a face. docs/cam-jobs.md, "Picks", describes them.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// A piece of the design, found again by its persistent name: a face or an edge of a body (with
-/// a point on it, the fallback when the name no longer finds it).
+/// a point on it, the fallback when the name no longer finds it), or a sketch's profile.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Pick {
@@ -23,6 +23,40 @@ pub struct Pick {
     /// finds nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<[f64; 3]>,
+    /// A sketch, by id or name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sketch: Option<String>,
+    /// With `sketch`: a profile of it, by index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<usize>,
+}
+
+/// What a height follows: a picked planar face, or one of `part_top`, `part_bottom`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum HeightSource {
+    Named(String),
+    Face(Pick),
+}
+
+/// A height that follows the model: `{from, offset?}`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HeightRef {
+    /// A planar face square to the tool axis (a pick), or `part_top`, `part_bottom`.
+    pub from: HeightSource,
+    /// Added to the height it follows, mm (negative: below it). Default: 0.
+    #[serde(default)]
+    pub offset: Option<f64>,
+}
+
+/// A height: a number (mm, in the operation's frame), or `{from, offset?}`, a height that
+/// follows a face of the model (worked out each time the job is planned).
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum HeightValue {
+    Number(f64),
+    From(HeightRef),
 }
 
 /// An operation, by its place in the job (from 0) and its name.

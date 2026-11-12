@@ -61,7 +61,8 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("cam.features", "CAM Fe
          the sides standing out of it], radius_max?, profile?: [[a_deg, radius]]}]), wrapped (axis a: [{id: \"wrapped:k\", radius, \
          floor_radius, depth, x_min, x_max, a_min_deg, a_max_deg, span_deg, outline unrolled at radius}]), notes. Read from the exact \
          B-rep, in each setup's frame (its Z the tool axis). A cam.job pocket or contour takes `feature: \"pocket:0\"` (heights default \
-         from the feature); the ids are the same for the same bodies, origin and axis",
+         from the feature); the ids are the same for the same bodies, origin and axis. picks?: true also gives each feature's faces \
+         as picks (picks: {id: [pick]}), for an operation's `picks`",
     )];
 
 /// Most setups (A angles) looked at.
@@ -99,6 +100,18 @@ fn features(s: &mut Session, p: &Value) -> Result<Value> {
     if axis == AxisSpec::A {
         let st = s.world_state()?;
         lobes(&mut set.reply, &st, v3(origin), tol);
+    }
+    if params.picks.unwrap_or(false) {
+        let st = s.world_state()?;
+        let ids: Vec<String> = set.geo.keys().cloned().collect();
+        let mut picks = BTreeMap::new();
+        for id in ids {
+            let list = super::picks::feature_picks(&set, &st, &id);
+            if !list.is_empty() {
+                picks.insert(id, list);
+            }
+        }
+        set.reply.picks = picks;
     }
     serde_json::to_value(&set.reply).map_err(|e| EngineError::Other(e.to_string()))
 }

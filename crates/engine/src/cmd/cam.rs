@@ -1431,16 +1431,17 @@ fn job_value(cmd: &str, p: &Value, inline: bool, path: Option<&String>) -> Resul
 }
 
 /// The job of a call (`inline` under `job`, or the file `path`), its operations' picks found
-/// again and read as their geometry (`cam_picks.rs`), how each pick was found, and the folder its
-/// relative paths are read from.
+/// again and read as their geometry and its heights that follow the model read as numbers
+/// (`cam_picks.rs`), how each pick was found, and the folder its relative paths are read from.
 fn load_job(cmd: &str, s: &Session, p: &Value, inline: bool, path: Option<&String>) -> Result<(CamJob, Vec<PickResolved>, Option<PathBuf>)> {
     let (mut value, what, base) = job_value(cmd, p, inline, path)?;
-    let job: CamJob = parse(cmd, &value, &what)?;
-    let has_picks =
-        value.get("operations").and_then(Value::as_array).is_some_and(|ops| ops.iter().any(|o| o.get("picks").is_some_and(|v| !v.is_null())));
-    if !has_picks {
-        return Ok((job, Vec::new(), base));
+    if !picks::has_refs(&value) {
+        return Ok((parse(cmd, &value, &what)?, Vec::new(), base));
     }
+    // The job as the schema reads it without the model (picks taken out, heights that follow
+    // the model read as 0), for its machine, bodies and work zero.
+    let probe = picks::placeholders(&value).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+    let job: CamJob = parse(cmd, &probe, &what)?;
     let machine = machine_of(cmd, &job, base.as_deref())?;
     let m = picks::Model::new(cmd, s, &job, &machine)?;
     let resolved = match &mut value {
@@ -1592,7 +1593,18 @@ fn plan_job(cmd: &str, s: &Session, job: &CamJob, base: Option<&Path>) -> Result
 /// `cam.job`.
 fn job(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "cam.job";
-    let params: CamJobParams = parse(cmd, p, "")?;
+    // A job given inline whose heights follow the model is read with them as 0 here; the job
+    // itself is read again from `p` once they are worked out (`load_job`).
+    let params: CamJobParams = match p.get("job").filter(|j| picks::has_refs(j)) {
+        Some(j) => {
+            let mut shell = p.clone();
+            if let Some(m) = shell.as_object_mut() {
+                m.insert("job".into(), picks::placeholders(j).map_err(|e| bad(cmd, format!("`job`: {e}")))?);
+            }
+            parse(cmd, &shell, "")?
+        }
+        None => parse(cmd, p, "")?,
+    };
     let reply = run_job(s, cmd, p, params, None)?;
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
@@ -2550,7 +2562,7 @@ fn gcode_check(_: &mut Session, p: &Value) -> Result<Value> {
 #[path = "cam_features.rs"]
 mod features;
 #[path = "cam_picks.rs"]
-mod picks;
+pub(super) mod picks;
 #[path = "cam_image.rs"]
 mod pictures;
 #[path = "cam_programs.rs"]
