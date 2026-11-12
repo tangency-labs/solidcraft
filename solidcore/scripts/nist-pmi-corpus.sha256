@@ -1,0 +1,39 @@
+# SHA-256 pins for scripts/fetch-nist-pmi-corpus.sh: "<sha256>  <path>", the path inside the
+# NIST PMI archive (and under corpus/nist-pmi/). Archive pinned 2026-11-03, the same archive as
+# SolidCraft's tests/external-corpus.toml (source "nist-pmi").
+# US Government work (NIST), public domain; acknowledgement appreciated, the NIST logo may not be
+# used in promotion. Still never committed: the corpus is fetched, not vendored.
+archive 8fa78429e6d8d9b0d7681d223b6aa9ec98c3772185c55b1a0e3679b21c181911  nist-pmi-step-files.zip
+e081d518484d5c708c6729353237f94a7d97da2b74a10d60d4c0d146d67a5855  NIST-PMI-STEP-Files/AP203 geometry only/nist_ctc_01_asme1_rd.stp
+e6df6d0ed68fd8a91bd3f8360c7047f2af3d61068b89050d84423fe8ddb93bcf  NIST-PMI-STEP-Files/AP203 geometry only/nist_ctc_02_asme1_rc.stp
+95a775b1acdbc34de11319cb83b4cf6c6fdd7de8cbfc4af2d0afe5d3565cfdf8  NIST-PMI-STEP-Files/AP203 geometry only/nist_ctc_03_asme1_rc.stp
+cdb59a085a3364941b881f96b511265a7cb5f6e94180c4426bdc3025481f405a  NIST-PMI-STEP-Files/AP203 geometry only/nist_ctc_04_asme1_rd.stp
+5140b8f41fa1d0a069ea978e28c92a597f47220d0a11e667b79ff5f7c7243b86  NIST-PMI-STEP-Files/AP203 geometry only/nist_ctc_05_asme1_rd.stp
+5e30f0903f9470c14a98e70395ca005fe90bcd3fb704c381a80a69958838f169  NIST-PMI-STEP-Files/AP203 geometry only/nist_ftc_06_asme1_rd.stp
+a0bc551656780b26d7a0ee1beedbc07d43f41efa092f74f3c2d8383417f04481  NIST-PMI-STEP-Files/AP203 geometry only/nist_ftc_07_asme1_rd.stp
+4b7011b0b86cf6301058aa954b76a9587d23478b6dee2660f4a80caf0dfe8b73  NIST-PMI-STEP-Files/AP203 geometry only/nist_ftc_08_asme1_rc.stp
+e29c09bd2d454601ff1a0d77c4c4ffaf2ed78eee71031ce49f7b7bb5a6d1d4e8  NIST-PMI-STEP-Files/AP203 geometry only/nist_ftc_09_asme1_rd.stp
+2bd726f9fe86aeb96ab517ce876e5696e7951310df5c4fbca36276d65879067b  NIST-PMI-STEP-Files/AP203 geometry only/nist_ftc_10_asme1_rb.stp
+a5abfea460499dc31bc812aca68917948a117565fea4f5a080e36eb32f39650d  NIST-PMI-STEP-Files/AP203 geometry only/nist_ftc_11_asme1_rb.stp
+a3058f47323c7e0e24249eeaa19939867e66b243058805f67cd1b93c41f6c806  NIST-PMI-STEP-Files/AP203 with PMI/nist_ctc_01_asme1_ap203.stp
+ae0049980cb11cb224447e1738b499d8e1c79423782b7a8e8489a4d5316660cc  NIST-PMI-STEP-Files/AP203 with PMI/nist_ctc_02_asme1_ap203.stp
+294444aadbe1b427013250cd07ece07d9e6b6c718ebd570622deccf5702178de  NIST-PMI-STEP-Files/AP203 with PMI/nist_ctc_03_asme1_ap203.stp
+d6d8f9b3439bb334b85b5c94edd613c02ccea2694407d9e79588991b068f1ebf  NIST-PMI-STEP-Files/AP203 with PMI/nist_ctc_04_asme1_ap203.stp
+9df8bf141d5e5b50856021b7c209dea93393dd5406bf0e85ccc70bb15f7d70a2  NIST-PMI-STEP-Files/AP203 with PMI/nist_ctc_05_asme1_ap203.stp
+85a5752da05f53c456ca3a9e038c90358e1d5a3141d1f0d6e5f0970f2356e821  NIST-PMI-STEP-Files/nist_ctc_01_asme1_ap242-e1.stp
+99a0a2079ddeb64d05c2432cbe931fa17c89da60d8b0bcb0b11bd0ed94fa2e68  NIST-PMI-STEP-Files/nist_ctc_02_asme1_ap242-e2.stp
+196b665776e759282f80fc8fb27d7bceb995df77cf78b7ce48347535a4d6cb5f  NIST-PMI-STEP-Files/nist_ctc_03_asme1_ap242-e2.stp
+20b43b54ce25d4ed17cff794084c406e831c687f5b62471d3371eef33669e355  NIST-PMI-STEP-Files/nist_ctc_04_asme1_ap242-e1.stp
+59bbc09a34621c03106e4c1b2a5bc909fdb67463117c16c4965ee7a6fe5c1521  NIST-PMI-STEP-Files/nist_ctc_05_asme1_ap242-e1.stp
+b87afb7f25adc0d44d12e182209d50f0b085b533c0742fb8ffd58f4c87403447  NIST-PMI-STEP-Files/nist_ftc_06_asme1_ap242-e2.stp
+aa8115c12e12a99cc439477cbfd222916f9ec629fbb3c9002b18e0c264c9a892  NIST-PMI-STEP-Files/nist_ftc_07_asme1_ap242-e2.stp
+841a9ac51a32fe25b872f283b0b8770c77fee4e34adc8499f88a6e1bafd8e578  NIST-PMI-STEP-Files/nist_ftc_08_asme1_ap242-e1-tg.stp
+7b9283b4288d152fd181d76c39285d7c79fbba34fda1e14a41ac4a983f6d68b3  NIST-PMI-STEP-Files/nist_ftc_08_asme1_ap242-e2.stp
+f1215fe15a78085a9fa78dd81714caf774b59071be92580b04ebfdc19f52a1bd  NIST-PMI-STEP-Files/nist_ftc_09_asme1_ap242-e1.stp
+9d7711f48e81831c5d1838fdac5c11c0de1aa9b61f3c1d67930a7638b3b25e69  NIST-PMI-STEP-Files/nist_ftc_10_asme1_ap242-e2.stp
+20a92edf514ae0989d556f9c7b9f065aed741cfbb361b7fe4cb7938a1eb5c232  NIST-PMI-STEP-Files/nist_ftc_11_asme1_ap242-e2.stp
+71777c28da76da0e8a667e4cbe792d5f72c09b5c56440c9744d3d50ca96ecc8d  NIST-PMI-STEP-Files/nist_stc_06_asme1_ap242-e3.stp
+2dddf9b8894bc241f7ffddf3dc4502baa3d49c374e8784039d14b86473d54832  NIST-PMI-STEP-Files/nist_stc_07_asme1_ap242-e3.stp
+64f24b914910ce8e20c9e4bd59637b4fd155715c7c7b51689466534ed7db1442  NIST-PMI-STEP-Files/nist_stc_08_asme1_ap242-e3.stp
+737423afcb223b87d92a4ea7646a97d8d55fb21cc24ba2fb72b952336bcf1fad  NIST-PMI-STEP-Files/nist_stc_09_asme1_ap242-e3.stp
+fba4f46cab1ce1402362038036884631b4a41afe1c9efc5681d358c39db7ed5f  NIST-PMI-STEP-Files/nist_stc_10_asme1_ap242-e2.stp

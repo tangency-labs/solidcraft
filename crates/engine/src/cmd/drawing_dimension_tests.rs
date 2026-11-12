@@ -1898,7 +1898,8 @@ fn a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again() {
     // The file's copy of a record also keeps its last good value.
     let mut saved = read["record"].clone();
     let last_good = saved.as_object_mut().and_then(|record| record.remove("last_good"));
-    assert_eq!(last_good, Some(json!(10.0)), "{read}");
+    // The bore measures 10 to within rounding (9.999999999999995 on solidcore), as `reads` takes it.
+    assert!(last_good.as_ref().and_then(Value::as_f64).is_some_and(|v| (v - 10.0).abs() < 1e-9), "{read}");
     assert_eq!(saved, repaired["record"], "the repair is saved");
 
     closed_edit(&mut s, &drawing, "edit.undo", json!({}));

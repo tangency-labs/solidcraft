@@ -100,8 +100,7 @@
     "Title block": "خانة العنوان",
     "UI preview": "معاينة الواجهة",
     "Units & precision": "الوحدات والدقة",
-    "Update Drawing": "تحديث اللوحة",
-    "View": "مسقط"
+    "Update Drawing": "تحديث اللوحة"
   },
   "he": {
     "0 objects": "0 עצמים",
@@ -204,8 +203,7 @@
     "Title block": "טבלת כותרת",
     "UI preview": "תצוגה מקדימה של הממשק",
     "Units & precision": "יחידות ודיוק",
-    "Update Drawing": "עדכון שרטוט",
-    "View": "מבט"
+    "Update Drawing": "עדכון שרטוט"
   },
   "vi": {
     "0 objects": "0 đối tượng",
@@ -308,8 +306,7 @@
     "Title block": "Khung tên",
     "UI preview": "Xem trước giao diện",
     "Units & precision": "Đơn vị và độ chính xác",
-    "Update Drawing": "Cập nhật bản vẽ",
-    "View": "Hình chiếu"
+    "Update Drawing": "Cập nhật bản vẽ"
   },
   "en": {
     "0 objects": "0 objects",
@@ -412,8 +409,7 @@
     "Title block": "Title block",
     "UI preview": "UI preview",
     "Units & precision": "Units & precision",
-    "Update Drawing": "Update Drawing",
-    "View": "View"
+    "Update Drawing": "Update Drawing"
   },
   "ja": {
     "0 objects": "0個のオブジェクト",
@@ -516,8 +512,7 @@
     "Title block": "表題欄",
     "UI preview": "UIプレビュー",
     "Units & precision": "単位と精度",
-    "Update Drawing": "図面を更新",
-    "View": "ビュー"
+    "Update Drawing": "図面を更新"
   },
   "zh": {
     "0 objects": "0 个对象",
@@ -620,8 +615,7 @@
     "Title block": "标题栏",
     "UI preview": "界面预览",
     "Units & precision": "单位与精度",
-    "Update Drawing": "更新图纸",
-    "View": "视图"
+    "Update Drawing": "更新图纸"
   },
   "de": {
     "0 objects": "0 Objekte",
@@ -724,8 +718,7 @@
     "Title block": "Schriftfeld",
     "UI preview": "Oberflächenvorschau",
     "Units & precision": "Einheiten & Genauigkeit",
-    "Update Drawing": "Zeichnung aktualisieren",
-    "View": "Ansicht"
+    "Update Drawing": "Zeichnung aktualisieren"
   },
   "ko": {
     "0 objects": "객체 0개",
@@ -828,7 +821,6 @@
     "Title block": "표제란",
     "UI preview": "인터페이스 미리보기",
     "Units & precision": "단위 및 정밀도",
-    "Update Drawing": "도면 업데이트",
-    "View": "뷰"
+    "Update Drawing": "도면 업데이트"
   }
 }

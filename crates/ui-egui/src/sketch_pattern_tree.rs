@@ -23,7 +23,7 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
             SketchPatternKind::Circular { .. } => ("Circular Pattern", "sketch_circ_pattern"),
         };
         let suffix = pattern.id.strip_prefix("pat").unwrap_or(&pattern.id);
-        let label = format!("{} {suffix}", crate::i18n::tr_label(name));
+        let label = format!("{} {suffix}", solidcraft_ui_text::tr_label(name));
         let active = app.session.active_sketch == Some(sketch);
         // The sources are inputs to the pattern: selecting its row must only delete copies.
         // Select point copies when the point itself is a source; curve endpoints go with curves.
@@ -45,7 +45,7 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
         let selected = active && !copies.is_empty() && copies.iter().all(|copy| app.session.selection.contains(copy));
         let response = draw_row(
             ui,
-            ui.id().with(("sketch_pattern", sketch, &pattern.id)),
+            ui.scope_id().with(("sketch_pattern", sketch, &pattern.id)),
             &Row { depth, icon, label: &label, name: true, selected, dim, ..Default::default() },
         );
         if let Some(rect) = response.rect {
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn left_history_patterns_step_in_from_their_sketch_like_the_browser() {
         let (mut h, sketch, rectangular, _) = harness(true);
-        let label = format!("{} {}", crate::i18n::tr_label("Rectangular Pattern"), rectangular.strip_prefix("pat").unwrap_or(&rectangular));
+        let label = format!("{} {}", solidcraft_ui_text::tr_label("Rectangular Pattern"), rectangular.strip_prefix("pat").unwrap_or(&rectangular));
         h.frame();
         let browser = crate::scenario::rect_of("browser:card").unwrap();
         let in_browser = text_left(&h, &label, browser) - text_left(&h, "Patterned Sketch", browser);

@@ -12,6 +12,7 @@ mod body_transfer;
 mod body_transfer_sheet;
 pub mod bom;
 mod browser_tree;
+pub mod newer_file;
 pub mod pbr_appearance;
 pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
 pub mod canvas;
@@ -22,11 +23,13 @@ mod component_removal;
 pub use component_removal::RemovedTree;
 pub mod config;
 pub mod construct;
+pub mod csv;
 pub mod display_quality;
 pub mod display_units;
 mod document;
 pub mod drawing;
 pub mod drawing_view;
+pub mod end_cap;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
@@ -36,6 +39,7 @@ pub use face_anchor::{FaceAnchor, FaceAttachmentStatus};
 pub mod format;
 mod format_offsets;
 pub mod frame;
+pub mod gpu_plan;
 mod history_names;
 pub mod hole_reference;
 pub mod ids;
@@ -47,9 +51,12 @@ mod lineage;
 pub mod metadata;
 pub use metadata::Metadata;
 pub mod motion;
+pub mod notes;
+pub use notes::Note;
 mod name_lookup;
 mod names;
 pub mod naming;
+mod occurrence_tree;
 mod params;
 pub mod persistent_name;
 pub mod physical_material;
@@ -74,15 +81,18 @@ pub use print_face::PrintFace;
 pub mod project;
 mod project3d;
 pub mod render_aging;
+pub mod render_coat;
 pub mod render_job;
 pub mod render_optics;
 pub mod render_resources;
 pub mod render_settings;
 pub mod render_surface;
+pub mod render_texture_resources;
 pub mod sheet;
 pub mod sketch_equation;
 pub mod text_params;
 pub mod thread_forms;
+pub mod tolerance;
 
 pub use assembly::{
     BomType, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, is_placement,
@@ -94,13 +104,13 @@ pub use eval::{
     blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state, hole_direction_at,
     hole_on_surface, import_body_names, join_pieces_added, map_wire, metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices,
     revolve_extent, revolve_extent_for_handle, revolve_extent_with_convention, select_profiles, sketch_hole_direction, sketch_line_plane,
-    state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, world_state,
-    world_state_reusing,
+    state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, with_placed_copies,
+    world_state, world_state_reusing,
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;
 pub use names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
-pub use params::{ParamRow, ParamUser, cycles};
+pub use params::{ParamRow, ParamUser, cycles, name_words_match};
 pub use points::{Dir, FacePick, Position, plain};
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_sketch as sketch;
@@ -163,7 +173,11 @@ mod feature_walk_tests;
 #[cfg(test)]
 mod named_projection_tests;
 #[cfg(test)]
+mod old_cap_anchor_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tolerance_tests;
 
 mod anchor_frame;
 pub use anchor_frame::state_in_face_anchor_frame;

@@ -418,6 +418,8 @@ fn angled_attachment_tracks_source_plane_and_reopens() {
         axis_dir: Vec3::X,
         angle: "90 deg".into(),
         line: None,
+        direction_only: false,
+        pivot: None,
     };
     s.refresh();
     let height = s.doc.find_feature("BaseFeature").unwrap().param_names[2].clone();
@@ -892,4 +894,39 @@ fn activate_part_makes_the_sketch_in_the_faces_component() {
         draw(&mut s);
         assert!(s.model.result(id).unwrap().error.is_none());
     }
+}
+/// #14346: a side of a loft through three sections, flat but built as a B-spline patch, is a
+/// planar face a sketch can lie on and an extrude can start on. Its y− side is a trapezoid, 20
+/// and 12 wide and √404 along its slope, so 5 mm out from it adds its area × 5.
+#[test]
+fn a_flat_side_of_a_three_section_loft_takes_a_sketch_and_an_extrude() {
+    let mut s = Session::default();
+    for (name, z, [x, y]) in [("S0", 0, [10, 6]), ("S1", 10, [8, 5]), ("S2", 20, [6, 4])] {
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-x, -y], "p1": [x, y]}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    run(&mut s, "solid.loft", json!({"sections": [{"sketch": "S0"}, {"sketch": "S1"}, {"sketch": "S2"}], "body_name": "L3"}));
+    let side = {
+        let world = s.world_state().unwrap();
+        let body = world.body("L3").unwrap();
+        let face = body
+            .body
+            .faces(0.01)
+            .unwrap()
+            .into_iter()
+            .find(|face| face.centroid.y < -4.0 && face.centroid.z > 1.0 && face.centroid.z < 19.0)
+            .unwrap();
+        json!({"body": "L3", "index": face.index, "face": [face.centroid.x, face.centroid.y, face.centroid.z]})
+    };
+    let sketch = run(&mut s, "sketch.create", json!({"plane": side.clone(), "name": "OnSide"}))["sketch"].as_u64().unwrap();
+    let normal = s.model.state().sketch(sketch).unwrap().plane.normal();
+    assert!(normal.dot(Vec3::new(0.0, -10.0, 1.0).normalized().unwrap()) > 1.0 - 1e-9, "{normal:?}");
+    run(&mut s, "sketch.finish", json!({}));
+    let volume = |s: &mut Session| run(s, "inspect.measure", json!({"bodies": ["L3"]}))["bodies"][0]["volume_mm3"].as_f64().unwrap();
+    let before = volume(&mut s);
+    run(&mut s, "solid.extrude", json!({"face": side["face"], "face_body": "L3", "distance": "5 mm", "direction": "positive", "operation": "join"}));
+    let added = (volume(&mut s) - before) / 5.0;
+    let area = (20.0 + 12.0) / 2.0 * 404f64.sqrt();
+    assert!((added - area).abs() < 1e-6 * area, "{added} vs {area}");
 }

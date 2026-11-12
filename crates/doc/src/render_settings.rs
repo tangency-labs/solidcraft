@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use solidcraft_render::{BackendId, Camera, RenderFormat, RenderLimits, RenderMode, UpAxis};
+use solidcraft_render::{BackendId, RenderFormat, RenderLimits, RenderMode};
+use solidcraft_viewport::{Camera, UpAxis};
 
 pub use crate::render_job::{CpuJob, GpuJob, RenderJob, SkyEnvironment};
 use crate::{DocError, Result};
@@ -35,6 +36,8 @@ pub struct RenderSetup {
     pub surfaces: crate::render_surface::SurfaceBindings,
     #[serde(skip_serializing_if = "crate::render_optics::OpticalBindings::is_empty")]
     pub optics: crate::render_optics::OpticalBindings,
+    #[serde(skip_serializing_if = "crate::render_coat::CoatBindings::is_empty")]
+    pub coats: crate::render_coat::CoatBindings,
     #[serde(skip_serializing_if = "solidcraft_render::stage::Stage::is_empty")]
     pub stage: solidcraft_render::stage::Stage,
 }
@@ -78,6 +81,7 @@ impl Default for RenderSetup {
             background: [236, 240, 245],
             job: None,
             optics: Default::default(),
+            coats: Default::default(),
             surfaces: Default::default(),
             stage: Default::default(),
         }
@@ -87,9 +91,13 @@ impl Default for RenderSetup {
 impl RenderSetup {
     pub fn validate(&self) -> Result<()> {
         let (limits, cpu) = match &self.job {
-            Some(RenderJob::CpuRaytrace { options }) => {
-                (options.budget.image_limits(options.progressive.is_some()), Some(CpuSize { progressive: options.progressive }))
-            }
+            Some(RenderJob::CpuRaytrace { options, .. }) => (
+                options.budget.image_limits(options.progressive.is_some()),
+                Some(CpuSize {
+                    progressive: solidcraft_render::job::cpu_camera_sampling(options.progressive, options.adaptive, options.budget)
+                        .map_err(|e| DocError::Invalid(e.to_string()))?,
+                }),
+            ),
             Some(RenderJob::GpuPath { .. }) => (solidcraft_render::job::GPU_PATH_LIMITS, None),
             _ => (RenderLimits::default(), None),
         };
@@ -111,8 +119,30 @@ impl RenderSetup {
     fn validate_with_limits(&self, limits: RenderLimits, cpu: Option<CpuSize>) -> Result<()> {
         self.surfaces.validate()?;
         self.optics.validate()?;
-        if !self.optics.is_empty() && !matches!(self.job, Some(RenderJob::GpuPath { .. })) {
-            return Err(DocError::Invalid("saved optics require an explicit GPU job".into()));
+        self.coats.validate()?;
+        if !self.coats.is_empty() && !matches!(self.job, Some(RenderJob::CpuRaytrace { .. } | RenderJob::GpuPath { .. })) {
+            return Err(DocError::Invalid("saved clear coats require an explicit CPU or GPU raytrace job".into()));
+        }
+        if self.coats.iter().any(|coat| self.optics.iter().any(|optics| coat.target == optics.target)) {
+            return Err(DocError::Invalid("clear coat and Glass cannot share a target, including zero-weight authored coats".into()));
+        }
+        match &self.job {
+            Some(RenderJob::CpuRaytrace { options, .. }) => {
+                self.optics.validate_for_cpu_path(options.path.is_some())?;
+                if options.volume.is_some_and(|v| v.active()) && !self.optics.is_empty() {
+                    return Err(DocError::Invalid(
+                        "CPU Atmosphere cannot combine with saved Glass or subsurface scattering; settings are kept".into(),
+                    ));
+                }
+                if options.denoise && self.optics.iter().any(|binding| binding.optics.subsurface.is_some_and(|s| s.active())) {
+                    return Err(DocError::Invalid(
+                        "CPU subsurface random walks have no surface-denoiser guides; disable denoising explicitly".into(),
+                    ));
+                }
+            }
+            Some(RenderJob::GpuPath { .. }) => {}
+            _ if !self.optics.is_empty() => return Err(DocError::Invalid("saved optics require an explicit CPU or GPU raytrace job".into())),
+            _ => {}
         }
         if self.optics.iter().any(|o| self.surfaces.iter().any(|s| s.target == o.target)) {
             return Err(DocError::Invalid("saved opaque surface maps and optical boundaries cannot share a target".into()));
@@ -121,8 +151,23 @@ impl RenderSetup {
         if !self.stage.is_empty() && matches!(self.job, Some(RenderJob::Raster { .. })) {
             return Err(DocError::Invalid("passive stage geometry requires raytracing; raster cannot silently discard it".into()));
         }
-        if !self.surfaces.is_empty() && !matches!(self.job, Some(RenderJob::GpuPath { .. })) {
-            return Err(DocError::Invalid("saved surfaces require an explicit GPU job; unsupported methods cannot discard bindings".into()));
+        if !self.surfaces.is_empty() {
+            match &self.job {
+                Some(RenderJob::GpuPath { .. }) => {}
+                Some(RenderJob::CpuRaytrace { options, .. }) => {
+                    if !self.optics.is_empty() && options.path.is_none() {
+                        return Err(DocError::Invalid(
+                            "CPU surface maps cannot combine with saved Glass; preserve the bindings and select a compatible method".into(),
+                        ));
+                    }
+                    options.validate_surface_maps(self.exposure_ev)?;
+                }
+                _ => {
+                    return Err(DocError::Invalid(
+                        "saved surfaces require an explicit CPU raytrace or GPU path job; unsupported methods cannot discard bindings".into(),
+                    ));
+                }
+            }
         }
         let (width, height) = (u64::from(self.width), u64::from(self.height));
         if width == 0 || height == 0 {
@@ -168,10 +213,34 @@ impl RenderSetup {
                 ));
             }
             job.validate(&self.camera, self.exposure_ev)?;
-            if let RenderJob::CpuRaytrace { options } = job
-                && let Some(progressive) = options.progressive
-            {
-                progressive.validate_image_with_budget(self.width, self.height, options.budget).map_err(|e| DocError::Invalid(e.to_string()))?;
+            if let RenderJob::GpuPath { options, .. } = job {
+                solidcraft_render::job::supersampled_dimensions(self.width, self.height, options.supersampling)
+                    .map_err(|e| DocError::Invalid(e.to_string()))?;
+            }
+            if let RenderJob::CpuRaytrace { options, .. } = job {
+                // Existing native-size Workstation intent remains readable. X2
+                // uses the bounded 8K output envelope and pays for its internal grid.
+                let (trace_width, trace_height) = if options.supersampling == 1 && !options.denoise && !options.denoise_diagnostics {
+                    (self.width, self.height)
+                } else {
+                    solidcraft_render::job::supersampled_dimensions(self.width, self.height, options.supersampling)
+                        .map_err(|e| DocError::Invalid(e.to_string()))?
+                };
+                if options.denoise || options.denoise_diagnostics {
+                    solidcraft_render::job::validate_cpu_denoise_image(trace_width, trace_height).map_err(|e| DocError::Invalid(e.to_string()))?;
+                }
+                options
+                    .budget
+                    .validate_image(
+                        trace_width,
+                        trace_height,
+                        solidcraft_render::job::cpu_camera_sampling(options.progressive, options.adaptive, options.budget)
+                            .map_err(|e| DocError::Invalid(e.to_string()))?,
+                    )
+                    .map_err(|e| DocError::Invalid(e.to_string()))?;
+                if let Some(output) = &options.output {
+                    output.validate_image(self.width, self.height).map_err(|e| DocError::Invalid(e.to_string()))?;
+                }
             }
         }
         // Desired mode/format/backend may be unavailable on this host. Saving intent is not preflight.
@@ -185,6 +254,8 @@ pub struct RenderSettings {
     pub setups: BTreeMap<String, RenderSetup>,
     #[serde(skip_serializing_if = "crate::render_resources::HdrResources::is_empty")]
     pub resources: crate::render_resources::HdrResources,
+    #[serde(skip_serializing_if = "crate::render_texture_resources::TextureResources::is_empty")]
+    pub texture_resources: crate::render_texture_resources::TextureResources,
 }
 
 #[derive(Default, Deserialize)]
@@ -192,12 +263,13 @@ pub struct RenderSettings {
 struct UncheckedSettings {
     setups: BTreeMap<String, RenderSetup>,
     resources: crate::render_resources::HdrResources,
+    texture_resources: crate::render_texture_resources::TextureResources,
 }
 
 impl TryFrom<UncheckedSettings> for RenderSettings {
     type Error = DocError;
     fn try_from(value: UncheckedSettings) -> Result<Self> {
-        let settings = Self { setups: value.setups, resources: value.resources };
+        let settings = Self { setups: value.setups, resources: value.resources, texture_resources: value.texture_resources };
         settings.validate()?;
         Ok(settings)
     }
@@ -205,7 +277,7 @@ impl TryFrom<UncheckedSettings> for RenderSettings {
 
 impl RenderSettings {
     pub fn is_empty(&self) -> bool {
-        self.setups.is_empty() && self.resources.is_empty()
+        self.setups.is_empty() && self.resources.is_empty() && self.texture_resources.is_empty()
     }
 
     pub fn validate_name(name: &str) -> Result<()> {
@@ -228,8 +300,19 @@ impl RenderSettings {
     }
 
     pub fn validate_resources(&self, setup: &RenderSetup) -> Result<()> {
+        for surface in setup.surfaces.iter() {
+            if let crate::render_surface::SurfaceSource::Embedded(source) = &surface.source {
+                for (role, id) in source.role_resources() {
+                    let resource = self.texture_resources.required(&id)?;
+                    resource.validate_role(role)?;
+                    if matches!(setup.job, Some(RenderJob::CpuRaytrace { .. })) {
+                        resource.validate_cpu_encoding()?;
+                    }
+                }
+            }
+        }
         match &setup.job {
-            Some(RenderJob::CpuRaytrace { options }) => {
+            Some(RenderJob::CpuRaytrace { options, .. }) => {
                 if let Some(hdr) = options.hdr {
                     hdr.validate_resource(&self.resources)?;
                 }
@@ -312,11 +395,12 @@ mod tests {
             RenderSetup {
                 exposure_ev: 1.25,
                 job: Some(RenderJob::CpuRaytrace {
-                    options: CpuJob {
+                    transparent_background: false,
+                    options: Box::new(CpuJob {
                         lights: Some(Vec::new()),
                         hdr: Some(CpuHdrEnvironment { resource: id, rotation_rad: 0.75, intensity: 2.0, samples: 64 }),
                         ..Default::default()
-                    },
+                    }),
                 }),
                 ..Default::default()
             },
@@ -509,7 +593,7 @@ mod tests {
             exposure_ev: 2.5,
             mode: RenderMode::Final,
             format: RenderFormat::Exr,
-            camera: Camera { up: solidcraft_render::UpAxis::Y, ..Default::default() },
+            camera: Camera { up: solidcraft_viewport::UpAxis::Y, ..Default::default() },
             ..Default::default()
         };
         Arc::make_mut(&mut loaded.render).setups.insert("Studio".into(), setup);
@@ -564,7 +648,7 @@ mod tests {
         let cpu = |budget, width, height| RenderSetup {
             width,
             height,
-            job: Some(RenderJob::CpuRaytrace { options: CpuJob { budget, ..Default::default() } }),
+            job: Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(CpuJob { budget, ..Default::default() }) }),
             ..Default::default()
         };
         let compact = cpu(CpuBudget::Compact, 3840, 2160);
@@ -572,7 +656,7 @@ mod tests {
         assert!(message.contains("3840 × 2160 exceeds the image limits (4096 pixels per side, 4194304 pixels in all)"), "{message}");
         assert!(message.contains("the largest image at this aspect is 2730 × 1536"), "{message}");
         assert!(message.contains("choose the Studio CPU resource profile, or a smaller size"), "{message}");
-        assert!(matches!(&compact.job, Some(RenderJob::CpuRaytrace { options }) if options.budget == CpuBudget::Compact));
+        assert!(matches!(&compact.job, Some(RenderJob::CpuRaytrace { options, .. }) if options.budget == CpuBudget::Compact));
         let message = compact.validate_for_cpu(CpuBudget::Compact).unwrap_err().to_string();
         assert!(message.contains("choose the Studio CPU resource profile"), "{message}");
 
@@ -599,7 +683,7 @@ mod tests {
         gpu(3840, 2160).validate().unwrap();
         gpu(3840, 2160).validate_for_gpu().unwrap();
         let message = gpu(8193, 8193).validate().unwrap_err().to_string();
-        assert!(message.contains("(8192 pixels per side, 16777216 pixels in all)"), "{message}");
+        assert!(message.contains("(8192 pixels per side, 33554432 pixels in all)"), "{message}");
         assert!(!message.contains("CPU resource profile"), "{message}");
     }
 
@@ -617,7 +701,7 @@ mod tests {
                 "area_samples":64,"seed":u32::MAX,"environment":{"color":[0.1,0.2,0.3],"intensity":0.5}
             }}},
             "GPU":{"camera":camera,"exposure_ev":-3.5,"job":{"method":"gpu_path","transparent_background":true,"options":{
-                "samples":4096,"max_depth":16,"seed":81,"tone_map":"aces_fitted","denoise":true,
+                "samples":4096,"max_depth":16,"seed":81,"tone_map":"aces_fitted","denoise":true,"clamp_indirect":8,
                 "lens":{"aperture_radius_mm":0.4,"focus_distance_mm":90},
                 "lighting":{"environment":[0.1,0.25,0.6],"sun":{"direction":[1,-1,-2],"angular_radius_rad":0.1,"radiance":[5,4,3]},
                     "area_lights":[{"center":[10,20,30],"u":[4,0,0],"v":[0,-2,0],"radiance":[3,2,1]}]},
@@ -631,7 +715,7 @@ mod tests {
         let saved = serde_json::to_value(&reopened.render).unwrap();
         assert!(saved["setups"]["Legacy"].get("job").is_none());
         assert_eq!(saved["setups"]["Legacy"]["environment_rotation"], 0.75);
-        let RenderJob::CpuRaytrace { options } = settings.setups["CPU"].job.as_ref().unwrap() else { panic!("CPU intent changed") };
+        let RenderJob::CpuRaytrace { options, .. } = settings.setups["CPU"].job.as_ref().unwrap() else { panic!("CPU intent changed") };
         let runtime = options.to_runtime(settings.setups["CPU"].exposure_ev).unwrap();
         assert_eq!(runtime.exposure_ev, 1.25);
         assert_eq!(runtime.area_samples, Some(64));
@@ -646,7 +730,15 @@ mod tests {
         assert_eq!(runtime.exposure_ev, -3.5);
         assert_eq!(runtime.lighting.unwrap().environment, [0.1, 0.25, 0.6]);
         assert!(runtime.denoise);
+        assert_eq!(runtime.clamp_indirect, Some(8.0));
+        assert_eq!(saved["setups"]["GPU"]["job"]["options"]["clamp_indirect"], 8.0);
         assert!(saved["setups"]["GPU"]["job"]["options"].get("exposure_ev").is_none());
+        // Off is not written, and a limit that would round to zero or overflow in the shader is refused.
+        assert!(serde_json::to_value(GpuJob::default()).unwrap().get("clamp_indirect").is_none());
+        for limit in [0.0, -1.0, 2e6] {
+            let job = GpuJob { clamp_indirect: Some(limit), ..(**options).clone() };
+            assert!(job.validate(0.0).unwrap_err().to_string().contains("clamp_indirect"), "{limit}");
+        }
     }
 
     #[test]
@@ -655,11 +747,11 @@ mod tests {
         for options in [json!({}), json!({"lights":null,"punctual_lights":null,"area_lights":null,"environment":null})] {
             let setup: RenderSetup = serde_json::from_value(json!({"job":{"method":"cpu_raytrace","options":options}})).unwrap();
             setup.validate().unwrap();
-            assert_eq!(setup.job, Some(RenderJob::CpuRaytrace { options: CpuJob::default() }));
+            assert_eq!(setup.job, Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::default() }));
         }
         let empty: RenderSetup = serde_json::from_value(json!({"job":{"method":"cpu_raytrace","options":{"lights":[]}}})).unwrap();
         empty.validate().unwrap();
-        assert_ne!(empty.job, Some(RenderJob::CpuRaytrace { options: CpuJob::default() }));
+        assert_ne!(empty.job, Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::default() }));
         for (lighting, explicit) in [(serde_json::Value::Null, false), (json!({"environment":[0,0,0],"area_lights":[]}), true)] {
             let setup: RenderSetup = serde_json::from_value(json!({"job":{"method":"gpu_path","options":{"lighting":lighting}}})).unwrap();
             setup.validate().unwrap();
@@ -681,7 +773,7 @@ mod tests {
         let document = Document { render: Arc::new(settings), ..Default::default() };
         let reopened = Document::from_json(&document.to_json()).unwrap();
         assert_eq!(document, reopened);
-        let RenderJob::CpuRaytrace { options } = reopened.render.setups["Film"].job.as_ref().unwrap() else { panic!("method changed") };
+        let RenderJob::CpuRaytrace { options, .. } = reopened.render.setups["Film"].job.as_ref().unwrap() else { panic!("method changed") };
         let runtime = options.to_runtime(1.5).unwrap();
         assert_eq!(runtime.progressive.unwrap().seed, u32::MAX);
         assert_eq!(runtime.exposure_ev, 1.5);
@@ -696,6 +788,104 @@ mod tests {
         let mut incompatible = saved;
         incompatible["setups"]["Film"]["job"]["options"]["primary_samples"] = json!(4);
         assert!(serde_json::from_value::<RenderSettings>(incompatible).is_err());
+    }
+
+    #[test]
+    fn cpu_transparent_intent_roundtrips_offline_and_keeps_opaque_defaults() {
+        use serde_json::json;
+        let opaque: RenderSetup = serde_json::from_value(json!({"job":{"method":"cpu_raytrace"}})).unwrap();
+        assert!(matches!(opaque.job, Some(RenderJob::CpuRaytrace { transparent_background: false, .. })));
+        let setup: RenderSetup =
+            serde_json::from_value(json!({"width":8,"height":8,"job":{"method":"cpu_raytrace","transparent_background":true,"options":{
+            "primary_samples":4,"output":{"linear_exr":true}}}}))
+            .unwrap();
+        setup.validate().unwrap();
+        let document = Document {
+            render: Arc::new(RenderSettings { setups: std::collections::BTreeMap::from([("Cutout".into(), setup)]), ..Default::default() }),
+            ..Default::default()
+        };
+        assert_eq!(document, Document::from_json(&document.to_json()).unwrap());
+        for output in [json!({"backdrop":{}}), json!({"finishing":{"bloom":{"strength":1}}}), json!({"finishing":{"photographic":{"grain":0.03}}})] {
+            let settings = json!({"setups":{"Cutout":{"job":{"method":"cpu_raytrace","transparent_background":true,"options":{"output":output}}}}});
+            let error = serde_json::from_value::<RenderSettings>(settings.clone()).unwrap_err();
+            assert!(error.to_string().contains("opaque"), "valid opaque-only effects remain authored and refused");
+            let mut saved: serde_json::Value = serde_json::from_str(&Document::default().to_json()).unwrap();
+            saved["render"] = settings;
+            let error = Document::from_json(&saved.to_string()).unwrap_err();
+            assert!(error.to_string().contains("opaque"), "the full document loader must enforce the same saved output contract");
+        }
+        assert!(
+            serde_json::from_value::<RenderSetup>(json!({"job":{"method":"cpu_raytrace","options":{"transparent_background":true}}})).is_err(),
+            "one alpha authority beside the numerical job"
+        );
+    }
+
+    #[test]
+    fn cpu_physical_lens_roundtrips_offline_and_keeps_disabled_legacy_intent() {
+        use serde_json::json;
+        let camera = Camera { fov: 0.7, distance: 20.0, ..Default::default() };
+        let saved = json!({"setups":{"Focus":{"width":64,"height":32,"camera":camera,
+            "job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":8,"seed":81},
+                "lens":{"aperture_radius_mm":0.5,"focus_distance_mm":20.0}}}}}});
+        let settings: RenderSettings = serde_json::from_value(saved.clone()).unwrap();
+        let document = Document { render: Arc::new(settings), ..Default::default() };
+        assert_eq!(document, Document::from_json(&document.to_json()).unwrap());
+        let RenderJob::CpuRaytrace { options, .. } = document.render.setups["Focus"].job.as_ref().unwrap() else { panic!("CPU method changed") };
+        assert_eq!(options.to_runtime(1.5).unwrap().lens, options.lens);
+        let mut fixed = saved.clone();
+        fixed["setups"]["Focus"]["job"]["options"].as_object_mut().unwrap().remove("progressive");
+        assert!(serde_json::from_value::<RenderSettings>(fixed.clone()).is_err());
+        fixed["setups"]["Focus"]["job"]["options"]["lens"]["aperture_radius_mm"] = json!(0);
+        fixed["setups"]["Focus"]["camera"]["fov"] = json!(0);
+        let zero: RenderSettings = serde_json::from_value(fixed).unwrap();
+        assert_eq!(serde_json::to_value(&zero).unwrap()["setups"]["Focus"]["job"]["options"]["lens"]["aperture_radius_mm"].as_f64(), Some(0.0));
+        for lens in [
+            json!({"aperture_radius_mm":-1,"focus_distance_mm":20}),
+            json!({"aperture_radius_mm":0.5,"focus_distance_mm":0}),
+            json!({"aperture_radius_mm":0.5,"focus_distance_mm":20,"f_stop":2}),
+        ] {
+            let mut invalid = saved.clone();
+            invalid["setups"]["Focus"]["job"]["options"]["lens"] = lens;
+            assert!(serde_json::from_value::<RenderSettings>(invalid).is_err());
+        }
+        let mut ortho = saved;
+        ortho["setups"]["Focus"]["camera"]["fov"] = json!(0);
+        assert!(serde_json::from_value::<RenderSettings>(ortho).is_err());
+        assert!(serde_json::to_value(CpuJob::default()).unwrap().get("lens").is_none());
+    }
+
+    #[test]
+    fn cpu_output_presentation_roundtrips_offline_without_another_exposure_authority() {
+        use serde_json::json;
+        assert!(serde_json::to_value(CpuJob::default()).unwrap().get("output").is_none());
+        let saved = json!({"setups":{"CPU output":{"width":64,"height":32,"exposure_ev":1.5,
+            "job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":7,"seed":81},
+                "output":{"tone_map":"aces_fitted","finishing":{"rgb_gain":[1.2,0.8,1.1],"photographic":{"grain":0.03,"seed":42},
+                    "bloom":{"strength":0.2,"threshold":0.5,"radius":2}},"backdrop":{"mode":"radial"},"linear_exr":true}}}}}});
+        let settings: RenderSettings = serde_json::from_value(saved).unwrap();
+        let setup = &settings.setups["CPU output"];
+        let RenderJob::CpuRaytrace { options, .. } = setup.job.as_ref().unwrap() else { panic!("CPU job expected") };
+        let runtime = options.to_runtime(setup.exposure_ev).unwrap();
+        assert_eq!(runtime.exposure_ev, 1.5);
+        assert_eq!(runtime.output, options.output);
+        let encoded = serde_json::to_value(&settings).unwrap();
+        assert!(encoded["setups"]["CPU output"]["job"]["options"]["output"].get("exposure_ev").is_none());
+        assert_eq!(settings, serde_json::from_value::<RenderSettings>(encoded.clone()).unwrap());
+        for bad in [json!({"exposure_ev":1}), json!({"samples":4}), json!({"linear_exr":"yes"}), json!({"finishing":{"rgb_gain":[-1,1,1]}})] {
+            let mut invalid = encoded.clone();
+            invalid["setups"]["CPU output"]["job"]["options"]["output"] = bad;
+            assert!(serde_json::from_value::<RenderSettings>(invalid).is_err());
+        }
+        let wide = json!({"width":16384,"height":1,"job":{"method":"cpu_raytrace","options":{"budget":"workstation"}}});
+        serde_json::from_value::<RenderSetup>(wide.clone()).unwrap().validate().unwrap();
+        for output in [json!({"tone_map":"aces_fitted"}), json!({"linear_exr":true})] {
+            let mut invalid = wide.clone();
+            invalid["job"]["options"]["output"] = output;
+            assert!(
+                serde_json::from_value::<RenderSetup>(invalid).unwrap().validate().is_err(),
+                "active output must respect its existing shared envelope"
+            );
+        }
     }
 
     #[test]
@@ -714,7 +904,7 @@ mod tests {
             json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"hdr","path":"not-portable.hdr"}}}}),
             json!({"job":{"method":"gpu_path","options":{"exposure_ev":0}}}),
             json!({"job":{"method":"gpu_path","options":{"samples":0}}}),
-            json!({"job":{"method":"gpu_path","options":{"max_depth":17}}}),
+            json!({"job":{"method":"gpu_path","options":{"max_depth":65}}}),
             json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"sky","intensity":101}}}}),
             json!({"job":{"method":"gpu_path","options":{"lighting":{"environment":[-1,0,0]}}}}),
             json!({"camera":Camera { fov: 0.0, ..Default::default() },"job":{"method":"gpu_path","options":{"lens":{"aperture_radius_mm":1,"focus_distance_mm":10}}}}),
@@ -801,6 +991,7 @@ mod tests {
 #[cfg(test)]
 mod cpu_budget_tests {
     use super::*;
+    use serde_json::json;
     use solidcraft_render::job::{CpuBudget, CpuProgressiveOptions};
 
     #[test]
@@ -821,11 +1012,12 @@ mod cpu_budget_tests {
             width: 3840,
             height: 2160,
             job: Some(RenderJob::CpuRaytrace {
-                options: CpuJob {
+                transparent_background: false,
+                options: Box::new(CpuJob {
                     budget: CpuBudget::Studio,
                     progressive: Some(CpuProgressiveOptions { samples_per_pixel: 128, seed: 82 }),
                     ..Default::default()
-                },
+                }),
             }),
             ..Default::default()
         };
@@ -833,7 +1025,7 @@ mod cpu_budget_tests {
         let text = serde_json::to_string(&setup).unwrap();
         let reopened: RenderSetup = serde_json::from_str(&text).unwrap();
         assert_eq!(setup, reopened);
-        let Some(RenderJob::CpuRaytrace { options }) = &mut setup.job else {
+        let Some(RenderJob::CpuRaytrace { options, .. }) = &mut setup.job else {
             panic!("CPU fixture");
         };
         options.budget = CpuBudget::Compact;
@@ -845,4 +1037,410 @@ mod cpu_budget_tests {
         let legacy_large = RenderSetup { width: 3840, height: 2160, ..Default::default() };
         assert!(legacy_large.validate().is_err(), "large intent must name an explicit CPU job profile");
     }
+    #[test]
+    fn cpu_path_is_explicit_bounded_offline_intent_and_roundtrips_without_changing_legacy_jobs() {
+        let old = CpuJob::default();
+        assert!(old.path.is_none());
+        assert!(serde_json::to_value(&old).unwrap().get("path").is_none());
+        for depth in [1, 8, 16, 64] {
+            let setup:RenderSetup=serde_json::from_value(json!({"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{"path":{"max_depth":depth},"progressive":{"samples_per_pixel":7,"seed":9}}}})).unwrap();
+            setup.validate().unwrap();
+            let mut document = crate::Document::default();
+            std::sync::Arc::make_mut(&mut document.render).setups.insert("GI".into(), setup);
+            let bytes = serde_json::to_vec(&document).unwrap();
+            let reopened: crate::Document = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(document, reopened);
+        }
+        for raw in [
+            json!({"path":{"max_depth":0},"progressive":{"samples_per_pixel":7,"seed":9}}),
+            json!({"path":{"max_depth":65},"progressive":{"samples_per_pixel":7,"seed":9}}),
+            json!({"path":{"max_depth":8}}),
+            json!({"path":{"max_depth":8},"progressive":{"samples_per_pixel":7,"seed":9},"shadows":false}),
+        ] {
+            let options: CpuJob = serde_json::from_value(raw).unwrap();
+            assert!(options.to_runtime(0.0).is_err());
+        }
+        assert!(serde_json::from_value::<CpuJob>(json!({"path":{"max_depth":8,"unknown":true}})).is_err());
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn cpu_denoise_saved_flag_roundtrips_offline_and_keeps_false_omitted() {
+    use solidcraft_render::job::CpuBudget;
+    let mut setup = RenderSetup {
+        width: 16,
+        height: 8,
+        job: Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(CpuJob { denoise: true, ..Default::default() }) }),
+        ..Default::default()
+    };
+    setup.validate().unwrap();
+    let wire = serde_json::to_value(&setup).unwrap();
+    assert_eq!(wire["job"]["options"]["denoise"], true);
+    assert_eq!(serde_json::from_value::<RenderSetup>(wire).unwrap(), setup);
+    let Some(RenderJob::CpuRaytrace { options, .. }) = &mut setup.job else { panic!("CPU job expected") };
+    assert!(options.to_runtime(1.5).unwrap().denoise);
+    options.denoise = false;
+    assert!(serde_json::to_value(&setup).unwrap()["job"]["options"].get("denoise").is_none());
+    let default: CpuJob = serde_json::from_value(serde_json::json!({})).unwrap();
+    let explicit: CpuJob = serde_json::from_value(serde_json::json!({"denoise":false})).unwrap();
+    assert_eq!(default, explicit);
+    assert!(!default.to_runtime(0.0).unwrap().denoise);
+    assert!(serde_json::from_value::<CpuJob>(serde_json::json!({"denoise":"true"})).is_err());
+    setup.width = 8193;
+    setup.height = 1;
+    let Some(RenderJob::CpuRaytrace { options, .. }) = &mut setup.job else { panic!("CPU job expected") };
+    options.budget = CpuBudget::Workstation;
+    setup.validate().unwrap();
+    let Some(RenderJob::CpuRaytrace { options, .. }) = &mut setup.job else { panic!("CPU job expected") };
+    options.denoise = true;
+    assert_eq!(setup.validate().unwrap_err(), DocError::Invalid("LimitExceeded: output requires 1..8192 sides and at most 33554432 pixels".into()),);
+}
+
+#[cfg(test)]
+#[test]
+fn composed_cpu_path_preserves_saved_optics_alpha_filter_lens_and_master_intent() {
+    use crate::render_optics::{OpticalMaterial, SavedOptics};
+    use crate::render_surface::RenderBodyTarget;
+    use solidcraft_render::job::{CpuPathOptions, CpuProgressiveOptions, OutputOptions, ThinLens};
+    let mut setup = RenderSetup {
+        camera: Camera { fov: 0.6, distance: 123.0, ..Default::default() },
+        width: 8,
+        height: 8,
+        job: Some(RenderJob::CpuRaytrace {
+            transparent_background: true,
+            options: Box::new(CpuJob {
+                denoise: true,
+                path: Some(CpuPathOptions { max_depth: 3 }),
+                progressive: Some(CpuProgressiveOptions { samples_per_pixel: 3, seed: 81 }),
+                lens: Some(ThinLens { aperture_radius_mm: 1.0, focus_distance_mm: 123.0 }),
+                output: Some(Box::new(OutputOptions { linear_exr: true, ..Default::default() })),
+                ..Default::default()
+            }),
+        }),
+        ..Default::default()
+    };
+    setup.validate().unwrap();
+    setup
+        .optics
+        .set(
+            SavedOptics {
+                target: RenderBodyTarget { definition: "Glass".into(), feature: 1, component: 0, occurrence_path: Vec::new() },
+                optics: OpticalMaterial::default(),
+            },
+            false,
+        )
+        .unwrap();
+    let before = setup.clone();
+    setup.validate().unwrap();
+    assert_eq!(setup, before, "validation must not lower or rewrite authored optics");
+    let Some(RenderJob::CpuRaytrace { options, .. }) = &mut setup.job else { panic!("CPU fixture") };
+    options.path = None;
+    setup.validate().unwrap();
+    assert!(matches!(&setup.job, Some(RenderJob::CpuRaytrace { transparent_background:true, options })
+        if options.denoise && options.output.as_ref().unwrap().linear_exr && options.lens.is_some()));
+}
+
+#[cfg(test)]
+#[test]
+fn gpu_hard_directional_intent_roundtrips_and_hostile_lists_refuse_at_document_load() {
+    use serde_json::json;
+    let light = json!({"direction":[0.0,0.0,2.0],"color":[0.25,0.5,1.0],"intensity":0.0});
+    let settings = json!({"setups":{"Lights":{"job":{"method":"gpu_path","options":{"lighting":{"directional_lights":vec![light.clone();8]}}}}}});
+    let saved: RenderSettings = serde_json::from_value(settings.clone()).unwrap();
+    let doc = crate::Document { render: std::sync::Arc::new(saved.clone()), ..Default::default() };
+    assert_eq!(crate::Document::from_json(&doc.to_json()).unwrap(), doc);
+    let encoded = serde_json::to_value(&saved).unwrap();
+    assert_eq!(encoded["setups"]["Lights"]["job"]["options"]["lighting"]["directional_lights"], json!(vec![light.clone(); 8]));
+    for list in [
+        json!(vec![light.clone(); 9]),
+        json!([{"direction":[0,0,0],"color":[1,1,1],"intensity":1}]),
+        json!([{"direction":[0,0,1],"color":[1,1,1],"intensity":65}]),
+    ] {
+        let mut bad = settings.clone();
+        bad["setups"]["Lights"]["job"]["options"]["lighting"]["directional_lights"] = list;
+        assert!(serde_json::from_value::<RenderSettings>(bad).is_err());
+    }
+    let mut over_combined = settings;
+    over_combined["setups"]["Lights"]["job"]["options"]["lighting"]["sun"] =
+        json!({"direction":[0,0,1],"angular_radius_rad":0.02,"radiance":[1,1,1]});
+    assert!(serde_json::from_value::<RenderSettings>(over_combined.clone()).is_err());
+    let mut document = serde_json::to_value(crate::Document::default()).unwrap();
+    document["render"] = over_combined;
+    assert!(crate::Document::from_json(&serde_json::to_string(&document).unwrap()).is_err());
+    let old: RenderSettings = serde_json::from_value(json!({"setups":{"Old":{"job":{"method":"gpu_path","options":{}}}}})).unwrap();
+    let Some(RenderJob::GpuPath { options, .. }) = &old.setups["Old"].job else { panic!("gpu job") };
+    assert!(options.lighting.is_none());
+}
+
+#[cfg(test)]
+#[test]
+fn saved_cpu_aging_is_optional_bounded_and_preserves_stable_targets_without_runtime_ordinals() {
+    use crate::render_aging::SavedAgingStack;
+    use crate::render_surface::RenderBodyTarget;
+    use solidcraft_render::job::aging::{AgingKind, AgingLayer};
+    let old = CpuJob::default();
+    assert!(serde_json::to_value(&old).unwrap().get("aging").is_none());
+    let mut layers = SavedAgingStack::default();
+    layers.push(AgingLayer::preset(AgingKind::Dust)).unwrap();
+    let target = RenderBodyTarget { definition: "Aged panel".into(), feature: 19, component: 0, occurrence_path: Vec::new() };
+    layers.get_mut(0).unwrap().target = Some(target.clone());
+    let job = CpuJob { aging: layers.clone(), progressive: Some(Default::default()), denoise: true, ..Default::default() };
+    job.validate(0.5).unwrap();
+    assert!(job.to_runtime(0.5).unwrap_err().to_string().contains("stable occurrence"));
+    let setup = RenderSetup {
+        width: 8,
+        height: 8,
+        exposure_ev: 0.5,
+        job: Some(RenderJob::CpuRaytrace { transparent_background: true, options: Box::new(job) }),
+        ..Default::default()
+    };
+    setup.validate().unwrap();
+    let wire = serde_json::to_value(&setup).unwrap();
+    assert_eq!(wire["job"]["options"]["aging"][0]["target"]["definition"], "Aged panel");
+    assert!(wire["job"]["options"]["aging"][0]["target"].get("body_index").is_none());
+    assert_eq!(serde_json::from_value::<RenderSetup>(wire.clone()).unwrap(), setup);
+    let mut legacy = wire.clone();
+    legacy["job"]["options"]["aging"][0]["target"] = serde_json::json!({"body_index":0,"body_name":"Aged panel"});
+    assert!(serde_json::from_value::<RenderSetup>(legacy).unwrap_err().to_string().contains("explicit rebinding"));
+    let mut nine = wire;
+    nine["job"]["options"]["aging"] = serde_json::json!(vec![serde_json::json!({}); 9]);
+    assert!(serde_json::from_value::<RenderSetup>(nine).is_err());
+    layers.get_mut(0).unwrap().target = None;
+    let runtime = CpuJob { aging: layers, ..Default::default() }.to_runtime(0.5).unwrap();
+    assert!(runtime.aging.unwrap().active());
+}
+
+#[cfg(test)]
+mod cpu_adaptive_saved_tests {
+    use super::*;
+    use serde_json::json;
+    use solidcraft_render::job::{CpuBudget, CpuProgressiveOptions};
+    #[test]
+    fn saved_cpu_adaptive_intent_roundtrips_offline_and_pays_pilots_inside_the_existing_profile() {
+        let setup: RenderSetup = serde_json::from_value(json!({"width":128,"height":64,
+            "job":{"method":"cpu_raytrace","transparent_background":true,"options":{
+                "progressive":{"samples_per_pixel":48,"seed":81},"adaptive":{"pilot_samples":16,"min_samples":16},
+                "denoise":true,"path":{"max_depth":3},"output":{"linear_exr":true}}}}))
+        .unwrap();
+        setup.validate().unwrap();
+        let value = serde_json::to_value(&setup).unwrap();
+        assert_eq!(serde_json::from_value::<RenderSetup>(value.clone()).unwrap(), setup);
+        let Some(RenderJob::CpuRaytrace { options, .. }) = setup.job.as_ref() else { panic!("CPU job expected") };
+        let runtime = options.to_runtime(0.0).unwrap();
+        assert_eq!(runtime.adaptive.as_deref().copied(), options.adaptive);
+        assert_eq!(runtime.preview_target().unwrap(), 64);
+        assert_eq!(runtime.camera_sampling().unwrap(), Some(CpuProgressiveOptions { samples_per_pixel: 64, seed: 81 }));
+        let mut too_large = setup.clone();
+        too_large.width = 1024;
+        too_large.height = 1024;
+        assert!(too_large.validate().is_err(), "64 total passes exceed Compact's existing camera-sample bound");
+        let mut cap = value.clone();
+        cap["job"]["options"]["progressive"]["samples_per_pixel"] = json!(64);
+        assert!(
+            serde_json::from_value::<RenderSetup>(cap).unwrap().validate().is_err(),
+            "16 pilots cannot be hidden outside Compact's 64-sample cap"
+        );
+        for (budget, maximum) in
+            [(CpuBudget::Compact, 64), (CpuBudget::Studio, 1024), (CpuBudget::Workstation, solidcraft_render::job::MAX_CPU_SAMPLES_PER_PIXEL)]
+        {
+            let mut runtime = runtime.clone();
+            runtime.budget = budget;
+            runtime.progressive = Some(CpuProgressiveOptions { samples_per_pixel: maximum - 16, seed: 81 });
+            assert_eq!(runtime.preview_target().unwrap(), maximum);
+            runtime.progressive.as_mut().unwrap().samples_per_pixel += 1;
+            assert!(runtime.validate().is_err(), "{budget:?} must include the pilot stage in its unchanged cap");
+        }
+        let mut fixed = value.clone();
+        fixed["job"]["options"].as_object_mut().unwrap().remove("progressive");
+        assert!(serde_json::from_value::<RenderSetup>(fixed).unwrap().validate().is_err());
+        let mut hostile = value;
+        hostile["job"]["options"]["adaptive"]["certified_convergence"] = json!(true);
+        assert!(serde_json::from_value::<RenderSetup>(hostile).is_err());
+        let old = serde_json::to_value(CpuJob::default()).unwrap();
+        assert!(old.get("adaptive").is_none(), "default-absent saved jobs keep their prior schema bytes");
+    }
+}
+
+#[cfg(test)]
+mod saved_coat_tests {
+    use super::*;
+    use crate::{
+        Document,
+        render_coat::{CoatMaterial, SavedCoat},
+        render_surface::RenderBodyTarget,
+    };
+    use serde_json::{Value, json};
+    use std::sync::Arc;
+
+    fn target(feature: u64) -> RenderBodyTarget {
+        RenderBodyTarget { definition: format!("Coated{feature}"), feature, component: 0, occurrence_path: vec![] }
+    }
+    fn document(gpu: bool) -> Document {
+        let mut doc = Document::default();
+        let job = if gpu {
+            RenderJob::GpuPath { transparent_background: false, options: Default::default() }
+        } else {
+            RenderJob::CpuRaytrace { transparent_background: false, options: Default::default() }
+        };
+        Arc::make_mut(&mut doc.render).setups.insert("Coated".into(), RenderSetup { width: 8, height: 8, job: Some(job), ..Default::default() });
+        doc
+    }
+    #[test]
+    fn saved_coat_document_roundtrip_preserves_every_number_and_old_omission_for_both_methods() {
+        for gpu in [false, true] {
+            let mut doc = document(gpu);
+            let old = doc.to_json();
+            let old_value: Value = serde_json::from_str(&old).unwrap();
+            assert!(old_value["render"]["setups"]["Coated"].get("coats").is_none());
+            assert_eq!(Document::from_json(&old).unwrap().to_json(), old);
+            let coat = CoatMaterial { weight: -0.0, roughness: 0.22, ior: 1.74 };
+            Arc::make_mut(&mut doc.render).setups.get_mut("Coated").unwrap().coats.set(SavedCoat { target: target(1), coat }, false).unwrap();
+            let encoded = doc.to_json();
+            let loaded = Document::from_json(&encoded).unwrap();
+            assert_eq!(loaded.render, doc.render);
+            let saved = loaded.render.setups["Coated"].coats.iter().next().unwrap();
+            assert_eq!(saved.coat, coat);
+            assert_eq!(saved.coat.weight.to_bits(), (-0.0_f64).to_bits());
+            let wire = serde_json::to_value(saved).unwrap();
+            assert!(wire.get("body_index").is_none() && wire.get("body_name").is_none());
+            assert!(wire["target"].get("feature").is_some());
+            let setup = Arc::make_mut(&mut doc.render).setups.get_mut("Coated").unwrap();
+            let changed = SavedCoat { target: target(1), coat: CoatMaterial { weight: 0.0, ..coat } };
+            assert!(setup.coats.set(changed.clone(), false).is_err(), "authored signed zero is not silently replaced");
+            setup.coats.set(changed, true).unwrap();
+            assert_eq!(setup.coats.iter().next().unwrap().coat.weight.to_bits(), 0.0_f64.to_bits());
+            assert!(setup.coats.remove(&target(1)));
+            assert_eq!(doc.to_json(), old, "removing the only coat restores exact legacy document bytes");
+        }
+    }
+    #[test]
+    fn malformed_saved_coats_refuse_through_the_full_document_loader() {
+        let mut doc = document(false);
+        Arc::make_mut(&mut doc.render)
+            .setups
+            .get_mut("Coated")
+            .unwrap()
+            .coats
+            .set(SavedCoat { target: target(1), coat: Default::default() }, false)
+            .unwrap();
+        let base: Value = serde_json::from_str(&doc.to_json()).unwrap();
+        for (key, value) in
+            [("weight", json!(-0.01)), ("weight", json!(1.01)), ("roughness", json!(0.02)), ("ior", json!(3.01)), ("unknown", json!(true))]
+        {
+            let mut bad = base.clone();
+            bad["render"]["setups"]["Coated"]["coats"][0]["coat"][key] = value;
+            assert!(Document::from_json(&bad.to_string()).is_err(), "invalid coat {key}");
+        }
+        let mut duplicate = base.clone();
+        let row = duplicate["render"]["setups"]["Coated"]["coats"][0].clone();
+        duplicate["render"]["setups"]["Coated"]["coats"] = json!([row, row]);
+        assert!(Document::from_json(&duplicate.to_string()).is_err());
+        for key in ["body_index", "runtime_path"] {
+            let mut bad = base.clone();
+            bad["render"]["setups"]["Coated"]["coats"][0][key] = json!(0);
+            assert!(Document::from_json(&bad.to_string()).is_err());
+        }
+        let mut too_many = base;
+        too_many["render"]["setups"]["Coated"]["coats"] =
+            json!((1..=65).map(|feature| SavedCoat { target: target(feature), coat: Default::default() }).collect::<Vec<_>>());
+        assert!(Document::from_json(&too_many.to_string()).is_err());
+    }
+    #[test]
+    fn saved_coat_uses_existing_sixty_four_target_bound_and_rejects_glass_even_at_zero_weight() {
+        use crate::render_optics::{OpticalMaterial, SavedOptics};
+        for gpu in [false, true] {
+            let mut doc = document(gpu);
+            let setup = Arc::make_mut(&mut doc.render).setups.get_mut("Coated").unwrap();
+            for feature in 1..=64 {
+                setup.coats.set(SavedCoat { target: target(feature), coat: CoatMaterial { weight: 0.0, ..Default::default() } }, false).unwrap();
+            }
+            setup.validate().unwrap();
+            assert_eq!(setup.coats.len(), 64);
+            let before = setup.coats.clone();
+            assert!(setup.coats.set(SavedCoat { target: target(65), coat: Default::default() }, false).is_err());
+            assert_eq!(setup.coats, before);
+            setup.optics.set(SavedOptics { target: target(1), optics: OpticalMaterial::default() }, false).unwrap();
+            assert!(setup.validate().unwrap_err().to_string().contains("cannot share"));
+            setup.optics.remove(&target(1));
+            setup.job = Some(RenderJob::Raster { transparent_background: false });
+            assert!(setup.validate().unwrap_err().to_string().contains("raytrace"));
+            assert_eq!(setup.coats, before, "unsupported method retains all authored rows");
+        }
+    }
+}
+
+#[cfg(test)]
+mod cpu_celestial_saved_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn saved_cpu_finite_sun_and_sky_roundtrip_exactly_and_require_explicit_path() {
+        let value = json!({"width":16,"height":12,"job":{"method":"cpu_raytrace","transparent_background":true,"options":{
+            "path":{"max_depth":4},"progressive":{"samples_per_pixel":32,"seed":81},"adaptive":{"pilot_samples":16,"min_samples":16},
+            "sun":{"direction":[0.2,-0.3,0.9],"angular_radius_rad":0.02,"radiance":[301.25,202.5,103.75]},
+            "sky":{"kind":"sky","gradient":{"zenith":[0.25,0.5,1.0],"horizon":[0.75,0.5,0.25],"ground":[0.125,0.25,0.5]},"rotation_rad":0.731,"intensity":75},
+            "denoise":true,"output":{"linear_exr":true},"lights":[]}}});
+        let setup: RenderSetup = serde_json::from_value(value.clone()).unwrap();
+        setup.validate().unwrap();
+        let wire = serde_json::to_value(&setup).unwrap();
+        assert_eq!(serde_json::from_value::<RenderSetup>(wire.clone()).unwrap(), setup);
+        let Some(RenderJob::CpuRaytrace { options, .. }) = &setup.job else { panic!("CPU expected") };
+        let runtime = options.to_runtime(0.0).unwrap();
+        assert_eq!(runtime.sun.as_deref().copied(), options.sun);
+        assert_eq!(runtime.sky.as_deref().unwrap().intensity, 75.0);
+        assert_eq!(runtime.sky.as_deref().unwrap().rotation_rad, 0.731);
+        for (field, replacement) in [
+            ("path", serde_json::Value::Null),
+            ("sun", json!({"direction":[0,0,1],"angular_radius_rad":0,"radiance":[1,1,1]})),
+            ("environment", json!({"color":[1,1,1],"intensity":1})),
+        ] {
+            let mut invalid = wire.clone();
+            invalid["job"]["options"][field] = replacement;
+            assert!(serde_json::from_value::<RenderSetup>(invalid).unwrap().validate().is_err(), "{field} must not be silently replaced");
+        }
+        for (field, value) in [("intensity", json!(100.001)), ("rotation_rad", json!(1e6 + 1.0))] {
+            let mut invalid = wire.clone();
+            invalid["job"]["options"]["sky"][field] = value;
+            assert!(serde_json::from_value::<RenderSetup>(invalid).unwrap().validate().is_err());
+        }
+        let defaults = serde_json::to_value(CpuJob::default()).unwrap();
+        assert!(defaults.get("sun").is_none() && defaults.get("sky").is_none());
+    }
+}
+
+#[test]
+fn render_quality_saved_intent_preserves_output_size_and_validates_the_internal_grid() {
+    let gpu: RenderSetup = serde_json::from_value(serde_json::json!({
+        "width":7680,"height":4320,"job":{"method":"gpu_path","options":{
+            "samples":128,"supersampling":2,"denoise":true,"denoise_diagnostics":true,
+            "denoise_settings":{"passes":2,"strength":0.5,"firefly_suppression":false}
+        }}
+    }))
+    .unwrap();
+    gpu.validate().unwrap();
+    let reopened: RenderSetup = serde_json::from_value(serde_json::to_value(&gpu).unwrap()).unwrap();
+    assert_eq!(reopened, gpu);
+    assert_eq!((reopened.width, reopened.height), (7680, 4320));
+    let mut cpu: RenderSetup = serde_json::from_value(serde_json::json!({
+        "width":7680,"height":4320,"job":{"method":"cpu_raytrace","options":{
+            "threads":4,"budget":"workstation","progressive":{"samples_per_pixel":128},"supersampling":2
+        }}
+    }))
+    .unwrap();
+    cpu.validate().unwrap();
+    assert_eq!((cpu.width, cpu.height), (7680, 4320));
+    cpu.width = 1024;
+    cpu.height = 1024;
+    let Some(RenderJob::CpuRaytrace { options, .. }) = &mut cpu.job else { panic!("expected CPU job") };
+    options.budget = solidcraft_render::job::CpuBudget::Compact;
+    options.progressive.as_mut().unwrap().samples_per_pixel = 8;
+    assert!(cpu.validate().is_err(), "X2 must charge four million internal pixels to Compact's progressive limit");
+    let Some(RenderJob::CpuRaytrace { options, .. }) = &mut cpu.job else { panic!("expected CPU job") };
+    options.supersampling = 1;
+    cpu.validate().unwrap();
+    let mut invalid = gpu;
+    invalid.width = 8193;
+    invalid.height = 1;
+    assert!(invalid.validate().is_err());
 }

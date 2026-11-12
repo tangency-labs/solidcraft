@@ -57,6 +57,13 @@ pub(crate) struct Ask {
     pub sources: bool,
 }
 
+impl Scene {
+    /// How many triangles the drawing's meshes hold, for the export's reply.
+    pub(crate) fn triangle_count(&self) -> usize {
+        self.triangles
+    }
+}
+
 struct Group {
     first: usize,
     inverse: Mat,

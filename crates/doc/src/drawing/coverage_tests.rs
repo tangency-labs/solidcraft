@@ -15,6 +15,7 @@ fn design() -> Document {
             width: "10".into(),
             height: "10".into(),
             operation: Operation::NewBody,
+            centred: false,
         };
         assert_eq!(doc.add_feature(kind, None).unwrap(), i + 1);
     }

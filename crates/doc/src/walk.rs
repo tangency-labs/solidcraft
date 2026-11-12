@@ -42,6 +42,7 @@ impl Walk for i8 {}
 impl Walk for f64 {}
 impl Walk for usize {}
 impl Walk for u32 {}
+impl Walk for crate::newer_file::RawFeature {}
 impl Walk for ProfileSel {}
 impl Walk for std::collections::BTreeMap<String, String> {}
 impl Walk for crate::frame::Anchor {}
@@ -410,9 +411,12 @@ impl PlaneRef {
                 base.walk_feature_refs(f, depth + 1);
                 point.walk_feature_refs(f, depth + 1);
             }
-            Self::AtAngle { base, line, .. } => {
+            Self::AtAngle { base, line, pivot, .. } => {
                 base.walk_feature_refs(f, depth + 1);
                 if let Some(g) = line {
+                    g.walk_feature_refs(f, depth + 1);
+                }
+                if let Some(g) = pivot {
                     g.walk_feature_refs(f, depth + 1);
                 }
             }
@@ -432,7 +436,7 @@ impl PlaneRef {
                 }
             }
             Self::AlongPath { path, .. } => path.walk_feature_refs(f, depth + 1),
-            Self::Origin { .. } | Self::Custom { .. } | Self::Placed { .. } | Self::Face { .. } => {}
+            Self::Origin { .. } | Self::Custom { .. } | Self::Datum { .. } | Self::Placed { .. } | Self::Face { .. } => {}
         }
     }
 
@@ -447,9 +451,12 @@ impl PlaneRef {
                 base.walk_feature_refs_mut(f, depth + 1);
                 point.walk_feature_refs_mut(f, depth + 1);
             }
-            Self::AtAngle { base, line, .. } => {
+            Self::AtAngle { base, line, pivot, .. } => {
                 base.walk_feature_refs_mut(f, depth + 1);
                 if let Some(g) = line {
+                    g.walk_feature_refs_mut(f, depth + 1);
+                }
+                if let Some(g) = pivot {
                     g.walk_feature_refs_mut(f, depth + 1);
                 }
             }
@@ -469,7 +476,7 @@ impl PlaneRef {
                 }
             }
             Self::AlongPath { path, .. } => path.walk_feature_refs_mut(f, depth + 1),
-            Self::Origin { .. } | Self::Custom { .. } | Self::Placed { .. } | Self::Face { .. } => {}
+            Self::Origin { .. } | Self::Custom { .. } | Self::Datum { .. } | Self::Placed { .. } | Self::Face { .. } => {}
         }
     }
 }
@@ -483,7 +490,9 @@ impl GeoRef {
         match self {
             Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs(f, depth + 1),
+            Self::Snap { of, .. } => of.walk_feature_refs(f, depth + 1),
             Self::Point { .. }
+            | Self::Datum { .. }
             | Self::Origin
             | Self::Vertex { .. }
             | Self::Edge { .. }
@@ -501,7 +510,9 @@ impl GeoRef {
         match self {
             Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs_mut(f, depth + 1),
+            Self::Snap { of, .. } => of.walk_feature_refs_mut(f, depth + 1),
             Self::Point { .. }
+            | Self::Datum { .. }
             | Self::Origin
             | Self::Vertex { .. }
             | Self::Edge { .. }

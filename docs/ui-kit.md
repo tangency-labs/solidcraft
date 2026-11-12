@@ -1,14 +1,138 @@
 # SolidCraft UI kit
 
-The internal opt-in [universal panel foundation](panel-foundation.md) separates
-engine layout/specs from retained UI controllers and host-local services.
-`panel_runtime::EguiPanelHost` mounts bounded Header/Body/Footer slots through one
-existing `ui_kit::Container`; content controls its own scrolling. This reference
-adapter requires a full rectangular paint/input surface, rejects sparse geometry,
-and preserves parent clipping. `SolveApp::mount_panels` uses the enabled runtime's
-injected services. It adds no default
-placement/content change. Production docking and panel migrations remain separate.
+The opt-in [universal panel foundation](panel-foundation.md) separates engine
+layout, retained content controllers and viewport-local services. Its production
+content adapters are sibling work; existing content, Classic and shipping defaults
+remain available. `WorkspacePanelHost` uses the existing Container policy, theme
+tokens and stable semantic widgets. No second shell or camera path is added.
 
+Shared headers span their complete column width when collapsed. They retain the
+active identity and declared custom actions, menu, chevron and optional quick
+close, in that LTR order and mirrored in RTL. `hot_closable` controls quick close;
+`closable` independently controls permission. One click on the same chevron
+restores the body. There is no rail, hover-peek or pin-open product presentation.
+Registered actions are bound to retained controllers and validated through the
+same engine command route as `panel.action`; unbound/disabled actions cannot run.
+
+Tab groups place text-only tab headings in this same header row, replacing the
+single active title. One leading six-dot section grip drags the active tab;
+individual tabs keep their select, drag and reorder responses. Grip, tabs,
+compact overflow and actual controls use disjoint hitboxes, mirrored in RTL.
+Collapsed groups retain their headings; inline groups use the allocated title
+region without displacing editable inline content. Overflow reserves one compact
+control width, preserving the active label when it fits and keeping every entry
+reachable through the accessible menu. Single titles retain the heading font
+without placeholder icons. Icon metadata remains available to other consumers.
+Neither `HostMetrics` nor `AllocationEnvironment` has a second-row tab metric;
+measurement chrome counts the shared header only once.
+
+After the existing six-point Move threshold, only the dragged instance's title
+ink fades to 50% of its current opacity. Group grips have no title ink; the
+matching tab fades instead. Font selection, other labels, icons, grips, actions,
+fills and bodies stay unchanged. A paint-only badge shows the full live title
+next to the pointer on the existing preview tooltip layer, independently of
+landing validity. Theme typography, padding, radius and opaque backing keep it
+legible; the offset mirrors in RTL, and the badge clamps to the render-domain clip.
+The full title remains in its existing display order on one line, with no
+automatic wrapping, second bidi pass or ellipsis. Oversized text clips from a
+left-aligned galley in LTR or a right-aligned galley in RTL, preserving its reading
+start. Explicit metadata newlines retain their existing meaning.
+There is no added widget, container or input/occlusion/usable-space footprint.
+Pointer absence hides the badge while the held source remains dim; re-entry
+uses a fresh position. Release and cancellation clear feedback and repaint the
+source. Presses, clicks and either resize kind retain their normal appearance.
+
+Expanded content receives bounded Header/Body/Footer slots and owns its scrolling.
+`HostOptions::content_header_height` can reserve a content toolbar. Collapsed
+content has no body and renders none of these slots. Expanded Wide hosts below
+`theme::PANEL_INLINE_MAX_HEIGHT` use one total row with the shared title/grip, leading registered actions,
+a dedicated inline content slot, then menu, chevron and optional quick close. The
+complete row mirrors in RTL. Only `render_inline` runs; its safe default delegates
+to Body and adapters may supply a compact view. There is no extra title band or
+duplicated footer. The inline specimen contains a working synthetic text input;
+it does not replace real History playback or timeline content.
+
+Columns have independent widths and stacked tab sections. Sole side Content
+panels use bounded preferred metrics at their assigned width and leave uncovered
+space below; declared Fill panels use available height within the same limits.
+`PanelController::measure` captures immutable `HostContentMetrics` snapshots,
+including a revision that changes whenever any answer changes. The default
+reports the registration's preferred outer height honestly. Real adapters supply
+bounded intrinsic/preferred metrics without rendering hidden bodies or enumerating
+unbounded lists. Candidate and committed allocation use the same captured metrics.
+
+Tiny windows keep real panels at minimum dimensions in a bounded scroll extent.
+Scroll tracks own narrow input regions; leftover wheel input over actual panel
+paint scrolls presentation after content scrolling. The scroll canvas has no
+full-viewport response. Uncovered gaps stay navigable. Actual clipped paint,
+input/occlusion and usable contour remain separate from the full render domain
+below the application bar, including behind the ribbon. Panel changes never move
+the camera. Fit/Centre and independent navbar/compass placement include persistent
+legacy forms, palettes and confirmations after all producer passes.
+
+Pointer and app commands use `prepare_host_layout_with_snapshot` and the same
+NO_SPACE admission. Pointer release stages the injected layout catalogue, then
+consumes the exact owned `PreparedHostLayout` after lifecycle and native preflight; it never reconstructs an action. Only the selected successful
+candidate's landing, changed neighbours and tab marker paint. No idle targets or
+rejected-target grid is shown. Escape, invalid/outside release, focus/visibility/
+modal loss, independent commands and changed environment/metrics cancel capture.
+Missing host/environment refuses structural app commands. A standalone registered
+HeaderAction follows the owning controller route without placement or layout-store
+staging. Availability, fallback selection and binding permission still validate.
+Projection and commit reuse one staged incoming cohort; metric/reservation changes
+invalidate pending widgets and cached proposals as well as drag and the old frame.
+The next widget admission requires fresh paint.
+
+The app paints through `show_host_deferred`, then finalizes after later windows
+and modals using actual enabled top-layer responses. Geometry alone cannot
+permission input through a foreign window. `Container::bring_to_front` and
+owner-scoped popup layer registration preserve current layer ownership. Root and
+native windows mount complete separate cohorts. `HostFrame::layout` retains
+intended section geometry; its published controls and actual footprint arrays
+exclude invisible Area sizing passes. `reply`, `Committed` and
+`PreparedCommitted` events describe committed state, while `next_layout` describes
+a pending repaint. Transient menus shield input without becoming Fit targets.
+
+`AppPanelRuntime` retains the installed native adapter and read-only Session
+provider. Inspection exposes an immutable runtime; callers cannot replace an
+adapter while native placements exist. The default adapter truthfully supplies no
+native Window service. Host cards reuse adaptive Container styling, title fonts,
+the six-dot grip and header separator. Shared shell gaps are allocation space.
+Captured frame alpha is reported separately from declarative surface intent;
+the opt-in surface renderer reports contrast outcomes and raises opacity to retain
+readable primary and muted text. An invalid authored pair uses an opaque accessible
+fallback and reports its reason rather than claiming the original pair complies.
+The shared host publishes expanded disclosure, selected tab/tab-list, toggled
+action, menu-item and oriented splitter semantics. Keyboard panel commands use
+the registered keymap and typed host admission; focused text editors retain their
+automatic key handling. Menus support keyboard navigation and Escape focus return.
+Focus traversal reveals clipped headers without changing camera geometry.
+Owner-scoped focus restoration preserves eligible editor state without rendering
+hidden bodies or taking focus from foreign UI. Native logical direction follows
+the effective locale. Shared paint transitions use theme timing and cubic-out
+easing; reduced motion commits immediately.
+Native windows, saved workspace rollout and real content migrations remain peer work.
+
+The authenticated `ui.panel_fixture` seam is off by default and rejects replacing
+an existing runtime. Presets are `docks`, `tabs`, `collapsed`, `floating`, `overflow`
+(24 instances), `pinned`, `columns`, `stack_tabs`, `content_fill`, `inline` and `surfaces`.
+Only `surfaces` opts out of the compatibility opaque host policy. Its optional
+`translucency_percent` request (finite 0–100) converts to opacity as
+`1 - percent / 100`; readability protection may increase effective opacity.
+This fixture override changes no saved preference. Inspection reports each
+section's declared `surface`, actual `paint_alpha` and optional `contrast` outcome,
+including fallback reasons. See [the surface specimen contract](panel-foundation.md#surface-review-specimen).
+An enabled specimen accepts `translucency_percent` alone to update presentation
+in place, retaining its controllers, drafts, layout and model. A missing/disabled
+specimen host or a runtime owned by another provider refuses this update.
+An enabled specimen also accepts the ephemeral `reduced_motion` boolean, which
+changes animation without replacing content or writing preferences.
+Drafts, controller identities and lifecycle/service/action counters are inspectable.
+The native specimen exposes editor Apply/Finish/Cancel actions. Separate
+action-binding fixtures retain their declared test actions.
+Strings use pending `ui.panel_fixture.*` / `ui.panel_host.*` catalog entries.
+Authored source cases and scenarios do not establish visual or automated
+verification; root owns builds, screenshots, visual acceptance and checks.
 `viewport_status_item` and `viewport_status_row` draw persistent viewport pills on
 `Surface::ViewportStatus`. Callers supply translated names, formatted settings,
 kind, stable identity and key availability, and dispatch returned clear/edit actions.
@@ -37,7 +161,7 @@ diagnostics without preparing or evaluating geometry. `details_findings` and
 | `method_section` | Section with a GPU/CPU tag; unsupported contents stay faded with a readable reason. |
 | `read_only_text` | Bounded, selectable code box for read-only diagnostic JSON. |
 
-`crates/ui-egui/src/ui_kit/` contains the tokenised controls used by feature dialogs,
+`crates/ui-kit/src/` (the shared crate `solidcraft-ui-kit`, which `ui-egui` uses as `ui_kit`) contains the tokenised controls used by feature dialogs,
 preferences, manager cards, prompts, context menus and the sketch palette. Import through
 `crate::ui_kit::{...}`. Most controls are crate-visible; the container API is public so platform apps use the same hosts.
 
@@ -98,6 +222,10 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
   `hint_row` for a value the form checks before it runs: with a warning, the field is outlined in
   the warning colour and the message sits under it (`warning_caption`), so colour is never the
   only cue.
+  The label of an `expr_row` or `hint_row` scrubs: dragging it sideways changes a
+  literal value (`20 mm`, `45°`) by about a hundredth of its size per point, on that step's
+  grid, Shift ten times finer and Ctrl/Cmd ten times coarser. It keeps the unit and decimal
+  mark as typed, never makes a size negative, and leaves expressions and parameters alone.
 - `Panel::workspace` owns grip-based left/right placement and bounded width resizing for
   floating workspace cards, including in Compact ribbon layouts. It reuses the 40 pt
   Panel/Window header and padded body, with no second top inset below the ribbon.
@@ -216,6 +344,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | history: `StripHeading`, `HistoryChip`, `HistoryStyle`, `history_drop_bar`, `history_marker`, `HistorySeam`, `history_seam` | Shared strip headings use semibold `font_heading`, `text`, a centred baseline and `space_12` trailing gap. One painter family for bottom chips, 38 pt vertical icon chips and single-line 26 pt name rows (the browser's shared `TREE_ROW_HEIGHT`). Selected items use the active tab tint/ink/border; all variants retain multi-tone feature artwork using one shared kind-to-accent rule (Sketch green, Surface orange, Mesh yellow, Form purple, solids base blue); rolled-back items have 42% opacity; a reference row (a sketch listed under another feature, #6489) has its name in secondary text. Error/warning badges, suppression strikes, horizontal/vertical drop bars and rollback line/hollow circle are shared. No connector lines. | `control_height`, `space_2/3/4/6/8/10/12/14/16/24`, radii, typography, `TabAccent`, `timeline_item`, `control_border`, `text/dim`, `form_error/fill` |
 | tree: `tree_row`, `Row`, `TreeAction` | Shared Browser rows with disclosure, visibility (an eye column at the row's end, clear of a floating scroll bar, with a gap between the disclosure and the activation radio; or beside the disclosure with `eye_left`), activation, selection, appearance swatches, optional subtitle and trailing actions. Compact scene rows are 28 pt, with inline right-aligned summaries, circular swatches, trailing eyes and full-width selection tint. Actions use quiet icons and can appear on hover. Disabled actions retain their reasons and cannot select or fold the row. Browser automation records the same row geometry. | `TREE_ROW_HEIGHT`, `font_label/small`, spacing, control radius/border, `text/dim`, workspace selection tint |
 | search: `CommandSearch`, `MenuItem::search_row` | Ribbon search composition: one persistent ribbon editor expands from 28 to 40 pt and to 520 pt wide with its right edge anchored, magnifier and S/Esc keycap, 38 pt two-line menu row with 26 pt icon tile, accent bold substring, path, shortcut/kind keycap, counts, JSON detail box and footer. The ordinary 30 pt menu row cannot fit a second line; this variant keeps its enabled/selected states and scenario IDs. Ranking and dispatch stay with the caller. | `form_card_width × 2 − space_8` (520 pt), `control_height`, `space_2/3/4/6/8/10/12/14/16/24`, `radius_xl/control_radius`, `control_fill`, `dialog_body/footer/rule/border`, `form_ink/dim/primary/error/error_fill/success/success_fill`, `selected_ink`, `accent_soft`, typography |
+| icons: `IconSet`, `IconData`, `IconExtension`, `install`, `paint_icon`, `paint_on`, `paint_ink` (`_flipped`, `_mirrored`), `paint_app_bar`, `paint_accented`, `paint_danger`, `resolve`, `primary`, `render` | The kit ships no artwork. The host compiles its SVG masters, colour roles, accents and aliases into a `static` `IconSet` and `install`s it once, before the first frame and in its test contexts (SolidCraft: `solidcraft_look::icons::install`). A host that draws another host's icons plus a few masters of its own installs `IconSet::extended(data, extension)`: the other host's `IconData` (the same static tables, not a copy) with an `IconExtension` of its masters, aliases and default accents, drawn in the data's colour roles and accents and taking precedence for a name both have. The painters rasterise a master per (master, look, pixel size) in the set's roles for the theme, accent and colour vision, with theme-file overrides (`set_theme_palette`); an unknown name draws the set's `placeholder` master, and nothing is drawn before a set is installed. The code-drawn glyphs (`glyphs`: transport, caption, badge, pin, cross, breadcrumb, compass axis tip and radius, agent pointer, brand mark) are host painters too, in a `Glyphs` the host installs beside the set (SolidCraft: `solidcraft_look::glyphs::GLYPHS`). | `app_bar_text`, colour vision, the set's palette |
 | menu: `Menu`, `MenuItem` | Shared popup, 30 pt rows, 28 pt icon column, clipped labels, right-aligned mono shortcuts, submenu chevrons, checked/unchecked and document swatches, inert 40% disabled rows and danger ink; headings and separators; ribbon drag/pin targets retained | `dialog_body/border/rule`, `radius_xl`, `control_height/radius`, `form_ink/dim/primary/error`, `accent_soft`, typography and spacing |
 | radial: `radial_menu` | Eight rounded annular sectors, parallel 4 pt gaps, 9 pt circular corner joins, tab-accent artwork and hover, centre label/key; existing hold/flick/release dispatch | `dialog_body/border`, `form_ink/dim`, `TabAccent`, icon palette, font/spacing tokens |
 | panel: `Window`, `WindowPage` | Shared card frame, header, optional page list, bounded content and footer with a left action | `form_header/footer_height`, `form_card_width`, `form_label_width`, `control_height`, `dialog_footer/rule`, `selected_bg/ink`, spacing |
@@ -254,9 +383,9 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `slider` + `Slider` options | One token-painted track/thumb over native slider/value interaction; optional step, caller formatting, whole-step manipulation and hidden value editor | `control_height`, `space_24/8/4/2`, form control/font tokens |
 | `placement_field` | Stable focus ID; drawing tool owns Enter/Tab validation and completion | `control_fill`, `font_body`, `text`, `control_height`, spacing |
 | `color_field`, `color_field_with_opacity`, `mixed_color_field`, `color_popover` | Document RGB swatch and kit popover; global U8/F/Hex segments, active-format copy, gamma-byte or linear RGB fields or one Hex editor, painter-drawn HSV square/hue and current strip; outside click dismisses. The opacity-aware field edits the caller's separate `f64` opacity, never premultiplied RGB. Six Hex digits preserve exact opacity; eight set alpha to `aa / 255`. RGB-only callers reject non-FF alpha without applying RGB. Incomplete text remains editable without changing the last valid colour. The mixed-aware wrapper adds a non-editable label and reports accepting the first colour as an edit, so the caller can set all selected targets. | `control_*`, `form_*`, `border`, `on_accent`, `space_*` |
-| choice: `segmented`, `Segments` | Equal text choices; `states` supplies mixed selection, `enabled` keeps unsupported choices faded and inert, `disabled_reasons` also disables choices and supplies hover explanations, `compact` clips instead of falling back to a dropdown, `primary` uses accent/on-accent for the selected segment | `control_*`, `selected_bg/ink`, `font_label`, `space_4/8` |
+| choice: `segmented`, `Segments` | Equal text choices; `states` supplies mixed selection, `enabled` keeps unsupported choices faded and inert, `disabled_reasons` also disables choices and supplies hover explanations, `compact` clips instead of falling back to a dropdown, `primary` uses accent/on-accent for the selected segment, `glyphs` draws a symbol per segment in place of its label (the label stays the hover text and accessible name) | `control_*`, `selected_bg/ink`, `font_label`, `space_4/8` |
 | `segmented_icons`, `IconSegment` | Equal icon choices and mixed states | segment tokens, icon palette |
-| `checkbox`, `checkbox_indeterminate`, `checkbox_row`, `checkbox_grid`, `options` | One box/tick painter for inline, mixed, full-row, grid and menu choices | `space_14/3/2`, `radius_sm`, `control_fill/border`, `form_primary/ink`, `hover`, `on_accent` |
+| `checkbox`, `checkbox_indeterminate`, `checkbox_icon`, `checkbox_row`, `checkbox_grid`, `options` | One box/tick painter for inline, mixed, full-row, grid and menu choices; `checkbox_icon` adds a command icon between box and label (Customize Toolbar) | `space_14/3/2`, `space_16`, `radius_sm`, `control_fill/border`, `form_primary/ink`, `hover`, `on_accent` |
 | `text_emphasis` | Bold/italic with translated accessible names | form control/font tokens |
 | `tool_choices`, `ToolChoice`, `toggle_icon` | Wrapped command modes or independent icon toggles | sketch mode/icon tokens, `accent` |
 | `list_picker` | Selectable row with caller identity and native checked state | `control_height`, form selection tokens |
@@ -378,7 +507,7 @@ slot/tile/add/appearance targets retain their identities.
 | Bar 3 | Hover / press and open / latched; focus outline 2 with offset 1 | `navigation_visual`, `navigation_fill`, `NAV_FOCUS_WIDTH/OFFSET`; `nav_hover`, `nav_press`, `selected_bg`, `form_primary` |
 | Bar 5 | Width 244, padding 5, radius 10; shared menu shadow (0,14), blur 36; row 30, radius 6, inset 8, icon 17, gap 9; heading 22, text 11, tracking .07em | `NAV_POPUP_*`, `NAV_MENU_*`, `NAV_ROW_GAP`, `NAV_HEADING_*`, `navigation_popup_frame`, `Container::menu_frame` |
 | Bar 6 | Left / Centre / Right, 12 edge inset | `Position`, `NAV_EDGE`; legacy bottom / bottom_left / bottom_right deserialize as centre / left / right |
-| Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `navigation_bar_view::measure` |
+| Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `nav_bar_layout::measure` |
 | Bar 8 | Idle fade 45%, hidden 0%, restored 100%; hide-mode fade in 120ms | `navigation_opacity`, `NAV_IDLE_OPACITY/FADE_SECONDS` |
 | Bar 9 | Tooltip delay 800ms, gap 6, padding (8,5), radius 6; 12 medium text, 11 mono key, 15 key line height | `NAV_TOOLTIP_DELAY/POPUP_GAP`, `navigation_tooltip`; `nav_tip/tip_ink/tip_key_border` |
 | Bar 10 | Render hides Look at and Visual style; flat canvases hide Orbit, Spin, Look at, Projection and Visual style, retaining Home and Display | `Slot::available`, `canvas_caps` |
@@ -401,7 +530,7 @@ Colours shared with the boards use `dialog_body` (window/popup), `dialog_footer`
 (inspector), `dialog_border`, `dialog_rule`, `control_border`, `form_ink`, `form_dim`
 and `selected_bg`. Additional `nav_*` roles above, plus `nav_field`,
 `nav_viewport` and `nav_dim`, have light/dark defaults in
-`assets/styles/ui/palettes.rs`. They are ordinary `solidcraft-theme/1` colour keys:
+`crates/theme/src/palettes.rs`. They are ordinary `solidcraft-theme/1` colour keys:
 import, export and palette cache identity all include them through `theme_files.rs`.
 Files omitting them retain their base palette, including older exported themes.
 Semantic selection/action ink reuses measured `form_primary`, and the slot-cap notice
@@ -432,6 +561,18 @@ Board regression checks live in the existing test modules:
   `tool_cursor.rs::navigation_preference_restores_tool_badge_on_cancel_and_defaults` covers
   the relocated setting's snapshot and page defaults.
   Runtime icon discovery visits More at narrow width, retaining Preferences page coverage.
+
+## Type
+
+The kit sets type through `ui_kit::type_face`: the weights (`medium`, `semibold`, `bold`,
+`RichTextExt`), the family and fallback names a host installs its faces under, the script checks
+and the on-demand CJK font state. It holds no font data. Host contract: before the kit draws, the
+context's fonts bind the weight families. A host with faces of its own binds them in its
+definitions (SolidCraft's look, `solidcraft_look::fonts`, installs IBM Plex at four weights; `with_weight_families`
+binds any it leaves out); a host with none calls `type_face::install_weight_families(ctx)` once,
+which replaces the definitions with egui's defaults, and the kit draws every weight with those
+faces. Without either, egui finds no face for the weight families and draws no glyphs for
+weighted text.
 
 ## Extending and checking the kit
 
@@ -487,7 +628,8 @@ The natural scrolling body height is published as `dialog:body:content_height`,
 so geometry tests distinguish content size from the viewport cap.
 After a successful parameter add, a fresh empty draft retains Name focus for
 continuous keyboard entry; leaving that empty row drops it.
-Parameter draft fields retain `param:new:name/unit/expression/comment`.
+Parameter draft fields retain `param:new:name/unit/expression/comment`, and the draft's
+bin button publishes `param:new:delete`.
 Configuration drafts publish `config:new:name`; existing `config:cell:ROW:COLUMN`,
 activation, rule and preview handles remain. The header plus retains
 `dialog:menu:Add Column`, including the existing menu nesting. The old separate
@@ -669,6 +811,25 @@ border strip without changing logical panel allocations. The application bar has
 an independent surface role.
 The saved `Prefs::layout` is changed through `view.layout`; `ui.set` may still make a
 transient automation override.
+With the universal host enabled, the model render domain fills the area below the application bar in both layout modes,
+including behind ribbon, docked and floating chrome. Paint/input footprints remain
+separate: transparent styling does not expose controls to picking. The usable
+region follows actual occupied edges, retains short-panel gaps and floating-panel
+holes, and supplies explicit Fit/Centre and measured navbar/compass placement.
+This contour also includes actually painted persistent surfaces outside the host,
+such as the active sketch palette. Closing one releases its footprint; transient
+menus shield input without changing fitting or control placement.
+Ordinary panel operations preserve the camera and its framing. Fit may change
+zoom; explicit Look At/`view.normal_to` centring preserves zoom, distance,
+orientation and selected focus. If the selection cannot fit at the current zoom,
+only its focus moves to stable usable space; it does not trigger a zoom-out.
+
+Universal title/tab drags offer explicit dock, split and tab targets. Their landing
+preview uses the same prepared geometry as the final transaction, including
+affected neighbours and insertion index. Releasing outside a valid target cancels;
+floating placement is an explicit action or command. Previewing never changes the
+committed usable region or the render projection.
+
 ## File/start presentation
 
 `FileView` owns File surfaces and controls. It accepts translated strings, existing
@@ -872,8 +1033,10 @@ one row inside a Navigation card. Cancel and the status always show whole; a lon
 cut first (ellipsis, full name on hover), then the track narrows. `Container::below_navigation_row` reserves that card
 and its shared gap above an inline result toolbar.
 
-`number_pair` extends the shared value-pair row to bounded numeric fields (such as
-image width and height), preserving label alignment, clipping and number-field behavior.
+`number_pair_preserving` extends the shared value-pair row to bounded numeric fields
+(such as image width and height), preserving label alignment and clipping. Authored
+out-of-range values remain unchanged on paint; explicit typing and dragging still
+respect the selected bounds.
 
 ## Preferences cards, figures and help (redesign)
 
@@ -889,7 +1052,7 @@ these shared pieces; the pages themselves arrive in later steps. Sizes follow
 | `preset_card(ui, name, word, selected, enabled, &icon, width)` | A 70 pt card with a 38 pt icon box (`icon` paints into it in the ink it is given), a name, one word and an accent check. Used for Performance, Quality and Custom. | as above, `pref_well` |
 | `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip and exposes it as the widget's label. | `form_dim`, `form_ink` |
 | `shortcut_binding(ui, chord, editable)` | Complete mono keycaps using the command-search painter; one focusable recorder target per binding, or a read-only label. Empty chords show dim Not assigned. `shortcut_binding_width` measures the same font and padding, including literal plus keys. Gallery: `shortcut_binding`. | `font_small/label`, `control_height`, `form_dim`, `form_primary`, `space_4/8/10`, `radius_sm` |
-| `carousel(ui, id, count, item_width, item_height, item)` | A row of items between a previous and a next arrow (both labelled from the `prefs.carousel_*` messages). `carousel_window(count, offset, available, item_width, gap, arrow)` says which items show; the arrow at an end is dimmed (0.35) and inert. The first shown index is kept in the Ui's temporary memory under `id`. | `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
+| `theme_browser(ui, id, count, grid, reveal, item)` | The Appearance theme list: a carousel (one clipped row, an edge fade in the container fill, round arrows on a side with more cards, an arrow moves by the cards that fit, drag and horizontal wheel scroll while vertical wheel input goes to the page) or a 5-across grid with its own vertical scroll. `reveal` scrolls an index into view. The box and fades use the `settings_card_frame` fill and stroke. | `dialog_border`, `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
 
 `card_look(selected, enabled, hovered, focused)` holds the state rules (border width, fill, ink, weight,
 dimming, focus ring) apart from the painting so they can be tested.
@@ -900,9 +1063,9 @@ search and reveal their own bounds. Labelled rows retain ownership of their sear
 
 ### Figures
 
-`ui_kit/preferences_figures.rs` paints the illustrations of the Preferences boards. The geometry of
+`crates/ui-kit/src/preferences_figures.rs` paints the illustrations of the Preferences boards. The geometry of
 each comes from its SVG in `docs/design/preferences/figures/`: `tools/preferences-figures/generate.py`
-compiles those files into `ui_kit/preferences_figure_data.rs`, one constant and one painter per
+compiles those files into `crates/ui-kit/src/preferences_figure_data.rs`, one constant and one painter per
 figure (`paint_tess_normal`, `paint_orbit_origin`, ...; `FIGURES` lists them all), and
 `preferences_figure_ops.rs` paints the operations with egui shapes. A figure is a list of rectangles,
 circles, polygons, soft shadows and tiny captions in the figure's own coordinates. Nothing is
@@ -916,16 +1079,17 @@ of each element is a role read from `Tokens`: `figure_ground`, `figure_line`, `f
 `figure_face_left`, `figure_face_right`, `figure_card`, `figure_accent`, `figure_reference`,
 `figure_axis_x/y/z`, `figure_ok`, `figure_warn`, plus `form_ink`, `form_dim`, `dialog_border`,
 `control_border` and `control_fill` (`docs/design/preferences/tokens.md`). The new tokens, with light
-and dark values, are in `assets/styles/ui/palettes.rs`; theme files cannot override them yet and keep
-the built-in values. The colour vision samples read `axis_z`, `sketch_projected`, `axis_x`, `bend_up`
-and `bend_down`, so they follow the colour vision mode.
+and dark values, are in `crates/theme/src/palettes.rs`; theme files cannot override them yet and keep
+the built-in values. The colour vision figures (`paint_colour_vision`) read `axis_z`,
+`sketch_projected`, `axis_x`, `bend_up` and `bend_down`, so they follow the colour vision mode; the
+host composes them into its own sample with its own names.
 
 Theme thumbnails (`paint_theme_thumbnail`, `paint_theme_system`) take a `ThemeSample` (12 colours,
 `ThemeSample::from_tokens(&tokens)`), not the dialog's tokens, because a card shows its own theme.
 The Orientation figures and the visual-style icon are not repeated here: the app already has them.
 
 New pieces and figures each have an entry in `gallery::ELEMENTS` (`picture_card`, `toggle_tile`,
-`preset_card`, `help_icon`, `carousel`, `preference_theme_thumbnails`, `preference_figures`), checked
+`preset_card`, `help_icon`, `theme_browser`, `preference_theme_thumbnails`, `preference_figures`), checked
 in both themes. `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE=<dir>` keeps the CPU-rendered boards
 (`preferences-widgets-*.png`, `preferences-figures-*.png`) from
 `preference_widgets_and_figures_board_in_both_themes`.

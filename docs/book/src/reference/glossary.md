@@ -33,6 +33,13 @@ later pull requests, one topic at a time, each pointing at its entry here.
 
 ## Terms
 
+### abbe number
+
+Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer d, F and C wavelengths.
+
+- **In SolidCraft:** Glass `model.dispersion.abbe_number`; larger values give less chromatic dispersion.
+- **For translators:** an optical material quantity, not a sample or photon count.
+
 ### appearance
 
 How a body, face or component looks on screen and in renders.
@@ -110,6 +117,18 @@ a tree.
 - **For translators:** not the web browser. A language with its own CAD word for the tree may use
   it (in French, *arborescence*), so that "browser" and "web browser" don't share a word. See
   *web browser*.
+
+### caustic
+
+A concentration or structured redistribution of light caused by reflection or refraction.
+
+- **In SolidCraft:** Render job `caustics` controls the photon estimate for point and hard directional sources; finite sources also have camera-path estimates.
+
+### chromatic dispersion
+
+Variation of refractive index with wavelength that can separate colours along refracted paths.
+
+- **In SolidCraft:** Glass `model.dispersion`; the current renderer uses three representative wavelength bands.
 
 ### component
 
@@ -210,6 +229,19 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### end cap
+
+A plate that closes the open end of a frame member, shaped like the member profile's outer outline
+and set in from its edge.
+
+An end cap is a separate body named after its member. Compare a mounting plate, which is
+rectangular or round and need not follow the profile.
+
+- **In SolidCraft:** `frame.end_cap`; the `frame_end_cap` design-file key.
+- **Don't use:** plug, lid, blank (for the plate).
+- **Elsewhere:** end cap, end plate, cap plate.
+- **For translators:** a closing plate on a tube's end, not a cap of a sketch or surface.
+
 ### equation curve
 
 A sketch curve whose shape comes from formulas over a range of one variable.
@@ -249,6 +281,12 @@ makes is a *group*.
 - **Don't use:** folder for a group.
 - **Elsewhere:** folder, node.
 - **For translators:** not a group and not a folder on disk.
+
+### gather radius
+
+Radius of the surface neighbourhood used to estimate illumination from nearby photon hits.
+
+- **In SolidCraft:** Caustics `radius_mm`; smaller values preserve sharper details and require more photons to reduce noise.
 
 ### group
 
@@ -346,6 +384,29 @@ component changes every copy. The browser names occurrences with a number, such 
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
 
+### opaque path lighting
+
+Indirect diffuse and specular illumination computed by tracing finite light paths between opaque surfaces. Shown as **Indirect lighting (opaque surfaces)** in Sampling.
+
+- **In SolidCraft:** optional CPU `job.options.path` / runtime `raytrace.path`, enabled explicitly in Sampling.
+- **Don't use:** ambient occlusion, glass, full optical parity.
+- **For translators:** this describes light transport; it is unrelated to a modelling path or physical material density.
+
+### operations panel
+
+The panel in the view's bottom-right corner that lists each long operation under way, with its
+progress and a button that cancels it.
+
+An operation is work that takes long enough to run beside the window: opening or inserting a file,
+a feature dialog's OK computing, an undo or a history marker move recomputing the timeline, an
+agent's command. A new one goes on top; one that ends fades out.
+
+- **In SolidCraft:** the `ui.operations` control method; the `operations_panel` preference.
+- **Don't use:** job, task, activity.
+- **Elsewhere:** progress panel, background tasks.
+- **For translators:** an operation is work under way, not a feature's *operation* (join, cut,
+  intersect).
+
 ### part number
 
 A design property that holds the identifier an organisation gives a design.
@@ -354,6 +415,13 @@ A design property that holds the identifier an organisation gives a design.
   `document.metadata.set`.
 - **Don't use:** part number for a standard part's size.
 - **For translators:** see *Words with more than one meaning*, "part".
+
+### path depth
+
+The maximum number of shaded surfaces in a rendering path, starting with the first visible surface. A depth of 1 uses direct lighting only; higher values allow more light bounces. This does not count CAD mesh vertices.
+
+- **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
+- **For translators:** a count, not a geometric depth in millimetres or timeline depth.
 
 ### pattern instance
 
@@ -486,6 +554,12 @@ a standard size.
 - **Don't use:** library part, part (on its own), content.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
+
+### thin-film interference
+
+Interference between coherent optical waves reflected at the interfaces of a thin layer.
+
+- **In SolidCraft:** Glass `model.thin_film`, with `ior` and `thickness_nm`; this differs from an incoherent ideal Glass sheet.
 
 ### timeline
 

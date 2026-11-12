@@ -1,0 +1,201 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  40.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  40.0,
+                  0.0,
+                  17.0
+                ]
+              ],
+              "index": 10
+            },
+            {
+              "at": [
+                [
+                  40.0,
+                  0.0,
+                  17.0
+                ],
+                [
+                  40.0,
+                  3.0,
+                  20.0
+                ]
+              ],
+              "index": 11
+            },
+            {
+              "at": [
+                [
+                  40.0,
+                  3.0,
+                  20.0
+                ],
+                [
+                  40.0,
+                  30.0,
+                  20.0
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              40.0,
+              0.0,
+              8.5
+            ],
+            [
+              40.0,
+              0.8786796564403578,
+              19.121320343559642
+            ],
+            [
+              40.0,
+              16.5,
+              20.0
+            ]
+          ],
+          "tolerance": 2.693582403567252
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "every-fillet-after-fillet-front-r3-then-vertical-r2",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        30,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "faces": 10,
+    "method": "box 40x30x20; the edge y=0, z=20 rounded r3 removes 40 (1-pi/4) 9 = 77.2567. The edge x=40, y=0 (now z 0..17) rounded r2 with its tangent chain: the end arc of the r3 round on x = 40 and the edge x=40, z=20 (y 3..30). Along the arc the r2 ball rolls between the plane x = 40 and the r3 cylinder: its section in each half-plane through that cylinder's axis is the square-corner spandrel with its corner 3 from the axis, the material towards it, turned a quarter turn (Pappus): (pi/2)(3 A2 - M2), A2 = (1-pi/4) 4 = 0.858407, M2 = 8 (5/6-pi/4) = 0.383481. Removed = 40 A3 + 17 A2 + (pi/2)(3 A2 - M2) + 27 A2 = 118.4694. V = 23881.5306. Faces 6 + 3 rounds + the torus piece = 10.",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 23881.530637372005,
+    "what": "a box's top front edge rounded r3, then the vertical edge meeting it rounded r2: the smaller round runs on round the bigger round's end and along the top side edge"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 22,
+      "faces": 10,
+      "vertices": 14
+    }
+  },
+  "records": "every-fillet-after-fillet-front-r3-then-vertical-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5100.65601247926,
+      "body_count": 1,
+      "edges": 22,
+      "faces": 10,
+      "vertices": 14,
+      "volume_mm3": 23881.530637386644
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a box's top front edge rounded r3, then the vertical edge meeting it rounded r2: the smaller round runs on round the bigger round's end and along the top side edge",
+  "why_not": []
+}

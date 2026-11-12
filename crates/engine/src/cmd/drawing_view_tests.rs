@@ -994,7 +994,7 @@ fn the_meshs_chord_follows_the_scale() {
     assert!(e.contains("finer than 0.0001 mm") && e.contains("chord_mm 0.1"), "{e}");
     let v = snap(&mut s, json!({"scale": "1000:1", "chord_mm": 0.2}));
     assert!((v["status"]["model_chord_mm"].as_f64().unwrap() - 2e-4).abs() < 1e-15, "{v}");
-    let dxf = s.execute("file.export_view_dxf", &json!({"camera": solidcraft_render::Camera::default(), "tolerance": 2})).unwrap_err().to_string();
+    let dxf = s.execute("file.export_view_dxf", &json!({"camera": solidcraft_viewport::Camera::default(), "tolerance": 2})).unwrap_err().to_string();
     assert!(dxf.contains("tolerance must be 0.0001..1 mm"), "{dxf}");
 }
 
@@ -2472,7 +2472,8 @@ fn hostile_poses_are_refused() {
         (json!([{"joint": 999_999, "values": [1]}]), "no joint"),
         (json!([{"joint": "Hinge", "values": [1, 2]}]), "1 value"),
         (json!([{"joint": "Hinge", "values": []}]), "1 value"),
-        (json!([{"joint": "Hinge", "values": [1e300]}]), "numbers or expressions"),
+        // Main's joint check names the range a value must keep to before the pose's own check.
+        (json!([{"joint": "Hinge", "values": [1e300]}]), "between -1e9 and 1e9"),
         (json!([{"joint": "Hinge", "values": ["1/0"]}]), "Hinge"),
         (json!([{"joint": "Hinge", "values": [1]}, {"joint": "Hinge", "values": [2]}]), "each joint once"),
         (json!(many), "at most 64 joints"),

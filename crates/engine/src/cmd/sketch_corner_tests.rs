@@ -204,6 +204,26 @@ fn a_fillet_where_a_line_runs_on_smoothly_from_an_arc_is_refused() {
     assert_eq!(sk(&s).curves.len(), n);
 }
 
+/// An ellipse's construction axes take no part in a corner: a line drawn from the major end
+/// meets the major axis there, and Fillet or Chamfer at that point, or on that pair, is refused
+/// instead of rounding the line into the axis.
+#[test]
+fn an_ellipse_s_axis_is_not_a_side_of_a_corner() {
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}));
+    let major = r["created"]["curves"][1].as_str().unwrap().to_string();
+    let l = curves(&run(&mut s, "sketch.line", json!({"points": [format!("{major}.end"), [20, 15]], "infer": false, "connect": false})))[0].clone();
+    let before = sk(&s);
+    for (cmd, size) in [("sketch.fillet", "radius"), ("sketch.chamfer.equal_distance", "distance")] {
+        for corner in [json!({"point": format!("{l}.start")}), json!({"a": l, "b": major})] {
+            let mut p = corner;
+            p[size] = json!(2);
+            assert!(s.execute(cmd, &p).is_err(), "{cmd} {p}: {:?}", sk(&s).curves);
+            assert_eq!(sk(&s), before, "{cmd} {p}");
+        }
+    }
+}
+
 /// The ids of the constraints driven by the model parameter `name`.
 fn driven_by(s: &Session, name: &str) -> Vec<String> {
     sk(s).constraints.iter().filter(|c| c.param.as_deref() == Some(name)).map(|c| c.id.clone()).collect()

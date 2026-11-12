@@ -38,11 +38,11 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let name = app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.name.clone()).unwrap_or_default();
     let before = (m.translate, m.angles);
     let shared = !m.path.is_empty() && app.session.occurrence_scope_count(&m.path).is_ok_and(|n| n > 1);
-    let title = crate::i18n::format("browser.move_title", &[("name", &name)]);
-    let at = panel_pos(app);
+    let title = solidcraft_ui_text::format("browser.move_title", &[("name", &name)]);
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, &ctx).unwrap_or_else(|| (egui::Align2::LEFT_TOP, panel_pos(app)));
     let (units, decimals) = (app.session.doc.units.clone(), app.preferences.length_decimals);
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_occ_move"), "move", &title)
-        .placed(egui::Align2::LEFT_TOP, at)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_occ_move"), "move", &title)
+        .placed(pivot, at)
         .fields()
         .cards(2.0)
         .actions("Capture All Positions", "Cancel", Some("Revert All Positions"))
@@ -50,19 +50,19 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             if shared {
                 ui_kit::text(
                     ui,
-                    crate::i18n::tr_label("This child is shared. Position changes apply to every copy of its parent."),
+                    solidcraft_ui_text::tr_label("This child is shared. Position changes apply to every copy of its parent."),
                     ui_kit::Text::Note("shared"),
                 );
             }
             for (k, axis) in ["X distance", "Y distance", "Z distance"].into_iter().enumerate() {
                 if let Some(v) = m.translate.get_mut(k) {
-                    let response = ui_kit::row(ui, crate::i18n::tr_label(axis), |ui| ui_kit::length_field(ui, v, &units, decimals));
+                    let response = ui_kit::row(ui, solidcraft_ui_text::tr_label(axis), |ui| ui_kit::length_field(ui, v, &units, decimals));
                     crate::scenario::publish_handle(&format!("occurrence-move:distance:{k}"), response.rect.center());
                 }
             }
             for (k, axis) in ["X angle", "Y angle", "Z angle"].into_iter().enumerate() {
                 if let Some(v) = m.angles.get_mut(k) {
-                    let response = ui_kit::row(ui, crate::i18n::tr_label(axis), |ui| ui_kit::angle_field(ui, v));
+                    let response = ui_kit::row(ui, solidcraft_ui_text::tr_label(axis), |ui| ui_kit::angle_field(ui, v));
                     crate::scenario::publish_handle(&format!("occurrence-move:angle:{k}"), response.rect.center());
                 }
             }
@@ -97,17 +97,17 @@ pub(crate) fn capture_prompt(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let n = app.session.pending_moves.len();
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_capture_prompt"), "capture", crate::i18n::tr_label("Capture Position"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_capture_prompt"), "capture", solidcraft_ui_text::tr_label("Capture Position"))
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -80.0))
         .actions("Capture Position", "Cancel", Some("Revert"))
         .show(ctx, true, |ui| {
             let question = if n == 1 {
-                crate::i18n::tr("browser.capture_one").to_string()
+                solidcraft_ui_text::tr("browser.capture_one").to_string()
             } else {
-                crate::i18n::format("browser.capture_many", &[("count", &n.to_string())])
+                solidcraft_ui_text::format("browser.capture_many", &[("count", &n.to_string())])
             };
             ui_kit::text(ui, &question, ui_kit::Text::Report("question", false));
-            ui_kit::text(ui, crate::i18n::tr("browser.capture_note"), ui_kit::Text::Note("capture"));
+            ui_kit::text(ui, solidcraft_ui_text::tr("browser.capture_note"), ui_kit::Text::Note("capture"));
         });
     let answer = match action {
         ui_kit::Action::Ok => Some("capture"),

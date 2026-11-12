@@ -5,7 +5,7 @@ use solidcraft_geom::Aabb3;
 #[cfg(test)]
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
-use solidcraft_render::Camera;
+use solidcraft_viewport::Camera;
 use std::collections::BTreeMap;
 
 use super::Refused;
@@ -86,6 +86,13 @@ impl View {
     /// The direction from `p` toward the eye: `back` itself in an orthographic view.
     pub(super) fn toward(&self, p: Vec3) -> Vec3 {
         self.perspective.map_or(self.back, |distance| self.origin + self.back * distance - p)
+    }
+
+    /// Where the world origin lands in the view's right and up, so a drawing can be shifted to
+    /// put its zero there.
+    pub(crate) fn world_origin(&self) -> Result<Vec2, Refused> {
+        let p = self.project(Vec3::new(0., 0., 0.))?;
+        Ok(Vec2::new(p.x, p.y))
     }
 
     /// How far behind a surface a line must be to count as covered, in the depth `project` gives.
