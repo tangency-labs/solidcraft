@@ -5147,6 +5147,44 @@ fn with_single_body(mut p: Value, picks: &[Sel]) -> Value {
     p
 }
 
+/// The points a fillet or chamfer takes, grouped by the body each lies on, in the order the
+/// bodies were first picked. A picked face stands for its edges. A point is kept once per body (#12453).
+fn edges_by_body(s: &Session, picks: &[Sel]) -> Vec<(String, Vec<Vec3>)> {
+    let st = crate::open_meshing::session_world(s);
+    let mut groups: Vec<(String, Vec<Vec3>)> = Vec::new();
+    let mut add = |body: &str, p: Vec3| {
+        let i = match groups.iter().position(|(b, _)| b == body) {
+            Some(i) => i,
+            None => {
+                groups.push((body.to_string(), Vec::new()));
+                groups.len() - 1
+            }
+        };
+        if !groups[i].1.iter().any(|q| q.dist(p) < 1e-9) {
+            groups[i].1.push(p);
+        }
+    };
+    for x in picks {
+        match x {
+            Sel::Edge { body, point, .. } => add(body.as_str(), *point),
+            Sel::Face { body, index, .. } => {
+                if let Some(b) = st.body(body) {
+                    let m = b.mesh();
+                    for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
+                        if !m.seams.get(e).copied().unwrap_or(false)
+                            && let Some(p) = m.edges.get(e)
+                        {
+                            add(body.as_str(), polyline_mid(p));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    groups
+}
+
 /// Section Analysis with a section on and no plane picked: OK turns the section off.
 fn section_turns_off(s: &Session, inputs: &[selection::SelInput]) -> bool {
     s.section.is_some() && selection::items(inputs, 0).is_empty()
@@ -5630,34 +5668,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Fillet { radius, chamfer, ctype, distance2, angle, flip, setback, .. } => {
             need(0, "edges")?;
-            // Faces stand for all their edges.
             let st = crate::open_meshing::session_world(s);
-            let mut pts: Vec<Vec3> = Vec::new();
-            for x in sels(d, 0) {
-                match x {
-                    Sel::Edge { point, .. } => pts.push(*point),
-                    Sel::Face { body, index, .. } => {
-                        if let Some(b) = st.body(body) {
-                            let m = b.mesh();
-                            for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
-                                if !m.seams.get(e).copied().unwrap_or(false)
-                                    && let Some(p) = m.edges.get(e)
-                                {
-                                    pts.push(polyline_mid(p));
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            let mut uniq: Vec<Vec3> = Vec::new();
-            for p in pts {
-                if !uniq.iter().any(|q| q.dist(p) < 1e-9) {
-                    uniq.push(p);
-                }
-            }
-            let edges: Vec<Value> = uniq.into_iter().map(pt).collect();
+            // Faces stand for all their edges. Picks on several bodies are split per body below (#12453).
+            let edges: Vec<Value> = edges_by_body(s, sels(d, 0)).into_iter().flat_map(|(_, pts)| pts).map(pt).collect();
             if *chamfer {
                 let mut p = with_single_body(json!({"edges": edges, "distance": radius}), sels(d, 0));
                 match *ctype {
@@ -6403,6 +6416,29 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 continue;
             }
             m.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    // Picks on two or more bodies: one command per body, with that body's edges and its name (#12453).
+    if matches!(d.kind, Kind::Fillet { .. }) {
+        let groups = edges_by_body(s, sels(d, 0));
+        if groups.len() > 1 {
+            if d.editing.is_some() {
+                return Err("pick edges on one body to edit this feature".into());
+            }
+            let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
+            let variable = matches!(d.extra.get("type").and_then(Value::as_str), Some("variable" | "spline"));
+            if fillet && (variable || params.get("setbacks").is_some()) {
+                return Err("a variable or spline fillet, or corner setbacks, take edges on one body".into());
+            }
+            return Ok(groups
+                .into_iter()
+                .map(|(body, pts)| {
+                    let mut p = params.clone();
+                    p["edges"] = Value::Array(pts.into_iter().map(pt).collect());
+                    p["body"] = json!(body);
+                    (cmd.to_string(), p)
+                })
+                .collect());
         }
     }
     Ok(vec![(cmd.to_string(), params)])
