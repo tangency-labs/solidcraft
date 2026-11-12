@@ -389,6 +389,9 @@ pub enum OffsetRefusal {
     /// An offset face has a gap in its loops, and the segment that would bridge it is not
     /// established within tolerance.
     LoopGapUncertified,
+    /// The offset moves a vertex onto or past its edge's other end, so the edge closes to
+    /// nothing: as where a wall is as thick as the part is there.
+    EdgeVanishes,
     /// The body built fails what the input did not: what.
     Unsound {
         /// What the built body fails.
@@ -455,6 +458,10 @@ impl std::fmt::Display for OffsetRefusal {
                     "a gap in its offset's loops cannot be bridged within tolerance"
                 )
             }
+            OffsetRefusal::EdgeVanishes => write!(
+                f,
+                "an edge of its offset closes to nothing: the wall is as thick as the part is there; use a thinner or thicker wall"
+            ),
             OffsetRefusal::Unsound { what } => write!(f, "{what}"),
             OffsetRefusal::Phrase { phrase, .. } => f.write_str(phrase),
         }
