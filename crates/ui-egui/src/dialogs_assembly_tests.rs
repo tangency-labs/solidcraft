@@ -1620,7 +1620,11 @@ fn a_crossed_faces_centre_is_the_face() {
     let face = face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap();
     let mut points = solidcraft_engine::snap::snap_points(&app.session, &edge);
     points.extend(solidcraft_engine::snap::snap_points(&app.session, &face));
-    app.viewport.woken = crate::snap_wake::Woken { item: Some(edge.clone()), face: Some(face.clone()), points, revision: app.session.revision };
+    // `..Default::default()` keeps this compiling once #11810 adds `kept_over`.
+    #[allow(clippy::needless_update)]
+    let woken =
+        crate::snap_wake::Woken { item: Some(edge.clone()), face: Some(face.clone()), points, revision: app.session.revision, ..Default::default() };
+    app.viewport.woken = woken;
     assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 10.0, 10.0) }), face);
     assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) }), edge);
 }
