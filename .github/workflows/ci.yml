@@ -402,7 +402,8 @@ jobs:
           # - in the merge queue, when the group's diff touches render code or one of its pull
           #   requests carries render-tests;
           # - in the nightly and by hand, always, so anything the above skipped is caught within a day;
-          # - not on a push to main: the queue tested that commit, or the nightly will.
+          # - not on a push to main: the queue tested that commit, or the nightly will; except a push
+          #   to main that changes a cache key (cache_key), so that main saves the GPU job's caches too.
           gpu=false
           if [ "$native" = true ]; then
             case "$EVENT_NAME" in
@@ -411,7 +412,7 @@ jobs:
                 gpu=$gpu_paths
                 if [ "$RENDER_LABEL" = true ]; then gpu=true; fi ;;
               merge_group) gpu=$gpu_paths ;;
-              push) gpu=false ;;
+              push) if [ -n "$cache_key" ]; then gpu=true; fi ;;
               *) gpu=true ;;
             esac
           fi
