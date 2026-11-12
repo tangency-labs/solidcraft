@@ -19,8 +19,10 @@
 //! - The surface's poles are no concern of it: the planner fans each pole's cap on its own
 //!   ([`super::pole_caps`]). The fans are kept as they are: never flipped or refined, since in
 //!   (u, v) a pole is a side and a fan's middles and maps there are not the surface's. A ring
-//!   side a point would encroach on is split in the face, the fan triangle on it halved at the
-//!   pole, while the halves keep the angle; past that the point is not added.
+//!   side encroaches by its lens, not its diametral ball ([`encroaches`]); a ring side a point
+//!   would encroach on is split in the face, the fan triangle on it halved at the pole, while the
+//!   halves keep the angle, and past that the point moves to the side's off-centre
+//!   ([`off_centre`]), just outside its lens.
 //!
 //! Every loop is bounded: the points added (`budget`, reported as [`ShapeLimit::Points`]), the
 //! flips per pass ([`FLIPS_PER_TRIANGLE`] per triangle at the start, [`FLIPS_PER_POINT`] after
@@ -444,67 +446,52 @@ pub(crate) fn shape(
             continue;
         };
         let longest = a.dist(b).max(b.dist(c)).max(c.dist(a));
-        let located = m.locate(ti, q);
-        let p = match located {
+        let mut located = m.locate(ti, q);
+        let mut q = q;
+        let mut p = match located {
             Located::Inside(_) | Located::OnSide(..) => point(q),
             Located::Beyond(..) | Located::Lost => None,
         };
-        // The boundary sides it encroaches on: the one it lies past, and those of the triangle
-        // it lands in and of that triangle's neighbours whose diametral ball holds it.
-        let mut near: Vec<(u32, u32)> = Vec::new();
-        match located {
-            Located::Beyond(x, y) => near.push(key(x, y)),
-            Located::Inside(tj) | Located::OnSide(tj, ..) => {
-                if let (Some(p), Some(&tri)) = (p, m.tris.get(tj as usize)) {
-                    let mut around: Vec<u32> = vec![tj];
-                    for k in 0..3 {
-                        let [x, y, _] = super::rot3(tri, k);
-                        around.extend(m.across(x, y, tj));
-                    }
-                    // A pole's fan owns its sides: they are never split for a point outside it.
-                    for tk in around.into_iter().filter(|&tk| !m.is_frozen(tk)) {
-                        let Some(&tk) = m.tris.get(tk as usize) else { continue };
-                        for k in 0..3 {
-                            let [x, y, _] = super::rot3(tk, k);
-                            let e = key(x, y);
-                            if !m.kept(e) || near.contains(&e) {
-                                continue;
-                            }
-                            let (Some((px, _)), Some((py, _))) = (m.node(x), m.node(y)) else { continue };
-                            if px != py && p.dist((px + py) * 0.5) < 0.5 * px.dist(py) {
-                                near.push(e);
-                            }
-                        }
-                    }
-                }
-            }
-            Located::Lost => {}
-        }
-        if !near.is_empty() {
-            let (edge_sides, ring_sides): (Vec<(u32, u32)>, Vec<(u32, u32)>) = near.into_iter().partition(|e| m.fixed.contains_key(e));
-            if edge_sides.is_empty() {
-                // Only ring sides: the first is split in the face, where its fan's halves keep
-                // the angle; otherwise the ring is kept whole there.
-                let split = match ring_sides.first() {
-                    Some(&e) if added < rules.budget => split_ring(&mut m, e, point, rules.min_angle, CROWDED * longest),
-                    Some(_) => Err(ShapeLimit::Points),
-                    None => Err(ShapeLimit::SidesOnNoEdge),
-                };
-                match split {
-                    Ok((made, facing)) => {
-                        added += 1;
-                        let flipped = m.flip(facing, FLIPS_PER_POINT);
-                        queue.extend(made);
-                        queue.extend(flipped);
-                        queue.push_back(ti);
-                    }
-                    Err(why) => {
-                        dead.insert(sorted(t));
-                        give_up(&mut m, ti, Some(why), &mut limits);
-                    }
-                }
+        let mut near = encroaches(&m, located, p, rules.min_angle);
+        if !near.is_empty() && near.iter().all(|e| !m.fixed.contains_key(e)) {
+            // Only ring sides: the first is split in the face, where its fan's halves keep the
+            // angle; otherwise the point is moved to the side's off-centre, which lies on the
+            // edge of its lens and so encroaches on nothing it is for.
+            let split = match near.first() {
+                Some(&e) if added < rules.budget => split_ring(&mut m, e, point, rules.min_angle, CROWDED * longest),
+                Some(_) => Err(ShapeLimit::Points),
+                None => Err(ShapeLimit::SidesOnNoEdge),
+            };
+            if let Ok((made, facing)) = split {
+                added += 1;
+                let flipped = m.flip(facing, FLIPS_PER_POINT);
+                queue.extend(made);
+                queue.extend(flipped);
+                queue.push_back(ti);
                 continue;
             }
+            let moved = near.first().and_then(|&e| off_centre(&m, e, rules)).map(|(from, oq)| {
+                let at = m.locate(from, oq);
+                let op = match at {
+                    Located::Inside(_) | Located::OnSide(..) => point(oq),
+                    Located::Beyond(..) | Located::Lost => None,
+                };
+                (at, oq, op)
+            });
+            match moved {
+                Some((at, oq, Some(op))) if encroaches(&m, at, Some(op), rules.min_angle).is_empty() => {
+                    (located, q, p) = (at, oq, Some(op));
+                    near.clear();
+                }
+                _ => {
+                    dead.insert(sorted(t));
+                    give_up(&mut m, ti, Some(ShapeLimit::SidesOnNoEdge), &mut limits);
+                    continue;
+                }
+            }
+        }
+        if !near.is_empty() {
+            let edge_sides: Vec<(u32, u32)> = near.into_iter().filter(|e| m.fixed.contains_key(e)).collect();
             match rules.whole {
                 None => {
                     for e in edge_sides {
@@ -554,6 +541,81 @@ pub(crate) fn shape(
     }
     // The triangles still too sharp, by why they stayed.
     Shaped::Done(limits)
+}
+
+/// The kept sides point `p` (located `at`) encroaches on: the one it lies past, and those of
+/// the triangle it lands in and of that triangle's neighbours (but a pole's fan, which owns its
+/// sides) that it lies in the diametral ball of, for a boundary side; for a ring side, in its
+/// lens (Shewchuk, "Delaunay refinement mesh generation", 1997, §3.4: the points that see it at
+/// more than half a turn less twice `min_angle`), since a ring side is never split there: a point
+/// outside the lens on its bisector makes the triangle on it keep `min_angle` at its ends.
+fn encroaches(m: &Mesh<'_>, at: Located, p: Option<Vec3>, min_angle: f64) -> Vec<(u32, u32)> {
+    let mut near: Vec<(u32, u32)> = Vec::new();
+    match at {
+        Located::Beyond(x, y) => near.push(key(x, y)),
+        Located::Inside(tj) | Located::OnSide(tj, ..) => {
+            let (Some(p), Some(&tri)) = (p, m.tris.get(tj as usize)) else { return near };
+            let mut around: Vec<u32> = vec![tj];
+            for k in 0..3 {
+                let [x, y, _] = super::rot3(tri, k);
+                around.extend(m.across(x, y, tj));
+            }
+            for tk in around.into_iter().filter(|&tk| !m.is_frozen(tk)) {
+                let Some(&tk) = m.tris.get(tk as usize) else { continue };
+                for k in 0..3 {
+                    let [x, y, _] = super::rot3(tk, k);
+                    let e = key(x, y);
+                    if !m.kept(e) || near.contains(&e) {
+                        continue;
+                    }
+                    let (Some((px, _)), Some((py, _))) = (m.node(x), m.node(y)) else { continue };
+                    if px == py {
+                        continue;
+                    }
+                    let inside = if m.fixed.contains_key(&e) {
+                        p.dist((px + py) * 0.5) < 0.5 * px.dist(py)
+                    } else {
+                        angle(p, px, py) > std::f64::consts::PI - 2.0 * min_angle
+                    };
+                    if inside {
+                        near.push(e);
+                    }
+                }
+            }
+        }
+        Located::Lost => {}
+    }
+    near
+}
+
+/// The off-centre of ring side `e` (Üngör, "Off-centers: a new type of Steiner points for
+/// computing size-optimal quality-guaranteed Delaunay triangulations", 2004): the point on the
+/// side's bisector, toward the face, from which it is seen at half a turn less twice the angle
+/// (a hair less): the triangle it makes on the side keeps the angle at both ends, and it lies just
+/// outside the side's lens ([`encroaches`]). The triangle to walk from and its parameters, put on
+/// the surface at its closest point; `None` where the side has no such triangle.
+fn off_centre(m: &Mesh<'_>, e: (u32, u32), rules: &Rules) -> Option<(u32, [f64; 2])> {
+    let ts = m.sides.get(&e)?;
+    let other = ts.iter().copied().find(|&t| !m.is_frozen(t))?;
+    let tri = *m.tris.get(other as usize)?;
+    let c = tri.iter().copied().find(|&v| v != e.0 && v != e.1)?;
+    let ((px, qx), (py, qy), (pc, qc)) = (m.node(e.0)?, m.node(e.1)?, m.node(c)?);
+    let length = px.dist(py);
+    let along = (py - px) * (1.0 / length);
+    let mid = (px + py) * 0.5;
+    let w = pc - mid;
+    let across = w - along * w.dot(along);
+    let reach = across.len();
+    if !(length > 0.0 && reach > 0.0) {
+        return None;
+    }
+    let height = 0.5 * length * (rules.min_angle * (1.0 + 1e-3)).tan();
+    let target = mid + across * (height / reach);
+    let qm = [0.5 * (qx[0] + qy[0]), 0.5 * (qx[1] + qy[1])];
+    let f = height / reach;
+    let from = [qm[0] + (qc[0] - qm[0]) * f, qm[1] + (qc[1] - qm[1]) * f];
+    let q = (rules.project)(target, from, height + rules.tol)?;
+    Some((other, q))
 }
 
 /// Split ring side `e` in the face at its middle in (u, v) (the ring is straight there), on the
