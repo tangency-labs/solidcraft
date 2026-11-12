@@ -23,6 +23,7 @@
 mod curve;
 #[cfg(test)]
 mod fixtures;
+mod hash;
 mod iso;
 mod mesh;
 // SolidCraft's mesher, moved here (RFC 0003, item 1.1) and kept in SolidCraft's formatting so it
