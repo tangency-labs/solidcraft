@@ -129,6 +129,7 @@ mod surface;
 pub mod surface_ops;
 mod tool;
 pub mod tool_mesh;
+pub mod workholding;
 pub mod wrapped;
 
 pub use chamfer::{ChamferGeometry, ChamferParams, DEFAULT_TIP_OFFSET, band_gouges, chamfer, chamfer_geometry};
@@ -228,5 +229,7 @@ mod stock_tests;
 mod surface_ops_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod workholding_tests;
 #[cfg(test)]
 mod wrapped_tests;
