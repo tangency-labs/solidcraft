@@ -48,7 +48,7 @@ phase 1 design review.
 
 ## Installing
 
-File › Install plugin… (desktop only) picks a plugin `.zip`, shows its name, version, summary and
+Install plugin… on Preferences › Plugins (desktop only) picks a plugin `.zip`, shows its name, version, summary and
 what it asks for, and installs it on Install. `plugin.install` does the same for programs:
 `{"path": "gears.zip"}` installs, `"dry_run": true` only checks and describes it, and replacing an
 installed plugin of the same id needs `"replace": true`. The `.zip` holds one plugin, `plugin.json`

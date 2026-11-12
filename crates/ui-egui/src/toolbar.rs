@@ -490,10 +490,6 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
-    // Desktop only: the browser has no plugins folder.
-    if crate::plugin_install::available() {
-        rows.push(row("plugin.install", solidcraft_ui_text::tr("plugin_install.menu"), "", "import", true));
-    }
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
     if crate::install::offered(app).is_some() {
         rows.push(button("install", solidcraft_ui_text::tr("install.menu"), "new", Some(solidcraft_ui_text::tr("install.button_tip"))));
@@ -543,7 +539,6 @@ fn run_file_row(app: &mut SolveApp, id: &str) {
                 crate::install::start(app, offer);
             }
         }
-        "plugin.install" => crate::plugin_install::start(app),
         "settings" => FileAction::Settings.run(app),
         "shortcuts" => FileAction::Shortcuts.run(app),
         "quit" => FileAction::Quit.run(app),

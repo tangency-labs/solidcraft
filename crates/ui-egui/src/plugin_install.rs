@@ -1,5 +1,5 @@
 //! Install plugin…: pick a plugin `.zip`, review what it asks for, and install it with
-//! `plugin.install`. Desktop only; menus call [`start`]. The command itself never asks anything:
+//! `plugin.install`. Desktop only; Preferences › Plugins and menus call [`start`]. The command itself never asks anything:
 //! this question is the menu's.
 
 use serde_json::{Value, json};
@@ -70,8 +70,10 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
         lines.push(tr("plugin_install.clock").to_string());
     }
     let commands = list(plugin.get("commands")).len();
-    if commands > 0 {
-        lines.push(format("plugin_install.commands", &[("count", &commands.to_string())]));
+    match commands {
+        0 => {}
+        1 => lines.push(tr("plugin_install.command_one").to_string()),
+        n => lines.push(format("plugin_install.commands", &[("count", &n.to_string())])),
     }
     lines
 }
