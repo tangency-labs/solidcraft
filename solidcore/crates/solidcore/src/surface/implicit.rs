@@ -1915,7 +1915,7 @@ impl AnalyticSupport {
             let m = (p0 + p2) * 0.5;
             let to_m = m - p1;
             let mm = to_m.dot(to_m);
-            if !(mm > 0.0) {
+            if mm.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
                 return None;
             }
             let side = p0 - p1;
@@ -1928,7 +1928,7 @@ impl AnalyticSupport {
         let (&(c0, r0), &(c1, r1)) = (circles.first()?, circles.last()?);
         let along = c1 - c0;
         let length = along.length();
-        if !(length > 0.0) {
+        if length.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
             return None;
         }
         let mut axis = along * (1.0 / length);
