@@ -45,6 +45,11 @@ const TOUCH_AREA: f64 = 1e-6;
 const FOLD_TABS_REJOIN: &str = "not supported yet: folding tabs that join again beyond the bend";
 pub const FOLD_FIXED_OFF_SHEET: &str = "the fold's fixed point is not on the sheet";
 
+/// A bend radius below this (mm), the sheet model's outline tolerance, is a sharp bend. Its inner
+/// face has collapsed to the bend's inner edge, so the folded solid has only the outer cylindrical
+/// face there, as a press brake makes it with a sharp punch: no inner cylinder.
+const SHARP_BEND: f64 = 1e-3;
+
 /// The most bores one sheet keeps.
 const MAX_BORES: usize = 1000;
 
@@ -2310,6 +2315,13 @@ impl SheetBody {
         };
         let mut faces = Vec::new();
         for (ci, c) in cells.iter().enumerate() {
+            // A sharp bend's inner surface has no area: it is the line where the base's and the
+            // flange's inner faces meet. The outer surface and the zone's end walls close the
+            // solid; the end walls lose their collapsed inner edge below.
+            let inner_sharp = match c.piece {
+                Piece::Zone(i) => self.flanges.get(i).filter(|f| f.radius <= SHARP_BEND).map(|f| if f.angle >= 0.0 { z1 } else { z0 }),
+                Piece::Panel(_) => None,
+            };
             // Top (z1, outward +z) and bottom (z0, outward −z, loops reversed).
             let loops = |z: f64, rev: bool| -> Result<Vec<Vec<EdgeSpec>>> {
                 std::iter::once(&c.outer)
@@ -2325,6 +2337,9 @@ impl SheetBody {
             };
             let centre = c.outer.iter().map(Seg2::start).fold(Vec2::default(), |a, b| a + b) * (1.0 / c.outer.len().max(1) as f64);
             for (z, rev, sign) in [(z1, false, 1.0), (z0, true, -1.0)] {
+                if inner_sharp == Some(z) {
+                    continue;
+                }
                 let surface = match c.piece {
                     Piece::Panel(_) => SurfSpec::Plane,
                     Piece::Zone(i) => {
@@ -2381,13 +2396,30 @@ impl SheetBody {
                     (Piece::Zone(_), _) if matches!(bottom, EdgeSpec::Chain { .. }) => SurfSpec::Ruled { a: bottom.clone(), b: top_ab.clone() },
                     _ => SurfSpec::Plane,
                 };
-                let top = rev_edge(top_ab);
+                // A sharp bend's inner edge is a point on the zone's end wall: drop that
+                // collapsed edge and let the wall end at the point (a three-edge loop). The inner
+                // face is z1 when the bend turns up and z0 when it turns down.
+                let collapsed = |e: &EdgeSpec| match e {
+                    EdgeSpec::Arc { a, b, .. } | EdgeSpec::Line { a, b } => a.dist(*b) < LINEAR_TOL,
+                    EdgeSpec::Chain { .. } => false,
+                };
+                let inner_bottom = inner_sharp == Some(z0) && collapsed(&bottom);
+                let inner_top = inner_sharp == Some(z1) && collapsed(&top_ab);
+                let mut edges = Vec::new();
+                if !inner_bottom {
+                    edges.push(bottom);
+                }
+                edges.push(up_b);
+                if !inner_top {
+                    edges.push(rev_edge(top_ab));
+                }
+                edges.push(down_a);
                 let mid = e.point_at(0.5);
                 let tdir = e.point_at(0.51) - e.point_at(0.49);
                 let right = Vec2::new(tdir.y, -tdir.x);
                 let pm = self.map3(c.piece, mid, (z0 + z1) / 2.0);
                 let outward = self.map3(c.piece, mid + right * 1e-3, (z0 + z1) / 2.0) - pm;
-                faces.push(FaceSpec { loops: vec![vec![bottom, up_b, top, down_a]], surface, probe: Some((pm, outward)) });
+                faces.push(FaceSpec { loops: vec![edges], surface, probe: Some((pm, outward)) });
             }
         }
         Ok(faces)

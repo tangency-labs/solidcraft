@@ -1298,6 +1298,32 @@ fn fold_on_a_flange_panel() {
     assert!(s.execute("sheet.fold", &json!({"points": [[50, y, 2], [50, y, 25]]})).is_err());
 }
 
+/// A sharp bend (radius 0) folds the sheet's outer face only: the inner face has collapsed to
+/// the edge where the two panels meet, so the body is closed with one cylindrical face per
+/// bend and no zero-area inner cylinder. Three 90° folds on a 1.2 mm sheet: each bend zone's
+/// flat strip of width BA becomes a quarter disc of radius T.
+#[test]
+fn a_sharp_bend_has_only_its_outer_cylindrical_face() {
+    let (t, k, w) = (1.2, 0.44, 60.0);
+    let ba = FRAC_PI_2 * (k * t);
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Sharp", "thickness": t, "k_factor": k, "bend_radius": 0, "active": true}));
+    base(&mut s, 100.0, w);
+    let fixed = json!([10, 30, t]);
+    run(&mut s, "sheet.fold", json!({"points": [[80, 0, t], [80, w, t]], "fixed": fixed, "flip": false, "radius": 0}));
+    run(&mut s, "sheet.fold", json!({"points": [[60, 0, t], [60, w, t]], "fixed": fixed, "flip": false, "radius": 0}));
+    run(&mut s, "sheet.fold", json!({"points": [[20, 0, t], [20, w, t]], "fixed": fixed, "flip": true, "radius": 0}));
+    // The flat strip each bend takes (BA wide) becomes a quarter disc of radius T.
+    let want = 100.0 * w * t + 3.0 * (FRAC_PI_2 * t * (t / 2.0) * w - ba * t * w);
+    assert!(rel(volume(&mut s), want) < 1e-4, "{} {want}", volume(&mut s));
+    let body = &s.model.state().bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1, "{:?}", body.validity());
+    let cylinders = body.faces(1e-6).map(|f| f.iter().filter(|f| f.plane_normal.is_none()).count()).unwrap_or(0);
+    assert_eq!(cylinders, 3, "one outer face per sharp bend, no inner cylinders");
+    let bends = flat(&mut s)["bends"].clone();
+    assert_eq!(bends.as_array().map(Vec::len), Some(3), "{bends}");
+}
+
 #[test]
 fn fold_through_cut_outs() {
     let mut s = Session::default();
