@@ -439,7 +439,8 @@ pub(crate) fn shape(
                         let [x, y, _] = super::rot3(tri, k);
                         around.extend(m.across(x, y, tj));
                     }
-                    for tk in around {
+                    // A pole's fan owns its sides: they are never split for a point outside it.
+                    for tk in around.into_iter().filter(|&tk| !m.is_frozen(tk)) {
                         let Some(&tk) = m.tris.get(tk as usize) else { continue };
                         for k in 0..3 {
                             let [x, y, _] = super::rot3(tk, k);
