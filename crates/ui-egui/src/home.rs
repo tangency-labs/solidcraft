@@ -173,14 +173,12 @@ thread_local! {
 fn pictures_dir() -> Option<std::path::PathBuf> {
     // Tests never touch the user's real folder.
     #[cfg(test)]
-    {
-        if let Some(own) = TEST_PICTURES.with(|d| d.borrow().clone()) {
-            return Some(own);
-        }
-        return Some(std::env::temp_dir().join("SolidCraft").join("thumbnails"));
-    }
+    let own = TEST_PICTURES.with(|d| d.borrow().clone()).unwrap_or_else(|| std::env::temp_dir().join("SolidCraft").join("thumbnails"));
+    #[cfg(test)]
+    let dir = Some(own);
     #[cfg(not(test))]
-    Some(solidcraft_engine::recovery::cache_dir()?.join("thumbnails"))
+    let dir = Some(solidcraft_engine::recovery::cache_dir()?.join("thumbnails"));
+    dir
 }
 
 /// Delete the pictures not read for [`KEEP_PICTURES`], once a run, off the window thread: saving a
