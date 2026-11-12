@@ -1319,7 +1319,7 @@ fn a_kernel_unsupported_after_a_no_room_note_is_its_own_cause() {
     use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
     use solidcore::kernel::UpstreamFixes;
     use solidcore::SolidError;
-    use solidcore_ops::blend::{session_refusal, SessionCall};
+    use solidcore_ops::blend::{session_refusal, Refusal, SessionCall};
     let mut k = Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
@@ -1350,7 +1350,7 @@ fn a_kernel_unsupported_after_a_no_room_note_is_its_own_cause() {
     let refused = s.do_filleting(&mut k, None).unwrap_err();
     // the note: no room, with the fit
     let sized = session_refusal(&s, refused, SessionCall::default()).unwrap();
-    let Error::TooLarge { size, .. } = sized.on(&k, s.target()).unwrap() else {
+    let Refusal::TooLarge { size, .. } = sized.on(&k, s.target()).unwrap() else {
         panic!("not sized")
     };
     assert!((size - 19.99).abs() < 1e-9, "{size}");

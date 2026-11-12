@@ -55,7 +55,7 @@ use solidcore::topology::face::p4 as face_p4;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, VertexId, edge, vertex};
 
-use solidcore_ops::blend::{SessionCall, SessionRefusal};
+use solidcore_ops::blend::{Refusal, SessionCall, SessionRefusal};
 
 use super::{Body, answer};
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result, Turn};
@@ -378,16 +378,13 @@ fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool, replaced: b
 }
 
 /// An ops refusal of the session ([`blend_failure`]) as SolidCraft's error, its fields as they are.
-fn refusal(e: solidcore_ops::Error) -> Error {
-    use solidcore_ops::Error as Ops;
-    match e {
-        Ops::TooLarge { size, kind, at, why } => Error::TooLarge { size, kind, at, why },
-        Ops::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
-        Ops::NoRoom => Error::NoRoom,
-        Ops::CornerUnsupported => Error::CornerUnsupported,
-        Ops::Unsupported(_) => Error::Unsupported,
-        // `session_refusal` gives none other.
-        e => Error::Internal(format!("blend: ops refused the session with {e}")),
+fn refusal(r: Refusal) -> Error {
+    match r {
+        Refusal::TooLarge { size, kind, at, why } => Error::TooLarge { size, kind, at, why },
+        Refusal::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
+        Refusal::NoRoom => Error::NoRoom,
+        Refusal::CornerUnsupported => Error::CornerUnsupported,
+        Refusal::RailLeavesFace(_) => Error::Unsupported,
     }
 }
 
