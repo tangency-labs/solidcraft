@@ -845,8 +845,9 @@ fn read_openpgp_record(bytes: &[u8]) -> std::result::Result<(ProvenanceRecord, M
 }
 
 /// Verify a detached OpenPGP signature over `message` with the record's transferable public key.
-/// The key's own bindings are not evaluated: the record proves which key signed, and trust in
-/// that key is the reader's decision.
+/// The embedded key's self-signatures and a signing subkey's binding (and back-signature) are
+/// checked; whether the primary key belongs to the person it names is the reader's trust
+/// decision.
 fn verify_openpgp(key: &[u8], signature: &[u8], message: &[u8]) -> std::result::Result<(String, Option<String>), String> {
     let (key, _) = SignedPublicKey::from_reader_single(Cursor::new(key)).map_err(|error| format!("public key: {error}"))?;
     let (signature, _) = DetachedSignature::from_reader_single(Cursor::new(signature)).map_err(|error| format!("signature: {error}"))?;
@@ -916,26 +917,60 @@ mod tests {
     struct TestPgpSigner {
         key: pgp::composed::SignedSecretKey,
         public: Vec<u8>,
+        sign_with_subkey: bool,
     }
 
     impl TestPgpSigner {
         fn new(seed: u64) -> TestPgpSigner {
+            TestPgpSigner::build(seed, false, false)
+        }
+
+        /// A key whose signing subkey signs, optionally with the subkey's binding removed.
+        fn with_signing_subkey(seed: u64, unbound: bool) -> TestPgpSigner {
+            TestPgpSigner::build(seed, true, unbound)
+        }
+
+        fn build(seed: u64, subkey: bool, unbound: bool) -> TestPgpSigner {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let mut params = pgp::composed::SecretKeyParamsBuilder::default();
             params.key_type(pgp::composed::KeyType::Ed25519Legacy).can_certify(false).can_sign(true);
             params.primary_user_id("SolidCraft Test <test@solidcraft.invalid>".into());
+            if subkey {
+                params.subkey(
+                    pgp::composed::SubkeyParamsBuilder::default().key_type(pgp::composed::KeyType::Ed25519Legacy).can_sign(true).build().unwrap(),
+                );
+            }
             let key = params.build().unwrap().generate(&mut rng).unwrap();
-            let public = PgpSerialize::to_bytes(&key.to_public_key()).unwrap();
-            TestPgpSigner { key, public }
+            let mut public_key = key.to_public_key();
+            if unbound {
+                for subkey in &mut public_key.public_subkeys {
+                    subkey.signatures.clear();
+                }
+            }
+            let public = PgpSerialize::to_bytes(&public_key).unwrap();
+            TestPgpSigner { key, public, sign_with_subkey: subkey }
+        }
+
+        /// The same key's public form with the signing subkey's bindings removed.
+        fn unbound_public(&self) -> Vec<u8> {
+            let mut public_key = self.key.to_public_key();
+            for subkey in &mut public_key.public_subkeys {
+                subkey.signatures.clear();
+            }
+            PgpSerialize::to_bytes(&public_key).unwrap()
         }
     }
 
     impl OpenPgpSigner for TestPgpSigner {
         fn sign(&self, manifest: &[u8]) -> Result<OpenPgpSignature> {
             let mut rng = rand::thread_rng();
-            let signature =
-                DetachedSignature::sign_binary_data(&mut rng, &self.key.primary_key, &pgp::types::Password::empty(), HashAlgorithm::Sha256, manifest)
-                    .map_err(|error| invalid(format!("test signature: {error}")))?;
+            let password = pgp::types::Password::empty();
+            let signature = if self.sign_with_subkey {
+                DetachedSignature::sign_binary_data(&mut rng, &self.key.secret_subkeys[0].key, &password, HashAlgorithm::Sha256, manifest)
+            } else {
+                DetachedSignature::sign_binary_data(&mut rng, &self.key.primary_key, &password, HashAlgorithm::Sha256, manifest)
+            }
+            .map_err(|error| invalid(format!("test signature: {error}")))?;
             let signature = PgpSerialize::to_bytes(&signature).map_err(|error| invalid(format!("test signature: {error}")))?;
             Ok(OpenPgpSignature { signature, key: self.public.clone() })
         }
@@ -1149,6 +1184,36 @@ mod tests {
         std::fs::write(&unsigned, write_design_container(&Document::new("Plate")).unwrap()).unwrap();
         assert!(!crate::has_design_provenance(&unsigned.to_string_lossy()));
         let _ = std::fs::remove_file(&unsigned);
+    }
+
+    #[test]
+    fn a_bound_signing_subkey_verifies_and_reports_the_primary_key() {
+        let signer = TestPgpSigner::with_signing_subkey(21, false);
+        let primary = format!("{:X}", signer.key.fingerprint());
+        let bytes = signed_pgp(&Document::new("Plate"), &signer, &ProvenanceChain::default());
+        let report = report(&bytes).unwrap();
+        assert_eq!(report.status, ProvenanceStatus::Valid);
+        match &report.records[0].signer {
+            ProvenanceSigner::OpenPgp { fingerprint, .. } => {
+                assert_eq!(fingerprint, &primary, "a subkey signature is reported under the primary key")
+            }
+            other => panic!("expected an OpenPGP signer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_signing_subkey_without_its_binding_is_rejected() {
+        let signer = TestPgpSigner::with_signing_subkey(22, false);
+        let bytes = signed_pgp(&Document::new("Plate"), &signer, &ProvenanceChain::default());
+        let entries = read_entries(&bytes);
+        let envelope = envelope(entries.get(ENTRY).unwrap());
+        let mut wire: OpenPgpWire = decode(&envelope.records[0]).unwrap();
+        wire.key = signer.unbound_public().into();
+        let mut record = Vec::new();
+        ciborium::ser::into_writer(&wire, &mut record).unwrap();
+        let broken = replace_entry(&bytes, ENTRY, &raw_envelope(vec![record], VERSION));
+        let report = report(&broken).unwrap();
+        assert!(matches!(report.status, ProvenanceStatus::Invalid(_)), "{report:?}");
     }
 
     #[test]

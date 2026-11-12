@@ -1162,11 +1162,18 @@ pub(crate) fn signer_trusted(app: &SolveApp, record: &solidcraft_engine::io::Pro
 
 /// Whether `fingerprint` is one of the comma/space separated fingerprints in `trusted`.
 pub(crate) fn trusted_fingerprint(trusted: &str, fingerprint: &str) -> bool {
-    !fingerprint.is_empty()
-        && trusted
-            .split(|c: char| c == ',' || c.is_ascii_whitespace())
-            .filter(|entry| !entry.is_empty())
-            .any(|entry| entry.eq_ignore_ascii_case(fingerprint))
+    let fingerprint = fingerprint.trim();
+    if fingerprint.is_empty() {
+        return false;
+    }
+    // Commas/newlines separate entries; spaces inside an entry are ignored, because
+    // `gpg --fingerprint` prints a single fingerprint in groups of four.
+    trusted
+        .split([',', ';', '\n'])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.chars().filter(|c| !c.is_whitespace()).collect::<String>())
+        .any(|entry| entry.eq_ignore_ascii_case(fingerprint))
 }
 
 /// The shield each design tab shows, from the same last check as its tooltip.
@@ -1817,10 +1824,46 @@ mod tests {
     #[test]
     fn only_a_listed_fingerprint_is_trusted() {
         assert!(trusted_fingerprint("0123456789ABCDEF, fedcba9876543210", "0123456789abcdef"));
-        assert!(trusted_fingerprint("0123456789ABCDEF fedcba9876543210", "FEDCBA9876543210"));
+        assert!(trusted_fingerprint("0123456789ABCDEF; fedcba9876543210", "FEDCBA9876543210"));
+        // `gpg --fingerprint` prints a fingerprint in groups of four.
+        assert!(trusted_fingerprint("0123 4567 89AB CDEF", "0123456789ABCDEF"));
         assert!(!trusted_fingerprint("", "0123456789ABCDEF"));
         assert!(!trusted_fingerprint("1111111111111111", "0123456789ABCDEF"));
         assert!(!trusted_fingerprint("0123456789ABCDEF", ""));
+        // Two fingerprints must be separated by a comma; a run of spaces is one grouped fingerprint.
+        assert!(!trusted_fingerprint("0123456789ABCDEF 1111111111111111", "0123456789ABCDEF"));
+    }
+
+    #[test]
+    fn an_untrusted_user_id_is_not_shown_for_a_valid_signature() {
+        let record = solidcraft_engine::io::ProvenanceRecord {
+            signer: solidcraft_engine::io::ProvenanceSigner::OpenPgp {
+                fingerprint: "0123456789ABCDEF".into(),
+                user_id: Some("Alice <alice@example.invalid>".into()),
+            },
+            author: Some("Alice".into()),
+            tool: None,
+            note: None,
+            created: None,
+            app: "test".into(),
+            format: "solidcraft/55".into(),
+            pending: Vec::new(),
+            document: [0; 32],
+            container: [0; 32],
+            parts: 0,
+            signature_valid: true,
+            covered: true,
+        };
+        let report = solidcraft_engine::io::ProvenanceReport {
+            chain: Default::default(),
+            records: vec![record],
+            status: solidcraft_engine::io::ProvenanceStatus::Valid,
+        };
+        let record = report.newest().unwrap();
+        assert_eq!(record.signer.fingerprint(), "0123456789ABCDEF");
+        assert_eq!(signer_name(record), "Alice <alice@example.invalid>");
+        assert!(!trusted_fingerprint("", &record.signer.fingerprint()));
+        assert!(trusted_fingerprint("0123 4567 89AB CDEF", &record.signer.fingerprint()));
     }
 
     #[test]

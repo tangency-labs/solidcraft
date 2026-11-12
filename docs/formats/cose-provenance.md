@@ -222,7 +222,7 @@ and small parts are hashed while writing.
   (empty: GnuPG's default key; *Choose…* lists the keys GnuPG can sign with, on a smartcard or not),
   *Check signatures when opening designs* (off by default; the tab tooltip and the status line then
   name the signer, and *File › Verify Signature* checks on request), and *Trusted signing keys*
-  (fingerprints, comma or space separated; empty by default).
+  (fingerprints, comma separated; spaces inside a fingerprint are ignored, as `gpg --fingerprint` groups it; empty by default).
 - **Trust:** a signature only proves that a key signed something. The app shows the green shield
   and a user id only for a fingerprint the user listed under *Trusted signing keys*; any other
   valid signature is shown in grey with its fingerprint and *key not trusted*. The user id inside a

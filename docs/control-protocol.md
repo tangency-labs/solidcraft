@@ -1064,7 +1064,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `toast_place` (`corner` (default: notices and offers stack in one column in the view's bottom-right corner, each 360 points wide, buttons right-aligned with the main action right-most, #7893), `centre` (at the bottom centre above the view toolbar, each as wide as its text, as before))
 - `trackpad_pan` (default true: two-finger scroll pans, except Touchpad always zooms; pinch zooms)
 - `trackpad_zoom_modifier` (`off` default, `cmd`, `alt`, or `ctrl`: hold this key alone for vertical scroll to zoom)
-- `trusted_signing_keys` (string, default empty: fingerprints of signing keys whose signatures the app shows as verified, separated by commas or spaces; any other valid signature is shown in grey with its fingerprint and names no user id; a user id inside a file is not proof)
+- `trusted_signing_keys` (string, default empty: fingerprints of signing keys whose signatures the app shows as verified, separated by commas; spaces inside a fingerprint, as `gpg --fingerprint` prints them, are ignored; any other valid signature is shown in grey with its fingerprint and names no user id; a user id inside a file is not proof)
 - `ui_font` (an installed font family or a font file for the interface; empty for the built-in font; a `Family-Weight.ttf` file also takes its heavier sibling files for bold text, see [interface fonts](fonts.md))
 - `ui_scale`
 - `up_axis` (`z`, `y`)
