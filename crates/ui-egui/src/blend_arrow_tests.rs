@@ -194,3 +194,55 @@ fn pulling_an_edge_does_nothing_without_creative_mode() {
     assert!(h.app.dialog.is_none());
     assert_eq!(h.app.session.doc.features.len(), features);
 }
+
+/// The edges the last fillet or chamfer took.
+fn last_blend_edges(h: &Harness) -> usize {
+    match &h.app.session.doc.features.last().unwrap().kind {
+        solidcraft_engine::doc::FeatureKind::Fillet { edges, .. } | solidcraft_engine::doc::FeatureKind::Chamfer { edges, .. } => edges.len(),
+        other => panic!("not a blend: {other:?}"),
+    }
+}
+
+/// With the top face selected, pulling one of its edges rounds all four: the selected face stands
+/// for its edges.
+#[test]
+fn with_a_face_selected_pulling_one_of_its_edges_fillets_them_all() {
+    let mut h = creative_box(true);
+    h.step(&json!({"click": {"world": [20, 15, 20]}})).unwrap();
+    h.settle();
+    assert!(matches!(h.app.session.selection.as_slice(), [Sel::Face { .. }]), "{:?}", h.app.session.selection);
+    let name = drag_across(&mut h, [20.0, 0.0, 20.0], false);
+    assert!(name.as_deref().is_some_and(|n| n.starts_with("Fillet")), "{name:?}");
+    assert_eq!(last_blend_edges(&h), 4);
+    let measured = h.app.session.execute("inspect.measure", &json!({})).unwrap();
+    assert_eq!(measured["bodies"][0]["faces"].as_u64(), Some(10), "four rounds round the top: {measured}");
+}
+
+/// Pushing an edge of the selected face in chamfers every edge of it.
+#[test]
+fn with_a_face_selected_pushing_one_of_its_edges_chamfers_them_all() {
+    let mut h = creative_box(true);
+    h.step(&json!({"click": {"world": [20, 15, 20]}})).unwrap();
+    h.settle();
+    let name = drag_across(&mut h, [20.0, 0.0, 20.0], true);
+    assert!(name.as_deref().is_some_and(|n| n.starts_with("Chamfer")), "{name:?}");
+    assert_eq!(last_blend_edges(&h), 4);
+}
+
+/// An edge that is not on the selected face is taken alone: the selection gives way to it.
+#[test]
+fn an_edge_off_the_selected_face_is_taken_alone() {
+    let mut h = creative_box(true);
+    // The front face (-y) is selected; the top front edge is on it, so drag a top edge that is
+    // not: the right one (x = 40), across to +x.
+    h.step(&json!({"click": {"world": [20, 0, 10]}})).unwrap();
+    h.settle();
+    assert!(matches!(h.app.session.selection.as_slice(), [Sel::Face { .. }]), "{:?}", h.app.session.selection);
+    let features = h.app.session.doc.features.len();
+    let s = std::f64::consts::FRAC_1_SQRT_2 * 4.0;
+    h.step(&json!({"drag": [{"world": [40, 15, 20]}, {"world": [40.0 + s, 15, 20.0 + s]}]})).unwrap();
+    h.frames(6);
+    h.settle();
+    assert_eq!(h.app.session.doc.features.len(), features + 1);
+    assert_eq!(last_blend_edges(&h), 1);
+}

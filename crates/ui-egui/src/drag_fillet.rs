@@ -5,6 +5,10 @@
 //! enough; the value then follows the distance dragged that way, in steps that suit the zoom
 //! (hold Alt or Ctrl for a free value), and the release applies it. A press that goes along the
 //! edge instead stays a box selection.
+//!
+//! To round or cut every edge of a face at once, select the face first and drag any one of its
+//! edges: the selection goes into the window as it is, and a selected face stands for all its
+//! edges. The same holds for several selected edges: dragging one of them takes them all.
 
 use egui::{Pos2, Vec2};
 use solidcore_record::Vec3;
@@ -36,6 +40,9 @@ pub struct Gesture {
     push: bool,
     /// The window is open and follows the pointer.
     started: bool,
+    /// The edge is part of the selection (one of its edges, or an edge of a selected face): the
+    /// drag takes the whole selection rather than this edge alone.
+    keep: bool,
 }
 
 #[derive(Debug, Default)]
@@ -78,7 +85,25 @@ pub fn press(app: &mut SolveApp, proj: &Proj, at: Pos2) {
     };
     let Some(grab) = crate::canvas::along(proj, at, point, out) else { return };
     crate::drag_extrude::forget(app);
-    app.viewport.drag_fillet.gesture = Some(Gesture { press: at, sel, base: point, out, grab, push: false, started: false });
+    let keep = in_selection(app, &body, index);
+    app.viewport.drag_fillet.gesture = Some(Gesture { press: at, sel, base: point, out, grab, push: false, started: false, keep });
+}
+
+/// Whether edge `index` of `body` is selected, or lies on a selected face, while the selection is
+/// only edges and faces (anything else would not go into a fillet).
+fn in_selection(app: &SolveApp, body: &str, index: usize) -> bool {
+    let sel = &app.session.selection;
+    if sel.is_empty() || !sel.iter().all(|x| matches!(x, Sel::Edge { .. } | Sel::Face { .. })) {
+        return false;
+    }
+    let st = crate::open_meshing::session_world(&app.session);
+    sel.iter().any(|x| match x {
+        Sel::Edge { body: b, index: i, .. } => b == body && *i == index,
+        Sel::Face { body: b, index: f, .. } => {
+            b == body && st.body(b).is_some_and(|bd| bd.mesh().face_edges(u32::try_from(*f).unwrap_or(u32::MAX)).into_iter().any(|e| e == index))
+        }
+        _ => false,
+    })
 }
 
 /// Whether the move from the press to `p` crosses the edge on screen, and if so whether it goes
@@ -101,7 +126,9 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
             return;
         }
         let Some(push) = crossing(proj, &g, p) else { return };
-        crate::viewport::select(app, Some(g.sel.clone()), false, false);
+        if !g.keep {
+            crate::viewport::select(app, Some(g.sel.clone()), false, false);
+        }
         app.start(if push { "solid.chamfer" } else { "solid.fillet" });
         if !matches!(app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Fillet { chamfer, .. }) if *chamfer == push) {
             app.viewport.drag_fillet.gesture = None;
