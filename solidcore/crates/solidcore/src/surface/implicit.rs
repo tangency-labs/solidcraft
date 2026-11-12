@@ -1936,7 +1936,7 @@ impl AnalyticSupport {
         }
         let mut axis = along * (1.0 / length);
         if axis.dot(axis_r) < 0.0 {
-            axis = axis * -1.0;
+            axis *= -1.0;
         }
         let origin = c0 + axis * (placement_r.origin() - c0).dot(axis);
         let xr = placement_r.x_axis();
