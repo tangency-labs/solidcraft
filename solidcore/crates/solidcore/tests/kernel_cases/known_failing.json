@@ -13,13 +13,8 @@
   },
   {
     "case": "fillets/12342-round-wall-and-ledge-edges-r5-refused",
-    "issue": "solidcore#2845",
-    "reason": "status 1001 instead of the refusal naming the size that fits"
-  },
-  {
-    "case": "fillets/12342-round-wall-edge-r5-past-the-wall-refused",
-    "issue": "solidcore#2845",
-    "reason": "status 1001 instead of the refusal naming the size that fits"
+    "issue": "tangency-labs/solidcraft#13757",
+    "reason": "status 1001: the wall's End corner now builds its cap edge, and the trim at the creases then refuses the pair (the wall's overflow and the ledge's round) as taking off nothing or everything; the wall's round alone builds its overflow"
   },
   {
     "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",
