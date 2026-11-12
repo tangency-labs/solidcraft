@@ -8,7 +8,6 @@ crates/doc/src/appearance.rs:nearest_face picks the face nearest a point by the 
 crates/doc/src/construct.rs:GeoRef::name_picks names picked faces and edges through the display mesh
 crates/doc/src/construct.rs:named_vertex finds where named edges meet through the display mesh
 crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
-crates/doc/src/eval.rs:body_at picks the body whose surface is nearest a point by the display mesh
 crates/doc/src/eval.rs:edge_refs turns edge picks into references through the display mesh
 crates/doc/src/eval.rs:eval_feature places features by the display mesh (faces, edges, nearness)
 crates/doc/src/eval.rs:face_plane finds a sketch's face plane again on a mesh
@@ -36,14 +35,12 @@ crates/doc/src/eval_more.rs:plastic_eval places plastic features by a mesh
 crates/doc/src/eval_more.rs:rib_tool runs a rib to the body by the display mesh
 crates/doc/src/eval_more.rs:rib_tool_normal runs a rib to the body by the display mesh
 crates/doc/src/eval_more.rs:sheet_eval places sheet-metal features by a mesh
-crates/doc/src/history_names.rs:OperandNames::edge names an operand's edge by the display mesh
 crates/doc/src/hole_reference.rs:on_reference_face decides whether a point lies on a hole's reference face by the display mesh
 crates/doc/src/hole_reference.rs:reference_frame finds a hole's reference edges on the display mesh
 crates/doc/src/joints_cam.rs:default_reverse picks a cam follower's side by the display mesh
 crates/doc/src/joints_cam.rs:profile_points samples a cam profile's edges from a mesh
 crates/doc/src/joints_edge.rs:edge_frame places an edge snap by the display mesh
 crates/doc/src/joints_edge.rs:edge_snap places an edge snap by the display mesh
-crates/doc/src/joints_edge.rs:face_of picks the planar face beside an edge by the display mesh
 crates/doc/src/joints_edge.rs:nearest_edge picks the edge nearest a point by the display mesh
 crates/doc/src/joints_face.rs:NamedFace::own_cylinder reads a named face's cylinder from the display mesh
 crates/doc/src/joints_face.rs:face_name_at names the face at a pick by its mesh triangles
@@ -115,7 +112,6 @@ crates/engine/src/cmd/face.rs:sketch_of_face finds the planar face a sketch star
 crates/engine/src/cmd/face.rs:sketch_of_faces groups coplanar picked faces by mesh triangles
 crates/engine/src/cmd/features.rs:auto_operation_in chooses a feature's operation by probing the display mesh
 crates/engine/src/cmd/features.rs:edge_points turns edge references into points on a mesh
-crates/engine/src/cmd/features.rs:through_all_reach sizes a Through All reach by the display mesh
 crates/engine/src/cmd/features_more.rs:emboss places an emboss by the display mesh
 crates/engine/src/cmd/features_more.rs:snap_point snaps a feature's point by the display mesh
 crates/engine/src/cmd/inspect.rs:dist_to measures a distance on the display mesh

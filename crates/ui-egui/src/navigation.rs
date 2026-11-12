@@ -313,6 +313,50 @@ pub(crate) fn claims_scroll(modifiers: egui::Modifiers, zoom_modifier: Option<eg
     zoom_modifier.is_some_and(|chosen| modifiers.matches_exact(chosen) && !(modifiers.mac_cmd && modifiers.ctrl))
 }
 
+/// How long a twist may pause, in seconds, before it has ended and its cursor pivot is let go.
+const TWIST_PAUSE: f64 = 0.25;
+
+/// The trackpad's two-finger rotation this frame in radians, counter-clockwise positive (egui's
+/// `Event::Rotate` counts clockwise). Events that carry a non-finite angle are ignored.
+pub(crate) fn twist_radians(input: &egui::InputState) -> f64 {
+    input
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            egui::Event::Rotate(r) if r.is_finite() => Some(-f64::from(*r)),
+            _ => None,
+        })
+        .sum()
+}
+
+/// Turn the view about the world's up axis (Z, or Y in a Y-up design) by `radians`, through the
+/// centre that Orbit around names: the view's centre, the world origin, or the model point under
+/// the cursor, chosen when the twist begins. A counter-clockwise twist turns the model
+/// counter-clockwise as seen from above, so the model follows the fingers. Pitch and roll stay
+/// as they are.
+pub(crate) fn twist_turn(app: &mut SolveApp, rect: Rect, radians: f64, hover: Option<Pos2>) {
+    if !radians.is_finite() {
+        return;
+    }
+    let pivot = match app.preferences.orbit_around {
+        OrbitAround::ViewCentre => None,
+        OrbitAround::Origin => Some(Vec3::ZERO),
+        OrbitAround::Cursor => Some(match app.viewport.twist_pivot {
+            Some(p) => p,
+            None => {
+                let p = pivot_under(app, &projection(app, rect), hover.unwrap_or(rect.center()));
+                app.viewport.twist_pivot = Some(p);
+                p
+            }
+        }),
+    };
+    let keep = pivot.map(|p| (p, app.cam.frame_coords(p)));
+    app.cam.yaw = (app.cam.yaw + radians) % std::f64::consts::TAU;
+    if let Some((p, coords)) = keep {
+        app.cam.place(p, coords);
+    }
+}
+
 /// Combined pinch-to-zoom factor for one frame (1 = no pinch input).
 ///
 /// Some input paths deliver pinch as a zoom-modified wheel instead of `Event::Zoom`.
@@ -781,6 +825,23 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.viewport.orbit_free = None;
         let sign = crate::prefs::orbit_sign(app);
         orbit(app, rect, sign * f64::from(raw.shift_pan.x), sign * f64::from(raw.shift_pan.y), hover);
+    }
+    // A two-finger twist on the trackpad turns the view about the world's up axis (#6286).
+    // The OS does not send a rotation on every frame of a slow twist, so the twist's cursor pivot
+    // is kept through short gaps and let go only once the twist has paused or a button is pressed.
+    // That is checked before this frame's rotation: an idle window draws no frames in between, so
+    // the first rotation of a new twist must not turn about the last twist's point.
+    let (twist, now, pressed) = ui.input(|i| (twist_radians(i), i.time, i.pointer.any_pressed()));
+    if pressed || app.viewport.twist_last.is_none_or(|last| now - last > TWIST_PAUSE) {
+        app.viewport.twist_pivot = None;
+        app.viewport.twist_last = None;
+    }
+    if wheel_inside && caps.orbit && app.preferences.trackpad_twist_turns && twist != 0.0 {
+        app.cancel_view_animation();
+        app.viewport.orbit_free = None;
+        app.viewport.spin = false;
+        twist_turn(app, rect, twist, hover);
+        app.viewport.twist_last = Some(now);
     }
     let zoom_held = (inside || app.viewport.zoom_shortcut_drag)
         && ui.input(|input| crate::keymap::drag_zoom_held(app, input))
@@ -1457,16 +1518,43 @@ fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>) -> Option<Ve
 
 /// The screen point Home and Fit centre the model on, through the one function they use
 /// ([`crate::viewport_layout::framing_centre`]), so the pivot is exactly where Home leaves the model; the free
-/// view's middle (`Layout::middle`) when there is no model to frame.
+/// view's middle (`Layout::middle`) when there is no model to frame. With the navigators' Fit on, Home and
+/// the navigators frame their own way, while Fit keeps the plain framing ([`navigator_home_centre`]).
 fn home_centre(app: &SolveApp) -> Option<Pos2> {
     let layout = app.viewport.layout.as_ref()?;
     let bounds = crate::viewport::view_bounds(app);
-    crate::viewport_layout::framing_centre(app.cam, &bounds, layout).or_else(|| Some(layout.middle.center()))
+    navigator_home_centre(app, &bounds, layout)
+        .or_else(|| crate::viewport_layout::framing_centre(app.cam, &bounds, layout))
+        .or_else(|| Some(layout.middle.center()))
+}
+
+/// With the navigators' Fit on (#10091), the screen point where Home and the navigators put the middle
+/// of `bounds`, while the model's middle is there now: their camera (`SolveApp::navigator_fitted_bounds`)
+/// aims at the model's middle, at the view's centre unless the shared panel frame moves it. Fit still
+/// frames the plain way, so after Fit, a pan or a zoom the model's middle is elsewhere and this is `None`.
+fn navigator_home_centre(app: &SolveApp, bounds: &solidcraft_engine::geom::Aabb3, layout: &crate::viewport_layout::Layout) -> Option<Pos2> {
+    if !app.preferences.navigator_fit {
+        return None;
+    }
+    let at = screen_middle(app, app.navigator_fitted_bounds(app.cam, bounds)?, bounds, layout)?;
+    let now = screen_middle(app, app.cam, bounds, layout)?;
+    (now.distance(at) < 0.5).then_some(at)
+}
+
+/// Where `cam` shows the middle of `bounds` in the laid-out view, at the angle the view draws with.
+fn screen_middle(app: &SolveApp, mut cam: Camera, bounds: &solidcraft_engine::geom::Aabb3, layout: &crate::viewport_layout::Layout) -> Option<Pos2> {
+    cam.fov = app.view_fov();
+    let vp = layout.viewport;
+    // The depth range only clips; it moves no point across the screen.
+    let (x, y, _) = cam.to_screen(bounds.center(), f64::from(vp.width()), f64::from(vp.height()), bounds.diagonal().max(1.0))?;
+    let at = pos2(vp.left() + x as f32, vp.top() + y as f32);
+    at.is_finite().then_some(at)
 }
 
 /// What orbit around the view's centre turns about: the point at the camera target's depth under
 /// the middle of the part of the view the panels leave free (`Layout::middle`). Home and Fit move
-/// the model towards that middle, as far as the compass and the navigation bar leave room. With
+/// the model towards that middle, as far as the compass and the navigation bar leave room (with the
+/// navigators' Fit on, Home puts it where [`navigator_home_centre`] says, see [`home_centre`]). With
 /// the Browser open the middle lies beside the window's centre, and turning about the window's
 /// centre swung the model off to one side (#14651). `None`, so that the camera turns about its
 /// target, when the middle is within half a point of the window's centre, before the view is
