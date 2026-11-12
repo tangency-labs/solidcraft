@@ -16,8 +16,8 @@ use std::collections::VecDeque;
 
 use egui::{Align2, FontId, Id, Sense, Stroke, ViewportCommand, vec2};
 
-use solidcraft_theme::Tokens;
 use crate::ui_kit::{Container, Surface};
+use solidcraft_theme::Tokens;
 
 /// How often the page is drawn while a step waits for its worker (see [`Starting::wait_frame`]).
 const WAIT_FRAME: std::time::Duration = std::time::Duration::from_millis(100);
@@ -229,6 +229,8 @@ mod tests {
     }
 
     fn frame(ctx: &egui::Context, starting: &mut Starting<Vec<&'static str>>, log: &mut Vec<&'static str>) -> (bool, Vec<String>) {
+        // The page's labels are catalog messages: a test process installs the catalogs itself.
+        crate::i18n::install();
         let mut still = false;
         let mut output = ctx.run_ui(
             egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 1000.0))), ..Default::default() },
