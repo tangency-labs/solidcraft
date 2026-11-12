@@ -479,7 +479,7 @@ impl std::fmt::Display for Error {
                 "the body is not a closed solid facing out: {}",
                 match test {
                     SolidTest::NotManifold => "it is not one closed manifold solid",
-                    SolidTest::NotClosedSolids => "it is not closed solids",
+                    SolidTest::NotClosedSolids => "it is not closed solids, even ones touching along edges or at vertices",
                     SolidTest::PointersInvalid => "its pointer check fails",
                     SolidTest::Invalid => "its validity check fails",
                     SolidTest::LoopOrientationUndecided => "a loop's orientation is undecided",
