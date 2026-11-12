@@ -38,6 +38,14 @@
 //! edges of profiles ([`chamfer()`]), and the gouge check allows it the chamfer it is told to
 //! cut ([`band_gouges`]).
 //!
+//! 2D contours and pockets take leads, entries, linking, holding tabs and finishing passes
+//! ([`contour_with`], [`pocket_with`]). A lead into or out of a cut may be a vertical arc
+//! ([`PlaneArc`]): [`gcode5`] writes it as a `G18` or `G19` arc, [`emit`] as lines within the
+//! arc tolerance, and both readers read such arcs in their own plane. A planned path can be
+//! written with fewer moves ([`compact`]: lines and arcs that stay within a tolerance of the
+//! moves they replace), and its descent feeds worked out again for the coordinates as written
+//! ([`limit_descents`]).
+//!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
 //! retract to the machine's top, the tool length offset on the first Z move, modal motion
@@ -53,6 +61,7 @@
 mod chamfer;
 mod check;
 pub mod collision;
+mod compact;
 mod cutter;
 pub mod drill;
 mod dropcutter;
@@ -63,6 +72,7 @@ pub mod gcode5;
 pub mod helical;
 pub mod indexed;
 pub mod kinematics;
+mod leads;
 pub mod machine_time;
 mod multiaxis;
 mod offset;
@@ -82,6 +92,7 @@ pub mod wrapped;
 
 pub use chamfer::{ChamferGeometry, ChamferParams, DEFAULT_TIP_OFFSET, band_gouges, chamfer, chamfer_geometry};
 pub use check::{lift_entries, verify};
+pub use compact::{Compaction, compact, limit_descents};
 pub use cutter::{Cone, Cutter};
 pub use dropcutter::{drop_along, drop_triangle, drop_z};
 pub use finish3d::{
@@ -90,10 +101,14 @@ pub use finish3d::{
 };
 pub use frame::{Frame, angle_about, rotate, rotate_about};
 pub use gcode::{Operation, Program, emit, parse, work_offset_code};
+pub use leads::{
+    ContourOptions, Entry, Lead, Linking, MAX_FINISH_PASSES, MAX_TABS, MIN_ARC_RADIUS, PocketOptions, TabLayout, Tabs, contour_with, pocket_with,
+    tabs_fit,
+};
 pub use multiaxis::{Move5, Operation5, PathStats5, Pose, Program5, Toolpath5, slerp, verify5};
 pub use offset::offset_regions;
 pub use ops::{ContourParams, Cut, Feeds, Heights, PocketParams, Side, contour, pocket};
-pub use path::{Move, PathStats, Toolpath, arc_sweep};
+pub use path::{ArcPlane, Move, PathStats, PlaneArc, Toolpath, arc_sweep};
 pub use post::{CommentStyle, LineNumbers, Post, SafeRetract, Units};
 pub use readback::{Readback, allowed_deviation, readback};
 pub use rotary::{
@@ -148,6 +163,8 @@ mod gcode5_tests;
 mod helical_tests;
 #[cfg(test)]
 mod kinematics_tests;
+#[cfg(test)]
+mod leads_tests;
 #[cfg(test)]
 mod machine_time_tests;
 #[cfg(test)]

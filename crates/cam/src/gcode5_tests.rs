@@ -511,11 +511,10 @@ fn hostile_programs_are_refused() {
     assert!(parse5("G0 X0 Y0 Z0 A0\nG1 X1 F-5", &a).is_err());
     assert!(parse5("X1 Y2", &a).is_err());
     assert!(parse5("G0 X1..2", &a).is_err());
-    // What this crate does not write yet is refused, not misread: tool centre point control
-    // and arcs in a vertical plane.
+    // What this crate does not write yet is refused, not misread: tool centre point control.
     assert!(matches!(parse5("G43.4 H1\nG0 X0 Y0 Z0 A0", &a), Err(CamError::Parse(1, _))));
-    assert!(matches!(parse5("G0 X0 Y0 Z0 A0\nG18 G2 X1 Z1 I1 K0 F100", &a), Err(CamError::Parse(2, _))));
-    assert!(matches!(parse5("G19\nG0 X0 Y0 Z0 A0", &a), Err(CamError::Parse(1, _))));
+    // An arc in a vertical plane needs that plane's offsets.
+    assert!(matches!(parse5("G0 X0 Y0 Z0 A0\nG18 G2 X1 Z1 J1 F100", &a), Err(CamError::Parse(2, _))));
     // G93 F applies to its own block; G53 makes the axes it names unknown; G20 scales the
     // linear axes, not the angles.
     let w = parse5("G20\nG0 X1 Y0 Z1 A0\nG93 G1 X2 A90 F4\nG53 G0 Z0\nG0 Z2\nG94 G1 X3 F10", &a).unwrap();
@@ -1018,8 +1017,8 @@ fn a_dialect_post_retracts_before_every_turn_of_a() {
     // The first index turns A after the start's retract; the next one retracts before its
     // comment, then A turns alone and the tool comes back across (still G0, not written
     // again) and down with its offset.
-    assert!(text.contains("\n(SIDE 0)\nT3 M6\nS9000 M3\nG17 G90 G94\nG54\nG0 A0.\nX0. Y-3.\nG43 Z10. H3\nZ2.\n"), "{text}");
-    assert!(text.contains("\nG0 Z10.\nG28 G91 Z0.\nG90\n\n(SIDE 90)\nG17 G90 G94\nG54\nG0 A90.\nX0. Y-3.\nG43 Z10. H3\nZ2.\n"), "{text}");
+    assert!(text.contains("\n(SIDE 0)\nT3 M6\nS9000 M3\nG17 G90 G94\nG54\nG0 A0.\nX0. Y-3.\nG43 Z10. H3\nZ1.\n"), "{text}");
+    assert!(text.contains("\nG0 Z10.\nG28 G91 Z0.\nG90\n\n(SIDE 90)\nG17 G90 G94\nG54\nG0 A90.\nX0. Y-3.\nG43 Z10. H3\nZ1.\n"), "{text}");
     // The move after a turn of A does not repeat its G0.
     let mut last: Option<&str> = None;
     for line in text.lines() {
@@ -1572,6 +1571,65 @@ fn a_large_diagonal_raster_reads_back() {
     let rb = readback5(&text, &program, &post, &machine).unwrap();
     assert!(rb.within(), "{rb:?}");
     close(rb.cut_length, rb.planned_cut_length, 1e-6 * rb.planned_cut_length);
+}
+
+/// A vertical lead as it is written: the plane word on the arc's own block
+/// (`G19 G2 Y… Z… J… K…`, `G18 … I… K…`), `G17` again on the next XY arc and after the
+/// operation, and every one read back in its own plane.
+#[test]
+fn vertical_arcs_are_written_with_their_plane_word_and_read_back() {
+    let machine = Machine::three_axis();
+    let post = Post5::linuxcnc_4axis();
+    let moves = vec![
+        Move::Rapid { to: Vec3::new(0.0, 10.3, 20.0) },
+        Move::Rapid { to: Vec3::new(0.0, 10.3, 5.0) },
+        Move::Feed { to: Vec3::new(0.0, 10.3, 0.15), feed: 50.0 },
+        // Down a quarter in YZ into the start of a pass along -Y.
+        Move::PlaneArc { to: Vec3::new(0.0, 10.0, -0.15), center: Vec3::new(0.0, 10.0, 0.15), plane: ArcPlane::Yz, ccw: false, feed: 1600.0 },
+        Move::Feed { to: Vec3::new(0.0, 0.0, -0.15), feed: 1600.0 },
+        // Round to the next pass in XY.
+        Move::Arc { to: Vec3::new(5.0, 0.0, -0.15), center: Vec2::new(2.5, 0.0), ccw: true, feed: 1600.0 },
+        Move::Feed { to: Vec3::new(5.0, 10.0, -0.15), feed: 1600.0 },
+        // Up a quarter in YZ beyond its end.
+        Move::PlaneArc { to: Vec3::new(5.0, 10.3, 0.15), center: Vec3::new(5.0, 10.0, 0.15), plane: ArcPlane::Yz, ccw: true, feed: 1600.0 },
+        // And one in XZ.
+        Move::Feed { to: Vec3::new(5.0, 10.3, -0.15), feed: 50.0 },
+        Move::PlaneArc { to: Vec3::new(5.3, 10.3, 0.15), center: Vec3::new(5.3, 10.3, -0.15), plane: ArcPlane::Zx, ccw: true, feed: 1600.0 },
+        Move::Rapid { to: Vec3::new(5.3, 10.3, 20.0) },
+    ];
+    let program = program_of(vec![indexed_op("face", 1, vec![], moves.clone())]);
+    let text = emit_program(&program, &post, &machine).unwrap();
+    assert!(text.contains("\nG19 G2 Y10 Z-0.15 J-0.3 K0 F1600\n"), "{text}");
+    assert!(text.contains("\nG17 G3 X5 Y0 I2.5 J0\n"), "{text}");
+    assert!(text.contains("\nG19 G3 Y10.3 Z0.15 J0 K0.3\n"), "{text}");
+    assert!(text.contains("\nG18 G3 X5.3 Z0.15 I0.3 K0 F1600\n"), "{text}");
+    // Back in G17 after the operation, before its end.
+    let after = text.rsplit("G18 G3").next().unwrap();
+    assert!(after.contains("\nG17\n"), "{text}");
+    // Read as written: each arc in its plane about its own centre.
+    let words = parse5(&text, &machine.letters()).unwrap();
+    let plane_arcs: Vec<_> = words
+        .iter()
+        .filter_map(|w| if let JointWords::PlaneArc { center, plane, ccw, .. } = w { Some((*center, *plane, *ccw)) } else { None })
+        .collect();
+    assert_eq!(plane_arcs.len(), 3, "{plane_arcs:?}");
+    assert_eq!((plane_arcs[0].1, plane_arcs[0].2), (ArcPlane::Yz, false));
+    close3(plane_arcs[0].0, Vec3::new(0.0, 10.0, 0.15), 1e-9);
+    assert_eq!((plane_arcs[2].1, plane_arcs[2].2), (ArcPlane::Zx, true));
+    close3(plane_arcs[2].0, Vec3::new(5.3, 10.3, -0.15), 1e-9);
+    let rb = readback_program(&text, &program, &post, &machine).unwrap();
+    assert!(rb.within(), "{rb:?}");
+    close(rb.cut_length, rb.planned_cut_length, 1e-3);
+    // The quarter arcs are as long as they are round: a quarter of 2π·0.3 each.
+    let planned = Toolpath { moves }.stats();
+    close(planned.cut_length, 3.0 * 0.15 * std::f64::consts::PI + 4.85 + 10.0 + 2.5 * std::f64::consts::PI + 10.0 + 0.3, 1e-9);
+    // A post that writes no arcs writes lines within its tolerance, in G17 throughout.
+    let lines_only = Post5 { base: Post { arcs: false, ..post.base.clone() }, ..post.clone() };
+    let text = emit_program(&program, &lines_only, &machine).unwrap();
+    assert!(!text.contains("G19") && !text.contains("G18") && !text.contains("G2 ") && !text.contains("G3 "), "{text}");
+    assert!(readback_program(&text, &program, &lines_only, &machine).unwrap().within());
+    // An arc without its plane's offsets is refused when read.
+    assert!(parse5("G0 X0 Y0 Z0\nG19 G2 Y1 Z1 I1 F100\n", &[]).is_err());
 }
 
 /// Where the written moves crowd (the turns of a small helix, a written arc's many chords), a

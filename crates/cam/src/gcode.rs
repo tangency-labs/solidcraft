@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
-use crate::path::{Move, Toolpath, arc_sweep};
+use crate::path::{ArcPlane, Move, PlaneArc, Toolpath, arc_sweep};
 use crate::post::{CommentStyle, Post, Values, fill};
 use crate::tool::{Tool, ToolKind};
 use crate::{CamError, Result, invalid};
@@ -476,7 +476,7 @@ pub fn emit(program: &Program, post: &Post) -> Result<String> {
             }
             match *m {
                 Move::Rapid { to } => w.rapid(to, rise),
-                Move::Feed { to, feed } | Move::Arc { to, feed, .. }
+                Move::Feed { to, feed } | Move::Arc { to, feed, .. } | Move::PlaneArc { to, feed, .. }
                     if !feed_in_range(feed) || !feed_word_ok(&w.value(feed / post.units.mm(), post.feed_decimals), true) =>
                 {
                     let _ = to;
@@ -487,6 +487,15 @@ pub fn emit(program: &Program, post: &Post) -> Result<String> {
                 }
                 Move::Feed { to, feed } => w.feed(to, feed),
                 Move::Arc { to, center, ccw, feed } => w.arc(to, center, ccw, feed)?,
+                // This writer keeps to G17: a vertical arc goes as lines within the arc tolerance.
+                Move::PlaneArc { to, center, plane, ccw, feed } => match w.pos {
+                    Some(from) => {
+                        for p in (PlaneArc { from, to, center, plane, ccw }).points(post.arc_tolerance) {
+                            w.feed(p, feed);
+                        }
+                    }
+                    None => return Err(CamError::Unsafe("an arc before the first positioning move".into())),
+                },
                 Move::Dwell { seconds } => {
                     if !(seconds >= 0.0) || !seconds.is_finite() {
                         return Err(CamError::Unsafe("a dwell must be 0 seconds or longer".into()));
@@ -556,6 +565,7 @@ pub fn parse(text: &str) -> Result<Vec<Move>> {
     let mut mode: Option<u8> = None;
     let mut feed: Option<f64> = None;
     let mut incremental = false;
+    let mut plane = ArcPlane::Xy;
     let (mut x, mut y, mut z): (Option<f64>, Option<f64>, Option<f64>) = (None, None, None);
     let mut pos: Option<Vec3> = None;
     let mut moves = Vec::new();
@@ -576,6 +586,9 @@ pub fn parse(text: &str) -> Result<Vec<Move>> {
                 20 => mode = Some(2),
                 30 => mode = Some(3),
                 40 => dwell = true,
+                170 => plane = ArcPlane::Xy,
+                180 => plane = ArcPlane::Zx,
+                190 => plane = ArcPlane::Yz,
                 200 => units = 25.4,
                 210 => units = 1.0,
                 280 | 300 => home = true,
@@ -598,7 +611,7 @@ pub fn parse(text: &str) -> Result<Vec<Move>> {
             pos = None;
             continue;
         }
-        if incremental && ['X', 'Y', 'Z', 'I', 'J'].into_iter().any(|l| word(l).is_some()) {
+        if incremental && ['X', 'Y', 'Z', 'I', 'J', 'K'].into_iter().any(|l| word(l).is_some()) {
             return Err(CamError::Parse(n, "not supported yet: incremental coordinates (G91)".into()));
         }
         if dwell {
@@ -609,8 +622,8 @@ pub fn parse(text: &str) -> Result<Vec<Move>> {
         if let Some(f) = word('F') {
             feed = Some(f * units);
         }
-        let (tx, ty, tz, ti, tj) = (word('X'), word('Y'), word('Z'), word('I'), word('J'));
-        if tx.is_none() && ty.is_none() && tz.is_none() && ti.is_none() && tj.is_none() {
+        let (tx, ty, tz, ti, tj, tk) = (word('X'), word('Y'), word('Z'), word('I'), word('J'), word('K'));
+        if tx.is_none() && ty.is_none() && tz.is_none() && ti.is_none() && tj.is_none() && tk.is_none() {
             continue;
         }
         let Some(mode) = mode else { return Err(CamError::Parse(n, "coordinates before any G0, G1, G2 or G3".into())) };
@@ -627,11 +640,25 @@ pub fn parse(text: &str) -> Result<Vec<Move>> {
                     moves.push(Move::Feed { to, feed });
                 } else {
                     let Some(from) = pos else { return Err(CamError::Parse(n, "an arc before the position is known".into())) };
-                    if ti.is_none() && tj.is_none() {
-                        return Err(CamError::Parse(n, "not supported yet: arcs without I and J".into()));
+                    let offsets = [ti, tj, tk];
+                    let (u, v, _) = plane.axes();
+                    let given = |i: usize| offsets.get(i).copied().flatten();
+                    if given(u).is_none() && given(v).is_none() {
+                        let words = match plane {
+                            ArcPlane::Xy => "I and J",
+                            ArcPlane::Zx => "I and K (G18)",
+                            ArcPlane::Yz => "J and K (G19)",
+                        };
+                        return Err(CamError::Parse(n, format!("not supported yet: arcs without {words}")));
                     }
-                    let center = Vec2::new(from.x + ti.unwrap_or(0.0) * units, from.y + tj.unwrap_or(0.0) * units);
-                    moves.push(Move::Arc { to, center, ccw: mode == 3, feed });
+                    let off = |i: usize| if i == u || i == v { given(i).unwrap_or(0.0) * units } else { 0.0 };
+                    if plane == ArcPlane::Xy {
+                        let center = Vec2::new(from.x + off(0), from.y + off(1));
+                        moves.push(Move::Arc { to, center, ccw: mode == 3, feed });
+                    } else {
+                        let center = from + Vec3::new(off(0), off(1), off(2));
+                        moves.push(Move::PlaneArc { to, center, plane, ccw: mode == 3, feed });
+                    }
                 }
             }
         }

@@ -8,9 +8,10 @@ use solidcore_record::{Region2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
 use crate::check::verify;
-use crate::offset::{Shape, reversed};
+use crate::offset::Shape;
 use crate::path::{MAX_MOVES, Move, Toolpath};
 use crate::piece::Piece;
+use crate::surface_ops::{ENTRY_GAP, descent_feed};
 use crate::tool::{Tool, ToolKind};
 use crate::{CamError, Result, invalid};
 
@@ -19,9 +20,9 @@ const MAX_LEVELS: usize = 10_000;
 /// Most offset rings of one pocket.
 const MAX_RINGS: usize = 2_000;
 /// Most times a ramp goes round its loop; a loop too short for that is plunged into instead.
-const MAX_RAMP_LAPS: f64 = 2000.0;
+pub(crate) const MAX_RAMP_LAPS: f64 = 2000.0;
 /// Largest coordinate or height (mm).
-const MAX_COORD: f64 = 1.0e6;
+pub(crate) const MAX_COORD: f64 = 1.0e6;
 
 /// The Z levels of an operation (work coordinates, mm).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -72,7 +73,7 @@ pub struct Cut {
 }
 
 impl Cut {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         self.heights.validate()?;
         self.feeds.validate()?;
         if !(self.stepdown > 0.0) || !self.stepdown.is_finite() {
@@ -82,7 +83,7 @@ impl Cut {
     }
 
     /// Depth passes from the top down to the bottom, evenly spaced and at most a stepdown apart.
-    fn levels(&self) -> Result<Vec<f64>> {
+    pub(crate) fn levels(&self) -> Result<Vec<f64>> {
         let (top, bottom) = (self.heights.top, self.heights.bottom);
         let n = ((top - bottom) / self.stepdown - 1e-9).ceil().max(1.0);
         if !(n <= MAX_LEVELS as f64) {
@@ -133,19 +134,19 @@ pub struct PocketParams {
 }
 
 /// Collects moves, keeping the tool's position.
-struct Builder {
-    moves: Vec<Move>,
-    pos: Option<Vec3>,
-    h: Heights,
-    feeds: Feeds,
+pub(crate) struct Builder {
+    pub(crate) moves: Vec<Move>,
+    pub(crate) pos: Option<Vec3>,
+    pub(crate) h: Heights,
+    pub(crate) feeds: Feeds,
 }
 
 impl Builder {
-    fn new(cut: &Cut) -> Builder {
+    pub(crate) fn new(cut: &Cut) -> Builder {
         Builder { moves: Vec::new(), pos: None, h: cut.heights, feeds: cut.feeds }
     }
 
-    fn push(&mut self, m: Move) -> Result<()> {
+    pub(crate) fn push(&mut self, m: Move) -> Result<()> {
         if self.moves.len() >= MAX_MOVES {
             return Err(CamError::TooLarge(format!("the toolpath has more than {MAX_MOVES} moves")));
         }
@@ -156,12 +157,12 @@ impl Builder {
         Ok(())
     }
 
-    fn at(&self, p: Vec2) -> bool {
+    pub(crate) fn at(&self, p: Vec2) -> bool {
         self.pos.is_some_and(|q| Vec2::new(q.x, q.y).dist(p) <= 1e-9)
     }
 
     /// Up to the clearance height (if below it), then across to `p`.
-    fn travel_to(&mut self, p: Vec2) -> Result<()> {
+    pub(crate) fn travel_to(&mut self, p: Vec2) -> Result<()> {
         if let Some(q) = self.pos {
             if self.at(p) && q.z >= self.h.clearance {
                 return Ok(());
@@ -174,7 +175,7 @@ impl Builder {
     }
 
     /// Straight down to `z`: rapid to the retract height, then at the plunge feed.
-    fn plunge_to(&mut self, z: f64) -> Result<()> {
+    pub(crate) fn plunge_to(&mut self, z: f64) -> Result<()> {
         let Some(q) = self.pos else { return Err(CamError::Unsafe("a plunge before the first positioning move".into())) };
         if q.z > self.h.retract {
             self.push(Move::Rapid { to: Vec3::new(q.x, q.y, self.h.retract) })?;
@@ -185,7 +186,19 @@ impl Builder {
         Ok(())
     }
 
-    fn cut_to(&mut self, p: Vec2, z: f64) -> Result<()> {
+    /// Down to `z` where the material left reaches no higher than `top`: at rapid to the
+    /// retract height and on through the air to [`ENTRY_GAP`] above `top` (where that is
+    /// lower), then at the plunge feed.
+    pub(crate) fn descend_to(&mut self, z: f64, top: f64) -> Result<()> {
+        let Some(q) = self.pos else { return Err(CamError::Unsafe("a plunge before the first positioning move".into())) };
+        let air = (top + ENTRY_GAP).max(z).min(self.h.retract);
+        if q.z > air + 1e-9 {
+            self.push(Move::Rapid { to: Vec3::new(q.x, q.y, air) })?;
+        }
+        self.plunge_to(z)
+    }
+
+    pub(crate) fn cut_to(&mut self, p: Vec2, z: f64) -> Result<()> {
         if self.at(p) && self.pos.is_some_and(|q| (q.z - z).abs() <= 1e-9) {
             return Ok(());
         }
@@ -193,48 +206,68 @@ impl Builder {
     }
 
     /// Cuts along `piece` from wherever the tool is (within the offsetting's joining tolerance
-    /// of the piece's start), going evenly from depth `z0` to `z1`.
-    fn cut_piece(&mut self, piece: &Piece, z0: f64, z1: f64) -> Result<()> {
+    /// of the piece's start), going evenly from depth `z0` to `z1`: at the cut feed, slowed
+    /// where it goes down so the tool goes down no faster than the plunge feed.
+    pub(crate) fn cut_piece(&mut self, piece: &Piece, z0: f64, z1: f64) -> Result<()> {
+        let drop = z0 - z1;
+        let feed = descent_feed(&self.feeds, piece.length().hypot(drop), drop);
         match *piece {
-            Piece::Line { b, .. } => self.cut_to(b, z1),
+            Piece::Line { b, .. } => {
+                if self.at(b) && self.pos.is_some_and(|q| (q.z - z1).abs() <= 1e-9) {
+                    return Ok(());
+                }
+                self.push(Move::Feed { to: b.extend(z1), feed })
+            }
             Piece::Arc { c, sweep, .. } => {
                 // Halves, so that no arc move comes near a full turn.
                 let parts = if sweep.abs() > PI { 2 } else { 1 };
                 for k in 1..=parts {
                     let t = k as f64 / parts as f64;
                     let to = piece.point_at(t).extend(z0 + (z1 - z0) * t);
-                    self.push(Move::Arc { to, center: c, ccw: sweep > 0.0, feed: self.feeds.cut })?;
+                    self.push(Move::Arc { to, center: c, ccw: sweep > 0.0, feed })?;
                 }
                 Ok(())
             }
         }
     }
 
-    fn cut_loop(&mut self, lp: &[Piece], z: f64) -> Result<()> {
+    pub(crate) fn cut_loop(&mut self, lp: &[Piece], z: f64) -> Result<()> {
         lp.iter().try_for_each(|piece| self.cut_piece(piece, z, z))
     }
 
-    /// Goes down to `z` along `lp`, no steeper than `angle`, round as often as that takes; the
-    /// tool ends where the loop starts. Straight down when there is no angle or the loop is too
-    /// short to ramp along.
-    fn ramp_loop(&mut self, lp: &[Piece], z: f64, angle: f64) -> Result<()> {
+    /// Goes down to `z` along `lp` at `angle`, round as often as that takes, then on round at
+    /// `z` to where the loop starts, where the tool ends. Each ramping move goes down no faster
+    /// than the plunge feed. Straight down when there is no angle or the loop is too short to
+    /// ramp along.
+    pub(crate) fn ramp_loop(&mut self, lp: &[Piece], z: f64, angle: f64) -> Result<()> {
         let Some(from) = self.pos.map(|p| p.z) else { return Err(CamError::Unsafe("a ramp before the first positioning move".into())) };
         let drop = from - z;
         if !(drop > 1e-9) {
             return Ok(());
         }
         let length: f64 = lp.iter().map(Piece::length).sum();
-        let laps = (drop / angle.tan() / length - 1e-9).ceil().max(1.0);
-        if !(angle > 0.0) || !(length > 1e-3) || !(laps <= MAX_RAMP_LAPS) {
+        // The distance along the loop the ramp takes.
+        let run = drop / angle.tan();
+        let laps = (run / length - 1e-9).ceil().max(1.0);
+        if !(angle > 0.0) || !(length > 1e-3) || !(laps <= MAX_RAMP_LAPS) || !(run > 0.0) {
             return self.plunge_to(z);
         }
-        let total = laps * length;
+        let depth_at = |d: f64| from - drop * (d / run).min(1.0);
         let mut done = 0.0;
         for _ in 0..laps as usize {
             for piece in lp {
-                let z0 = from - drop * done / total;
-                done += piece.length();
-                self.cut_piece(piece, z0, from - drop * (done / total).min(1.0))?;
+                let (d0, l) = (done, piece.length());
+                done += l;
+                if d0 >= run || l <= 1e-12 {
+                    self.cut_piece(piece, z, z)?;
+                } else if done <= run {
+                    self.cut_piece(piece, depth_at(d0), depth_at(done))?;
+                } else {
+                    // The ramp reaches the depth part way along this piece.
+                    let t = (run - d0) / l;
+                    self.cut_piece(&piece.sub(0.0, t), depth_at(d0), z)?;
+                    self.cut_piece(&piece.sub(t, 1.0), z, z)?;
+                }
             }
         }
         // Exactly at depth, whatever the rounding of the last step.
@@ -244,14 +277,14 @@ impl Builder {
         }
     }
 
-    fn retract(&mut self) -> Result<()> {
+    pub(crate) fn retract(&mut self) -> Result<()> {
         match self.pos {
             Some(q) if q.z < self.h.clearance => self.push(Move::Rapid { to: Vec3::new(q.x, q.y, self.h.clearance) }),
             _ => Ok(()),
         }
     }
 
-    fn finish(mut self) -> Result<Toolpath> {
+    pub(crate) fn finish(mut self) -> Result<Toolpath> {
         self.retract()?;
         let path = Toolpath { moves: self.moves };
         verify(&path, &self.h)?;
@@ -259,11 +292,11 @@ impl Builder {
     }
 }
 
-fn check_ramp(angle: f64) -> Result<()> {
+pub(crate) fn check_ramp(angle: f64) -> Result<()> {
     if (0.0..=1.5).contains(&angle) { Ok(()) } else { invalid("the ramp angle must be between 0 and 85 degrees") }
 }
 
-fn check_leave(leave: f64) -> Result<()> {
+pub(crate) fn check_leave(leave: f64) -> Result<()> {
     if leave.is_finite() && (0.0..=MAX_COORD).contains(&leave) { Ok(()) } else { invalid("the stock to leave must be 0 or more") }
 }
 
@@ -275,7 +308,7 @@ pub(crate) fn mills(tool: &Tool, ramp_angle: f64) -> Result<()> {
     cuts_sideways(tool)?;
     match tool.kind {
         ToolKind::Chamfer => invalid(
-            "a chamfer mill's side is tapered: it cuts chamfers (the chamfer operation) and spots holes (drill), but a contour, a pocket or a bore needs a tool with a straight side",
+            "a chamfer mill's side is tapered: it cuts chamfers (the chamfer operation), traces a line to a depth (a contour `side: on`) and spots holes (drill), but does not cut beside a contour, pocket or bore",
         ),
         _ => crate::chamfer::enters(tool, ramp_angle),
     }
@@ -293,70 +326,41 @@ pub(crate) fn cuts_sideways(tool: &Tool) -> Result<()> {
 }
 
 /// The loop turned to start at its corner nearest to `p`.
-fn start_near(lp: &[Piece], p: Vec2) -> Vec<Piece> {
+pub(crate) fn start_near(lp: &[Piece], p: Vec2) -> Vec<Piece> {
     let first = lp.iter().enumerate().min_by(|a, b| a.1.start().dist(p).total_cmp(&b.1.start().dist(p))).map_or(0, |(i, _)| i);
     lp.iter().cycle().skip(first).take(lp.len()).copied().collect()
 }
 
 /// Follows the boundaries of `regions` on the chosen side, one loop after the other, each
-/// down through every depth pass before the next.
+/// down through every depth pass before the next. [`crate::contour_with`] adds leads, entries,
+/// tabs and finishing passes.
 pub fn contour(regions: &[Region2], tool: &Tool, params: &ContourParams, cut: &Cut) -> Result<Toolpath> {
-    tool.validate()?;
-    mills(tool, params.ramp_angle)?;
-    cut.validate()?;
-    check_leave(params.stock_to_leave)?;
-    check_ramp(params.ramp_angle)?;
-    let shape = Shape::from_regions(regions, params.tolerance)?;
-    let away = tool.radius() + params.stock_to_leave;
-    let loops = match params.side {
-        Side::Outside => shape.offset(-away)?,
-        Side::Inside => shape.offset(away)?,
-        Side::On => shape.loops().to_vec(),
-    };
-    if loops.is_empty() {
-        return invalid("the tool does not fit the profile");
-    }
-    // Loops come with the regions on their left. Around a part that puts the wall on the left
-    // (conventional), inside an opening on the right (climb).
-    let natural_is_climb = params.side != Side::Outside;
-    let levels = cut.levels()?;
-    let mut b = Builder::new(cut);
-    for lp in &loops {
-        let lp = if params.climb == natural_is_climb { lp.clone() } else { reversed(lp) };
-        let Some(first) = lp.first() else { continue };
-        b.travel_to(first.start())?;
-        // Down to the last pass (through what it cut), then into the material along the loop.
-        b.plunge_to(cut.heights.top)?;
-        for &z in &levels {
-            b.ramp_loop(&lp, z, params.ramp_angle)?;
-            b.cut_loop(&lp, z)?;
-            b.cut_to(first.start(), z)?;
-        }
-        b.retract()?;
-    }
-    b.finish()
+    crate::leads::contour_with(regions, tool, params, &crate::leads::ContourOptions::default(), cut, &|_, _, _| false)
 }
 
 /// Clears `regions` (holes are islands) with rings parallel to the boundary, from the inside out.
+/// [`crate::pocket_with`] adds entries and linking choices.
 pub fn pocket(regions: &[Region2], tool: &Tool, params: &PocketParams, cut: &Cut) -> Result<Toolpath> {
-    tool.validate()?;
-    mills(tool, params.ramp_angle)?;
-    cut.validate()?;
-    check_leave(params.stock_to_leave)?;
-    check_ramp(params.ramp_angle)?;
+    crate::leads::pocket_with(regions, tool, params, &crate::leads::PocketOptions::default(), cut, &|_, _, _| false)
+}
+
+/// The passes of a pocket, outermost first, each with its distance from the boundary: rings
+/// `stepover` apart from a tool radius (plus the stock to leave) in, and where rings are more
+/// than a radius apart, extra rings a radius further in.
+pub(crate) fn pocket_rings(shape: &Shape, tool: &Tool, params: &PocketParams) -> Result<Vec<(f64, Vec<Vec<Piece>>)>> {
     let r = tool.radius();
     if !(params.stepover > 0.0) || !(params.stepover <= tool.diameter) {
         return invalid("the stepover must be above 0 and at most the tool diameter");
     }
-    let shape = Shape::from_regions(regions, params.tolerance)?;
     let wall = r + params.stock_to_leave;
-    let mut rings: Vec<Vec<Vec<Piece>>> = Vec::new();
+    let mut rings: Vec<(f64, Vec<Vec<Piece>>)> = Vec::new();
     loop {
-        let ring = shape.offset(wall + params.stepover * rings.len() as f64)?;
+        let d = wall + params.stepover * rings.len() as f64;
+        let ring = shape.offset(d)?;
         if ring.is_empty() {
             break;
         }
-        rings.push(ring);
+        rings.push((d, ring));
         if rings.len() > MAX_RINGS {
             return Err(CamError::TooLarge(format!("the pocket needs more than {MAX_RINGS} passes; use a larger stepover")));
         }
@@ -367,68 +371,32 @@ pub fn pocket(regions: &[Region2], tool: &Tool, params: &PocketParams, cut: &Cut
     // Rings more than a radius apart leave material wherever the next ring in does not run
     // within a radius: the middle of a part of the pocket it no longer fits in, a passage that
     // narrows. A ring a radius further in clears it; it is cut where some stretch of it is out
-    // of the next ring's reach (corners between rings are cleared by the spurs below).
+    // of the next ring's reach (corners between rings are cleared by the spurs).
     if params.stepover > r + 1e-9 {
         let mut passes = Vec::new();
-        for (k, ring) in rings.iter().enumerate() {
-            passes.push(ring.clone());
-            let next: Vec<&Piece> = rings.get(k + 1).into_iter().flatten().flatten().collect();
+        for (k, (d, ring)) in rings.iter().enumerate() {
+            passes.push((*d, ring.clone()));
+            let next: Vec<&Piece> = rings.get(k + 1).into_iter().flat_map(|(_, ring)| ring.iter().flatten()).collect();
             let reached = |p: Vec2| next.iter().any(|piece| piece.dist(p) <= r + 1e-6);
             let extra: Vec<Vec<Piece>> = shape
-                .offset(wall + params.stepover * k as f64 + r)?
+                .offset(d + r)?
                 .into_iter()
                 .filter(|lp| lp.iter().any(|piece| [0.25, 0.5, 0.75].iter().any(|t| !reached(piece.point_at(*t)))))
                 .collect();
             if !extra.is_empty() {
-                passes.push(extra);
+                passes.push((d + r, extra));
             }
         }
         rings = passes;
     }
-    let mut b = Builder::new(cut);
-    // The depth already cut wherever this pass's rings run.
-    let mut cleared = cut.heights.top;
-    for z in cut.levels()? {
-        // Whether the tool is down in this level's cut.
-        let mut down: Option<Vec2> = None;
-        for lp in rings.iter().rev().flatten() {
-            // Offset loops keep the pocket on their left, so the wall is on the right: climb.
-            let lp = if params.climb { lp.clone() } else { reversed(lp) };
-            let lp = start_near(&lp, down.unwrap_or_default());
-            let Some(first) = lp.first() else { continue };
-            let start = first.start();
-            match down {
-                Some(from) if link_is_clear(&shape, from, start, wall, r) => b.cut_to(start, z)?,
-                _ => {
-                    b.travel_to(start)?;
-                    b.plunge_to(cleared)?;
-                    b.ramp_loop(&lp, z, params.ramp_angle)?;
-                }
-            }
-            // Rings far apart do not reach into a sharp corner between them: there the tool
-            // steps towards the next ring's corner and back.
-            let inward = if params.climb { 1.0 } else { -1.0 };
-            for (piece, next) in lp.iter().zip(lp.iter().cycle().skip(1)) {
-                b.cut_piece(piece, z, z)?;
-                if let Some(to) = corner_spur(piece, next, inward, params.stepover, r).filter(|to| link_is_clear(&shape, piece.end(), *to, wall, r)) {
-                    b.cut_to(to, z)?;
-                    b.cut_to(piece.end(), z)?;
-                }
-            }
-            b.cut_to(start, z)?;
-            down = Some(start);
-        }
-        cleared = z;
-        b.retract()?;
-    }
-    b.finish()
+    Ok(rings)
 }
 
 /// Where to step to from the corner between `piece` and `next` so that the corner between
 /// this ring and the next one in (`gap` away) is cleared: along the corner's bisector, to within
 /// a radius of the next ring's corner. `inward`: 1 with the pocket on the loop's left, −1 on
 /// its right. `None` where the rings' own passes already clear the corner.
-fn corner_spur(piece: &Piece, next: &Piece, inward: f64, gap: f64, r: f64) -> Option<Vec2> {
+pub(crate) fn corner_spur(piece: &Piece, next: &Piece, inward: f64, gap: f64, r: f64) -> Option<Vec2> {
     let (t_in, t_out) = (piece.tangent_at(1.0), next.tangent_at(0.0));
     let bend = crate::piece::turn(t_in, t_out);
     // Half the corner's inside angle has this sine.
@@ -440,8 +408,10 @@ fn corner_spur(piece: &Piece, next: &Piece, inward: f64, gap: f64, r: f64) -> Op
     Some(piece.end() + dir * (gap / sharp - r))
 }
 
-/// Whether the tool can feed straight from `a` to `b` without touching a wall.
-fn link_is_clear(shape: &Shape, a: Vec2, b: Vec2, wall: f64, r: f64) -> bool {
+/// Whether the tool can feed straight from `a` to `b` staying at least `wall` from the
+/// boundary. With `wall` the distance of the pass the link leads to, every point of the link
+/// is where the passes cut so far (or the one it leads to) have taken the material away.
+pub(crate) fn link_is_clear(shape: &Shape, a: Vec2, b: Vec2, wall: f64, r: f64) -> bool {
     let n = ((a.dist(b) / (r * 0.25).max(1e-3)).ceil()).clamp(1.0, 2000.0) as usize;
     (0..=n).all(|i| shape.clear(a.lerp(b, i as f64 / n as f64), wall))
 }

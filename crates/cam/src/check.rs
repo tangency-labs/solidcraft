@@ -6,7 +6,7 @@ use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
 use crate::ops::Heights;
-use crate::path::{MAX_MOVES, Move, Toolpath};
+use crate::path::{MAX_MOVES, Move, PlaneArc, Toolpath};
 use crate::surface_ops::ENTRY_GAP;
 use crate::{CamError, Result};
 
@@ -111,7 +111,7 @@ pub fn lift_entries(path: &mut Toolpath, top: f64) {
                     swept.add(from, *to);
                 }
             }
-            Move::Arc { to, .. } => {
+            Move::Arc { to, .. } | Move::PlaneArc { to, .. } => {
                 if let Some(from) = pos {
                     swept.add(from, from);
                 }
@@ -220,6 +220,24 @@ fn verify_against(path: &Toolpath, h: &Heights, rest: Option<RestAt<'_>>) -> Res
                 }
                 cut_here = Some(to.z);
                 // An arc is filed by its ends: its chord is not where it cut.
+                swept.add(from, from);
+                swept.add(to, to);
+            }
+            Move::PlaneArc { to, center, plane, ccw, feed } => {
+                let Some(from) = pos else { return fail(i, "the path must start with a rapid") };
+                if !(feed > 0.0) || !feed.is_finite() {
+                    return fail(i, "the feed must be above 0");
+                }
+                let arc = PlaneArc { from, to, center, plane, ccw };
+                let (r0, r1) = (arc.radius(), (plane.split(to).0 - plane.split(center).0).len());
+                if !center.is_finite() || !(r0 > 0.0) || (r0 - r1).abs() > 1e-3 {
+                    return fail(i, "an arc does not start and end at the same distance from its centre");
+                }
+                // A vertical arc may dip below its ends.
+                if arc.points(1e-4).iter().any(|q| q.z < h.bottom - TOL) {
+                    return fail(i, format!("an arc goes below the bottom height {}", h.bottom));
+                }
+                cut_here = Some(to.z);
                 swept.add(from, from);
                 swept.add(to, to);
             }

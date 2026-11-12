@@ -880,6 +880,109 @@ fn roughing_levels_come_down_through_the_air_they_cleared() {
     assert!(entries >= 6, "{entries} entries");
 }
 
+/// The points of `path` at feed, each reached from the one before.
+fn feed_points(path: &Toolpath) -> Vec<Vec3> {
+    feed_moves(path).into_iter().flat_map(|(a, b)| [a, b]).collect()
+}
+
+/// The distance from `q` to the nearest move of `path` at feed, arcs followed closely.
+fn off_path(path: &Toolpath, q: Vec3) -> f64 {
+    let pts = path.points(1e-5);
+    pts.windows(2).filter(|w| w[1].1).map(|w| q.dist_to_segment(w[0].0, w[1].0)).fold(f64::INFINITY, f64::min)
+}
+
+/// Merging: a roughing level's straight passes become one move each, a waterline's loop round
+/// a pin becomes arcs, and every point merged away is within the tolerance of what replaces it.
+#[test]
+fn compacting_merges_lines_and_fits_arcs_within_the_tolerance() {
+    let s = block(Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 5.0));
+    let h = Heights { clearance: 20.0, retract: 10.0, top: 8.0, bottom: 0.0 };
+    let rough_path = roughing(&s, &flat(6.0), &rough(h, rect(-20.0, -20.0, 20.0, 20.0))).unwrap();
+    let how = Compaction { tolerance: 0.001, arcs: true, helical: true, bow: 0.001 };
+    let merged = compact(&rough_path, &how).unwrap();
+    verify(&merged, &h).unwrap();
+    assert!(merged.moves.len() * 4 < rough_path.moves.len(), "{} of {} moves", merged.moves.len(), rough_path.moves.len());
+    for q in feed_points(&rough_path) {
+        assert!(off_path(&merged, q) <= how.tolerance + 1e-9, "{q:?} is {} off", off_path(&merged, q));
+    }
+    close(merged.stats().cut_length, rough_path.stats().cut_length, 1e-2);
+    // Straight passes give no arcs.
+    assert!(!merged.moves.iter().any(|m| matches!(m, Move::Arc { .. })));
+
+    let pin = pin(1.0, 10.0, 512);
+    let hw = Heights { clearance: 30.0, retract: 15.0, top: 8.0, bottom: 2.0 };
+    let mut p = wl(hw, rect(-6.0, -6.0, 6.0, 6.0));
+    p.step = 0.5;
+    p.stepdown = 3.0;
+    p.tolerance = 0.0005;
+    let loops = waterline(&pin, &flat(4.0), &p).unwrap();
+    let how = Compaction { tolerance: 0.002, arcs: true, helical: false, bow: p.tolerance };
+    let merged = compact(&loops, &how).unwrap();
+    verify(&merged, &hw).unwrap();
+    let arcs = merged.moves.iter().filter(|m| matches!(m, Move::Arc { .. })).count();
+    assert!(arcs >= 6 && merged.moves.len() * 5 < loops.moves.len(), "{arcs} arcs, {} of {} moves", merged.moves.len(), loops.moves.len());
+    for q in feed_points(&loops) {
+        assert!(off_path(&merged, q) <= how.tolerance + 1e-9, "{q:?} is {} off", off_path(&merged, q));
+    }
+    // Without arcs only lines are merged; a level loop is no helix.
+    let lines_only = compact(&loops, &Compaction { arcs: false, ..how }).unwrap();
+    assert!(!lines_only.moves.iter().any(|m| matches!(m, Move::Arc { .. })));
+    // A hostile tolerance is refused.
+    for bad in [-1.0, f64::NAN, 1e9] {
+        assert!(compact(&loops, &Compaction { tolerance: bad, ..how }).is_err());
+        assert!(compact(&loops, &Compaction { bow: bad, ..how }).is_err());
+    }
+}
+
+/// A merged move stays near the path it replaces all along it, not only at the points it
+/// replaces: a line within the tolerance, an arc within the tolerance and the bow asked for.
+/// The corners of an octagon lie on a circle, but an arc through them bows out of the
+/// octagon's sides by 7.6% of its radius between them (it was fitted, and a wall the octagon
+/// runs along would have been cut 0.76 mm deep).
+#[test]
+fn compacting_never_moves_the_path_far_between_its_points() {
+    let corner = |k: usize| {
+        let a = k as f64 * PI / 4.0;
+        Vec3::new(10.0 * a.cos(), 10.0 * a.sin(), 0.0)
+    };
+    let mut moves = vec![Move::Rapid { to: corner(0) }];
+    moves.extend((1..=8).map(|k| Move::Feed { to: corner(k), feed: 500.0 }));
+    let octagon = Toolpath { moves };
+    // The same with each side cut into steps: merging gives the sides back as lines.
+    let mut moves = vec![Move::Rapid { to: corner(0) }];
+    for k in 0..8 {
+        moves.extend((1..=10).map(|s| Move::Feed { to: corner(k).lerp(corner(k + 1), s as f64 / 10.0), feed: 500.0 }));
+    }
+    let stepped = Toolpath { moves };
+    let pin = pin(1.0, 10.0, 512);
+    let hw = Heights { clearance: 30.0, retract: 15.0, top: 8.0, bottom: 2.0 };
+    let mut p = wl(hw, rect(-6.0, -6.0, 6.0, 6.0));
+    p.step = 0.5;
+    p.stepdown = 3.0;
+    p.tolerance = 0.0005;
+    let loops = waterline(&pin, &flat(4.0), &p).unwrap();
+    for (path, tol, bow) in [(&octagon, 0.01, 0.01), (&stepped, 0.01, 0.01), (&loops, 0.002, p.tolerance)] {
+        let how = Compaction { tolerance: tol, arcs: true, helical: true, bow };
+        let merged = compact(path, &how).unwrap();
+        let pts = merged.points(1e-5);
+        for w in pts.windows(2).filter(|w| w[1].1) {
+            for k in 0..=8 {
+                let q = w[0].0.lerp(w[1].0, k as f64 / 8.0);
+                assert!(off_path(path, q) <= tol + bow + 1e-9, "{q:?} is {} off the path it replaces", off_path(path, q));
+            }
+        }
+        for q in feed_points(path) {
+            assert!(off_path(&merged, q) <= tol + 1e-9, "{q:?} is {} off", off_path(&merged, q));
+        }
+    }
+    // The waterline's loops round the pin are still written as arcs.
+    let merged = compact(&loops, &Compaction { tolerance: 0.002, arcs: true, helical: false, bow: p.tolerance }).unwrap();
+    assert!(merged.moves.iter().filter(|m| matches!(m, Move::Arc { .. })).count() >= 6);
+    // The octagon stays an octagon.
+    let merged = compact(&octagon, &Compaction { tolerance: 0.01, arcs: true, helical: true, bow: 0.01 }).unwrap();
+    assert!(!merged.moves.iter().any(|m| matches!(m, Move::Arc { .. })), "{merged:?}");
+}
+
 /// A link between two points where nothing is under the cutter (the ends of two passes that
 /// ran off the part's reach) still looks between them: here the straight line passes 0.2 mm
 /// under where the ball rests on the corner of a block, and used to be taken as it was (a link

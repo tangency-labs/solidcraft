@@ -39,7 +39,7 @@ fn trace(path: &Toolpath) -> Vec<(char, f64)> {
         .iter()
         .map(|m| match *m {
             Move::Rapid { to } => ('R', to.z),
-            Move::Feed { to, .. } | Move::Arc { to, .. } => ('F', to.z),
+            Move::Feed { to, .. } | Move::Arc { to, .. } | Move::PlaneArc { to, .. } => ('F', to.z),
             Move::Dwell { seconds } => ('D', seconds),
         })
         .collect()

@@ -140,7 +140,7 @@ impl Toolpath5 {
             match *m {
                 Move::Rapid { to } => out.push(Move5::Rapid { to: Pose::new(frame.to_world(to), axis) }),
                 Move::Feed { to, feed } => out.push(Move5::Feed { to: Pose::new(frame.to_world(to), axis), feed }),
-                Move::Arc { feed, .. } => {
+                Move::Arc { feed, .. } | Move::PlaneArc { feed, .. } => {
                     // Follow the arc as `Toolpath::points` does, from where the tool is.
                     let one = Toolpath { moves: pos.map(|p| Move::Rapid { to: p }).into_iter().chain([*m]).collect() };
                     for (p, cutting) in one.points(tol).into_iter().skip(usize::from(pos.is_some())) {

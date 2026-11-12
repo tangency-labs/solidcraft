@@ -57,7 +57,7 @@ use crate::gcode::{
 use crate::indexed::{IndexedOperation, frame_for_index, head_upright};
 use crate::kinematics::{AxisLetter, Carrier, JointMove, Joints, Machine, check_limits, forward, nearest_turn, solve_from};
 use crate::multiaxis::{Operation5, Program5, verify5};
-use crate::path::{MAX_MOVES, Move, arc_sweep};
+use crate::path::{ArcPlane, MAX_MOVES, Move, PlaneArc, arc_sweep};
 use crate::post::{CommentStyle, Post, Values, check_template, fill};
 use crate::tool::Tool;
 
@@ -338,6 +338,8 @@ struct Writer5<'a> {
     /// Lines held back until the operation's first turn of the rotaries is written
     /// ([`Post5::coolant_after_turn`]), or until any other motion if that comes first.
     held: Vec<String>,
+    /// The plane arcs are in as written: `G17` (the headers' plane) until a vertical arc.
+    plane: ArcPlane,
 }
 
 impl Writer5<'_> {
@@ -656,7 +658,12 @@ impl Writer5<'_> {
             return self.feed(to, rot, Rate::Linear(feed));
         }
         let mode = self.feed_mode(false).to_string();
-        let mut words = vec![mode, self.motion(if ccw { 3 } else { 2 })];
+        let plane = self.plane_word(ArcPlane::Xy);
+        if !plane.is_empty() {
+            // After a change of plane the motion code is written again, so the block reads on its own.
+            self.mode = None;
+        }
+        let mut words = vec![mode, plane, self.motion(if ccw { 3 } else { 2 })];
         // A modal post leaves out an end coordinate that does not change.
         if !self.post.modal_motion || !same_x {
             words.push(format!("X{nx}"));
@@ -672,6 +679,85 @@ impl Writer5<'_> {
         let f = self.rate_word(Rate::Linear(feed))?;
         words.push(f);
         self.lin = [Some(nx), Some(ny), Some(nz)];
+        (self.pos, self.height) = (Some(to), Height::At(to.z));
+        self.block(&join(&words));
+        Ok(())
+    }
+
+    /// The plane word (`G17`, `G18`, `G19`) when `plane` is not the one in force, written on the
+    /// arc's own block, before its motion code.
+    fn plane_word(&mut self, plane: ArcPlane) -> String {
+        if self.plane == plane {
+            return String::new();
+        }
+        self.plane = plane;
+        format!("G{}", plane.code())
+    }
+
+    /// Back to `G17` on a block of its own, after an operation that wrote a vertical arc, so
+    /// that what follows (canned cycles, another post's arcs) is in the plane the header set.
+    fn plane_xy(&mut self) {
+        if self.plane != ArcPlane::Xy {
+            self.release();
+            let w = self.plane_word(ArcPlane::Xy);
+            self.block(&w);
+        }
+    }
+
+    /// An arc in `plane` (`G18` ZX or `G19` YZ) about `center`, the rotaries held: the plane
+    /// word, the end's two coordinates in the plane (a modal post leaves out one that does not
+    /// change), the coordinate along the normal when it changes (a helix), and both centre
+    /// offsets of the plane (`I J K` for X Y Z). Lines within the post's arc tolerance when the
+    /// post writes no arcs (or no helices, for a helix).
+    fn plane_arc(&mut self, to: Vec3, center: Vec3, plane: ArcPlane, ccw: bool, feed: f64, rot: &[f64]) -> Result<()> {
+        if plane == ArcPlane::Xy {
+            return self.arc(to, Vec2::new(center.x, center.y), ccw, feed, rot);
+        }
+        self.release();
+        let Some(from) = self.pos else { return Err(CamError::Unsafe("an arc before the first positioning move".into())) };
+        let (u, v, n) = plane.axes();
+        let pick = |p: Vec3, i: usize| match i {
+            0 => p.x,
+            1 => p.y,
+            _ => p.z,
+        };
+        let new: [String; 3] = [self.coord(to.x), self.coord(to.y), self.coord(to.z)];
+        let unchanged: Vec<bool> = (0..3).map(|i| self.lin.get(i).and_then(Option::as_ref) == new.get(i)).collect();
+        let same = |i: usize| unchanged.get(i).copied().unwrap_or(false);
+        // An arc whose end is written the same as its start would be read as a full circle.
+        if same(u) && same(v) {
+            return self.feed(to, rot, Rate::Linear(feed));
+        }
+        let helix = !same(n);
+        if !self.post.arcs || (helix && !self.post.helical_arcs) {
+            let arc = PlaneArc { from, to, center, plane, ccw };
+            let points = arc.points(self.post.arc_tolerance);
+            for p in points {
+                self.feed(p, rot, Rate::Linear(feed))?;
+            }
+            return Ok(());
+        }
+        let mode = self.feed_mode(false).to_string();
+        let word = self.plane_word(plane);
+        if !word.is_empty() {
+            self.mode = None;
+        }
+        let mut words = vec![mode, word, self.motion(if ccw { 3 } else { 2 })];
+        for (i, letter) in ['X', 'Y', 'Z'].into_iter().enumerate() {
+            let in_plane = i == u || i == v;
+            let write = if in_plane { !self.post.modal_motion || !same(i) } else { helix };
+            if write && let Some(w) = new.get(i) {
+                words.push(format!("{letter}{w}"));
+            }
+        }
+        for (i, letter) in ['I', 'J', 'K'].into_iter().enumerate() {
+            if i == u || i == v {
+                words.push(format!("{letter}{}", self.coord(pick(center, i) - pick(from, i))));
+            }
+        }
+        let f = self.rate_word(Rate::Linear(feed))?;
+        words.push(f);
+        self.lin = new.map(Some);
         (self.pos, self.height) = (Some(to), Height::At(to.z));
         self.block(&join(&words));
         Ok(())
@@ -837,7 +923,7 @@ fn check_indexed(op: &IndexedOperation, machine: &Machine) -> Result<()> {
         }
         match *m {
             Move::Rapid { .. } => started = true,
-            Move::Feed { feed, .. } | Move::Arc { feed, .. } => {
+            Move::Feed { feed, .. } | Move::Arc { feed, .. } | Move::PlaneArc { feed, .. } => {
                 if !started {
                     return Err(CamError::Unsafe(format!("move {i}: a cut before the first positioning move")));
                 }
@@ -1311,6 +1397,7 @@ fn emit_ops(name: &str, work_offset: Option<u8>, ops: &[Op<'_>], post: &Post5, m
         length_on_z: base.tool_length_on_first_z,
         tool: None,
         held: Vec::new(),
+        plane: ArcPlane::Xy,
     };
     let mut values = Values { program: plain(name), units: base.units.code().into(), work_offset: work_offset_code(offset)?, ..Values::default() };
     w.comment(name);
@@ -1473,12 +1560,14 @@ fn emit_ops(name: &str, work_offset: Option<u8>, ops: &[Op<'_>], post: &Post5, m
                         Move::Rapid { to } => w.rapid(to, top),
                         Move::Feed { to, feed } => w.feed(to, &rotary, Rate::Linear(feed))?,
                         Move::Arc { to, center, ccw, feed } => w.arc(to, center, ccw, feed, &rotary)?,
+                        Move::PlaneArc { to, center, plane, ccw, feed } => w.plane_arc(to, center, plane, ccw, feed, &rotary)?,
                         Move::Dwell { seconds } => w.dwell(seconds, &base.dwell, &mut values)?,
                     }
                     if let Some(to) = m.target() {
                         joints = Some(Joints { linear: to, rotary: rotary.clone() });
                     }
                 }
+                w.plane_xy();
             }
         }
         w.release();
@@ -1528,20 +1617,45 @@ pub enum JointWords {
         f: f64,
         mm_per_unit: f64,
     },
+    /// An arc in the XZ (`G18`) or YZ (`G19`) plane about `center` (its coordinates in the
+    /// plane count), the rotaries held, at `f` per minute.
+    PlaneArc {
+        line: usize,
+        linear: Vec3,
+        center: Vec3,
+        plane: ArcPlane,
+        ccw: bool,
+        rotary: Vec<f64>,
+        f: f64,
+        mm_per_unit: f64,
+    },
     Dwell {
         line: usize,
         seconds: f64,
     },
 }
 
+impl JointWords {
+    /// The arc of an `Arc` or `PlaneArc` block that starts at `from`, in its plane.
+    pub fn arc_from(&self, from: Vec3) -> Option<PlaneArc> {
+        match *self {
+            JointWords::Arc { linear, center, ccw, .. } => {
+                Some(PlaneArc { from, to: linear, center: center.extend(from.z), plane: ArcPlane::Xy, ccw })
+            }
+            JointWords::PlaneArc { linear, center, plane, ccw, .. } => Some(PlaneArc { from, to: linear, center, plane, ccw }),
+            _ => None,
+        }
+    }
+}
+
 /// Reads the motion of a 4th-axis program in absolute coordinates: `G0`–`G3` with `X Y Z`,
-/// `I J` (arcs in the XY plane, the rotaries held), the rotary words `letters` (degrees) and
-/// `F`, `G93`/`G94`, `G20`/`G21`, `G4`, and `G91.1` (arc centres from the arc's start; `G90.1`
-/// is refused). A `G53` block moves in machine coordinates and a `G28`/`G30` block (as in `G28
-/// G91 Z0.`) to the machine's home, so the axes they name are unknown until written again. Any
-/// other move in incremental coordinates (`G91`) is refused, and so are arcs in the XZ or YZ
-/// plane (`G18`, `G19`) and tool centre point control (`G43.4`), which this crate does not write
-/// yet. Everything else (spindle, tools, coolant, offsets) is skipped, and so are blocks before
+/// `I J K` (arcs in the plane `G17`, `G18` or `G19` selects, the rotaries held), the rotary
+/// words `letters` (degrees) and `F`, `G93`/`G94`, `G20`/`G21`, `G4`, and `G91.1` (arc centres
+/// from the arc's start; `G90.1` is refused). A `G53` block moves in machine coordinates and a
+/// `G28`/`G30` block (as in `G28 G91 Z0.`) to the machine's home, so the axes they name are
+/// unknown until written again. Any other move in incremental coordinates (`G91`) is refused,
+/// and so is tool centre point control (`G43.4`), which this crate does not write yet.
+/// Everything else (spindle, tools, coolant, offsets) is skipped, and so are blocks before
 /// every axis is known.
 pub fn parse5(text: &str, letters: &[AxisLetter]) -> Result<Vec<JointWords>> {
     let mut units = 1.0;
@@ -1549,6 +1663,7 @@ pub fn parse5(text: &str, letters: &[AxisLetter]) -> Result<Vec<JointWords>> {
     let mut inverse = false;
     let mut incremental = false;
     let mut feed: Option<f64> = None;
+    let mut plane = ArcPlane::Xy;
     let mut lin: [Option<f64>; 3] = [None, None, None];
     let mut rot: Vec<Option<f64>> = vec![None; letters.len()];
     let mut out = Vec::new();
@@ -1569,7 +1684,9 @@ pub fn parse5(text: &str, letters: &[AxisLetter]) -> Result<Vec<JointWords>> {
                 20 => mode = Some(2),
                 30 => mode = Some(3),
                 40 => dwell = true,
-                180 | 190 => return Err(CamError::Parse(n, "not supported yet: arcs in the XZ or YZ plane (G18, G19)".into())),
+                170 => plane = ArcPlane::Xy,
+                180 => plane = ArcPlane::Zx,
+                190 => plane = ArcPlane::Yz,
                 200 => units = 25.4,
                 210 => units = 1.0,
                 280 | 300 => (machine_coords, home) = (true, true),
@@ -1618,11 +1735,11 @@ pub fn parse5(text: &str, letters: &[AxisLetter]) -> Result<Vec<JointWords>> {
             }
             continue;
         }
-        let (ti, tj) = (word('I'), word('J'));
-        if incremental && !linear_words.iter().chain(&rotary_words).chain([&ti, &tj]).all(Option::is_none) {
+        let (ti, tj, tk) = (word('I'), word('J'), word('K'));
+        if incremental && !linear_words.iter().chain(&rotary_words).chain([&ti, &tj, &tk]).all(Option::is_none) {
             return Err(CamError::Parse(n, "not supported yet: incremental coordinates (G91)".into()));
         }
-        if linear_words.iter().chain(&rotary_words).chain([&ti, &tj]).all(Option::is_none) {
+        if linear_words.iter().chain(&rotary_words).chain([&ti, &tj, &tk]).all(Option::is_none) {
             continue;
         }
         let Some(mode) = mode else { return Err(CamError::Parse(n, "coordinates before any G0, G1, G2 or G3".into())) };
@@ -1672,11 +1789,32 @@ pub fn parse5(text: &str, letters: &[AxisLetter]) -> Result<Vec<JointWords>> {
             return Err(CamError::Parse(n, "not supported yet: an arc that turns a rotary".into()));
         }
         let Some(from) = from else { return Err(CamError::Parse(n, "an arc before the position is known".into())) };
-        if ti.is_none() && tj.is_none() {
-            return Err(CamError::Parse(n, "not supported yet: arcs without I and J".into()));
+        let offsets = [ti, tj, tk];
+        let (u, v, _) = plane.axes();
+        if offsets.get(u).copied().flatten().is_none() && offsets.get(v).copied().flatten().is_none() {
+            let words = match plane {
+                ArcPlane::Xy => "I and J",
+                ArcPlane::Zx => "I and K (G18)",
+                ArcPlane::Yz => "J and K (G19)",
+            };
+            return Err(CamError::Parse(n, format!("not supported yet: arcs without {words}")));
         }
-        let center = Vec2::new(from.x + ti.unwrap_or(0.0) * units, from.y + tj.unwrap_or(0.0) * units);
-        out.push(JointWords::Arc { line: n, linear, center, ccw: mode == 3, rotary, f: rate, mm_per_unit: units });
+        let off = |i: usize| offsets.get(i).copied().flatten().unwrap_or(0.0) * units;
+        if plane == ArcPlane::Xy {
+            let center = Vec2::new(from.x + off(0), from.y + off(1));
+            out.push(JointWords::Arc { line: n, linear, center, ccw: mode == 3, rotary, f: rate, mm_per_unit: units });
+        } else {
+            // The centre's coordinate along the normal is the start's: only the plane's count.
+            let mut center = from;
+            for i in [u, v] {
+                match i {
+                    0 => center.x += off(0),
+                    1 => center.y += off(1),
+                    _ => center.z += off(2),
+                }
+            }
+            out.push(JointWords::PlaneArc { line: n, linear, center, plane, ccw: mode == 3, rotary, f: rate, mm_per_unit: units });
+        }
     }
     Ok(out)
 }

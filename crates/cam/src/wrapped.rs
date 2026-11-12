@@ -275,7 +275,7 @@ fn unscale(path: &Toolpath, k: f64, tol: f64, out: &mut Vec<Move>) -> Result<()>
         match *m {
             Move::Rapid { to } => push(Move::Rapid { to: back(to) }, out)?,
             Move::Feed { to, feed } => push(Move::Feed { to: back(to), feed }, out)?,
-            Move::Arc { feed, .. } => {
+            Move::Arc { feed, .. } | Move::PlaneArc { feed, .. } => {
                 let Some(from) = pos else { return invalid("a toolpath must not start with an arc") };
                 let one = Toolpath { moves: vec![Move::Rapid { to: from }, *m] };
                 for (p, _) in one.points(tol).into_iter().skip(1) {

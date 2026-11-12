@@ -19,14 +19,13 @@ use std::f64::consts::PI;
 use std::hash::{BuildHasherDefault, Hasher};
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Vec2, Vec3};
+use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
 use crate::gcode5::{JointWords, MachineOperation, MachineProgram, Post5, four_axis_only, parse5};
 use crate::kinematics::{Carrier, Joints, Machine, arc_distance, forward};
 use crate::machine_time::{DwellUnit, joint_dwells_in};
 use crate::multiaxis::{Move5, Pose, Program5, Toolpath5, slerp};
-use crate::path::{Move, Toolpath};
 use crate::{CamError, Result};
 
 /// Most grid entries the comparison builds.
@@ -137,13 +136,6 @@ fn pose_at(machine: &Machine, linear: Vec3, rotary: &[f64]) -> Pose {
     forward(machine, &Joints { linear, rotary: rotary.to_vec() })
 }
 
-/// The points a written arc in the XY plane from `from` passes through, its start left out and
-/// its end last, followed within [`ARC_SAMPLE`]; and its length.
-fn arc_points(from: Vec3, to: Vec3, center: Vec2, ccw: bool) -> (Vec<Vec3>, f64) {
-    let arc = Toolpath { moves: vec![Move::Rapid { to: from }, Move::Arc { to, center, ccw, feed: 1.0 }] };
-    (arc.points(ARC_SAMPLE).into_iter().skip(1).map(|(p, _)| p).collect(), arc.stats().cut_length)
-}
-
 /// [`readback5`] for a program that may hold indexed operations
 /// ([`crate::gcode5::emit_program`]).
 pub fn readback_program(text: &str, program: &MachineProgram, post: &Post5, machine: &Machine) -> Result<Readback5> {
@@ -210,13 +202,14 @@ pub fn readback_program(text: &str, program: &MachineProgram, post: &Post5, mach
                 }
                 Some(to)
             }
-            JointWords::Arc { linear, center, ccw, rotary, f, mm_per_unit, .. } => {
+            JointWords::Arc { linear, rotary, f, mm_per_unit, .. } | JointWords::PlaneArc { linear, rotary, f, mm_per_unit, .. } => {
                 let to = State { linear: *linear, rotary: rotary.clone() };
-                if let Some(from) = state.as_ref() {
-                    let (points, length) = arc_points(from.linear, *linear, *center, *ccw);
-                    cut_minutes += length / (f * mm_per_unit);
+                if let Some(from) = state.as_ref()
+                    && let Some(arc) = w.arc_from(from.linear)
+                {
+                    cut_minutes += arc.length() / (f * mm_per_unit);
                     let mut prev = pose_at(machine, from.linear, rotary);
-                    for q in points {
+                    for q in arc.points(ARC_SAMPLE) {
                         let p = pose_at(machine, q, rotary);
                         cut_length += prev.tip.dist(p.tip);
                         written_segments.push((prev, p));

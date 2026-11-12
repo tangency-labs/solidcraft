@@ -15,7 +15,8 @@
 //! A chamfer the model does not show (a deburr on a sharp edge, the usual case) is part of
 //! what the operation is told to cut: [`band_gouges`] holds the cone against the part less the
 //! chamfer band, so only a cut beyond it is a gouge. The same check serves a chamfer mill
-//! spotting holes ([`crate::drill`]), whose band is their depth.
+//! tracing a line to a depth (V-engraving) and spotting holes ([`crate::drill`]), whose band is
+//! their depth.
 //!
 //! Here too are the operations a chamfer mill or a face mill is refused for: a chamfer mill's
 //! pointed end leaves ridges between roughing passes a diameter apart, and a face mill's
@@ -173,8 +174,8 @@ pub(crate) fn cone_height(tool: &Tool) -> Result<f64> {
     Ok(((cutter.radius - cone.tip_radius) / tan).min(tool.flute_length))
 }
 
-/// Refuses a cut with the cone's point (a spot) `depth` mm deep (from the face it is told to
-/// start at) deeper than `tool`'s cone ([`cone_height`]); `what` names it.
+/// Refuses a V-trace or a spot of `depth` mm (from the face it is told to start at) deeper than
+/// `tool`'s cone ([`cone_height`]); `what` names it.
 pub(crate) fn within_cone(tool: &Tool, depth: f64, what: &str) -> Result<()> {
     let high = cone_height(tool)?;
     if !(depth <= high + 1e-9) {

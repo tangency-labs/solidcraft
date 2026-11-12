@@ -202,10 +202,10 @@ fn contour_runs_round_the_part_with_the_wall_on_the_chosen_side() {
         contour(&regions, &tool(6.0), &params, &c).unwrap()
     };
     let climb = run(true);
-    // Two passes round the rounded rectangle 3 mm outside the part, and 8 mm of plunging
-    // (retract 2 → −3 → −6).
-    close(climb.stats().cut_length, 2.0 * (140.0 + 6.0 * PI) + 8.0, 1e-6);
-    close(climb.stats().cut_minutes, 2.0 * (140.0 + 6.0 * PI) / 600.0 + 8.0 / 200.0, 1e-9);
+    // Two passes round the rounded rectangle 3 mm outside the part, and 7 mm of plunging
+    // (from 1 mm above the top, where the rapid from the clearance height stops, → −3 → −6).
+    close(climb.stats().cut_length, 2.0 * (140.0 + 6.0 * PI) + 7.0, 1e-6);
+    close(climb.stats().cut_minutes, 2.0 * (140.0 + 6.0 * PI) / 600.0 + 7.0 / 200.0, 1e-9);
     let turns = |path: &Toolpath| {
         let pts = cutting_points(path, -5.9);
         pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| a.x * b.y - a.y * b.x).sum::<f64>()
@@ -221,18 +221,20 @@ fn contour_runs_round_the_part_with_the_wall_on_the_chosen_side() {
     let inside = ContourParams { side: Side::Inside, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
     assert!(contour(&[rect(0.0, 0.0, 5.0, 5.0)], &tool(6.0), &inside, &c).is_err());
     let inner = contour(&regions, &tool(6.0), &inside, &c).unwrap();
-    close(inner.stats().cut_length, 2.0 * 2.0 * (34.0 + 24.0) + 8.0, 1e-6);
+    close(inner.stats().cut_length, 2.0 * 2.0 * (34.0 + 24.0) + 7.0, 1e-6);
     // Climb inside an opening is counter-clockwise.
     assert!(turns(&inner) > 0.0);
 }
 
-/// The steepest descent of a cutting move (radians), and whether any goes straight down below `top`.
+/// The steepest descent of a cutting move (radians), and whether any goes straight down below
+/// `top`; a feed straight down from where a rapid stopped (through the air a level before cut,
+/// to that level) is not counted.
 fn steepest(path: &Toolpath, top: f64) -> (f64, bool) {
     let pts = path.points(0.002);
     let (mut angle, mut plunges) = (0.0f64, false);
     for w in pts.windows(2) {
         let (a, b) = (w[0].0, w[1].0);
-        if !w[1].1 || b.z >= a.z - 1e-9 || a.z > top + 1e-9 {
+        if !w[1].1 || b.z >= a.z - 1e-9 || a.z > top + 1e-9 || (!w[0].1 && (b.x - a.x).hypot(b.y - a.y) < 1e-9) {
             continue;
         }
         let run = (b.x - a.x).hypot(b.y - a.y);
@@ -246,21 +248,24 @@ fn steepest(path: &Toolpath, top: f64) -> (f64, bool) {
 fn ramps_replace_plunges_into_material() {
     let ramp = 3.0f64.to_radians();
     let regions = [rect(0.0, 0.0, 40.0, 30.0)];
-    // Round the part: each pass ramps once round the 140 + 6π loop, then cuts it flat.
+    // Round the part: each pass ramps down the 3 mm at exactly the angle, part of the way
+    // round the 140 + 6π loop, goes on round at the depth to where it started, then cuts it
+    // flat; 1 mm of plunging down to the top first.
     let c = cut(0.0, -6.0, 3.0);
     let params = ContourParams { side: Side::Outside, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: ramp };
     let path = contour(&regions, &tool(6.0), &params, &c).unwrap();
     let lap = 140.0 + 6.0 * PI;
-    close(path.stats().cut_length, 2.0 * (lap.hypot(3.0) + lap) + 2.0, 1e-6);
+    let run = 3.0 / ramp.tan();
+    close(path.stats().cut_length, 2.0 * (run.hypot(3.0) + (lap - run) + lap) + 1.0, 1e-6);
     let (angle, plunges) = steepest(&path, 0.0);
-    assert!(!plunges && angle <= ramp + 1e-6 && angle > 0.01, "{angle} {plunges}");
+    assert!(!plunges && (angle - ramp).abs() <= ramp * 1e-3, "{angle} {plunges}");
     assert_eq!(path.stats().lowest_z, Some(-6.0));
 
     // In a pocket the first ring is short, so the ramp goes round it several times.
     let params = PocketParams { stepover: 2.5, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: ramp };
     let path = pocket(&regions, &tool(6.0), &params, &cut(0.0, -5.0, 2.5)).unwrap();
     let (angle, plunges) = steepest(&path, 0.0);
-    assert!(!plunges && angle <= ramp + 1e-6 && angle > 0.01, "{angle} {plunges}");
+    assert!(!plunges && (angle - ramp).abs() <= ramp * 1e-3, "{angle} {plunges}");
     assert_eq!(path.stats().lowest_z, Some(-5.0));
     for p in cutting_points(&path, 0.0) {
         assert!(p.x >= 3.0 - 1e-6 && p.x <= 37.0 + 1e-6 && p.y >= 3.0 - 1e-6 && p.y <= 27.0 + 1e-6, "gouge at {p:?}");
@@ -277,6 +282,128 @@ fn ramps_replace_plunges_into_material() {
     assert_eq!(tight.stats().lowest_z, Some(-5.0));
     assert!(steepest(&tight, 0.0).1);
     assert!(pocket(&regions, &tool(6.0), &PocketParams { ramp_angle: 2.0, ..params }, &c).is_err());
+}
+
+/// Every cut that goes down, ramps included, goes down no faster than the plunge feed: a 2°
+/// ramp at 3600 mm/min would go down at 126 mm/min, so it is fed at 2865 for a 100 mm/min
+/// plunge feed. The ramp is at the angle asked for, not shallower.
+#[test]
+fn ramps_go_down_at_the_angle_and_no_faster_than_the_plunge_feed() {
+    let ramp = 2.0f64.to_radians();
+    let c = Cut {
+        heights: Heights { clearance: 10.0, retract: 2.0, top: 0.0, bottom: -5.0 },
+        feeds: Feeds { cut: 3600.0, plunge: 100.0 },
+        stepdown: 1.25,
+    };
+    let hole = [Region2 { outer: Loop2::circle(v(0.0, 0.0), 3.0), holes: vec![] }];
+    let pocket_region = [rect(-15.0, -10.0, 15.0, 10.0)];
+    let contour_path =
+        contour(&hole, &tool(4.0), &ContourParams { side: Side::Inside, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: ramp }, &c)
+            .unwrap();
+    let pocket_path =
+        pocket(&pocket_region, &tool(4.0), &PocketParams { stepover: 1.6, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: ramp }, &c)
+            .unwrap();
+    for path in [&contour_path, &pocket_path] {
+        verify(path, &c.heights).unwrap();
+        let (angle, plunges) = steepest(path, 0.0);
+        assert!(!plunges && (angle - ramp).abs() <= ramp * 1e-3, "{angle}° {plunges}");
+        let mut pos: Option<Vec3> = None;
+        let mut ramps = 0;
+        for m in &path.moves {
+            if let Some(q) = pos {
+                let (to, feed, len) = match *m {
+                    Move::Feed { to, feed } => (to, feed, q.dist(to)),
+                    Move::Arc { to, center, ccw, feed } => {
+                        (to, feed, (Vec2::new(q.x, q.y).dist(center) * arc_sweep(q, to, center, ccw)).hypot(to.z - q.z))
+                    }
+                    _ => (q, 0.0, 0.0),
+                };
+                let drop = q.z - to.z;
+                if drop > 1e-9 && len > 0.0 {
+                    assert!(feed * drop / len <= c.feeds.plunge * (1.0 + 1e-9), "{q:?} → {to:?} goes down at {}", feed * drop / len);
+                    if len > drop * 2.0 {
+                        ramps += 1;
+                        assert!(feed > 2800.0, "a ramp at {feed}");
+                    }
+                }
+            }
+            pos = m.target().or(pos);
+        }
+        assert!(ramps > 4, "{ramps} ramping moves");
+    }
+}
+
+/// Between levels a pocket comes down at rapid through what the level before cleared, to
+/// [`ENTRY_GAP`] above it, and feeds from there; it used to feed from the retract height.
+#[test]
+fn pocket_levels_come_down_through_the_air_they_cleared() {
+    let c =
+        Cut { heights: Heights { clearance: 10.0, retract: 5.0, top: 0.0, bottom: -6.0 }, feeds: Feeds { cut: 600.0, plunge: 100.0 }, stepdown: 1.5 };
+    let island = Loop2::circle(v(30.0, 20.0), 6.0);
+    let regions = [Region2 { outer: rect(0.0, 0.0, 60.0, 40.0).outer, holes: vec![island.reversed()] }];
+    let params = PocketParams { stepover: 2.0, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
+    let path = pocket(&regions, &tool(6.0), &params, &c).unwrap();
+    verify(&path, &c.heights).unwrap();
+    let levels = [0.0, -1.5, -3.0, -4.5, -6.0];
+    let (mut pos, mut entries) = (None::<Vec3>, 0);
+    let mut last_rapid = false;
+    for m in &path.moves {
+        if let (Move::Feed { to, feed }, Some(q)) = (*m, pos)
+            && last_rapid
+        {
+            entries += 1;
+            assert_eq!(feed, c.feeds.plunge);
+            let before = levels.iter().copied().filter(|l| *l > to.z + 1e-9).fold(f64::INFINITY, f64::min);
+            assert!(q.z <= before.min(0.0) + ENTRY_GAP + 1e-9, "{q:?} → {to:?}");
+        }
+        last_rapid = matches!(m, Move::Rapid { .. });
+        pos = m.target().or(pos);
+    }
+    assert!(entries >= 4, "{entries} entries");
+}
+
+/// The descent feeds are worked out from the coordinates as written: a short cut planned at
+/// a feed that keeps it to the plunge feed's rate of descent can come out steeper once its ends
+/// are rounded to the post's digits, and its feed is then lowered, rounded down.
+#[test]
+fn descent_feeds_hold_for_the_written_coordinates() {
+    let feeds = Feeds { cut: 1950.0, plunge: 100.0 };
+    let from = Vec3::new(0.0, 0.0, 0.0);
+    let to = Vec3::new(0.0014, 0.0, -0.0016);
+    let planned = feeds.plunge * from.dist(to) / (from.z - to.z);
+    let mut path = Toolpath {
+        moves: vec![
+            Move::Rapid { to: Vec3::new(0.0, 0.0, 10.0) },
+            Move::Feed { to: from, feed: feeds.plunge },
+            Move::Feed { to, feed: planned },
+            Move::Feed { to: Vec3::new(5.0, 0.0, -1.0), feed: feeds.cut },
+        ],
+    };
+    // As planned, written to 3 decimals (0.001, 0, -0.002) and F133, it goes down at 119 mm/min.
+    let written = |p: Vec3| Vec3::new((p.x * 1e3).round() / 1e3, (p.y * 1e3).round() / 1e3, (p.z * 1e3).round() / 1e3);
+    let rate = |f: f64| f.round() * (written(from).z - written(to).z) / written(from).dist(written(to));
+    assert!(rate(planned) > 110.0, "{}", rate(planned));
+    limit_descents(&mut path, feeds.plunge, feeds.cut, 3, 1.0, 1.0).unwrap();
+    let Move::Feed { feed, .. } = path.moves[2] else { panic!("{:?}", path.moves[2]) };
+    assert_eq!(feed, feed.floor(), "a whole number of feed steps");
+    assert!(rate(feed) <= feeds.plunge, "goes down at {}", rate(feed));
+    // A plunge stays at the plunge feed; a cut at the cut feed is left alone, even going down.
+    assert!(matches!(path.moves[1], Move::Feed { feed, .. } if feed == feeds.plunge));
+    assert!(matches!(path.moves[3], Move::Feed { feed, .. } if feed == feeds.cut));
+    // The writer takes a half to the even digit (0.0625 is written 0.062), so the cut is worked
+    // out as it is written, not as rounding a half up would have it.
+    let mut half = Toolpath {
+        moves: vec![
+            Move::Rapid { to: Vec3::new(0.0, 0.0, 10.0) },
+            Move::Feed { to: Vec3::ZERO, feed: feeds.plunge },
+            Move::Feed { to: Vec3::new(0.0625, 0.0, -0.01), feed: 1000.0 },
+        ],
+    };
+    limit_descents(&mut half, feeds.plunge, feeds.cut, 3, 1.0, 1.0).unwrap();
+    let Move::Feed { feed, .. } = half.moves[2] else { panic!("{:?}", half.moves[2]) };
+    assert!(feed * 0.01 / 0.062f64.hypot(0.01) <= feeds.plunge, "F{feed} goes down too fast as written");
+    assert!(limit_descents(&mut path, f64::NAN, 1.0, 3, 1.0, 1.0).is_err());
+    assert!(limit_descents(&mut path, 1.0, 1.0, 3, -1.0, 1.0).is_err());
 }
 
 #[test]
@@ -529,6 +656,19 @@ fn verify_refuses_unsafe_paths() {
     for moves in unsafe_paths {
         assert!(matches!(verify(&Toolpath { moves: moves.clone() }, &h), Err(CamError::Unsafe(_))), "{moves:?}");
     }
+    // A level coming down at rapid to just above where a cut went through, or a rapid that
+    // stops above the top of the material, is fine.
+    let ok = vec![
+        Move::Rapid { to: at(0.0, 10.0) },
+        Move::Rapid { to: at(0.0, 0.5) },
+        Move::Feed { to: at(0.0, -1.0), feed: 100.0 },
+        Move::Feed { to: at(5.0, -1.0), feed: 100.0 },
+        Move::Rapid { to: at(5.0, 2.0) },
+        Move::Rapid { to: at(2.5, 2.0) },
+        Move::Rapid { to: at(2.5, -0.5) },
+        Move::Feed { to: at(2.5, -2.0), feed: 100.0 },
+    ];
+    verify(&Toolpath { moves: ok }, &h).unwrap();
     // A drill returning into its own hole is fine.
     let ok = vec![
         Move::Rapid { to: at(0.0, 10.0) },
@@ -700,6 +840,27 @@ fn rapids_down_are_lifted_above_the_material_but_not_out_of_their_own_cut() {
     assert_eq!(path.moves.len(), 12);
     let h = Heights { clearance: 30.0, retract: 3.5, top: 0.0, bottom: -5.0 };
     verify(&path, &h).unwrap();
+}
+
+/// The 3-axis reader follows `G18` and `G19` to the arcs that come after them.
+#[test]
+fn the_reader_follows_the_arc_plane() {
+    let moves =
+        parse("G0 X0 Y10.3 Z5\nG1 Z0.15 F50\nG19 G2 Y10 Z-0.15 J-0.3 K0 F1600\nG1 Y0\nG17 G3 X5 I2.5 J0\nG18 G3 X5.3 Z0.15 I0.3 K0\n").unwrap();
+    let plane: Vec<(ArcPlane, Vec3)> =
+        moves.iter().filter_map(|m| if let Move::PlaneArc { plane, center, .. } = m { Some((*plane, *center)) } else { None }).collect();
+    assert_eq!(plane.len(), 2, "{moves:?}");
+    assert_eq!(plane[0].0, ArcPlane::Yz);
+    assert!((plane[0].1 - Vec3::new(0.0, 10.0, 0.15)).len() < 1e-9, "{plane:?}");
+    assert_eq!(plane[1].0, ArcPlane::Zx);
+    assert!((plane[1].1 - Vec3::new(5.3, 0.0, -0.15)).len() < 1e-9, "{plane:?}");
+    assert!(moves.iter().any(|m| matches!(m, Move::Arc { .. })));
+    let s = Toolpath { moves }.stats();
+    assert!(
+        (s.cut_length - (4.85 + 0.15 * std::f64::consts::PI + 10.0 + 2.5 * std::f64::consts::PI + 0.15 * std::f64::consts::PI)).abs() < 1e-9,
+        "{s:?}"
+    );
+    assert!(parse("G0 X0 Y0 Z0\nG18 G2 X1 Z1 J1 F100\n").is_err());
 }
 
 #[test]

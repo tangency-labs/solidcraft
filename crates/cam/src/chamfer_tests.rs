@@ -1,7 +1,7 @@
 //! Tests of face mills and chamfer mills: their tool-list names, the tapered cutter (its drop
 //! against triangles held against brute force, grown and shrunk), the chamfer operation's
-//! width measured from the G-code it writes, the gouge check with a chamfer mill (chamfers and
-//! spots), and what a chamfer mill and a face mill are refused for.
+//! width measured from the G-code it writes, the gouge check with a chamfer mill (chamfers,
+//! traces and spots), and what a chamfer mill and a face mill are refused for.
 
 use solidcore_record::{Loop2, Region2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
@@ -713,4 +713,56 @@ fn a_spot_deeper_than_the_cone_is_refused() {
     let high = 3.5 / 30f64.to_radians().tan();
     assert!(spot(&tipped, -(high - 0.01)).is_ok());
     assert!(spot(&tipped, -(high + 0.01)).is_err());
+}
+
+#[test]
+fn a_chamfer_mill_traces_a_line_to_a_depth() {
+    // V-engraving: a contour on the profile with a chamfer mill runs its tip along the line at
+    // the depth asked; beside the line (outside or inside) it is still refused.
+    let tool = chamfer_mill(6.0, 0.0, 60.0);
+    let region = [rect(-10.0, -5.0, 10.0, 5.0)];
+    let cut =
+        Cut { heights: Heights { clearance: 10.0, retract: 2.0, top: 0.0, bottom: -0.4 }, feeds: Feeds { cut: 600.0, plunge: 100.0 }, stepdown: 1.0 };
+    let on = ContourParams { side: Side::On, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
+    let path = contour(&region, &tool, &on, &cut).unwrap();
+    let cuts: Vec<Vec3> = path.moves.iter().filter(|m| matches!(m, Move::Feed { .. })).filter_map(Move::target).collect();
+    assert!(cuts.iter().all(|p| p.z >= -0.4 - 1e-9), "{cuts:?}");
+    assert!(cuts.iter().any(|p| (p.x - 10.0).abs() < 1e-9 && (p.z + 0.4).abs() < 1e-9), "{cuts:?}");
+    for side in [Side::Outside, Side::Inside] {
+        let e = contour(&region, &tool, &ContourParams { side, ..on }, &cut).unwrap_err().to_string();
+        assert!(e.contains("tapered"), "{e}");
+    }
+    // Deeper than its flutes: refused.
+    let deep = Cut { heights: Heights { bottom: -11.0, ..cut.heights }, ..cut };
+    assert!(contour(&region, &tool, &on, &deep).is_err());
+    // The trace's band (its depth) lets the true cone cut the top it is told to; a path that
+    // goes deeper than the band does not pass.
+    let flat = block(Vec3::new(-20.0, -20.0, -10.0), Vec3::new(20.0, 20.0, 0.0));
+    let p5 = Toolpath5::from_3axis(&path, 0.001).unwrap();
+    assert!(band_gouges(&flat, &tool, &p5, 0.4, false, 0.01, 0.2).unwrap().is_empty());
+    assert!(!band_gouges(&flat, &tool, &p5, 0.2, false, 0.01, 0.2).unwrap().is_empty());
+}
+
+#[test]
+fn a_trace_deeper_than_the_cone_is_refused() {
+    // Below its cone a chamfer mill cuts with its straight side, a slot as wide as the tool: not
+    // a V-trace, and deeper than any band check could hold.
+    let tool = chamfer_mill(6.0, 0.0, 90.0); // its cone is 3 mm high
+    let region = [rect(-10.0, -5.0, 10.0, 5.0)];
+    let on = ContourParams { side: Side::On, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
+    let cut = |top: f64, bottom: f64| Cut {
+        heights: Heights { clearance: 10.0, retract: 2.0, top, bottom },
+        feeds: Feeds { cut: 600.0, plunge: 100.0 },
+        stepdown: 1.0,
+    };
+    assert!(contour(&region, &tool, &on, &cut(0.0, -3.0)).is_ok());
+    let e = contour(&region, &tool, &on, &cut(0.0, -3.5)).unwrap_err().to_string();
+    assert!(e.contains("cone") && e.contains("3 mm"), "{e}");
+    // A top above the face makes the band no deeper than the cone either.
+    assert!(contour(&region, &tool, &on, &cut(2.0, -1.5)).is_err());
+    // A tipped 60° cone: (4 - 0.5) / tan 30° high.
+    let tipped = chamfer_mill(8.0, 1.0, 60.0);
+    let high = 3.5 / 30f64.to_radians().tan();
+    assert!(contour(&region, &tipped, &on, &cut(0.0, -(high - 0.01))).is_ok());
+    assert!(contour(&region, &tipped, &on, &cut(0.0, -(high + 0.01))).is_err());
 }

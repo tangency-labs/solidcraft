@@ -109,7 +109,7 @@ pub fn wrap_with_step(path: &Toolpath, radius: f64, tolerance: f64, max_angle_st
                 Some(from) => w.segment(from, to, Some(feed), &mut out)?,
                 None => out.push(Move5::Feed { to: w.pose(to, 0.0)?, feed }),
             },
-            Move::Arc { feed, .. } => {
+            Move::Arc { feed, .. } | Move::PlaneArc { feed, .. } => {
                 let Some(from) = pos else { return invalid("a toolpath must not start with an arc") };
                 // The arc as flat points, close enough that wrapping keeps it within half the
                 // tolerance; then each piece wrapped within the other half.
