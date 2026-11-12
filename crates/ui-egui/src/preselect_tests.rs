@@ -4286,3 +4286,30 @@ fn fix_takes_a_boxed_selection_with_its_dimensions_and_hundreds_of_entities() {
         assert!(h.app.session.selection.is_empty(), "{lines} lines: the selection is used up");
     }
 }
+
+/// Editing a Split Face made with sketch curves keeps its sketch and `loops`: the dialog has
+/// no box for a sketch, so OK must not turn it into a split by the plane shown in its tool box.
+#[test]
+fn split_face_dialog_keeps_a_sketch_split_and_its_loops() {
+    let app = app_with(json!([
+        {"command":"solid.box", "params":{"length":40,"width":30,"height":20,"body_name":"B"}},
+        {"command":"sketch.create", "params":{"plane":"XY","name":"Loop"}},
+        {"command":"sketch.line", "params":{"points":[[10,5],[30,5],[20,25]],"closed":true}},
+        {"command":"sketch.finish", "params":{}},
+        {"command":"solid.split_face", "params":{"faces":[[20,12,20]],"body":"B","sketch":"Loop","loops":true,"name":"ByLoop"}},
+        {"command":"solid.split_face", "params":{"faces":[[2,2,0]],"body":"B","plane":{"origin":[0,15,0],"normal":[0,1,0]},"name":"ByPlane"}}
+    ]));
+    let commands_for = |name: &str| {
+        let feature = app.session.doc.find_feature(name).unwrap().kind.clone();
+        let (kind, inputs, extra) = crate::dialogs_surface::for_feature(&app, &feature, &solidcraft_engine::doc::IDENTITY).unwrap();
+        let Kind::Surface(k) = kind else { panic!("expected a surface dialog") };
+        crate::dialogs_surface::commands(&app, &k, &inputs, &extra).unwrap().remove(0)
+    };
+    let sketch = app.session.doc.find_feature("Loop").unwrap().id;
+    let (cmd, p) = commands_for("ByLoop");
+    assert_eq!(cmd, "solid.split_face");
+    assert_eq!(p["sketch"], json!(sketch));
+    assert_eq!(p["loops"], json!(true));
+    let (_, p) = commands_for("ByPlane");
+    assert!(p.get("sketch").is_none() && p.get("loops").is_none(), "{p}");
+}
