@@ -1142,6 +1142,20 @@ fn overflow_first(
     Ok(Ok(fresh))
 }
 
+/// A kernel error as ops' blend failure, for a caller that runs the kernel's blend itself: a
+/// failure the kernel states in words where it replaced a bare status (its `BlendFailure`), as
+/// [`Error::BlendFailed`] with its class, its status and the kernel's statement; `None` for any
+/// other error.
+#[must_use]
+pub fn failure(e: &SolidError) -> Option<Error> {
+    let b = e.blend_failure().filter(|b| b.replaces_upstream_status())?;
+    Some(Error::BlendFailed {
+        class: b.kind(),
+        status: e.sm_status().unwrap_or(solidcore::error::SM_ERR),
+        phrase: b.to_string(),
+    })
+}
+
 /// The edges of `body` at native-list indices `edges` blended by `kind`, edge i at `sizes[i]` (or
 /// `sizes[0]` for every edge), the corners at `setbacks` set back (not for a chamfer, whose
 /// corners are bevelled) and, with [`Corners::Open`], left open. When some of the rounds
