@@ -521,6 +521,11 @@ fn orbit_after_home_turns_the_model_in_place_beside_the_browser() {
         h.app.animate_view("home");
         h.settle();
         let rect = h.app.viewport.rect.unwrap();
+        // The pivot is the point Home centres the model on (the free view's middle, kept clear of the
+        // navigation bar), so that is where the orbit must hold still; it is no longer `layout.middle` itself.
+        let middle =
+            crate::viewport_layout::framing_centre(h.app.cam, &crate::viewport::view_bounds(&h.app), h.app.viewport.layout.as_ref().unwrap())
+                .unwrap();
         let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
         // The model's middle, and the point at the camera target's depth under the free view's middle.
         let centre = crate::viewport::view_bounds(&h.app).center();
@@ -542,5 +547,30 @@ fn orbit_after_home_turns_the_model_in_place_beside_the_browser() {
         assert!(held.distance(middle) < 1.0, "browser {browser}: the free view's middle moved from {middle:?} to {held:?}");
         let after = proj(&h).to_screen(centre).unwrap();
         assert!(after.distance(middle) < reach + 1.0, "browser {browser}: the model's middle went from {before:?} to {after:?}");
+    }
+}
+
+/// The default orbit pivot is exactly the screen point Home centres the model on, not the free view's middle,
+/// which lies a few points off it because Home leaves room for the navigation bar (#14651): no drift after
+/// Home, with the Browser shown and hidden.
+#[test]
+fn the_orbit_pivot_is_the_point_home_centres_on() {
+    for browser in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        moved_block(&mut h);
+        h.app.ui.show_browser = browser;
+        h.settle();
+        h.app.animate_view("home");
+        h.settle();
+        let rect = h.app.viewport.rect.unwrap();
+        let proj = crate::viewport::projection(&h.app, rect);
+        let centre = proj.to_screen(crate::viewport::view_bounds(&h.app).center()).unwrap();
+        let layout = h.app.viewport.layout.as_ref().unwrap();
+        let home = crate::viewport_layout::framing_centre(h.app.cam, &crate::viewport::view_bounds(&h.app), layout).unwrap();
+        let pivot = crate::navigation::view_middle(&h.app, rect).unwrap_or(h.app.cam.target);
+        let at = proj.to_screen(pivot).unwrap();
+        assert!(at.distance(home) < 0.5, "browser {browser}: the pivot is at {at:?}, Home centres on {home:?}");
+        assert!(at.distance(centre) < 1.5, "browser {browser}: Home left the model at {centre:?}, the pivot is at {at:?}");
     }
 }
