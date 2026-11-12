@@ -266,7 +266,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
-    k.fixes.fillet_retry_radius_as_first = true;
     k.fixes.fillet_run_on_past_far_end_only = true;
     k.fixes.fillet_split_edge_keeps_near_half = true;
     k.fixes.fillet_trace_reaches_rails = true;

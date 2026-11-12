@@ -136,7 +136,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_refuse_overlapping_bands",
     "fillet_refuse_rails_leaving_faces",
     "fillet_removal_takes_ring_fillets",
-    "fillet_retry_radius_as_first",
     "fillet_round_ends_at_tangent_continuation",
     "fillet_run_on_bspline_trims",
     "fillet_run_on_past_far_end_only",
