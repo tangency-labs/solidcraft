@@ -12,6 +12,7 @@ use crate::geom::{
 };
 use crate::p21::Param;
 
+pub mod product;
 pub mod topology;
 
 /// A real as Part 21 writes it: always with a decimal point, exponent as `E`.

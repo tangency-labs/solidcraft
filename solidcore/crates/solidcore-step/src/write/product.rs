@@ -1,26 +1,43 @@
 //! STEP (ISO 10303-21) export: AP242 product structure, assemblies, names and colours.
 //!
 //! Each body's record is written as it is, the exact B-rep, by
-//! [`solidcore_step::write::topology`]: its material regions as solids, its open shells as a
+//! [`topology`]: its material regions as solids, its open shells as a
 //! surface model. Around it this writes one header and context, a product per part with its
 //! shape representation, named solids, surface and face colours, and assemblies as
 //! next-assembly-usage occurrences placed by item-defined transformations (the structure the
 //! CAx-IF recommends and our reader follows). Identical geometric entities (points, directions,
 //! placements, curves, surfaces) are written once and referenced; ids are dense from `#1`.
 
+//!
+//! [`products`] writes products and assemblies, [`bodies`] the bodies of one part, and
+//! [`solidcore_bodies`] solidcore bodies (`solidcore_ops::Body`) as one part, in one call.
+//!
+//! Origin: SolidCraft's `crates/kernel/src/step_out.rs` (MIT OR Apache-2.0), moved here with its
+//! history (RFC 0003, 1.7). SolidCraft's export calls it with its bodies' records.
+
 use std::fmt::Write as _;
 
-use solidcore_step::p21::Param;
-use solidcore_step::write::{GeomWriter, Writer, string, topology};
+use solidcore_record::brep::Brep;
 
-use crate::body::Body;
-use crate::{KernelError, Result};
+use super::{GeomWriter, Writer, string, topology};
+use crate::p21::Param;
 
-/// A named, optionally coloured body to export (coordinates in its part's frame, mm).
+/// A surface colour: sRGB as 0..1, its opacity (1 = opaque) and its name (`COLOUR_RGB`'s name,
+/// empty for none).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Colour {
+    pub rgb: [f32; 3],
+    pub opacity: f32,
+    pub name: String,
+}
+
+/// A named body to export (coordinates in its part's frame, mm): its record, its colour if it has
+/// one, and the faces with colours of their own (the record's face index and its colour).
 pub struct ExportBody<'a> {
     pub name: String,
-    pub body: &'a Body,
-    pub color: Option<[f32; 3]>,
+    pub record: &'a Brep,
+    pub color: Option<Colour>,
+    pub faces: Vec<(usize, Colour)>,
 }
 
 /// A part or assembly: its own bodies and placed child products.
@@ -33,7 +50,7 @@ pub struct ExportProduct<'a> {
 
 /// Header fields.
 #[derive(Clone, Debug, Default)]
-pub struct StepHeader {
+pub struct Header {
     /// FILE_NAME name (the file's own name).
     pub file_name: String,
     /// FILE_NAME time stamp (ISO 8601), empty when unknown.
@@ -43,6 +60,40 @@ pub struct StepHeader {
     /// FILE_DESCRIPTION text; `SolidCraft model` when empty.
     pub description: String,
 }
+
+/// Why products could not be written.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExportError {
+    /// No product, a root that is not one of them, or no body in any product.
+    Nothing,
+    /// A child that is not one of the products.
+    BadReference,
+    /// A product that contains itself (or a tree deeper than 64).
+    Recursive,
+    /// A placement that is not a rotation and a translation.
+    NotRigid,
+    /// A body's record that does not write (its name and the writer's reason).
+    Body { name: String, reason: String },
+    /// A solidcore body whose record could not be made (its name and why).
+    Record { name: String, reason: String },
+}
+
+impl std::fmt::Display for ExportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nothing => f.write_str("nothing to export"),
+            Self::BadReference => f.write_str("bad component reference"),
+            Self::Recursive => f.write_str("the component tree is recursive"),
+            Self::NotRigid => f.write_str("component placements must be rigid (rotation and translation) to export as STEP"),
+            Self::Body { name, reason } => write!(f, "STEP export of '{name}': {reason}"),
+            Self::Record { name, reason } => write!(f, "STEP export of '{name}': no record: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for ExportError {}
+
+type Result<T> = std::result::Result<T, ExportError>;
 
 /// The least distance uncertainty written (mm).
 const MIN_UNCERTAINTY: f64 = 1e-6;
@@ -66,26 +117,27 @@ fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
     let cross = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
     let ok = (dot(x, x) - 1.0).abs() < 1e-6 && (dot(y, y) - 1.0).abs() < 1e-6 && dot(x, y).abs() < 1e-6 && dot(cross, z) > 0.999_999;
     if !ok || m.iter().flatten().any(|v| !v.is_finite()) {
-        return Err(KernelError::Invalid("component placements must be rigid (rotation and translation) to export as STEP".into()));
+        return Err(ExportError::NotRigid);
     }
     Ok(([m[3][0], m[3][1], m[3][2]], z, x))
 }
 
 /// STEP text (AP242) for products with bodies and assembly placements; `root` is the top product.
-pub fn step_export_products(products: &[ExportProduct], root: usize, header: &StepHeader) -> Result<String> {
-    let _span = solidcraft_profile::span("kernel", "step_export_products");
+///
+/// # Errors
+///
+/// [`ExportError`]: nothing to write, a bad child reference, a recursive tree, a placement that
+/// is not rigid, or a body whose record the writer refuses.
+pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Result<String> {
     if products.is_empty() || root >= products.len() {
-        return Err(KernelError::Invalid("nothing to export".into()));
+        return Err(ExportError::Nothing);
     }
     if products.iter().all(|p| p.bodies.is_empty()) {
-        return Err(KernelError::Invalid("nothing to export".into()));
+        return Err(ExportError::Nothing);
     }
     for p in products {
-        for b in &p.bodies {
-            b.body.require_brep("STEP export")?;
-        }
         if p.children.iter().any(|(c, _, _)| *c >= products.len()) {
-            return Err(KernelError::Invalid("bad component reference".into()));
+            return Err(ExportError::BadReference);
         }
     }
     // No product may contain itself.
@@ -99,7 +151,7 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         bad
     }
     if cyclic(products, root, &mut Vec::new()) {
-        return Err(KernelError::Invalid("the component tree is recursive".into()));
+        return Err(ExportError::Recursive);
     }
     // Products reachable from the root.
     let mut reach = vec![false; products.len()];
@@ -122,7 +174,7 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         .iter()
         .flat_map(|(_, p)| &p.bodies)
         .flat_map(|b| {
-            let r = b.body.record();
+            let r = b.record;
             std::iter::once(r.tolerance).chain(r.edges.iter().map(|e| e.tolerance)).chain(r.vertices.iter().map(|v| v.tolerance))
         })
         .filter(|t| t.is_finite())
@@ -161,11 +213,8 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         ("GLOBAL_UNIT_ASSIGNED_CONTEXT", vec![refs(&[mm, rad, sr])]),
         ("REPRESENTATION_CONTEXT", vec![s("Context #1"), s("3D Context with UNIT and UNCERTAINTY")]),
     ]);
-    let origin = GeomWriter::new(&mut w).placement(&solidcore_step::geom::Placement {
-        origin: [0.0; 3],
-        axis: [0.0, 0.0, 1.0],
-        ref_direction: [1.0, 0.0, 0.0],
-    });
+    let origin =
+        GeomWriter::new(&mut w).placement(&crate::geom::Placement { origin: [0.0; 3], axis: [0.0, 0.0, 1.0], ref_direction: [1.0, 0.0, 0.0] });
 
     // Placements of children inside each parent, made before the parent's representation.
     let mut placements: Vec<Vec<u64>> = vec![Vec::new(); products.len()];
@@ -204,20 +253,18 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         }
         let (mut solids, mut sheets) = (Vec::new(), Vec::new());
         for b in &p.bodies {
-            let written = topology::brep(&mut GeomWriter::new(&mut w), b.body.record(), &b.name)
-                .map_err(|e| KernelError::Failed(format!("STEP export of '{}': {e}", b.name)))?;
-            let opacity = b.body.paint().map_or(1.0, |p| p.opacity);
+            let written = topology::brep(&mut GeomWriter::new(&mut w), b.record, &b.name)
+                .map_err(|reason| ExportError::Body { name: b.name.clone(), reason })?;
             let items: Vec<u64> = written.solids.iter().copied().chain(written.sheets).collect();
-            if let Some(c) = b.color {
-                let name = b.body.paint().and_then(|p| p.name.as_deref());
+            if let Some(c) = &b.color {
                 for item in &items {
-                    styled.push(style(&mut w, *item, c, opacity, name));
+                    styled.push(style(&mut w, *item, c));
                 }
             }
             // Faces with colours of their own.
-            for f in b.body.paint().map(|p| p.faces.as_slice()).unwrap_or(&[]) {
-                if let Some(&face) = written.faces.get(f.face).filter(|id| **id != 0) {
-                    styled.push(style(&mut w, face, f.color, f.opacity, f.name.as_deref()));
+            for (index, c) in &b.faces {
+                if let Some(&face) = written.faces.get(*index).filter(|id| **id != 0) {
+                    styled.push(style(&mut w, face, c));
                 }
             }
             solids.extend(written.solids);
@@ -282,9 +329,10 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
 
 /// A surface colour for an item (STYLED_ITEM chain; the styles are shared), named as its look is
 /// (`COLOUR_RGB`'s name, read back on import) when it has a name.
-fn style(w: &mut Writer, item: u64, c: [f32; 3], opacity: f32, name: Option<&str>) -> u64 {
-    let name = name.and_then(crate::body::colour_name).unwrap_or_default();
-    let rgb = w.add("COLOUR_RGB", &[s(&name), Param::Real(c[0] as f64), Param::Real(c[1] as f64), Param::Real(c[2] as f64)]);
+fn style(w: &mut Writer, item: u64, colour: &Colour) -> u64 {
+    let Colour { rgb: c, opacity, name } = colour;
+    let opacity = *opacity;
+    let rgb = w.add("COLOUR_RGB", &[s(name), Param::Real(c[0] as f64), Param::Real(c[1] as f64), Param::Real(c[2] as f64)]);
     let fasc = w.add("FILL_AREA_STYLE_COLOUR", &[s(""), r(rgb)]);
     let fas = w.add("FILL_AREA_STYLE", &[s(""), refs(&[fasc])]);
     let ssfa = w.add("SURFACE_STYLE_FILL_AREA", &[r(fas)]);
@@ -301,89 +349,46 @@ fn style(w: &mut Writer, item: u64, c: [f32; 3], opacity: f32, name: Option<&str
     w.add_distinct("STYLED_ITEM", &[s("color"), refs(&[psa]), r(item)])
 }
 
-/// STEP text for bodies of one part (names `Body1`…).
-pub fn step_export_bodies(bodies: &[ExportBody], header: &StepHeader) -> Result<String> {
-    let _span = solidcraft_profile::span("kernel", "step_export_bodies");
+/// STEP text for the bodies of one part, named after the file (`Part` when it has no name).
+///
+/// # Errors
+///
+/// As [`products`].
+pub fn bodies(bodies: Vec<ExportBody<'_>>, header: &Header) -> Result<String> {
     let name = if header.file_name.is_empty() {
         "Part".to_string()
     } else {
         header.file_name.trim_end_matches(".step").trim_end_matches(".stp").to_string()
     };
-    let p = ExportProduct {
-        name,
-        bodies: bodies.iter().map(|b| ExportBody { name: b.name.clone(), body: b.body, color: b.color }).collect(),
-        children: Vec::new(),
-    };
-    step_export_products(&[p], 0, header)
+    let p = ExportProduct { name, bodies, children: Vec::new() };
+    products(&[p], 0, header)
+}
+
+/// STEP text for solidcore bodies as one part, each named: their records
+/// ([`solidcore_ops::Body::to_record`]) written by [`bodies`], with no colours.
+///
+/// # Errors
+///
+/// [`ExportError::Record`] where a body's record cannot be made; otherwise as [`products`].
+pub fn solidcore_bodies(named: &[(&str, &solidcore_ops::Body)], header: &Header) -> Result<String> {
+    let mut records = Vec::new();
+    for (name, body) in named {
+        let (record, _) = body.to_record().map_err(|e| ExportError::Record { name: (*name).to_string(), reason: e.to_string() })?;
+        records.push(record);
+    }
+    let list = named
+        .iter()
+        .zip(&records)
+        .map(|((name, _), record)| ExportBody { name: (*name).to_string(), record, color: None, faces: Vec::new() })
+        .collect();
+    bodies(list, header)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore_record::Vec3;
-    use solidcore_step::p21;
-    use solidcore_step::write::real;
-    use solidcraft_geom::prelude::*;
-
-    #[test]
-    fn islands_are_solids_of_their_own_not_voids() {
-        use solidcore_record::{Loop2, Plane, Region2, Vec2};
-        let square = |a: f64, b: f64| Loop2::polygon(&[Vec2::new(a, a), Vec2::new(b, a), Vec2::new(b, b), Vec2::new(a, b)]);
-        // A plate with a square hole, and an island inside the hole (a letter's counter).
-        let plate = Region2 { outer: square(0.0, 30.0), holes: vec![square(10.0, 20.0).reversed()] };
-        let island = Region2 { outer: square(12.0, 18.0), holes: vec![] };
-        let body = crate::extrude_planar_regions(&Plane::XY, &[plate, island], 0.0, 2.0).unwrap();
-        assert_eq!(body.shell_count(), 2);
-        let text = crate::step_export(&[&body], "test").unwrap();
-        assert_eq!(text.matches("MANIFOLD_SOLID_BREP(").count(), 2, "{text}");
-        assert_eq!(text.matches("BREP_WITH_VOIDS").count(), 0);
-        let imp = crate::step_import(&text).unwrap();
-        let v: f64 = imp.bodies.iter().map(|b| crate::measure(&b.body).unwrap().volume).sum();
-        assert!((v - (800.0 + 36.0) * 2.0).abs() < 1e-6, "{v}");
-        // A real void stays a void.
-        let hollow = crate::boolean(
-            &crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap(),
-            &crate::box_solid(Vec3::new(3.0, 3.0, 3.0), Vec3::new(7.0, 7.0, 7.0)).unwrap(),
-            crate::BoolOp::Cut,
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(hollow.shell_count(), 2);
-        let text = crate::step_export(&[&hollow], "test").unwrap();
-        assert_eq!(text.matches("BREP_WITH_VOIDS").count(), 1, "{text}");
-    }
-
-    /// The uncertainty a file states covers every edge and vertex of its bodies (#11997): STEP
-    /// keeps no tolerance per edge, so the context's is the only place an edge's deviation goes.
-    /// A body whose edge may lie 3e-3 mm off its faces (its tolerance) was written with its
-    /// record's tolerance, 2e-5, so a reader takes its geometry as good to 2e-5.
-    #[test]
-    fn uncertainty_covers_the_edge_and_vertex_tolerances() {
-        let bx = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 5.0)).unwrap();
-        let mut record = bx.record().clone();
-        let own = record.tolerance;
-        assert!(own < 1e-4, "{own}");
-        let edge = record.edges.first_mut().unwrap();
-        edge.tolerance = 3e-3;
-        let ends = edge.vertices;
-        for v in ends {
-            record.vertices.get_mut(v as usize).unwrap().tolerance = 4e-3;
-        }
-        let tolerant = crate::Body::from_record(record).unwrap();
-        let text = crate::step_export(&[&tolerant], "test").unwrap();
-        let stated = |text: &str| -> Vec<f64> {
-            let ex = p21::parse(text).unwrap();
-            ex.entities
-                .values()
-                .filter(|e| e.name() == "UNCERTAINTY_MEASURE_WITH_UNIT")
-                .filter_map(|e| e.params().first().and_then(p21::Param::as_f64))
-                .collect()
-        };
-        assert_eq!(stated(&text), vec![4e-3], "the vertex tolerance");
-        // A body without tolerant edges states its own tolerance, as before.
-        let text = crate::step_export(&[&bx], "test").unwrap();
-        assert_eq!(stated(&text), vec![own]);
-    }
+    use crate::p21;
+    use crate::write::real;
 
     #[test]
     fn numbers_and_strings() {
@@ -404,51 +409,17 @@ mod tests {
         }
     }
 
+    /// A solidcore box and a cut cylinder written in one call: one part with two named solids,
+    /// AP242, and the errors for nothing to write.
     #[test]
-    fn assembly_names_colours_round_trip() {
-        use crate::{box_solid, cylinder, measure, step_import, step_validate};
-        let bx = box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10.0, 20.0, 5.0)).unwrap();
-        let pin = cylinder(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 2.0, 8.0).unwrap();
-        let rot90 = [[0.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [50.0, 0.0, 0.0, 1.0]];
-        let shift = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 5.0, 1.0]];
-        let products = vec![
-            ExportProduct {
-                name: "Root Ä".into(),
-                bodies: vec![ExportBody { name: "Base".into(), body: &bx, color: Some([1.0, 0.0, 0.0]) }],
-                children: vec![(1, shift, "Pin:1".into()), (1, rot90, "Pin:2".into())],
-            },
-            ExportProduct { name: "Pin".into(), bodies: vec![ExportBody { name: "Shaft".into(), body: &pin, color: None }], children: vec![] },
-        ];
-        let text = step_export_products(&products, 0, &StepHeader { file_name: "a.step".into(), ..Default::default() }).unwrap();
-        step_validate(&text).unwrap();
+    fn solidcore_bodies_write_as_one_part() {
+        let bx = solidcore_ops::make_box([0.0; 3], [10.0, 20.0, 5.0]).unwrap();
+        let cyl = solidcore_ops::make_cylinder([30.0, 0.0, 0.0], 2.0, 8.0).unwrap();
+        let text = solidcore_bodies(&[("Block", &bx), ("Pin", &cyl)], &Header { file_name: "parts.step".into(), ..Default::default() }).unwrap();
         assert!(text.contains("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF"));
-        assert_eq!(text.matches("NEXT_ASSEMBLY_USAGE_OCCURRENCE").count(), 2);
-        // Shared geometry: the unit Z direction is written once.
-        assert_eq!(text.matches("DIRECTION('',(0.0,0.0,1.0))").count(), 1);
-        let imp = step_import(&text).unwrap();
-        assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
-        assert_eq!(imp.bodies.len(), 3);
-        let names: Vec<&str> = imp.bodies.iter().map(|b| b.name.as_str()).collect();
-        assert_eq!(names, ["Base", "Shaft", "Shaft"]);
-        assert_eq!(imp.bodies[0].color, Some([1.0, 0.0, 0.0]));
-        assert_eq!(imp.tree[0].name, "Root Ä");
-        assert_eq!(imp.tree[0].children.len(), 2);
-        let m: Vec<_> = imp.bodies.iter().map(|b| measure(&b.body).unwrap()).collect();
-        assert!((m[1].bbox.min.z - 5.0).abs() < 1e-6 && (m[1].bbox.max.z - 13.0).abs() < 1e-6);
-        // Rotated 90° about Z and moved 50 along X: centre at (50, 0).
-        assert!(m[2].centroid.dist(solidcore_record::Vec3::new(50.0, 0.0, 4.0)) < 1e-3, "{:?}", m[2].centroid);
-        // Recursion and bad placements are errors.
-        let cyc = vec![ExportProduct {
-            name: "A".into(),
-            bodies: vec![ExportBody { name: "B".into(), body: &bx, color: None }],
-            children: vec![(0, shift, String::new())],
-        }];
-        assert!(step_export_products(&cyc, 0, &StepHeader::default()).is_err());
-        let scaled = [[2.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0; 4]];
-        let bad = vec![
-            ExportProduct { name: "A".into(), bodies: vec![], children: vec![(1, scaled, String::new())] },
-            ExportProduct { name: "B".into(), bodies: vec![ExportBody { name: "B".into(), body: &bx, color: None }], children: vec![] },
-        ];
-        assert!(step_export_products(&bad, 0, &StepHeader::default()).is_err());
+        assert_eq!(text.matches("MANIFOLD_SOLID_BREP(").count(), 2, "{text}");
+        assert!(text.contains("MANIFOLD_SOLID_BREP('Block'") && text.contains("MANIFOLD_SOLID_BREP('Pin'"));
+        assert!(text.contains("PRODUCT('parts','parts'"));
+        assert_eq!(solidcore_bodies(&[], &Header::default()), Err(ExportError::Nothing));
     }
 }
