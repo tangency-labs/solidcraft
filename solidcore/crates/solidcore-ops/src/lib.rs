@@ -18,6 +18,7 @@
 //!   the kernel's entities;
 //! - `finish`: the result contract, from what the input was (crate-internal: the families use it);
 //! - [`provenance`]: the hook an application's construction history rides on.
+//! - [`affine`]: the maps a body or a curve is moved by, from an application's numbers.
 //!
 //! The families: [`measure`] (mass properties, area, box, point class, gap samples, the picks'
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
@@ -29,6 +30,7 @@
 #![deny(clippy::disallowed_methods)]
 #![cfg_attr(not(test), deny(clippy::float_arithmetic))]
 
+pub mod affine;
 pub mod blend;
 pub mod body;
 pub mod boolean;
