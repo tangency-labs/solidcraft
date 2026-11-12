@@ -42,6 +42,7 @@ use solidcraft_sketch::PatternAlignment;
 use super::check::whole;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
+use super::sketch_shapes::Created;
 use super::types::{LengthExpr, Point2, StringList};
 use crate::params::{self, expr, num, str_};
 
@@ -1312,6 +1313,9 @@ pub struct TrimResult {
     pub result: TrimOutcome,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1331,6 +1335,9 @@ pub struct TrimPathResult {
     /// `true` for a `dry_run`, which changed nothing; left out otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<bool>,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1343,6 +1350,9 @@ pub struct BreakResult {
     pub curves: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1377,6 +1387,9 @@ pub struct FilletResult {
     pub moved_to_virtual_corner: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1393,6 +1406,9 @@ pub struct ChamferResult {
     pub moved_to_virtual_corner: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1442,6 +1458,9 @@ pub struct OffsetResult {
     /// and so is not linked to its source (#12294).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1472,6 +1491,9 @@ pub struct MirrorResult {
     pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1487,6 +1509,9 @@ pub struct MoveResult {
     pub released: Vec<Value>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1517,6 +1542,9 @@ pub struct PatternResult {
     pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

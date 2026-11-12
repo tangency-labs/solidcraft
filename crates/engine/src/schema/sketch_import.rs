@@ -26,6 +26,7 @@ use solidcraft_io::MAX_DRAWING_BYTES;
 
 use super::check::{located, whole};
 use super::sketch_ends::SketchTarget;
+use super::sketch_shapes::Created;
 use super::types::{Point2, not_blank_pattern};
 
 /// A key that, once given (`null` included), must parse as `T`, as the handler reads it.
@@ -360,6 +361,9 @@ pub struct DrawingInserted {
     pub fixed: Option<usize>,
     /// The sketch's solve afterwards; null when it was not solved.
     pub info: Option<SketchSolve>,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
