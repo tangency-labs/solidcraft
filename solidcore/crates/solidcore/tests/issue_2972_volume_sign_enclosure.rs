@@ -34,6 +34,7 @@ use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
+use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::mass::enclosure::{
     enclose_volume, volume_sign, VolumeEnclosure, VolumeSign, CELL_BUDGET,
 };
@@ -439,5 +440,51 @@ fn the_solid_test_names_the_test_a_body_fails() {
     assert_eq!(
         outward_solid_failure(&mut k, &mut thin).unwrap(),
         Some(SolidTest::VolumeUndecided)
+    );
+}
+
+/// #15173: an enclosure asked narrower than the part no cut narrows (the caps' and loops'
+/// rounding terms, and strips that settle) is still refined, and a tighter request is never
+/// answered wider. For the sphere of radius 2, asking 1e-11 returned the 8 starting cells,
+/// 3e4 wide, while asking 1e-10 returned 5.3e-10.
+#[test]
+fn a_width_below_the_floor_is_refined_not_given_up() {
+    let mut k = Kernel::default();
+    let v = 4.0 / 3.0 * PI * 8.0;
+    let mut last = f64::INFINITY;
+    for width in [1e-6, 1e-8, 1e-11] {
+        let mut b = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
+        let e = enclose_volume(&k, &mut b, width).unwrap();
+        assert!(holds(&e, v), "{width}: {e:?} misses {v}");
+        assert!(e.width() <= last, "{width}: {e:?} wider than {last}");
+        // as narrow as asked, or it says why not
+        assert_eq!(
+            e.stop == EnclosureStop::Reached,
+            e.width() <= width,
+            "{width}: {e:?}"
+        );
+        last = e.width();
+    }
+    assert!(last <= 1e-9, "1e-11: {last}");
+}
+
+/// #15173: refining past where the rounding grows faster than the cells shrink does not
+/// widen the enclosure: the narrowest seen is kept. On a box, spending the whole budget took
+/// the width from 1.7e-10 (asked 1e-9) to 1.5e-9.
+#[test]
+fn spending_the_budget_never_widens_the_enclosure() {
+    let mut k = Kernel::default();
+    let boxed = |k: &mut Kernel| create_box(k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
+    let mut b = boxed(&mut k);
+    let asked = enclose_volume(&k, &mut b, 1e-9).unwrap();
+    let mut b = boxed(&mut k);
+    let spent = enclose_volume(&k, &mut b, f64::MIN_POSITIVE).unwrap();
+    assert!(holds(&asked, 120.0), "{asked:?}");
+    assert!(holds(&spent, 120.0), "{spent:?}");
+    assert_eq!(asked.stop, EnclosureStop::Reached, "{asked:?}");
+    assert_ne!(spent.stop, EnclosureStop::Reached, "{spent:?}");
+    assert!(
+        spent.width() <= asked.width(),
+        "{spent:?} wider than {asked:?}"
     );
 }
