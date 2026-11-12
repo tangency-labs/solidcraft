@@ -206,6 +206,12 @@ invalid manifest or input field and reason, trap, or cancellation. The WIT and R
 describe the same cases. A failure never retries the component, raises its limits or commits
 a partial transaction.
 
+After an entry returns valid JSON, the runtime writes consumed fuel, remaining fuel and the
+configured fuel limit to the `craft_plugin_wasm` debug log target. These counters describe guest
+execution before the application commits changes or publishes staged files. In the CLI, pass `--debug` to see these counters on stderr.
+Normal command output and plugin result JSON are unchanged. The counter message contains no
+model data or package paths.
+
 There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
 network integration, persistent store, plugin installer, signed index, custom panels or icons.
 The WIT has no persistent store interface. `manifest()` is not used.

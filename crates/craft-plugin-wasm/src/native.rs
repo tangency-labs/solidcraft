@@ -471,7 +471,18 @@ fn execute<H: PluginHost + 'static>(
         if Instant::now() >= store.data().deadline {
             return Err(limit("deadline"));
         }
-        serde_json::from_str(&text).map_err(|e| HostError::InvalidInput { field: "result".into(), reason: format!("entry result is not JSON: {e}") })
+        let value = serde_json::from_str(&text)
+            .map_err(|e| HostError::InvalidInput { field: "result".into(), reason: format!("entry result is not JSON: {e}") })?;
+        if let Ok(remaining) = store.get_fuel() {
+            ::log::debug!(
+                target: "craft_plugin_wasm",
+                "plugin entry completed: entry={}, fuel_consumed={}, fuel_remaining={remaining}, fuel_limit={}",
+                entry.name,
+                limits.fuel.saturating_sub(remaining),
+                limits.fuel
+            );
+        }
+        Ok(value)
     })();
     (store.into_data(), outcome)
 }

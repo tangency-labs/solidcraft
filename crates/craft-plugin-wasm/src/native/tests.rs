@@ -226,6 +226,7 @@ fn staged_writes_publish_in_guest_order_across_grant_aliases_and_normalize_separ
     state.discard_writes();
     assert_eq!(std::fs::read(root.join("nested/target.txt")).unwrap(), b"latest");
     assert_eq!(std::fs::read_dir(root.join("nested")).unwrap().count(), 1);
+    drop(state);
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]

@@ -18,6 +18,11 @@ source, package instructions and test-distribution launchers live outside this r
 they cannot be built from this checkout. A package must contain a
 WebAssembly **component**, not just a core Wasm module.
 
+Use only a separately supplied test distribution matching this host revision and its
+`solidcraft:plugin@1.0.0` WIT. Older 0.1.0 test kits are incompatible; changing their manifest
+API string alone does not update compiled components. Check the distribution's `BUILD-INFO.json`
+and file checksums before starting. This guide does not supply that distribution.
+
 ## Run the Windows test distribution
 
 1. Extract the ZIP. In File Explorer, open the extracted folder that contains
