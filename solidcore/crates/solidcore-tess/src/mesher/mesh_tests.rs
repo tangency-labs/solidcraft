@@ -61,9 +61,13 @@ fn worst_of(m: &Mesh, face: u32) -> (f64, usize) {
     (tris.iter().map(|t| smallest_angle(corners(m, t))).fold(180.0, f64::min), tris.len())
 }
 
-/// The smallest angle of any triangle (degrees), and its face.
-fn worst_anywhere(m: &Mesh) -> (f64, u32) {
-    m.triangles.iter().zip(&m.tri_face).map(|(t, f)| (smallest_angle(corners(m, t)), *f)).fold((180.0, u32::MAX), |w, x| if x.0 < w.0 { x } else { w })
+/// The smallest angle of any triangle (degrees), its face and its corners.
+fn worst_anywhere(m: &Mesh) -> (f64, u32, [P; 3]) {
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .map(|(t, f)| (smallest_angle(corners(m, t)), *f, corners(m, t)))
+        .fold((180.0, u32::MAX, [P::ZERO; 3]), |w, x| if x.0 < w.0 { x } else { w })
 }
 
 /// A body on the mesh path at a side of 2 mm and a chord of 0.01 mm: every triangle keeps 20
@@ -73,9 +77,9 @@ fn shaped_in_3d(b: &brep::Brep, size: f64, what: &str) -> PlanStats {
     let (plan, stats) = meshed(b, &spec, size, None);
     let (m, refused) = plan.evaluate();
     assert!(refused.is_empty(), "{what}: {refused:?}");
-    let (worst, face) = worst_anywhere(&m);
-    eprintln!("{what} on the mesh path: smallest angle {worst} degrees (face {face}) over {} triangles", m.triangles.len());
-    assert!(worst >= 20.0, "{what}: smallest angle {worst} degrees, on face {face}; unshaped: {:?}", stats.unshaped);
+    let (worst, face, at) = worst_anywhere(&m);
+    eprintln!("{what} on the mesh path: smallest angle {worst} degrees (face {face}, corners {at:?}) over {} triangles", m.triangles.len());
+    assert!(worst >= 20.0, "{what}: smallest angle {worst} degrees, on face {face}, corners {at:?}; unshaped: {:?}", stats.unshaped);
     assert_nothing_folds(&m, what);
     let (w, refused) = plan.welded();
     assert!(refused.is_empty(), "{what}: {refused:?}");
@@ -198,8 +202,8 @@ fn a_plate_a_ball_sinks_into_has_no_needles_on_the_mesh_path() {
     assert!(worst >= 20.0, "the top face's smallest angle is {worst} degrees over {count} triangles; unshaped: {:?}", stats.unshaped);
     // The ball's face too, its pole included (FieldCraft's trial at e728f90e: 1.95 degrees at
     // the pole, shaped in (u, v) scaled by the mean speeds).
-    let (worst, face) = worst_anywhere(&m);
-    assert!(worst >= 20.0, "smallest angle {worst} degrees, on face {face}; unshaped: {:?}", stats.unshaped);
+    let (worst, face, at) = worst_anywhere(&m);
+    assert!(worst >= 20.0, "smallest angle {worst} degrees, on face {face}, corners {at:?}; unshaped: {:?}", stats.unshaped);
     // The ball's pole is its cap's fan: the ball's face is not left short.
     let ball: Vec<usize> = (0..plan.surfaces.len()).filter(|&f| !matches!(plan.surfaces[f], EvalSurface::Plane { .. })).collect();
     assert!(stats.unshaped.iter().all(|u| !ball.contains(&u.face)), "the ball's faces {ball:?}; unshaped: {:?}", stats.unshaped);
