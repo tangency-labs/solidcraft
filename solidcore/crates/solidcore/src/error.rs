@@ -1329,7 +1329,7 @@ pub enum ErrorKind {
     /// A fillet or chamfer is too large to build; the error names the largest size
     /// that builds.
     FilletTooLarge = 100,
-    // The blend's classes, 101 to 129 (the classes of the typed blend failure record,
+    // The blend's classes, 101 to 131 (the classes of the typed blend failure record,
     // `error::blend`), in their order: the record's numbers less 200, then the classes added
     // after them.
     /// The rolling ball does not fit a face it rolls on.
@@ -1398,6 +1398,15 @@ pub enum ErrorKind {
     /// A blend past its faces keeps no length of its edge, no corner taking any of it: the
     /// trim takes the whole of it.
     OverflowKeepsNothing = 129,
+    /// Removing a fillet would continue a face or an edge past its geometry, which only a
+    /// plane or a line continues exactly (for example a face that would grow past its
+    /// surface's domain): the removal refuses rather than build an approximate face. Not a
+    /// matter of size ([`crate::error::blend::RemovalRefusal`]).
+    RemovalNotExact = 130,
+    /// The face asked to be removed is not a fillet the removal recognises: its edges, the
+    /// faces across them or their surfaces are not those of a fillet between two faces. Not a
+    /// matter of size ([`crate::error::blend::RemovalRefusal`]).
+    NotARemovableFillet = 131,
     /// An offset face's offset folds: the wall is thicker than a radius of curvature.
     OffsetFolds = 200,
     /// Loops of an offset face touch without crossing: the offset walls would meet.
@@ -1482,6 +1491,8 @@ impl ErrorKind {
                 | Self::EndAtSeamVertex
                 | Self::TangentContinuationEnd
                 | Self::OverflowKeepsNothing
+                | Self::RemovalNotExact
+                | Self::NotARemovableFillet
                 | Self::OffsetFolds
                 | Self::OffsetWallsTouch
                 | Self::OffsetLoopsCross
@@ -1492,8 +1503,8 @@ impl ErrorKind {
 
     /// True for a refusal a size that builds is the way out of (false for a missing
     /// construction and for a defect): every refusal class but a contact line that leaves its
-    /// face, a round that ends where its edge runs on tangentially, and the offset's that the
-    /// size of its wall does not decide.
+    /// face, a round that ends where its edge runs on tangentially, a fillet removal's
+    /// refusals, and the offset's that the size of its wall does not decide.
     #[must_use]
     pub const fn sized(self) -> bool {
         self.is_refusal()
@@ -1501,6 +1512,8 @@ impl ErrorKind {
                 self,
                 Self::RailLeavesFace
                     | Self::TangentContinuationEnd
+                    | Self::RemovalNotExact
+                    | Self::NotARemovableFillet
                     | Self::OffsetWallsTouch
                     | Self::OffsetLoopsCross
                     | Self::OffsetEdgeVanishes
@@ -1555,6 +1568,8 @@ impl ErrorKind {
             Self::StageFailed => "stage_failed",
             Self::TangentContinuationEnd => "tangent_continuation_end",
             Self::OverflowKeepsNothing => "overflow_keeps_nothing",
+            Self::RemovalNotExact => "removal_not_exact",
+            Self::NotARemovableFillet => "not_a_removable_fillet",
             Self::OffsetFolds => "offset_folds",
             Self::OffsetWallsTouch => "offset_walls_touch",
             Self::OffsetLoopsCross => "offset_loops_cross",
@@ -2459,6 +2474,12 @@ mod tests {
                 129,
                 "overflow_keeps_nothing",
             ),
+            (ErrorKind::RemovalNotExact, 130, "removal_not_exact"),
+            (
+                ErrorKind::NotARemovableFillet,
+                131,
+                "not_a_removable_fillet",
+            ),
             (ErrorKind::OffsetFolds, 200, "offset_folds"),
             (ErrorKind::OffsetWallsTouch, 201, "offset_walls_touch"),
             (ErrorKind::OffsetLoopsCross, 202, "offset_loops_cross"),
@@ -2511,11 +2532,13 @@ mod tests {
                 ErrorKind::StageFailed => 41,
                 ErrorKind::TangentContinuationEnd => 42,
                 ErrorKind::OverflowKeepsNothing => 43,
-                ErrorKind::OffsetFolds => 44,
-                ErrorKind::OffsetWallsTouch => 45,
-                ErrorKind::OffsetLoopsCross => 46,
-                ErrorKind::OffsetEdgeVanishes => 47,
-                ErrorKind::OffsetCollapses => 48,
+                ErrorKind::RemovalNotExact => 44,
+                ErrorKind::NotARemovableFillet => 45,
+                ErrorKind::OffsetFolds => 46,
+                ErrorKind::OffsetWallsTouch => 47,
+                ErrorKind::OffsetLoopsCross => 48,
+                ErrorKind::OffsetEdgeVanishes => 49,
+                ErrorKind::OffsetCollapses => 50,
             }
         };
         for (i, &(kind, code, name)) in PINNED.iter().enumerate() {
@@ -2529,17 +2552,17 @@ mod tests {
             "codes are unique and ascending"
         );
         // the blend's classes: 101 to 127 are the record's numbers less 200, with no gap; 128
-        // and 129 follow them
+        // to 131 follow them
         let blend: Vec<u16> = PINNED
             .iter()
             .map(|r| r.1)
             .filter(|c| (101..200).contains(c))
             .collect();
-        assert_eq!(blend, (101..=129).collect::<Vec<u16>>());
+        assert_eq!(blend, (101..=131).collect::<Vec<u16>>());
         // defects, refusals and the sized ones
         let defects = [115, 125, 126, 127];
-        let unsized_refusals = [102, 128];
-        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=129).contains(&r.1)) {
+        let unsized_refusals = [102, 128, 130, 131];
+        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=131).contains(&r.1)) {
             assert_eq!(kind.is_defect(), defects.contains(&code), "{kind:?}");
             assert_eq!(kind.is_refusal(), !defects.contains(&code), "{kind:?}");
             assert_eq!(

@@ -15,6 +15,7 @@
 //! | Cause                                  | Class ([`ErrorKind`])                         |
 //! |----------------------------------------|-----------------------------------------------|
 //! | [`BlendFailure::NoRoom`]               | the reason's ([`no_room_class`]), 101 to 124, 128 or 129 |
+//! | [`BlendFailure::RemovalRefused`]       | the reason's ([`removal_class`]), 130 or 131  |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
 //! | [`BlendFailure::StageFailed`]          | [`ErrorKind::StageFailed`] (127)              |
@@ -27,7 +28,7 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
 //! | [`BlendFailure::Missing`]              | `SM_ERR_NULL_POINTER`             |
 //! | [`BlendFailure::InvalidValue`]         | `SM_ERR_INVALID_INPUT`            |
@@ -72,6 +73,9 @@ pub enum BlendFailure {
     /// and 129; [`no_room_class`]). A refusal: the failure's fit, where the
     /// check computed one, is the size that builds.
     NoRoom(NoRoomReason),
+    /// A fillet removal refuses the face it is asked to remove, for the reason named
+    /// (classes 130 and 131; [`removal_class`]). A refusal that no size decides.
+    RemovalRefused(RemovalRefusal),
     /// The solve of the ball's position at a station of the blend did not converge: a defect,
     /// never "no root" (a solve that stops proves nothing about the root).
     StationDidNotConverge {
@@ -186,12 +190,112 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
     }
 }
 
+/// Why a fillet removal (`crate::blend::fillet_removal`, its ring removal included) refuses
+/// the face it is asked to remove. Each is a fact of the face and its neighbours, not a
+/// defect; the class is [`removal_class`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RemovalRefusal {
+    /// A face the removal extends would grow past its surface's domain, which only a plane
+    /// continues exactly.
+    FaceGrowsPastDomain,
+    /// A corner of more than three edges keeps its end edge, which would need a fitted
+    /// intersection to run on to the new corner.
+    CornerNeedsFittedIntersection,
+    /// The side edge that would run on to the new corner is not a straight B-spline curve,
+    /// so it cannot run on exactly.
+    SideEdgeNotStraight,
+    /// The new corner is off the line of the side edge that would run on to it.
+    CornerOffSideLine,
+    /// The tangent surfaces of a ring fillet do not meet in a closed curve near its rails
+    /// within their domains: the sharp edge would lie on a continuation of one of them.
+    TangentSurfacesDoNotMeet,
+    /// A tangent face's seam stops short of the sharp edge and is not a line, so it cannot
+    /// run on exactly.
+    SeamNotStraight,
+    /// A tangent face's seam, run on along its line, does not reach the sharp edge.
+    SeamDoesNotReachSharpEdge,
+    /// A seam's UV trim, run on, does not reach the new vertex on its face's surface.
+    SeamTrimMissesNewVertex,
+    /// The fillet face does not have four edges.
+    NotFourEdges,
+    /// Two adjacent edges of the fillet face are both tangent.
+    AdjacentEdgesTangent,
+    /// The edge opposite the fillet face's tangent edge is not tangent.
+    OppositeEdgeNotTangent,
+    /// Neither of the fillet face's first two edges is tangent.
+    NoTangentEdge,
+    /// A tangent or end edge of the fillet face does not have two vertices.
+    EdgeWithoutTwoVertices,
+    /// An edge of the fillet face does not border exactly two faces.
+    EdgeNotBetweenTwoFaces,
+    /// A tangent face's surface is not a B-spline surface.
+    TangentFaceNotBSpline,
+    /// An end face's surface is not a B-spline surface.
+    EndFaceNotBSpline,
+    /// The face is not a ring fillet.
+    NotARing,
+    /// The ring fillet has more than two rails.
+    MoreThanTwoRails,
+    /// The ring fillet does not have two rails between two other faces.
+    RailsNotBetweenTwoFaces,
+    /// The ring fillet's seam does not join the two rails' vertices.
+    SeamDoesNotJoinRails,
+    /// A rail's vertex has an edge other than one open seam of its tangent face.
+    RailVertexHasOtherEdges,
+    /// A tangent face's seam crosses the sharp edge at more than one place.
+    SeamCrossesSharpEdgeTwice,
+    /// The two tangent faces' seams cross the sharp edge at different places.
+    SeamsCrossApart,
+    /// A seam has more than two edge uses with their own UV trim curves.
+    SeamHasMoreThanTwoTrims,
+    /// A seam has no edge use with its own UV trim curve.
+    SeamHasNoOwnTrim,
+}
+
+/// The class of a fillet removal's refusal, for `reason`: [`ErrorKind::RemovalNotExact`] (130)
+/// where the removal would continue a face or an edge past its geometry, and
+/// [`ErrorKind::NotARemovableFillet`] (131) where the face and its neighbours are not a fillet
+/// the removal recognises. Both are refusals no size decides.
+#[must_use]
+pub const fn removal_class(reason: RemovalRefusal) -> ErrorKind {
+    use RemovalRefusal as R;
+    match reason {
+        R::FaceGrowsPastDomain
+        | R::CornerNeedsFittedIntersection
+        | R::SideEdgeNotStraight
+        | R::CornerOffSideLine
+        | R::TangentSurfacesDoNotMeet
+        | R::SeamNotStraight
+        | R::SeamDoesNotReachSharpEdge
+        | R::SeamTrimMissesNewVertex => ErrorKind::RemovalNotExact,
+        R::NotFourEdges
+        | R::AdjacentEdgesTangent
+        | R::OppositeEdgeNotTangent
+        | R::NoTangentEdge
+        | R::EdgeWithoutTwoVertices
+        | R::EdgeNotBetweenTwoFaces
+        | R::TangentFaceNotBSpline
+        | R::EndFaceNotBSpline
+        | R::NotARing
+        | R::MoreThanTwoRails
+        | R::RailsNotBetweenTwoFaces
+        | R::SeamDoesNotJoinRails
+        | R::RailVertexHasOtherEdges
+        | R::SeamCrossesSharpEdgeTwice
+        | R::SeamsCrossApart
+        | R::SeamHasMoreThanTwoTrims
+        | R::SeamHasNoOwnTrim => ErrorKind::NotARemovableFillet,
+    }
+}
+
 impl BlendFailure {
     /// The status the C++ reports for the failure unless its site says otherwise (a
     /// comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
             Self::NoRoom(_)
+            | Self::RemovalRefused(_)
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
@@ -209,7 +313,8 @@ impl BlendFailure {
     }
 
     /// The failure's class, its stable [`ErrorKind`], derived from the cause: the reason's
-    /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]),
+    /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]) and
+    /// [`BlendFailure::RemovalRefused`] ([`removal_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
     /// trim loop, and [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
@@ -218,6 +323,7 @@ impl BlendFailure {
     pub const fn class(&self) -> ErrorKind {
         match self {
             Self::NoRoom(reason) => no_room_class(*reason),
+            Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
             Self::StageFailed => ErrorKind::StageFailed,
@@ -242,6 +348,7 @@ impl BlendFailure {
     pub const fn is_phrase(&self) -> bool {
         match self {
             Self::NoRoom(_)
+            | Self::RemovalRefused(_)
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
@@ -267,6 +374,7 @@ impl BlendFailure {
     pub const fn replaces_upstream_status(&self) -> bool {
         match self {
             Self::NoRoom(_)
+            | Self::RemovalRefused(_)
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
@@ -289,6 +397,7 @@ impl core::fmt::Display for BlendFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::NoRoom(reason) => write!(f, "{}: {reason:?}", self.class()),
+            Self::RemovalRefused(reason) => write!(f, "{}: {reason:?}", self.class()),
             Self::StationDidNotConverge {
                 s,
                 residual,
@@ -678,6 +787,56 @@ mod tests {
             assert_eq!(e.sized(), class.sized(), "{cause:?}");
             assert!(!e.is_port_failure(), "{cause:?}");
         }
+    }
+
+    #[test]
+    fn a_fillet_removal_refusal_is_a_refusal_no_size_decides() {
+        use RemovalRefusal as R;
+        let cases = [
+            (R::FaceGrowsPastDomain, ErrorKind::RemovalNotExact),
+            (R::CornerNeedsFittedIntersection, ErrorKind::RemovalNotExact),
+            (R::SideEdgeNotStraight, ErrorKind::RemovalNotExact),
+            (R::CornerOffSideLine, ErrorKind::RemovalNotExact),
+            (R::TangentSurfacesDoNotMeet, ErrorKind::RemovalNotExact),
+            (R::SeamNotStraight, ErrorKind::RemovalNotExact),
+            (R::SeamDoesNotReachSharpEdge, ErrorKind::RemovalNotExact),
+            (R::SeamTrimMissesNewVertex, ErrorKind::RemovalNotExact),
+            (R::NotFourEdges, ErrorKind::NotARemovableFillet),
+            (R::AdjacentEdgesTangent, ErrorKind::NotARemovableFillet),
+            (R::OppositeEdgeNotTangent, ErrorKind::NotARemovableFillet),
+            (R::NoTangentEdge, ErrorKind::NotARemovableFillet),
+            (R::EdgeWithoutTwoVertices, ErrorKind::NotARemovableFillet),
+            (R::EdgeNotBetweenTwoFaces, ErrorKind::NotARemovableFillet),
+            (R::TangentFaceNotBSpline, ErrorKind::NotARemovableFillet),
+            (R::EndFaceNotBSpline, ErrorKind::NotARemovableFillet),
+            (R::NotARing, ErrorKind::NotARemovableFillet),
+            (R::MoreThanTwoRails, ErrorKind::NotARemovableFillet),
+            (R::RailsNotBetweenTwoFaces, ErrorKind::NotARemovableFillet),
+            (R::SeamDoesNotJoinRails, ErrorKind::NotARemovableFillet),
+            (R::RailVertexHasOtherEdges, ErrorKind::NotARemovableFillet),
+            (R::SeamCrossesSharpEdgeTwice, ErrorKind::NotARemovableFillet),
+            (R::SeamsCrossApart, ErrorKind::NotARemovableFillet),
+            (R::SeamHasMoreThanTwoTrims, ErrorKind::NotARemovableFillet),
+            (R::SeamHasNoOwnTrim, ErrorKind::NotARemovableFillet),
+        ];
+        for (reason, class) in cases {
+            let cause = BlendFailure::RemovalRefused(reason);
+            assert_eq!(cause.class(), class, "{reason:?}");
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            let e = SolidError::blend("blend::fillet_removal", cause);
+            assert_eq!(e.kind(), class, "{reason:?}");
+            // the status the C++ reports stays, for the goldens
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{reason:?}");
+            assert!(e.is_refusal() && !e.is_defect() && !e.sized(), "{reason:?}");
+        }
+        assert_eq!(
+            SolidError::blend(
+                "blend::fillet_removal",
+                BlendFailure::RemovalRefused(R::FaceGrowsPastDomain)
+            )
+            .to_string(),
+            "blend::fillet_removal: removal_not_exact: FaceGrowsPastDomain"
+        );
     }
 
     #[test]
