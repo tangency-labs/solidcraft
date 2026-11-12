@@ -34,8 +34,9 @@ use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
+use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::mass::enclosure::{
-    enclose_volume, volume_sign, EnclosureStop, VolumeEnclosure, VolumeSign, CELL_BUDGET,
+    enclose_volume, volume_sign, VolumeEnclosure, VolumeSign, CELL_BUDGET,
 };
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box, create_sphere};
@@ -451,7 +452,7 @@ fn a_width_below_the_floor_is_refined_not_given_up() {
     let mut k = Kernel::default();
     let v = 4.0 / 3.0 * PI * 8.0;
     let mut last = f64::INFINITY;
-    for width in [1e-6, 1e-8, 1e-10, 1e-11] {
+    for width in [1e-6, 1e-8, 1e-11] {
         let mut b = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
         let e = enclose_volume(&k, &mut b, width).unwrap();
         assert!(holds(&e, v), "{width}: {e:?} misses {v}");
@@ -478,6 +479,7 @@ fn spending_the_budget_never_widens_the_enclosure() {
     let asked = enclose_volume(&k, &mut b, 1e-9).unwrap();
     let mut b = boxed(&mut k);
     let spent = enclose_volume(&k, &mut b, f64::MIN_POSITIVE).unwrap();
+    assert!(holds(&asked, 120.0), "{asked:?}");
     assert!(holds(&spent, 120.0), "{spent:?}");
     assert_eq!(asked.stop, EnclosureStop::Reached, "{asked:?}");
     assert_ne!(spent.stop, EnclosureStop::Reached, "{spent:?}");

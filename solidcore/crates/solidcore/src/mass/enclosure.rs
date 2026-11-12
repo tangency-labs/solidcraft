@@ -133,8 +133,10 @@ pub struct VolumeEnclosure {
     /// The upper end.
     pub hi: f64,
     /// The width of the part of the last enclosure summed that no cut narrows (the settled
-    /// strip cells and the fixed terms), rounded up: refining does not take that enclosure
-    /// below it, so a width asked below it ends at [`EnclosureStop::Budget`] or
+    /// strip cells and the fixed terms), rounded up: refining does not take that one
+    /// enclosure below it. The result can still be narrower, since it intersects the
+    /// earlier enclosures too, and can then end at [`EnclosureStop::Reached`] for a width
+    /// below the floor; otherwise a width asked below it ends at [`EnclosureStop::Budget`] or
     /// [`EnclosureStop::Exhausted`].
     pub floor: f64,
     /// Why refinement ended.
@@ -1454,23 +1456,24 @@ impl<'a> Work<'a> {
     /// refining can make `done` hold; [`EnclosureStop::Settled`]), the budget is spent, or
     /// no cell is left to cut. The result is the intersection of every enclosure summed
     /// (each holds the volume): rounding that grows faster than the cells shrink does not
-    /// widen it.
+    /// widen it. Two enclosures that do not overlap mean one of them is not sound, which no
+    /// cell's construction allows: [`MassFailure::Failed`](crate::error::mass::MassFailure::Failed)
+    /// then, not an enclosure (no input is known to reach it).
     fn refine(
         &mut self,
         done: impl Fn(Ivl) -> bool,
         hopeless: impl Fn(Ivl, f64) -> bool,
     ) -> Result<VolumeEnclosure> {
-        let out = |w: &Self, best: Ivl, stop: EnclosureStop| {
-            let e = w.total();
-            let (lo, hi) = (e.lo.max(best.lo), e.hi.min(best.hi));
+        let out = |w: &Self, best: Ivl, stop: EnclosureStop| -> Result<VolumeEnclosure> {
+            let e = intersect(w.total(), best)?;
             let (_, still) = w.parts();
-            VolumeEnclosure {
-                lo,
-                hi,
+            Ok(VolumeEnclosure {
+                lo: e.lo,
+                hi: e.hi,
                 floor: (Ivl::from(still) + Ivl::from(still)).hi,
                 stop,
                 counts: w.counts,
-            }
+            })
         };
         // running sums in f64 say when to sum the enclosure in intervals again: when they
         // look done, or every quarter of the work list's length
@@ -1485,23 +1488,23 @@ impl<'a> Work<'a> {
                 || (done(Ivl::new(lo, hi)) && self.counts.cells >= checked + 16);
             if due {
                 let total = self.total();
-                best = Ivl::new(total.lo.max(best.lo), total.hi.min(best.hi));
+                best = intersect(total, best)?;
                 if done(best) {
-                    return Ok(out(self, best, EnclosureStop::Reached));
+                    return out(self, best, EnclosureStop::Reached);
                 }
                 let (rest, still) = self.parts();
                 if hopeless(rest, still) {
-                    return Ok(out(self, best, EnclosureStop::Settled));
+                    return out(self, best, EnclosureStop::Settled);
                 }
                 (lo, hi) = (total.lo, total.hi);
                 checked = self.counts.cells;
                 next_check = self.counts.cells + (self.items.len() / 4).max(64);
             }
             if self.counts.cells >= self.budget {
-                return Ok(out(self, best, EnclosureStop::Budget));
+                return out(self, best, EnclosureStop::Budget);
             }
             let Some((_, Reverse(i))) = self.heap.pop() else {
-                return Ok(out(self, best, EnclosureStop::Exhausted));
+                return out(self, best, EnclosureStop::Exhausted);
             };
             let Some(it) = self.items.get(i).copied() else {
                 continue;
@@ -1565,6 +1568,20 @@ impl<'a> Work<'a> {
                 }
             }
         }
+    }
+}
+
+/// The intersection of two enclosures of the volume; a [`MassFailure::Failed`](crate::error::mass::MassFailure::Failed)
+/// where they do not overlap (one of them is not sound).
+fn intersect(a: Ivl, b: Ivl) -> Result<Ivl> {
+    let (lo, hi) = (a.lo.max(b.lo), a.hi.min(b.hi));
+    if lo <= hi {
+        Ok(Ivl::new(lo, hi))
+    } else {
+        Err(SolidError::mass_failed(
+            OP,
+            "two enclosures of the volume do not overlap",
+        ))
     }
 }
 
@@ -1866,6 +1883,22 @@ mod tests {
             VolumeSign::Undecided(e) => assert!(e.lo < v && v < e.hi, "{e:?}"),
             other => panic!("{other:?}"),
         }
+    }
+
+    /// Enclosures intersect to their common part, and two that do not overlap (one of them
+    /// unsound) are a mass failure, not an enclosure.
+    #[test]
+    fn enclosures_that_do_not_overlap_are_a_failure() {
+        let e = intersect(Ivl::new(1.0, 3.0), Ivl::new(2.0, 4.0)).unwrap();
+        assert_eq!((e.lo, e.hi), (2.0, 3.0));
+        let r = intersect(Ivl::new(1.0, 2.0), Ivl::new(2.5, 4.0));
+        assert!(
+            matches!(
+                r.as_ref().map_err(SolidError::mass_failure),
+                Err(Some(crate::error::mass::MassFailure::Failed(_)))
+            ),
+            "{r:?}"
+        );
     }
 
     /// The moments hold the closed forms.
