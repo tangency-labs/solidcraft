@@ -130,6 +130,9 @@ fn kind(sketch: &Sketch, sel: &Sel) -> Option<Kind> {
     use crate::sketch::CurveKind;
     match sel {
         Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } => Some(Kind::Point),
+        // An origin axis is a straight line of the sketch once projected: Coincident takes it
+        // with a point. The other constraints' own rules take no axis from a selection yet.
+        Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Some(Kind::Line),
         Sel::SketchCurve { id, .. } => Some(match sketch.curves.get(sketch.curve_index(id)?)?.kind {
             CurveKind::Line { .. } => Kind::Line,
             CurveKind::Circle { .. } | CurveKind::Arc { .. } => Kind::Round,
@@ -144,7 +147,7 @@ fn kind(sketch: &Sketch, sel: &Sel) -> Option<Kind> {
 /// both lines; Concentric circles or arcs (or one and a point); Curvature a pair with a free-form
 /// curve; MidPoint and Polygon lines where they take curves; Coincident two points, lines or
 /// round curves, or a point with any curve; Horizontal/Vertical a
-/// single line. Entities of no sketch never fit.
+/// single line. An origin axis counts as a line. Entities of no sketch never fit.
 pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
     let Some(kinds) = selection.iter().map(|s| kind(sketch, s)).collect::<Option<Vec<Kind>>>() else { return false };
     let count = |k: Kind| kinds.iter().filter(|x| **x == k).count();
@@ -177,8 +180,11 @@ fn from_session(command: &str, s: &Session) -> Option<Value> {
 pub fn params_for(command: &str, s: &Session, selection: &[Sel]) -> Option<Value> {
     let state = s.world_state().ok()?;
     let sketch = super::sketch_store::active(s).and_then(|id| state.sketch(id)).map(|ss| &ss.sketch)?;
+    // A selected curve the sketch no longer has says nothing of its kind: the command names it
+    // in its error, where a pick tool would start over a selection that cannot be completed.
+    let stale = selection.iter().any(|sel| matches!(sel, Sel::SketchCurve { id, .. } if sketch.curve_index(id).is_none()));
     // Fix reads its own selection: a box's dimensions and constraint icons come along (#11663).
-    if command != "sketch.constraint.fix" && !kinds_fit(command, selection, sketch) {
+    if command != "sketch.constraint.fix" && !stale && !kinds_fit(command, selection, sketch) {
         return None;
     }
     constraint_params(command, selection, Some(sketch))
