@@ -13,6 +13,7 @@ commands work with jobs, from scripts, the CLI and MCP alike:
 | `cam.simulate` | Runs a written program through a model of the stock and holds what it leaves against the part: gouges, rapids through material, material left |
 | `cam.view.*` | The simulation view: a job's program played move by move on the simulated stock (see [Simulation view](#simulation-view)) |
 | `cam.view` | A PNG of the part with the job's toolpaths drawn over it, for an agent to look at (see [Pictures and extents for agents](#pictures-and-extents-for-agents)) |
+| `cam.features` | Lists the holes of a part a 3-axis mill drills or bores from above, found on its exact faces (see [Machinable features](#machinable-features)) |
 
 Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`, …).
 
@@ -1262,3 +1263,41 @@ job's operation names). It returns `path`, `image` (as above), `operations` (eac
 ```json
 {"cmd": "cam.view", "params": {"job_path": "C:/parts/bracket.cam.json", "path": "C:/parts/bracket.png", "op": "outline"}}
 ```
+
+## Machinable features
+
+`cam.features` lists the holes of a part a 3-axis mill drills or bores from above, with stable
+ids and their exact geometry, so an agent can plan drilling and boring without measuring the
+model:
+
+```json
+{"cmd": "cam.features", "params": {"bodies": ["Plate"], "origin": [0, 0, 0], "tolerance": 0.01}}
+```
+
+Every key is optional: the bodies default to every visible body, `origin` to the design's origin
+(the job's work zero) and `tolerance` to 0.01 mm (how close two sizes or positions must be to
+count as equal). Unknown keys are refused.
+
+Holes are read from the exact B-rep, never from a mesh: the faces' analytic surfaces, their loops
+of edges and the faces on the other side of each edge, and the edges' exact circles. Every
+coordinate is in work coordinates (the design less `origin`), the tool along work Z.
+
+| List | Each entry |
+| --- | --- |
+| `setups` | The one setup, the tool along work Z: `tool_axis`, `top_z`, `bottom_z`, `bounds` (the part's extent in XY), `features` (the hole ids) |
+| `holes` | `hole:k`: `body`, `center`, `center_work`, `axis_work`, `diameter`, `top_z`, `bottom_z`, `depth`, `through`, `floor` (`through`, `flat`, `cone` with `tip_z`, or `round`: the wall runs on into a curved floor within its radius, below `bottom_z`), `counterbore` / `counterbore_of` (the hole above or below it on the same axis), `countersink` (`diameter`, `angle_deg`), `breaks_out` (`[low, high]` Z over which the wall does not close all the way round: the hole breaks into another feature there, such as a slot across its foot), `faces` (the body's faces that make the round wall), `thread` (the thread the design taps in it: `designation`, `form`, `major_diameter`, `pitch`, `starts`, `hand`, and the threaded length's `top_z`, `bottom_z` and `depth`; the hole is then its tap drill) |
+| `hole_groups` | Holes of one diameter, depth and kind: `diameter`, `depth`, `through`, `count`, `ids` |
+
+Ids are numbered from the top down, then by position (Y, then X). The same bodies, origin and
+tolerance give the same ids. `notes` says what was left out: mesh bodies (they have no exact
+faces), and whole holes running square to Z, which a 3-axis mill does not reach from above.
+
+A hole is a whole round wall along the tool axis with material outside it, open at its top (the
+part of a round wall that is a pocket's corner or a slot's end is a wall, not a hole). Whether a
+round wall is a hole or a boss is read from the faces at its ends (a face facing up, or a
+countersink widening up from it, at its top), else by classifying a point just outside it on the
+exact solid; only the ends where the wall closes all the way round are read, so a hole that
+breaks partly into another feature (a slot across the part's underside cutting into its foot) is
+still a hole, with the stretch where it is open as `breaks_out`. A hole whose ends meet curved
+faces (through a domed handle) runs from the highest point of its mouth to the lowest of the
+other. A counterbore is a larger hole on the same axis whose bottom is a smaller one's top.

@@ -1,0 +1,10 @@
+{
+  "en": { "cmd.cam.features": "CAM Features" },
+  "ar": { "cmd.cam.features": "ميزات التشغيل CAM" },
+  "de": { "cmd.cam.features": "CAM-Features" },
+  "fr": { "cmd.cam.features": "Entités FAO" },
+  "he": { "cmd.cam.features": "תכונות CAM" },
+  "ja": { "cmd.cam.features": "CAMフィーチャー" },
+  "vi": { "cmd.cam.features": "Đặc trưng CAM" },
+  "zh": { "cmd.cam.features": "CAM 特征" }
+}

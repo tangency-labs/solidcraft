@@ -3981,3 +3981,126 @@ fn a_4axis_view_looks_along_the_a_axis_and_draws_one_operation() {
         }
     }
 }
+
+// Machinable features: holes.
+
+/// A plate 80 × 60 × 10 (its top at Z 0) with two 6 mm through holes along its -Y side, two
+/// blind 4 mm holes 6 deep along its +Y side, and a pocket with a round island in the middle.
+fn feature_plate() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 60, "height": 10, "corner": [-40, -30, -10], "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 24, "height": 6, "corner": [-20, -12, -5], "operation": "cut"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 5, "base": [0, 0, -5], "operation": "join"}));
+    for x in [-32.0, 32.0] {
+        run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 12, "base": [x, -22, -11], "operation": "cut"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 7, "base": [x, 22, -6], "operation": "cut"}));
+    }
+    s
+}
+
+fn near(v: &Value, want: f64) -> bool {
+    v.as_f64().is_some_and(|x| (x - want).abs() < 1e-6)
+}
+
+fn ids(list: &Value) -> Vec<String> {
+    list.as_array().unwrap().iter().map(|f| f["id"].as_str().unwrap().to_string()).collect()
+}
+
+#[test]
+fn the_holes_of_a_plate_are_read_exactly_from_its_faces() {
+    let mut s = feature_plate();
+    let f = run(&mut s, "cam.features", json!({}));
+    // By position: the two through holes of 6 mm first (y = -22), then the blind 4 mm ones. The
+    // island in the pocket is a boss, not a hole.
+    let holes = f["holes"].as_array().unwrap();
+    assert_eq!(holes.len(), 4, "{f}");
+    let want = [(-32.0, -22.0, 6.0, true), (32.0, -22.0, 6.0, true), (-32.0, 22.0, 4.0, false), (32.0, 22.0, 4.0, false)];
+    for (h, (x, y, d, through)) in holes.iter().zip(want) {
+        assert!(near(&h["center"][0], x) && near(&h["center"][1], y), "{h}");
+        assert!(near(&h["diameter"], d) && near(&h["top_z"], 0.0), "{h}");
+        assert_eq!(h["through"], through, "{h}");
+        if through {
+            assert!(near(&h["bottom_z"], -10.0) && near(&h["depth"], 10.0) && h["floor"] == "through", "{h}");
+        } else {
+            assert!(near(&h["bottom_z"], -6.0) && near(&h["depth"], 6.0) && h["floor"] == "flat", "{h}");
+        }
+        assert_eq!(h["axis_work"], json!([0.0, 0.0, 1.0]), "{h}");
+        assert!(h.get("counterbore").is_none() && h.get("countersink").is_none(), "{h}");
+        assert_eq!(h["body"], "Plate", "{h}");
+        assert!(!h["faces"].as_array().unwrap().is_empty(), "{h}");
+    }
+    assert_eq!(ids(&f["holes"]), ["hole:0", "hole:1", "hole:2", "hole:3"]);
+    let groups = f["hole_groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 2, "{f}");
+    assert!(near(&groups[0]["diameter"], 6.0) && groups[0]["count"] == 2 && groups[0]["ids"] == json!(["hole:0", "hole:1"]), "{f}");
+    assert!(near(&groups[1]["diameter"], 4.0) && groups[1]["count"] == 2 && groups[1]["through"] == false, "{f}");
+    let setup = &f["setups"][0];
+    assert!(near(&setup["top_z"], 0.0) && near(&setup["bottom_z"], -10.0), "{f}");
+    assert_eq!(setup["bounds"], json!([[-40.0, -30.0], [40.0, 30.0]]), "{f}");
+    assert_eq!(setup["features"], json!(["hole:0", "hole:1", "hole:2", "hole:3"]), "{f}");
+    // Work zero moves every coordinate; the same part gives the same ids and numbers, run again
+    // or built again.
+    let moved = run(&mut s, "cam.features", json!({"origin": [0, 0, -10]}));
+    assert!(near(&moved["holes"][0]["top_z"], 10.0) && near(&moved["holes"][0]["bottom_z"], 0.0), "{moved}");
+    assert_eq!(f, run(&mut s, "cam.features", json!({})));
+    assert_eq!(f, run(&mut feature_plate(), "cam.features", json!({})));
+    // Every face of the plate is a plane or a cylinder: no point of a free-form face was read
+    // against the body.
+    assert_eq!(super::features::trim_reads(), 0);
+}
+
+/// A counterbored hole, a countersunk one and a tapped one made with `solid.hole`, and a hole
+/// running square to Z.
+#[test]
+fn counterbores_countersinks_points_and_side_holes_are_told_apart() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 20, "corner": [-30, -20, 0], "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [-15, 0, 20], "diameter": 6, "depth": 25, "type": "counterbore", "cb_diameter": 11, "cb_depth": 6}));
+    run(&mut s, "solid.hole", json!({"position": [15, 0, 20], "diameter": 6, "depth": 25, "type": "countersink", "cs_diameter": 12, "cs_angle": 90}));
+    run(&mut s, "solid.hole", json!({"position": [0, -12, 20], "thread": "M6", "depth": 12}));
+    // A hole across the block, along X.
+    run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 70, "base": [-35, 12, 10], "axis": "X", "operation": "cut"}));
+    let f = run(&mut s, "cam.features", json!({}));
+    let holes = f["holes"].as_array().unwrap();
+    let find = |d: f64| holes.iter().find(|h| near(&h["diameter"], d)).unwrap_or_else(|| panic!("no {d} mm hole: {f}"));
+    let seat = find(11.0);
+    let under = holes.iter().find(|h| near(&h["diameter"], 6.0) && near(&h["center"][0], -15.0)).unwrap();
+    assert!(near(&seat["top_z"], 20.0) && near(&seat["bottom_z"], 14.0) && seat["floor"] == "flat", "{seat}");
+    assert_eq!(seat["counterbore_of"], under["id"], "{f}");
+    assert_eq!(under["counterbore"], seat["id"], "{f}");
+    assert!(near(&under["top_z"], 14.0) && under["through"] == true, "{under}");
+    let sunk = holes.iter().find(|h| near(&h["diameter"], 6.0) && near(&h["center"][0], 15.0)).unwrap();
+    let cs = &sunk["countersink"];
+    assert!(near(&cs["diameter"], 12.0) && near(&cs["angle_deg"], 90.0), "{sunk}");
+    // The tapped hole is its tap drill, with the thread the design gives it.
+    let tapped = holes.iter().find(|h| h["thread"].is_object()).unwrap_or_else(|| panic!("no tapped hole: {f}"));
+    assert_eq!(tapped["thread"]["designation"], "M6", "{tapped}");
+    assert!(tapped["diameter"].as_f64().is_some_and(|d| d > 4.5 && d < 5.5) && tapped["through"] == false, "{tapped}");
+    assert_eq!(holes.len(), 4, "the hole across the block is not one from above: {f}");
+    assert!(f["notes"].to_string().contains("1 holes run square to Z"), "{f}");
+}
+
+#[test]
+fn hostile_feature_calls_are_refused_without_panics() {
+    let mut s = feature_plate();
+    for p in [
+        json!({"bodies": []}),
+        json!({"bodies": ["Nothing"]}),
+        json!({"bodies": ["Plate", "Plate"]}),
+        json!({"origin": [1e308, 0, 0]}),
+        json!({"origin": [0, 0]}),
+        json!({"tolerance": 0}),
+        json!({"tolerance": 2}),
+        json!({"tolerance": "fine"}),
+        json!({"axis": "a"}),
+        json!({"surprise": 1}),
+    ] {
+        match s.execute("cam.features", &p) {
+            Err(EngineError::Internal(_, msg)) => panic!("{p}: panicked: {msg}"),
+            Err(_) => {}
+            Ok(v) => panic!("{p}: accepted: {v}"),
+        }
+    }
+    let e = Session::default().execute("cam.features", &json!({})).unwrap_err();
+    assert!(e.to_string().contains("no body to machine"), "{e}");
+}

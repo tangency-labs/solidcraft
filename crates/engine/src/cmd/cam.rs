@@ -3,7 +3,8 @@
 //! crate. The job (machine, post, tools, operations) is a JSON file next to the design, never part
 //! of it, so nothing new is saved in a design (docs/cam-jobs.md). The simulation view's commands
 //! (`cam.view.*`) are in `cam_view.rs`, and the pictures of the toolpaths (`cam.view`, and
-//! `cam.job`'s `image` and `images_dir`) in `cam_image.rs`.
+//! `cam.job`'s `image` and `images_dir`) in `cam_image.rs`. `cam.features`, the holes found on
+//! the part's exact faces, is in `cam_features.rs`.
 //!
 //! `cam.job` plans every operation in work coordinates (the design less the job's origin): the
 //! 2D ones on profiles, the 3D ones on the part's bodies tessellated from their exact surfaces
@@ -73,6 +74,7 @@ const POST_LIST_CONTRACT: TypedContract<CamPostListParams> = TypedContract::new(
 const POST_GET_CONTRACT: TypedContract<CamPostGetParams> = TypedContract::new();
 const GCODE_CHECK_CONTRACT: TypedContract<CamGcodeCheckParams> = TypedContract::new();
 
+pub(crate) use features::COMMANDS as FEATURE_COMMANDS;
 pub(crate) use pictures::COMMANDS as PICTURE_COMMANDS;
 pub(crate) use view::COMMANDS as VIEW_COMMANDS;
 
@@ -2490,6 +2492,8 @@ fn gcode_check(_: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+#[path = "cam_features.rs"]
+mod features;
 #[path = "cam_image.rs"]
 mod pictures;
 #[path = "cam_programs.rs"]

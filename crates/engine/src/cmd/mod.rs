@@ -371,6 +371,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(cam::COMMANDS.iter());
     v.extend(cam::VIEW_COMMANDS.iter());
     v.extend(cam::PICTURE_COMMANDS.iter());
+    v.extend(cam::FEATURE_COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(notes::COMMANDS.iter());

@@ -1,0 +1,34 @@
+//! Tests of the `cam.features` contract: its keys, and replies that match its output schema.
+
+use serde_json::{Value, json};
+
+use super::{CamFeaturesParams, CamFeaturesReply};
+use crate::Session;
+use crate::schema::tests::{assert_keys, conforms};
+use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+
+fn run(s: &mut Session, id: &str, p: Value) -> Value {
+    s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
+}
+
+#[test]
+fn schemas_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<CamFeaturesParams>(), &["bodies", "origin", "tolerance"]);
+}
+
+/// The command replies as its output schema says, in Warn without warnings; strict refuses a
+/// misspelt key.
+#[test]
+fn replies_match_the_output_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [-20, -15, -10]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 12, "base": [0, 0, -11], "operation": "cut"}));
+    let r = run(&mut s, "cam.features", json!({}));
+    let schema = output_schema_for::<CamFeaturesReply>();
+    let schema = schema.as_value();
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert!(r.get("param_warnings").is_none(), "{r}");
+    let mut strict = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let e = strict.execute("cam.features", &json!({"bodys": ["Body1"]})).unwrap_err();
+    assert!(e.to_string().contains("bodys"), "{e}");
+}
