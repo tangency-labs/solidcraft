@@ -1299,7 +1299,7 @@ mod tests {
     fn web_chinese_subset_draws_simplified_settings() {
         let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/craft-ui-sc/CraftUI-SC.otf")).to_vec();
         let ctx = test_context();
-        assert!(install_web_script_fonts(&ctx, None, Some(bytes), "zh"));
+        assert!(install_web_script_fonts(&ctx, None, Some(bytes), None, "zh"));
         let installed = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
         for family in sans_families() {
             assert_eq!(installed.families[&family].first().map(String::as_str), Some(CHINESE_FALLBACK));
@@ -1348,8 +1348,9 @@ mod tests {
         )
     }
 
-    /// The Korean face covers the whole Hangul block, so Korean text a user types draws too, and
-    /// every Hangul character of the Korean catalog has a glyph in it (#15208).
+    /// The Korean face covers the whole Hangul syllable block and the conjoining and compatibility
+    /// jamo, so Korean text a user types draws too, and every Hangul character of the Korean
+    /// catalog has a glyph in it (#15208).
     #[test]
     fn the_korean_subset_covers_every_hangul_character() {
         let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/craft-ui-kr/CraftUI-KR.otf"));

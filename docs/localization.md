@@ -169,8 +169,10 @@ first time Japanese text (kana, kanji or full-width forms in a design name, file
 typed text) is drawn, the Japanese face is fetched (#720). A session that never shows such text
 downloads no script font. If the needed face fails to load, the web interface shows English for that
 session only to prevent missing glyphs (tofu); the saved language preference is kept, so the next
-visit tries again. The Korean subset covers the whole Hangul syllable block, so Korean text typed into
-a design renders as well; Hanja (CJK ideographs) is not part of it and stays with the Japanese face.
+visit tries again. The Korean subset covers the whole Hangul syllable block and the Hangul jamo, so
+Korean text typed into a design renders as well. It carries no Hanja (CJK ideographs): a Korean
+interface fetches the Korean face alone, so Hanja in a design name is not drawn unless the Japanese
+face is fetched too, and the desktop falls back to the system Hangul font, which covers Hanja.
 
 ## Right-to-left text
 
