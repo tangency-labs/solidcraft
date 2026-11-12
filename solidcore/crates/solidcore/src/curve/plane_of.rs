@@ -162,6 +162,13 @@ fn hull(c: &Curve, out: &mut Vec<(Point3, f64)>) -> Result<()> {
                 reason: "a traced intersection curve",
             })
         }
+        // A curve on a surface is its UV curve on that surface; its record gives no hull.
+        Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. } => {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "a curve on a surface",
+            })
+        }
     }
     Ok(())
 }

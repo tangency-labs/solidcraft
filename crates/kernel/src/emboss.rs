@@ -557,7 +557,13 @@ fn face_axial_bounds(b: &Brep, face: usize, o: Vec3, axis: Vec3) -> Result<Optio
                     add(z, z)?;
                 }
             }
-            Curve::Ellipse { .. } | Curve::Polyline { .. } | Curve::SurfaceIntersection { .. } => return Ok(None),
+            Curve::Ellipse { .. }
+            | Curve::Polyline { .. }
+            | Curve::SurfaceIntersection { .. }
+            | Curve::OnSurface { .. }
+            | Curve::OnSurfaceRef { .. } => {
+                return Ok(None);
+            }
         }
     }
     Ok((lo.is_finite() && hi.is_finite()).then_some((lo, hi)))

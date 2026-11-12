@@ -294,6 +294,13 @@ fn create_iso_parametric_curve(
     value: f64,
     approx_tol: f64,
 ) -> Result<Curve> {
+    // A retained screw's net is only its search enclosure: its iso line is the
+    // exact definition's, which the surface's own iso construction builds.
+    if surface.retained_screw().is_some() {
+        return Ok(surface
+            .create_iso_parametric_curve(k, param, value, approx_tol, None, false)?
+            .curve);
+    }
     match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => Ok(Curve::from(
             b.create_iso_parametric_curve(k, param, value, IsoCurveOptions::default())?
@@ -2464,6 +2471,49 @@ mod tests {
         }
         sides.sort_by(f64::total_cmp);
         assert_eq!(sides, vec![d.u_min(), d.u_max()]);
+    }
+
+    /// An interior iso line of a retained screw is the exact definition's iso
+    /// curve, never the net's B-spline iso: the net only encloses S.
+    #[test]
+    fn retained_screw_iso_lines_follow_the_definition() {
+        use crate::curve::curve::CurveKind;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        let k = &Kernel::default();
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.3, 0.6];
+        let net = crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap();
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 0.15).unwrap();
+        let mut surface = Surface::from(net);
+        surface.set_sweep_definition(definition);
+        assert!(surface.retained_screw().is_some());
+        let domain = surface.natural_uv_domain_if_built();
+        for (param, value) in [
+            (SurfParamType::U, 0.5 * (domain.min().x + domain.max().x)),
+            (SurfParamType::V, 0.5 * (domain.min().y + domain.max().y)),
+        ] {
+            let iso = create_iso_parametric_curve(k, &surface, param, value, 1e-6).unwrap();
+            assert!(matches!(iso.kind(), CurveKind::Iso(_)));
+            let exact = surface
+                .create_iso_parametric_curve(k, param, value, 1e-6, None, false)
+                .unwrap()
+                .curve;
+            let ivl = iso.natural_interval();
+            assert_eq!(ivl, exact.natural_interval());
+            for i in 0..=4 {
+                let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 4.0;
+                assert_eq!(
+                    iso.evaluate_point(k, t).unwrap(),
+                    exact.evaluate_point(k, t).unwrap()
+                );
+            }
+        }
     }
 
     #[test]

@@ -86,7 +86,7 @@
 {"case":"edge_start_plane_axis","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,0.0,5.0,2.0,0.0,360.0,1.0],"status":[0.0]}}
 {"case":"edge_start_plane_seam","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[2.0,0.0,0.0,2.0,0.0,359.9999999713521,1.0],"status":[0.0]}}
 {"case":"edge_start_plane_seam_snap","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[2.0,0.0,0.0,2.0,0.0,360.0,1.0],"status":[0.0]}}
-{"case":"edge_to_step_outside","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[0.0,-0.3],"status":[0.0]}}
+{"case":"edge_to_step_outside","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[360.0,-0.3],"status":[0.0]}}
 {"case":"gen0000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[["NaN","NaN","NaN"]],"n":24},"status":[0.0]}}
 {"case":"gen0001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[1.2183279964408735,2.1484076110370722,2.7470940184686907],"status":[0.0]}}
 {"case":"gen0002","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[0.0],"out":[2.291015840057639,3.3099111400856014,0.9222817429351438,0.0024072708113241415,-0.0044978738918814735,0.002463678320717631,-0.02315945377793447,0.009346539644466988,0.06034622121747728,0.0,0.0,0.0],"status":[0.0]}}

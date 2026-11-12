@@ -161,6 +161,7 @@ fn cube(s: f64) -> Record {
         .collect();
     Record {
         version: VERSION,
+        screw_owners: Vec::new(),
         tolerance: 1e-6,
         regions: vec![
             Region {
@@ -266,6 +267,99 @@ fn records_the_conversion_cannot_carry_are_refused() {
     assert!(matches!(
         to_kernel(&mut k, &r, true),
         Err(Unsupported::NotYet(_))
+    ));
+}
+
+#[test]
+fn exact_curve_owner_records_cannot_bypass_the_input_budget() {
+    use solidcore_record::brep::sweep::{
+        NurbsCurveRecord, NurbsSurfaceRecord, ProceduralSweepRecord, ScrewMotionRecord,
+        SweepDefinitionRecord,
+    };
+    fn knots(n: usize) -> Vec<f64> {
+        let mut k = Vec::with_capacity(n + 2);
+        k.push(0.0);
+        k.extend((0..n).map(|i| i as f64));
+        k.push((n - 1) as f64);
+        k
+    }
+    let (u, v) = (2000_usize, 2001_usize);
+    let profile = NurbsCurveRecord {
+        dim: 3,
+        points_3d: true,
+        degree: 1,
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[2.0, 0.0, 0.0], [3.0, 0.0, 1.0]],
+        weights: None,
+    };
+    let owner = ProceduralSweepRecord {
+        definition: SweepDefinitionRecord::Screw {
+            profile,
+            motion: ScrewMotionRecord {
+                origin: [0.0; 3],
+                axis: [0.0, 0.0, 1.0],
+                pitch: 1.0,
+                law: None,
+            },
+            offset: None,
+        },
+        net: NurbsSurfaceRecord {
+            u_degree: 1,
+            v_degree: 1,
+            u_count: u as u32,
+            v_count: v as u32,
+            u_knots: knots(u),
+            v_knots: knots(v),
+            points: vec![[2.0, 0.0, 0.0]; u * v],
+            weights: None,
+        },
+        stations: vec![0.0, 1.0],
+        half: 0.5,
+        bound: 0.1,
+        map_a: [0.0, 0.0],
+        map_b: [1.0, 1.0],
+        swapped: false,
+    };
+    let mut record = cube(1.0);
+    record.edges[0].curve = Curve::OnSurface {
+        surface: Box::new(Surface::ProceduralSweep(Box::new(owner))),
+        uv_curve: Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[0.0, 0.0], [1.0, 1.0]],
+        },
+        domain: [[0.0, 1.0], [0.0, 1.0]],
+    };
+    let mut k = kernel();
+    assert!(matches!(
+        to_kernel(&mut k, &record, true),
+        Err(Unsupported::Invalid("item budget"))
+    ));
+    let Curve::OnSurface {
+        surface,
+        uv_curve,
+        domain,
+    } = std::mem::replace(
+        &mut record.edges[0].curve,
+        Curve::Line {
+            start: [0.0; 3],
+            end: [1.0, 0.0, 0.0],
+        },
+    )
+    else {
+        panic!("inline owner")
+    };
+    let Surface::ProceduralSweep(owner) = *surface else {
+        panic!("screw owner")
+    };
+    record.screw_owners.push(*owner);
+    record.edges[0].curve = Curve::OnSurfaceRef {
+        owner: 0,
+        uv_curve,
+        domain,
+    };
+    assert!(matches!(
+        to_kernel(&mut k, &record, true),
+        Err(Unsupported::Invalid("item budget"))
     ));
 }
 
@@ -420,6 +514,7 @@ fn square(s: f64) -> Record {
         .collect();
     Record {
         version: VERSION,
+        screw_owners: Vec::new(),
         tolerance: 1e-6,
         regions: vec![Region {
             shells: vec![0],
@@ -504,6 +599,235 @@ fn round_trip(k: &mut Kernel, name: &str, b: &mut Brep) -> (Record, Brep) {
     let (again, _) = to_record(k, &mut back).unwrap_or_else(|e| panic!("{name}: {e}"));
     assert_eq!(again, r, "{name}: the record changed on a round trip");
     (r, back)
+}
+
+/// A capped quarter-torus pipe has a Path definition before export. The established
+/// record representation stores its certified net as a spline, and preserves the
+/// closed body and its geometry when rebuilt.
+#[test]
+#[allow(clippy::disallowed_methods)] // Independent test-only geometry oracle; conversion copies fields.
+fn a_path_pipe_goes_round_as_its_certified_spline() {
+    use solidcore::curve::curve::Curve as KernelCurve;
+    use solidcore::math::Point2;
+    use solidcore::primitive::api_curves::create_arc;
+    use solidcore::sweep::api_brep::create_pipe_sweep;
+    use std::f64::consts::PI;
+
+    let mut k = kernel();
+    let path = KernelCurve::from(create_arc(Vec3::ZERO, 10.0, 0.0, 90.0).unwrap());
+    let mut pipe = create_pipe_sweep(&mut k, 1.0, Some(&path), true).unwrap();
+    assert!(is_manifold_solid(&pipe).unwrap());
+    valid(&mut k, &mut pipe);
+    let expected_volume = 5.0 * PI * PI;
+    assert!((volume(&k, &mut pipe) - expected_volume).abs() < 1e-9 * expected_volume);
+
+    let mut samples = Vec::new();
+    for &id in pipe.face_list() {
+        let surface = pipe.face(id).unwrap().surface.as_ref().unwrap();
+        let Some(sweep) = surface.procedural_sweep() else {
+            continue;
+        };
+        assert!(
+            sweep.definition().path().is_some(),
+            "pipe wall must use Path motion"
+        );
+        let domain = sweep.net().natural_uv_domain();
+        let uv = domain.evaluate(0.37, 0.61);
+        let point = sweep.definition().evaluate_definition_point(uv).unwrap();
+        let radius = (point.x.hypot(point.y) - 10.0).hypot(point.z);
+        assert!((radius - 1.0).abs() < 1e-10);
+        samples.push((id, Point2::new(uv.x, uv.y), point, sweep.bound()));
+    }
+    assert!(
+        !samples.is_empty(),
+        "the pipe must retain a Path wall before export"
+    );
+
+    let counts = (
+        pipe.face_list().len(),
+        pipe.edge_list().len(),
+        pipe.vertex_list().len(),
+    );
+    let (record, order) = to_record(&mut k, &mut pipe).unwrap();
+    record.validate_built().unwrap();
+    order_is_total(&order, &record, &pipe);
+    for (id, _, _, _) in &samples {
+        let index = order.faces.iter().position(|face| face == id).unwrap();
+        assert!(matches!(
+            record.faces[index].surface,
+            Surface::Spline { .. } | Surface::RationalSpline { .. }
+        ));
+        assert!(record.faces[index].nurbs.is_none());
+    }
+    let (mut restored, back_order) = to_kernel(&mut k, &record, true).unwrap();
+    order_is_total(&back_order, &record, &restored);
+    assert_eq!(
+        counts,
+        (
+            restored.face_list().len(),
+            restored.edge_list().len(),
+            restored.vertex_list().len()
+        )
+    );
+    assert!(is_manifold_solid(&restored).unwrap());
+    valid(&mut k, &mut restored);
+    assert!((volume(&k, &mut restored) - expected_volume).abs() < 1e-9 * expected_volume);
+    for (id, uv, expected, bound) in samples {
+        let index = order.faces.iter().position(|face| *face == id).unwrap();
+        let wall = restored
+            .face(back_order.faces[index])
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap();
+        let actual = wall.evaluate_point(&k, uv).unwrap();
+        assert!(
+            (actual - expected).length() <= bound + 1e-12,
+            "restored point differs from the Path definition"
+        );
+    }
+}
+
+/// Reconstructed acceptance classes, not the unavailable historical #2613 driver.
+/// The external dimensions match the independently verified M20 fixture above.
+/// The internal bore/groove follows the existing `issue_410` construction, scaled
+/// to M20x2.5. Segmentation uses the existing radial sweep builder: a zero radial
+/// law is identically zero, so its breakpoints change face partitioning while
+/// leaving the ideal screw geometry unchanged.
+#[derive(Clone, Copy, Debug)]
+enum MatrixShape {
+    SegmentedExternal,
+    ContinuousExternal,
+    ContinuousInternal,
+}
+
+#[allow(clippy::disallowed_methods)] // Independent test-only geometry oracle; conversion copies fields.
+fn matrix_m20_body(k: &mut Kernel, shape: MatrixShape) -> Brep {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::curve::curve::Curve as KernelCurve;
+    use solidcore::geom::tol::{brep_approx_tol_3d, SmallTopoType};
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::sweep::screw::{screw_sweep, screw_sweep_radial};
+
+    let base = Point3::new(-1.0, -64.0, 0.0);
+    let pitch = 2.5;
+    let minor = 10.0 - 5.0 * pitch * 3.0_f64.sqrt() / 16.0;
+    let internal = matches!(shape, MatrixShape::ContinuousInternal);
+    let (low, high, half_low, half_high) = if internal {
+        let low = minor - 0.05;
+        let half_high = pitch / 16.0;
+        (
+            low,
+            10.0,
+            half_high + (10.0 - low) / 3.0_f64.sqrt(),
+            half_high,
+        )
+    } else {
+        let high = 10.0 + 0.05 * pitch;
+        let half_low = pitch / 8.0;
+        (
+            minor,
+            high,
+            half_low,
+            half_low + (high - minor) / 3.0_f64.sqrt(),
+        )
+    };
+    let points = [
+        Point3::new(base.x + low, base.y, -pitch - half_low),
+        Point3::new(base.x + high, base.y, -pitch - half_high),
+        Point3::new(base.x + high, base.y, -pitch + half_high),
+        Point3::new(base.x + low, base.y, -pitch + half_low),
+    ];
+    let profile: Vec<KernelCurve> = points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .map(|(&a, &b)| KernelCurve::from(create_line_segment(a, b).unwrap()))
+        .collect();
+    let stock =
+        primitives::create_cylinder(k, base, if internal { 15.0 } else { 10.0 }, 20.0).unwrap();
+    let tolerance = brep_approx_tol_3d(k, &stock, SmallTopoType::NormalSize);
+    let stock = if internal {
+        let bore = primitives::create_cylinder(
+            k,
+            Point3::new(base.x, base.y, -pitch),
+            minor,
+            20.0 + 2.0 * pitch,
+        )
+        .unwrap();
+        boolean_difference(k, stock, bore).unwrap()
+    } else {
+        stock
+    };
+    let groove = if matches!(shape, MatrixShape::SegmentedExternal) {
+        let law: Vec<_> = (0..=5).map(|i| (2.0 * f64::from(i), 0.0)).collect();
+        screw_sweep_radial(k, &profile, base, Vec3::Z, pitch, 10.0, &law, tolerance).unwrap()
+    } else {
+        screw_sweep(k, &profile, base, Vec3::Z, pitch, 10.0, tolerance).unwrap()
+    };
+    boolean_difference(k, stock, groove).unwrap()
+}
+
+fn matrix_m20_selections(k: &Kernel, b: &Brep) -> (Vec<solidcore::FaceId>, Vec<solidcore::FaceId>) {
+    use solidcore::surface::surface::SurfaceKind;
+    let mut flanks = Vec::new();
+    let mut lateral = Vec::new();
+    for (id, face) in b.faces().iter() {
+        let surface = face.surface.as_ref().unwrap();
+        if surface.procedural_sweep().is_some() {
+            flanks.push(id);
+            lateral.push(id);
+        } else if matches!(surface.kind_with_nurb(k).unwrap(), SurfaceKind::Cone(c) if c.is_cylinder_class())
+        {
+            lateral.push(id);
+        }
+    }
+    (flanks, lateral)
+}
+
+fn check_matrix_fixture(shape: MatrixShape) {
+    let mut k = kernel();
+    let mut body = matrix_m20_body(&mut k, shape);
+    assert!(is_manifold_solid(&body).unwrap(), "{shape:?}");
+    let check = check_brep(&mut k, &mut body, CheckLevel::Level2).unwrap();
+    assert_eq!(
+        check.assert_valid,
+        Some(true),
+        "{shape:?}: {:?}",
+        check.reports
+    );
+    assert_eq!(
+        check.failures().count(),
+        0,
+        "{shape:?}: {:?}",
+        check.reports
+    );
+    let (flanks, lateral) = matrix_m20_selections(&k, &body);
+    if matches!(shape, MatrixShape::SegmentedExternal) {
+        assert!(
+            flanks.len() > 2,
+            "law breaks must create segmented screw walls"
+        );
+    } else {
+        assert_eq!(flanks.len(), 2, "one continuous face per flank");
+    }
+    assert!(
+        lateral.len() > flanks.len(),
+        "all-lateral selection must include cylinders"
+    );
+}
+
+#[test]
+fn reconstructed_m20_segmented_external_fixture() {
+    check_matrix_fixture(MatrixShape::SegmentedExternal);
+}
+#[test]
+fn reconstructed_m20_continuous_external_fixture() {
+    check_matrix_fixture(MatrixShape::ContinuousExternal);
+}
+#[test]
+fn reconstructed_m20_continuous_internal_fixture() {
+    check_matrix_fixture(MatrixShape::ContinuousInternal);
 }
 
 fn boxed(k: &mut Kernel, o: [f64; 3], s: f64) -> Brep {
@@ -1258,4 +1582,114 @@ fn a_tolerance_whose_zone_underflows_is_refused() {
         to_kernel(&mut k, &r, true),
         Err(Unsupported::Invalid(_))
     ));
+}
+
+/// Timings of an M20×2.5 external thread, 4 and 10 turns: the groove's build, the cut, the
+/// record both ways (opening a saved body is `to_kernel`, the median of eleven), the record's
+/// evaluators (every face's and edge's, as display builds them; the median of eleven) and a
+/// closest point over every edge of the body just opened. A bench: it prints, and asserts
+/// only that each step succeeds and the record's volume is the body's. `cargo test --profile
+/// goldens -p solidcore-convert --test brep -- --ignored --nocapture m20_thread_timings`.
+#[test]
+#[ignore = "a bench: prints timings"]
+#[allow(clippy::disallowed_methods)] // Test-only fixture.
+fn m20_thread_timings() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::curve::curve::Curve as KernelCurve;
+    use solidcore::geom::tol::{brep_approx_tol_3d, SmallTopoType};
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::query::api_queries::edge_closest_point;
+    use solidcore::sweep::screw::screw_sweep;
+    use std::time::Instant;
+
+    for turns in [4.0, 10.0] {
+        let mut k = kernel();
+        let pitch = 2.5_f64;
+        let minor = 10.0 - 5.0 * pitch * 3.0_f64.sqrt() / 16.0;
+        let high = 10.0 + 0.05 * pitch;
+        let half_low = pitch / 8.0;
+        let half_high = half_low + (high - minor) / 3.0_f64.sqrt();
+        let points = [
+            Point3::new(minor, 0.0, -half_low),
+            Point3::new(high, 0.0, -half_high),
+            Point3::new(high, 0.0, half_high),
+            Point3::new(minor, 0.0, half_low),
+        ];
+        let profile: Vec<KernelCurve> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&a, &b)| KernelCurve::from(create_line_segment(a, b).unwrap()))
+            .collect();
+        let length = pitch * (turns - 1.0);
+        let stock =
+            primitives::create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, length).unwrap();
+        let tolerance = brep_approx_tol_3d(&k, &stock, SmallTopoType::NormalSize);
+        let t = Instant::now();
+        let mut groove = screw_sweep(
+            &mut k,
+            &profile,
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::Z,
+            pitch,
+            turns,
+            tolerance,
+        )
+        .unwrap();
+        let build = t.elapsed();
+        let groove_volume = volume(&k, &mut groove);
+        let t = Instant::now();
+        let mut body = boolean_difference(&mut k, stock, groove).unwrap();
+        let cut = t.elapsed();
+        let body_volume = volume(&k, &mut body);
+        let t = Instant::now();
+        let (record, _) = to_record(&mut k, &mut body).unwrap();
+        let write = t.elapsed();
+        // the median of eleven opens
+        let mut opens = Vec::new();
+        for _ in 0..11 {
+            let t = Instant::now();
+            let _ = to_kernel(&mut k, &record, true).unwrap();
+            opens.push(t.elapsed());
+        }
+        opens.sort();
+        let open = opens[5];
+        let (mut back, _) = to_kernel(&mut k, &record, true).unwrap();
+        let back_volume = volume(&k, &mut back);
+        let mut evals = Vec::new();
+        for _ in 0..11 {
+            let t = Instant::now();
+            for f in &record.faces {
+                solidcore::eval::SurfaceEval::new(&solidcore_convert::surface(&f.surface).unwrap())
+                    .unwrap();
+            }
+            let context = solidcore_convert::curve_context::BodyCurveContext::new(&record).unwrap();
+            for i in 0..record.edges.len() {
+                context.edge(i).unwrap();
+            }
+            evals.push(t.elapsed());
+        }
+        evals.sort();
+        let evaluators = evals[5];
+        assert!((back_volume - body_volume).abs() <= 1e-9 * body_volume);
+        let q = Vec3::new(-9.0, 0.5, 0.4 * length);
+        let t = Instant::now();
+        let mut nearest = f64::INFINITY;
+        for &e in back.edge_list() {
+            let d = edge_closest_point(&k, &back, e, q)
+                .unwrap()
+                .closest
+                .distance;
+            nearest = nearest.min(d);
+        }
+        let closest = t.elapsed();
+        eprintln!(
+            "M20 turns {turns}: groove {groove_volume:.6} body {body_volume:.6} faces {} edges {} | \
+             build {build:?} cut {cut:?} to_record {write:?} to_kernel {open:?} evaluators {evaluators:?} \
+             closest-over-{}-edges {closest:?} (nearest {nearest:.9})",
+            back.face_list().len(),
+            back.edge_list().len(),
+            back.edge_list().len(),
+        );
+    }
 }

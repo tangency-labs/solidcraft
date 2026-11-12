@@ -79,6 +79,34 @@ impl Brep {
             .collect()
     }
 
+    /// Whether two edge curves of this record are the same curve: equal, or curves on screws
+    /// whose UV curves, domains and owners' definitions are equal (copies from different
+    /// solids name equal owners at different positions).
+    pub(crate) fn same_curve(&self, a: &super::Curve, b: &super::Curve) -> bool {
+        match (a, b) {
+            (
+                super::Curve::OnSurfaceRef {
+                    owner: oa,
+                    uv_curve: ua,
+                    domain: da,
+                },
+                super::Curve::OnSurfaceRef {
+                    owner: ob,
+                    uv_curve: ub,
+                    domain: db,
+                },
+            ) => {
+                ua == ub
+                    && da == db
+                    && matches!(
+                        (self.screw_owners.get(*oa as usize), self.screw_owners.get(*ob as usize)),
+                        (Some(x), Some(y)) if x == y
+                    )
+            }
+            _ => a == b,
+        }
+    }
+
     /// How the material regions meet, read from the record: each pair of regions that shares a
     /// face, an edge or a vertex, with the most they share. `regions` index
     /// [`Brep::material_regions`] (so a body's lumps); pairs not listed are apart. Regions share
@@ -182,10 +210,9 @@ impl Brep {
                 edge.interval.map(f64::to_bits),
             );
             let same = edge_copies.entry(key).or_default();
-            match same
-                .iter_mut()
-                .find(|(other, _)| other.curve == edge.curve && other.nurbs == edge.nurbs)
-            {
+            match same.iter_mut().find(|(other, _)| {
+                self.same_curve(&other.curve, &edge.curve) && other.nurbs == edge.nurbs
+            }) {
                 Some((_, all)) => all.extend(owners),
                 None => same.push((edge, owners.clone())),
             }
@@ -475,7 +502,7 @@ impl Brep {
                 Ok(face)
             })
             .collect::<Result<Vec<_>>>()?;
-        let new_edges = edges
+        let mut new_edges = edges
             .old
             .iter()
             .map(|&e| {
@@ -506,6 +533,25 @@ impl Brep {
                     .ok_or(Invalid("vertex reference"))
             })
             .collect::<Result<_>>()?;
+        let mut screw_owners = Vec::new();
+        let mut owner_map = std::collections::BTreeMap::new();
+        for edge in &mut new_edges {
+            if let super::Curve::OnSurfaceRef { owner, .. } = &mut edge.curve {
+                let old = *owner;
+                let next =
+                    u32::try_from(screw_owners.len()).map_err(|_| Invalid("screw owner count"))?;
+                let mapped = *owner_map.entry(old).or_insert_with(|| {
+                    if let Some(record) = self.screw_owners.get(old as usize) {
+                        screw_owners.push(record.clone());
+                    }
+                    next
+                });
+                if self.screw_owners.get(old as usize).is_none() {
+                    return Err(Invalid("screw owner index"));
+                }
+                *owner = mapped;
+            }
+        }
         let brep = Brep {
             version: self.version,
             tolerance: self.tolerance,
@@ -514,6 +560,7 @@ impl Brep {
             faces: new_faces,
             edges: new_edges,
             vertices: new_vertices,
+            screw_owners,
         };
         brep.validate_built()?;
         Ok(Part {
@@ -565,6 +612,7 @@ pub fn compound(records: &[&Brep]) -> Result<Part> {
         faces: Vec::new(),
         edges: Vec::new(),
         vertices: Vec::new(),
+        screw_owners: Vec::new(),
     };
     for r in records {
         let offset = |n: usize| u32::try_from(n).map_err(|_| Invalid("compound size"));
@@ -612,12 +660,19 @@ pub fn compound(records: &[&Brep]) -> Result<Part> {
             }
             f
         }));
-        all.edges.extend(r.edges.iter().map(|e| {
+        let owner_offset = offset(all.screw_owners.len())?;
+        all.screw_owners.extend(r.screw_owners.iter().cloned());
+        for e in &r.edges {
             let mut e = e.clone();
             e.vertices = e.vertices.map(|v| v + v0);
             e.uses.iter_mut().for_each(|u| u.face += f0);
-            e
-        }));
+            if let super::Curve::OnSurfaceRef { owner, .. } = &mut e.curve {
+                *owner = owner
+                    .checked_add(owner_offset)
+                    .ok_or(Invalid("screw owner count"))?;
+            }
+            all.edges.push(e);
+        }
         all.vertices.extend(r.vertices.iter().cloned());
     }
     all.part(&all.material_regions())

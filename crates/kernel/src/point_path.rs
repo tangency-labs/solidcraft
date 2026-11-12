@@ -299,6 +299,9 @@ pub fn curve_path(c: &brep::Curve, [t0, t1]: [f64; 2]) -> Result<Vec<PathSeg>> {
         brep::Curve::SurfaceIntersection { .. } => {
             return Err(KernelError::Failed("not supported yet: a path along an intersection curve (the record holds no exact curve for it)".into()));
         }
+        brep::Curve::OnSurface { .. } | brep::Curve::OnSurfaceRef { .. } => {
+            return Err(KernelError::Failed("not supported yet: a path along a curve on a procedural sweep".into()));
+        }
     };
     Ok(out)
 }

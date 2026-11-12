@@ -920,6 +920,8 @@ impl Surface {
                 semi_angle_deg: s.semi_angle_deg,
                 inside_out: s.inside_out,
                 cylinder: s.cylinder,
+                // (checked against the copy's own bits before any use)
+                checked: s.checked.clone(),
             })),
             SurfaceKind::Sphere(s) => SurfaceKind::Sphere(Box::new(Sphere {
                 base: s.base().clone_for_evaluation(depth + 1)?,
@@ -960,7 +962,7 @@ impl Surface {
             notify_identity: IdentitySlot::new(),
             made_kind: self.made_kind.shared(),
             boundary_memo: BoundaryMemo::new(),
-            definition: None,
+            definition: self.definition.clone(),
         })
     }
 
@@ -1233,13 +1235,13 @@ impl Surface {
     pub fn procedural_blend(&self) -> Option<BlendRef<'_>> {
         match self.definition.as_deref() {
             Some(KeptDefinition::Round(round)) => {
-                return Some(BlendRef::Exact { round, net: self })
+                return Some(BlendRef::Exact { round, net: self });
             }
             Some(KeptDefinition::Corner(corner)) => {
-                return Some(BlendRef::Corner { corner, net: self })
+                return Some(BlendRef::Corner { corner, net: self });
             }
             Some(KeptDefinition::Draft(draft)) => {
-                return Some(BlendRef::Draft { draft, net: self })
+                return Some(BlendRef::Draft { draft, net: self });
             }
             Some(KeptDefinition::SectionBlend(blend)) => {
                 return Some(BlendRef::SectionBlend { blend, net: self })
@@ -1262,6 +1264,17 @@ impl Surface {
             }
             _ => None,
         }
+    }
+
+    /// The retained screw sweep this surface answers by exactly: its
+    /// [`Surface::procedural_sweep`] when that definition is a screw motion.
+    /// Evaluation, copies and iso curves take the definition through this one
+    /// guard. Path sweeps are excluded on purpose: only a screw definition has a
+    /// certified runtime evaluation, so a path sweep still answers by its net.
+    #[must_use]
+    pub fn retained_screw(&self) -> Option<SweepRef<'_>> {
+        self.procedural_sweep()
+            .filter(|s| s.definition().screw().is_some())
     }
 
     /// The definition this surface is the net of, whatever made it (#2572): a blend's
@@ -1535,7 +1548,7 @@ impl Surface {
                 return Err(SolidError::invalid_input(
                     "surface::copy_cache_slot_of",
                     "the trimmed surface cache is in use",
-                ))
+                ));
             }
             TrimCacheSlot::Stored(cache) => {
                 let copied = cache.map_handles(&map).and_then(|mut copy| {
@@ -1924,6 +1937,15 @@ impl Surface {
     /// [`MAX_GEOMETRY_NESTING`]; none
     /// for the other ported kinds (the base default is `SM_ERR`).
     pub fn copy(&self, k: &Kernel) -> Result<Self> {
+        if let Some(sweep) = self.retained_screw() {
+            self.check_evaluation_copy_depth(0)?;
+            // Knot normalization changes B while carrying S's existing certificate.
+            // Keep both literal objects; the fresh wrapper still resets ownership,
+            // notification identity and caches exactly as an ordinary owning copy.
+            let mut copy = Self::from(sweep.net().clone_exact());
+            copy.definition.clone_from(&self.definition);
+            return Ok(copy);
+        }
         self.copy_of_kind(k).map(|c| self.carry_definition(c))
     }
 
@@ -1971,6 +1993,13 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is [`Surface::copy`]).
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Self> {
+        // A retained screw wall answers by its definition S, and its neighbours' edges lie
+        // on S. An analytic form recognised from its net would be the net's, up to the
+        // certified bound off S (the axial wall of a radial law is its net's spiral
+        // extruded), and drop S: the copy stays the net with its definition.
+        if self.retained_screw().is_some() {
+            return self.copy(k);
+        }
         self.copy_and_add_analytics_of_kind(k)
             .map(|c| self.carry_definition(c))
     }
@@ -2112,6 +2141,22 @@ impl Surface {
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec<Vec3>>> {
         self.check_evaluation_copy_depth(0)?;
+        if let Some(sweep) = self.retained_screw() {
+            if sweep.definition().net_answers(k) {
+                return sweep
+                    .net()
+                    .evaluate(uv, highest_u_deriv, highest_v_deriv, flags);
+            }
+            // (each exact evaluation proves its certificate: a long solve over a screw
+            // surface stops at the next one once cancelled)
+            k.check_cancelled("surface::surface::Surface::evaluate")?;
+            return sweep.definition().screw_derivatives_with_flags(
+                uv,
+                highest_u_deriv,
+                highest_v_deriv,
+                flags,
+            );
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::BSpline(s) => s.evaluate(uv, highest_u_deriv, highest_v_deriv, flags),
             SurfaceKind::BallPatch(s) => {
@@ -2191,6 +2236,19 @@ impl Surface {
         highest_v_deriv: usize,
         flags: EvaluateFlags,
     ) -> Result<Option<Vec<Vec<Vec3>>>> {
+        if let Some(sweep) = self.retained_screw() {
+            if sweep.definition().net_answers(k) {
+                return sweep.net().evaluate_ignoring_status(
+                    uv,
+                    highest_u_deriv,
+                    highest_v_deriv,
+                    flags,
+                );
+            }
+            return self
+                .evaluate(k, uv, highest_u_deriv, highest_v_deriv, flags)
+                .map(Some);
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::BSpline(s) => {
                 s.evaluate_ignoring_status(uv, highest_u_deriv, highest_v_deriv, flags)
@@ -2270,6 +2328,9 @@ impl Surface {
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn evaluate_point(&self, k: &Kernel, uv: Point2) -> Result<Point3> {
         self.check_evaluation_copy_depth(0)?;
+        if let Some(sweep) = self.retained_screw() {
+            return sweep.evaluate_point(k, uv);
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::BSpline(s) => s.evaluate_point(uv),
             SurfaceKind::ProceduralBlend(s) => s.evaluate_point(k, uv),
@@ -2840,15 +2901,11 @@ impl Surface {
             }
             SurfaceKind::ProceduralBlend(pb) => {
                 let s = pb.net();
-                {
-                    s.step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess)
-                }
+                s.step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess)
             }
             SurfaceKind::BallPatch(bp) => {
                 let s = bp.net();
-                {
-                    s.step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess)
-                }
+                s.step_inversion_on(k, self, anal_domain, point_on_surf, tol_3d, uv_guess)
             }
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_step_inversion(),
             SurfaceKind::OffsetSurface(s) => {
@@ -5289,6 +5346,8 @@ pub struct SurfaceEval<'s> {
     sect_dir_set: bool,
     /// `m_bFailsEval`.
     fails_eval: bool,
+    /// `NetScope` regime under which position, normal and section caches were filled.
+    net_tolerance: Option<f64>,
 }
 
 /// The members of a [`SurfaceEval`] its lazy normal evaluations write.
@@ -5324,6 +5383,7 @@ impl<'s> SurfaceEval<'s> {
             normal_set: false,
             sect_dir_set: false,
             fails_eval: false,
+            net_tolerance: None,
         }
     }
 
@@ -5441,6 +5501,19 @@ impl<'s> SurfaceEval<'s> {
         ]
     }
 
+    /// A temporary seed scope may end without changing UV. Never let cached
+    /// B values answer an S query (or retain a derived normal/section from B).
+    pub(super) fn refresh_net_scope(&mut self) {
+        let tolerance = NetScope::tolerance(self.kernel);
+        if self.net_tolerance != Some(tolerance) {
+            self.net_tolerance = Some(tolerance);
+            self.uv_set = false;
+            self.normal_set = false;
+            self.sect_dir_set = false;
+            self.fails_eval = false;
+        }
+    }
+
     /// Evaluates position and derivatives up to second order unless done already
     /// (`Eval`): the upper half of the `2 x 2` matrix of `SmSurface::Evaluate`.
     ///
@@ -5450,6 +5523,7 @@ impl<'s> SurfaceEval<'s> {
     /// `SM_ERR_NULL_POINTER` without surface (upstream dereferences `NULL`);
     /// [`SolidError::Unported`] from the evaluation.
     pub fn eval(&mut self) -> Result<()> {
+        self.refresh_net_scope();
         let k = self.kernel;
         if self.uv_set {
             return Ok(());
@@ -5525,6 +5599,23 @@ fn eval_second_derivatives_with_output(
 ) -> (Result<()>, Vec<Vec<Vec3>>) {
     let mut step = false;
     for _ in 0..64 {
+        // A retained screw's net is an approximation. Lazy evaluation must
+        // honor the same exact-definition/NetScope boundary as Evaluate; the
+        // partial-output B-spline path below is valid only when B answers.
+        if surface
+            .retained_screw()
+            .is_some_and(|sweep| !sweep.definition().net_answers(k))
+        {
+            let result = if step {
+                surface.evaluate_step(k, uv, 2, 2, flags)
+            } else {
+                surface.evaluate(k, uv, 2, 2, flags)
+            };
+            return match result {
+                Ok(values) => (Ok(()), values),
+                Err(error) => (Err(error), Vec::new()),
+            };
+        }
         // (the analytic kinds evaluate on the m_pNurb upstream's always hold)
         let kind = match surface.kind_with_nurb(k) {
             Ok(kind) => kind,
@@ -7715,6 +7806,35 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    #[test]
+    fn evaluation_copy_preserves_retained_screw_definition() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        use crate::sweep::screw::screw_net;
+        let k = Kernel::default();
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(3.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.6];
+        let definition = ProceduralSweep::create(&profile, motion.clone(), &stations, 0.3).unwrap();
+        let net = screw_net(&profile, &motion, &stations).unwrap();
+        let mut source = Surface::from(net);
+        source.set_sweep_definition(definition);
+        let copy = source.clone_for_evaluation().unwrap();
+        assert!(
+            copy.procedural_sweep().is_some(),
+            "evaluation copies must retain the exact screw definition"
+        );
+        let uv = Point2::new(0.37, 0.17);
+        let expected = source.evaluate_point(&k, uv).unwrap();
+        let actual = copy.evaluate_point(&k, uv).unwrap();
+        assert!((actual - expected).length() < 1e-12);
     }
 
     /// `SetCanonical`'s `SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT` of each edited surface, in

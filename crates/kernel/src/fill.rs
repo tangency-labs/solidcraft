@@ -687,6 +687,8 @@ fn planar(record: &b::Brep, chain: &[(usize, bool)], sides: &mut [Side], tol: f6
             b::Curve::Circle { frame, radius } => conic_on(frame, [*radius; 2], &on, n, tol),
             b::Curve::Ellipse { frame, radii } => conic_on(frame, *radii, &on, n, tol),
             b::Curve::SurfaceIntersection { surfaces, .. } => surfaces.iter().any(|s| holds(s)),
+            // Not proved to lie on the plane here.
+            b::Curve::OnSurface { .. } | b::Curve::OnSurfaceRef { .. } => false,
         };
         if !certified {
             return Ok(None);
@@ -745,7 +747,11 @@ impl Projection {
                 knots.clone(),
                 homogeneous.iter().map(|h| HPoint { x: h[0], y: h[1], z: h[2], w: h[3] }).collect(),
             ),
-            b::Curve::Circle { .. } | b::Curve::Ellipse { .. } | b::Curve::SurfaceIntersection { .. } => return None,
+            b::Curve::Circle { .. }
+            | b::Curve::Ellipse { .. }
+            | b::Curve::SurfaceIntersection { .. }
+            | b::Curve::OnSurface { .. }
+            | b::Curve::OnSurfaceRef { .. } => return None,
         };
         // The piece on the edge's own interval (the same points at the same parameters).
         let domain = [*knots.get(degree)?, *knots.get(knots.len() - degree - 1)?];

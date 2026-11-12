@@ -6,6 +6,7 @@
 //! tolerances grown; it changes the kinds or
 //! parameters of the other geometry, and a reflection the orientation: those are a kernel
 //! operation, not this.
+use solidcore_record::brep::sweep::ProceduralSweepRecord;
 use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 
 /// A rotation (rows of an orthonormal matrix with determinant +1) and a translation:
@@ -84,7 +85,18 @@ impl Rigid {
                 leader: Box::new(self.curve(leader)?),
                 tolerance: *tolerance,
             },
+            // The UV curve is in the surface's parameters, which a rigid motion keeps.
+            Curve::OnSurface { surface, uv_curve, domain } => {
+                Curve::OnSurface { surface: Box::new(self.surface(surface)?), uv_curve: uv_curve.clone(), domain: *domain }
+            }
+            // Its owner is in the record's screw owners, which `moved` moves.
+            Curve::OnSurfaceRef { .. } => c.clone(),
         })
+    }
+
+    /// A procedural sweep, moved by the kernel.
+    fn sweep(&self, s: &ProceduralSweepRecord) -> ProceduralSweepRecord {
+        solidcore_ops::procedural_sweep::moved(s, &self.rotation, self.translation)
     }
 
     /// The surface moved; `None` for a blend by its definition, which the kernel moves with its
@@ -127,6 +139,7 @@ impl Rigid {
             },
             // Moving a definition is the kernel's: its supports, leader and seeds move with it.
             Surface::Blend { .. } => return None,
+            Surface::ProceduralSweep(s) => Surface::ProceduralSweep(Box::new(self.sweep(s))),
         })
     }
 }
@@ -163,6 +176,9 @@ pub fn moved(brep: &Brep, motion: &Rigid) -> Option<Brep> {
     }
     for v in &mut out.vertices {
         v.point = motion.point(v.point);
+    }
+    for s in &mut out.screw_owners {
+        *s = motion.sweep(s);
     }
     Some(out)
 }
@@ -208,6 +224,8 @@ impl Affine {
             },
             // A conic is a label on its NURBS form, which holds its parameter ([`Affine::conic`]).
             Curve::Circle { .. } | Curve::Ellipse { .. } => return None,
+            // A screw's image under a scaling or shear is not a screw.
+            Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. } => return None,
         })
     }
 
@@ -259,7 +277,8 @@ impl Affine {
             | Surface::BallPatch { .. }
             | Surface::Torus { .. }
             | Surface::PlacedRevolution { .. }
-            | Surface::Blend { .. } => return None,
+            | Surface::Blend { .. }
+            | Surface::ProceduralSweep(_) => return None,
         })
     }
 
@@ -286,10 +305,15 @@ fn unit(v: [f64; 3]) -> Option<(f64, [f64; 3])> {
 /// This record mapped by a column-major affine matrix that keeps handedness (a scaling or shear,
 /// rigid or not), topology, parameters and pcurves unchanged, its tolerances grown with it; or
 /// `None` when the matrix reflects or is degenerate, or a face or edge is of a kind whose image
-/// is not of that kind with the same parameters (the analytic surfaces other than planes). A
+/// is not of that kind with the same parameters (the analytic surfaces other than planes, and
+/// procedural sweeps). A
 /// circle or ellipse becomes an ellipse, its NURBS form mapped with its parameter.
 pub fn mapped(brep: &Brep, m: &[[f64; 4]; 4]) -> Option<Brep> {
     if m.iter().flatten().any(|x| !x.is_finite()) || m[0][3] != 0.0 || m[1][3] != 0.0 || m[2][3] != 0.0 || m[3][3] != 1.0 {
+        return None;
+    }
+    // A screw's image under a scaling or shear is not a screw.
+    if !brep.screw_owners.is_empty() {
         return None;
     }
     let linear = [[m[0][0], m[1][0], m[2][0]], [m[0][1], m[1][1], m[2][1]], [m[0][2], m[1][2], m[2][2]]];

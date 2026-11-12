@@ -1196,7 +1196,7 @@
 {"case":"common_cone_r3_00065_ev_canon_std_in_0.5_1.0_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[15.898797589593947,73.43453574373936,354.17191128477225]],"n":27},"status":[1000.0]}}
 {"case":"common_cone_r3_00074_ev_canon_std_in_1.0_1.0_021110","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r3_00075_ep_canon_std_in_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.3333333333333333,-3.265724797726275e-16,1.0],"status":[1000.0]}}
-{"case":"common_cone_r3_00097_ts_canon_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.9999999999990001],"status":[1000.0]}}
+{"case":"common_cone_r3_00097_ts_canon_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241138738169379e-10,0.9999999999990001],"status":[1000.0]}}
 {"case":"common_cone_r3_00098_tn_canon_std_in_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_00109_iso_canon_std_in_0_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"common_cone_r3_00125_isod_canon_std_in_0_-0.2_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14036.638857172009,14045.017662350914,42390.635740646685]],"n":22},"status":[1000.0]}}
@@ -1354,7 +1354,7 @@
 {"case":"common_cone_r3_01605_ts_canon_sw_std_in_0.5_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,0.5],"status":[1000.0]}}
 {"case":"common_cone_r3_01606_ev_canon_sw_std_in_1.0_1.0_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.3333333333333333,-3.265724797726275e-16,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_01615_ev_canon_sw_std_in_0.75_0.0_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-11.141438276713263,68.85856172328674,-66.86433448365113]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r3_01625_ep_canon_sw_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0],"status":[1000.0]}}
+{"case":"common_cone_r3_01625_ep_canon_sw_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-2.4492935982947064e-16,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_01630_ev_canon_sw_std_in_1e-12_0.999999999999_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[9.875805666051516,9.875805666055289,61.35940349594786]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_r3_01633_ts_canon_sw_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1e-12],"status":[1000.0]}}
 {"case":"common_cone_r3_01634_tn_canon_sw_std_in_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
@@ -1461,7 +1461,7 @@
 {"case":"common_cone_r3_02592_es_canon_sw_far_in_400.0_5.0_40","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r3_02600_es_canon_sw_far_in_180.0_2.999999_40","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r3_02621_ep_canon_sw_far_in_0.25_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[99999.34999999999,-100000.86666666667,30000.25],"status":[1000.0]}}
-{"case":"common_cone_r3_02650_ts_canon_sw_far_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-0.1],"status":[1000.0]}}
+{"case":"common_cone_r3_02650_ts_canon_sw_far_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-0.1],"status":[1000.0]}}
 {"case":"common_cone_r3_02656_ep_canon_sw_far_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.6,-99999.2,30000.0],"status":[1000.0]}}
 {"case":"common_cone_r3_02657_ts_canon_sw_far_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1e-12],"status":[1000.0]}}
 {"case":"common_cone_r3_02668_isod_canon_sw_far_in_0_0.0_[0.0, 0.0, 1.0, 1e-09]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[104053.19989455232,704048.3991916041,1092375.9984885873]],"n":28},"status":[1000.0]}}
@@ -1483,7 +1483,7 @@
 {"case":"common_cone_r3_02877_ep_canon_sw_far_oob_0.25_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[99999.34999999999,-100000.86666666667,30000.25],"status":[1000.0]}}
 {"case":"common_cone_r3_02884_ep_canon_sw_far_oob_0.5_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.7,-99999.06666666667,30000.5],"status":[1000.0]}}
 {"case":"common_cone_r3_02896_ev_canon_sw_far_oob_0.75_0.0_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[30002.175329487654,230014.50602691981,-9986.520745545444]],"n":24},"status":[1000.0]}}
-{"case":"common_cone_r3_02906_ts_canon_sw_far_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-0.1],"status":[1000.0]}}
+{"case":"common_cone_r3_02906_ts_canon_sw_far_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-0.1],"status":[1000.0]}}
 {"case":"common_cone_r3_02908_ev_canon_sw_far_oob_1e-12_0.999999999999_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.6,-99999.2,30000.0,-4.52548339963261,3.3941125497244573,-2.910383045674694e-11,0.19999999999708962,0.2666666666700621,1.0,-1.5084944665140938,1.1313708498782944,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_02914_tn_canon_sw_far_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_02953_isod_canon_sw_far_oob_1_0.0_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[74037.20000000004,474032.4,622391.4000000001]],"n":22},"status":[1000.0]}}
@@ -1527,7 +1527,7 @@
 {"case":"common_cone_r3_03394_ev_canon_io_std_oob_0.5_1.0_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[52.463972995262196,1006.591344685789,1001.741798914805]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_r3_03403_ep_canon_io_std_oob_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.6666666666666665,-4.0821559971578437e-16,2.0],"status":[1000.0]}}
 {"case":"common_cone_r3_03411_ts_canon_io_std_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[270.0,3.0],"status":[1000.0]}}
-{"case":"common_cone_r3_03425_ts_canon_io_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,2.000000000001],"status":[1000.0]}}
+{"case":"common_cone_r3_03425_ts_canon_io_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241138738169379e-10,2.000000000001],"status":[1000.0]}}
 {"case":"common_cone_r3_03426_tn_canon_io_std_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,3.0],"status":[1000.0]}}
 {"case":"common_cone_r3_03428_tn_canon_io_std_oob_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,5.0],"status":[1000.0]}}
 {"case":"common_cone_r3_03430_tn_canon_io_std_oob_1000000.0_1000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-999997.0],"status":[1000.0]}}
@@ -1559,7 +1559,7 @@
 {"case":"common_cone_r3_03659_ep_canon_io_rot_in_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.0,-0.9999999999999998,4.333333333333333],"status":[1000.0]}}
 {"case":"common_cone_r3_03667_ts_canon_io_rot_in_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[270.0,3.0],"status":[1000.0]}}
 {"case":"common_cone_r3_03680_ep_canon_io_rot_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.000000000001,-0.9999999999997999,4.3333333333336],"status":[1000.0]}}
-{"case":"common_cone_r3_03681_ts_canon_io_rot_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,2.000000000001],"status":[1000.0]}}
+{"case":"common_cone_r3_03681_ts_canon_io_rot_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241144248145397e-10,2.000000000001],"status":[1000.0]}}
 {"case":"common_cone_r3_03693_iso_canon_io_rot_in_0_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"common_cone_r3_03694_isod_canon_io_rot_in_0_0.3_[0.1, 0.2, 0.9, 0.7]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"common_cone_r3_03711_iso_canon_io_rot_in_0_1.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
@@ -1682,8 +1682,8 @@
 {"case":"common_cone_r3_04939_ep_canon_swio_std_oob_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.6666666666666665,-4.0821559971578437e-16,2.0],"status":[1000.0]}}
 {"case":"common_cone_r3_04944_ev_canon_swio_std_oob_0.75_0.0_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[10.680543520114202,17.118446353109125,25.922342434919585]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_r3_04947_ts_canon_swio_std_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,2.25],"status":[1000.0]}}
-{"case":"common_cone_r3_04954_ts_canon_swio_std_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,3.1000000000000005],"status":[1000.0]}}
-{"case":"common_cone_r3_04956_ev_canon_swio_std_oob_1e-12_0.999999999999_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.9999999999996665,-4.898587196588596e-16,2.999999999999,6.40003605667623e-11,11.313708499009389,0.0,-0.3333333333333334,1.8855763700508444e-12,-1.0000000000000004,-1.0666578731388654e-11,-1.8856180831685454,0.0],"status":[1000.0]}}
+{"case":"common_cone_r3_04954_ts_canon_swio_std_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,3.1000000000000005],"status":[1000.0]}}
+{"case":"common_cone_r3_04956_ev_canon_swio_std_oob_1e-12_0.999999999999_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.9999999999996667,-1.1314106568857968e-11,2.999999999999,6.40003605667623e-11,11.313708499009389,0.0,-0.3333333333333334,1.8855763700508444e-12,-1.0000000000000004,-1.0666578731388654e-11,-1.8856180831685454,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_04963_tn_canon_swio_std_oob_720.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_04973_iso_canon_swio_std_oob_0_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[10.0,"inf","NaN"]],"n":77},"status":[1000.0]}}
 {"case":"common_cone_r3_05048_invg_canon_swio_std_oob_1e-12_[1.0, 0.0, 0.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,0.0,1.0],"status":[1000.0]}}
@@ -1943,7 +1943,7 @@
 {"case":"common_cone_r3_07751_ev_apex_top_std_in_1.0_1.0_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-2.4492935982947064e-16,1.0,-1.0000000000000002,0.0,1.0000000000000002,5.202828724532303e-16,5.6568542494923815,0.0,-1.2560739669470201e-15,-5.6568542494923815,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_07762_ep_apex_top_std_in_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-3.6739403974420594e-16,-2.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_07769_ep_apex_top_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9000000000000001,0.0,1.1],"status":[1000.0]}}
-{"case":"common_cone_r3_07777_ts_apex_top_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_07777_ts_apex_top_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241138738169379e-10,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_07789_iso_apex_top_std_in_0_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"common_cone_r3_07811_isod_apex_top_std_in_0_1.2_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14037.574129880732,14037.574129880732,42377.517818330234]],"n":22},"status":[1000.0]}}
 {"case":"common_cone_r3_07829_isod_apex_top_std_in_1_1.0_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14428.656854249493,14438.313708498987,45238.436074863064]],"n":58},"status":[1000.0]}}
@@ -2086,9 +2086,9 @@
 {"case":"common_cone_r3_09291_ep_apex_bot_std_in_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9999999999999999,-2.449293598294706e-16,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_09299_ts_apex_bot_std_in_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[270.0,2.0],"status":[1000.0]}}
 {"case":"common_cone_r3_09306_ts_apex_bot_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.8999999999999999],"status":[1000.0]}}
-{"case":"common_cone_r3_09307_ev_apex_bot_std_in_1e-12_0.999999999999_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000009999,0.0,1.000000000001],"status":[1000.0]}}
-{"case":"common_cone_r3_09308_ev_apex_bot_std_in_1e-12_0.999999999999_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000009999,0.0,1.000000000001,-1.0000000000000002,-5.656854249499009e-12,-1.0000000000000002,-3.200018028337581e-11,5.656854249511294,-1.8028323133391336e-16,3.200106846179551e-11,-5.656854249505637,1.0684616830355885e-15],"status":[1000.0]}}
-{"case":"common_cone_r3_09312_ep_apex_bot_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000009999,0.0,1.000000000001],"status":[1000.0]}}
+{"case":"common_cone_r3_09307_ev_apex_bot_std_in_1e-12_0.999999999999_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000009999,5.656854249504664e-12,1.000000000001],"status":[1000.0]}}
+{"case":"common_cone_r3_09308_ev_apex_bot_std_in_1e-12_0.999999999999_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000009999,5.656854249504664e-12,1.000000000001,-1.0000000000000002,-5.656854249499009e-12,-1.0000000000000002,-3.200018028337581e-11,5.656854249511294,-1.8028323133391336e-16,3.200106846179551e-11,-5.656854249505637,1.0684616830355885e-15],"status":[1000.0]}}
+{"case":"common_cone_r3_09312_ep_apex_bot_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000009999,5.656854249504664e-12,1.000000000001],"status":[1000.0]}}
 {"case":"common_cone_r3_09314_tn_apex_bot_std_in_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,2.0],"status":[1000.0]}}
 {"case":"common_cone_r3_09315_tn_apex_bot_std_in_720.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_09317_tn_apex_bot_std_in_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9999999996914665,-1.0],"status":[1000.0]}}
@@ -2270,7 +2270,7 @@
 {"case":"common_cone_r3_11072_ev_unb45_std_oob_0.5_1.0_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-2.0,2.4492935982947064e-16,1.0,-0.9999999999999998,1.224646799147353e-16,1.0,-3.552713678800501e-15,-11.31370849898476,0.0,-1.7763568394002505e-15,-5.65685424949238,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_11097_ep_unb45_std_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0999999999999996,0.0,1.1],"status":[1000.0]}}
 {"case":"common_cone_r3_11098_ts_unb45_std_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,1.1],"status":[1000.0]}}
-{"case":"common_cone_r3_11105_ts_unb45_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_11105_ts_unb45_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.24113873816938e-10,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_11106_tn_unb45_std_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_11108_tn_unb45_std_oob_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
 {"case":"common_cone_r3_11110_tn_unb45_std_oob_1000000.0_1000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1000000.0],"status":[1000.0]}}
@@ -2314,7 +2314,7 @@
 {"case":"common_cone_r3_11602_ep_unb45_rot_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-1.2000000000000002,2.4],"status":[1000.0]}}
 {"case":"common_cone_r3_11604_ev_unb45_rot_oob_-0.1_1.1_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.1,-0.7400000000000002,4.68],"status":[1000.0]}}
 {"case":"common_cone_r3_11612_ev_unb45_rot_oob_1e-12_0.999999999999_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.999999999999,-0.8000000000006,4.5999999999992,1.0,0.5999999999954744,0.8000000000033942,-2.1369233980856517e-15,-9.050966799242895,6.788225099352167,-1.0684616830355885e-15,-4.525483399623709,3.39411254967778],"status":[1000.0]}}
-{"case":"common_cone_r3_11617_ts_unb45_rot_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_11617_ts_unb45_rot_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.2411312751854994e-10,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_11618_tn_unb45_rot_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_11619_tn_unb45_rot_oob_720.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_11621_tn_unb45_rot_oob_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9999999996914665,3.0],"status":[1000.0]}}
@@ -2377,7 +2377,7 @@
 {"case":"common_cone_r3_12107_ep_unb45_far_oob_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100001.2,-99998.4,30001.0],"status":[1000.0]}}
 {"case":"common_cone_r3_12114_ep_unb45_far_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.8,-100000.59999999999,30000.0],"status":[1000.0]}}
 {"case":"common_cone_r3_12125_ev_unb45_far_oob_1e-12_0.999999999999_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[29907.903953849684,230121.66072144822,-11845.783838013314]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r3_12129_ts_unb45_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_12129_ts_unb45_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241131275151306e-10,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_12132_tn_unb45_far_oob_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
 {"case":"common_cone_r3_12136_isod_unb45_far_oob_0_0.0_[0.1, 0.2, 0.9, 0.7]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r3_12169_isod_unb45_far_oob_1_0.0_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[249274.04216951138,1814957.8671187495,5603267.48001269]],"n":58},"status":[1000.0]}}
@@ -2402,7 +2402,7 @@
 {"case":"common_cone_r3_12354_ev_unb45_sw_std_in_0.5_1.0_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6983755.094951687,6983771.408660186,34918734.533632934]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_r3_12363_ep_unb45_sw_std_in_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.1102230246251565e-16,-2.719262146893782e-32,-1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_12364_ts_unb45_sw_std_in_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-1.0],"status":[1000.0]}}
-{"case":"common_cone_r3_12378_ts_unb45_sw_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.1],"status":[1000.0]}}
+{"case":"common_cone_r3_12378_ts_unb45_sw_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,0.1],"status":[1000.0]}}
 {"case":"common_cone_r3_12388_tn_unb45_sw_std_in_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_12390_tn_unb45_sw_std_in_1000000.0_1000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-1000000.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_12415_iso_unb45_sw_std_in_0_1.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[2469136.0,"inf","NaN"]],"n":77},"status":[1000.0]}}
@@ -2473,7 +2473,7 @@
 {"case":"common_cone_r3_13114_ev_unb45_sw_rot_oob_0.25_0.5_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[53432547.736201845,61813080.68639204,460503157.14317244]],"n":27},"status":[1000.0]}}
 {"case":"common_cone_r3_13120_ev_unb45_sw_rot_oob_0.5_1.0_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.5,-1.7,3.4,0.0,-5587010.201444749,4190257.6510835635,-1.0,-0.5999999999999999,-0.8,0.0,4.525483399593904,-3.3941125496954294],"status":[1000.0]}}
 {"case":"common_cone_r3_13139_ts_unb45_sw_rot_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-0.75],"status":[1000.0]}}
-{"case":"common_cone_r3_13146_ts_unb45_sw_rot_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.1],"status":[1000.0]}}
+{"case":"common_cone_r3_13146_ts_unb45_sw_rot_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,0.1],"status":[1000.0]}}
 {"case":"common_cone_r3_13148_ev_unb45_sw_rot_oob_1e-12_0.999999999999_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.999999999999,-1.4000000000005999,3.7999999999992,-9.313225746154785e-10,-5587012.464175837,4190259.3481812594,-1.0,-0.6000000000045254,-0.799999999996606,8.881784197001252e-16,4.525483399585309,-3.3941125497289826],"status":[1000.0]}}
 {"case":"common_cone_r3_13153_ts_unb45_sw_rot_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-1e-12],"status":[1000.0]}}
 {"case":"common_cone_r3_13154_tn_unb45_sw_rot_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.0,0.0],"status":[1000.0]}}
@@ -2510,7 +2510,7 @@
 {"case":"common_cone_r3_13394_ep_unb45_sw_far_in_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.15,-99999.8,29999.25],"status":[1000.0]}}
 {"case":"common_cone_r3_13395_ts_unb45_sw_far_in_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-0.75],"status":[1000.0]}}
 {"case":"common_cone_r3_13401_ep_unb45_sw_far_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.65999999999,-99999.12,30000.1],"status":[1000.0]}}
-{"case":"common_cone_r3_13402_ts_unb45_sw_far_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.3350857223506405e-10,0.1],"status":[1000.0]}}
+{"case":"common_cone_r3_13402_ts_unb45_sw_far_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,0.1],"status":[1000.0]}}
 {"case":"common_cone_r3_13410_tn_unb45_sw_far_in_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_13412_tn_unb45_sw_far_in_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_13439_iso_unb45_sw_far_in_0_1.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[2469136.0,"inf","NaN"]],"n":77},"status":[1000.0]}}
@@ -2592,7 +2592,7 @@
 {"case":"common_cone_r3_14134_ep_unb0base_std_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_14139_ev_unb0base_std_oob_0.25_0.5_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[370.84421494470223,436.067799758039,8072.289242118223]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_r3_14163_ts_unb0base_std_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[270.0,0.0],"status":[1000.0]}}
-{"case":"common_cone_r3_14176_ep_unb0base_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.5773502691890484,0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_14176_ep_unb0base_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.5773502691890483,3.265986323711464e-12,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_14179_tn_unb0base_std_oob_720.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_14180_tn_unb0base_std_oob_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
 {"case":"common_cone_r3_14181_tn_unb0base_std_oob_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9999999996914665,3.0],"status":[1000.0]}}
@@ -2640,7 +2640,7 @@
 {"case":"common_cone_r3_14668_ts_unb0base_rot_oob_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_14671_ev_unb0base_rot_oob_0.75_0.0_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[7.687850907094795,12.380671230122347,76.85706111209115]],"n":27},"status":[1000.0]}}
 {"case":"common_cone_r3_14674_ep_unb0base_rot_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-2.0,3.0],"status":[1000.0]}}
-{"case":"common_cone_r3_14689_ts_unb0base_rot_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_14689_ts_unb0base_rot_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241111193664678e-10,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_14690_tn_unb0base_rot_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_14691_tn_unb0base_rot_oob_720.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_14692_tn_unb0base_rot_oob_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
@@ -2718,8 +2718,8 @@
 {"case":"common_cone_r3_15403_es_unbneg_std_in_90.0_-3.0_01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.692761945975136e-18,0.06030737921409146,2.581784256837419,-2.2286749118950847e-17,-0.3639702342662023,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_15404_es_unbneg_std_in_90.0_-3.0_23","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[3.283402947743724,4.013485282293699,12.133595073153176]],"n":36},"status":[1000.0]}}
 {"case":"common_cone_r3_15430_ev_unbneg_std_in_1.0_1.0_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.032034359338792784,0.05109579052549565,2.581784256837419],"status":[1000.0]}}
-{"case":"common_cone_r3_15456_ep_unbneg_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.06030737921409146,0.0,2.581784256837419],"status":[1000.0]}}
-{"case":"common_cone_r3_15457_ts_unbneg_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_15456_ep_unbneg_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.06030737921409146,5.429571749113059e-14,2.581784256837419],"status":[1000.0]}}
+{"case":"common_cone_r3_15457_ts_unbneg_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.15843251425777e-11,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_15462_tn_unbneg_std_in_1000000.0_1000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[6.283185307179586,1000000.0],"status":[1000.0]}}
 {"case":"common_cone_r3_15463_iso_unbneg_std_in_0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[16.566370614359172,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"common_cone_r3_15497_isod_unbneg_std_in_1_0.0_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14452.527538967825,14462.184393217318,46741.4621746747]],"n":58},"status":[1000.0]}}
@@ -2879,7 +2879,7 @@
 {"case":"common_cone_r3_17214_ts_unbtiny_std_oob_0.25_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[13.464324281726164,0.5],"status":[1000.0]}}
 {"case":"common_cone_r3_17220_ep_unbtiny_std_oob_0.5_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.8839245814459681,0.4676294840101566,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_17221_ts_unbtiny_std_oob_0.5_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[27.88053091482704,1.0],"status":[1000.0]}}
-{"case":"common_cone_r3_17248_ep_unbtiny_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000000175,0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_17248_ep_unbtiny_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000000175,9.003163161572899e-13,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_17285_iso_unbtiny_std_oob_1_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14452.527538967825,14462.184393217318,46741.4621746747]],"n":58},"status":[1000.0]}}
 {"case":"common_cone_r3_17291_iso_unbtiny_std_oob_1_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14454.876067107118,14464.532921356611,46804.872434435616]],"n":58},"status":[1000.0]}}
 {"case":"common_cone_r3_17336_invg_unbtiny_std_oob_1e-12_[1.0, 0.0, 0.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,0.0,1.0],"status":[1000.0]}}
@@ -3050,7 +3050,7 @@
 {"case":"common_cone_r3_18772_ev_unbsteep_std_oob_-0.1_1.1_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[630254.5746147787,0.0,1.1],"status":[1000.0]}}
 {"case":"common_cone_r3_18773_ev_unbsteep_std_oob_-0.1_1.1_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[630254.5746147787,0.0,1.1,503928.8356941902,-272646.9576700418,0.9999999999999999,1277490.6520936922,2361164.7179972297,-1.3322676295501878e-15,1161353.2955907402,2146509.9742096197,-8.881784197001252e-16],"status":[1000.0]}}
 {"case":"common_cone_r3_18777_ep_unbsteep_std_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[630254.5746147787,0.0,1.1],"status":[1000.0]}}
-{"case":"common_cone_r3_18784_ep_unbsteep_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[572958.7951037713,0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_18784_ep_unbsteep_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[572958.7951037711,3.2411443948706e-6,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_18787_tn_unbsteep_std_oob_720.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_18797_iso_unbsteep_std_oob_0_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"common_cone_r3_18802_isod_unbsteep_std_oob_0_0.3_[0.0, 0.0, 1.0, 1e-09]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
@@ -3140,7 +3140,7 @@
 {"case":"common_cone_r3_19515_ev_unbsteep_far_in_0.25_0.5_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[246488853.402969,353381883.98563284,5391594898.650791]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_r3_19528_ev_unbsteep_far_in_1.0_1.0_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-23811830.67783536,34859140.8898827,-484170387.04845303]],"n":27},"status":[1000.0]}}
 {"case":"common_cone_r3_19538_ep_unbsteep_far_in_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.8,-100000.6,30000.0],"status":[1000.0]}}
-{"case":"common_cone_r3_19546_ts_unbsteep_far_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0986336145517584e-14,1.1],"status":[1000.0]}}
+{"case":"common_cone_r3_19546_ts_unbsteep_far_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,1.1],"status":[1000.0]}}
 {"case":"common_cone_r3_19552_ep_unbsteep_far_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[443775.27706226276,358367.036083017,30001.0],"status":[1000.0]}}
 {"case":"common_cone_r3_19592_isod_unbsteep_far_in_1_0.0_[0.5, 0.5, 0.5, 0.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r3_19640_invg_unbsteep_far_in_1e-12_[100000.6, -99999.2, 30000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[359.9999999998332,0.0,4.0],"status":[1000.0]}}
@@ -3192,7 +3192,7 @@
 {"case":"common_cone_r3_20020_ev_semi_h_std_in_0.0_0.0_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[13.408178174902279,13.408178174902279,78.12239074142882]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_r3_20033_ev_semi_h_std_in_0.5_1.0_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-60.99833068426442,91.23758383473269,-459.8997516511824]],"n":27},"status":[1000.0]}}
 {"case":"common_cone_r3_20036_ep_semi_h_std_in_0.5_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.681985117133101,-4.1196753798210763e-16,0.5],"status":[1000.0]}}
-{"case":"common_cone_r3_20058_ts_semi_h_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-0.1],"status":[1000.0]}}
+{"case":"common_cone_r3_20058_ts_semi_h_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-0.1],"status":[1000.0]}}
 {"case":"common_cone_r3_20066_tn_semi_h_std_in_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_20070_tn_semi_h_std_in_1000000.0_1000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1000000.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_20071_iso_semi_h_std_in_0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[8.0,"inf","NaN"]],"n":77},"status":[1000.0]}}
@@ -3320,7 +3320,7 @@
 {"case":"common_cone_r3_21302_ep_semi_h_far_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.9,-99998.8,30000.0],"status":[1000.0]}}
 {"case":"common_cone_r3_21309_ep_semi_h_far_oob_0.25_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[99999.04540446486,-100001.27279404686,30000.25],"status":[1000.0]}}
 {"case":"common_cone_r3_21324_ts_semi_h_far_oob_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.0],"status":[1000.0]}}
-{"case":"common_cone_r3_21338_ts_semi_h_far_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.111625064873689e-10,-0.1],"status":[1000.0]}}
+{"case":"common_cone_r3_21338_ts_semi_h_far_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-0.1],"status":[1000.0]}}
 {"case":"common_cone_r3_21355_isod_semi_h_far_oob_0_0.0_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[249274.74216951075,1814957.7671187485,5603289.242754388]],"n":58},"status":[1000.0]}}
 {"case":"common_cone_r3_21358_isod_semi_h_far_oob_0_0.3_[0.1, 0.2, 0.9, 0.7]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[8.0,"inf","NaN"]],"n":67},"status":[1000.0]}}
 {"case":"common_cone_r3_21381_iso_semi_h_far_oob_1_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[74034.21911665595,474028.2544119063,622341.430868902]],"n":22},"status":[1000.0]}}
@@ -3343,7 +3343,7 @@
 {"case":"common_cone_r3_21587_ts_semi_inf_std_in_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[270.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_21591_ev_semi_inf_std_in_-0.1_1.1_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-1909.2210729464314,2078.1825951552114,-39448.68361292973]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_r3_21594_ts_semi_inf_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,1.1],"status":[1000.0]}}
-{"case":"common_cone_r3_21601_ts_semi_inf_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_21601_ts_semi_inf_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.2411387381693793e-10,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_21604_tn_semi_inf_std_in_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
 {"case":"common_cone_r3_21605_tn_semi_inf_std_in_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9999999996914665,3.0],"status":[1000.0]}}
 {"case":"common_cone_r3_21606_tn_semi_inf_std_in_1000000.0_1000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1000000.0],"status":[1000.0]}}
@@ -3392,7 +3392,7 @@
 {"case":"common_cone_r3_22078_ts_semi_inf_rot_in_0.25_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[89.99999999999999,0.5],"status":[1000.0]}}
 {"case":"common_cone_r3_22093_ev_semi_inf_rot_in_0.75_0.0_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-1.6,2.7],"status":[1000.0]}}
 {"case":"common_cone_r3_22110_ev_semi_inf_rot_in_1e-12_0.999999999999_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-1253.0670776615193,1657.074480921911,-26997.280918704542]],"n":24},"status":[1000.0]}}
-{"case":"common_cone_r3_22113_ts_semi_inf_rot_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_22113_ts_semi_inf_rot_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241127765259366e-10,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_22116_tn_semi_inf_rot_in_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
 {"case":"common_cone_r3_22117_tn_semi_inf_rot_in_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9999999996914665,3.0],"status":[1000.0]}}
 {"case":"common_cone_r3_22118_tn_semi_inf_rot_in_1000000.0_1000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1000000.0],"status":[1000.0]}}
@@ -3485,8 +3485,8 @@
 {"case":"common_cone_r3_23115_ep_cyl_std_in_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.767849162891905,0.9352589680202967,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_23116_ts_cyl_std_in_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[27.88053091482704,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_23130_ts_cyl_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,1.1],"status":[1000.0]}}
-{"case":"common_cone_r3_23136_ep_cyl_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,0.0,0.999999999999],"status":[1000.0]}}
-{"case":"common_cone_r3_23137_ts_cyl_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_23136_ep_cyl_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,9.0031631615719e-13,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_23137_ts_cyl_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.5792162571286438e-11,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_23138_tn_cyl_std_in_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_23141_tn_cyl_std_in_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[12.566370614359172,3.0],"status":[1000.0]}}
 {"case":"common_cone_r3_23155_iso_cyl_std_in_0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[29.132741228718345,"inf","NaN"]],"n":41},"status":[1000.0]}}
@@ -4355,7 +4355,7 @@
 {"case":"common_cone_r3_32324_ep_partial_mng_std_in_0.5_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.25,-3.061616997868383e-16,0.5],"status":[1000.0]}}
 {"case":"common_cone_r3_32325_ts_partial_mng_std_in_0.5_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,0.5],"status":[1000.0]}}
 {"case":"common_cone_r3_32339_ts_partial_mng_std_in_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.75],"status":[1000.0]}}
-{"case":"common_cone_r3_32352_ep_partial_mng_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000005,-2.449293598295931e-16,1e-12],"status":[1000.0]}}
+{"case":"common_cone_r3_32352_ep_partial_mng_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000005,-5.657053284432756e-12,1e-12],"status":[1000.0]}}
 {"case":"common_cone_r3_32355_tn_partial_mng_std_in_720.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_32365_iso_partial_mng_std_in_0_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[12.0,"inf","NaN"]],"n":77},"status":[1000.0]}}
 {"case":"common_cone_r3_32369_isod_partial_mng_std_in_0_0.3_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[12.0,"inf","NaN"]],"n":77},"status":[1000.0]}}
@@ -4383,8 +4383,8 @@
 {"case":"common_cone_r3_32575_ev_partial_mng_std_oob_0.5_1.0_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.25,-3.061616997868383e-16,0.5],"status":[1000.0]}}
 {"case":"common_cone_r3_32582_ev_partial_mng_std_oob_1.0_1.0_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.5,-3.6739403974420594e-16,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_32592_ev_partial_mng_std_oob_0.75_0.0_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14.231601717798213,14.231601717798213,86.12857133746822]],"n":24},"status":[1000.0]}}
-{"case":"common_cone_r3_32601_ep_partial_mng_std_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.95,0.0,-0.1],"status":[1000.0]}}
-{"case":"common_cone_r3_32608_ep_partial_mng_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000005,-2.449293598295931e-16,1e-12],"status":[1000.0]}}
+{"case":"common_cone_r3_32601_ep_partial_mng_std_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.95,-2.326828918379971e-16,-0.1],"status":[1000.0]}}
+{"case":"common_cone_r3_32608_ep_partial_mng_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0000000000005,-5.657053284432756e-12,1e-12],"status":[1000.0]}}
 {"case":"common_cone_r3_32610_tn_partial_mng_std_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_32611_tn_partial_mng_std_oob_720.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_32613_tn_partial_mng_std_oob_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.0,0.9999999996914665],"status":[1000.0]}}
@@ -4425,7 +4425,7 @@
 {"case":"common_cone_r3_33091_ev_partial_mng_rot_oob_0.5_1.0_021110","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r3_33097_ev_partial_mng_rot_oob_1.0_1.0_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[4.537258300203051,24.839191898578672,17.480404050710685]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_r3_33100_ts_partial_mng_rot_oob_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.0],"status":[1000.0]}}
-{"case":"common_cone_r3_33114_ts_partial_mng_rot_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-0.1],"status":[1000.0]}}
+{"case":"common_cone_r3_33114_ts_partial_mng_rot_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-0.1],"status":[1000.0]}}
 {"case":"common_cone_r3_33122_tn_partial_mng_rot_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_33125_tn_partial_mng_rot_oob_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.0,0.9999999996914665],"status":[1000.0]}}
 {"case":"common_cone_r3_33127_iso_partial_mng_rot_oob_0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[12.0,"inf","NaN"]],"n":77},"status":[1000.0]}}
@@ -4507,7 +4507,7 @@
 {"case":"common_cone_r3_33848_ev_big_std_in_0.25_0.5_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[6.123336049636695e-13,10000.166666666666,0.5],"status":[1000.0]}}
 {"case":"common_cone_r3_33858_ev_big_std_in_0.5_1.0_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[386007.5294509642,5018293.253877172,7803116.107828462]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_r3_33882_ts_big_std_in_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,1.1],"status":[1000.0]}}
-{"case":"common_cone_r3_33889_ts_big_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_33889_ts_big_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.24113873816938e-10,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_33891_tn_big_std_in_720.0_10000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,10000.0],"status":[1000.0]}}
 {"case":"common_cone_r3_33899_isod_big_std_in_0_0.0_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[164021.0,164021.0,2222157.0]],"n":22},"status":[1000.0]}}
 {"case":"common_cone_r3_33917_isod_big_std_in_0_-0.2_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[153540.60938138724,237328.66117042265,2142348.933724802]],"n":22},"status":[1000.0]}}
@@ -4531,7 +4531,7 @@
 {"case":"common_cone_r3_34113_ev_big_std_oob_0.5_1.0_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[120886.92803152077,519138.40530181245,2796853.7273559775]],"n":27},"status":[1000.0]}}
 {"case":"common_cone_r3_34116_ep_big_std_oob_0.5_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-10000.333333333334,1.224687620707325e-12,1.0],"status":[1000.0]}}
 {"case":"common_cone_r3_34130_ep_big_std_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-1.83697019872103e-12,-10000.0,0.0],"status":[1000.0]}}
-{"case":"common_cone_r3_34145_ts_big_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_34145_ts_big_std_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.24113873816938e-10,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_34149_tn_big_std_oob_359.9999999_30000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9999999996914665,30000.0],"status":[1000.0]}}
 {"case":"common_cone_r3_34155_isod_big_std_oob_0_0.0_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[164021.0,164021.0,2222157.0]],"n":22},"status":[1000.0]}}
 {"case":"common_cone_r3_34156_isod_big_std_oob_0_0.0_[0.0, 0.0, 1.0, 1e-09]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[34044.00000000433,34044.00000000433,262226.00000006537]],"n":22},"status":[1000.0]}}
@@ -4628,7 +4628,7 @@
 {"case":"common_cone_r3_35121_ev_big_far_oob_0.0_0.0_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[106000.0,-92000.0,30000.0],"status":[1000.0]}}
 {"case":"common_cone_r3_35123_ev_big_far_oob_0.0_0.0_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-441822.2869478123,781709.7340167541,-9259346.285265766]],"n":27},"status":[1000.0]}}
 {"case":"common_cone_r3_35161_ep_big_far_oob_-0.1_1.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[106000.22,-91999.70666666667,30001.1],"status":[1000.0]}}
-{"case":"common_cone_r3_35169_ts_big_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
+{"case":"common_cone_r3_35169_ts_big_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.240838049785098e-10,0.999999999999],"status":[1000.0]}}
 {"case":"common_cone_r3_35171_tn_big_far_oob_720.0_10000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,10000.0],"status":[1000.0]}}
 {"case":"common_cone_r3_35193_iso_big_far_oob_0_-0.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r3_35203_isod_big_far_oob_0_1.2_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[312110.1679501589,941480.766381063,3867018.441320823]],"n":22},"status":[1000.0]}}
@@ -4649,7 +4649,7 @@
 {"case":"common_cone_r3_35390_ts_small_std_in_0.25_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[90.0,0.5],"status":[1000.0]}}
 {"case":"common_cone_r3_35396_ep_small_std_in_0.5_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.0002,2.4492935982947065e-20,0.0003],"status":[1000.0]}}
 {"case":"common_cone_r3_35397_ts_small_std_in_0.5_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[180.0,1.0],"status":[1000.0]}}
-{"case":"common_cone_r3_35424_ep_small_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0002,0.0,0.0003],"status":[1000.0]}}
+{"case":"common_cone_r3_35424_ep_small_std_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.00020000000000000004,1.1313708498998022e-15,0.0003],"status":[1000.0]}}
 {"case":"common_cone_r3_35426_tn_small_std_in_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_r3_35427_tn_small_std_in_720.0_0.0001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0001],"status":[1000.0]}}
 {"case":"common_cone_r3_35428_tn_small_std_in_-725.0_-0.0002","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-0.0002],"status":[1000.0]}}
@@ -4973,7 +4973,7 @@
 {"case":"common_cone_r4_01401_invg_semisw11_1e-13_std_1_6_0.001_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_01414_tr_semisw11_1e-13_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_r4_01425_es_semisw11_1e-13_rot_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1000002.1460828796,1000004.9748610744,1000005.8133017564]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r4_01435_tos_semisw11_1e-13_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.1584271378971435e-9,-0.999999999],"status":[1000.0]}}
+{"case":"common_cone_r4_01435_tos_semisw11_1e-13_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.158433499006507e-9,-0.999999999],"status":[1000.0]}}
 {"case":"common_cone_r4_01445_isod_semisw11_1e-13_rot_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_01455_isod_semisw11_1e-13_rot_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_01523_es_semisw11_1e-13_skew_0_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[2.017148675100158,2.0177579099397316,7.186198486743436]],"n":27},"status":[1000.0]}}
@@ -5837,7 +5837,7 @@
 {"case":"common_cone_r4_09517_invg_semisw10_5e-11_std_1_6_0.001_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_09530_tr_semisw10_5e-11_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_r4_09541_es_semisw10_5e-11_rot_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1000002.1460840954,1000004.9748612703,1000005.8133048598]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r4_09551_tos_semisw10_5e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.3212928481646517e-9,0.999999999],"status":[1000.0]}}
+{"case":"common_cone_r4_09551_tos_semisw10_5e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.3212992092740144e-9,0.999999999],"status":[1000.0]}}
 {"case":"common_cone_r4_09561_isod_semisw10_5e-11_rot_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_09571_isod_semisw10_5e-11_rot_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_09639_es_semisw10_5e-11_skew_0_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[2.017148675101044,2.0177579099406175,7.1861984867471325]],"n":27},"status":[1000.0]}}
@@ -6028,7 +6028,7 @@
 {"case":"common_cone_r4_11340_invg_semi5.7e-11_std_1_6_1e-09_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_11354_adj_semi5.7e-11_std_1_3_-1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_r4_11365_es_semi5.7e-11_rot_0_359.9_-0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1.6464723565125394,4.472423470398545,5.313438929727732]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r4_11375_tos_semi5.7e-11_rot_0_-0.5_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.180554681463516e-15,2.0],"status":[1000.0]}}
+{"case":"common_cone_r4_11375_tos_semi5.7e-11_rot_0_-0.5_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,2.0],"status":[1000.0]}}
 {"case":"common_cone_r4_11385_isod_semi5.7e-11_rot_0_0_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[16.566370614359172,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"common_cone_r4_11395_isod_semi5.7e-11_rot_0_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_11408_inv_semi5.7e-11_rot_0_1_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
@@ -6161,7 +6161,7 @@
 {"case":"common_cone_r4_12561_invg_semisw11_5.7e-11_std_1_6_0.001_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_12574_tr_semisw11_5.7e-11_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_r4_12585_es_semisw11_5.7e-11_rot_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1000002.146084266,1000004.9748612975,1000005.8133052951]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r4_12595_tos_semisw11_5.7e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.1584271378971435e-9,-0.999999999],"status":[1000.0]}}
+{"case":"common_cone_r4_12595_tos_semisw11_5.7e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.158433499006507e-9,-0.999999999],"status":[1000.0]}}
 {"case":"common_cone_r4_12605_isod_semisw11_5.7e-11_rot_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_12615_isod_semisw11_5.7e-11_rot_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_12683_es_semisw11_5.7e-11_skew_0_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[2.0171486751011685,2.017757909940742,7.186198486747651]],"n":27},"status":[1000.0]}}
@@ -6352,7 +6352,7 @@
 {"case":"common_cone_r4_14384_invg_semisw01_6e-11_std_1_6_1e-09_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_14398_adj_semisw01_6e-11_std_1_3_-1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_r4_14409_es_semisw01_6e-11_rot_0_359.9_-0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1.6464723565125758,4.4724234703986125,5.313438929728047]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r4_14419_tos_semisw01_6e-11_rot_0_-0.5_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[7.067873546061804e-9,-2.0],"status":[1000.0]}}
+{"case":"common_cone_r4_14419_tos_semisw01_6e-11_rot_0_-0.5_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
 {"case":"common_cone_r4_14429_isod_semisw01_6e-11_rot_0_0_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[16.566386858685775,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"common_cone_r4_14439_isod_semisw01_6e-11_rot_0_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_14452_inv_semisw01_6e-11_rot_0_1_0.001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
@@ -7025,7 +7025,7 @@
 {"case":"common_cone_r4_20677_invg_semisw10_-1e-13_std_1_6_0.001_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_20690_tr_semisw10_-1e-13_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_r4_20701_es_semisw10_-1e-13_rot_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1000002.1460828747,1000004.9748610737,1000005.813301744]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r4_20711_tos_semisw10_-1e-13_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.1584271378971435e-9,0.999999999],"status":[1000.0]}}
+{"case":"common_cone_r4_20711_tos_semisw10_-1e-13_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.158433499006507e-9,0.999999999],"status":[1000.0]}}
 {"case":"common_cone_r4_20721_isod_semisw10_-1e-13_rot_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_20731_isod_semisw10_-1e-13_rot_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_20799_es_semisw10_-1e-13_skew_0_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[2.0171486751001546,2.0177579099397316,7.186198486743422]],"n":27},"status":[1000.0]}}
@@ -7349,7 +7349,7 @@
 {"case":"common_cone_r4_23721_invg_semisw11_-5e-11_std_1_6_0.001_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_23734_tr_semisw11_-5e-11_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_r4_23745_es_semisw11_-5e-11_rot_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1000002.1460816589,1000004.9748608776,1000005.8132986407]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r4_23755_tos_semisw11_-5e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.1584271378971435e-9,-0.999999999],"status":[1000.0]}}
+{"case":"common_cone_r4_23755_tos_semisw11_-5e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.158433499006507e-9,-0.999999999],"status":[1000.0]}}
 {"case":"common_cone_r4_23765_isod_semisw11_-5e-11_rot_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_23775_isod_semisw11_-5e-11_rot_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_23843_es_semisw11_-5e-11_skew_0_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[2.0171486750992687,2.0177579099406175,7.186198486739725]],"n":27},"status":[1000.0]}}
@@ -8157,7 +8157,7 @@
 {"case":"common_cone_r4_31220_inv_csweep0_720_std_1_7_1e-09_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
 {"case":"common_cone_r4_31230_tr_csweep0_720_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
 {"case":"common_cone_r4_31241_es_sweep-360_0_std_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[3.0974110123295517,4.042608341126703,11.736505844537849]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r4_31251_tos_sweep-360_0_std_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,1e-10],"status":[1000.0]}}
+{"case":"common_cone_r4_31251_tos_sweep-360_0_std_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-3.2411386502971487e-7,1e-10],"status":[1000.0]}}
 {"case":"common_cone_r4_31261_isod_sweep-360_0_std_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_31271_isod_sweep-360_0_std_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_31301_invg_sweep-360_0_std_0_4_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
@@ -8168,7 +8168,7 @@
 {"case":"common_cone_r4_31321_inv_sweep-360_0_std_0_7_1e-09_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_31331_tr_sweep-360_0_std_0_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_r4_31342_es_sweep-360_0_std_1_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[902562.4055307147,1347570.7471536577,2970608.1302391617]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_r4_31352_tos_sweep-360_0_std_1_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,1e-10],"status":[1000.0]}}
+{"case":"common_cone_r4_31352_tos_sweep-360_0_std_1_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-3.2411386502971487e-7,1e-10],"status":[1000.0]}}
 {"case":"common_cone_r4_31362_isod_sweep-360_0_std_1_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_31372_isod_sweep-360_0_std_1_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_r4_31402_invg_sweep-360_0_std_1_4_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
@@ -8820,7 +8820,7 @@
 {"case":"common_cone_review2_far_can_semi_h_tr_near","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_review2_far_can_semi_h_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_review2_far_can_semi_h_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
-{"case":"common_cone_review2_far_can_semi_h_ts_-0.1_1.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-0.1],"status":[1000.0]}}
+{"case":"common_cone_review2_far_can_semi_h_ts_-0.1_1.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-0.1],"status":[1000.0]}}
 {"case":"common_cone_review2_far_can_semi_unb_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_review2_far_can_semi_unb_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
 {"case":"common_cone_review2_far_can_semi_unb_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
@@ -9035,7 +9035,7 @@
 {"case":"common_cone_review2_far_semi_unb_swin_tr_near","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_review2_far_semi_unb_swin_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_review2_far_semi_unb_swin_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
-{"case":"common_cone_review2_far_semi_unb_swin_ts_-0.1_1.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.1],"status":[1000.0]}}
+{"case":"common_cone_review2_far_semi_unb_swin_ts_-0.1_1.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,0.1],"status":[1000.0]}}
 {"case":"common_cone_review2_far_semi_unb_swin_ts_0.25_0.999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[359.99967588574646,-0.25],"status":[1000.0]}}
 {"case":"common_cone_review2_skew_bnd_bot0_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
 {"case":"common_cone_review2_skew_bnd_bot0_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
@@ -9259,7 +9259,7 @@
 {"case":"common_cone_review2_skew_can_h0_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_h0_adj_[10, 0, 90, 2]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":164},"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_h0_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
-{"case":"common_cone_review2_skew_can_h0_ep_-0.1_1.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9732050807568877,0.0,-0.1],"status":[1000.0]}}
+{"case":"common_cone_review2_skew_can_h0_ep_-0.1_1.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9732050807568877,-2.3836649741257277e-16,-0.1],"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_h0_es_200_-5_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.086536767333743e-16,7.594372760115068e-17,-3.732050807568878,-0.25178987887306936,-0.09164402119928976,1.0,-1.3254680928777744e-18,3.641693655389268e-18,-0.0,0.0,0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_h0_es_200_-5_31","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-3.0754847076412366,5.0754847076412375,-6.661532044195361]],"n":24},"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_h0_es_90_1000.0_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.6468388382202e-14,268.9491924311227,1000.0,1.640715604224463e-17,0.2679491924311227,1.0,-4.6940489285029035,2.8742759976660722e-16,0.0,0.0,0.0,0.0],"status":[1000.0]}}
@@ -9287,12 +9287,12 @@
 {"case":"common_cone_review2_skew_can_semi_h_adj_[10, 0, 90, 2]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":164},"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_semi_h_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_semi_h_es_45_1.5_22","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[7.44867048308984,7.537213843986017,22.18945537309825]],"n":27},"status":[1000.0]}}
-{"case":"common_cone_review2_skew_can_semi_h_ev_-0.1_1.2_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0,8.881784197001252e-16,5.6568542494923815,0.0,1.0000000000000002,0.0,1.0000000000000002,0.0,5.656854249492382,0.0],"status":[1000.0]}}
+{"case":"common_cone_review2_skew_can_semi_h_ev_-0.1_1.2_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-2.4492935982947064e-16,0.0,8.881784197001252e-16,5.6568542494923815,0.0,1.0000000000000002,0.0,1.0000000000000002,0.0,5.656854249492382,0.0],"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_semi_h_ev_0.25_0.999999_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-85.60681757203349,1130.2951208968332,-1630.4249466378994]],"n":48},"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_semi_h_ev_0_0_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0,0.0,5.65685424949238,0.0,1.0000000000000002,0.0,1.0000000000000002,0.0,5.6568542494923815,0.0],"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_semi_h_ev_1_1_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,-4.898587196589413e-16,1.0],"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_semi_h_oob_es_0_0_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[3.0342920336233785,3.035521136456394,11.524705314946047]],"n":48},"status":[1000.0]}}
-{"case":"common_cone_review2_skew_can_semi_h_oob_ev_-0.1_1.2_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9,0.0,-0.1,-2.0919281218159345,1.8029086721574896,2.7755575615628914e-17,0.6528403972529118,0.7574954889071361,1.0000000000000002,-2.3243645797954833,2.003231857952766,-4.440892098500626e-16],"status":[1000.0]}}
+{"case":"common_cone_review2_skew_can_semi_h_oob_ev_-0.1_1.2_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9,-2.2043642384652358e-16,-0.1,-2.0919281218159345,1.8029086721574896,2.7755575615628914e-17,0.6528403972529118,0.7574954889071361,1.0000000000000002,-2.3243645797954833,2.003231857952766,-4.440892098500626e-16],"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_semi_h_oob_ev_0.25_0.999999_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.24999999998,-7.0710760982548555e-6,0.25,0.00004000014059091228,7.071084380267383,2.220446049250313e-16,0.9999999999840001,-5.656860877034556e-6,1.0000000000000002,0.00003200011247450618,5.656867504213906,8.881784197001252e-16],"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_semi_h_oob_ev_0_0_21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14.313708498984761,14.313708498984761,107.5096679918781]],"n":18},"status":[1000.0]}}
 {"case":"common_cone_review2_skew_can_semi_h_oob_ev_1_1_21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[21.970562748477146,21.970562748477146,139.79393923934003]],"n":18},"status":[1000.0]}}
@@ -12399,7 +12399,7 @@
 {"case":"common_cone_review_c123_ep[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_c123_ep[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[7.654042494670958e-17,1.25,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_c123_ep[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.3333333333333333,-3.265724797726275e-16,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_c123_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0],"status":[1000.0]}}
+{"case":"common_cone_review_c123_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-2.4492935982947064e-16,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_c123_es00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.744340014520537,1.1461831095254127,1.1],"status":[1000.0]}}
 {"case":"common_cone_review_c123_es01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.744340014520537,1.1461831095254127,1.1,-0.18154634500500902,0.27955685598180796,1.0],"status":[1000.0]}}
 {"case":"common_cone_review_c123_es03","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.744340014520537,1.1461831095254127,1.1,-0.18154634500500902,0.27955685598180796,1.0,0.0,0.0,0.0,0.0,0.0,0.0],"status":[1000.0]}}
@@ -13103,7 +13103,7 @@
 {"case":"common_cone_review_c123_swio_e44","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-11144.110081672268,17904.000092961065,-113384.66803095044]],"n":75},"status":[1000.0]}}
 {"case":"common_cone_review_c123_swio_e50","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_review_c123_swio_e88","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
-{"case":"common_cone_review_c123_swio_ep[-0.5, 2.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,0.0,3.0],"status":[1000.0]}}
+{"case":"common_cone_review_c123_swio_ep[-0.5, 2.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,-4.898587196589413e-16,3.0],"status":[1000.0]}}
 {"case":"common_cone_review_c123_swio_ep[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,0.0,3.0],"status":[1000.0]}}
 {"case":"common_cone_review_c123_swio_ep[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-3.52085954754864e-16,-1.9166666666666665,2.75],"status":[1000.0]}}
 {"case":"common_cone_review_c123_swio_ep[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.6666666666666665,-4.0821559971578437e-16,2.0],"status":[1000.0]}}
@@ -13389,7 +13389,7 @@
 {"case":"common_cone_review_c123_swio_tn[360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_review_c123_swio_tn[45, 10000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-9997.0,0.12499999999999999],"status":[1000.0]}}
 {"case":"common_cone_review_c123_swio_tn[720, -2]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.0,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_c123_swio_ts[-0.5, 2.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,3.5],"status":[1000.0]}}
+{"case":"common_cone_review_c123_swio_ts[-0.5, 2.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,3.5],"status":[1000.0]}}
 {"case":"common_cone_review_c123_swio_ts[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,3.0],"status":[1000.0]}}
 {"case":"common_cone_review_c123_swio_ts[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[270.0,2.75],"status":[1000.0]}}
 {"case":"common_cone_review_c123_swio_ts[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,2.0],"status":[1000.0]}}
@@ -13417,7 +13417,7 @@
 {"case":"common_cone_review_c123_ts[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_c123_ts[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[90.0,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_c123_ts[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_c123_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-1000.0],"status":[1000.0]}}
+{"case":"common_cone_review_c123_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-1000.0],"status":[1000.0]}}
 {"case":"common_cone_review_coneb_part_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":193},"status":[1000.0]}}
 {"case":"common_cone_review_coneb_part_e00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.207867093564473,-0.4806839754808893,0.3],"status":[1000.0]}}
 {"case":"common_cone_review_coneb_part_e01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.207867093564473,-0.4806839754808893,0.3,1.3771055603923512,3.460403457590843,0.0],"status":[1000.0]}}
@@ -13574,7 +13574,7 @@
 {"case":"common_cone_review_cyl_ep[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.5,0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_cyl_ep[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.4821197232449492,0.23091367644276722,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_cyl_ep[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.1846892766249724,0.920060496842354,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_cyl_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.5,0.0,-1000.0],"status":[1000.0]}}
+{"case":"common_cone_review_cyl_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.5,-3.6739403974420594e-16,-1000.0],"status":[1000.0]}}
 {"case":"common_cone_review_cyl_es00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.8169585525225407,1.2580058519181359,1.1],"status":[1000.0]}}
 {"case":"common_cone_review_cyl_es01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.8169585525225407,1.2580058519181359,1.1,0.0,0.0,1.0],"status":[1000.0]}}
 {"case":"common_cone_review_cyl_es03","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.8169585525225407,1.2580058519181359,1.1,0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0],"status":[1000.0]}}
@@ -13985,7 +13985,7 @@
 {"case":"common_cone_review_cyl_ts[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_cyl_ts[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[8.855467036429626,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_cyl_ts[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[37.833842679974666,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_cyl_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-1000.0],"status":[1000.0]}}
+{"case":"common_cone_review_cyl_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-1000.0],"status":[1000.0]}}
 {"case":"common_cone_review_cylb_part_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":201},"status":[1000.0]}}
 {"case":"common_cone_review_cylb_part_inv0_t10.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"common_cone_review_cylb_part_inv0_t10.0_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
@@ -14336,7 +14336,7 @@
 {"case":"common_cone_review_huge_ts[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_huge_ts[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[90.0,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_huge_ts[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_huge_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-1000.0],"status":[1000.0]}}
+{"case":"common_cone_review_huge_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-1000.0],"status":[1000.0]}}
 {"case":"common_cone_review_nonunit_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
 {"case":"common_cone_review_nonunit_e00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.35257432525390514,1.147035895328369,0.6],"status":[1000.0]}}
 {"case":"common_cone_review_nonunit_e01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.35257432525390514,1.147035895328369,0.6,-0.09793731257052926,0.31862108203565814,1.0000000000000004],"status":[1000.0]}}
@@ -14355,7 +14355,7 @@
 {"case":"common_cone_review_nonunit_ep[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_nonunit_ep[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[7.654042494670958e-17,1.25,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_nonunit_ep[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.3333333333333333,-3.265724797726275e-16,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_nonunit_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0],"status":[1000.0]}}
+{"case":"common_cone_review_nonunit_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-2.4492935982947064e-16,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_nonunit_es00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.744340014520537,1.1461831095254127,1.1],"status":[1000.0]}}
 {"case":"common_cone_review_nonunit_es01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.744340014520537,1.1461831095254127,1.1,-0.18154634500500902,0.27955685598180796,1.0],"status":[1000.0]}}
 {"case":"common_cone_review_nonunit_es03","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.744340014520537,1.1461831095254127,1.1,-0.18154634500500902,0.27955685598180796,1.0,0.0,0.0,0.0,0.0,0.0,0.0],"status":[1000.0]}}
@@ -14391,7 +14391,7 @@
 {"case":"common_cone_review_nonunit_ts[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_nonunit_ts[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[90.0,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_nonunit_ts[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_nonunit_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-1000.0],"status":[1000.0]}}
+{"case":"common_cone_review_nonunit_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-1000.0],"status":[1000.0]}}
 {"case":"common_cone_review_semi_near90_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
 {"case":"common_cone_review_semi_tinyang_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":192},"status":[1000.0]}}
 {"case":"common_cone_review_semi_tinyang_inv0_t10.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,1.5,0.0],"status":[1000.0]}}
@@ -14546,7 +14546,7 @@
 {"case":"common_cone_review_tiny_ep[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1e-6,0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_tiny_ep[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.8369701987210298e-22,3e-6,2e-6],"status":[1000.0]}}
 {"case":"common_cone_review_tiny_ep[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3e-6,-7.347880794884119e-22,2e-6],"status":[1000.0]}}
-{"case":"common_cone_review_tiny_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1e-6,0.0,0.0],"status":[1000.0]}}
+{"case":"common_cone_review_tiny_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1e-6,-2.4492935982947065e-22,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_tiny_es00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-1.6339171050450813e-6,2.5160117038362717e-6,2e-6],"status":[1000.0]}}
 {"case":"common_cone_review_tiny_es01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-1.6339171050450813e-6,2.5160117038362717e-6,2e-6,-0.5446390350150272,0.8386705679454242,1.0],"status":[1000.0]}}
 {"case":"common_cone_review_tiny_es03","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-1.6339171050450813e-6,2.5160117038362717e-6,2e-6,-0.5446390350150272,0.8386705679454242,1.0,0.0,0.0,0.0,0.0,0.0,0.0],"status":[1000.0]}}
@@ -14582,7 +14582,7 @@
 {"case":"common_cone_review_tiny_ts[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_tiny_ts[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[90.0,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_tiny_ts[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_tiny_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-1000.0],"status":[1000.0]}}
+{"case":"common_cone_review_tiny_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-1000.0],"status":[1000.0]}}
 {"case":"common_cone_review_toapex_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
 {"case":"common_cone_review_toapex_e00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.47009910033854024,1.529381193771159,0.6],"status":[1000.0]}}
 {"case":"common_cone_review_toapex_e01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.47009910033854024,1.529381193771159,0.6,0.1958746251410585,-0.6372421640713163,1.0000000000000004],"status":[1000.0]}}
@@ -14601,7 +14601,7 @@
 {"case":"common_cone_review_toapex_ep[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_toapex_ep[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[9.184850993605148e-17,1.5,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_toapex_ep[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.3333333333333335,-3.2657247977262755e-16,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_toapex_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,0.0,0.0],"status":[1000.0]}}
+{"case":"common_cone_review_toapex_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.0,-4.898587196589413e-16,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_toapex_es00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.6898761110190342,1.0623160527308704,1.1],"status":[1000.0]}}
 {"case":"common_cone_review_toapex_es01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.6898761110190342,1.0623160527308704,1.1,0.36309269001001804,-0.5591137119636159,1.0],"status":[1000.0]}}
 {"case":"common_cone_review_toapex_es03","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.6898761110190342,1.0623160527308704,1.1,0.36309269001001804,-0.5591137119636159,1.0,0.0,0.0,0.0,0.0,0.0,0.0],"status":[1000.0]}}
@@ -14715,7 +14715,7 @@
 {"case":"common_cone_review_toapex_ts[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_toapex_ts[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[90.0,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_toapex_ts[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_toapex_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-1000.0],"status":[1000.0]}}
+{"case":"common_cone_review_toapex_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-1000.0],"status":[1000.0]}}
 {"case":"common_cone_review_unb30r1_adj_[0, -10, 90, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
 {"case":"common_cone_review_unb30r1_adj_[0, -2.999999999999, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
 {"case":"common_cone_review_unb30r1_adj_[0, -3.0000001, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
@@ -14740,7 +14740,7 @@
 {"case":"common_cone_review_unb30r1_ep[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_unb30r1_ep[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[8.774672092549033e-17,1.4330127018922192,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_unb30r1_ep[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.5773502691896257,-3.863393916594582e-16,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_unb30r1_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-2.220446049250313e-16,0.0,-1.7320508075688776],"status":[1000.0]}}
+{"case":"common_cone_review_unb30r1_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-2.220446049250313e-16,5.438524293787564e-32,-1.7320508075688776],"status":[1000.0]}}
 {"case":"common_cone_review_unb30r1_es00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.8905312778398414,1.3712979139266015,1.1],"status":[1000.0]}}
 {"case":"common_cone_review_unb30r1_es01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.8905312778398414,1.3712979139266015,1.1,-0.3144474934771039,0.4842066781647068,1.0],"status":[1000.0]}}
 {"case":"common_cone_review_unb30r1_es03","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.8905312778398414,1.3712979139266015,1.1,-0.3144474934771039,0.4842066781647068,1.0,0.0,0.0,0.0,0.0,0.0,0.0],"status":[1000.0]}}
@@ -15412,7 +15412,7 @@
 {"case":"common_cone_review_unb30r1_ts[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"common_cone_review_unb30r1_ts[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[90.0,0.75],"status":[1000.0]}}
 {"case":"common_cone_review_unb30r1_ts[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.0],"status":[1000.0]}}
-{"case":"common_cone_review_unb30r1_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-1000.0],"status":[1000.0]}}
+{"case":"common_cone_review_unb30r1_ts[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,-1000.0],"status":[1000.0]}}
 {"case":"common_cone_review_unb45_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
 {"case":"common_cone_review_unb45_inv0_g","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.5000000000000002,1.0],"status":[1000.0]}}
 {"case":"common_cone_review_unb45_inv0_g_subdomain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[360.0,1.5000000000000002,1.0],"status":[1000.0]}}

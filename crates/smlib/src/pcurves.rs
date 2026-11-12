@@ -182,6 +182,7 @@ fn sheet(face: &TrimFace<'_>) -> Result<(b::Brep, HashSet<(u32, u32, u32)>), Str
         faces: vec![b::Face { surface: face.surface.clone(), nurbs: face.nurbs.cloned(), domain: face.domain, loops }],
         edges,
         vertices,
+        screw_owners: Vec::new(),
     };
     Ok((record, bare))
 }

@@ -1531,7 +1531,8 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             out_shells.push(Shell::Faces { faces, wires: Vec::new() });
         }
-        let brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
+        let brep =
+            Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices, screw_owners: Vec::new() };
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
         solidcore_ops::record_check::agreement(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })

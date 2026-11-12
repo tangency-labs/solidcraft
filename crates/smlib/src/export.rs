@@ -1358,7 +1358,8 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
             Ok(b::Shell::Faces { faces, wires: Vec::new() })
         })
         .collect::<Res<Vec<_>>>()?;
-    let brep = b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices };
+    let brep =
+        b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices, screw_owners: Vec::new() };
     solidcore_ops::record_check::validate_built(&brep).map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
     let placed = |new: &[Option<u32>]| {
         new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()

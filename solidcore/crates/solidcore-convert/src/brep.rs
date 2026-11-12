@@ -255,6 +255,11 @@ fn build(
     record
         .validate_built()
         .map_err(|e| Unsupported::Invalid(e.0))?;
+    // The built check bounds nesting before the following read-only traversal.
+    // New exact curve graphs must share one input budget even for a trusted body.
+    if !trusted || needs_curve_owner_budget(record) {
+        record.validate().map_err(|e| Unsupported::Invalid(e.0))?;
+    }
     if !bare.is_sorted() {
         return Err(Unsupported::Invalid("bare uses not sorted"));
     }
@@ -314,11 +319,72 @@ fn build(
     Ok((b, kept.then_some(order)))
 }
 
+pub(crate) fn needs_curve_owner_budget(record: &r::Brep) -> bool {
+    needs_exact_budget(record, false)
+}
+
+/// Whether evaluating this body may materialize a retained-screw surface.
+pub(crate) fn needs_evaluator_budget(record: &r::Brep) -> bool {
+    needs_exact_budget(record, true)
+}
+
+fn needs_exact_budget(record: &r::Brep, include_faces: bool) -> bool {
+    fn curve(c: &r::Curve, depth: usize, include_faces: bool) -> bool {
+        if depth > r::MAX_DEPTH {
+            return true;
+        }
+        match c {
+            r::Curve::OnSurface { .. } | r::Curve::OnSurfaceRef { .. } => true,
+            r::Curve::SurfaceIntersection {
+                surfaces, leader, ..
+            } => {
+                surfaces
+                    .iter()
+                    .any(|s| surface(s, depth.saturating_add(1), include_faces))
+                    || curve(leader, depth.saturating_add(1), include_faces)
+            }
+            _ => false,
+        }
+    }
+    fn surface(s: &r::Surface, depth: usize, include_faces: bool) -> bool {
+        if depth > r::MAX_DEPTH {
+            return true;
+        }
+        match s {
+            r::Surface::ProceduralSweep(_) => include_faces,
+            r::Surface::PlacedRevolution { profile, .. } => {
+                curve(profile, depth.saturating_add(1), include_faces)
+            }
+            _ => false,
+        }
+    }
+    !record.screw_owners.is_empty()
+        || record.edges.iter().any(|e| {
+            curve(&e.curve, 0, include_faces)
+                || e.nurbs.as_ref().is_some_and(|n| curve(n, 0, include_faces))
+        })
+        || record.faces.iter().any(|f| {
+            surface(&f.surface, 0, include_faces)
+                || f.nurbs
+                    .as_ref()
+                    .is_some_and(|n| surface(n, 0, include_faces))
+        })
+}
+
 /// The record as the kernel's B-rep data: edgeuses face by face, loop by loop, in loop order;
 /// edges and vertices in the record's order. Each edge and vertex keeps its own tolerance; the
 /// body's and each face's are the least of theirs ([`own_tolerances`]). The record has no face
 /// tolerance: a face's own crosses as its edges' (`to_record` puts it into them).
 fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
+    let owners = rec
+        .screw_owners
+        .iter()
+        .map(|owner| {
+            solidcore::surface::procedural_sweep::ProceduralSweep::from_record(
+                &crate::sweep::sweep(owner),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let zone = zone_tolerance(rec.tolerance);
     let mut d = BrepData::new(UNSURE, DataSourceType::Usd);
     d.zone_tol_3d = zone;
@@ -412,6 +478,26 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
             return Err(Unsupported::NotYet("traced intersection curves"));
         }
         let (curve, interval): (KernelCurve, Extent1d) = match (&e.curve, &e.nurbs) {
+            (
+                r::Curve::OnSurfaceRef {
+                    owner,
+                    uv_curve,
+                    domain,
+                },
+                None,
+            ) => {
+                let owner = owners
+                    .get(*owner as usize)
+                    .ok_or(Unsupported::Invalid("screw owner index"))?;
+                let c = curves::on_screw_surface(
+                    k,
+                    owner,
+                    &crate::curve2(uv_curve),
+                    *domain,
+                    e.interval,
+                )?;
+                (c.curve, c.interval)
+            }
             (r::Curve::Circle { .. } | r::Curve::Ellipse { .. }, Some(n)) => {
                 let [lo, hi] = e.interval;
                 (

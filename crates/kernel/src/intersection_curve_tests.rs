@@ -47,6 +47,7 @@ fn triangle_with_intersection_edge(support_gap: f64) -> b::Brep {
         faces: vec![face],
         edges,
         vertices: corners.iter().map(|p| b::Vertex { point: *p, tolerance: 1e-6 }).collect(),
+        screw_owners: Vec::new(),
     };
     loose.canonical().unwrap().brep
 }

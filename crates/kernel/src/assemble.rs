@@ -93,6 +93,11 @@ impl Assembly {
     /// assembly are the record's). Only face shells: a record with wire or vertex shells is not
     /// rebuilt here.
     pub(crate) fn from_record(b: &Brep) -> Result<Assembly> {
+        // Each edge is rebuilt from its own curve, and a curve on a screw names its owner in the
+        // record's list: such a body is refused here, not rebuilt without its owners.
+        if !b.screw_owners.is_empty() {
+            return Err(KernelError::Failed("rebuilding the B-rep: not supported yet: a body with curves on screws".into()));
+        }
         let mut faces: Vec<Option<AFace>> = vec![None; b.faces.len()];
         for (s, shell) in b.shells.iter().enumerate() {
             let Shell::Faces { faces: uses, wires } = shell else { return Err(invalid("a wire or vertex shell")) };
@@ -243,8 +248,16 @@ impl Assembly {
             tolerance: a.tolerance,
             uses: Vec::new(),
         });
-        let loose =
-            Brep { version: VERSION, tolerance: self.tolerance, regions, shells, faces, edges: edges.collect(), vertices: self.vertices.clone() };
+        let loose = Brep {
+            version: VERSION,
+            tolerance: self.tolerance,
+            regions,
+            shells,
+            faces,
+            edges: edges.collect(),
+            vertices: self.vertices.clone(),
+            screw_owners: Vec::new(),
+        };
         let part = loose.canonical().map_err(invalid)?;
         solidcore_ops::record_check::agreement(&part.brep).map_err(invalid)?;
         let mut face_map: Vec<Option<usize>> = vec![None; self.faces.len()];

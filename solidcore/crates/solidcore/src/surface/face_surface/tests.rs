@@ -468,3 +468,24 @@ fn a_label_with_its_origin_elsewhere_on_the_axis_passes_the_kernels_check() {
         }
     }
 }
+
+#[test]
+fn path_sweep_wall_records_as_its_existing_spline_representation() {
+    use crate::math::Vec3;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::surface::procedural_sweep::ProceduralSweep;
+
+    let profile = BSplineCurve::create_line_segment(3, Vec3::X, Vec3::Y).unwrap();
+    let path = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z * 3.0).unwrap();
+    let (definition, net) = ProceduralSweep::create_path_exact(&profile, &path, Vec3::X).unwrap();
+    let domain = net.natural_uv_domain();
+    let mut surface = Surface::from(net);
+    surface.set_sweep_definition(definition);
+    let record = record_face(&k(), &surface, &domain).unwrap();
+    assert!(matches!(record.surface, Record::Spline { .. }));
+    let (restored, _) = from_parameters(&k(), &record.surface, record.domain).unwrap();
+    let uv = Point2::new(0.4, 0.6);
+    let original = surface.evaluate_point(&k(), uv).unwrap();
+    let round_trip = restored.evaluate_point(&k(), uv).unwrap();
+    assert!((original - round_trip).length() < 1e-10);
+}

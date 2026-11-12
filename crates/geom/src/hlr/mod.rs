@@ -217,6 +217,8 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
             solidcore_record::brep::Curve::RationalSpline { .. } => "rational_spline",
             // Only one with a spline to follow gets here: what was an `intersection` record.
             solidcore_record::brep::Curve::SurfaceIntersection { .. } => "intersection",
+            // `C3::of_edge` refuses these, so none gets here.
+            solidcore_record::brep::Curve::OnSurface { .. } | solidcore_record::brep::Curve::OnSurfaceRef { .. } => "on_surface",
         };
         let shape = if matches!(c, C3::Line { .. }) {
             "line"

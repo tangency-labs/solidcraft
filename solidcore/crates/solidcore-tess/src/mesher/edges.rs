@@ -3,8 +3,7 @@
 
 use solidcore::Vec3;
 use solidcore_record::brep::{self, Curve};
-use solidcore::eval::CurveEval;
-use solidcore_convert as kernel;
+use solidcore_convert::curve_context::BodyCurveContext;
 use crate::vec::VecExt as _;
 
 use super::size::{Rules, SizeAt};
@@ -46,15 +45,22 @@ pub(crate) struct Nodes {
 /// the curve. The end nodes are the vertices' own points, so edges meeting at a vertex meet
 /// exactly. A curve that does not evaluate somewhere on its interval is an error naming the
 /// edge.
-pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> Result<Nodes> {
-    sample_edge_sized(b, ei, rules, h, None)
+pub(crate) fn sample_edge_with_context(b: &brep::Brep, curves: &BodyCurveContext<'_>, ei: usize, rules: &Rules, h: f64) -> Result<Nodes> {
+    sample_edge_sized(b, curves, ei, rules, h, None)
 }
 
-/// [`sample_edge`], where no segment is longer than the size function `size_at` asks at its
-/// middle either (the mesh path's, [`super::Purpose::Mesh`]; `None`: `h` alone). A line is
-/// divided evenly by `h` as there, then its segments are halved, on the line, wherever the
-/// function asks for less; a curve is bisected to both.
-pub(crate) fn sample_edge_sized(b: &brep::Brep, ei: usize, rules: &Rules, h: f64, size_at: Option<SizeAt<'_>>) -> Result<Nodes> {
+/// [`sample_edge_with_context`], where no segment is longer than the size function `size_at`
+/// asks at its middle either (the mesh path's, [`super::Purpose::Mesh`]; `None`: `h` alone). A
+/// line is divided evenly by `h` as there, then its segments are halved, on the line, wherever
+/// the function asks for less; a curve is bisected to both.
+pub(crate) fn sample_edge_sized(
+    b: &brep::Brep,
+    curves: &BodyCurveContext<'_>,
+    ei: usize,
+    rules: &Rules,
+    h: f64,
+    size_at: Option<SizeAt<'_>>,
+) -> Result<Nodes> {
     let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
     let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
     let vertex = |k: usize| {
@@ -92,8 +98,8 @@ pub(crate) fn sample_edge_sized(b: &brep::Brep, ei: usize, rules: &Rules, h: f64
         let capped = (h > 0.0 && side > h * (1.0 + 1e-9)).then(|| (crate::EdgeCap::Nodes, 0.0, side / h));
         return Ok(Nodes { points: pts, params, snapped: Vec::new(), capped });
     }
-    let curve_value = kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?;
-    let curve = CurveEval::new(&curve_value).map_err(|e| fail(crate::eval_message(e)))?;
+    // Through the body's curve context: an edge on a shared screw owner evaluates there.
+    let curve = curves.edge(ei).map_err(|e| fail(crate::eval_message(e)))?;
     let at =
         |t: f64| -> Result<Vec3> { curve.point(t).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {t}"))) };
     // A closed curve's chord between its ends is empty: start it from a few segments. An open
@@ -195,10 +201,10 @@ pub(crate) fn bisect_at(
 
 /// Edge `ei`'s nodes with each of its segments `segs` (counted from its start) halved at the
 /// middle of its curve parameters, the new node on the curve (on a line, halfway between the two,
-/// as [`sample_edge`] spaces a line's nodes). A segment too short to halve in floating point keeps
+/// as [`sample_edge_sized`] spaces a line's nodes). A segment too short to halve in floating point keeps
 /// its two nodes. More than [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, is
 /// an error naming the edge.
-pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs: &[u32]) -> Result<()> {
+pub(crate) fn split_segments(b: &brep::Brep, curves: &BodyCurveContext<'_>, ei: usize, nodes: &mut Nodes, segs: &[u32]) -> Result<()> {
     let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
     let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
     let mut segs = segs.to_vec();
@@ -210,7 +216,7 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
     }
     let curve = match edge.curve {
         Curve::Line { .. } => None,
-        _ => Some(CurveEval::new(&kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?).map_err(|e| fail(crate::eval_message(e)))?),
+        _ => Some(curves.edge(ei).map_err(|e| fail(crate::eval_message(e)))?),
     };
     let (mut points, mut params) = (Vec::with_capacity(n + segs.len()), Vec::with_capacity(n + segs.len()));
     let mut next = segs.iter().copied().peekable();
@@ -246,7 +252,7 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
 /// its segment's length from a node, or from one put in before it, is the same node and left
 /// out, so no two nodes lie a rounding apart. The nodes are unchanged on an error: more than
 /// [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, naming the edge.
-pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]) -> Result<()> {
+pub(crate) fn insert_at(b: &brep::Brep, curves: &BodyCurveContext<'_>, ei: usize, nodes: &mut Nodes, ts: &[f64]) -> Result<()> {
     let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
     let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
     let mut ts: Vec<f64> = ts.iter().copied().filter(|t| t.is_finite()).collect();
@@ -257,7 +263,7 @@ pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]
     }
     let curve = match edge.curve {
         Curve::Line { .. } => None,
-        _ => Some(CurveEval::new(&kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?).map_err(|e| fail(crate::eval_message(e)))?),
+        _ => Some(curves.edge(ei).map_err(|e| fail(crate::eval_message(e)))?),
     };
     let n = nodes.points.len().min(nodes.params.len());
     let (mut points, mut params) = (Vec::new(), Vec::new());
@@ -332,6 +338,13 @@ pub(crate) fn turn(a: Vec3, b: Vec3) -> f64 {
         return 0.0;
     }
     (a.dot(b) / (la * lb)).clamp(-1.0, 1.0).acos()
+}
+
+/// [`sample_edge_with_context`] with a context of its own, for tests that sample one edge.
+#[cfg(test)]
+pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> Result<Nodes> {
+    let curves = BodyCurveContext::new(b).map_err(|e| TessError::Failed(crate::eval_message(e)))?;
+    sample_edge_with_context(b, &curves, ei, rules, h)
 }
 
 #[cfg(test)]
@@ -434,5 +447,104 @@ mod tests {
             }
         }
         assert!(edges > 0 && checked > 20, "{edges} edges, {checked} nodes");
+    }
+
+    #[test]
+    fn deep_curve_graphs_are_refused_before_building_an_evaluation_context() {
+        let mut body = crate::fixtures::fixture("box_10x6x4");
+        let plane = body.faces[0].surface.clone();
+        let mut curve = body.edges[0].curve.clone();
+        for _ in 0..brep::MAX_DEPTH + 2 {
+            curve = Curve::SurfaceIntersection {
+                surfaces: [Box::new(plane.clone()), Box::new(plane.clone())],
+                leader: Box::new(curve),
+                tolerance: 1e-5,
+            };
+        }
+        body.edges[0].curve = curve;
+        assert!(matches!(
+            BodyCurveContext::new(&body),
+            Err(solidcore::eval::EvalError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn samples_an_edge_with_a_shared_exact_screw_owner() {
+        use solidcore::curve::curve::Curve as KernelCurve;
+        use solidcore::math::{Point2, Vec3 as KVec3};
+        use solidcore::primitive::api_curves::create_line_segment;
+        use solidcore::sweep::screw::screw_sweep;
+        use solidcore_record::brep::{Curve2, Surface};
+
+        let mut k = solidcore::Kernel::default();
+        let points = [
+            KVec3::new(2.0, 0.0, 0.0),
+            KVec3::new(3.0, 0.0, 0.5),
+            KVec3::new(2.0, 0.0, 1.0),
+        ];
+        let profile: Vec<KernelCurve> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&a, &b)| KernelCurve::from(create_line_segment(a, b).unwrap()))
+            .collect();
+        let swept = screw_sweep(&mut k, &profile, KVec3::ZERO, KVec3::Z, 2.5, 0.1, 1e-4).unwrap();
+        let sweep = swept
+            .faces()
+            .iter()
+            .find_map(|(_, f)| f.surface.as_ref()?.procedural_sweep())
+            .unwrap();
+        let domain = sweep.net().natural_uv_domain();
+        let u = 0.5 * (domain.u_min() + domain.u_max());
+        let raw = sweep.definition().to_record(sweep.net()).unwrap();
+        let Surface::ProceduralSweep(owner) =
+            solidcore_convert::record_surface(solidcore::eval::Surface::ProceduralSweep(Box::new(raw)))
+                .unwrap()
+        else {
+            panic!("screw")
+        };
+        let mut body = crate::fixtures::fixture("box_10x6x4");
+        body.screw_owners.push(*owner);
+        body.edges[0].curve = Curve::OnSurfaceRef {
+            owner: 0,
+            uv_curve: Curve2::Spline {
+                knots: vec![0.0, 0.0, 1.0, 1.0],
+                points: vec![[u, domain.v_min()], [u, domain.v_max()]],
+            },
+            domain: [
+                [domain.u_min(), domain.u_max()],
+                [domain.v_min(), domain.v_max()],
+            ],
+        };
+        for (vertex, uv) in body.edges[0].vertices.into_iter().zip([
+            Point2::new(u, domain.v_min()),
+            Point2::new(u, domain.v_max()),
+        ]) {
+            let p = sweep.definition().evaluate_definition_point(uv).unwrap();
+            body.vertices[vertex as usize].point = [p.x, p.y, p.z];
+        }
+        body.validate().unwrap();
+        let rules = Rules {
+            tol: 0.01,
+            max_len: 1.0,
+            turn: None,
+        };
+        let context = BodyCurveContext::new(&body).unwrap();
+        let first_eval = context.edge(0).unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &first_eval,
+            &context.edge(0).unwrap()
+        ));
+        let mut nodes = sample_edge_with_context(&body, &context, 0, &rules, 1.0)
+            .expect("pooled edge must sample");
+        assert!(nodes.points.len() >= 2);
+        let before = nodes.points.len();
+        split_segments(&body, &context, 0, &mut nodes, &[0]).unwrap();
+        assert_eq!(nodes.points.len(), before + 1);
+        let relaxed = Rules { tol: 0.02, ..rules };
+        sample_edge_with_context(&body, &context, 0, &relaxed, 2.0).unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &first_eval,
+            &context.edge(0).unwrap()
+        ));
     }
 }

@@ -7,8 +7,10 @@
 //! its exact curve from the record edge's start vertex (interval min) to its end (max), its
 //! same_sense .T.; an edge one or two faces use is a SURFACE_CURVE (SEAM_CURVE when one face
 //! uses it twice) carrying the PCURVEs of its uses: the record's exact pcurves, in the STEP
-//! surface's parameters. Nothing is approximated: what STEP cannot state exactly is refused
-//! ("not supported yet: …").
+//! surface's parameters. Nothing is approximated, but for one entity STEP lacks: a face on a
+//! procedural sweep is written as the sweep's net (its B-spline, within the record's certified
+//! bound of the sweep), and an edge on the sweep as the side of that net it runs along. What
+//! else STEP cannot state exactly is refused ("not supported yet: …").
 //!
 //! Parameters: every record curve keeps its parameter in STEP (a line's runs from its start to
 //! its end as the record's does). A record surface's (u, v) is a linear image of its STEP
@@ -25,6 +27,7 @@
 use crate::vec::Vec3Geom as _;
 use std::sync::Arc;
 
+use solidcore_record::brep::sweep::NurbsSurfaceRecord;
 use solidcore_record::brep::{Brep, Curve as BCurve, Curve2, Edge, Face, Frame, Loop, Shell, Surface as BSurface};
 
 use super::{GeomWriter, boolean, list, r, s};
@@ -153,6 +156,7 @@ pub fn curve(c: &BCurve) -> R<Curve> {
             bspline_curve(knots, points, Some(weights))?
         }
         BCurve::SurfaceIntersection { .. } => return Err(unsupported("a traced intersection curve")),
+        BCurve::OnSurface { .. } | BCurve::OnSurfaceRef { .. } => return Err(unsupported("a curve on a procedural sweep")),
     })
 }
 
@@ -241,6 +245,7 @@ fn placed_curve(c: &BCurve, a: &Affine, similarity: Option<f64>) -> R<BCurve> {
                 .collect::<R<_>>()?,
         },
         BCurve::SurfaceIntersection { .. } => return Err(unsupported("a revolution of a traced intersection curve")),
+        BCurve::OnSurface { .. } | BCurve::OnSurfaceRef { .. } => return Err(unsupported("a revolution of a curve on a procedural sweep")),
     })
 }
 
@@ -307,7 +312,137 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(profile, *origin, *axis, matrix, *forward)?,
         BSurface::BallPatch { .. } => return Err("a ball patch's label (its face is written as its NURBS form)".into()),
         BSurface::Blend { .. } => return Err("a blend's label (its face is written as its NURBS form)".into()),
+        // STEP has no entity for the exact sweep: its net, the B-spline the face's (u, v) are
+        // on and within the record's certified bound of the sweep, is written in its place.
+        BSurface::ProceduralSweep(sweep) => (net(&sweep.net)?, Map::IDENTITY),
     })
+}
+
+/// A procedural sweep's net as the B-spline surface it is: its rows along u, each stored
+/// coefficient (weighted when rational) back over its weight.
+fn net(n: &NurbsSurfaceRecord) -> R<Surface> {
+    let (nu, nv) = net_counts(n)?;
+    let mut points = Vec::new();
+    let mut weights = n.weights.as_ref().map(|_| Vec::new());
+    for i in 0..nu {
+        let mut row = Vec::new();
+        let mut row_weights = Vec::new();
+        for j in 0..nv {
+            let (p, w) = net_point(n, i, j, nv)?;
+            row.push(p);
+            row_weights.push(w);
+        }
+        points.push(row);
+        if let Some(rows) = &mut weights {
+            rows.push(row_weights);
+        }
+    }
+    bspline_surface(&n.u_knots, &n.v_knots, points, weights)
+}
+
+/// The net's control counts along u and v, checked against its coefficients.
+fn net_counts(n: &NurbsSurfaceRecord) -> R<(usize, usize)> {
+    let bad = || "a procedural sweep's net does not hold its counts".to_string();
+    let (nu, nv) = (usize::try_from(n.u_count).map_err(|_| bad())?, usize::try_from(n.v_count).map_err(|_| bad())?);
+    if nu.checked_mul(nv) != Some(n.points.len()) || n.weights.as_ref().is_some_and(|w| w.len() != n.points.len()) {
+        return Err(bad());
+    }
+    Ok((nu, nv))
+}
+
+/// The net's control point `(i, j)` and its weight (1 for a polynomial net).
+fn net_point(n: &NurbsSurfaceRecord, i: usize, j: usize, nv: usize) -> R<(P3, f64)> {
+    let bad = || "a procedural sweep's net does not hold its counts".to_string();
+    let k = i.checked_mul(nv).and_then(|k| k.checked_add(j)).ok_or_else(bad)?;
+    let p = n.points.get(k).copied().ok_or_else(bad)?;
+    match &n.weights {
+        Some(w) => rational(&[p[0], p[1], p[2], w.get(k).copied().ok_or_else(bad)?]),
+        None => Ok((p, 1.0)),
+    }
+}
+
+/// An edge on a procedural sweep (`c`, its record curve, on `b`'s screw owners) as the B-spline
+/// its (u, v) line traces on the sweep's net, in the edge's own parameter: a line holding u at
+/// the net's first or last u knot is that row of control points, the net's B-spline along v
+/// there, read through the line's affine map from the edge's parameter to v (a line holding v
+/// likewise). The curve lies on the net the face is written as, so the pcurves of the edge's
+/// uses stay its pcurves. Any other curve on a sweep is not supported yet.
+fn sweep_edge(b: &Brep, c: &BCurve) -> R<Curve> {
+    let (n, uv) = match c {
+        BCurve::OnSurface { surface, uv_curve, .. } => match surface.as_ref() {
+            BSurface::ProceduralSweep(s) => (&s.net, uv_curve),
+            _ => return Err(unsupported("a curve on a surface that is no procedural sweep")),
+        },
+        BCurve::OnSurfaceRef { owner, uv_curve, .. } => {
+            let s = b.screw_owners.get(*owner as usize).ok_or_else(|| "a curve on a screw owner the record does not hold".to_string())?;
+            (&s.net, uv_curve)
+        }
+        other => return curve(other),
+    };
+    let not_side = || unsupported("a curve on a procedural sweep that is not a side of its net");
+    // The line's ends and its parameter interval: a degree-1 spline of two points (a rational
+    // one with equal weights is the same line).
+    let (ends, knots) = match uv {
+        Curve2::Spline { knots, points } => match points.as_slice() {
+            [a, b] => ([*a, *b], knots),
+            _ => return Err(not_side()),
+        },
+        Curve2::RationalSpline { knots, homogeneous } => match homogeneous.as_slice() {
+            [a, b] if a[2] > 0.0 && a[2] == b[2] => ([[a[0] / a[2], a[1] / a[2]], [b[0] / b[2], b[1] / b[2]]], knots),
+            _ => return Err(not_side()),
+        },
+    };
+    let [s0, s1] = match knots.as_slice() {
+        [a, b, c, d] if a == b && c == d && a < c => [*a, *c],
+        _ => return Err(not_side()),
+    };
+    let (nu, nv) = net_counts(n)?;
+    // Which end of `knots` the parameter `x` is: the first or the last row.
+    let end = |knots: &[f64], count: usize, x: f64| {
+        if knots.first() == Some(&x) {
+            Some(0)
+        } else if knots.last() == Some(&x) {
+            count.checked_sub(1)
+        } else {
+            None
+        }
+    };
+    let [a, z] = ends;
+    let (row, along, from, to): (Vec<(usize, usize)>, &[f64], f64, f64) = if a[0] == z[0] && a[1] != z[1] {
+        let i = end(&n.u_knots, nu, a[0]).ok_or_else(not_side)?;
+        ((0..nv).map(|j| (i, j)).collect(), &n.v_knots, a[1], z[1])
+    } else if a[1] == z[1] && a[0] != z[0] {
+        let j = end(&n.v_knots, nv, a[1]).ok_or_else(not_side)?;
+        ((0..nu).map(|i| (i, j)).collect(), &n.u_knots, a[0], z[0])
+    } else {
+        return Err(not_side());
+    };
+    let mut points = Vec::new();
+    let mut weights = Vec::new();
+    for (i, j) in row {
+        let (p, w) = net_point(n, i, j, nv)?;
+        points.push(p);
+        weights.push(w);
+    }
+    // The net's parameter x along the side is the edge's s = s0 + (x - from) (s1 - s0) / (to -
+    // from): the same where the line runs from s0 to s1 (the knots kept as they are), the
+    // knots mapped and the side reversed where it runs the other way.
+    let edge_knots: Vec<f64> = if from == s0 && to == s1 {
+        along.to_vec()
+    } else {
+        let scale = (s1 - s0) / (to - from);
+        if !scale.is_finite() || scale == 0.0 {
+            return Err(not_side());
+        }
+        let mut mapped: Vec<f64> = along.iter().map(|x| s0 + (x - from) * scale).collect();
+        if scale < 0.0 {
+            mapped.reverse();
+            points.reverse();
+            weights.reverse();
+        }
+        mapped
+    };
+    bspline_curve(&edge_knots, points, n.weights.as_ref().map(|_| weights))
 }
 
 /// Whether a face is written as its NURBS form, pcurves and all: a ball patch or a blend by its
@@ -544,7 +679,7 @@ impl BrepWriter<'_, '_, '_> {
     /// The edge's curve, with the pcurves of its uses when it has one or two (a SURFACE_CURVE
     /// holds at most two).
     fn edge_geometry(&mut self, edge: &Edge) -> R<u64> {
-        let curve_3d = curve(&edge.curve)?;
+        let curve_3d = sweep_edge(self.b, &edge.curve)?;
         if !(1..=2).contains(&edge.uses.len()) {
             return Ok(self.g.curve(&curve_3d));
         }

@@ -210,6 +210,7 @@ fn kind(s: &brep::Surface) -> &'static str {
         brep::Surface::RationalSpline { .. } => "rational spline",
         brep::Surface::PlacedRevolution { .. } => "revolution",
         brep::Surface::Blend { .. } => "blend",
+        brep::Surface::ProceduralSweep(_) => "procedural sweep",
     }
 }
 
@@ -278,8 +279,11 @@ pub(crate) struct Prepared {
 /// edges are the record's, in its order.
 pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<(TessPlan, PlanStats)> {
     let faces = &b.faces;
+    // One curve context for the body: each edge on a shared screw owner evaluates there, in
+    // sampling the edges and in putting in the nodes the shaping asks for alike.
+    let curves = solidcore_convert::curve_context::BodyCurveContext::new(b).map_err(|e| TessError::Failed(crate::eval_message(e)))?;
     let Prepared { rules, forward, edge_faces, evals, sizes, mut nodes, unsampled_edges, kept_strict, mut boundaries, params, why, tangled } =
-        prepare(b, tol, turn, purpose)?;
+        prepare(b, &curves, tol, turn, purpose)?;
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
     // One face for `purpose`: its plan, oriented, with its poles of higher order; or the boundary
     // sides the mesh path's shaping split.
@@ -362,7 +366,7 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         let (mut moved, mut lost): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
         for (e, ts) in &split {
             let fs = edge_faces.get(*e).map_or(&[][..], Vec::as_slice);
-            let inserted = nodes.get_mut(*e).map_or(Ok(()), |n| edges::insert_at(b, *e, n, ts));
+            let inserted = nodes.get_mut(*e).map_or(Ok(()), |n| edges::insert_at(b, &curves, *e, n, ts));
             match inserted {
                 Ok(()) => moved.extend(fs),
                 // An edge that cannot take the nodes leaves out the faces it bounds, naming it.
@@ -479,8 +483,15 @@ fn on_edges(f: &brep::Face, nodes: &[edges::Nodes], sides: &[SplitSide]) -> Vec<
 /// Every face's surface, size and boundary and every edge's nodes, as [`plan_at`] reads them
 /// ([`Prepared`]), with chord tolerance `tol` and the facet angle `turn`, for `purpose`: on the
 /// mesh path every face, planar ones included, asks for the spec's side where its surface asks
-/// for no less, and every edge follows the caller's size function too.
-pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<Prepared> {
+/// for no less, and every edge follows the caller's size function too. Every edge is evaluated
+/// through the body's curve context `curves`.
+pub(crate) fn prepare(
+    b: &brep::Brep,
+    curves: &solidcore_convert::curve_context::BodyCurveContext<'_>,
+    tol: f64,
+    turn: Option<size::Turn>,
+    purpose: Purpose<'_>,
+) -> Result<Prepared> {
     let faces = &b.faces;
     let forward = forward_faces(b);
     // The faces each edge bounds, each once, in the order of the edge's uses.
@@ -557,7 +568,7 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
     let mut unsampled_edges: Vec<crate::RefusedEdge> = Vec::new();
     let mut nodes: Vec<edges::Nodes> = Vec::with_capacity(jobs.len());
     for (ei, r) in crate::par::map("edge nodes", &jobs, solved >= PARALLEL_CURVES || jobs.len() >= PARALLEL_EDGES, |(e, h)| {
-        edges::sample_edge_sized(b, *e, &rules, *h, size_at)
+        edges::sample_edge_sized(b, curves, *e, &rules, *h, size_at)
     })
     .into_iter()
     .enumerate()
@@ -578,8 +589,8 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
             }
         });
     }
-    let kept_strict = relax_crowded_faces(b, &jobs, &rules, &mut nodes);
-    for (ei, e) in split_thin_loops(b, &mut nodes) {
+    let kept_strict = relax_crowded_faces(b, curves, &jobs, &rules, &mut nodes);
+    for (ei, e) in split_thin_loops(b, curves, &mut nodes) {
         for &fi in edge_faces.get(ei).map_or(&[][..], Vec::as_slice) {
             if let (Some(slot @ None), Some(f)) = (why.get_mut(fi), faces.get(fi)) {
                 *slot = Some(unsupported(format!("face {fi} ({}): {}", kind(&f.surface), detail(&e))));
@@ -614,7 +625,7 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
             }
         });
     }
-    let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why)?;
+    let tangled = untangle(b, curves, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why)?;
     Ok(Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, params, why, tangled })
 }
 
@@ -858,6 +869,7 @@ struct Boundary {
 #[allow(clippy::too_many_arguments)]
 fn untangle(
     b: &brep::Brep,
+    curves: &solidcore_convert::curve_context::BodyCurveContext<'_>,
     evals: &[poles::Face],
     edge_faces: &[Vec<usize>],
     tol: f64,
@@ -918,7 +930,7 @@ fn untangle(
             let Some(&(e, _)) = run.first() else { continue };
             let segs: Vec<u32> = run.iter().map(|(_, k)| *k).collect();
             let Some(slot) = nodes.get_mut(e as usize) else { continue };
-            if let Err(err) = edges::split_segments(b, e as usize, slot, &segs) {
+            if let Err(err) = edges::split_segments(b, curves, e as usize, slot, &segs) {
                 for &fi in edge_faces.get(e as usize).into_iter().flatten() {
                     refuse(fi, &err, why);
                 }
@@ -1122,7 +1134,7 @@ const MIN_LOOP_SEGMENTS: usize = 3;
 /// until it has them: two short arcs (a lens), each within the chord tolerance and so one
 /// segment, would otherwise be two chords on one line, a boundary of no area. The new nodes are
 /// on the edges' curves and shared by every face that runs them, as all edge nodes are.
-fn split_thin_loops(b: &brep::Brep, nodes: &mut [edges::Nodes]) -> Vec<(usize, TessError)> {
+fn split_thin_loops(b: &brep::Brep, curves: &solidcore_convert::curve_context::BodyCurveContext<'_>, nodes: &mut [edges::Nodes]) -> Vec<(usize, TessError)> {
     let mut failed: Vec<(usize, TessError)> = Vec::new();
     for f in &b.faces {
         for l in &f.loops {
@@ -1145,7 +1157,7 @@ fn split_thin_loops(b: &brep::Brep, nodes: &mut [edges::Nodes]) -> Vec<(usize, T
                     let Some(slot) = nodes.get_mut(e) else { continue };
                     let segs: Vec<u32> = (0..slot.points.len().saturating_sub(1)).filter_map(|k| u32::try_from(k).ok()).collect();
                     // An edge that cannot be split further leaves out the faces it bounds.
-                    if let Err(why) = edges::split_segments(b, e, slot, &segs) {
+                    if let Err(why) = edges::split_segments(b, curves, e, slot, &segs) {
                         failed.push((e, why));
                     }
                 }
@@ -1156,7 +1168,7 @@ fn split_thin_loops(b: &brep::Brep, nodes: &mut [edges::Nodes]) -> Vec<(usize, T
 }
 
 /// same share whatever the order of the faces.
-fn relax_crowded_faces(b: &brep::Brep, jobs: &[(usize, f64)], rules: &size::Rules, nodes: &mut [edges::Nodes]) -> Vec<crate::RefusedEdge> {
+fn relax_crowded_faces(b: &brep::Brep, curves: &solidcore_convert::curve_context::BodyCurveContext<'_>, jobs: &[(usize, f64)], rules: &size::Rules, nodes: &mut [edges::Nodes]) -> Vec<crate::RefusedEdge> {
     let mut kept = Vec::new();
     let Some(turn) = rules.turn else { return kept };
     let boundaries: Vec<Vec<usize>> = b.faces.iter().map(|f| face_edges(f).map(|oe| oe.edge as usize).collect()).collect();
@@ -1182,7 +1194,7 @@ fn relax_crowded_faces(b: &brep::Brep, jobs: &[(usize, f64)], rules: &size::Rule
             // An edge whose coarser sampling fails keeps the nodes it has (valid, only finer),
             // named with why.
             if let Some(slot) = nodes.get_mut(e) {
-                match edges::sample_edge(b, e, &relaxed, h) {
+                match edges::sample_edge_with_context(b, curves, e, &relaxed, h) {
                     Ok(n) => *slot = n,
                     Err(why) => kept.push(crate::RefusedEdge { edge: e, reason: why.to_string() }),
                 }

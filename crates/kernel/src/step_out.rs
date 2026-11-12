@@ -165,6 +165,73 @@ mod tests {
         assert_eq!(stated(&text), vec![own]);
     }
 
+    /// Faces on procedural sweeps are written as their certified nets and the edges on them as
+    /// the nets' sides: an M20×2.5 thread cut four turns into a bar, and a square coil, each go
+    /// out as one closed solid and read back with their exact volumes, to within the nets'
+    /// certified bound times the area they move (and the measure's own accuracy).
+    #[test]
+    fn screw_swept_bodies_export_as_one_closed_solid() {
+        use solidcore_ops::boolean::{BooleanOp, boolean as cut};
+        use solidcore_ops::sweep::{Curve as C, DraftCorner, extrude, screw_sweep};
+        use solidcore_record::brep as b;
+        use std::f64::consts::TAU;
+        let polygon = |p: &[[f64; 3]]| -> Vec<C> { (0..p.len()).map(|i| C::Line { start: p[i], end: p[(i + 1) % p.len()] }).collect() };
+        // A polygon in the meridian plane y = 0 swept `turns` turns about z: Pappus, 2π turns ∫ x dA.
+        let pappus = |p: &[[f64; 3]], turns: f64| {
+            let moment: f64 = (0..p.len())
+                .map(|i| {
+                    let (a, b) = (p[i], p[(i + 1) % p.len()]);
+                    (a[0] + b[0]) * (a[0] * b[2] - b[0] * a[2]) / 6.0
+                })
+                .sum();
+            TAU * turns * moment.abs()
+        };
+        let export = |body: solidcore_ops::Body, exact: f64, what: &str| {
+            let (record, _) = body.to_record().unwrap();
+            let bound = record
+                .faces
+                .iter()
+                .filter_map(|f| match &f.surface {
+                    b::Surface::ProceduralSweep(s) => Some(s.bound),
+                    _ => None,
+                })
+                .fold(0.0_f64, f64::max);
+            assert!(bound > 0.0, "{what}: walls keep their definitions");
+            assert!(record.edges.iter().any(|e| matches!(e.curve, b::Curve::OnSurface { .. } | b::Curve::OnSurfaceRef { .. })));
+            let text = crate::step_export(&[&crate::Body::from_record(record).unwrap()], "test").unwrap();
+            crate::step_validate(&text).unwrap();
+            assert_eq!(text.matches("MANIFOLD_SOLID_BREP(").count(), 1, "{what}: one solid");
+            let read = crate::step_import(&text).unwrap();
+            assert_eq!(read.bodies.len(), 1, "{what}");
+            let back = &read.bodies[0].body;
+            assert!(!back.is_surface(), "{what}: a closed solid");
+            let m = crate::measure_mass(back).unwrap();
+            let allowed = bound * m.area + 1e-6 * exact;
+            assert!((m.volume - exact).abs() <= allowed, "{what}: volume {} against {exact} (allowed {allowed})", m.volume);
+        };
+
+        // M20×2.5: the groove from the minor radius to past the major one, cut into a bar of
+        // radius 10 that holds it from end to end. What it removes is the groove's profile
+        // clipped to r <= 10, swept the same four turns.
+        let (pitch, turns) = (2.5, 4.0);
+        let minor = 10.0 - 5.0 * pitch * 3.0_f64.sqrt() / 16.0;
+        let high = 10.0 + 0.05 * pitch;
+        let half_at = |r: f64| pitch / 8.0 + (r - minor) / 3.0_f64.sqrt();
+        let groove = [[minor, 0.0, -half_at(minor)], [high, 0.0, -half_at(high)], [high, 0.0, half_at(high)], [minor, 0.0, half_at(minor)]];
+        let removed = [[minor, 0.0, -half_at(minor)], [10.0, 0.0, -half_at(10.0)], [10.0, 0.0, half_at(10.0)], [minor, 0.0, half_at(minor)]];
+        let circle = [C::Arc { center: [0.0, 0.0, -pitch], axis: [0.0, 0.0, 1.0], reference: [1.0, 0.0, 0.0], radius: 10.0, start: 0.0, end: TAU }];
+        let length = pitch * (turns + 2.0);
+        let bar = extrude(&circle, [0.0, 0.0, 1.0], length, 0.0, DraftCorner::Curvature, true).unwrap();
+        let thread = screw_sweep(&polygon(&groove), [0.0; 3], [0.0, 0.0, 1.0], pitch, turns, None, pitch * 1e-4).unwrap();
+        let body = cut(bar, thread, BooleanOp::Subtract).unwrap().unwrap();
+        export(body, std::f64::consts::PI * 100.0 * length - pappus(&removed, turns), "M20 thread");
+
+        // A coil of square wire: two walls are exact cylinders, two are screw sweeps.
+        let square = [[4.1, 0.0, 0.0], [5.0, 0.0, 0.0], [5.0, 0.0, 0.9], [4.1, 0.0, 0.9]];
+        let coil = screw_sweep(&polygon(&square), [0.0; 3], [0.0, 0.0, 1.0], 1.5, 2.5, None, 1.5e-4).unwrap();
+        export(coil, pappus(&square, 2.5), "coil");
+    }
+
     #[test]
     fn assembly_names_colours_round_trip() {
         use crate::{box_solid, cylinder, measure, step_import, step_validate};

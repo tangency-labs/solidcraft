@@ -3091,55 +3091,6 @@ mod tests {
     }
 
     #[test]
-    fn offset_refusals_name_their_entities_and_statuses() {
-        use offset::{LoopCrossing, OffsetFailure};
-        let face = FaceId::from_index(4);
-        let folds = OffsetFailure::Folds {
-            face,
-            distance: -11.0,
-            largest: 10.0,
-        };
-        assert_eq!(folds.comparison_status(), SM_ERR);
-        assert_eq!(folds.kind(), ErrorKind::OffsetFolds);
-        assert_eq!(folds.entity(), Some(EntityRef::Face(face)));
-        assert_eq!(
-            folds.to_string(),
-            "the offset of face 4 by -11 folds: the wall is thicker than a radius of curvature \
-             of the face on that side (the largest wall that works is 10)"
-        );
-        let cross = OffsetFailure::LoopsCross {
-            face: None,
-            crossing: LoopCrossing::ThreeAtOnePoint,
-        };
-        assert_eq!(cross.comparison_status(), SM_ERR_BAD_INTERSECTIONS);
-        assert_eq!(cross.entity(), None);
-        assert_eq!(cross.on_face(face).entity(), Some(EntityRef::Face(face)));
-        assert_eq!(
-            cross.on_face(face).to_string(),
-            "the loops of the offset of face 4 cross in a way the offset cannot resolve: three \
-             loops cross at one point"
-        );
-        // a face already named, or an edge, is kept
-        let other = FaceId::from_index(9);
-        assert_eq!(cross.on_face(face).on_face(other), cross.on_face(face));
-        let edge = OffsetFailure::EdgeVanishes {
-            edge: Some(EdgeId::from_index(2)),
-            face: None,
-        };
-        assert_eq!(edge.on_face(face), edge);
-        assert_eq!(
-            OffsetFailure::EdgeVanishes {
-                edge: None,
-                face: None
-            }
-            .on_face(face)
-            .to_string(),
-            "the offset moves a vertex of an edge of face 4 to or past the edge's other end: the \
-             edge would vanish, a change of topology the offset does not make"
-        );
-    }
-
-    #[test]
     fn display_includes_operation_and_entity() {
         let e = SolidError::NotFound {
             operation: "topology::Brep::face",

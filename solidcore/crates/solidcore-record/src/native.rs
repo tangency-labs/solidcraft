@@ -284,6 +284,7 @@ mod tests {
     fn point() -> Saved {
         let solid = Brep {
             version: crate::brep::VERSION,
+            screw_owners: Vec::new(),
             tolerance: 1e-7,
             regions: vec![Region {
                 shells: vec![0],

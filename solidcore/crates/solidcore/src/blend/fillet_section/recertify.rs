@@ -36,12 +36,15 @@
 //! same Hermite net: H is cut to the piece, in homogeneous coordinates, before the nets
 //! are compared.
 //!
-//! Deviations: none (no upstream counterpart). No recursion.
+//! Deviations: none (no upstream counterpart). No recursion. The mapped-net certificate
+//! accepts degrees at most 16, at most 262,144 retained interval coefficients, and at most
+//! eight million refinement steps or coefficient comparisons.
 
 use core::cmp::Ordering;
 
 use super::certificate::{gn_certify_span, gn_certify_span_reusing, GnLaw, NurbsCurve, SpanReuse};
 use super::continuation::{growth, section_degree, section_weight_range};
+use super::interval::Ivl;
 use super::section::{
     certificate_faces, crosses_knot, inner_knots, net_of_spans, param, varying, NetForm,
     StationSystem, GN_THUMBWEIGHT_EQUAL_AREA,
@@ -80,25 +83,10 @@ fn map_rounding(a: f64, b: f64, x: f64) -> f64 {
 /// One Bezier curve of homogeneous points cut to `[lo, hi]` of its `[0, 1]` (de Casteljau,
 /// at hi, then the left part at lo / hi).
 fn sub_curve(pts: &[Hpt], lo: f64, hi: f64) -> Vec<Hpt> {
-    let split = |p: &[Hpt], tau: f64| -> (Vec<Hpt>, Vec<Hpt>) {
-        let mut level: Vec<Hpt> = p.to_vec();
-        let mut left = Vec::new();
-        let mut right = Vec::new();
-        while let (Some(&first), Some(&last)) = (level.first(), level.last()) {
-            left.push(first);
-            right.push(last);
-            level = level
-                .windows(2)
-                .map(|w| match w {
-                    [(pa, wa), (pb, wb)] => {
-                        (*pa * (1.0 - tau) + *pb * tau, wa * (1.0 - tau) + wb * tau)
-                    }
-                    _ => (Vec3::ZERO, 0.0),
-                })
-                .collect();
-        }
-        right.reverse();
-        (left, right)
+    let split = |p: &[Hpt], tau: f64| {
+        split_curve(p, tau, &|a: Hpt, b: Hpt, tau| {
+            (a.0 * (1.0 - tau) + b.0 * tau, a.1 * (1.0 - tau) + b.1 * tau)
+        })
     };
     let (left, _) = if hi < 1.0 {
         split(pts, hi)
@@ -173,7 +161,152 @@ fn extrapolate_curve(pts: &[Hpt], lo: f64, hi: f64) -> Result<(Vec<Hpt>, f64)> {
 ///
 /// `InvalidInput` where the nets differ in size or a weight is not positive.
 pub(crate) fn net_distance(b: &[Vec<Hpt>], h: &[Vec<Hpt>]) -> Result<f64> {
-    let flat = |n: &[Vec<Hpt>]| -> Vec<Hpt> { n.iter().flatten().copied().collect() };
+    net_distance_with::<FloatMetric>(b, h)
+}
+
+/// Cached weight-only part of the interval net inequality. The complete list
+/// of weights is checked on reuse; coordinates are always checked afresh.
+#[derive(Default)]
+pub(crate) struct IntervalWeightCache {
+    weights: Vec<(Ivl, Ivl)>,
+    cross: f64,
+}
+
+/// As `interval_net_distance`, caching only the weight-pair maximum. The flag
+/// reports whether all pair comparisons were reused, for the caller's work cap.
+pub(crate) fn interval_net_distance_cached(
+    actual: &[Vec<([Ivl; 3], Ivl)>],
+    ideal: &[Vec<([Ivl; 3], Ivl)>],
+    cache: &mut IntervalWeightCache,
+) -> Result<(f64, bool)> {
+    let width = actual.first().map_or(0, Vec::len);
+    if width == 0
+        || actual.len() != ideal.len()
+        || !actual.iter().chain(ideal).all(|row| row.len() == width)
+        || !actual.iter().chain(ideal).flatten().all(|(p, w)| {
+            p.iter()
+                .chain(core::iter::once(w))
+                .all(|x| x.lo.is_finite() && x.hi.is_finite() && x.lo <= x.hi)
+                && IntervalMetric::positive(*w)
+        })
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid interval control nets",
+        ));
+    }
+    let weights: Vec<_> = actual
+        .iter()
+        .flatten()
+        .zip(ideal.iter().flatten())
+        .map(|(a, b)| (a.1, b.1))
+        .collect();
+    let reused = weights == cache.weights;
+    if !reused {
+        let mut cross = 0.0_f64;
+        for &(wi, vi) in &weights {
+            for &(wj, vj) in &weights {
+                cross = cross.max(IntervalMetric::cross(wi, vi, wj, vj));
+            }
+        }
+        cache.weights = weights;
+        cache.cross = cross;
+    }
+    Ok((
+        net_distance_with_cross::<IntervalMetric>(actual, ideal, Some(cache.cross))?,
+        reused,
+    ))
+}
+
+// The float and interval certificates share the same control-net inequality. FloatMetric
+// retains the existing blend operation order; IntervalMetric encloses every operation for
+// records whose parameter maps and restrictions must also be certified.
+trait NetMetric {
+    type Point: Copy;
+    type Weight: Copy;
+    fn positive(w: Self::Weight) -> bool;
+    fn lower(w: Self::Weight) -> f64;
+    fn euclid(p: (Self::Point, Self::Weight)) -> Self::Point;
+    fn distance(a: Self::Point, b: Self::Point) -> f64;
+    fn cross(wi: Self::Weight, vi: Self::Weight, wj: Self::Weight, vj: Self::Weight) -> f64;
+    fn combine(points: f64, reach: f64, cross: f64, w_min: f64, v_min: f64) -> f64;
+}
+
+struct FloatMetric;
+impl NetMetric for FloatMetric {
+    type Point = Vec3;
+    type Weight = f64;
+    fn positive(w: f64) -> bool {
+        w > 0.0 && w.is_finite()
+    }
+    fn lower(w: f64) -> f64 {
+        w
+    }
+    fn euclid((p, w): Hpt) -> Vec3 {
+        p * (1.0 / w)
+    }
+    fn distance(a: Vec3, b: Vec3) -> f64 {
+        (a - b).length()
+    }
+    fn cross(wi: f64, vi: f64, wj: f64, vj: f64) -> f64 {
+        (wi * vj - vi * wj).abs()
+    }
+    fn combine(points: f64, reach: f64, cross: f64, w_min: f64, v_min: f64) -> f64 {
+        points + reach * cross / (w_min * v_min)
+    }
+}
+
+type IPoint = [Ivl; 3];
+type IHpt = (IPoint, Ivl);
+struct IntervalMetric;
+impl NetMetric for IntervalMetric {
+    type Point = IPoint;
+    type Weight = Ivl;
+    fn positive(w: Ivl) -> bool {
+        w.lo > 0.0 && w.lo.is_finite() && w.hi.is_finite()
+    }
+    fn lower(w: Ivl) -> f64 {
+        w.lo
+    }
+    fn euclid((p, w): IHpt) -> IPoint {
+        p.map(|x| x * (Ivl::from(1.0) / w))
+    }
+    fn distance(a: IPoint, b: IPoint) -> f64 {
+        a.into_iter()
+            .zip(b)
+            .map(|(a, b)| {
+                let d = a - b;
+                d * d
+            })
+            .fold(Ivl::from(0.0), |a, b| a + b)
+            .sqrt()
+            .hi
+    }
+    fn cross(wi: Ivl, vi: Ivl, wj: Ivl, vj: Ivl) -> f64 {
+        (wi * vj - vi * wj).mag()
+    }
+    fn combine(points: f64, reach: f64, cross: f64, w_min: f64, v_min: f64) -> f64 {
+        (Ivl::from(points)
+            + Ivl::from(reach) * Ivl::from(cross) / (Ivl::from(w_min) * Ivl::from(v_min)))
+        .hi
+    }
+}
+
+type MetricPoint<M> = (<M as NetMetric>::Point, <M as NetMetric>::Weight);
+
+fn net_distance_with<M: NetMetric>(
+    b: &[Vec<MetricPoint<M>>],
+    h: &[Vec<MetricPoint<M>>],
+) -> Result<f64> {
+    net_distance_with_cross::<M>(b, h, None)
+}
+
+fn net_distance_with_cross<M: NetMetric>(
+    b: &[Vec<MetricPoint<M>>],
+    h: &[Vec<MetricPoint<M>>],
+    saved_cross: Option<f64>,
+) -> Result<f64> {
+    let flat = |n: &[Vec<MetricPoint<M>>]| n.iter().flatten().copied().collect::<Vec<_>>();
     let (pb, ph) = (flat(b), flat(h));
     if pb.len() != ph.len() || pb.is_empty() {
         return Err(SolidError::invalid_input(
@@ -181,37 +314,912 @@ pub(crate) fn net_distance(b: &[Vec<Hpt>], h: &[Vec<Hpt>]) -> Result<f64> {
             "the net is not of its definition's degrees",
         ));
     }
-    let positive = |p: &[Hpt]| p.iter().all(|&(_, w)| w > 0.0 && w.is_finite());
-    if !positive(&pb) || !positive(&ph) {
+    if !pb.iter().chain(&ph).all(|&(_, w)| M::positive(w)) {
         return Err(SolidError::invalid_input(
             OP,
             "a weight of the net is not positive",
         ));
     }
-    let euclid = |(p, w): Hpt| p * (1.0 / w);
-    let c = ph.first().map_or(Vec3::ZERO, |&q| euclid(q));
+    let first = ph
+        .first()
+        .copied()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the first homogeneous control"))?;
+    let c = M::euclid(first);
     let mut d_points = 0.0_f64;
     let mut reach = 0.0_f64;
     for (&x, &y) in pb.iter().zip(&ph) {
-        d_points = d_points.max((euclid(x) - euclid(y)).length());
-        reach = reach.max((euclid(y) - c).length());
+        d_points = d_points.max(M::distance(M::euclid(x), M::euclid(y)));
+        reach = reach.max(M::distance(M::euclid(y), c));
     }
-    let mut cross = 0.0_f64;
-    for (i, &(_, wi)) in pb.iter().enumerate() {
-        let vi = ph.get(i).map_or(f64::NAN, |q| q.1);
-        for (j, &(_, wj)) in pb.iter().enumerate() {
-            let vj = ph.get(j).map_or(f64::NAN, |q| q.1);
-            cross = cross.max((wi * vj - vi * wj).abs());
+    let mut cross = saved_cross.unwrap_or(0.0);
+    if saved_cross.is_none() {
+        for (i, &(_, wi)) in pb.iter().enumerate() {
+            let vi = ph
+                .get(i)
+                .map(|q| q.1)
+                .ok_or_else(|| SolidError::blend_missing(OP, "a homogeneous control's weight"))?;
+            for (j, &(_, wj)) in pb.iter().enumerate() {
+                let vj = ph.get(j).map(|q| q.1).ok_or_else(|| {
+                    SolidError::blend_missing(OP, "a homogeneous control's weight")
+                })?;
+                cross = cross.max(M::cross(wi, vi, wj, vj));
+            }
         }
     }
-    let w_min = pb.iter().map(|q| q.1).fold(f64::INFINITY, f64::min);
-    let v_min = ph.iter().map(|q| q.1).fold(f64::INFINITY, f64::min);
-    let d = d_points + reach * cross / (w_min * v_min);
+    let w_min = pb
+        .iter()
+        .map(|q| M::lower(q.1))
+        .fold(f64::INFINITY, f64::min);
+    let v_min = ph
+        .iter()
+        .map(|q| M::lower(q.1))
+        .fold(f64::INFINITY, f64::min);
+    let d = M::combine(d_points, reach, cross, w_min, v_min);
     if d.is_finite() {
         Ok(d)
     } else {
         Err(SolidError::invalid_input(OP, "the net is not finite"))
     }
+}
+
+// One de Casteljau triangle, used with unchanged floating arithmetic by the blend's
+// sub_curve and with interval coefficients by the mapped-net certificate.
+fn split_curve<P: Copy, T: Copy>(
+    p: &[P],
+    tau: T,
+    blend: &impl Fn(P, P, T) -> P,
+) -> (Vec<P>, Vec<P>) {
+    let mut level = p.to_vec();
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    while let (Some(&first), Some(&last)) = (level.first(), level.last()) {
+        left.push(first);
+        right.push(last);
+        level = level
+            .windows(2)
+            .filter_map(|w| match w {
+                &[a, b] => Some(blend(a, b, tau)),
+                _ => None,
+            })
+            .collect();
+    }
+    right.reverse();
+    (left, right)
+}
+
+/// A span whose existing control points are already its Bernstein coefficients.
+#[derive(Clone, Copy)]
+struct BezierSpan {
+    first: usize,
+    range: [f64; 2],
+}
+
+struct BezierNet {
+    net: Vec<Vec<IHpt>>,
+    u: Vec<BezierSpan>,
+    v: Vec<BezierSpan>,
+    degrees: [usize; 2],
+}
+
+// These limits bound both retained cell data and the quadratic coefficient comparison.
+const MAPPED_MAX_DEGREE: usize = 16;
+const MAPPED_MAX_WORK: usize = 8_000_000;
+const MAPPED_MAX_COEFFICIENTS: usize = 262_144;
+
+fn knot_runs(knots: &[f64], degree: usize, count: usize) -> Result<Vec<(f64, usize)>> {
+    let bad = || {
+        SolidError::invalid_input(
+            OP,
+            "mapped certificate requires a finite clamped spline net",
+        )
+    };
+    if degree == 0
+        || degree > MAPPED_MAX_DEGREE
+        || count <= degree
+        || count.checked_add(degree).and_then(|n| n.checked_add(1)) != Some(knots.len())
+        || knots.iter().any(|x| !x.is_finite())
+        || !knots.windows(2).all(|w| matches!(w, [a,b] if a <= b))
+    {
+        return Err(bad());
+    }
+    let mut runs = Vec::new();
+    for &knot in knots {
+        match runs.last_mut() {
+            Some((last, n)) if *last == knot => *n += 1,
+            _ => runs.push((knot, 1_usize)),
+        }
+    }
+    if runs.len() < 2
+        || runs.iter().enumerate().any(|(i, (_, n))| {
+            if i == 0 || i + 1 == runs.len() {
+                *n != degree + 1
+            } else {
+                *n == 0 || *n > degree + 1
+            }
+        })
+    {
+        return Err(bad());
+    }
+    Ok(runs)
+}
+
+fn bezier_spans(knots: &[f64], degree: usize, count: usize) -> Result<Vec<BezierSpan>> {
+    if knot_runs(knots, degree, count)?
+        .iter()
+        .skip(1)
+        .rev()
+        .skip(1)
+        .any(|(_, n)| *n < degree)
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "mapped net is not Bezier after refinement",
+        ));
+    }
+    Ok(knots
+        .windows(2)
+        .enumerate()
+        .filter_map(|(i, w)| match w {
+            &[a, b] if a < b && i >= degree && i < count => Some(BezierSpan {
+                first: i - degree,
+                range: [a, b],
+            }),
+            _ => None,
+        })
+        .collect())
+}
+
+impl BezierNet {
+    fn new(net: &BSplineSurface) -> Result<Self> {
+        let nurb = net
+            .gw_nurb()
+            .ok_or_else(|| SolidError::blend_missing(OP, "the net's NURBS form"))?;
+        let (p, q) = nurb.degrees();
+        let (n, m, _, _) = nurb.array_sizes();
+        let nu = n
+            .checked_add(1)
+            .ok_or_else(|| SolidError::blend_failed(OP, "the net's control count overflows"))?;
+        let nv = m
+            .checked_add(1)
+            .ok_or_else(|| SolidError::blend_failed(OP, "the net's control count overflows"))?;
+        if nu
+            .checked_mul(nv)
+            .is_none_or(|n| n > MAPPED_MAX_COEFFICIENTS)
+        {
+            return Err(SolidError::invalid_input(
+                OP,
+                "mapped net certificate work budget",
+            ));
+        }
+        if nurb.rows().count() != nu {
+            return Err(SolidError::invalid_input(OP, "mapped net row count"));
+        }
+        for row in nurb.rows() {
+            if row.len() != nv {
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the net's rows are not all the same length",
+                ));
+            }
+            for c in row {
+                let w = if c.w == NOW { 1.0 } else { c.w };
+                if ![c.x, c.y, c.z, w].into_iter().all(f64::is_finite) || w <= 0.0 {
+                    return Err(SolidError::invalid_input(
+                        OP,
+                        "mapped net has a nonfinite coefficient or nonpositive weight",
+                    ));
+                }
+            }
+        }
+        let mut coefficients = nurb
+            .rows()
+            .map(|row| {
+                row.iter()
+                    .map(|c| {
+                        (
+                            [Ivl::from(c.x), Ivl::from(c.y), Ivl::from(c.z)],
+                            Ivl::from(if c.w == NOW { 1.0 } else { c.w }),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let (mut u, mut v) = (nurb.u_knots().to_vec(), nurb.v_knots().to_vec());
+        let mut work = 0;
+        refine_bezier(&mut coefficients, &mut u, p, true, &mut work)?;
+        refine_bezier(&mut coefficients, &mut v, q, false, &mut work)?;
+        Ok(Self {
+            u: bezier_spans(&u, p, coefficients.len())?,
+            v: bezier_spans(&v, q, coefficients.first().map_or(0, Vec::len))?,
+            net: coefficients,
+            degrees: [p, q],
+        })
+    }
+    fn cell(
+        &self,
+        u: BezierSpan,
+        v: BezierSpan,
+        swapped: bool,
+        flip: [bool; 2],
+    ) -> Result<Vec<Vec<IHpt>>> {
+        let [p, q] = self.degrees;
+        let [ds, dt] = if swapped { [q, p] } else { [p, q] };
+        let mut net = vec![vec![([Ivl::from(0.0); 3], Ivl::from(0.0)); dt + 1]; ds + 1];
+        for i in 0..=p {
+            for j in 0..=q {
+                let point = self
+                    .net
+                    .get(u.first + i)
+                    .and_then(|row| row.get(v.first + j))
+                    .copied()
+                    .ok_or_else(|| SolidError::blend_missing(OP, "a net control point"))?;
+                let (s, t) = if swapped { (j, i) } else { (i, j) };
+                let s = if flip[0] { ds - s } else { s };
+                let t = if flip[1] { dt - t } else { t };
+                *net.get_mut(s).and_then(|r| r.get_mut(t)).ok_or_else(|| {
+                    SolidError::blend_missing(OP, "the mapped net's control point")
+                })? = point;
+            }
+        }
+        Ok(net)
+    }
+}
+
+fn interval_blend((a, wa): IHpt, (b, wb): IHpt, t: Ivl) -> IHpt {
+    let point = std::array::from_fn(|i| {
+        let a = a.get(i).copied().unwrap_or_else(Ivl::whole);
+        let b = b.get(i).copied().unwrap_or_else(Ivl::whole);
+        a * (Ivl::from(1.0) - t) + b * t
+    });
+    (point, wa * (Ivl::from(1.0) - t) + wb * t)
+}
+
+// The standard one-knot insertion recurrence (Piegl and Tiller A5.1), evaluated
+// on interval homogeneous coefficients. Only the certificate changes representation;
+// neither of the model's nets is altered.
+fn insert_interval_knot(
+    points: &[IHpt],
+    knots: &[f64],
+    degree: usize,
+    knot: f64,
+    k: usize,
+    mult: usize,
+) -> Result<Vec<IHpt>> {
+    let unchanged = k
+        .checked_sub(degree)
+        .ok_or_else(|| SolidError::blend_failed(OP, "the knot index is below the degree"))?;
+    (0..=points.len())
+        .map(|i| {
+            let at = |i| {
+                points
+                    .get(i)
+                    .copied()
+                    .ok_or_else(|| SolidError::blend_missing(OP, "a curve control point"))
+            };
+            if i <= unchanged {
+                return at(i);
+            }
+            if i > k - mult {
+                return at(i - 1);
+            }
+            let lo = knots
+                .get(i)
+                .copied()
+                .ok_or_else(|| SolidError::blend_missing(OP, "a knot below the span"))?;
+            let hi = knots
+                .get(i + degree)
+                .copied()
+                .ok_or_else(|| SolidError::blend_missing(OP, "a knot above the span"))?;
+            let alpha = (Ivl::from(knot) - Ivl::from(lo)) / (Ivl::from(hi) - Ivl::from(lo));
+            if !alpha.lo.is_finite() || !alpha.hi.is_finite() {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "uncertifiable knot insertion coefficient",
+                ));
+            }
+            Ok(interval_blend(at(i - 1)?, at(i)?, alpha))
+        })
+        .collect()
+}
+
+fn refine_bezier(
+    net: &mut Vec<Vec<IHpt>>,
+    knots: &mut Vec<f64>,
+    degree: usize,
+    u: bool,
+    work: &mut usize,
+) -> Result<()> {
+    let rows = net.len();
+    let columns = net.first().map_or(0, Vec::len);
+    let count = if u { rows } else { columns };
+    let runs = knot_runs(knots, degree, count)?;
+    for &(knot, mult) in runs.iter().skip(1).rev().skip(1).rev() {
+        for inserted in mult..degree {
+            let rows = net.len();
+            let columns = net.first().map_or(0, Vec::len);
+            let next = if u {
+                rows.checked_add(1).and_then(|n| n.checked_mul(columns))
+            } else {
+                columns.checked_add(1).and_then(|n| n.checked_mul(rows))
+            };
+            let next = next
+                .filter(|n| *n <= MAPPED_MAX_COEFFICIENTS)
+                .ok_or_else(|| SolidError::invalid_input(OP, "mapped net coefficient budget"))?;
+            *work = work.checked_add(next).ok_or_else(|| {
+                SolidError::blend_failed(OP, "the refinement work count overflows")
+            })?;
+            if *work > MAPPED_MAX_WORK {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "mapped net refinement work budget",
+                ));
+            }
+            let k = knots
+                .partition_point(|x| *x <= knot)
+                .checked_sub(1)
+                .ok_or_else(|| {
+                    SolidError::blend_failed(OP, "the knot lies before the first knot")
+                })?;
+            let mut refined = Vec::new();
+            if u {
+                let mut cols = Vec::new();
+                for j in 0..columns {
+                    let column = net
+                        .iter()
+                        .map(|row| {
+                            row.get(j).copied().ok_or_else(|| {
+                                SolidError::blend_missing(OP, "a net column's control")
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    cols.push(insert_interval_knot(
+                        &column, knots, degree, knot, k, inserted,
+                    )?);
+                }
+                for i in 0..=rows {
+                    refined.push(
+                        cols.iter()
+                            .map(|col| {
+                                col.get(i).copied().ok_or_else(|| {
+                                    SolidError::blend_missing(OP, "a refined column's control")
+                                })
+                            })
+                            .collect::<Result<Vec<_>>>()?,
+                    );
+                }
+            } else {
+                for row in net.iter() {
+                    refined.push(insert_interval_knot(row, knots, degree, knot, k, inserted)?);
+                }
+            }
+            *net = refined;
+            knots.insert(k + 1, knot);
+        }
+    }
+    Ok(())
+}
+
+fn interval_sub_curve(pts: &[IHpt], lo: Ivl, hi: Ivl) -> Vec<IHpt> {
+    // Cut first at the endpoint whose normalization denominator is away from zero.
+    // Exterior rounding strips can have width below an ulp at zero; cutting at hi
+    // and then dividing lo/hi would discard all information there.
+    if hi.lo < 0.5 {
+        let right = if lo == Ivl::from(0.0) {
+            pts.to_vec()
+        } else {
+            split_curve(pts, lo, &interval_blend).1
+        };
+        let t = if lo == Ivl::from(0.0) {
+            hi
+        } else {
+            (hi - lo) / (Ivl::from(1.0) - lo)
+        };
+        return split_curve(&right, t, &interval_blend).0;
+    }
+    let left = if hi == Ivl::from(1.0) {
+        pts.to_vec()
+    } else {
+        split_curve(pts, hi, &interval_blend).0
+    };
+    if lo == Ivl::from(0.0) {
+        left
+    } else {
+        split_curve(&left, lo / hi, &interval_blend).1
+    }
+}
+
+fn interval_patch(net: &[Vec<IHpt>], s: [Ivl; 2], t: [Ivl; 2]) -> Result<Vec<Vec<IHpt>>> {
+    let columns = net.first().map_or(0, Vec::len);
+    let mut cut_columns = Vec::new();
+    for j in 0..columns {
+        let column = net
+            .iter()
+            .map(|r| {
+                r.get(j)
+                    .copied()
+                    .ok_or_else(|| SolidError::blend_missing(OP, "a net column's control"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        cut_columns.push(interval_sub_curve(&column, s[0], s[1]));
+    }
+    (0..net.len())
+        .map(|i| {
+            let row = cut_columns
+                .iter()
+                .map(|c| {
+                    c.get(i)
+                        .copied()
+                        .ok_or_else(|| SolidError::blend_missing(OP, "a refined column's control"))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(interval_sub_curve(&row, t[0], t[1]))
+        })
+        .collect()
+}
+
+// An exactly representable affine endpoint is kept exact (including identity and reversal).
+// Otherwise interval arithmetic encloses both operations. A power-of-two scale with a
+// normal result is exact. Above 2^-511, a product's at-most-106-bit significand also
+// guarantees its FMA residual cannot underflow, so a zero residual proves exactness.
+fn affine_endpoint(a: f64, b: f64, x: f64) -> Ivl {
+    let product = b * x;
+    let sum = a + product;
+    let power_of_two = b.is_normal() && b.abs().to_bits() & ((1_u64 << 52) - 1) == 0;
+    let exact_product = b == 0.0
+        || x == 0.0
+        || b == 1.0
+        || b == -1.0
+        || (power_of_two && product.is_normal())
+        || (product.abs() >= f64::from_bits(512_u64 << 52) && b.mul_add(x, -product) == 0.0);
+    if product.is_finite() && sum.is_finite() && exact_product {
+        let z = sum - a;
+        if (a - (sum - z)) + (product - z) == 0.0 {
+            return Ivl::from(sum);
+        }
+    }
+    Ivl::from(a) + Ivl::from(b) * Ivl::from(x)
+}
+
+fn mapped_range(range: [f64; 2], a: f64, b: f64) -> [Ivl; 2] {
+    let endpoints = range.map(|x| affine_endpoint(a, b, x));
+    if b < 0.0 {
+        [endpoints[1], endpoints[0]]
+    } else {
+        endpoints
+    }
+}
+
+fn normalized_range(range: [f64; 2], domain: [Ivl; 2]) -> [Ivl; 2] {
+    range.map(|x| (Ivl::from(x) - domain[0]) / (domain[1] - domain[0]))
+}
+
+#[derive(Clone, Copy)]
+struct CoveredSpan {
+    source: BezierSpan,
+    range: [f64; 2],
+    endpoint: Option<f64>,
+}
+
+impl CoveredSpan {
+    fn parameters(self) -> [Ivl; 2] {
+        match self.endpoint {
+            Some(t) => [Ivl::from(t); 2],
+            None => normalized_range(self.range, self.source.range.map(Ivl::from)),
+        }
+    }
+}
+
+// A clamped surface is piecewise rational on the interior cells and constant along
+// each exterior direction. Explicit boundary strips cover every mapped parameter,
+// including outward rounding bands; no part of the actual net is discarded.
+fn covered_spans(spans: &[BezierSpan], range: [Ivl; 2], clamped: bool) -> Result<Vec<CoveredSpan>> {
+    let first = *spans
+        .first()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the first span"))?;
+    let last = *spans
+        .last()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the last span"))?;
+    let [lo, hi] = [range[0].lo, range[1].hi];
+    let mut result = Vec::new();
+    if clamped && lo < first.range[0] {
+        result.push(CoveredSpan {
+            source: first,
+            range: [lo, hi.min(first.range[0])],
+            endpoint: Some(0.0),
+        });
+    }
+    let start = spans.partition_point(|p| p.range[1] <= lo);
+    for &source in spans.iter().skip(start).take_while(|p| p.range[0] < hi) {
+        let range = [lo.max(source.range[0]), hi.min(source.range[1])];
+        if range[0] < range[1] {
+            result.push(CoveredSpan {
+                source,
+                range,
+                endpoint: None,
+            });
+        }
+    }
+    if clamped && hi > last.range[1] {
+        result.push(CoveredSpan {
+            source: last,
+            range: [lo.max(last.range[1]), hi],
+            endpoint: Some(1.0),
+        });
+    }
+    Ok(result)
+}
+
+/// Certifies against the expected net evaluated with its natural-domain clamping.
+///
+/// Exterior mapped strips are compared to constant endpoint Bernstein rows/columns,
+/// including both exterior directions at a corner. This matches the sweep definition's
+/// clamped profile and turn evaluation without allowing unexamined boundary slivers.
+///
+/// # Errors
+/// Those of [`mapped_net_distance`], except that an exterior mapped strip is certified
+/// rather than refused. The same degree, coefficient and work budgets apply.
+pub(crate) fn mapped_clamped_net_distance(
+    actual: &BSplineSurface,
+    expected: &BSplineSurface,
+    a: [f64; 2],
+    b: [f64; 2],
+    swapped: bool,
+) -> Result<f64> {
+    let ad = actual.natural_uv_domain();
+    let ed = expected.natural_uv_domain();
+    let [u, v] = if swapped {
+        [[ad.v_min(), ad.v_max()], [ad.u_min(), ad.u_max()]]
+    } else {
+        [[ad.u_min(), ad.u_max()], [ad.v_min(), ad.v_max()]]
+    };
+    let u = mapped_range(u, a[0], b[0]);
+    let v = mapped_range(v, a[1], b[1]);
+    if u[0].lo >= ed.u_min()
+        && u[1].hi <= ed.u_max()
+        && v[0].lo >= ed.v_min()
+        && v[1].hi <= ed.v_max()
+    {
+        mapped_net_distance(actual, expected, a, b, swapped)
+    } else {
+        mapped_net_distance_with(actual, expected, a, b, swapped, true)
+    }
+}
+
+/// Whether `actual` read through the map `(a, b, swapped)` is on `expected`'s own basis:
+/// the map is the identity (`a = 0`, `b = 1`, the parameters exchanged when `swapped`)
+/// and the nets have the same degrees, control counts and knots in the mapped directions.
+/// Then [`same_basis_net_distance`] bounds their distance; otherwise
+/// [`mapped_clamped_net_distance`] does.
+///
+/// # Errors
+/// A net without its NURB form.
+pub(crate) fn same_basis(
+    actual: &BSplineSurface,
+    expected: &BSplineSurface,
+    a: [f64; 2],
+    b: [f64; 2],
+    swapped: bool,
+) -> Result<bool> {
+    if a != [0.0; 2] || b != [1.0; 2] {
+        return Ok(false);
+    }
+    let x = actual
+        .gw_nurb()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the saved net's NURBS form"))?;
+    let y = expected
+        .gw_nurb()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the regenerated net's NURBS form"))?;
+    let (xs, ys) = (x.array_sizes(), y.array_sizes());
+    let (xd, yd) = (x.degrees(), y.degrees());
+    Ok(if swapped {
+        xd == (yd.1, yd.0)
+            && (xs.0, xs.1) == (ys.1, ys.0)
+            && x.u_knots() == y.v_knots()
+            && x.v_knots() == y.u_knots()
+    } else {
+        xd == yd
+            && (xs.0, xs.1) == (ys.0, ys.1)
+            && x.u_knots() == y.u_knots()
+            && x.v_knots() == y.v_knots()
+    })
+}
+
+/// Encloses the distance between two nets on one basis ([`same_basis`]), without refining
+/// either. On a knot span of each direction the net is `sum N_k (w_k P_k) / sum N_k w_k`
+/// over the span's `(p + 1)(q + 1)` active coefficients, and those basis functions are
+/// non-negative with sum 1 there, as the Bernstein polynomials of a Bezier cell are: the
+/// control-net inequality of the module docs holds for them as it stands. So the largest,
+/// over the spans, of the inequality on the span's active coefficients of both nets,
+/// evaluated in interval arithmetic, bounds `|B - E|` on the whole domain.
+///
+/// # Errors
+/// Refuses nets [`same_basis`] does not accept, degrees above 16, more than 262,144
+/// coefficients, a nonfinite coefficient or a nonpositive weight, malformed knots, and more
+/// than eight million coefficient comparisons.
+pub(crate) fn same_basis_net_distance(
+    actual: &BSplineSurface,
+    expected: &BSplineSurface,
+    swapped: bool,
+) -> Result<f64> {
+    let bad = |s| SolidError::invalid_input(OP, s);
+    if !same_basis(actual, expected, [0.0; 2], [1.0; 2], swapped)? {
+        return Err(bad("same-basis net certificate requires one basis"));
+    }
+    let x = interval_coefficients(actual)?;
+    let y = interval_coefficients(expected)?;
+    let nurb = expected
+        .gw_nurb()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the regenerated net's NURBS form"))?;
+    let (p, q) = nurb.degrees();
+    let rows = y.len();
+    let columns = y.first().map_or(0, Vec::len);
+    knot_runs(nurb.u_knots(), p, rows)?;
+    knot_runs(nurb.v_knots(), q, columns)?;
+    // A span [k_i, k_{i+1}] with k_i < k_{i+1}, p <= i < count: its active coefficients
+    // are i - p ..= i.
+    let spans = |knots: &[f64], degree: usize, count: usize| -> Vec<usize> {
+        knots
+            .windows(2)
+            .enumerate()
+            .filter_map(|(i, w)| match w {
+                &[lo, hi] if lo < hi && i >= degree && i < count => Some(i - degree),
+                _ => None,
+            })
+            .collect()
+    };
+    let su = spans(nurb.u_knots(), p, rows);
+    let sv = spans(nurb.v_knots(), q, columns);
+    // Each coefficient pair's terms are formed once (a coefficient is active on several
+    // spans). The actual net's (j, i) is the expected net's (i, j) when swapped.
+    let mut pairs: Vec<Vec<Pair>> = Vec::new();
+    for (i, row) in y.iter().enumerate() {
+        let mut out = Vec::new();
+        for (j, &e) in row.iter().enumerate() {
+            let a = if swapped {
+                x.get(j).and_then(|r| r.get(i))
+            } else {
+                x.get(i).and_then(|r| r.get(j))
+            };
+            let &a = a.ok_or_else(|| SolidError::blend_missing(OP, "a saved net control point"))?;
+            let point = IntervalMetric::euclid(e);
+            out.push(Pair {
+                point,
+                weights: (a.1, e.1),
+                distance: IntervalMetric::distance(IntervalMetric::euclid(a), point),
+            });
+        }
+        pairs.push(out);
+    }
+    let cell = (p + 1) * (q + 1);
+    let mut work = 0_usize;
+    let mut bound = 0.0_f64;
+    for &i0 in &su {
+        for &j0 in &sv {
+            work = work
+                .checked_add(cell * cell)
+                .filter(|w| *w <= MAPPED_MAX_WORK)
+                .ok_or_else(|| bad("same-basis net certificate work budget"))?;
+            let active: Vec<&Pair> = (i0..=i0 + p)
+                .flat_map(|i| (j0..=j0 + q).map(move |j| (i, j)))
+                .map(|(i, j)| {
+                    pairs
+                        .get(i)
+                        .and_then(|r| r.get(j))
+                        .ok_or_else(|| SolidError::blend_missing(OP, "a paired control point"))
+                })
+                .collect::<Result<_>>()?;
+            bound = bound.max(span_distance(&active)?);
+        }
+    }
+    Ok(bound)
+}
+
+/// One coefficient pair of [`same_basis_net_distance`]: the expected net's point (over its
+/// weight), the actual and expected weights, and the distance of the two points.
+struct Pair {
+    point: IPoint,
+    weights: (Ivl, Ivl),
+    distance: f64,
+}
+
+/// [`net_distance_with`] in [`IntervalMetric`] on one span's active coefficient pairs of
+/// [`same_basis_net_distance`], from their terms formed once.
+fn span_distance(active: &[&Pair]) -> Result<f64> {
+    let c = active
+        .first()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the span's first active control"))?
+        .point;
+    let mut d_points = 0.0_f64;
+    let mut reach = 0.0_f64;
+    for pair in active {
+        d_points = d_points.max(pair.distance);
+        reach = reach.max(IntervalMetric::distance(pair.point, c));
+    }
+    let mut cross = 0.0_f64;
+    for pi in active {
+        let (wi, vi) = pi.weights;
+        for pj in active {
+            let (wj, vj) = pj.weights;
+            cross = cross.max(IntervalMetric::cross(wi, vi, wj, vj));
+        }
+    }
+    let w_min = active
+        .iter()
+        .map(|q| IntervalMetric::lower(q.weights.0))
+        .fold(f64::INFINITY, f64::min);
+    let v_min = active
+        .iter()
+        .map(|q| IntervalMetric::lower(q.weights.1))
+        .fold(f64::INFINITY, f64::min);
+    let d = IntervalMetric::combine(d_points, reach, cross, w_min, v_min);
+    if d.is_finite() {
+        Ok(d)
+    } else {
+        Err(SolidError::invalid_input(OP, "the net is not finite"))
+    }
+}
+
+/// A net's homogeneous coefficients as point intervals `[row along u][column along v]`,
+/// checked finite with positive weights, within the mapped certificates' coefficient
+/// budget.
+fn interval_coefficients(net: &BSplineSurface) -> Result<Vec<Vec<IHpt>>> {
+    let nurb = net
+        .gw_nurb()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the net's NURBS form"))?;
+    let (n, m, _, _) = nurb.array_sizes();
+    let nu = n
+        .checked_add(1)
+        .ok_or_else(|| SolidError::blend_failed(OP, "the net's control count overflows"))?;
+    let nv = m
+        .checked_add(1)
+        .ok_or_else(|| SolidError::blend_failed(OP, "the net's control count overflows"))?;
+    let (p, q) = nurb.degrees();
+    if p > MAPPED_MAX_DEGREE
+        || q > MAPPED_MAX_DEGREE
+        || nu
+            .checked_mul(nv)
+            .is_none_or(|n| n > MAPPED_MAX_COEFFICIENTS)
+    {
+        return Err(SolidError::invalid_input(
+            OP,
+            "mapped net certificate work budget",
+        ));
+    }
+    if nurb.rows().count() != nu {
+        return Err(SolidError::invalid_input(OP, "mapped net row count"));
+    }
+    let mut out = Vec::new();
+    for row in nurb.rows() {
+        if row.len() != nv {
+            return Err(SolidError::blend_failed(
+                OP,
+                "the net's rows are not all the same length",
+            ));
+        }
+        let mut r = Vec::new();
+        for c in row {
+            let w = if c.w == NOW { 1.0 } else { c.w };
+            if ![c.x, c.y, c.z, w].into_iter().all(f64::is_finite) || w <= 0.0 {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "mapped net has a nonfinite coefficient or nonpositive weight",
+                ));
+            }
+            r.push((
+                [Ivl::from(c.x), Ivl::from(c.y), Ivl::from(c.z)],
+                Ivl::from(w),
+            ));
+        }
+        out.push(r);
+    }
+    Ok(out)
+}
+
+/// Encloses the distance between an actual net and an expected net under its definition map.
+///
+/// `(s,t)=(a[0]+b[0]*p,a[1]+b[1]*q)`, with `(p,q)=(u,v)` or `(v,u)`
+/// when swapped. Homogeneous coefficients are refined to Bezier cells using interval knot
+/// insertion; interval de Casteljau cuts then enclose both patches on each common cell.
+/// Neither input net is changed, and no floating decomposition is trusted.
+///
+/// # Errors
+///
+/// Refuses malformed knots, nonpositive weights, differing mapped degrees, singular maps,
+/// mapped domains not proved inside the expected net, degrees above 16, more than 262,144
+/// interval coefficients, or eight million refinement steps or coefficient comparisons.
+/// No input-driven recursion is used.
+pub(crate) fn mapped_net_distance(
+    actual: &BSplineSurface,
+    expected: &BSplineSurface,
+    a: [f64; 2],
+    b: [f64; 2],
+    swapped: bool,
+) -> Result<f64> {
+    mapped_net_distance_with(actual, expected, a, b, swapped, false)
+}
+
+fn mapped_net_distance_with(
+    actual: &BSplineSurface,
+    expected: &BSplineSurface,
+    a: [f64; 2],
+    b: [f64; 2],
+    swapped: bool,
+    clamped: bool,
+) -> Result<f64> {
+    let bad = |s| SolidError::invalid_input(OP, s);
+    if !a.into_iter().chain(b).all(f64::is_finite) || b.into_iter().any(|x| x == 0.0) {
+        return Err(bad(
+            "mapped net certificate requires a finite nonsingular map",
+        ));
+    }
+    let actual = BezierNet::new(actual)?;
+    let expected = BezierNet::new(expected)?;
+    let degrees = if swapped {
+        [actual.degrees[1], actual.degrees[0]]
+    } else {
+        actual.degrees
+    };
+    if degrees != expected.degrees {
+        return Err(bad("mapped net certificate requires equal degrees"));
+    }
+    let expected_domain = |spans: &[BezierSpan]| -> Result<[f64; 2]> {
+        Ok([
+            spans.first().ok_or_else(|| bad("empty mapped net"))?.range[0],
+            spans.last().ok_or_else(|| bad("empty mapped net"))?.range[1],
+        ])
+    };
+    let es = expected_domain(&expected.u)?;
+    let et = expected_domain(&expected.v)?;
+    let mut work = 0_usize;
+    let mut bound = 0.0_f64;
+    for &u in &actual.u {
+        for &v in &actual.v {
+            let [s, t] = if swapped {
+                [v.range, u.range]
+            } else {
+                [u.range, v.range]
+            };
+            let s = mapped_range(s, a[0], b[0]);
+            let t = mapped_range(t, a[1], b[1]);
+            if !(s[0].hi < s[1].lo
+                && t[0].hi < t[1].lo
+                && [s[0].lo, s[1].hi, t[0].lo, t[1].hi]
+                    .into_iter()
+                    .all(f64::is_finite))
+                || (!clamped
+                    && (s[0].lo < es[0] || s[1].hi > es[1] || t[0].lo < et[0] || t[1].hi > et[1]))
+            {
+                return Err(bad(
+                    "mapped net domain is not proved inside its expected net",
+                ));
+            }
+            let actual_cell = actual.cell(u, v, swapped, [b[0] < 0.0, b[1] < 0.0])?;
+            let s_spans = covered_spans(&expected.u, s, clamped)?;
+            let t_spans = covered_spans(&expected.v, t, clamped)?;
+            for &eu in &s_spans {
+                for &ev in &t_spans {
+                    let sr = eu.range;
+                    let tr = ev.range;
+                    let coefficients = (degrees[0] + 1) * (degrees[1] + 1);
+                    work = work
+                        .checked_add(coefficients * coefficients)
+                        .ok_or_else(|| bad("mapped net certificate work budget"))?;
+                    if work > MAPPED_MAX_WORK {
+                        return Err(bad("mapped net certificate work budget"));
+                    }
+                    let ac = interval_patch(
+                        &actual_cell,
+                        normalized_range(sr, s),
+                        normalized_range(tr, t),
+                    )?;
+                    let ec = expected.cell(eu.source, ev.source, false, [false, false])?;
+                    let ec = interval_patch(&ec, eu.parameters(), ev.parameters())?;
+                    bound = bound.max(net_distance_with::<IntervalMetric>(&ac, &ec)?);
+                }
+            }
+        }
+    }
+    Ok(bound)
 }
 
 /// A NURBS surface's derivative bounds `(max |S_u|, max |S_v|)`: degree times the largest
@@ -1150,6 +2158,75 @@ fn sign(x: f64) -> i32 {
 mod tests {
     use super::*;
 
+    /// A screw wall's net (a line from (2, 0, z) to (3, 0, z + 1), three spans), its profile
+    /// lifted by `z`: the same knots, every coefficient moved by `z` along the axis.
+    fn screw_wall(z: f64, stations: &[f64]) -> BSplineSurface {
+        use crate::surface::procedural_sweep::ScrewMotion;
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(2.0, 0.0, z),
+            Vec3::new(3.0, 0.0, z + 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 1.5, None).unwrap();
+        crate::sweep::screw::screw_net(&profile, &motion, stations).unwrap()
+    }
+
+    /// Two nets on one basis are compared span by span on their own control nets: the result
+    /// is the module's inequality on each span's active coefficients, the largest over the
+    /// spans, as if each span were a Bezier cell; it encloses a known gap and a transposed copy
+    /// read through a swapped map; nets of other knots or maps are not on one basis.
+    #[test]
+    fn nets_on_one_basis_are_bounded_span_by_span() {
+        let stations = [0.0, 0.3, 0.6, 0.75];
+        let net = screw_wall(0.0, &stations);
+        let lifted = screw_wall(1e-6, &stations);
+        assert!(same_basis(&lifted, &net, [0.0; 2], [1.0; 2], false).unwrap());
+        // the inequality on each span's active coefficients, formed afresh
+        let (x, y) = (
+            interval_coefficients(&lifted).unwrap(),
+            interval_coefficients(&net).unwrap(),
+        );
+        let nurb = net.gw_nurb().unwrap();
+        let (p, q) = nurb.degrees();
+        let spans = |knots: &[f64], d: usize, n: usize| -> Vec<usize> {
+            (d..n)
+                .filter(|&i| knots[i] < knots[i + 1])
+                .map(|i| i - d)
+                .collect()
+        };
+        let mut fresh = 0.0_f64;
+        for i0 in spans(nurb.u_knots(), p, y.len()) {
+            for j0 in spans(nurb.v_knots(), q, y[0].len()) {
+                let cell = |n: &[Vec<IHpt>]| -> Vec<Vec<IHpt>> {
+                    (i0..=i0 + p).map(|i| n[i][j0..=j0 + q].to_vec()).collect()
+                };
+                fresh =
+                    fresh.max(net_distance_with::<IntervalMetric>(&cell(&x), &cell(&y)).unwrap());
+            }
+        }
+        let d = same_basis_net_distance(&lifted, &net, false).unwrap();
+        assert_eq!(d.to_bits(), fresh.to_bits());
+        assert!((1e-6..=1e-6 + 1e-12).contains(&d), "{d}");
+        // the refined Bezier comparison encloses the same gap
+        assert!(
+            mapped_clamped_net_distance(&lifted, &net, [0.0; 2], [1.0; 2], false).unwrap() >= 1e-6
+        );
+
+        let mut transposed = net.copy();
+        transposed.swap_uv().unwrap();
+        assert!(same_basis(&transposed, &net, [0.0; 2], [1.0; 2], true).unwrap());
+        assert!(!same_basis(&transposed, &net, [0.0; 2], [1.0; 2], false).unwrap());
+        let d = same_basis_net_distance(&transposed, &net, true).unwrap();
+        assert!(d <= 1e-13, "a transposed copy is the same net: {d}");
+
+        let other = screw_wall(0.0, &[0.0, 0.3, 0.6, 0.7]);
+        assert!(!same_basis(&other, &net, [0.0; 2], [1.0; 2], false).unwrap());
+        assert!(same_basis_net_distance(&other, &net, false).is_err());
+        assert!(!same_basis(&net, &net, [0.0, 1e-9], [1.0; 2], false).unwrap());
+        assert!(!same_basis(&net, &net, [0.0; 2], [1.0, -1.0], false).unwrap());
+    }
+
     /// `T_m(x)` for `x >= 1` by its closed form, independent of the recurrence.
     fn cheb(m: usize, x: f64) -> f64 {
         (m as f64 * x.acosh()).cosh()
@@ -1257,5 +2334,179 @@ mod tests {
             );
             assert!(worst < 1e-9, "[{lo}, {hi}]: {worst} is not the same curve");
         }
+    }
+
+    use crate::math::Point2;
+    use crate::nurbs::b_spline_surface::SurfParamType;
+
+    fn wall(dz: f64) -> BSplineSurface {
+        BSplineSurface::create_bilinear_surface(
+            Vec3::new(0.0, 0.0, dz),
+            Vec3::new(2.0, 0.0, dz),
+            Vec3::new(0.0, 1.0, dz),
+            Vec3::new(2.0, 1.0, 0.5 + dz),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn mapped_nets_certify_identity_swaps_reversals_and_restrictions() {
+        let expected = wall(0.0);
+        let check = |actual: &BSplineSurface, a, b, swapped| {
+            let bound = mapped_net_distance(actual, &expected, a, b, swapped).unwrap();
+            assert!(bound < 1e-10, "{bound}");
+        };
+        check(&expected, [0.0; 2], [1.0; 2], false);
+        let mut swapped = expected.copy();
+        swapped.swap_uv().unwrap();
+        check(&swapped, [0.0; 2], [1.0; 2], true);
+        let reversed = BSplineSurface::create_bilinear_surface(
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(2.0, 1.0, 0.5),
+            Vec3::new(0.0, 1.0, 0.0),
+        )
+        .unwrap();
+        check(&reversed, [1.0, 0.0], [-1.0, 1.0], false);
+        let restricted = expected
+            .split_at(0.25, SurfParamType::U)
+            .unwrap()
+            .1
+            .split_at(0.75, SurfParamType::U)
+            .unwrap()
+            .0
+            .split_at(0.5, SurfParamType::V)
+            .unwrap()
+            .1;
+        check(&restricted, [0.0; 2], [1.0; 2], false);
+        let nurb = expected.gw_nurb().unwrap();
+        let rows = nurb.rows().map(<[_]>::to_vec).collect::<Vec<_>>();
+        let reparameterized = BSplineSurface::from_data(
+            1,
+            1,
+            1,
+            1,
+            3,
+            3,
+            &rows,
+            &[-2.0, -2.0, 2.0, 2.0],
+            &[4.0, 4.0, 8.0, 8.0],
+        )
+        .unwrap();
+        check(&reparameterized, [0.5, -1.0], [0.25, 0.25], false);
+    }
+
+    #[test]
+    fn mapped_net_bound_encloses_a_real_displacement() {
+        let (actual, expected) = (wall(0.125), wall(0.0));
+        let bound = mapped_net_distance(&actual, &expected, [0.0; 2], [1.0; 2], false).unwrap();
+        assert!((0.125..0.125 + 1e-10).contains(&bound), "{bound}");
+        for u in [0.0, 0.25, 0.75, 1.0] {
+            for v in [0.0, 0.5, 1.0] {
+                let uv = Point2::new(u, v);
+                let difference = (actual.evaluate_point(uv).unwrap()
+                    - expected.evaluate_point(uv).unwrap())
+                .length();
+                assert!(difference <= bound);
+            }
+        }
+    }
+
+    #[test]
+    fn clamped_mapped_certificate_covers_boundary_strips_and_corners() {
+        let expected = wall(0.0);
+        let nurb = expected.gw_nurb().unwrap();
+        let rows = nurb.rows().map(<[_]>::to_vec).collect::<Vec<_>>();
+        let actual = BSplineSurface::from_data(
+            1,
+            1,
+            1,
+            1,
+            3,
+            3,
+            &rows,
+            &[-1.0, -1.0, 2.0, 2.0],
+            &[3.0, 3.0, 9.0, 9.0],
+        )
+        .unwrap();
+        let (a, b) = ([1.0 / 3.0, -0.5], [1.0 / 3.0, 1.0 / 6.0]);
+        assert!(mapped_net_distance(&actual, &expected, a, b, false).is_err());
+        let bound = mapped_clamped_net_distance(&actual, &expected, a, b, false).unwrap();
+        assert!(bound < 1e-10, "{bound}");
+        // The complete mapped domain lies beyond BOTH lower boundaries: the expected
+        // surface is its constant corner. Omitting the strips would falsely certify zero.
+        let bound =
+            mapped_clamped_net_distance(&expected, &expected, [-1.0; 2], [0.25; 2], false).unwrap();
+        let distance = Vec3::new(2.0, 1.0, 0.5).length();
+        assert!(bound >= distance && bound < distance + 1e-10, "{bound}");
+    }
+
+    #[test]
+    fn mapped_net_certificate_refines_a_smooth_rational_profile() {
+        use crate::nurbs::math::CPoint;
+        let rows = [
+            [(0.0, 0.0, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0)],
+            [(0.25, 0.0, 0.125, 0.75), (0.25, 0.75, 0.25, 0.75)],
+            [(1.0, 0.0, 0.25, 1.25), (1.0, 1.25, 0.5, 1.25)],
+            [(2.0, 0.0, 0.0, 1.0), (2.0, 1.0, 0.5, 1.0)],
+        ]
+        .map(|row| row.map(|(x, y, z, w)| CPoint { x, y, z, w }).to_vec());
+        let expected = BSplineSurface::from_data(
+            3,
+            1,
+            2,
+            1,
+            6,
+            3,
+            &rows,
+            &[0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
+            &[0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let restricted = expected.split_at(0.25, SurfParamType::U).unwrap().1;
+        for actual in [&expected, &restricted] {
+            let bound = mapped_net_distance(actual, &expected, [0.0; 2], [1.0; 2], false).unwrap();
+            assert!(bound < 1e-10, "{bound}");
+        }
+        // An underflowing product residual must never be mistaken for an exact endpoint.
+        let endpoint = affine_endpoint(0.0, 1.1, f64::MIN_POSITIVE);
+        assert!(endpoint.lo < endpoint.hi);
+    }
+
+    #[test]
+    fn mapped_net_refuses_hostile_knots_maps_and_domains() {
+        for knots in [
+            vec![0.0, 0.0, f64::NAN, 1.0],
+            vec![0.0, 0.0, 1.0, 0.5],
+            vec![0.0, 0.0, 0.0, 0.0],
+        ] {
+            assert!(bezier_spans(&knots, 1, 2).is_err());
+        }
+        // A quadratic's simple interior knot would require an uncertified knot insertion.
+        assert!(bezier_spans(&[0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0], 2, 4).is_err());
+        let net = wall(0.0);
+        assert!(mapped_net_distance(&net, &net, [0.0; 2], [0.0, 1.0], false).is_err());
+        assert!(mapped_net_distance(&net, &net, [f64::NAN, 0.0], [1.0; 2], false).is_err());
+        assert!(mapped_net_distance(&net, &net, [0.25, 0.0], [1.0; 2], false).is_err());
+    }
+
+    #[test]
+    fn shared_float_net_metric_keeps_its_existing_value() {
+        let actual = vec![vec![
+            (Vec3::new(0.25, 0.0, 0.0), 1.0),
+            (Vec3::new(2.5, 0.0, 0.0), 2.0),
+        ]];
+        let expected = vec![vec![(Vec3::ZERO, 1.0), (Vec3::new(1.0, 0.0, 0.0), 1.0)]];
+        assert_eq!(
+            net_distance(&actual, &expected).unwrap().to_bits(),
+            1.25_f64.to_bits()
+        );
+        assert_eq!(
+            sub_curve(&actual[0], 0.25, 0.75),
+            vec![
+                (Vec3::new(0.8125, 0.0, 0.0), 1.25),
+                (Vec3::new(1.9375, 0.0, 0.0), 1.75)
+            ]
+        );
     }
 }
