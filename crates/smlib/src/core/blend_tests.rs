@@ -480,9 +480,11 @@ fn a_setback_short_of_where_the_rails_cross_names_the_least() {
 /// keeps no chamfer definition; its offsets are its distance (the chord between the contacts
 /// of the ball of that radius), so the radius that fits is the distance that fits
 /// (`FilletSession::chamfer_fit`). The named distance builds the closed form's chamfer:
-/// the triangle flat contact, tip, wall contact less the wall's circular segment. (Larger
-/// chamfers between 21 and 175 build too: the fit is a size that builds, the ball's contact
-/// still on the arc, not the largest.)
+/// the triangle flat contact, tip, wall contact less the wall's circular segment. The size
+/// named is the wall contact's limit (the ball's contact leaves the arc at d = 21), the value
+/// SolidCraft named before its refusals were ops'; it is not the chamfer's largest buildable
+/// size (184.033 by construction, where the overflowed chord takes the whole part), which
+/// the kernel does not compute yet (#15250).
 #[test]
 fn a_knife_edge_chamfer_too_large_names_its_distance() {
     use super::sweep::extrude;
