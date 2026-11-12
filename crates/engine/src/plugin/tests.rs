@@ -776,7 +776,7 @@ mod install_zip {
     fn gears(version: &str) -> Vec<u8> {
         let mut m: Value = serde_json::from_slice(&manifest_bytes("gears", json!(["commands@0.1"]))).unwrap();
         m["version"] = json!(version);
-        zip(&[("gears-0.1.0/plugin.json", &serde_json::to_vec(&m).unwrap()), ("gears-0.1.0/plugin.wasm", b"\0asm"), ("__MACOSX/._x", b"")])
+        zip(&[("gears-0.1.0/plugin.json", &serde_json::to_vec(&m).unwrap()[..]), ("gears-0.1.0/plugin.wasm", b"\0asm"), ("__MACOSX/._x", b"")])
     }
     /// A session whose plugins folder is a fresh temporary one, and the folder of the zip files.
     fn session(name: &str) -> (Session, std::path::PathBuf) {
@@ -839,35 +839,36 @@ mod install_zip {
 
     #[test]
     fn unsafe_oversized_and_incomplete_zips_are_refused_before_anything_is_written() {
-        let good = manifest_bytes("gears", json!(["commands@0.1"]));
-        let slip = unpack(&zip(&[("plugin.json", &good), ("plugin.wasm", b"x"), ("../evil", b"x")])).unwrap_err();
+        let good_bytes = manifest_bytes("gears", json!(["commands@0.1"]));
+        let good: &[u8] = &good_bytes;
+        let slip = unpack(&zip(&[("plugin.json", good), ("plugin.wasm", b"x"), ("../evil", b"x")])).unwrap_err();
         assert!(matches!(slip, InstallError::Archive(safe_zip::Error::UnsafeEntry { .. })), "{slip}");
-        let absolute = unpack(&zip(&[("/plugin.json", &good)])).unwrap_err();
+        let absolute = unpack(&zip(&[("/plugin.json", good)])).unwrap_err();
         assert!(matches!(absolute, InstallError::Archive(safe_zip::Error::UnsafeEntry { .. })), "{absolute}");
         let huge = vec![0u8; MAX_COMPONENT_BYTES + 1];
-        let bomb = unpack(&zip(&[("plugin.json", &good), ("plugin.wasm", &huge)])).unwrap_err();
+        let bomb = unpack(&zip(&[("plugin.json", good), ("plugin.wasm", &huge[..])])).unwrap_err();
         assert!(matches!(bomb, InstallError::Archive(safe_zip::Error::EntryTooLarge { .. })), "{bomb}");
         let chunk = vec![0u8; 15 << 20];
         let many: Vec<String> = (0..5).map(|i| format!("data/{i}.bin")).collect();
-        let mut files: Vec<(&str, &[u8])> = vec![("plugin.json", &good), ("plugin.wasm", b"x")];
+        let mut files: Vec<(&str, &[u8])> = vec![("plugin.json", good), ("plugin.wasm", b"x")];
         files.extend(many.iter().map(|n| (n.as_str(), chunk.as_slice())));
         assert_eq!(unpack(&zip(&files)).unwrap_err(), InstallError::Archive(safe_zip::Error::TooLarge { limit: 64 << 20 }));
         assert_eq!(unpack(&zip(&[("plugin.wasm", b"x")])).unwrap_err(), InstallError::MissingManifest);
-        assert_eq!(unpack(&zip(&[("plugin.json", &good)])).unwrap_err(), InstallError::MissingModule("plugin.wasm".into()));
-        let two = zip(&[("a/plugin.json", &good), ("a/plugin.wasm", b"x"), ("b/plugin.json", &good), ("b/plugin.wasm", b"x")]);
+        assert_eq!(unpack(&zip(&[("plugin.json", good)])).unwrap_err(), InstallError::MissingModule("plugin.wasm".into()));
+        let two = zip(&[("a/plugin.json", good), ("a/plugin.wasm", b"x"), ("b/plugin.json", good), ("b/plugin.wasm", b"x")]);
         assert_eq!(unpack(&two).unwrap_err(), InstallError::NotOnePlugin);
-        let stray = zip(&[("a/plugin.json", &good), ("a/plugin.wasm", b"x"), ("other.txt", b"x")]);
+        let stray = zip(&[("a/plugin.json", good), ("a/plugin.wasm", b"x"), ("other.txt", b"x")]);
         assert_eq!(unpack(&stray).unwrap_err(), InstallError::NotOnePlugin);
-        let deep = zip(&[("a/b/plugin.json", &good), ("a/b/plugin.wasm", b"x")]);
+        let deep = zip(&[("a/b/plugin.json", good), ("a/b/plugin.wasm", b"x")]);
         assert_eq!(unpack(&deep).unwrap_err(), InstallError::NotOnePlugin);
-        let newer = unpack(&zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.2"]))), ("plugin.wasm", b"x")])).unwrap_err();
+        let newer = unpack(&zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.2"]))[..]), ("plugin.wasm", b"x")])).unwrap_err();
         assert!(matches!(&newer, InstallError::Manifest(HostError::UnsupportedCapability { .. })), "{newer}");
         assert_eq!(newer.to_string(), "needs commands 0.2; update SolidCraft or the plugin");
         // Through the command: refused, and the plugins folder is never created.
         let (mut s, root) = session("refused");
-        let path = put(&root, "slip.zip", &zip(&[("plugin.json", &good), ("plugin.wasm", b"x"), ("../evil", b"x")]));
+        let path = put(&root, "slip.zip", &zip(&[("plugin.json", good), ("plugin.wasm", b"x"), ("../evil", b"x")]));
         assert!(s.execute("plugin.install", &json!({"path": path})).is_err());
-        let path = put(&root, "newer.zip", &zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.2"]))), ("plugin.wasm", b"x")]));
+        let path = put(&root, "newer.zip", &zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.2"]))[..]), ("plugin.wasm", b"x")]));
         let error = s.execute("plugin.install", &json!({"path": path})).unwrap_err();
         assert!(matches!(error, crate::EngineError::Plugin(HostError::UnsupportedCapability { .. })), "{error}");
         assert!(!root.join("plugins").exists() && !root.join("evil").exists());

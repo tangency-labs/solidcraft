@@ -51,7 +51,8 @@ fn is_junk(path: &str) -> bool {
 /// a manifest the host accepts, safe paths and sizes.
 pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
     let files: Vec<_> = safe_zip::read(zip, LIMITS)?.into_iter().filter(|f| !is_junk(&f.path)).collect();
-    let manifests: Vec<&str> = files.iter().filter(|f| f.path == "plugin.json" || f.path.ends_with("/plugin.json")).map(|f| f.path.as_str()).collect();
+    let manifests: Vec<&str> =
+        files.iter().filter(|f| f.path == "plugin.json" || f.path.ends_with("/plugin.json")).map(|f| f.path.as_str()).collect();
     let prefix = match manifests.as_slice() {
         [] => return Err(InstallError::MissingManifest),
         ["plugin.json"] => "",
@@ -66,8 +67,7 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
     if files.iter().any(|f| !f.path.starts_with(&prefix)) {
         return Err(InstallError::NotOnePlugin);
     }
-    let files: Vec<safe_zip::File> =
-        files.into_iter().map(|f| safe_zip::File { path: f.path[prefix.len()..].to_string(), bytes: f.bytes }).collect();
+    let files: Vec<safe_zip::File> = files.into_iter().map(|f| safe_zip::File { path: f.path[prefix.len()..].to_string(), bytes: f.bytes }).collect();
     let text = files.iter().find(|f| f.path == "plugin.json").map(|f| f.bytes.as_slice()).ok_or(InstallError::MissingManifest)?;
     // The folder it installs to is its id: the parser checks the id itself.
     let id = serde_json::from_slice::<serde_json::Value>(text)

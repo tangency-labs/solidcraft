@@ -141,7 +141,12 @@ mod tests {
         let manifest = json!({"id":"gears","name":"Gears","version":"0.1.0","description":"Spur gears","capabilities":["commands@0.1"],
             "runtime":{"module":"gears.wasm","entries":["make"],"commands":["solid.box","file.export_stl"],
             "permissions":{"command_groups":["file"],"files":[{"name":"exports","write":true}]}}});
-        let zip = solidcraft_io::safe_zip::write(&[("gears/plugin.json", &serde_json::to_vec(&manifest).unwrap()), ("gears/gears.wasm", b"\0asm")]).unwrap();
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, bytes) in [("gears/plugin.json", serde_json::to_vec(&manifest).unwrap()), ("gears/gears.wasm", b"\0asm".to_vec())] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            std::io::Write::write_all(&mut zip, &bytes).unwrap();
+        }
+        let zip = zip.finish().unwrap().into_inner();
         let path = h.dir.join("gears.zip");
         std::fs::write(&path, zip).unwrap();
         review(&mut h.app, path.to_string_lossy().into_owned());

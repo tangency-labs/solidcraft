@@ -110,9 +110,8 @@ pub fn read(zip: &[u8], limits: Limits) -> Result<Vec<File>, Error> {
 /// A deflated `.zip` of `files` (path, bytes), in order: for packaging and tests.
 pub fn write(files: &[(&str, &[u8])]) -> std::io::Result<Vec<u8>> {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .last_modified_time(zip::DateTime::default());
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).last_modified_time(zip::DateTime::default());
     for (path, bytes) in files {
         zip.start_file(*path, options).map_err(std::io::Error::other)?;
         zip.write_all(bytes)?;
