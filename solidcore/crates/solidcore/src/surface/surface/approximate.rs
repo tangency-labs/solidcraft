@@ -35,17 +35,14 @@
 //!   upstream caller does, uses [`Surface::approximate_surface_ignoring_status`].
 //! - **Patch index check.** When a starter surface's knots are not all of full
 //!   multiplicity, a patch's control points lie outside the net; upstream signals
-//!   `SM_ERR` but returns `SM_SUCCESS` without surface, as the port does (`Ok` with
-//!   `surface: None`). With `Kernel::fixes.approximate_surface_bezier_starter`
-//!   (WR-573, the fork's tangency-labs/smlib@eae96cb) the starter's inner knots are
-//!   raised to full multiplicity before each round of patches, and an overrun is
-//!   `SM_ERR`.
+//!   `SM_ERR` but returns `SM_SUCCESS` without surface. Here the starter's inner knots
+//!   are raised to full multiplicity before each round of patches (WR-573, the fork's
+//!   tangency-labs/smlib@eae96cb), and an overrun is `SM_ERR`.
 //! - **Accepted pass.** Upstream accepts a pass of patches when its last row (or
 //!   column) is within the tolerance (`bFailed` starts over with every row), and
-//!   returns success with an achieved tolerance above the requested one; the port
-//!   does the same. With `Kernel::fixes.approximate_surface_checks_every_row`
-//!   (WR-726, #2507) a pass with any row outside the tolerance is subdivided further,
-//!   and the search fails (`SM_ERR`) when the last subdivision is still outside it.
+//!   returns success with an achieved tolerance above the requested one. Here a pass
+//!   with any row outside the tolerance is subdivided further, and the search fails
+//!   (`SM_ERR`) when the last subdivision is still outside it (WR-726, #2507).
 //! - **Root surface.** `GetRootSurface` of an offset, curve bounded surface or surface
 //!   in a volume follows its base; the chain is walked in a loop bounded by
 //!   [`MAX_GEOMETRY_NESTING`] (`InvalidInput` beyond). The root of a plane, cone,
@@ -321,28 +318,25 @@ impl Surface {
 
             // Update pApproxSurf using cubic Bezier approximations to each patch.
 
-            // `Kernel::fixes.approximate_surface_bezier_starter` (WR-573): the patches
-            // below are the cubic Bezier pieces between knots, which needs every inner
-            // knot of full multiplicity (control points 3 apart per span). A starter
-            // copied from a root B-spline with simple inner knots is put in that form
-            // first, exactly, by knot insertion.
-            if k.fixes.approximate_surface_bezier_starter {
-                for (param, deg) in [(SurfParamType::U, u_deg), (SurfParamType::V, v_deg)] {
-                    let (knots, mult) = approx_surf.knots(param, None)?;
-                    more_knots.clear();
-                    for (knot, &m) in knots
-                        .iter()
-                        .zip(&mult)
-                        .take(knots.len().saturating_sub(1))
-                        .skip(1)
-                    {
-                        for _ in m..deg {
-                            more_knots.push(*knot);
-                        }
+            // WR-573: the patches below are the cubic Bezier pieces between knots, which
+            // needs every inner knot of full multiplicity (control points 3 apart per
+            // span). A starter copied from a root B-spline with simple inner knots is put
+            // in that form first, exactly, by knot insertion; upstream uses it as it is.
+            for (param, deg) in [(SurfParamType::U, u_deg), (SurfParamType::V, v_deg)] {
+                let (knots, mult) = approx_surf.knots(param, None)?;
+                more_knots.clear();
+                for (knot, &m) in knots
+                    .iter()
+                    .zip(&mult)
+                    .take(knots.len().saturating_sub(1))
+                    .skip(1)
+                {
+                    for _ in m..deg {
+                        more_knots.push(*knot);
                     }
-                    if !more_knots.is_empty() {
-                        approx_surf.insert_knots(param, &more_knots)?;
-                    }
+                }
+                if !more_knots.is_empty() {
+                    approx_surf.insert_knots(param, &more_knots)?;
                 }
             }
 
@@ -379,17 +373,12 @@ impl Surface {
                     for iub in 0..=3 {
                         for ivb in 0..=3 {
                             if u_min + iub >= num_ctrl_u || v_min + ivb >= num_ctrl_v {
-                                // `Kernel::fixes.approximate_surface_bezier_starter`
-                                // (WR-573): an error, not success with no surface
-                                if k.fixes.approximate_surface_bezier_starter {
-                                    return Err(SolidError::surface_failed(
-                                        OP,
-                                        "a Bezier starter index is past the control net",
-                                    ));
-                                }
-                                // SE(SM_ERR): some problem here with knots; upstream
-                                // returns SM_SUCCESS without surface
-                                return Ok(None);
+                                // WR-573: an error, where upstream returns SM_SUCCESS
+                                // without surface
+                                return Err(SolidError::surface_failed(
+                                    OP,
+                                    "a Bezier starter index is past the control net",
+                                ));
                             }
                             // (the point read is overwritten; statuses ignored)
                             let _ = ignored_or_pass_on(
@@ -429,9 +418,7 @@ impl Surface {
             // We'll test points at 1/4, 2/4, 3/4:
             let num_between: usize = 3;
             let fraction = (num_between + 1) as f64;
-            let mut failed = false;
-            // `Kernel::fixes.approximate_surface_checks_every_row` (WR-726): whether any
-            // row or column of this pass has failed
+            // WR-726: whether any row or column of this pass has failed
             let mut pass_failed = false;
 
             if let Some((knots, _)) =
@@ -461,7 +448,7 @@ impl Surface {
 
             // for every surface patch
             for outer_span in outer_knots.windows(2) {
-                failed = false; // Starting over on a new row.
+                let mut failed = false; // Starting over on a new row.
                 let &[o0, o1] = outer_span else {
                     continue;
                 };
@@ -530,15 +517,10 @@ impl Surface {
                 // ... continue on to the next 'outer' dir row/column of patches
             } // end iter every 'outer' dir patch
 
-            // when the approx surface is good enough: upstream tests the flag of the
-            // last row or column only; `Kernel::fixes.approximate_surface_checks_every_row`
-            // (WR-726) tests every row and column of the pass
-            let rejected = if k.fixes.approximate_surface_checks_every_row {
-                pass_failed
-            } else {
-                failed
-            };
-            if !rejected {
+            // when the approx surface is good enough: every row and column of the pass
+            // is within the tolerance (WR-726; upstream tests the flag of the last row
+            // or column only)
+            if !pass_failed {
                 // Remove excess knots: the result does not have to be piecewise Bezier.
                 ignored_or_pass_on(
                     approx_surf.remove_knots(approx_tol_3d, true, true, None, None),

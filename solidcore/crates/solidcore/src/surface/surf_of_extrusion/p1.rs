@@ -89,8 +89,7 @@
 //!   turns the generator's flag on (upstream permanently, through the `const`
 //!   method's pointer); here a copy is used for the solve.
 //! - **Clamped STEP parameters.** `EvaluateSTEP` and `EvaluateSTEPPoint` clamp a copy
-//!   of the STEP parameters and then evaluate the caller's; the port keeps that by
-//!   default and, with `Kernel::fixes.extrusion_step_uses_clamped_uv`, evaluates the
+//!   of the STEP parameters and then evaluate the caller's; the port evaluates the
 //!   clamped copy in the analytic UV domain (both bodies ignore `SwapUV`), as their
 //!   comment says (WR-61; see
 //!   `plan/upstream-issues/WR-61--addendum-2026-10-31-step-evaluators-use-clamped-uv.md`).
@@ -1249,16 +1248,13 @@ impl SurfOfExtrusion {
     // ---- evaluation -----------------------------------------------------------------
 
     /// The STEP parameters the evaluators use: `uv`, clamped to the analytic UV domain
-    /// when `Kernel::fixes.extrusion_step_uses_clamped_uv` is set and out-of-bounds
-    /// evaluation is off, else `uv` itself (the pinned C++ evaluates `crUV`). The guard
-    /// is `ContainsPoint2d` with its default `tol = 0`, so a NaN coordinate (never
-    /// outside by that comparison) stays unclamped. Both upstream bodies clamp in
-    /// `m_vAnalUVDomain` and neither reads `SwapUV`.
-    fn step_eval_uv(&self, k: &Kernel, uv: Point2) -> Point2 {
-        if k.fixes.extrusion_step_uses_clamped_uv
-            && !self.is_out_of_bounds_enabled()
-            && !self.anal_uv_domain.contains_point(uv, 0.0)
-        {
+    /// when out-of-bounds evaluation is off, else `uv` itself (WR-61; the pinned C++
+    /// clamps a copy and evaluates `crUV`). The guard is `ContainsPoint2d` with its
+    /// default `tol = 0`, so a NaN coordinate (never outside by that comparison) stays
+    /// unclamped. Both upstream bodies clamp in `m_vAnalUVDomain` and neither reads
+    /// `SwapUV`.
+    fn step_eval_uv(&self, uv: Point2) -> Point2 {
+        if !self.is_out_of_bounds_enabled() && !self.anal_uv_domain.contains_point(uv, 0.0) {
             self.anal_uv_domain.clamp_point(uv)
         } else {
             uv
@@ -1269,10 +1265,9 @@ impl SurfOfExtrusion {
     /// `(hu + 1) * (hv + 1)` vectors, entry `i * (hv + 1) + j` the derivative of order
     /// `i` in u and `j` in v. Only the position, `Sv = E`, the pure u derivatives (the
     /// generator's STEP derivatives at `uv.x`, evaluated with the surface's
-    /// out-of-bounds flag) are non-zero. `uv` is not clamped by default (upstream
-    /// clamps a copy it does not use); with
-    /// `Kernel::fixes.extrusion_step_uses_clamped_uv` and out-of-bounds evaluation
-    /// off, both coordinates are clamped to the analytic domain first (WR-61).
+    /// out-of-bounds flag) are non-zero. With out-of-bounds evaluation off, both
+    /// coordinates are clamped to the analytic domain first (WR-61; upstream clamps a
+    /// copy it does not use).
     ///
     /// # Errors
     ///
@@ -1332,7 +1327,7 @@ impl SurfOfExtrusion {
 
         // per SMLib practice clamp the input point to the surface domain (upstream
         // clamps a copy it then ignores; WR-61 makes that copy the one evaluated)
-        let uv = self.step_eval_uv(k, uv);
+        let uv = self.step_eval_uv(uv);
 
         // the generator with the surface's out-of-bounds flag
         let gen_own = self.gen()?;
@@ -1366,17 +1361,16 @@ impl SurfOfExtrusion {
 
     /// The point at the STEP parameters `uv` (`EvaluateSTEPPoint`): the generator's
     /// STEP point at `uv.x` (with its own out-of-bounds flag) plus `uv.y` times the
-    /// extrusion vector. `uv` is not clamped by default (upstream clamps a copy it
-    /// does not use); with `Kernel::fixes.extrusion_step_uses_clamped_uv` and
-    /// out-of-bounds evaluation off, both coordinates are clamped to the analytic
-    /// domain first (WR-61).
+    /// extrusion vector. With out-of-bounds evaluation off, both coordinates are
+    /// clamped to the analytic domain first (WR-61; upstream clamps a copy it does not
+    /// use).
     ///
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` without generator; those of the generator's evaluation.
     pub fn evaluate_step_point(&self, k: &Kernel, uv: Point2) -> Result<Point3> {
         // per SMLib practice clamp the input point to the surface domain (WR-61)
-        let uv = self.step_eval_uv(k, uv);
+        let uv = self.step_eval_uv(uv);
         let pv = first(&gen_evaluate_step(k, self.gen()?, uv.x, 0)?)?;
         Ok(pv + uv.y * self.extrusion_vec)
     }

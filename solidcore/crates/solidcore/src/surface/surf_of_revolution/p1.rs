@@ -511,13 +511,12 @@ impl SurfOfRevolution {
     /// The surface of one full revolution of `swept_curve` about the axis through
     /// `axis_point` along `axis_direction` (`CreateCanonical`, co-ported from unit
     /// `surface.surf_of_revolution_p2`): the X axis points from the axis point to the
-    /// curve's STEP start point (with
-    /// [`UpstreamFixes::revolution_frame_from_profile_origin`](crate::kernel::UpstreamFixes::revolution_frame_from_profile_origin),
-    /// its point at parameter 0 when the STEP interval holds it, WR-738, and its start
-    /// when that is on the axis; or, when that is on the axis, its point at 45%; a
-    /// point is on the axis within 1 degree of its direction, with the fix by its
-    /// distance from it), the
-    /// domain is `[0, 360]` by the curve's STEP interval; the NURB is made by
+    /// curve's point at parameter 0 when the STEP interval holds it (WR-738; upstream
+    /// takes the STEP start point), else to its start; when that point is on the axis,
+    /// to its start, and when that is on the axis too, to its point at 45%. A point is
+    /// on the axis by its distance from it (upstream: within 1 degree of its
+    /// direction). The domain is `[0, 360]` by the curve's STEP interval; the NURB is
+    /// made by
     /// [`Self::make_nurb`]. A zero axis (squared length below `SM_EFF_ZERO_SQ`) is
     /// taken as `(0, 0, 1)`, as upstream's unchecked `Unitize`.
     ///
@@ -538,31 +537,24 @@ impl SurfOfRevolution {
         // locals
         let crv_ivl = gen_step_interval(&swept_curve)?;
 
-        // SweptCurve start point; with the fix (WR-738) the point at its parameter origin
-        // when the interval holds it: the point the profile is defined from, where an
-        // unbounded profile's start is SM_INFINITE_PARAMETER away (past the axis for a
-        // line crossing it, so the frame would face the other nappe)
-        let fix = k.fixes.revolution_frame_from_profile_origin;
-        let from_origin = fix && crv_ivl.contains_value(0.0, 0.0);
+        // the point at the profile's parameter origin when the interval holds it (WR-738;
+        // upstream: the SweptCurve start point): the point the profile is defined from,
+        // where an unbounded profile's start is SM_INFINITE_PARAMETER away (past the axis
+        // for a line crossing it, so the frame would face the other nappe)
+        let from_origin = crv_ivl.contains_value(0.0, 0.0);
         let ref_param = if from_origin { 0.0 } else { crv_ivl.min() };
         let mut pnt = first(&gen_evaluate_step(k, &swept_curve, ref_param, 0)?)?;
 
         // Vector from SweptCurve Start to RotAxis point
         let mut x_vec = pnt - axis_point;
-        // on the axis: upstream within 1 degree of its direction (which takes a point
-        // far along the axis for one on it); with the fix by the point's distance from
-        // the axis, `|Z x x_vec|`, under the bound the Y axis below is checked against
-        let on_axis = |x_vec: Vec3| {
-            if fix {
-                z_vec.cross(x_vec).length_squared() < crate::math::EFF_ZERO_SQ
-            } else {
-                x_vec.length() < EFF_ZERO || x_vec.is_parallel_to(z_vec, 1.0)
-            }
-        };
+        // on the axis by the point's distance from the axis, `|Z x x_vec|`, under the
+        // bound the Y axis below is checked against (upstream: within 1 degree of its
+        // direction, which takes a point far along the axis for one on it)
+        let on_axis = |x_vec: Vec3| z_vec.cross(x_vec).length_squared() < crate::math::EFF_ZERO_SQ;
 
-        // with the fix, a profile origin on the axis gives way to the start first, the
-        // point upstream takes (a segment through the axis whose origin and 45% point
-        // are both on it, e.g. `s (1, 0, 1)` on [-9, 11])
+        // a profile origin on the axis gives way to the start first, the point upstream
+        // takes (a segment through the axis whose origin and 45% point are both on it,
+        // e.g. `s (1, 0, 1)` on [-9, 11])
         if from_origin && on_axis(x_vec) {
             pnt = first(&gen_evaluate_step(k, &swept_curve, crv_ivl.min(), 0)?)?;
             x_vec = pnt - axis_point;
