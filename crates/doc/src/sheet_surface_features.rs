@@ -1190,10 +1190,13 @@ impl SurfaceSheet {
     /// hand. A mirror turns each panel's chart over (u → −u), so that its frame stays
     /// right-handed with the material where it was and the copy's flat is its source's mirrored
     /// across the flat's y axis (x → −x). Every outline, anchor, cut and record in the charts and
-    /// the flat is mirrored with it, each joint and bend line runs the other way, each
-    /// perforation field counts its grid from the other side, and its rims and faces are named as
-    /// its own layout names them. None for a transform that is no rigid motion or mirror, and for
-    /// a mirror of a sheet with a roll.
+    /// the flat is mirrored with it, each joint and bend line runs the other way, and each
+    /// perforation field counts its grid from the other side. The turn keeps the records in the
+    /// charts and the parts (what each face was made for, `parts`, and the rim each bend's panel
+    /// was made on, in `recipes`) as the copy's own build has them: each bend's anchors start at
+    /// its other end, so its ends, the rims across and past them and its tabs count from there.
+    /// The model names the faces from the parts. None for a transform that is no rigid motion or
+    /// mirror, and for a mirror of a sheet with a roll.
     pub fn copied(&self, body: &str, m: &crate::Mat) -> Option<SurfaceSheet> {
         let axis = |i: usize| m.get(i).map(|c| Vec3::new(c[0], c[1], c[2]));
         let (x, y, z) = (axis(0)?, axis(1)?, axis(2)?);
@@ -1226,8 +1229,10 @@ impl SurfaceSheet {
         Some(out)
     }
 
-    /// Every chart and the flat turned over (u → −u): see [`Self::copied`].
+    /// Every chart and the flat turned over (u → −u), with the parts as the turned sheet's own
+    /// build reports them: see [`Self::copied`].
     fn turn_charts_over(&mut self) {
+        use crate::sheet_surface_convert::{PanelMade, RimEdge, SheetPart};
         let f = |p: Vec2| Vec2::new(-p.x, p.y);
         let r = |g: &Region2| crate::sheet_surface_convert::rigid_region(g, f);
         let seg =
@@ -1279,7 +1284,8 @@ impl SurfaceSheet {
         for l in &mut self.loose {
             l.region = r(&l.region);
         }
-        // The flat lies in the first panel's chart: it turns over with it.
+        // The flat lies in the sheet's flat frame, which `copied` turns with `place`: it turns
+        // over with the frame.
         self.regions = self.regions.iter().map(r).collect();
         for b in &mut self.bends {
             b.zone = r(&b.zone);
@@ -1322,6 +1328,41 @@ impl SurfaceSheet {
                 if let Some(d) = drawn {
                     *d = turned(d);
                 }
+            }
+        }
+        // What each face was made for, as the copy's own build reports it. Each bend's anchors
+        // now start at its other end: the bend's end at their origin (`zone.near[0]` in
+        // `FaceNamer::part`), and the rim across its end or past its end there (`rim_edges`), are
+        // the ones that were at the other end. A bend's tabs rank along it from that end, so the
+        // `k`th of `n` is the `n + 1 − k`th. Nothing else a part holds is read from where a bend's
+        // anchors start.
+        let turn_part = |part: &mut SheetPart| {
+            let at_origin = match part {
+                SheetPart::BendEnd { at_origin, .. } => at_origin,
+                SheetPart::Rim { edge: RimEdge::End { at_origin } | RimEdge::Past { at_origin }, .. } => at_origin,
+                _ => return,
+            };
+            *at_origin = !*at_origin;
+        };
+        // How many places along its bend each tab's cap has: its last.
+        let mut tabs: std::collections::HashMap<SheetPart, usize> = std::collections::HashMap::new();
+        for x in self.parts.iter().flatten() {
+            if let (SheetPart::Tab { .. }, Some(k)) = (&x.part, x.place) {
+                let n = tabs.entry(x.part.clone()).or_default();
+                *n = (*n).max(k);
+            }
+        }
+        for x in self.parts.iter_mut().flatten() {
+            if let (Some(k), Some(n)) = (x.place, tabs.get(&x.part)) {
+                x.place = Some((n + 1).saturating_sub(k));
+            }
+            turn_part(&mut x.part);
+        }
+        // A bend's panel made on a rim across or past another bend's end: that rim as the copy's
+        // build reports it.
+        for (_, made) in &mut self.recipes {
+            if let PanelMade::Bend { on: Some(part), .. } = made {
+                turn_part(part);
             }
         }
     }

@@ -7186,7 +7186,9 @@ fn a_mirrored_sheet_copy_is_the_opposite_hand_with_the_mirror_image_flat_pattern
 /// puts it, the material on its left. A flange picked on the copy's back edge stores the name the
 /// model gives that edge (the source's back edge's, as the copy's: `@` the mirror that made it),
 /// lands on the copy's edge, and finds the edge by that name again when the base grows and the
-/// edge moves off the pick.
+/// edge moves off the pick. The copy keeps what its faces were made for as its own build reports
+/// it, each bend's ends counted from where its turned anchors start: through that flange, the
+/// faces at either end of the copy's front flange keep their names.
 #[test]
 fn a_flange_on_a_mirrored_sheet_copy_is_picked_by_its_rims_name_and_lands_on_the_copys_edge() {
     use solidcore_record::Vec3;
@@ -7219,6 +7221,33 @@ fn a_flange_on_a_mirrored_sheet_copy_is_picked_by_its_rims_name_and_lands_on_the
         assert!(named.rims.iter().any(|q| same(&q)), "the copy's own rim {r:?} is not among {:?}", named.rims);
     }
 
+    // The faces at either end of the copy's front flange, by the names the model gives them, each
+    // read on the copy alone (the source's faces at x = 0 lie on the copy's there). The front
+    // flange stands on y = 0 to T = 2.5, its leg from R + T = 5 up to 20 (R = T, the default
+    // rule's), and its bend turns round the axis y = z = 5 from radius R = 2.5 to R + T = 5. At
+    // x = 0 the bend and the leg end square with the plate. At the corner the bend ends at the
+    // tangent line of the copy's left flange (the source's right one), x = -(100 - 5) = -95, and
+    // the leg runs on past it to where the mitre leaves the two legs' inner corners the rule's gap
+    // (T) apart, cut square across: at x = -(97.5 - 2.5/√2) = -95.732 (as
+    // `contour_flange_hem_and_tray` has it). So the leg's end rims hold (0, T/2, 12.5) and
+    // (-95.732, T/2, 12.5), mid-leg, and the bend's ends, at x = 0 and x = -95, the middle of
+    // their quarter ring, radius 3.75 at 45°: y = z = 5 - 3.75/√2 = 2.348.
+    let e = 97.5 - 2.5 / std::f64::consts::SQRT_2;
+    let ring = 5.0 - 3.75 / std::f64::consts::SQRT_2;
+    let ends = [Vec3::new(0.0, 1.25, 12.5), Vec3::new(-e, 1.25, 12.5), Vec3::new(0.0, ring, ring), Vec3::new(-95.0, ring, ring)];
+    let names_at = |s: &Session| {
+        let state = s.model.state();
+        let body = state.body(copy).expect("the copy");
+        ends.map(|p| solidcraft_doc::naming::face_name_at_body(body, p).unwrap_or_default())
+    };
+    let before = names_at(&s);
+    // Four faces, each its own: the leg's two end rims (`end0`, `end1`) and the bend's two ends
+    // (`bend.end0`, `bend.end1`).
+    let [rim_free, rim_corner, bend_free, bend_corner] = &before;
+    assert!([rim_free, rim_corner].iter().all(|n| n.contains(":end") && !n.contains("bend.end")), "{before:?}");
+    assert!([bend_free, bend_corner].iter().all(|n| n.contains("bend.end")), "{before:?}");
+    assert!(rim_free != rim_corner && bend_free != bend_corner, "{before:?}");
+
     // A flange on the copy's back edge (y = 60, x from -100 to 0) is named by the edge's own name,
     // the source's back edge's as the copy's, and lands on the copy: a wall up from y = 60 - 2.5 to
     // 60.
@@ -7230,6 +7259,11 @@ fn a_flange_on_a_mirrored_sheet_copy_is_picked_by_its_rims_name_and_lands_on_the
     assert!(copy_name.len() == 1 && copy_name[0].starts_with(source_name[0].split('|').next().unwrap()), "{copy_name:?} for {source_name:?}");
     run(&mut s, "sheet.flange", json!({"edges": [[-50, 60, 2.5]], "height": 10, "body": copy}));
     assert_eq!(s.doc.features.last().map(|f| f.edge_names.clone()), Some(copy_name));
+    // The flange is the first sheet feature on the copy, its build matched to what the copy's
+    // faces were made for: each face at the front flange's ends keeps its name. (Matched to the
+    // source's parts unturned, the faces at each end took the names of those at the other:
+    // `end0` with `end1`, `bend.end0` with `bend.end1`.)
+    assert_eq!(names_at(&s), before);
     let inside = |s: &Session, name: &str, p: [f64; 3]| {
         s.model
             .state()

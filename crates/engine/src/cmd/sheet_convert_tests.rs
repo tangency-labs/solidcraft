@@ -1302,6 +1302,8 @@ fn a_plates_recesses_are_the_sheets_at_any_depth_from_either_face() {
     engraved_plate(&mut s, 0.6, label_rectangle, &[]);
     convert(&mut s, [45.0, 30.0, 1.0]);
     let d = depths(&mut s);
+    // Picked on the engraved face (the sheet's surface, z T), the pocket runs from T − 0.6 = 0.4
+    // to T = 1.
     assert!(d.len() == 1 && (d[0].0 - 0.4).abs() < 1e-9 && d[0].1 == 1.0, "{d:?}");
     let mut s = Session::default();
     engraved_plate(&mut s, 0.1, label_rectangle, &[]);
