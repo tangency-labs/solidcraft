@@ -1,0 +1,145 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "T",
+    "thickness": "1.0 mm",
+    "active": true,
+    "bend_radius": "1.0 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     100,
+     60
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Base"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "height": 40,
+    "angle": 90,
+    "position": "inside",
+    "edges": [
+     [
+      50,
+      0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Slant"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -10,
+      42
+     ],
+     [
+      110,
+      18
+     ],
+     [
+      110,
+      50
+     ],
+     [
+      -10,
+      50
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Slant",
+    "through_all": true,
+    "direction": "symmetric",
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "height": 20,
+    "angle": 90,
+    "position": "inside",
+    "edges": [
+     [
+      50,
+      1,
+      30
+     ]
+    ]
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  },
+  {
+   "command": "sheet.flat_pattern",
+   "params": {}
+  }
+ ]
+}

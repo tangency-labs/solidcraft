@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#7278",
+  "tangency-labs/solidcraft#2009"
+ ],
+ "what": "a 40 mm wall on a 100 x 60 base, its top cut to a slant from z 40 to z 20, and a 20 mm outside edge flange picked on the slanted edge: the flange runs along that edge, end to end",
+ "source": "analytic",
+ "method": "T = 1, R = 1, K = 0.5. Before the new flange: the 100 x 60 base less its R + T = 2 strip under the wall's bend, 100 x BA of bend (BA = (pi/2)(R + K T) = 2.356194), the wall's leg 100 x (40 - 2), less the cut's triangle 100 x 20 / 2 above the line from z 40 at x 0 to z 20 at x 100: 8835.619449 mm2. The slanted edge is L = sqrt(100^2 + 20^2) = 101.980390 long, from one side edge of the wall to the other. The flange is outside: the bend starts at the edge, so the wall keeps all its material and the new wall's leg is 20 - (R + T): it adds L x (BA + 20 - (R + T)): flat 10911.552108 mm2; with K = 0.5 the folded volume is the flat area times T",
+ "body_count": 1,
+ "volume_mm3": 10911.55210757885,
+ "flat_pattern": {
+  "area_mm2": 10911.55210757885
+ }
+}

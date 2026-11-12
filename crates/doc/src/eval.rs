@@ -7042,7 +7042,11 @@ fn feature_tools_with_constructor(
                 }
             }
             extrude_within_reach([lo + off, hi + off])?;
-            let untrimmed = extent.to.is_none() && extent.from.is_none() && !extent.through_all;
+            // Through all, the tool is the same straight prism, run past the bodies: its interval is
+            // where its caps are, so a cut through a sheet made from surfaces goes into the panel's
+            // outline with the sketch's own curves (a text's letters as drawn), not read back from
+            // the body's.
+            let untrimmed = extent.to.is_none() && extent.from.is_none();
             let mut tools = Vec::new();
             for r in &regions {
                 tools.extend(centered_extrude(&ss.plane, r, lo + off, hi + off, Some(&ss), thin_roles.as_ref(), extent.distance2.is_some())?);
