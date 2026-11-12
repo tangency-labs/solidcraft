@@ -9298,7 +9298,7 @@ fn chamfer_with(
     };
     Ok(match side {
         Some(s) => kernel::chamfer_sides(b, edges, d, s, flip)?,
-        None => match kernel::chamfer(b, edges, d) {
+        None => match kernel::chamfer_carrying_face(b, edges, d) {
             Err(kernel::KernelError::TooLarge(why)) => {
                 let hint = kernel::named_fit(&why);
                 return Err(with_largest_fit(why, "distance", || kernel::chamfer_max_why(b, edges, d, hint)).into());
