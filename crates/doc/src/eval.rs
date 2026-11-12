@@ -6081,6 +6081,12 @@ fn hole_references(f: &Feature) -> &[crate::HoleReference] {
 
 /// Where a cylinder stands: its base, or with reference edges (#6380) at their distances in the
 /// plane of the flat face at its base, square to its axis.
+/// A box's lowest corner from its stored point and sides: the point itself, or the box's centre
+/// when it was placed by its centre (#14487).
+fn box_low_corner(at: Vec3, size: Vec3, centred: bool) -> Vec3 {
+    if centred { at - size * 0.5 } else { at }
+}
+
 fn cylinder_base(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, base: &crate::PointExpr, axis: Vec3) -> Result<Vec3> {
     let at = point(vals, base)?;
     with_references(vals, st, f, at, -axis, true)
@@ -7436,9 +7442,9 @@ fn feature_tools_with_constructor(
             let plane = Plane::from_normal(start, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
             Ok(unnamed(vec![kernel::sweep(&plane, &pipe_region(vals, r, wall)?, &segs)?]))
         }
-        FeatureKind::Box { corner, length, width, height, .. } => {
+        FeatureKind::Box { corner, length, width, height, centred, .. } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
-            let corner = point(vals, corner)?;
+            let corner = box_low_corner(point(vals, corner)?, s, *centred);
             Ok(vec![crate::lineage::box_tool(kernel::box_solid(corner, corner + s)?).with_recipe(tool_recipe(doc, f, vals))])
         }
         FeatureKind::Cylinder { base, axis, radius, height, .. } => Ok(vec![
@@ -9709,7 +9715,7 @@ fn eval_feature(
             }
             apply_traced(doc, st, f, made, *operation, &[])
         }
-        FeatureKind::SplitFace { faces, body, plane, tool, sketch } => {
+        FeatureKind::SplitFace { faces, body, plane, tool, sketch, loops } => {
             let i = body_at(st, body, &crate::plain(faces))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mut picked: Vec<usize> = Vec::new();
@@ -9729,12 +9735,18 @@ fn eval_feature(
                 }
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
-                    // Each curve's exact segments (lines and arcs split by their own plane and cylinder).
-                    let curves: Vec<Vec<solidcore_record::Seg2>> = (0..ss.sketch.curves.len())
-                        .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
-                        .map(|ci| ss.sketch.segs(ci))
-                        .filter(|segs| !segs.is_empty())
-                        .collect();
+                    // Each curve's exact segments (lines and arcs split by their own plane and cylinder),
+                    // or with `loops` the curves joined end to end: a closed chain is not extended.
+                    let curves: Vec<Vec<solidcore_record::Seg2>> = if *loops {
+                        let ids: Vec<String> = ss.sketch.curves.iter().filter(|c| !c.construction).map(|c| c.id.clone()).collect();
+                        surface::curve_chains(ss, &ids)?
+                    } else {
+                        (0..ss.sketch.curves.len())
+                            .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
+                            .map(|ci| ss.sketch.segs(ci))
+                            .filter(|segs| !segs.is_empty())
+                            .collect()
+                    };
                     if curves.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
                     }
@@ -9987,9 +9999,9 @@ fn eval_feature(
             }
             Ok(())
         }
-        FeatureKind::Box { corner, length, width, height, operation } => {
+        FeatureKind::Box { corner, length, width, height, operation, centred } => {
             let s = Vec3::new(val(vals, length, Kind::Length)?, val(vals, width, Kind::Length)?, val(vals, height, Kind::Length)?);
-            let corner = point(vals, corner)?;
+            let corner = box_low_corner(point(vals, corner)?, s, *centred);
             let b = kernel::box_solid(corner, corner + s)?;
             let b = if matches!(operation, Operation::NewBody | Operation::Join) { b.with_box_certificate(f.id)? } else { b };
             let handled = more::sheet_primitive_cut(f, st, &b, more::PrimitivePrism::Box { lo: corner, hi: corner + s }, *operation, false, warning)?;
@@ -11189,6 +11201,7 @@ mod world_placement_cache_tests {
                     width: "3 mm".into(),
                     height: "4 mm".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 Some("AuthoredBox"),
             )
@@ -11225,7 +11238,14 @@ mod world_placement_cache_tests {
         let mut boxes = |comp: u64, operation: Operation, corner: Vec3| {
             let id = doc
                 .add_feature(
-                    FeatureKind::Box { corner: crate::point_expr(corner), length: "10".into(), width: "10".into(), height: "2".into(), operation },
+                    FeatureKind::Box {
+                        corner: crate::point_expr(corner),
+                        length: "10".into(),
+                        width: "10".into(),
+                        height: "2".into(),
+                        operation,
+                        centred: false,
+                    },
                     None,
                 )
                 .unwrap();
@@ -11375,6 +11395,7 @@ mod chain_tests {
                 width: "30".into(),
                 height: "20".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -11421,6 +11442,7 @@ mod chain_tests {
             width: w.into(),
             height: h.into(),
             operation,
+            centred: false,
         };
         doc.add_feature(block(Vec3::new(0.0, 0.0, 20.0), ["40", "20", "20"], Operation::NewBody), None).unwrap();
         doc.add_feature(block(Vec3::new(20.0, 0.0, 0.0), ["20", "20", "20"], Operation::Join), None).unwrap();
@@ -11467,6 +11489,7 @@ mod chain_tests {
                 width: "20".into(),
                 height: "20".into(),
                 operation: Operation::NewBody,
+                centred: false,
             };
             doc.add_feature(solid, None).unwrap();
             doc.add_feature(fillet(Vec3::new(20.0, 10.0, 20.0), "2", true), None).unwrap();

@@ -4915,7 +4915,7 @@
   "ui.pitch": "Emelkedés",
   "ui.placement": "Elhelyezés",
   "ui.placement_handles": "Elhelyezési fogantyúk",
-  "ui.placement_handles_tip": "Fogantyúk egy Támasz, Dudor vagy Pattintós illesztés előnézetén: húzza a jelölőt a modell fölött, a gyűrűjénél fogva forgassa el",
+  "ui.placement_handles_tip": "Egy jelölő az elem modellen való húzásához és, ahol az elem elforgatható, egy gyűrű az elforgatásához.",
   "ui.plane": "Sík",
   "ui.plane_at_angle": "Szögben álló sík",
   "ui.plugins": "Bővítmények",

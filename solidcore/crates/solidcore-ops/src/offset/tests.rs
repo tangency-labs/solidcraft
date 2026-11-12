@@ -394,11 +394,13 @@ fn the_offset_refusals_are_typed() {
 
 /// Each of the kernel's other offset refusals as [`Error::OffsetRefused`] (#14783): its reason,
 /// and its face by the index the call's lookup gives, `None` for a face it does not find or a
-/// refusal that names none. Never the bare status they were before.
+/// refusal that names none. Never the bare status they were before, and never the kernel's text
+/// in place of a reason (#15035): a routine's own failure keeps its kind and the kernel's phrase.
 #[test]
 fn every_other_offset_refusal_says_why_and_where() {
     use crate::OffsetRefusal as R;
     use solidcore::error::offset::{LoopCrossing, OffsetFailure as O, Unsoundness};
+    use solidcore::error::ErrorKind;
     use solidcore::error::Failure;
     use solidcore::FaceId;
     let named = FaceId::from_index(3);
@@ -501,17 +503,78 @@ fn every_other_offset_refusal_says_why_and_where() {
                 what: Unsoundness::VolumeUndecided,
             },
         ),
+        // a routine's own failure, so far only a phrase: its class, whether it is the kernel's
+        // fault, and the kernel's words, as it said them when it arrived as text
+        (
+            O::Failed("the face has no surface"),
+            None,
+            R::Phrase {
+                class: ErrorKind::Failed,
+                defect: false,
+                phrase: "the face has no surface".to_owned(),
+            },
+        ),
+        (
+            O::Missing("the face's surface"),
+            None,
+            R::Phrase {
+                class: ErrorKind::Missing,
+                defect: false,
+                phrase: "the face's surface is missing".to_owned(),
+            },
+        ),
+        (
+            O::InvalidValue("the face has no outer face use"),
+            None,
+            R::Phrase {
+                class: ErrorKind::InvalidInput,
+                defect: false,
+                phrase: "invalid input: the face has no outer face use".to_owned(),
+            },
+        ),
+        (
+            O::Inconsistent("an offset edge has no curve"),
+            None,
+            R::Phrase {
+                class: ErrorKind::Failed,
+                defect: true,
+                phrase: "a consistency check failed: an offset edge has no curve".to_owned(),
+            },
+        ),
     ];
     for (o, face, why) in cases {
         let got = refused(o);
         assert_eq!(got, Error::OffsetRefused { face, why }, "{o:?}");
         assert!(!got.to_string().contains("status"), "{got}");
+        // only a phrase arrives as one: every reason the kernel names is named here too
+        let Error::OffsetRefused { why, .. } = &got else {
+            panic!("not an offset refusal: {o:?}");
+        };
+        assert_eq!(matches!(why, R::Phrase { .. }), o.is_phrase(), "{o:?}");
     }
+    // the face the kernel sets on a failure whose reason names none (a draft's face without a
+    // surface) is the one said
+    let what = "the face has no surface or no outer face use";
+    let at = Failure::new("test", O::InvalidValue(what))
+        .at(solidcore::EntityRef::Face(named))
+        .into_error();
+    assert_eq!(
+        super::status(at, &index),
+        Error::OffsetRefused {
+            face: Some(7),
+            why: R::Phrase {
+                class: ErrorKind::InvalidInput,
+                defect: false,
+                phrase: format!("invalid input: {what}"),
+            },
+        }
+    );
 }
 
-/// A reason ops does not name yet (one the kernel adds later) is said in the kernel's words,
-/// never a bare status: [`super::unnamed`], the arm every unnamed reason takes, keeps the
-/// kernel's own statement, and the error says it.
+/// A reason ops does not name yet (one the kernel adds later) is said by its class and in the
+/// kernel's words, never a bare status: [`super::unnamed`], the arm every unnamed reason takes,
+/// keeps the kernel's class, whether it is a defect, and its own statement, and the error says
+/// it.
 #[test]
 fn an_unnamed_offset_refusal_keeps_the_kernels_words() {
     use solidcore::error::offset::OffsetFailure;
@@ -519,11 +582,28 @@ fn an_unnamed_offset_refusal_keeps_the_kernels_words() {
     let why = super::unnamed(&o);
     assert_eq!(
         why,
-        crate::OffsetRefusal::Other {
-            message: o.to_string()
+        crate::OffsetRefusal::Phrase {
+            class: o.kind(),
+            defect: o.is_defect(),
+            phrase: o.to_string(),
         }
     );
     assert!(!o.to_string().is_empty());
+    // one whose class has an error of its own (a new reason of the walls-touch, fold or
+    // vanishing-edge kind) keeps taking it, as it did before it had a reason
+    assert_eq!(
+        super::by_kind(solidcore::error::ErrorKind::OffsetWallsTouch),
+        Some(Error::WallsTouch)
+    );
+    assert_eq!(
+        super::by_kind(solidcore::error::ErrorKind::OffsetFolds),
+        Some(Error::WallFolds { largest: None })
+    );
+    assert!(matches!(
+        super::by_kind(solidcore::error::ErrorKind::OffsetEdgeVanishes),
+        Some(Error::Unsupported(_))
+    ));
+    assert_eq!(super::by_kind(o.kind()), None);
     let e = Error::OffsetRefused { face: Some(2), why };
     assert_eq!(
         e.to_string(),

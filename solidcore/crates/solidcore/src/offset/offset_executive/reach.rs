@@ -56,6 +56,7 @@ use crate::surface::side::BoxSide;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::{p1 as eu, p3 as eu3};
 use crate::topology::{edge, loopuse, Brep, EdgeuseId, FaceId, FaceuseId};
+use std::collections::BTreeMap;
 
 mod net;
 
@@ -841,7 +842,8 @@ impl Dv {
 }
 
 /// The trace of a plane in a normal section, or of two planes' line: the foot `x0` of the
-/// edge point on it, its squared distance `foot2` from the point, and its unit direction.
+/// edge point on it, its squared distance `foot2` from the point, and its direction `u`,
+/// unit only within rounding (a point `x0 + τ u` is `|τ| |u|` from the foot, not `|τ|`).
 #[derive(Debug, Clone, Copy)]
 struct Trace {
     x0: Dv,
@@ -1107,8 +1109,11 @@ fn plan_of(line: &Trace, q: &AlongLine, quadric: &Implicit, tolerance: f64) -> P
 
 /// The squared distances from the edge point of the meetings `plan` takes (each a bound on
 /// the reach: the meeting taken is the nearest), or `None` where the plan takes none or its
-/// formula is not defined on these enclosures.
+/// formula is not defined on these enclosures. A meeting at `τ` is `foot² + τ² |u|²` from
+/// the point: `|u|²` enclosed as `u·u`, since the direction is unit only within rounding,
+/// and an upper bound taken as if `|u| = 1` could sit an ulp below the distance.
 fn planned(plan: &Plan, line: &Trace, q: &AlongLine) -> Option<Vec<Di>> {
+    let unit = line.u.dot(line.u);
     match plan {
         Plan::Roots {
             positive,
@@ -1119,7 +1124,7 @@ fn planned(plan: &Plan, line: &Trace, q: &AlongLine) -> Option<Vec<Di>> {
                 .iter()
                 .map(|&i| {
                     let tau = taus.get(i).copied().flatten()?;
-                    Some(line.foot2 + tau * tau)
+                    Some(line.foot2 + tau * tau * unit)
                 })
                 .collect()
         }
@@ -1128,7 +1133,7 @@ fn planned(plan: &Plan, line: &Trace, q: &AlongLine) -> Option<Vec<Di>> {
                 return None;
             }
             let tau = (Di::constant(0.0) - q.b) / (Di::constant(2.0) * q.a);
-            Some(vec![line.foot2 + tau * tau])
+            Some(vec![line.foot2 + tau * tau * unit])
         }
         Plan::Cover => {
             if !q.a.excludes_zero() {
@@ -1146,7 +1151,7 @@ fn planned(plan: &Plan, line: &Trace, q: &AlongLine) -> Option<Vec<Di>> {
                 v: Ivl::from(tau),
                 d: Ivl::whole(),
             };
-            Some(vec![line.foot2 + tau * tau])
+            Some(vec![line.foot2 + tau * tau * unit])
         }
         Plan::Apart | Plan::Unknown => None,
     }
@@ -1403,6 +1408,118 @@ fn point_and_tangent(cn: &NurbsCurve, s: Ivl) -> Result<Option<(Dv, Dv)>> {
     Ok(Some((Dv::of(d0, d1), Dv::of(d1, d2))))
 }
 
+/// What an edge's bound in [`local_extension_reach`] is of: a moved face's surface's distance
+/// from the edge (the shift), or how far past the edge a plane and a quadric beside it meet
+/// (the reach), by the faces whose surfaces they are, the pair in id order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum EdgeQuantity {
+    Shift(Option<FaceId>),
+    Meeting(Option<FaceId>, Option<FaceId>),
+}
+
+/// A bound [`edge_interval_maximum`] found, with what it was found on, as bits
+/// ([`bound_inputs`]).
+#[derive(Debug, Clone)]
+struct EdgeBound {
+    on: Vec<u64>,
+    bound: Option<(f64, bool)>,
+}
+
+/// Everything an edge's bound is a function of besides the quantity, as bits: the edge's
+/// interval, the tolerance, the curve's degree, knots and homogeneous control points (each
+/// list after its length), and the bits of the surfaces the quantity is of ([`exact_bits`]).
+/// Two asks with the same bits ask the same function of the same numbers.
+fn bound_inputs(
+    cn: &NurbsCurve,
+    interval: crate::geom::extent1d::Extent1d,
+    tolerance: f64,
+    surfaces: &[u64],
+) -> Vec<u64> {
+    let count = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
+    let mut on = vec![
+        interval.min().to_bits(),
+        interval.max().to_bits(),
+        tolerance.to_bits(),
+        count(cn.p),
+        count(cn.n),
+        count(cn.u.len()),
+    ];
+    on.extend(cn.u.iter().map(|x| x.to_bits()));
+    on.push(count(cn.pw.len()));
+    on.extend(cn.pw.iter().map(|x| x.to_bits()));
+    on.push(count(surfaces.len()));
+    on.extend_from_slice(surfaces);
+    on
+}
+
+/// The bits of a surface's exact class an edge's bound is of ([`EdgeBounds`]): a tag for
+/// its kind, then its data; `None` for a class no edge's bound by pieces is of (a plane as
+/// an [`Implicit`], a torus, a B-spline face), which is then bounded and not recorded.
+fn exact_bits(c: &Exact) -> Option<Vec<u64>> {
+    let v = |p: Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+    let mut bits = Vec::new();
+    match *c {
+        Exact::Plane(t) => {
+            bits.push(0);
+            bits.extend(v(t.point));
+            bits.extend(v(t.normal));
+            bits.extend(v(t.raw));
+        }
+        Exact::Quadric(Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        }) => {
+            bits.push(1);
+            bits.extend(v(origin));
+            bits.extend(v(axis));
+            bits.extend([radius.to_bits(), tan_angle.to_bits()]);
+        }
+        Exact::Quadric(Implicit::Sphere { centre, radius }) => {
+            bits.push(2);
+            bits.extend(v(centre));
+            bits.push(radius.to_bits());
+        }
+        Exact::Quadric(Implicit::Plane { .. } | Implicit::Torus { .. }) | Exact::Net(_) => {
+            return None;
+        }
+    }
+    Some(bits)
+}
+
+/// The edge bounds one local operation has found ([`local_extension_reach`]), by edge and
+/// quantity: an edge is met from both its faces, and the second takes the first's bound
+/// rather than bounding the edge again, the same function of the same curve, so the same
+/// bits. Kept by the operation (the offset executive, from its local surfaces being set
+/// until its relations are cleared), never across operations.
+#[derive(Debug, Clone, Default)]
+pub struct EdgeBounds(BTreeMap<(crate::topology::EdgeId, EdgeQuantity), EdgeBound>);
+
+impl EdgeBounds {
+    /// Forgets every bound.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
+#[cfg(test)]
+impl EdgeBounds {
+    /// How many bounds are held.
+    pub(super) fn held(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Holds a bound for edge `e` (its shift by no face, on no inputs).
+    pub(super) fn hold(&mut self, e: crate::topology::EdgeId) {
+        let bound = EdgeBound {
+            on: Vec::new(),
+            bound: None,
+        };
+        self.0.insert((e, EdgeQuantity::Shift(None)), bound);
+    }
+}
+
 /// A piece of an edge's parameters `[t0, t1]` with a certified upper bound on it, ordered by
 /// that bound (the most is taken first in [`edge_interval_maximum`]); `halvable` false
 /// where a halving left a half undecided, so the piece keeps its own bound.
@@ -1469,21 +1586,52 @@ fn spans(cn: &NurbsCurve, interval: crate::geom::extent1d::Extent1d) -> Vec<(f64
 /// spend them on the spans taken first and leave a later one undecided, refusing the whole
 /// edge, though every piece was bounded or apart within the caps. Taking the largest bound
 /// first spends them where the answer is.
+///
+/// Each edge is met from both its faces, and the second asks for the same bound: `bounds`
+/// holds what the local operation has found ([`EdgeBounds`]), and a bound is taken from it
+/// for the same quantity `of` where everything it is a function of has the same bits
+/// ([`bound_inputs`]: the curve, interval, tolerance, and `surfaces`, the bits of the
+/// surfaces `f` is of). With no `surfaces` the edge is bounded and nothing recorded.
 fn edge_interval_maximum(
     b: &Brep,
     e: crate::topology::EdgeId,
     f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> PieceBound,
     tolerance: f64,
+    bounds: &mut EdgeBounds,
+    of: EdgeQuantity,
+    surfaces: Option<&[u64]>,
 ) -> Result<Option<(f64, bool)>> {
     let Some(cn) = edge_nurbs(b, e)? else {
         return Ok(None);
     };
-    let mut undecided = spans(&cn, edge::interval(b, e)?);
+    let interval = edge::interval(b, e)?;
+    let Some(surfaces) = surfaces else {
+        return interval_maximum(&cn, interval, f, tolerance);
+    };
+    let on = bound_inputs(&cn, interval, tolerance, surfaces);
+    if let Some(found) = bounds.0.get(&(e, of)) {
+        if found.on == on {
+            return Ok(found.bound);
+        }
+    }
+    let bound = interval_maximum(&cn, interval, f, tolerance)?;
+    bounds.0.insert((e, of), EdgeBound { on, bound });
+    Ok(bound)
+}
+
+/// [`edge_interval_maximum`]'s bound over `interval` of the curve `cn`.
+fn interval_maximum(
+    cn: &NurbsCurve,
+    interval: crate::geom::extent1d::Extent1d,
+    f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> PieceBound,
+    tolerance: f64,
+) -> Result<Option<(f64, bool)>> {
+    let mut undecided = spans(cn, interval);
     // the bound on a piece; a bound that is not finite bounds nothing
     let bound_of = |t0: f64, t1: f64| -> Result<PieceBound> {
         let tm = 0.5 * (t0 + t1);
-        let over = point_and_tangent(&cn, Ivl::new(t0, t1))?;
-        let mid = point_and_tangent(&cn, Ivl::from(tm))?;
+        let over = point_and_tangent(cn, Ivl::new(t0, t1))?;
+        let mid = point_and_tangent(cn, Ivl::from(tm))?;
         Ok(match (over, mid) {
             (Some(over), Some(mid)) => match f(over, mid, Ivl::checked(t0 - tm, t1 - tm)) {
                 PieceBound::Value { upper, .. } if !upper.is_finite() => PieceBound::Unknown,
@@ -1688,18 +1836,14 @@ fn straight_edges_between(
 }
 
 /// Where the line of a kept straight edge ([`StraightEdge`]) meets the plane `(o, ν)`,
-/// from the vertex `p`: the line's point `x0 + τ u` (`x0` the foot of `p`, `u` the unit
-/// direction, `τ = (o − x0)·ν / (u·ν)`) at `√(|x0 − p|² + τ²)`, raised by the curve's
-/// distance from the line over the sine of their angle (`dev |ν| / |u·ν|`); nowhere near
-/// where the line is within `tangent_sine` of parallel to the plane (as two planes'
-/// line, [`planes_line`]); not decided where the enclosures do not settle it.
+/// from the vertex `p`: [`line_meets_plane`] on the line from the edge's first control
+/// point along its unit direction (unit within rounding).
 fn straight_edge_meets_plane(
     p: Vec3,
     line: StraightEdge,
     plane: Tangent,
     tangent_sine: f64,
 ) -> CornerMeeting {
-    let pv = Dv::constant(p);
     let a = Dv::constant(line.a);
     let d = Dv::constant(line.b).sub(a);
     let dd = d.dot(d);
@@ -1707,6 +1851,24 @@ fn straight_edge_meets_plane(
         return CornerMeeting::Uncertified;
     }
     let u = d.scale(Di::constant(1.0) / dd.sqrt());
+    line_meets_plane(Dv::constant(p), a, u, line.dev, plane, tangent_sine)
+}
+
+/// Where the line `a + s u` meets the plane `(o, ν)`, from `p`: its point `M = x0 + τ u`
+/// (`x0 = a + u (u·(p − a))`, the foot of `p` where `|u| = 1`, a point of the line in any
+/// case; `τ = (o − x0)·ν / (u·ν)`) at `|M − p|`, enclosed as it is, so it holds whatever
+/// `|u|` (the direction is unit only within rounding), raised by the curve's distance `dev`
+/// from the line over the sine of their angle, `|u·ν| / (|u| |ν|)`; nowhere near where the
+/// line is within `tangent_sine` of parallel to the plane (as two planes' line,
+/// [`planes_line`]); not decided where the enclosures do not settle it.
+fn line_meets_plane(
+    pv: Dv,
+    a: Dv,
+    u: Dv,
+    dev: f64,
+    plane: Tangent,
+    tangent_sine: f64,
+) -> CornerMeeting {
     let x0 = a.add(u.scale(pv.sub(a).dot(u)));
     let nu = Dv::constant(plane.raw);
     let nn = nu.dot(nu).sqrt();
@@ -1718,9 +1880,9 @@ fn straight_edge_meets_plane(
         return CornerMeeting::Nowhere;
     }
     let tau = Dv::constant(plane.point).sub(x0).dot(nu) / un;
-    let foot = x0.sub(pv);
-    let far = (foot.dot(foot) + tau * tau).v.hi.max(0.0);
-    let slack = (Ivl::from(line.dev) * nn.v / Ivl::from(un.v.mig())).hi;
+    let to = x0.add(u.scale(tau)).sub(pv);
+    let far = to.dot(to).v.hi.max(0.0);
+    let slack = (Ivl::from(dev) * nn.v * u.dot(u).v.sqrt() / Ivl::from(un.v.mig())).hi;
     let reach = round_up(round_up(sqrt(far)) + slack);
     if reach.is_finite() {
         CornerMeeting::Within(reach)
@@ -1869,6 +2031,9 @@ fn kept_straight_edge_corner(
 /// left undecided past the caps, has no certified bound here:
 /// [`OffsetFailure::ReachUncertified`].
 ///
+/// An edge's bound by pieces is taken from `bounds` where the operation already found it from
+/// the edge's other face ([`EdgeBounds`]), and recorded there otherwise.
+///
 /// # Errors
 ///
 /// [`OffsetFailure::ReachUncertified`] as above; [`SolidError::InvalidInput`] for a
@@ -1882,6 +2047,7 @@ pub fn local_extension_reach(
     moved: &[(FaceId, &Surface)],
     kept: &[(FaceId, &Surface)],
     tangency_tol_radians: f64,
+    bounds: &mut EdgeBounds,
 ) -> Result<Option<LocalReach>> {
     let tangent_sine = tangency_tol_radians.abs().min(crate::math::PI / 2.0).sin();
     let tolerance = b.tolerance();
@@ -1966,26 +2132,33 @@ pub fn local_extension_reach(
             let hull = |f: &dyn Fn(Vec3) -> f64| -> Result<f64> {
                 edge_maximum(b, e, f, tolerance)?.ok_or_else(uncertified)
             };
-            let pieces =
-                |f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> PieceBound| -> Result<(f64, bool)> {
-                    edge_interval_maximum(b, e, f, tolerance)?.ok_or_else(uncertified)
-                };
-            // a moved net's move is bounded by the meetings on it, below
-            let shift_of = |c: &Exact| -> Result<Option<f64>> {
-                match c {
-                    Exact::Plane(t) => hull(&|x| plane_distance(x, *t)).map(Some),
-                    Exact::Quadric(q) => {
-                        let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
-                            quadric_distance_piece(over.0, mid.0, dt, q)
-                        };
-                        Ok(Some(pieces(&piece)?.0))
-                    }
-                    Exact::Net(_) => Ok(None),
-                }
+            let pieces = |f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> PieceBound,
+                          bounds: &mut EdgeBounds,
+                          of: EdgeQuantity,
+                          surfaces: Option<&[u64]>|
+             -> Result<(f64, bool)> {
+                edge_interval_maximum(b, e, f, tolerance, bounds, of, surfaces)?
+                    .ok_or_else(uncertified)
             };
+            // a moved net's move is bounded by the meetings on it, below
+            let shift_of =
+                |c: &Exact, face: Option<FaceId>, bounds: &mut EdgeBounds| -> Result<Option<f64>> {
+                    match c {
+                        Exact::Plane(t) => hull(&|x| plane_distance(x, *t)).map(Some),
+                        Exact::Quadric(q) => {
+                            let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
+                                quadric_distance_piece(over.0, mid.0, dt, q)
+                            };
+                            let surfaces = exact_bits(c);
+                            let of = EdgeQuantity::Shift(face);
+                            Ok(Some(pieces(&piece, bounds, of, surfaces.as_deref())?.0))
+                        }
+                        Exact::Net(_) => Ok(None),
+                    }
+                };
             let mut net_moved = false;
             if own_moved {
-                match shift_of(&own)? {
+                match shift_of(&own, own_face, bounds)? {
                     Some(shift) => found.shift = found.shift.max(shift),
                     None => net_moved = true,
                 }
@@ -1998,7 +2171,7 @@ pub fn local_extension_reach(
             }
             let other = class_of(b, other_face)?;
             if other_moved {
-                match shift_of(&other)? {
+                match shift_of(&other, other_face, bounds)? {
                     Some(shift) => found.shift = found.shift.max(shift),
                     None => net_moved = true,
                 }
@@ -2019,14 +2192,26 @@ pub fn local_extension_reach(
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
                         plane_quadric_piece(over, mid, dt, plane, q, tolerance)
                     };
-                    pieces(&piece)?
+                    let pair =
+                        EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
+                    // the plane's, then the quadric's: the same from either face
+                    let surfaces = exact_bits(&Exact::Plane(plane))
+                        .zip(exact_bits(&Exact::Quadric(*q)))
+                        .map(|(mut a, c)| {
+                            a.extend(c);
+                            a
+                        });
+                    pieces(&piece, bounds, pair, surfaces.as_deref())?
                 }
                 (&Exact::Plane(plane), Exact::Net(n)) | (Exact::Net(n), &Exact::Plane(plane)) => {
                     let guess = std::cell::Cell::new(None);
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
                         plane_net_piece(over, mid, dt, plane, n, &guess)
                     };
-                    pieces(&piece)?
+                    // a net's bound is not recorded: it carries no bits to key it on
+                    let pair =
+                        EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
+                    pieces(&piece, bounds, pair, None)?
                 }
                 (Exact::Quadric(_) | Exact::Net(_), Exact::Quadric(_) | Exact::Net(_)) => {
                     return Err(uncertified())
@@ -2469,9 +2654,10 @@ mod tests {
             } else {
                 box_face(&brep, n).1
             };
-            let found = local_extension_reach(&k, &brep, fu, &moved, &[], 1e-3)
-                .unwrap()
-                .unwrap();
+            let found =
+                local_extension_reach(&k, &brep, fu, &moved, &[], 1e-3, &mut EdgeBounds::default())
+                    .unwrap()
+                    .unwrap();
             (found.reach, found.shift)
         };
         [at(Vec3::Z), at(-Vec3::Y), at(-Vec3::X), at(-Vec3::Z)]
@@ -2542,9 +2728,17 @@ mod tests {
             n,
         ));
         let moved = [(moved_face, &plane)];
-        let found = local_extension_reach(&k, &brep, across, &moved, &[], 1e-3)
-            .unwrap()
-            .unwrap();
+        let found = local_extension_reach(
+            &k,
+            &brep,
+            across,
+            &moved,
+            &[],
+            1e-3,
+            &mut EdgeBounds::default(),
+        )
+        .unwrap()
+        .unwrap();
         let (reach, shift) = (found.reach, found.shift);
         assert!((reach - delta * sqrt(1.5)).abs() < 1e-12, "{reach}");
         assert!((shift - delta).abs() < 1e-12, "{shift}");
@@ -2557,7 +2751,9 @@ mod tests {
         let mut kk = Kernel::default();
         let (brep, faceuses) = box_faceuses(&mut kk, false);
         for (_, fu) in faceuses {
-            let found = local_extension_reach(&k, &brep, fu, &[], &[], 1e-3).unwrap();
+            let found =
+                local_extension_reach(&k, &brep, fu, &[], &[], 1e-3, &mut EdgeBounds::default())
+                    .unwrap();
             assert_eq!(found, Some(LocalReach::default()));
         }
     }
@@ -2613,7 +2809,8 @@ mod tests {
         kept: &[(FaceId, &Surface)],
     ) -> Option<OffsetFailure> {
         let fu = faceuse_of(b, f);
-        let e = local_extension_reach(k, b, fu, moved, kept, 1e-3).unwrap_err();
+        let e = local_extension_reach(k, b, fu, moved, kept, 1e-3, &mut EdgeBounds::default())
+            .unwrap_err();
         match e.failure().map(|f| &f.reason) {
             Some(crate::error::Reason::Offset(why)) => Some(*why),
             _ => None,
@@ -2622,9 +2819,17 @@ mod tests {
 
     /// Each face's reach with `moved`.
     fn reach_of(k: &Kernel, b: &Brep, f: FaceId, moved: &[(FaceId, &Surface)]) -> LocalReach {
-        local_extension_reach(k, b, faceuse_of(b, f), moved, &[], 1e-3)
-            .unwrap()
-            .unwrap()
+        local_extension_reach(
+            k,
+            b,
+            faceuse_of(b, f),
+            moved,
+            &[],
+            1e-3,
+            &mut EdgeBounds::default(),
+        )
+        .unwrap()
+        .unwrap()
     }
 
     /// `x` is a certified upper bound of `want` within the B-rep's tolerance.
@@ -2734,11 +2939,102 @@ mod tests {
         };
         let piece =
             |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| quadric_distance_piece(over.0, mid.0, dt, &q);
-        let (at_seam, apart) = edge_interval_maximum(&b, seam, &piece, b.tolerance())
-            .unwrap()
-            .unwrap();
+        let (at_seam, apart) = edge_interval_maximum(
+            &b,
+            seam,
+            &piece,
+            b.tolerance(),
+            &mut EdgeBounds::default(),
+            EdgeQuantity::Shift(None),
+            None,
+        )
+        .unwrap()
+        .unwrap();
         assert!(bounds(&b, at_seam, 1.0), "{at_seam}");
         assert!(!apart);
+    }
+
+    /// An edge's bound is taken from [`EdgeBounds`] only for the same quantity on the same
+    /// inputs: the seam of a cylinder r 1 against the cylinder r 2, its pieces counted. The
+    /// second ask gives the first's bits and bounds no piece; another surface, tolerance or
+    /// quantity bounds the edge again, as does an ask after a clear or with no surfaces.
+    #[test]
+    fn an_edge_bound_is_reused_only_on_the_same_inputs() {
+        let mut k = Kernel::default();
+        let (b, side, _, seam, wider) = seamed_cylinder(&mut k, 2.0);
+        let c = exact_class(&k, &wider).unwrap().unwrap();
+        let Exact::Quadric(q) = c else {
+            panic!("the cylinder r 2 is a quadric");
+        };
+        let calls = std::cell::Cell::new(0_usize);
+        let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
+            calls.set(calls.get() + 1);
+            quadric_distance_piece(over.0, mid.0, dt, &q)
+        };
+        let ask = |bounds: &mut EdgeBounds, tol: f64, of: EdgeQuantity, on: Option<&[u64]>| {
+            let before = calls.get();
+            let found = edge_interval_maximum(&b, seam, &piece, tol, bounds, of, on)
+                .unwrap()
+                .unwrap();
+            (found.0.to_bits(), found.1, calls.get() - before)
+        };
+        let surfaces = exact_bits(&c).unwrap();
+        let mut other = surfaces.clone();
+        *other.last_mut().unwrap() ^= 1;
+        let (tol, shift) = (b.tolerance(), EdgeQuantity::Shift(Some(side)));
+        let mut held = EdgeBounds::default();
+        let first = ask(&mut held, tol, shift, Some(&surfaces));
+        assert!(first.2 > 0, "{first:?}");
+        assert_eq!(
+            ask(&mut held, tol, shift, Some(&surfaces)),
+            (first.0, first.1, 0)
+        );
+        assert!(ask(&mut held, tol, shift, Some(&other)).2 > 0);
+        assert_eq!(ask(&mut held, tol, shift, Some(&other)).2, 0);
+        assert!(ask(&mut held, 2.0 * tol, shift, Some(&other)).2 > 0);
+        let none = EdgeQuantity::Shift(None);
+        assert!(ask(&mut held, tol, none, Some(&surfaces)).2 > 0);
+        assert_eq!(
+            ask(&mut held, tol, none, Some(&surfaces)),
+            (first.0, first.1, 0)
+        );
+        held.clear();
+        assert_eq!(held.held(), 0);
+        assert_eq!(ask(&mut held, tol, none, Some(&surfaces)), first);
+        for _ in 0..2 {
+            assert_eq!(ask(&mut EdgeBounds::default(), tol, shift, None), first);
+        }
+        let mut unrecorded = EdgeBounds::default();
+        assert_eq!(ask(&mut unrecorded, tol, shift, None), first);
+        assert_eq!(unrecorded.held(), 0);
+    }
+
+    /// What a bound is recorded on ([`bound_inputs`]) tells curves apart by their bits: a
+    /// line from 0 to 1 against the same line with its first knot −0 (equal as numbers), a
+    /// control point moved, or a weight changed; the same curve gives the same bits.
+    #[test]
+    fn a_changed_curve_is_another_bound() {
+        let line = |u0: f64, x1: f64, w1: f64| NurbsCurve {
+            p: 1,
+            n: 2,
+            u: vec![u0, 0.0, 1.0, 1.0],
+            pw: vec![0.0, 0.0, 0.0, 1.0, x1 * w1, 0.0, 0.0, w1],
+        };
+        let interval = crate::geom::extent1d::Extent1d::from_raw(0.0, 1.0);
+        let on = |c: &NurbsCurve| bound_inputs(c, interval, 1e-5, &[7]);
+        let base = on(&line(0.0, 1.0, 1.0));
+        assert_eq!(on(&line(0.0, 1.0, 1.0)), base);
+        for other in [
+            line(-0.0, 1.0, 1.0),
+            line(0.0, 1.5, 1.0),
+            line(0.0, 1.0, 2.0),
+        ] {
+            assert_ne!(on(&other), base, "{other:?}");
+        }
+        assert_ne!(
+            bound_inputs(&line(0.0, 1.0, 1.0), interval, 1e-5, &[8]),
+            base
+        );
     }
 
     /// The side of a cylinder r 1 given the coaxial cylinder one rounding wider: every
@@ -2753,9 +3049,17 @@ mod tests {
         let (b, side, caps, _, wider) = seamed_cylinder(&mut k, r);
         let moved = [(side, &wider)];
         for f in [side, caps[0], caps[1]] {
-            let found = local_extension_reach(&k, &b, faceuse_of(&b, f), &moved, &[], 1e-3)
-                .unwrap()
-                .unwrap();
+            let found = local_extension_reach(
+                &k,
+                &b,
+                faceuse_of(&b, f),
+                &moved,
+                &[],
+                1e-3,
+                &mut EdgeBounds::default(),
+            )
+            .unwrap()
+            .unwrap();
             assert!(found.reach >= 0.0 && found.reach < 1e-3, "{f:?}: {found:?}");
             assert!(bounds(&b, found.shift, 0.0), "{f:?}: {found:?}");
             assert!(found.apart.is_empty(), "{f:?}: {found:?}");
@@ -2806,9 +3110,10 @@ mod tests {
         let slack = b.tolerance() + 1e-9;
         for f in [bottom, round] {
             let fu = faceuse_of(&b, f);
-            let found = local_extension_reach(&k, &b, fu, &moved, &[], 1e-3)
-                .unwrap()
-                .unwrap();
+            let found =
+                local_extension_reach(&k, &b, fu, &moved, &[], 1e-3, &mut EdgeBounds::default())
+                    .unwrap()
+                    .unwrap();
             for (name, x) in [("reach", found.reach), ("move", found.shift)] {
                 assert!(
                     x >= want - 1e-9 && x <= want + slack,
@@ -2818,9 +3123,10 @@ mod tests {
             assert!(found.apart.is_empty());
         }
         let fu = faceuse_of(&b, side);
-        let found = local_extension_reach(&k, &b, fu, &moved, &[], 1e-3)
-            .unwrap()
-            .unwrap();
+        let found =
+            local_extension_reach(&k, &b, fu, &moved, &[], 1e-3, &mut EdgeBounds::default())
+                .unwrap()
+                .unwrap();
         assert!(found.reach <= slack && found.shift <= slack, "{found:?}");
     }
 
@@ -2988,9 +3294,17 @@ mod tests {
         ));
         let moved = [(piece, &raised)];
         let at = |f: FaceId| {
-            local_extension_reach(&k, &b, faceuse_of(&b, f), &moved, &[], 1e-3)
-                .unwrap()
-                .unwrap()
+            local_extension_reach(
+                &k,
+                &b,
+                faceuse_of(&b, f),
+                &moved,
+                &[],
+                1e-3,
+                &mut EdgeBounds::default(),
+            )
+            .unwrap()
+            .unwrap()
         };
         let stays = at(twin);
         assert_eq!(stays.apart.len(), 1, "{stays:?}");
@@ -3009,7 +3323,9 @@ mod tests {
         let (b, _, _, _) = rounded_cube(&mut k);
         for f in bp1::faces(&b, None).unwrap() {
             let fu = faceuse_of(&b, f);
-            let found = local_extension_reach(&k, &b, fu, &[], &[], 1e-3).unwrap();
+            let found =
+                local_extension_reach(&k, &b, fu, &[], &[], 1e-3, &mut EdgeBounds::default())
+                    .unwrap();
             assert_eq!(found, Some(LocalReach::default()));
         }
     }
@@ -3041,9 +3357,17 @@ mod tests {
         let moved = [(side, &into)];
         let kept = [(round, &net)];
         for f in [side, round, bottom] {
-            let found = local_extension_reach(&k, &b, faceuse_of(&b, f), &moved, &kept, 1e-3)
-                .unwrap()
-                .unwrap();
+            let found = local_extension_reach(
+                &k,
+                &b,
+                faceuse_of(&b, f),
+                &moved,
+                &kept,
+                1e-3,
+                &mut EdgeBounds::default(),
+            )
+            .unwrap()
+            .unwrap();
             assert!(bounds(&b, found.reach, 1.0), "{f:?}: {found:?}");
             assert!(bounds(&b, found.shift, 0.1), "{f:?}: {found:?}");
             assert!(found.apart.is_empty(), "{f:?}: {found:?}");
@@ -3081,9 +3405,17 @@ mod tests {
         let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
             plane_net_piece(over, mid, dt, into, &net, &guess)
         };
-        let (reach, apart) = edge_interval_maximum(&b, tangent, &piece, b.tolerance())
-            .unwrap()
-            .unwrap();
+        let (reach, apart) = edge_interval_maximum(
+            &b,
+            tangent,
+            &piece,
+            b.tolerance(),
+            &mut EdgeBounds::default(),
+            EdgeQuantity::Shift(None),
+            None,
+        )
+        .unwrap()
+        .unwrap();
         assert!(bounds(&b, reach, 1.0) && !apart, "{reach}");
     }
 
@@ -3108,10 +3440,18 @@ mod tests {
         let moved = [(bottom, &tilted)];
         let kept = [(round, &net)];
         let reach = |f: FaceId| {
-            local_extension_reach(&k, &b, faceuse_of(&b, f), &moved, &kept, 1e-3)
-                .unwrap()
-                .unwrap()
-                .reach
+            local_extension_reach(
+                &k,
+                &b,
+                faceuse_of(&b, f),
+                &moved,
+                &kept,
+                1e-3,
+                &mut EdgeBounds::default(),
+            )
+            .unwrap()
+            .unwrap()
+            .reach
         };
         let at_round = reach(round);
         assert!(bounds(&b, at_round, 0.45), "{at_round}");
@@ -3151,9 +3491,17 @@ mod tests {
         let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
             plane_net_piece(over, mid, dt, tilted, &net, &guess)
         };
-        let (reach, apart) = edge_interval_maximum(&b, arc, &piece, b.tolerance())
-            .unwrap()
-            .unwrap();
+        let (reach, apart) = edge_interval_maximum(
+            &b,
+            arc,
+            &piece,
+            b.tolerance(),
+            &mut EdgeBounds::default(),
+            EdgeQuantity::Shift(None),
+            None,
+        )
+        .unwrap()
+        .unwrap();
         assert!(bounds(&b, reach, 0.45) && !apart, "{reach}");
     }
 
@@ -3185,5 +3533,67 @@ mod tests {
         let xs = |v: &[[f64; 4]]| v.iter().map(|p| p[0]).collect::<Vec<_>>();
         assert_eq!(xs(&left), vec![0.0, 0.5, 1.5]);
         assert_eq!(xs(&right), vec![1.5, 2.5, 4.0]);
+    }
+
+    /// A meeting's distance takes the trace direction's length: the unit sphere and the line
+    /// `x0 + τ u` through its centre with `u = (2, 0, 0)` (far from unit, to show the
+    /// factor; a trace's own `u` is unit within rounding), its edge point `f` off the centre.
+    /// The roots `τ = ±½` are the points `(±1, 0, 0)`, `√(f² + 1)` from the edge point; as
+    /// if `|u| = 1` the bound would be `√(f² + ¼)`, below it.
+    #[test]
+    fn a_meeting_is_as_far_as_its_point_whatever_the_direction_length() {
+        let sphere = Implicit::Sphere {
+            centre: Vec3::new(0.0, 0.0, 0.0),
+            radius: 1.0,
+        };
+        for f in [0.0, 0.5, 3.0] {
+            let line = Trace {
+                x0: Dv::constant(Vec3::new(0.0, 0.0, 0.0)),
+                foot2: Di::constant(f * f),
+                u: Dv::constant(Vec3::new(2.0, 0.0, 0.0)),
+            };
+            let q = along_line(&sphere, &line).unwrap();
+            let plan = plan_of(&line, &q, &sphere, 1e-5);
+            assert!(matches!(plan, Plan::Roots { .. }), "{plan:?}");
+            let found = planned(&plan, &line, &q).unwrap();
+            assert_eq!(found.len(), 2, "{found:?}");
+            let exact = f * f + 1.0;
+            for g in found {
+                assert!(g.v.lo <= exact && exact <= g.v.hi, "{f}: {g:?} {exact}");
+            }
+        }
+    }
+
+    /// A line's meeting with a plane is as far as its point, whatever the direction's
+    /// length: the line through the origin along `u = (2, 0, 0)` (far from unit, to show
+    /// it; an edge's own `u` is unit within rounding) meets the plane `x = 3` at `(3, 0, 0)`,
+    /// `√5` from `p = (1, 1, 0)`; `x0 = (4, 0, 0)` is a point of the line but not `p`'s foot.
+    /// A curve `dev` off the line, which is square to the plane, adds `dev` (the sine is
+    /// `|u·ν| / (|u| |ν|)` = 1), not `dev / 2`.
+    #[test]
+    fn a_line_meets_a_plane_as_far_as_its_point_whatever_the_direction_length() {
+        let plane = Tangent {
+            point: Vec3::new(3.0, 0.0, 0.0),
+            normal: Vec3::new(1.0, 0.0, 0.0),
+            raw: Vec3::new(1.0, 0.0, 0.0),
+        };
+        for dev in [0.0, 0.1] {
+            let met = line_meets_plane(
+                Dv::constant(Vec3::new(1.0, 1.0, 0.0)),
+                Dv::constant(Vec3::new(0.0, 0.0, 0.0)),
+                Dv::constant(Vec3::new(2.0, 0.0, 0.0)),
+                dev,
+                plane,
+                1e-3,
+            );
+            let exact = 5.0_f64.sqrt() + dev;
+            let CornerMeeting::Within(reach) = met else {
+                panic!("{dev}: {met:?}");
+            };
+            assert!(
+                reach >= exact && reach <= exact * (1.0 + 1e-12),
+                "{dev}: {reach} {exact}"
+            );
+        }
     }
 }

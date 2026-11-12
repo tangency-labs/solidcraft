@@ -4916,7 +4916,7 @@
   "ui.pitch": "Stigning",
   "ui.placement": "Placering",
   "ui.placement_handles": "Placeringshandtag",
-  "ui.placement_handles_tip": "Handtag på förhandsvisningen av ett stöd, nav eller snäppfäste: dra markören för att flytta det över modellen, vrid det med dess ring",
+  "ui.placement_handles_tip": "En markör för att dra funktionen över modellen och, där funktionen kan vridas, en ring för att vrida den.",
   "ui.plane": "Plan",
   "ui.plane_at_angle": "Plan i vinkel",
   "ui.plugins": "Insticksmoduler",

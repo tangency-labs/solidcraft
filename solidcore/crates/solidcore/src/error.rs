@@ -432,6 +432,20 @@ pub enum SolidError {
         distance: Option<f64>,
     },
 
+    /// A blend face's definition, read from a record, whose net it does not certify: the net is
+    /// not proved within the definition's bound `eps` of S (docs/definitions-and-certificates.md
+    /// §4.5), so the face is refused, never kept with a larger bound. Not upstream; its
+    /// [`SolidError::sm_status`] is `None`.
+    #[error("{operation}: the definition of {face} does not certify its net within {eps}")]
+    DefinitionNotCertified {
+        /// Operation that read the definition.
+        operation: &'static str,
+        /// The face.
+        face: EntityRef,
+        /// The bound ε the definition states.
+        eps: f64,
+    },
+
     /// The operation needs an upstream routine whose unit is not ported yet (a
     /// plan back-edge). Returned instead of panicking or faking a result; every
     /// site carries a `// UNPORTED(<unit id>): <C++ symbol>` comment so the
@@ -1133,6 +1147,7 @@ impl SolidError {
             | Self::FaceTrimsUnavailable { .. }
             | Self::UnsureRegion { .. }
             | Self::ExtendRefused { .. }
+            | Self::DefinitionNotCertified { .. }
             | Self::Unported { .. } => None,
         }
     }
@@ -1224,7 +1239,9 @@ impl SolidError {
     #[must_use]
     pub fn kind(&self) -> ErrorKind {
         match self {
-            Self::InvalidInput { .. } => ErrorKind::InvalidInput,
+            Self::InvalidInput { .. } | Self::DefinitionNotCertified { .. } => {
+                ErrorKind::InvalidInput
+            }
             Self::NotFound { .. } => ErrorKind::NotFound,
             Self::Degenerate { .. } => ErrorKind::Degenerate,
             Self::NotConverged { .. } => ErrorKind::NotConverged,
@@ -1350,6 +1367,7 @@ impl SolidError {
             | Self::BlendRefused { operation, .. }
             | Self::RoundRefused { operation, .. }
             | Self::ExtendRefused { operation, .. }
+            | Self::DefinitionNotCertified { operation, .. }
             | Self::PreparationRequired { operation }
             | Self::FaceTrimsUnavailable { operation, .. }
             | Self::Cancelled { operation } => operation,
@@ -1362,9 +1380,9 @@ impl SolidError {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match self {
-            Self::NotFound { entity, .. } | Self::FaceTrimsUnavailable { entity, .. } => {
-                Some(*entity)
-            }
+            Self::NotFound { entity, .. }
+            | Self::FaceTrimsUnavailable { entity, .. }
+            | Self::DefinitionNotCertified { face: entity, .. } => Some(*entity),
             Self::UnsureRegion { region, .. } => Some(EntityRef::Region(*region)),
             Self::Degenerate { entity, .. }
             | Self::Upstream { entity, .. }

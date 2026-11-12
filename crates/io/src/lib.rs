@@ -1046,6 +1046,7 @@ mod tests {
                 width: "20".into(),
                 height: "30".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -1434,6 +1435,7 @@ mod tests {
                 width: "30".into(),
                 height: "10".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -1557,6 +1559,7 @@ mod tests {
                 width: "30".into(),
                 height: "10".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )

@@ -974,9 +974,11 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
 /// directions looks longer on screen (`to`: sketch to screen). Seen nearly edge-on, one of them
 /// points at the eye and looks a pixel long or less: sized from it alone, a dimension's text and
 /// gaps grew so large that its lines ran across the window (#14826). Face-on both are the same.
+/// A direction that does not project leaves the other to size it; with neither, there is no size.
 pub(crate) fn mm_per_pixel(to: impl Fn(Vec2) -> Option<Pos2>, at: Vec2) -> Option<f64> {
-    let (a, x, y) = (to(at)?, to(at + Vec2::X)?, to(at + Vec2::Y)?);
-    let px = 1.0 / f64::from(a.distance(x).max(a.distance(y))).max(1e-9);
+    let a = to(at)?;
+    let longest = [Vec2::X, Vec2::Y].into_iter().filter_map(|d| to(at + d)).map(|p| a.distance(p)).reduce(f32::max)?;
+    let px = 1.0 / f64::from(longest).max(1e-9);
     px.is_finite().then_some(px)
 }
 

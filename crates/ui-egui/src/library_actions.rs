@@ -73,6 +73,7 @@ pub(super) fn context_menu(app: &mut SolveApp, ui: &egui::Ui, response: &egui::R
             let enabled = path.is_some()
                 && !app.file_picker_busy()
                 && !app.file_load.busy()
+                && (!matches!(action, Action::Rename | Action::Move | Action::Copy | Action::Trash) || app.file_load.idle())
                 && (action != Action::Reveal || app.services.show_in_folder.is_some());
             if crate::ui_kit::button(ui, label(action), crate::ui_kit::Button::Enabled(enabled)).clicked() {
                 ui.close();
@@ -122,7 +123,7 @@ fn perform(app: &mut SolveApp, entry: Entry, action: Action) {
 }
 
 fn execute(app: &mut SolveApp, entry: &Entry, action: Action, destination: Option<&std::path::Path>) -> bool {
-    if app.file_picker_busy() || app.file_load.busy() {
+    if app.file_picker_busy() || !app.file_load.idle() {
         return false;
     }
     let Some(path) = entry.path.to_str() else { return false };
@@ -286,6 +287,53 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         assert!(!h.app.file_picker_busy());
+    }
+
+    #[test]
+    fn waiting_import_keeps_its_source_safe_from_library_mutations() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.file_operations_wait = false;
+        let e = entry(&h);
+        let mut source = solidcraft_engine::Session::default();
+        source.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        source.execute("file.save", &json!({"path": e.path})).unwrap();
+        let before = std::fs::read(&e.path).unwrap();
+        h.app.run("component.rename", json!({"component": 0, "name": "Assembly"})).unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        h.app.file_load.worker_gate = Some((started_tx, release_rx));
+        crate::file_load::begin_request(&mut h.app, crate::file_load::Request::new(e.path.to_str().unwrap(), crate::file_load::Kind::InsertDesign))
+            .unwrap();
+        started_rx.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        release_tx.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !crate::operations::current(&h.app).iter().any(|op| op.waiting) && std::time::Instant::now() < deadline {
+            crate::file_load::tick(&mut h.app, &h.ctx);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(crate::operations::current(&h.app).iter().any(|op| op.waiting));
+        assert!(!h.app.file_load.busy() && !h.app.file_load.idle());
+        let destination = h.dir.join("Moved.solidcraft");
+        for action in [Action::Rename, Action::Move, Action::Trash, Action::Copy] {
+            assert!(!execute(&mut h.app, &e, action, Some(&destination)), "waiting imports retain the file-action lock");
+            assert!(!h.app.file_picker_busy());
+            assert_eq!(std::fs::read(&e.path).unwrap(), before);
+            assert!(!destination.exists());
+        }
+        crate::documents::switch(&mut h.app, 0);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !h.app.file_load.idle() && std::time::Instant::now() < deadline {
+            crate::file_load::tick(&mut h.app, &h.ctx);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(h.app.file_load.idle());
+        assert!(crate::documents::uses_file(&h.app, e.path.to_str().unwrap()));
+        assert!(execute(&mut h.app, &e, Action::Rename, Some(&destination)));
+        finish_job(&mut h);
+        assert_eq!(std::fs::read(&e.path).unwrap(), before);
+        assert!(!destination.exists(), "the adopted link now protects its source");
     }
 
     #[test]

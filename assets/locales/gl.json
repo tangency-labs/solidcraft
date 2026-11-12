@@ -4915,7 +4915,7 @@
   "ui.pitch": "Paso",
   "ui.placement": "Colocación",
   "ui.placement_handles": "Asas de colocación",
-  "ui.placement_handles_tip": "Asas na vista previa dun Apoio, un Saínte ou un Encaixe a presión: arrastra o marcador para movelo polo modelo, xírao polo seu anel",
+  "ui.placement_handles_tip": "Un marcador para arrastrar a operación polo modelo e, onde a operación pode xirar, un anel para xirala.",
   "ui.plane": "Plano",
   "ui.plane_at_angle": "Plano en ángulo",
   "ui.plugins": "Complementos",

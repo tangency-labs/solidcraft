@@ -494,6 +494,26 @@ fn a_hole_wider_than_the_part_says_it_removes_all_of_it() {
     assert_eq!(said(&s, "H1"), "");
 }
 
+/// A hole across the part's width that touches none of its sides keeps the rest, in one piece and
+/// silently, and says so once a parameter widens it past the whole part. The same hole touching a
+/// side along a line is the case above.
+#[test]
+fn a_hole_across_the_part_clear_of_its_sides_keeps_the_rest_silently() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "hd", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "diameter": "hd", "name": "H1"}));
+    assert_eq!(said(&s, "H1"), "");
+    assert_eq!(s.model.state().bodies.len(), 1);
+    // The plate less the part of the 40 mm circle inside it, 10 mm deep.
+    assert!((volume(&mut s) - 3623.4382).abs() < 1e-3, "{}", volume(&mut s));
+    change(&mut s, "hd", "100 mm");
+    assert!(s.model.state().bodies.is_empty());
+    assert!(said(&s, "H1").contains("the hole removes all of Body1"), "{}", said(&s, "H1"));
+    change(&mut s, "hd", "5 mm");
+    assert_eq!(said(&s, "H1"), "");
+}
+
 /// The volume of one body.
 fn body_volume(s: &mut Session, name: &str) -> f64 {
     let m = run(s, "inspect.measure", json!({}));
