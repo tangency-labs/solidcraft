@@ -203,7 +203,7 @@ fn without_reorder_a_dragged_step_returns_nothing_and_a_click_still_selects() {
     assert_eq!(rig.drag(c, a - vec2(12.0, 0.0)), Vec::new());
     assert_eq!(rig.click(c), vec![Action::Select { step: 3, modifiers: Modifiers::NONE }]);
     // the marker still drags
-    assert_eq!(rig.drag(rig.marker(), a - vec2(12.0, 0.0)), vec![Action::Seek(Seek::Slot { slot: 0, before: true })]);
+    assert_eq!(rig.drag(rig.marker(), a - vec2(12.0, 0.0)), vec![Action::Seek { slot: 0, before: true }]);
 }
 
 #[test]
