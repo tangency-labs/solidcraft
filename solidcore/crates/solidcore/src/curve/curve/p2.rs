@@ -1837,9 +1837,11 @@ impl Curve {
 
     /// (not upstream) [`Self::edit_parameterization`] whose natural interval is then
     /// `new_param` exactly: where the natural interval's ends were already the same as
-    /// `new_param`'s within the scaled zero, the edit leaves them as they are, and a
-    /// B-spline's (or a conic's NURB's) knots are then mapped onto `new_param`, so an edge
-    /// that keeps `new_param` as its interval lies inside its curve. Every point is kept.
+    /// `new_param`'s within the scaled zero, the edit leaves them as they are, and the
+    /// knots of a B-spline's, a line's or a conic's NURB are then mapped onto `new_param`,
+    /// so an edge that keeps `new_param` as its interval lies inside its curve. Every
+    /// point is kept. The other kinds are left as [`Self::edit_parameterization`] leaves
+    /// them.
     ///
     /// # Errors
     ///
@@ -1862,7 +1864,10 @@ impl Curve {
                 c.base_mut().reparam_to(new_param)?;
                 c.notify(k, NotifyOperation::PostEdit)
             }
-            // their edits set the interval itself, or have none
+            CurveKind::Line(c) => {
+                c.ensure_nurb(self.owner)?;
+                c.base_mut().reparam_to(new_param)
+            }
             _ => Ok(()),
         }
     }
