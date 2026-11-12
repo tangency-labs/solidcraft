@@ -1457,11 +1457,37 @@ fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>) -> Option<Ve
 
 /// The screen point Home and Fit centre the model on, through the one function they use
 /// ([`crate::viewport_layout::framing_centre`]), so the pivot is exactly where Home leaves the model; the free
-/// view's middle (`Layout::middle`) when there is no model to frame.
+/// view's middle (`Layout::middle`) when there is no model to frame. With the navigators' Fit on, Home and
+/// the navigators frame their own way, while Fit keeps the plain framing ([`navigator_home_centre`]).
 fn home_centre(app: &SolveApp) -> Option<Pos2> {
     let layout = app.viewport.layout.as_ref()?;
     let bounds = crate::viewport::view_bounds(app);
-    crate::viewport_layout::framing_centre(app.cam, &bounds, layout).or_else(|| Some(layout.middle.center()))
+    navigator_home_centre(app, &bounds, layout)
+        .or_else(|| crate::viewport_layout::framing_centre(app.cam, &bounds, layout))
+        .or_else(|| Some(layout.middle.center()))
+}
+
+/// With the navigators' Fit on (#10091), the screen point where Home and the navigators put the middle
+/// of `bounds`, while the model's middle is there now: their camera (`SolveApp::navigator_fitted_bounds`)
+/// aims at the model's middle, at the view's centre unless the shared panel frame moves it. Fit still
+/// frames the plain way, so after Fit, a pan or a zoom the model's middle is elsewhere and this is `None`.
+fn navigator_home_centre(app: &SolveApp, bounds: &solidcraft_engine::geom::Aabb3, layout: &crate::viewport_layout::Layout) -> Option<Pos2> {
+    if !app.preferences.navigator_fit {
+        return None;
+    }
+    let at = screen_middle(app, app.navigator_fitted_bounds(app.cam, bounds)?, bounds, layout)?;
+    let now = screen_middle(app, app.cam, bounds, layout)?;
+    (now.distance(at) < 0.5).then_some(at)
+}
+
+/// Where `cam` shows the middle of `bounds` in the laid-out view, at the angle the view draws with.
+fn screen_middle(app: &SolveApp, mut cam: Camera, bounds: &solidcraft_engine::geom::Aabb3, layout: &crate::viewport_layout::Layout) -> Option<Pos2> {
+    cam.fov = app.view_fov();
+    let vp = layout.viewport;
+    // The depth range only clips; it moves no point across the screen.
+    let (x, y, _) = cam.to_screen(bounds.center(), f64::from(vp.width()), f64::from(vp.height()), bounds.diagonal().max(1.0))?;
+    let at = pos2(vp.left() + x as f32, vp.top() + y as f32);
+    at.is_finite().then_some(at)
 }
 
 /// What orbit around the view's centre turns about: the point at the camera target's depth under
