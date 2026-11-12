@@ -160,16 +160,58 @@ pub(crate) fn booleans(app: &SolveApp) -> Vec<Item> {
     .collect()
 }
 
+/// A center pivot pole, made at once: a construction axis through the middle of the selection, to
+/// revolve, pattern or turn things round. One flat face gets a pole through its centroid, square
+/// to it; one body gets an upright pole (along Z) through the centre of its box. `None` for any
+/// other selection.
+pub(crate) fn pole(app: &SolveApp) -> Option<Item> {
+    let (id, params, of) = match app.session.selection.as_slice() {
+        [Sel::Face { body, index, point }] => {
+            let (centroid, _) = crate::dialogs::planar_face(&app.session, body, *index)?;
+            let params = json!({
+                "face": {"face": [point.x, point.y, point.z]},
+                "point": {"point": [centroid.x, centroid.y, centroid.z]},
+                "name": "Center Pole",
+            });
+            ("construct.axis.normal_to_face", params, body.clone())
+        }
+        [Sel::Body { name }] => {
+            let st = crate::open_meshing::session_world(&app.session);
+            let b = st.body(name)?.mesh().bounds();
+            let (cx, cy) = ((b.min.x + b.max.x) / 2.0, (b.min.y + b.max.y) / 2.0);
+            if b.max.z - b.min.z <= 1e-9 {
+                return None;
+            }
+            let params = json!({
+                "a": {"point": [cx, cy, b.min.z]},
+                "b": {"point": [cx, cy, b.max.z]},
+                "name": "Center Pole",
+            });
+            ("construct.axis.two_points", params, name.clone())
+        }
+        _ => return None,
+    };
+    let mut item = crate::context_menu::cmd(app, id, app.tr("creative_mode.pole")).with(params);
+    item.icon = "axis_normal_to_face".into();
+    item.tip = Some(app.tr("creative_mode.pole_tip").replace("{target}", &of));
+    Some(item)
+}
+
 /// The pill's feature items for the selection: the one-click booleans first, then each fitting
-/// feature, which opens its window. Combine's window is left out where the booleans stand in for it.
+/// feature, which opens its window, with the center pole third among them so a full pill keeps
+/// it. Combine's window is left out where the booleans stand in for it.
 pub(crate) fn items(app: &SolveApp) -> Vec<Item> {
     let mut v = booleans(app);
     let quick = !v.is_empty();
+    let first = v.len();
     for id in fitting(app) {
         if quick && id == "solid.combine" {
             continue;
         }
         v.push(crate::context_menu::cmd(app, id, solidcraft_ui_text::tr_label(crate::command_label(id))));
+    }
+    if let Some(p) = pole(app) {
+        v.insert((first + 2).min(v.len()), p);
     }
     v
 }
@@ -275,6 +317,46 @@ mod tests {
                 h.app.run("select.set", json!({"items": items})).unwrap();
             }
         }
+    }
+
+    fn click_pole(h: &mut Harness) {
+        let p = pole(&h.app).expect("a center pole is offered");
+        assert!(items(&h.app).iter().any(|i| i.label == "Center Pole"), "the pill has it");
+        crate::context_menu::run_item(&mut h.app, &p, egui::Pos2::ZERO);
+        h.settle();
+    }
+
+    #[test]
+    fn a_body_gets_an_upright_center_pole_and_a_second_one_too() {
+        let mut h = two_boxes(40.0);
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        let before = h.app.session.doc.features.len();
+        click_pole(&mut h);
+        assert_eq!(h.app.session.doc.features.len(), before + 1, "one axis feature");
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body2"}]})).unwrap();
+        click_pole(&mut h);
+        assert_eq!(h.app.session.doc.features.len(), before + 2, "a second pole");
+    }
+
+    #[test]
+    fn a_flat_face_gets_a_pole_through_its_middle() {
+        let mut h = two_boxes(40.0);
+        h.app.run("select.set", json!({"items": [{"type": "face", "body": "Body1", "point": [3, 4, 10]}]})).unwrap();
+        let before = h.app.session.doc.features.len();
+        let p = pole(&h.app).unwrap();
+        let params = p.params.clone().unwrap();
+        let at = params["point"]["point"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect::<Vec<_>>();
+        assert!((at[0] - 10.0).abs() < 1e-6 && (at[1] - 10.0).abs() < 1e-6 && (at[2] - 10.0).abs() < 1e-6, "the top face's middle: {at:?}");
+        click_pole(&mut h);
+        assert_eq!(h.app.session.doc.features.len(), before + 1);
+    }
+
+    #[test]
+    fn two_bodies_or_an_edge_get_no_pole() {
+        let mut h = two_boxes(40.0);
+        assert!(pole(&h.app).is_none());
+        h.app.run("select.set", json!({"items": [{"type": "edge", "body": "Body1", "point": [10, 0, 10]}]})).unwrap();
+        assert!(pole(&h.app).is_none());
     }
 
     /// A finished sketch with one 10 mm circle at the origin, on XY raised by `z`; its id.

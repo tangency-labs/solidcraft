@@ -11,6 +11,8 @@
     "creative_mode.cut": "Cut",
     "creative_mode.cut_tip": "Cut {tools} out of {target}.",
     "creative_mode.intersect": "Intersect",
-    "creative_mode.intersect_tip": "Keep only where {target} and {tools} overlap."
+    "creative_mode.intersect_tip": "Keep only where {target} and {tools} overlap.",
+    "creative_mode.pole": "Center Pole",
+    "creative_mode.pole_tip": "Add a center pivot pole: a construction axis through the middle of {target}, to revolve, pattern or rotate around."
   }
 }
