@@ -329,6 +329,12 @@ struct Inputs {
     /// measured entry point, `brep_volume` here), both compared as `volumes`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     volume_query: Option<VolumeQuery>,
+    /// A box the constructor refuses is the case's result (#15350, the `review_box_`
+    /// construction fixtures only): `create_box` returns each face's and the stitch's status
+    /// (the fork's `AddBoxFace`, WR-596), so a source or foreign box it cannot make is
+    /// recorded as constructor `rejected` with `status` its code, not a harness error.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    box_refusal_is_result: bool,
 }
 /// [`Inputs::volume_query`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -900,6 +906,34 @@ fn build(kernel: &mut Kernel, fixture: &Fixture, tolerance: f64, namespace: u64)
         }
     }
     Ok(brep)
+}
+
+/// [`Inputs::box_refusal_is_result`]: the first of the source and foreign boxes that
+/// `create_box` refuses, as constructor `rejected` with `status` its code; `None` when both
+/// build (or are not boxes).
+fn box_refusal(input: &Inputs) -> HResult<Option<Output>> {
+    for (side, fixture) in [("source", &input.source), ("foreign", &input.foreign)] {
+        let Some(Fixture::Box { origin, size }) = fixture else {
+            continue;
+        };
+        let [dx, dy, dz] = *size;
+        let made = solidcore::primitive::api_primitives::create_box(
+            &mut Kernel::default(),
+            v3(*origin),
+            dx,
+            dy,
+            dz,
+        );
+        if let Err(error) = made {
+            let code = solidcore::error::upstream_status(&error)
+                .ok_or_else(|| bad(format!("{side} box refused without a status: {error}")))?;
+            return Ok(Some(
+                Output::rejected(format!("{side} box refused by its constructor (status {code})"))
+                    .int("status", i64::from(code)),
+            ));
+        }
+    }
+    Ok(None)
 }
 
 /// The native fixture's `SmApiCreateBox(origin, dx, dy, dz)` then
@@ -1604,6 +1638,11 @@ fn purity_state(brep: &Brep) -> Result<String, SolidError> {
 }
 fn rust_output(input: &Inputs) -> RResult<Output> {
     validate(input)?;
+    if input.box_refusal_is_result {
+        if let Some(output) = box_refusal(input)? {
+            return Ok(output);
+        }
+    }
     let mut kernel = Kernel::default();
     let mut source = input
         .source
@@ -1922,6 +1961,7 @@ fn generated(rng: &mut Rng) -> Inputs {
         heap_ordered_vertices: false,
         attributed: None,
         volume_query: None,
+        box_refusal_is_result: false,
     };
     match category {
         0 | 1 => {
@@ -2050,6 +2090,7 @@ mod tests {
             heap_ordered_vertices: false,
             attributed: None,
             volume_query: None,
+            box_refusal_is_result: false,
         }
     }
     fn case(input: &Inputs) -> Case {
@@ -2586,6 +2627,17 @@ mod tests {
                 continue;
             }
             let rust = Runner.run_rust(&case).unwrap();
+            // #15350: a box too small for its tolerance (1e-6 at the origin, 1e-3 at 1e6) is
+            // refused by `create_box` itself (the fork's `AddBoxFace`, WR-596): constructor
+            // rejected, status 1001
+            let refused = !case.name.ends_with("_selected")
+                && (case.name.contains("_tiny_") || case.name.contains("_translated_"));
+            if refused {
+                assert!(rust.rejected.is_some() && rust.error.is_none(), "{}", case.name);
+                assert_eq!(rust.ints["status"], [1001], "{}", case.name);
+                recorded += 1;
+                continue;
+            }
             assert!(rust.rejected.is_none() && rust.error.is_none(), "{}", case.name);
             if case.name.ends_with("_control") {
                 assert!(rust.deferred.is_none());
@@ -2593,7 +2645,7 @@ mod tests {
                 assert_eq!(rust.ints["input.pure"], [1, 1]);
                 assert!(!rust.values.is_empty());
             } else if !case.name.ends_with("_selected") {
-                // Null selection: the empty box is built and the API status is 1007.
+                // Null selection: the box is built and the API status is 1007.
                 assert_eq!(rust.ints["status"], [1007]);
             }
             recorded += 1;

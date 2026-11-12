@@ -204,7 +204,6 @@
   "boolean_new_face_closure_both_sides",
   "stitch_solid_nests_cavities",
   "glue_vertices_joins_every_region",
-  "box_face_failures_propagate",
   "ellipse_adjust_step_interval_keeps_turns",
   "ellipse_open_arc_keeps_end_angle",
   "fillet_removal_takes_ring_fillets",

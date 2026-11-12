@@ -1148,8 +1148,6 @@ pub struct UpstreamFixes {
     pub stitch_solid_nests_cavities: bool,
     /// `SmBrep::GlueVertices` joins the pair of shells of every region both vertices are in (each other pair's children transferred with its wire edges, the emptied shell removed), not only the last pair its search finds: a solid's vertex is in a shell of the solid's region and one of the infinite region's, so where a face that alone held two parts of a body together was deleted, gluing the parts again at a vertex left the other region's pair apart, and the check reported an edge use and its radial in two shells (WR-607; SolidCraft change, tangency-labs/smlib 661f79c).
     pub glue_vertices_joins_every_region: bool,
-    /// `SmPrimitiveCreation::CreateBox` returns the status of each face it makes (a plane that cannot be made, a face whose making fails even after the face was made, such as a box far smaller than the tolerance whose top face closes up on its bottom one) and of its `StitchAndOrient`, and makes no face on a side of zero extent. Upstream drops every one of those statuses and returns success with whatever faces were made (WR-596; the fork's tangency-labs/smlib@0df62c8, 35008b1 and 449c81c, `AddBoxFace`).
-    pub box_face_failures_propagate: bool,
     /// `SmEllipse::AdjustSTEPInterval` converts a new interval end outside the current arc
     /// itself: past a full-turn arc it is taken whole turns back into the arc and its NURBS
     /// parameter moved by the circle's NURBS length per turn (the other way for an
