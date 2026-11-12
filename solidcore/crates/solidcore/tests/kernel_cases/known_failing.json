@@ -67,11 +67,6 @@
     "reason": "refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)"
   },
   {
-    "case": "fillets/every-block-cylinder-tangent-concave-arc-r2-partial-chain",
-    "issue": "tangency-labs/solidcore#2864",
-    "reason": "refused: the picked edge runs on across the cylinder's seam into the rest of the same half circle, and a round does not end there; it passes as written (19091.9620) once the round runs on across the seam"
-  },
-  {
     "case": "fillets/report-fillet-curvature-three-edges-at-bar-corner",
     "issue": "solidcore#2697",
     "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)"
