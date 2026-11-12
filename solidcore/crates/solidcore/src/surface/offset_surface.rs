@@ -94,6 +94,9 @@
 //!   with an extended surface negates the offset distance twice (kept unless
 //!   `fixes.offset_swap_uv_extended_distance`, WR-164); `STEPInversion`
 //!   retries on the extended surface with the tolerance not widened by the offset.
+//! - **`SwapUV` swaps the periodic flags and singular sides** (not upstream, WR-780):
+//!   upstream keeps `m_bIsPeriodicOnU`/`V` and `m_lSingularities`, so after a swap the
+//!   extension wraps and clamps the wrong directions.
 //! - **Recursion.** The pole step-off of `EvaluatePlainOrSimple` evaluates itself at
 //!   the step-off points; its depth is bounded by [`MAX_STEPOFF_DEPTH`] (upstream
 //!   fixtures reach depth 1). Construction and restoration bound nested surface
@@ -1888,7 +1891,8 @@ impl OffsetSurface {
     /// distance for each (`SwapUV`). With
     /// [`UpstreamFixes::offset_swap_uv_extended_distance`](crate::kernel::UpstreamFixes::offset_swap_uv_extended_distance)
     /// set and an extension present, the base's swap keeps the extension's one
-    /// negation instead of negating again (WR-164).
+    /// negation instead of negating again (WR-164). Not upstream (WR-780): the periodic
+    /// flags and the singular sides are swapped with the directions they describe.
     ///
     /// # Errors
     ///
@@ -1931,6 +1935,11 @@ impl OffsetSurface {
                 "the offset surface does not own its base, so cannot swap its UV",
             ));
         }
+        // not upstream (WR-780): the periodic flags and the singular sides describe the
+        // directions, so they swap with them (upstream keeps them, and the extension
+        // then wraps or clamps the wrong direction)
+        core::mem::swap(&mut self.is_periodic_on_u, &mut self.is_periodic_on_v);
+        self.singularities = swapped_sides(self.singularities);
         Ok(())
     }
 
@@ -3198,6 +3207,25 @@ fn extend_from_base(
 /// `SM_ERR_NULL_POINTER` for a surface that is not a B-spline kind (upstream's `NER`
 /// in the caller); `SM_ERR` when both extensions fail; `InvalidInput` when the
 /// extension leaves no surface (upstream builds a surface from an empty NURB).
+/// The singular sides `sides` (an or of `SS_UMIN`, `SS_VMIN`, `SS_UMAX`, `SS_VMAX`, with
+/// any other bit such as `SS_UNKNOWN` kept) with `u` and `v` exchanged (WR-780).
+const fn swapped_sides(sides: u32) -> u32 {
+    let mut out = sides & !(SS_UMIN | SS_VMIN | SS_UMAX | SS_VMAX);
+    if sides & SS_UMIN != 0 {
+        out |= SS_VMIN;
+    }
+    if sides & SS_VMIN != 0 {
+        out |= SS_UMIN;
+    }
+    if sides & SS_UMAX != 0 {
+        out |= SS_VMAX;
+    }
+    if sides & SS_VMAX != 0 {
+        out |= SS_UMAX;
+    }
+    out
+}
+
 fn extend_surface(
     k: &Kernel,
     surface: &Surface,
