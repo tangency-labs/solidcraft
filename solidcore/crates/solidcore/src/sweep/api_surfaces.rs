@@ -275,10 +275,9 @@ fn skin_primitive(
             }
             Ok((start, side, end))
         })?;
+    // Not upstream: the flat side walls are their planes (WR-778).
     let mut brep = brep;
-    if k.fixes.skin_flat_walls_as_planes {
-        crate::sweep::skin_flat_walls::flat_walls_as_planes(k, &mut brep, &side_faces)?;
-    }
+    crate::sweep::skin_flat_walls::flat_walls_as_planes(k, &mut brep, &side_faces)?;
     Ok(SkinPrimitive {
         brep,
         start_faces,

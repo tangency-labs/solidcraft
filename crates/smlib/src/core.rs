@@ -280,7 +280,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_setback_beside_curved_faces = true;
     f.fillet_chamfer_corner = true;
     f.brep_ray_classifies_current_trims = true;
-    f.skin_flat_walls_as_planes = true;
     f
 }
 

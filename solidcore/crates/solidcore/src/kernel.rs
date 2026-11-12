@@ -1163,14 +1163,6 @@ pub struct UpstreamFixes {
     /// against the untrimmed surface. Classifications outside editing are unchanged
     /// (WR-732, #2503; solidcore-native, no fork commit).
     pub brep_ray_classifies_current_trims: bool,
-    /// Not upstream: `SmApiCreateSkinPrimitive` makes each side wall whose B-spline lies in
-    /// one plane (its control points within `SM_EFF_ZERO` of it: a loft whose sections'
-    /// corners line up, through three or more sections or with lines beside arcs) that
-    /// plane, its natural normal the B-spline's way and its UV trims made again from its
-    /// edges; a wall whose replacement fails keeps its B-spline. Upstream every skin wall is
-    /// a B-spline, flat or not, so nothing that asks for a plane finds one there
-    /// (`sweep::skin_flat_walls`; WR-778, solidcraft#13331; solidcore-native, no fork commit).
-    pub skin_flat_walls_as_planes: bool,
 }
 }
 

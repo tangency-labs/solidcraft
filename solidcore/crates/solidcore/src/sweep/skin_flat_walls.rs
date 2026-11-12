@@ -1,4 +1,4 @@
-//! Not upstream: a skin's flat walls as planes (WR-778, `Kernel::fixes.skin_flat_walls_as_planes`).
+//! Not upstream: a skin's flat walls as planes (WR-778), always (upstream every wall is a B-spline).
 //!
 //! `SmApiCreateSkinPrimitive` makes every side wall a B-spline surface, also where the wall is
 //! flat: a loft whose sections' corners line up (through three or more sections, or with lines
@@ -163,11 +163,10 @@ mod tests {
         ]
     }
 
-    /// The capped skin through `sections` with the fix `on` or off, its side faces' count of
+    /// The capped skin through `sections`, its side faces' count of
     /// planes and B-splines, its volume, after the B-rep check passes.
-    fn skin(sections: &[Vec<Curve>], degree: usize, on: bool) -> (usize, usize, f64) {
+    fn skin(sections: &[Vec<Curve>], degree: usize) -> (usize, usize, f64) {
         let mut k = Kernel::default();
-        k.fixes.skin_flat_walls_as_planes = on;
         let counts: Vec<usize> = sections.iter().map(Vec::len).collect();
         let refs: Vec<Option<&Curve>> = sections.iter().flatten().map(Some).collect();
         let SkinPrimitive {
@@ -210,17 +209,13 @@ mod tests {
     }
 
     /// Three squares whose corners line up (half sides 55, 77.5, 100 at z 0, 60, 120): the
-    /// quadratic skin's four walls are flat, and with the fix they are planes; the solid is the
-    /// same frustum either way.
+    /// quadratic skin's four walls are flat, so they are planes; the solid is the frustum.
     #[test]
     fn a_skin_through_three_squares_in_line_has_planar_walls() {
         let sections = [square(55.0, 0.0), square(77.5, 60.0), square(100.0, 120.0)];
         let want = frustum(120.0, 4.0 * 55.0 * 55.0, 4.0 * 100.0 * 100.0);
-        let (planes, splines, volume) = skin(&sections, 2, false);
-        assert_eq!((planes, splines), (0, 4), "upstream: B-spline walls");
-        assert!(near(volume, want), "{volume} vs {want}");
-        let (planes, splines, volume) = skin(&sections, 2, true);
-        assert_eq!((planes, splines), (4, 0), "with the fix: planes");
+        let (planes, splines, volume) = skin(&sections, 2);
+        assert_eq!((planes, splines), (4, 0), "planes");
         assert!(near(volume, want), "{volume} vs {want}");
     }
 
@@ -228,7 +223,7 @@ mod tests {
     #[test]
     fn a_skin_through_three_squares_out_of_line_keeps_curved_walls() {
         let sections = [square(55.0, 0.0), square(80.0, 60.0), square(100.0, 120.0)];
-        let (planes, splines, _) = skin(&sections, 2, true);
+        let (planes, splines, _) = skin(&sections, 2);
         assert_eq!((planes, splines), (0, 4));
     }
 
@@ -239,7 +234,7 @@ mod tests {
         let sections = [d_shape(50.0, 0.0), d_shape(30.0, 50.0)];
         let area = |s: f64| 2.0 * s * s + std::f64::consts::PI * s * s / 2.0;
         let want = frustum(50.0, area(50.0), area(30.0));
-        let (planes, splines, volume) = skin(&sections, 1, true);
+        let (planes, splines, volume) = skin(&sections, 1);
         assert_eq!((planes, splines), (3, 1));
         assert!(near(volume, want), "{volume} vs {want}");
     }
@@ -255,7 +250,7 @@ mod tests {
                 .zip([0.0, 60.0, 120.0])
                 .map(|(&h, z)| square_by(h, z, cw, |p| p))
                 .collect::<Vec<_>>();
-            let (planes, splines, volume) = skin(&sections, 2, true);
+            let (planes, splines, volume) = skin(&sections, 2);
             assert_eq!((planes, splines), (4, 0), "cw {cw}");
             assert!(near(volume, want), "cw {cw}: {volume} vs {want}");
         }
@@ -310,7 +305,7 @@ mod tests {
             .map(|(&h, z)| square_by(h, z, false, turn))
             .collect::<Vec<_>>();
         let want = frustum(2400.0, 4.0 * 1100.0 * 1100.0, 4.0 * 2000.0 * 2000.0);
-        let (planes, splines, volume) = skin(&sections, 2, true);
+        let (planes, splines, volume) = skin(&sections, 2);
         assert_eq!((planes, splines), (4, 0));
         assert!(near(volume, want), "{volume} vs {want}");
     }

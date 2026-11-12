@@ -11,7 +11,7 @@
 - **Trigger:** three squares of half side 55, 77.5 and 100 at z 0, 60 and 120, skinned at
   degree 2: four B-spline walls, each flat.
 - **How found:** solidcraft#13331 (Convert to Sheet Metal refuses a lofted duct).
-- **Fix (opt-in):** `Kernel::fixes.skin_flat_walls_as_planes`. After the skin, each side wall
+- **Fix (always on, no flag):** after the skin, each side wall
   whose surface `IsPlanar` at `SM_EFF_ZERO` (`plane_of`) takes that plane through
   `ReplaceSurface` with `bCreateUVTrimCurves`. The plane's axes put its natural normal on the
   B-spline's side at the middle of its domain, so the faceuses keep their orientation. A wall
