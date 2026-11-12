@@ -212,6 +212,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "view.grid"
             | "view.ground_shadow"
             | "view.navigation_bar"
+            | "view.parts_library"
             | "view.ribbon_tabs_only"
             | "view.next_tab"
             | "view.previous_tab"
@@ -645,6 +646,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
         "ui.workspace" => with(p, |q| ui_workspace(app, q)),
+        "ui.library" => wrap(crate::library::control(app, p)),
         "engine.execute" | "command" => with(p, |q: params::Execute| {
             let id = q.command.clone();
             wrap(execute(app, &id, q.params()))

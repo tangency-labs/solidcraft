@@ -320,6 +320,7 @@ pub const DOCUMENTED: &[&str] = &[
     "view.list",
     "view.navigate",
     "view.navigation_bar",
+    "view.parts_library",
     "view.rename",
     "view.ribbon_tabs_only",
     "view.save",

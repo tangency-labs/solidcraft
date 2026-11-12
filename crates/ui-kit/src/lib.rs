@@ -53,6 +53,7 @@ mod navigation_menu;
 mod navigation_settings;
 pub mod panel;
 mod panel_host;
+mod part_card;
 mod preferences;
 mod preferences_assistant;
 #[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
@@ -118,6 +119,7 @@ pub use navigation::*;
 pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
 pub use navigation_menu::*;
 pub use navigation_settings::*;
+pub use panel::card_header;
 pub use panel::{
     ComputeStatus, FeatureOptions, InspectorAction, InspectorNames, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover,
     within,
@@ -126,6 +128,7 @@ pub use panel::{DialogButtons, Window};
 #[cfg(any(test, feature = "test-support"))]
 pub use panel::{collapsible_header, header};
 pub use panel_host::*;
+pub use part_card::{PartCard, PartCardSize, PartFace, folder_button, part_card, part_row};
 pub use preferences::*;
 pub use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]

@@ -163,6 +163,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
+    ("home.rs", 2, "thumbnail tints"),
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("prefs.rs", 1, "a saved sketch dimension colour: the colour is the user's own data"),

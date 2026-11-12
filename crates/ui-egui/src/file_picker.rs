@@ -79,6 +79,11 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
+    /// Wait for a folder from the host's dialog (the parts library), then `complete`.
+    pub(crate) fn begin_folder_picker(&mut self, future: FilePickerFuture, complete: Completion) {
+        self.begin_picker(Some(future), complete);
+    }
+
     fn begin_picker(&mut self, future: Option<FilePickerFuture>, complete: Completion) {
         let Some(future) = future else {
             complete(self, None);
