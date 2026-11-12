@@ -11,11 +11,11 @@
 //!
 //! An M33x3.5 groove on a 14 mm shaft (the rig's case 2193): upstream, two edges end
 //! 1.52e-5 from their vertices (the C++ reference reports the same two test #0 lines on
-//! the same body); with `Kernel::fixes.imprint_trims_edge_to_proto_vertex` and
-//! `imprint_extends_edge_to_proto_vertex` (WR-452, WR-453) every edge ends within 1.2e-6
-//! of its vertex. An internal M10x1.5 thread (a nut of radius 8 bored to the minor
-//! radius 4.188, the groove out to the major radius 5) has no gap over half a tolerance
-//! either way, as in the C++.
+//! the same body); solidcore fits the edges' ends to their proto vertices (WR-452) and
+//! every edge ends within 1.2e-6 of its vertex, with or without the opt-in
+//! `Kernel::fixes.imprint_extends_edge_to_proto_vertex` (WR-453). An internal M10x1.5
+//! thread (a nut of radius 8 bored to the minor radius 4.188, the groove out to the major
+//! radius 5) has no gap over half a tolerance either way, as in the C++.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -61,10 +61,9 @@ fn screw_groove(k: &mut Kernel, p: f64, z0: f64, turns: f64, prof: &[(f64, f64)]
         .brep
 }
 
-fn kernel(fixes: bool) -> Kernel {
+fn kernel(extend: bool) -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.imprint_trims_edge_to_proto_vertex = fixes;
-    k.fixes.imprint_extends_edge_to_proto_vertex = fixes;
+    k.fixes.imprint_extends_edge_to_proto_vertex = extend;
     k
 }
 
@@ -142,40 +141,31 @@ fn brep_reports(k: &mut Kernel, b: &mut Brep) -> Vec<String> {
 }
 
 #[test]
-fn issue_410_m33x3_5_upstream_leaves_vertex_gaps() {
-    let mut k = kernel(false);
-    let mut b = external(&mut k, 3.5, 16.5, 14.0, 2.15, 0.875);
-    let (gap, tol) = worst_vertex_gap(&k, &b);
-    assert!(gap > tol / 2.0, "gap {gap:e}, tolerance {tol:e}");
-    let lines = brep_reports(&mut k, &mut b);
-    assert_eq!(lines.len(), 2, "{lines:#?}");
-    assert!(
-        lines.iter().all(|l| l.starts_with("SmBrep::Test #0 ")),
-        "{lines:#?}"
-    );
-}
-
-#[test]
-fn issue_410_m33x3_5_edges_end_at_their_vertices_with_the_imprint_fixes() {
-    let mut k = kernel(true);
-    let mut b = external(&mut k, 3.5, 16.5, 14.0, 2.15, 0.875);
-    let (gap, tol) = worst_vertex_gap(&k, &b);
-    assert!(gap < 2e-6, "gap {gap:e}, tolerance {tol:e}");
-    let lines = brep_reports(&mut k, &mut b);
-    assert!(lines.is_empty(), "{lines:#?}");
+fn issue_410_m33x3_5_edges_end_at_their_vertices() {
+    for extend in [false, true] {
+        let mut k = kernel(extend);
+        let mut b = external(&mut k, 3.5, 16.5, 14.0, 2.15, 0.875);
+        let (gap, tol) = worst_vertex_gap(&k, &b);
+        assert!(
+            gap < 2e-6,
+            "extend {extend}: gap {gap:e}, tolerance {tol:e}"
+        );
+        let lines = brep_reports(&mut k, &mut b);
+        assert!(lines.is_empty(), "extend {extend}: {lines:#?}");
+    }
 }
 
 #[test]
 fn issue_410_internal_m10x1_5_has_no_vertex_gap() {
-    for fixes in [false, true] {
-        let mut k = kernel(fixes);
+    for extend in [false, true] {
+        let mut k = kernel(extend);
         let mut b = internal_m10(&mut k);
         let (gap, tol) = worst_vertex_gap(&k, &b);
         assert!(
             gap < tol / 2.0,
-            "fixes {fixes}: gap {gap:e}, tolerance {tol:e}"
+            "extend {extend}: gap {gap:e}, tolerance {tol:e}"
         );
         let lines = brep_reports(&mut k, &mut b);
-        assert!(lines.is_empty(), "fixes {fixes}: {lines:#?}");
+        assert!(lines.is_empty(), "extend {extend}: {lines:#?}");
     }
 }

@@ -666,6 +666,34 @@ fn legacy_usable_space_does_not_silently_ignore_obstacles_after_sixteen() {
     }
 }
 
+/// `free_rect` remembers its recent answers (it ran several times a frame with the same inputs):
+/// the same view and overlays get the same room, and a moved or added overlay a new one.
+#[test]
+fn free_rect_remembers_answers_only_for_the_same_overlays() {
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
+    let panel = Rect::from_min_size(pos2(0.0, 0.0), vec2(300.0, 600.0));
+    let first = free_rect(viewport, &[panel]);
+    assert_eq!(first, Rect::from_min_max(pos2(300.0, 0.0), pos2(1000.0, 600.0)));
+    assert_eq!(free_rect(viewport, &[panel]), first, "the same inputs, the same answer");
+    let wider = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 600.0));
+    assert_eq!(free_rect(viewport, &[wider]), Rect::from_min_max(pos2(400.0, 0.0), pos2(1000.0, 600.0)), "a moved overlay is searched again");
+    let bar = Rect::from_min_size(pos2(0.0, 500.0), vec2(1000.0, 100.0));
+    assert_eq!(free_rect(viewport, &[panel, bar]), Rect::from_min_max(pos2(300.0, 0.0), pos2(1000.0, 500.0)), "an added overlay too");
+    for _ in 0..20 {
+        assert_eq!(free_rect(viewport, &[panel]), first, "evicted answers are worked out again the same");
+        let _ = free_rect(viewport, &[Rect::from_min_size(pos2(0.0, 0.0), vec2(f32::from(rand_like()), 10.0))]);
+    }
+}
+
+/// A different small width each call (no clock, no randomness): fills the remembered answers.
+fn rand_like() -> u8 {
+    thread_local!(static N: std::cell::Cell<u8> = const { std::cell::Cell::new(1) });
+    N.with(|n| {
+        n.set(n.get().wrapping_mul(37).wrapping_add(11) | 1);
+        n.get()
+    })
+}
+
 #[test]
 fn fit_home_animation_and_manual_takeover_use_one_layout_solution() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {

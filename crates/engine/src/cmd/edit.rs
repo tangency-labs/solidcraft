@@ -192,7 +192,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("timeline.inspect", "Inspect Feature", crate::checked!("timeline.inspect", inspect_feature))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&INSPECT_CONTRACT)
         .output(crate::schema::output_schema_for::<TimelineInspectResult>)
         .params(

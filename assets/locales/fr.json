@@ -2432,6 +2432,8 @@
   "prefs.invert_curved_roll_arrows_note": "Les deux flèches courbes au coin du cube font pivoter la vue dans le plan de l'écran. Activé : la flèche horaire fait tourner la vue dans le sens antihoraire, et inversement. Désactivé : chaque flèche fait tourner la vue dans le sens indiqué par sa courbure.",
   "prefs.invert_navigator_arrows": "Inverser les flèches de rotation du cube de vue",
   "prefs.invert_navigator_arrows_note": "Les flèches autour du cube font orbiter la caméra dans la direction qu'elles indiquent, comme dans Fusion et Inventor : la flèche de gauche pointe vers la droite et fait pivoter la caméra vers la droite. Désactivé : une flèche fait tourner le cube vers le côté où elle se trouve ; la flèche de gauche fait donc pivoter la caméra vers la gauche. Les flèches courbes de rotation ne sont pas affectées.",
+  "prefs.keep_print_faces": "Conserver les faces d’impression",
+  "prefs.keep_print_faces_tip": "Activé : la face d’impression de chaque corps est toujours teintée dans la vue et enregistrée dans la conception. Désactivé : elle n'est teintée que tant qu'Envoyer au slicer est ouvert, et les conceptions sont enregistrées et ouvertes sans faces d’impression.",
   "prefs.keep_work_on_tab_switch": "Garder dialogues et outils ouverts en changeant de conception",
   "prefs.keep_work_on_tab_switch_note": "Chaque onglet de conception garde son dialogue ou son outil ouvert, avec ce que vous y avez sélectionné et saisi, ainsi que son onglet de barre d'outils. Vous les retrouvez en revenant à la conception. Désactivé : changer de conception les annule et affiche l'onglet Modèle.",
   "prefs.labels": "Libellés",

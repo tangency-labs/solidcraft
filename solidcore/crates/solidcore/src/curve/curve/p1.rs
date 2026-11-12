@@ -86,6 +86,10 @@
 //!   its `Inversion`s not, tangency-labs/smlib 8ea6a20), the degenerate `ApproximateCurve`'s `EditParameterization`,
 //!   `ClassifyIntersectingRangeSolution`, `SmCPGlobalSolver::LocalSolve` and
 //!   `GlobalPointSolve`'s `SolveIt`.
+//! - **Projected extrema on a tangent field (#13675).** `GlobalPointSolve` refuses a
+//!   projected minimum or maximum on a tangent field curve, and on a projected, offset,
+//!   in-volume or on-surface curve built on one, with [`SolidError::Unsupported`]. The
+//!   search found no stationary point there and reported an empty success.
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{
@@ -1818,6 +1822,28 @@ impl Curve {
             .without_objects())
     }
 
+    /// Whether the curve is a tangent field, or a projected, offset, in-volume or
+    /// on-surface curve whose defining curve is one (through any number of them).
+    fn rests_on_tangent_field(&self) -> bool {
+        // far above any nesting a caller builds; a deeper chain is not searched further
+        const MAX_WRAPPERS: usize = 64;
+        let mut curve = self;
+        for _ in 0..MAX_WRAPPERS {
+            curve = match curve.kind() {
+                CurveKind::TangentField(_) => return true,
+                CurveKind::Projected(c) => c.curve(),
+                CurveKind::CrvInVolume(c) => c.curve(),
+                CurveKind::CrvOnSurf(c) => c.uv_curve(),
+                CurveKind::Offset(c) => match c.base_curve() {
+                    Some(base) => base,
+                    None => return false,
+                },
+                _ => return false,
+            };
+        }
+        false
+    }
+
     /// [`Curve::global_point_solve`] keeping the curve's cache in `cache` across calls,
     /// as upstream keeps it on the curve (`GetOrCreateObjectCache`): the cache is built
     /// where the solve first needs it (with the same errors) and reused by later calls
@@ -1841,6 +1867,21 @@ impl Curve {
         cache: &mut Option<CurveCache<O>>,
     ) -> Result<SolutionArray<O>> {
         let target = opts.target_distance;
+
+        // (not upstream, #13675) A tangent field switches to its stored end vectors in
+        // strips at its two ends that its knots do not name, and it has no derivative
+        // past the first. The projected search below looks for stationary points between
+        // knots, so on such a curve it finds none and reported an empty success where a
+        // nearest (farthest) point exists. Nothing here builds the solution set of that
+        // definition, so the query is refused instead.
+        if (op == SolverOperation::ProjectedMinimize || op == SolverOperation::ProjectedMaximize)
+            && self.rests_on_tangent_field()
+        {
+            return Err(SolidError::Unsupported {
+                operation: OP_GLOBAL,
+                reason: "a projected minimum or maximum on a tangent field curve",
+            });
+        }
 
         // Try quick solves when MINIMIZING and INTERSECTING (without using curve cache)
         if op == SolverOperation::Minimize || op == SolverOperation::Intersect {
@@ -2722,6 +2763,87 @@ mod tests {
                 assert_eq!(got.len(), 2, "{tolerance}: {got:?}");
             }
         }
+    }
+
+    /// #13675: a tangent field with the same vector stored at both ends evaluates to
+    /// that vector in a strip at each end and to zero between them, and its knots name
+    /// neither strip. Seen from 2Z along Y the field is 1 away in the strips and 2 away
+    /// between them, so every interval has a nearest and a farthest point; the projected
+    /// queries returned an empty success for all of them.
+    #[test]
+    fn projected_extremum_on_a_tangent_field_is_refused() {
+        use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
+        use crate::curve::tangent_field::{TangentDirType, TangentFieldCurve};
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::Vec2;
+        use crate::nurbs::b_spline_curve::ProjectionType;
+        use crate::surface::plane::Plane;
+        use crate::surface::surface::p2::Surface;
+        let k = Kernel::default();
+        let field = || {
+            let uv =
+                Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
+            let domain = Extent2d::from_points(Vec2::new(-2.0, -2.0), Vec2::new(2.0, 2.0));
+            let plane = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Y, Vec2::new(1.0, 1.0), &domain);
+            let field = TangentFieldCurve::new(
+                &k,
+                uv,
+                Surface::from(plane),
+                TangentDirType::Interpolate,
+                Vec3::Z,
+                Vec3::Z,
+                None,
+            );
+            Curve::from(field.unwrap())
+        };
+        let wrapped = Curve::from(
+            ProjectedCurve::new(
+                field(),
+                Some(Vec3::ZERO),
+                Some(Vec3::Y),
+                None,
+                ProjectionType::Parallel,
+                OwnsCurve::Yes,
+            )
+            .unwrap(),
+        );
+        let field = field();
+        let query = Vec3::new(0.0, 0.0, 2.0);
+        let solve = |curve: &Curve, interval: (f64, f64), op, requested| {
+            let options = GlobalPointSolveOptions {
+                opt_vectors: Some(&[Vec3::Y]),
+                ..Default::default()
+            };
+            let interval = Extent1d::from_min_max(interval.0, interval.1);
+            curve.global_point_solve::<Obj>(&k, &interval, op, query, 1e-12, requested, &options)
+        };
+        for curve in [&field, &wrapped] {
+            for interval in [(0.0, 1.0), (0.0, 1e-8), (0.2, 0.8)] {
+                for op in [
+                    SolverOperation::ProjectedMaximize,
+                    SolverOperation::ProjectedMinimize,
+                ] {
+                    for requested in [SolutionRequested::All, SolutionRequested::Single] {
+                        assert!(
+                            matches!(
+                                solve(curve, interval, op, requested),
+                                Err(SolidError::Unsupported { .. })
+                            ),
+                            "{interval:?} {op:?} {requested:?}"
+                        );
+                    }
+                }
+            }
+        }
+        // the other operations on the field are not refused
+        let nearest = solve(
+            &field,
+            (0.0, 1.0),
+            SolverOperation::Minimize,
+            SolutionRequested::Single,
+        )
+        .unwrap();
+        assert_eq!(nearest.len(), 1);
     }
 
     #[test]

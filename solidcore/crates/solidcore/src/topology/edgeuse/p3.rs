@@ -782,56 +782,17 @@ pub fn create_uv_trim_curve(
             }
 
             // If we have more than one then we may have split them because they cross the
-            // boundary. Try to find one that is within 10% of the size of the original one
-            // and use it.
-            //   GWC: this is not a good idea - this creates gaps between the Edge and the
-            //   UVTrimCurve. But it's not the worst idea either, it does not create gaps
-            //   between the Edge and its vertices - leave this healing in this method for
-            //   now.
-            if uv_curves.len() > 1 && k.fixes.uv_trim_joins_drop_pieces {
-                // Not upstream (WR-543, tangency-labs/solidcore#1383; the fork's
-                // tangency-labs/smlib@e36feb1): keep the longest run of pieces that meet
-                // end to end, joined, on the edge parameters it was dropped from:
-                // stretching a piece onto the whole edge interval would put every trim
-                // point off its edge point. A run shorter than the edge is then kept only
-                // as any shorter trim below: when its ends are within tolerance of the
-                // edge's vertices.
+            // boundary. Not upstream (WR-543, tangency-labs/solidcore#1383; the fork's
+            // tangency-labs/smlib@e36feb1): keep the longest run of pieces that meet end to
+            // end, joined, on the edge parameters it was dropped from. Upstream takes a
+            // piece within 10% of the edge's size and stretches it onto the whole edge
+            // interval, which puts every trim point off its edge point (up to 5 mm). A run
+            // shorter than the edge is then kept only as any shorter trim below: when its
+            // ends are within tolerance of the edge's vertices.
+            if uv_curves.len() > 1 {
                 longest_drop_run(k, &surface, zone_tol, &mut uv_curves)?;
                 fail.create_path_type = CreateUvTrimCurvePathType::TenPercentSeamCrossRecovery;
                 fail.brep = brep_handle(b, eu)?;
-            } else if uv_curves.len() > 1 {
-                let param_size = edge_domain.length();
-
-                // for every found UVTrimCurve
-                let mut chosen = None;
-                for (kkk, c) in uv_curves.iter().enumerate() {
-                    let uv_param_size = c.natural_interval().length();
-
-                    // if this UVTrimCurve param range is at least 90% of orig param range
-                    if (uv_param_size - param_size).abs() < 0.1 * param_size {
-                        chosen = Some(kkk);
-                        break;
-                    }
-                }
-                if let Some(kkk) = chosen {
-                    // remove all the other curves
-                    fail.create_path_type = CreateUvTrimCurvePathType::TenPercentSeamCrossRecovery;
-                    fail.brep = brep_handle(b, eu)?;
-                    let mut keep = uv_curves.swap_remove(kkk);
-                    uv_curves.clear();
-
-                    // set remaining UVcurve's param range to equal original curve
-                    keep.edit_parameterization(k, &edge_domain)?;
-
-                    // set sUVCurves = this UVTrimCurve
-                    uv_curves.push(keep);
-                }
-
-                // if we don't have 1 UVTrimCurve - try again with a different tolerance
-                if uv_curves.len() != 1 {
-                    uv_curves.clear();
-                    continue;
-                }
             } // end more than 1 UVTrimCurve due to splitting (not seams) check
 
             // State: sUVCurves.GetSize() == 1

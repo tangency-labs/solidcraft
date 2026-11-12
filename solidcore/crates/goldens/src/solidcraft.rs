@@ -1761,9 +1761,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "precise_properties_body_length_scale" => &mut k.fixes.precise_properties_body_length_scale,
-        "boolean_wire_edge_keeps_faceuse_shell" => {
-            &mut k.fixes.boolean_wire_edge_keeps_faceuse_shell
-        }
         "boolean_new_face_closure_both_sides" => &mut k.fixes.boolean_new_face_closure_both_sides,
         "loops_go_on_round_the_vertex" => &mut k.fixes.loops_go_on_round_the_vertex,
         "revolve_nested_shells_as_cavities" => &mut k.fixes.revolve_nested_shells_as_cavities,

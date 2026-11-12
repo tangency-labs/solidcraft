@@ -294,6 +294,10 @@ fn write_container(
         replacements.insert("render".into(), render);
     }
     let mut metadata = replace(doc, replacements).map_err(invalid)?;
+    // Plugin data goes beside the design, a part each, as it came (`plugin_data`).
+    if let Some(object) = metadata.as_object_mut() {
+        object.remove("plugin_data");
+    }
     solidcraft_doc::newer_file::restore(doc, &mut metadata);
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
@@ -302,6 +306,10 @@ fn write_container(
     writer.part("container.json", &serde_json::to_vec(&container).map_err(invalid)?, false)?;
     for (name, bytes) in doc.newer_file.iter().flat_map(|file| &file.parts) {
         writer.part(name, bytes, true)?;
+    }
+    for (key, data) in &doc.plugin_data {
+        let bytes = solidcraft_doc::canvas::base64_decode(data).ok_or_else(|| invalid(format!("plugin data `{key}` is not base64")))?;
+        writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), &bytes, true)?;
     }
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
     // left out, never a failed save. Encoding it is a save's longest step: not begun once cancelled.
@@ -786,7 +794,7 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     }
     // A blob a typed record uses comes back from that record; others only for what is kept.
     for name in reader.part_names() {
-        let ours = matches!(name.as_str(), "document.json" | "container.json") || name.starts_with("cache/");
+        let ours = matches!(name.as_str(), "document.json" | "container.json") || name.starts_with("cache/") || plugin_part(&name).is_some();
         let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
         if !ours && !unused_blob {
             file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
@@ -795,6 +803,25 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     // Looking counts against what a design may expand to only once: the reads below are the real ones.
     reader.hydrated = 0;
     Ok(())
+}
+
+/// The plugin data key of a container part under `plugins/`, when it is one this build keeps.
+fn plugin_part(name: &str) -> Option<&str> {
+    name.strip_prefix(solidcraft_doc::plugin_data::PREFIX).filter(|key| solidcraft_doc::plugin_data::valid_key(key))
+}
+
+/// Plugin data: each `plugins/<plugin-id>/` part, kept as it is whether or not the plugin is
+/// installed. One that does not read is left out; the design opens all the same.
+fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageReader<R>) {
+    for name in reader.part_names() {
+        let Some(key) = plugin_part(&name) else { continue };
+        if doc.plugin_data.len() >= solidcraft_doc::plugin_data::MAX_FILES && !doc.plugin_data.contains_key(key) {
+            break;
+        }
+        if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
+            doc.plugin_data.insert(key.to_string(), solidcraft_doc::canvas::base64_encode(&bytes));
+        }
+    }
 }
 
 /// A `container.json` that says only a format this build writes or wrote.
@@ -887,6 +914,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     if doc.newer_file.is_some() {
         hydrate_newer(&mut doc, &metadata, container, reader)?;
     }
+    hydrate_plugin_data(&mut doc, reader);
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
@@ -1989,6 +2017,47 @@ mod tests {
         let said = &opened.newer_file.as_ref().unwrap().not_understood;
         assert!(said.iter().any(|what| what.contains("unsupported mesh blob version")), "{said:?}");
         assert_eq!(parts(&write_design_container(&opened).unwrap())[&renamed], encoded);
+    }
+
+    /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin
+    /// installed, in a container and in a plain JSON design; a design without any has no
+    /// `plugins/` part, and a part that is not a plugin data name is not kept.
+    #[test]
+    fn plugin_data_round_trips_untouched_without_the_plugin() {
+        let doc = document();
+        let without = parts(&write_design_container(&doc).unwrap());
+        assert!(without.keys().all(|name| !name.starts_with("plugins/")));
+        assert!(crate::read_design(&package(&without)).unwrap().plugin_data.is_empty());
+
+        let mut entries = without.clone();
+        let binary: Vec<u8> = (0..=255).collect();
+        entries.insert("plugins/gear-maker/state.json".into(), br#"{"teeth":24}"#.to_vec());
+        entries.insert("plugins/gear-maker/cache/table.bin".into(), binary.clone());
+        entries.insert("plugins/other-tool/notes.txt".into(), b"kept".to_vec());
+        entries.insert("plugins/Bad_ID/x".into(), b"no".to_vec());
+        entries.insert("plugins/gear-maker/.hidden".into(), b"no".to_vec());
+        // A name that climbs out (`plugins/../x`) is refused by the container reader itself.
+        let mut climbing = entries.clone();
+        climbing.insert("plugins/../escape".into(), b"no".to_vec());
+        assert!(crate::read_design(&package(&climbing)).is_err());
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        assert_eq!(opened.features, doc.features);
+        assert_eq!(opened.plugin_data.len(), 3, "{:?}", opened.plugin_data.keys().collect::<Vec<_>>());
+
+        let resaved = parts(&write_design_container(&opened).unwrap());
+        assert_eq!(resaved["plugins/gear-maker/state.json"], br#"{"teeth":24}"#);
+        assert_eq!(resaved["plugins/gear-maker/cache/table.bin"], binary);
+        assert_eq!(resaved["plugins/other-tool/notes.txt"], b"kept");
+        assert_eq!(resaved.keys().filter(|name| name.starts_with("plugins/")).count(), 3);
+        let metadata: Value = serde_json::from_slice(&resaved["document.json"]).unwrap();
+        assert!(metadata.get("plugin_data").is_none(), "the parts stand beside the design, not inside it");
+        assert_eq!(crate::read_design(&package(&resaved)).unwrap(), opened);
+
+        // A plain JSON design carries the same data, and a container made from it has the parts.
+        let json = opened.to_json();
+        let from_json = Document::from_json(&json).unwrap();
+        assert_eq!(from_json.plugin_data, opened.plugin_data);
+        assert_eq!(parts(&write_design_container(&from_json).unwrap())["plugins/gear-maker/cache/table.bin"], binary);
     }
 
     /// A newer build's point cloud with numbers, an edge and a face (#14572): a field this build

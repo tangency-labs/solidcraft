@@ -3384,7 +3384,19 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
                     for _ in 0..30 {
                         both(vec![], none, &mut design, &mut render);
                     }
-                    assert_eq!(design.cam, render.cam, "{preset} {around:?}: {button:?} drag with {mods:?}");
+                    if around == crate::prefs::OrbitAround::ViewCentre {
+                        // The modelling viewport turns about the point Home centres the model on (#14651), a
+                        // little below the view's centre; the Render preview frames its own picture and turns
+                        // about its target. The turn itself is the same, only the point it holds still differs.
+                        let (d, r) = (design.cam, render.cam);
+                        let same = |a: f64, b: f64| (a - b).abs() < 1e-9;
+                        assert!(
+                            same(d.yaw, r.yaw) && same(d.pitch, r.pitch) && same(d.roll, r.roll) && same(d.distance, r.distance),
+                            "{preset} {around:?}: {button:?} drag with {mods:?}: {d:?} against {r:?}"
+                        );
+                    } else {
+                        assert_eq!(design.cam, render.cam, "{preset} {around:?}: {button:?} drag with {mods:?}");
+                    }
                     moved += usize::from(design.cam != before);
                     // Let any snap settle and start the next gesture from the same view.
                     design.cam = render.cam;
@@ -3411,7 +3423,16 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
                 both(vec![Event::PointerMoved(empty)], mods, &mut design, &mut render);
                 both(vec![Event::PointerMoved(empty + vec2(25.0, 15.0))], mods, &mut design, &mut render);
                 both(vec![Event::PointerMoved(empty)], none, &mut design, &mut render);
-                assert_eq!(design.cam, render.cam, "{preset} {around:?}: modifier motion with {mods:?}");
+                if around == crate::prefs::OrbitAround::ViewCentre {
+                    // As for the drags above: same turn, different point held still.
+                    let (d, r) = (design.cam, render.cam);
+                    assert!(
+                        (d.yaw - r.yaw).abs() < 1e-9 && (d.pitch - r.pitch).abs() < 1e-9 && (d.distance - r.distance).abs() < 1e-9,
+                        "{preset} {around:?}: modifier motion with {mods:?}"
+                    );
+                } else {
+                    assert_eq!(design.cam, render.cam, "{preset} {around:?}: modifier motion with {mods:?}");
+                }
             }
             assert!(render.session.selection.is_empty(), "camera navigation must not select");
         }

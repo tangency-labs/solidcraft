@@ -3616,6 +3616,63 @@ fn fold_across_two_collinear_tabs() {
     assert!(bb["max"][2].as_f64().unwrap() > 7.0, "both tabs stand up: {bb}");
 }
 
+/// One fold across two tabs with rounded corners keeps every arc one face: 0.40.1 cut the zone from the
+/// outline's chords, so the base and both tabs came out with one flat face per chord (a bracket with eight r 3
+/// corners had 276 faces, 262 of them flat). A 100 x 40 plate with a 15 mm tab hanging 30 below each end, the
+/// tabs' tips rounded 2 and their inner roots 3, the fillets ending where the bend starts (y -3): six arcs (the
+/// tabs' outer sides run on from the plate's ends). The same blank with sharp corners is the reference.
+///
+/// On a sheet made from surfaces (#6748) the folded solid has one face per plane: the fold's axis runs along x,
+/// so a tab's side, its bend's side wall and the plate's end or the stretch of tab side short of the bend lie in
+/// one plane (x 0, 15, 85, 100) and are one face. Sharp: 18 faces (the plate's top and bottom, 2; its far edge and
+/// the edge between the tabs, 2; the four side planes, 4; each tab's two faces and tip, 6; each bend's inside and
+/// outside, the 4 cylinders). Rounded: each of the six arcs (four tip corners, two root fillets) is one cylinder
+/// face more, and nothing else changes: 6 faces and 6 cylinders more, one face for each arc. (The flat model kept
+/// the three faces of each side plane apart: 26 sharp, and a root fillet took the place of one of them.)
+#[test]
+fn fold_across_two_rounded_tabs_keeps_one_face_per_arc() {
+    let rounded = |s: &mut Session| {
+        let (h2, h3) = (2.0 * (1.0 - 0.5f64.sqrt()), 3.0 * (1.0 - 0.5f64.sqrt()));
+        run(s, "sheet.manage_rules", json!({"name": "Steel 0.8", "thickness": "0.8", "active": true}));
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+        let line = |s: &mut Session, a: [f64; 2], b: [f64; 2]| run(s, "sketch.line", json!({"points": [a, b]}));
+        let arc =
+            |s: &mut Session, a: [f64; 2], b: [f64; 2], t: [f64; 2]| run(s, "sketch.arc.three_point", json!({"start": a, "end": b, "through": t}));
+        line(s, [0.0, 40.0], [0.0, -28.0]);
+        arc(s, [0.0, -28.0], [2.0, -30.0], [h2, -30.0 + h2]);
+        line(s, [2.0, -30.0], [13.0, -30.0]);
+        arc(s, [13.0, -30.0], [15.0, -28.0], [15.0 - h2, -30.0 + h2]);
+        line(s, [15.0, -28.0], [15.0, -3.0]);
+        arc(s, [15.0, -3.0], [18.0, 0.0], [15.0 + h3, -h3]);
+        line(s, [18.0, 0.0], [82.0, 0.0]);
+        arc(s, [82.0, 0.0], [85.0, -3.0], [85.0 - h3, -h3]);
+        line(s, [85.0, -3.0], [85.0, -28.0]);
+        arc(s, [85.0, -28.0], [87.0, -30.0], [85.0 + h2, -30.0 + h2]);
+        line(s, [87.0, -30.0], [98.0, -30.0]);
+        arc(s, [98.0, -30.0], [100.0, -28.0], [100.0 - h2, -30.0 + h2]);
+        line(s, [100.0, -28.0], [100.0, 40.0]);
+        line(s, [100.0, 40.0], [0.0, 40.0]);
+        run(s, "sketch.finish", json!({}));
+        run(s, "sheet.flange", json!({"sketch": "Blank"}));
+    };
+    let sharp = |s: &mut Session| outline_blank(s, json!([[0, -30], [15, -30], [15, 0], [85, 0], [85, -30], [100, -30], [100, 40], [0, 40]]));
+    let folded = |blank: &dyn Fn(&mut Session)| {
+        let mut s = Session::default();
+        blank(&mut s);
+        let flat = volume(&mut s);
+        run(&mut s, "sheet.fold", json!({"points": [[-10, -3, 0.8], [110, -3, 0.8]], "fixed": [50, 20, 0.8], "position": "start"}));
+        assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+        assert!(rel(volume(&mut s), flat) < 1e-3, "a fold keeps the material");
+        let bb = &run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"];
+        assert!(bb["max"][2].as_f64().unwrap() > 7.0, "both tabs stand up: {bb}");
+        faces(&mut s)
+    };
+    let ((rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)) = (folded(&rounded), folded(&sharp));
+    let counts = [(rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)];
+    assert_eq!((sharp_faces, sharp_cylinders), (18, 4), "sharp: {counts:?}");
+    assert_eq!((rounded_faces, rounded_cylinders), (sharp_faces + 6, sharp_cylinders + 6), "rounded, sharp: {counts:?}");
+}
+
 /// After one of two collinear tabs is folded, the other one folds in its own feature too (#638, follow-up to #264).
 #[test]
 fn fold_second_collinear_tab_after_the_first() {

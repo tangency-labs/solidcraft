@@ -414,6 +414,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             ViewDxf {
                 dashed: bool,
                 tolerance: f64,
+                /// Put the drawing's 0,0 on the model's origin instead of the camera target.
+                zero_origin: bool,
             },
             /// Insert SVG / DXF: where the picked drawing goes (`dialogs_insert_drawing`).
             InsertDrawing(crate::dialogs_insert_drawing::Place),
@@ -1800,9 +1802,10 @@ impl Dialog {
     }
 
     /// A sketch clicked in the Browser or the History while Extrude, Revolve or Emboss is open
-    /// (#6106): Profiles takes every profile of the sketch, as when the sketch is selected before
-    /// the command starts. The island inside another profile's hole is left out, or it would fill
-    /// the hole. False when the click is not one of those (the caller selects it as usual).
+    /// (#6106): Profiles takes every profile of what was drawn (`drawn_profiles`), as when the
+    /// sketch is selected before the command starts. The island inside another profile's hole is
+    /// left out, or it would fill the hole. False when the click is not one of those (the caller
+    /// selects it as usual).
     pub fn pick_sketch(&mut self, s: &Session, id: u64) -> bool {
         if self.refuse_sketch(s, id) {
             return true;
@@ -1816,7 +1819,7 @@ impl Dialog {
         }
         let profiles: Vec<Sel> = crate::open_meshing::session_world(s)
             .sketch(id)
-            .map(|ss| outermost_profiles(&ss.profiles).map(|index| Sel::Profile { sketch: id, index }).collect())
+            .map(|ss| drawn_profiles(ss).into_iter().map(|index| Sel::Profile { sketch: id, index }).collect())
             .unwrap_or_default();
         let Some(input) = self.inputs.first_mut() else { return false };
         if profiles.is_empty() {
@@ -2233,6 +2236,28 @@ fn outermost_profiles(profiles: &[solidcraft_engine::sketch::Profile]) -> impl I
     (0..profiles.len()).filter(move |&i| profiles.get(i).is_some_and(|p| !holes.contains(&key(&p.outer_curves))))
 }
 
+/// The profiles of `ss` that make up what was drawn, as `profiles: "all"` takes it (#15521):
+/// projected reference geometry (a face's auto-projected edges) only counts when the drawn curves
+/// alone make no profile. Drawn profiles are found without the references, so they are not
+/// entries of `ss.profiles`; a profile of `ss` is taken when it lies in one of them, which also
+/// takes every piece of a drawn region that a projected edge cuts in two.
+fn drawn_profiles(ss: &solidcraft_engine::doc::SolvedSketch) -> Vec<usize> {
+    let drawn = solidcraft_engine::sketch::find_drawn_profiles(&ss.sketch);
+    if drawn.is_empty() {
+        return outermost_profiles(&ss.profiles).collect();
+    }
+    let outermost: Vec<&solidcraft_engine::sketch::Profile> = outermost_profiles(&drawn).filter_map(|i| drawn.get(i)).collect();
+    ss.profiles
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| {
+            let probe = p.region.interior_point();
+            outermost.iter().any(|d| d.contains(probe))
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
 /// Profiles of the sketch a feature would use, when there is just one: the active sketch's, else
 /// the last sketch's while no feature builds from it yet. A used profile (a cube's sketch on its
 /// bottom face) is only taken when it is picked.
@@ -2441,8 +2466,8 @@ fn boxes_meet(a: &Aabb3, b: &Aabb3, pad: f64) -> bool {
 
 #[cfg(test)]
 thread_local! {
-    /// Planar face lookups (each tessellates the body) and triangles the snap looked at, on this
-    /// thread: tests bound the work of a pick with them.
+    /// Planar face lookups that measured a body's mesh, and triangles the snap looked at, on
+    /// this thread: tests bound the work of a pick with them.
     static SNAP_WORK: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
 }
 
@@ -2475,15 +2500,62 @@ mod face_snap_tests {
         for _ in 0..5 {
             assert_eq!(planar_face(&s, &body, face), Some(first));
         }
-        assert_eq!(take_snap_work().0, 1, "the same model state looks the face up once");
+        assert_eq!(take_snap_work().0, 0, "a plane is planar by its surface: nothing is meshed");
         assert!((first.0.z - 20.0).abs() < 1e-9 && (first.1 - Vec3::Z).len() < 1e-9, "{first:?}");
 
         // A changed model is looked at again.
         s.execute("solid.box", &json!({"length":10,"width":10,"height":50,"operation":"join"})).unwrap();
         let (body, face) = top(&s);
         let again = planar_face(&s, &body, face).expect("the new top face is planar");
-        assert_eq!(take_snap_work().0, 1);
+        assert_eq!(take_snap_work().0, 0);
         assert!((again.0.z - 50.0).abs() < 1e-9, "{again:?}");
+    }
+
+    /// Hovering the faces of a body while New Sketch waits for a plane does not tessellate the
+    /// body once per face: planes and flat B-spline faces are planar by their surfaces, curved
+    /// ones are not. Before, each face not among the last 8 looked up meshed the whole body,
+    /// seconds a face for a large imported body with many B-spline faces. Every face the mesh
+    /// takes as planar is still taken, with the same normal.
+    #[test]
+    fn hovering_many_faces_for_a_sketch_plane_does_not_tessellate_per_face() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, z, [x, y]) in [("S0", 0, [10, 6]), ("S1", 10, [8, 5]), ("S2", 20, [6, 4])] {
+            h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0": [-x, -y], "p1": [x, y]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("solid.loft", json!({"sections": [{"sketch": "S0"}, {"sketch": "S1"}, {"sketch": "S2"}], "body_name": "L3"})).unwrap();
+        h.app.run("solid.cylinder", json!({"base": [0, 0, 20], "radius": 2, "height": 5, "operation": "join"})).unwrap();
+        h.app.run("solid.cylinder", json!({"base": [4, 0, -1], "radius": 1, "height": 30, "operation": "cut"})).unwrap();
+        let faces = h.app.session.world_state().unwrap().body("L3").unwrap().body.faces(1e-3).unwrap();
+        assert!(faces.len() > 8, "more faces than the old cache held: {}", faces.len());
+        let curved = faces.iter().filter(|f| f.plane_normal.is_none()).count();
+        assert_eq!(curved, 2, "the boss's wall and the hole's wall");
+
+        h.app.start("sketch.create");
+        take_snap_work();
+        let d = h.app.dialog.as_ref().unwrap();
+        for _ in 0..2 {
+            for f in &faces {
+                let hit = Hit::Face { body: "L3".into(), index: f.index, point: f.centroid };
+                let picked = d.candidate_on(&h.app.session, &hit, None);
+                assert_eq!(picked.is_some(), f.plane_normal.is_some(), "face {} ({:?})", f.index, f.centroid);
+            }
+        }
+        let tessellations = take_snap_work().0;
+        assert!(tessellations <= 1, "{tessellations} tessellations for {} faces hovered twice", faces.len());
+
+        for f in &faces {
+            let exact = planar_face(&h.app.session, "L3", f.index);
+            match (f.plane_normal, exact) {
+                (Some(mesh), Some((origin, normal))) => {
+                    assert!(normal.dot(mesh) > 1.0 - 1e-9, "face {}: {normal:?} vs the mesh's {mesh:?}", f.index);
+                    assert!((f.centroid - origin).dot(normal).abs() < 1e-6, "face {}: the centroid is on its plane", f.index);
+                }
+                (None, None) => {}
+                (mesh, exact) => panic!("face {}: the mesh says {mesh:?}, the lookup {exact:?}", f.index),
+            }
+        }
     }
 
     #[test]
@@ -2584,33 +2656,62 @@ fn sketch_curve_edge(s: &Session, sel: &Sel) -> Option<Sel> {
     best.map(|(_, e)| e)
 }
 
+/// The plane of planar face `face` of `body`: a point on it and its normal, out of the material.
+/// Planes and B-spline faces go by their exact surfaces ([`Body::planar_face`]), and a cylinder,
+/// sphere or torus is curved, so hovering the faces of a large imported body tessellates nothing.
+/// Only a mesh body's face, or a surface of another kind, is judged by the mesh, measured once
+/// per body geometry ([`ModelBody::joint_faces`]).
+///
+/// [`Body::planar_face`]: solidcraft_engine::kernel::Body::planar_face
+/// [`ModelBody::joint_faces`]: solidcraft_engine::doc::ModelBody::joint_faces
 pub fn planar_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)> {
     let st = crate::open_meshing::session_world(s);
+    let key = (body.to_string(), face);
     let known = FACE_PLANES.with(|c| {
         let c = c.borrow();
-        c.0.as_ref().filter(|k| std::sync::Arc::ptr_eq(k, &st)).and_then(|_| c.1.iter().find(|(b, f, _)| b == body && *f == face).map(|x| x.2))
+        c.0.as_ref().filter(|k| std::sync::Arc::ptr_eq(k, &st)).and_then(|_| c.1.get(&key).copied())
     });
     if let Some(found) = known {
         return found;
     }
-    #[cfg(test)]
-    SNAP_WORK.with(|w| w.set((w.get().0 + 1, w.get().1)));
-    let found = st.body(body).and_then(|b| {
-        let tol = (b.body.size() * 1e-3).max(1e-3);
-        let f = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == face)?;
-        Some((f.centroid, f.plane_normal?))
-    });
+    let found = st.body(body).and_then(|b| face_plane(b, face));
     FACE_PLANES.with(|c| {
         let mut c = c.borrow_mut();
         if !c.0.as_ref().is_some_and(|k| std::sync::Arc::ptr_eq(k, &st)) {
-            *c = (Some(st.clone()), Vec::new());
+            *c = (Some(st.clone()), std::collections::HashMap::new());
         }
-        if c.1.len() >= 8 {
-            c.1.remove(0);
-        }
-        c.1.push((body.to_string(), face, found));
+        c.1.insert(key, found);
     });
     found
+}
+
+/// [`planar_face`] of one body, without the cache.
+fn face_plane(b: &solidcraft_engine::doc::ModelBody, face: usize) -> Option<(Vec3, Vec3)> {
+    use solidcore_record::brep::Surface;
+    if let Some(plane) = b.body.planar_face(face) {
+        return Some((plane.origin, plane.normal()));
+    }
+    let surface = if b.body.is_mesh() { None } else { b.body.record().faces.get(face).map(|f| &f.surface) };
+    match surface {
+        // Exact: a plane the kernel turned down is degenerate, and a B-spline face is flat
+        // only when the kernel finds it so.
+        Some(
+            Surface::Plane { .. }
+            | Surface::PlaneThrough { .. }
+            | Surface::Spline { .. }
+            | Surface::RationalSpline { .. }
+            | Surface::Cylinder { .. }
+            | Surface::Sphere { .. }
+            | Surface::Torus { .. },
+        ) => None,
+        _ => {
+            #[cfg(test)]
+            SNAP_WORK.with(|w| w.set((w.get().0 + 1, w.get().1)));
+            let faces = b.joint_faces().ok()?;
+            let f = faces.iter().find(|f| f.index == face)?;
+            Some((f.centroid, f.plane_normal?))
+        }
+    }
 }
 
 /// The fillet or chamfer feature whose blend a body face is (a piece or copy of one too).
@@ -2625,13 +2726,14 @@ pub fn blend_feature(s: &Session, body: &str, face: usize) -> Option<u64> {
 }
 
 thread_local! {
-    /// The planar faces looked up last, with the model state they were found in (kept, so the
-    /// pointer stays its own). Each lookup tessellates the whole body, about 0.1 s for an
-    /// imported part of a few million triangles, and an open Section Analysis on a face asks
-    /// for its plane several times a frame.
+    /// The faces looked up in one model state, with that state (kept, so the pointer stays its
+    /// own). A B-spline face's flatness is a kernel query, and an open Section Analysis on a
+    /// face asks for its plane several times a frame.
     #[allow(clippy::type_complexity)]
-    static FACE_PLANES: std::cell::RefCell<(Option<std::sync::Arc<solidcraft_engine::doc::ModelState>>, Vec<(String, usize, Option<(Vec3, Vec3)>)>)> =
-        const { std::cell::RefCell::new((None, Vec::new())) };
+    static FACE_PLANES: std::cell::RefCell<(
+        Option<std::sync::Arc<solidcraft_engine::doc::ModelState>>,
+        std::collections::HashMap<(String, usize), Option<(Vec3, Vec3)>>,
+    )> = std::cell::RefCell::new((None, std::collections::HashMap::new()));
 }
 
 /// A plane input as a command parameter: an origin/construction plane name or a face plane.
@@ -5147,6 +5249,44 @@ fn with_single_body(mut p: Value, picks: &[Sel]) -> Value {
     p
 }
 
+/// The points a fillet or chamfer takes, grouped by the body each lies on, in the order the
+/// bodies were first picked. A picked face stands for its edges. A point is kept once per body (#12453).
+fn edges_by_body(s: &Session, picks: &[Sel]) -> Vec<(String, Vec<Vec3>)> {
+    let st = crate::open_meshing::session_world(s);
+    let mut groups: Vec<(String, Vec<Vec3>)> = Vec::new();
+    let mut add = |body: &str, p: Vec3| {
+        let i = match groups.iter().position(|(b, _)| b == body) {
+            Some(i) => i,
+            None => {
+                groups.push((body.to_string(), Vec::new()));
+                groups.len() - 1
+            }
+        };
+        if !groups[i].1.iter().any(|q| q.dist(p) < 1e-9) {
+            groups[i].1.push(p);
+        }
+    };
+    for x in picks {
+        match x {
+            Sel::Edge { body, point, .. } => add(body.as_str(), *point),
+            Sel::Face { body, index, .. } => {
+                if let Some(b) = st.body(body) {
+                    let m = b.mesh();
+                    for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
+                        if !m.seams.get(e).copied().unwrap_or(false)
+                            && let Some(p) = m.edges.get(e)
+                        {
+                            add(body.as_str(), polyline_mid(p));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    groups
+}
+
 /// Section Analysis with a section on and no plane picked: OK turns the section off.
 fn section_turns_off(s: &Session, inputs: &[selection::SelInput]) -> bool {
     s.section.is_some() && selection::items(inputs, 0).is_empty()
@@ -5165,8 +5305,8 @@ fn run_primed(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
 }
 
 pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
-    if let Kind::ViewDxf { dashed, tolerance } = &d.kind {
-        return crate::dialogs_view_dxf::run(app, *dashed, *tolerance);
+    if let Kind::ViewDxf { dashed, tolerance, zero_origin } = &d.kind {
+        return crate::dialogs_view_dxf::run(app, *dashed, *tolerance, *zero_origin);
     }
     if let Kind::ViewNavigator(form) = &d.kind {
         return crate::view_gizmo::run_dialog(app, form, &d.inputs);
@@ -5630,34 +5770,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Fillet { radius, chamfer, ctype, distance2, angle, flip, setback, .. } => {
             need(0, "edges")?;
-            // Faces stand for all their edges.
             let st = crate::open_meshing::session_world(s);
-            let mut pts: Vec<Vec3> = Vec::new();
-            for x in sels(d, 0) {
-                match x {
-                    Sel::Edge { point, .. } => pts.push(*point),
-                    Sel::Face { body, index, .. } => {
-                        if let Some(b) = st.body(body) {
-                            let m = b.mesh();
-                            for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
-                                if !m.seams.get(e).copied().unwrap_or(false)
-                                    && let Some(p) = m.edges.get(e)
-                                {
-                                    pts.push(polyline_mid(p));
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            let mut uniq: Vec<Vec3> = Vec::new();
-            for p in pts {
-                if !uniq.iter().any(|q| q.dist(p) < 1e-9) {
-                    uniq.push(p);
-                }
-            }
-            let edges: Vec<Value> = uniq.into_iter().map(pt).collect();
+            // Faces stand for all their edges. Picks on several bodies are split per body below (#12453).
+            let edges: Vec<Value> = edges_by_body(s, sels(d, 0)).into_iter().flat_map(|(_, pts)| pts).map(pt).collect();
             if *chamfer {
                 let mut p = with_single_body(json!({"edges": edges, "distance": radius}), sels(d, 0));
                 match *ctype {
@@ -6403,6 +6518,29 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 continue;
             }
             m.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    // Picks on two or more bodies: one command per body, with that body's edges and its name (#12453).
+    if matches!(d.kind, Kind::Fillet { .. }) {
+        let groups = edges_by_body(s, sels(d, 0));
+        if groups.len() > 1 {
+            if d.editing.is_some() {
+                return Err("pick edges on one body to edit this feature".into());
+            }
+            let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
+            let variable = matches!(d.extra.get("type").and_then(Value::as_str), Some("variable" | "spline"));
+            if fillet && (variable || params.get("setbacks").is_some()) {
+                return Err("a variable or spline fillet, or corner setbacks, take edges on one body".into());
+            }
+            return Ok(groups
+                .into_iter()
+                .map(|(body, pts)| {
+                    let mut p = params.clone();
+                    p["edges"] = Value::Array(pts.into_iter().map(pt).collect());
+                    p["body"] = json!(body);
+                    (cmd.to_string(), p)
+                })
+                .collect());
         }
     }
     Ok(vec![(cmd.to_string(), params)])
@@ -8132,7 +8270,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, angle, copy } => {
+        kind @ FeatureKind::Move { bodies, .. } => {
             let mut d = start("solid.move")?;
             // Move stores distances in the first body's frame, which can differ from the
             // feature's component. Refill the world distances that the command accepts.
@@ -8146,19 +8284,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         .map(|(.., frame)| frame)
                 })
                 .unwrap_or_else(|| feature_frame(s, f.component));
-            let mut world_translate = translate.clone();
-            if !solidcraft_engine::doc::is_identity(&frame) {
-                solidcraft_engine::doc::map_vector_expr(&frame, &mut world_translate);
-            }
-            crate::dialogs_move::for_feature(
-                &s.doc,
-                &mut d,
-                &solidcraft_engine::doc::plain(bodies),
-                &world_translate,
-                rotate_axis.map(Vec3::from),
-                angle.as_ref(),
-                *copy,
-            );
+            crate::dialogs_move::for_feature(&s.doc, &mut d, kind, &frame);
             d
         }
         other => {

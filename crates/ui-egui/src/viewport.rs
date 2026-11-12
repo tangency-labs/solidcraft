@@ -5053,8 +5053,12 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 let m = drawn(b);
                 for i in m.circular_rim(*index) {
                     let selected = sel.iter().any(|x| matches!(x, Sel::Edge { body: b, index: j, .. } if b == body && *j == i));
-                    if !selected && let Some(e) = if i == *index { edge_of(&m, i, *mid) } else { m.edges.get(i) } {
-                        edge_lines(&mut feedback, e, hover_edge, 2.0, &edge_normals(&m, e));
+                    if let Some(e) = if i == *index { edge_of(&m, i, *mid) } else { m.edges.get(i) } {
+                        // A hovered edge that is picked keeps its selection highlight and only
+                        // thickens one step; redrawing it in the hover colour would read as if
+                        // the pick had come off.
+                        let (cols, w) = if selected { (selected_edge, 4.0) } else { (hover_edge, 2.0) };
+                        edge_lines(&mut feedback, e, cols, w, &edge_normals(&m, e));
                     }
                 }
             }
@@ -5755,7 +5759,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             let m = b.mesh();
             let items: Vec<Sel> = m
-                .tangent_chain(index, 2f64.to_radians())
+                .tangent_chain(index, solidcraft_engine::geom::TANGENT_CHAIN)
                 .into_iter()
                 .filter_map(|i| m.edges.get(i).map(|e| Sel::Edge { body: body.clone(), index: i, point: polyline_mid(e) }))
                 .collect();
@@ -11922,7 +11926,9 @@ mod tests {
         let item = hit_sel(app.viewport.hover.as_ref().unwrap()).unwrap();
         select(&mut app, Some(item.clone()), false, false);
         assert_eq!(app.session.selection, std::slice::from_ref(&item));
-        assert_eq!(build_highlight(&app).merged().lines.len(), 2 * line_count * crate::gpu::LINE_SIZE);
+        // Picked with the pointer still on it: the picked pass lights the whole rim, and the
+        // hover pass redraws it one step thicker, so the rim is drawn twice over.
+        assert_eq!(build_highlight(&app).merged().lines.len(), 4 * line_count * crate::gpu::LINE_SIZE);
         // Ctrl/Shift clicking the rim deselects it.
         select(&mut app, Some(item.clone()), true, true);
         assert!(app.session.selection.is_empty());

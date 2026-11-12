@@ -61,6 +61,7 @@ pub mod physical_material;
 mod piece_names;
 pub mod pipe_thread_catalog;
 pub mod pipe_thread_sizes;
+pub mod plugin_data;
 pub mod point_cloud;
 mod point_cloud_complex;
 pub mod point_cloud_distribution;

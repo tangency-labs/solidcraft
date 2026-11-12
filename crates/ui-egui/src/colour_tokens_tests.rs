@@ -165,6 +165,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
+    ("prefs.rs", 1, "a saved sketch dimension colour: the colour is the user's own data"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
     ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
