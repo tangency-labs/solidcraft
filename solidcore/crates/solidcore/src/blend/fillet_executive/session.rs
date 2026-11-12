@@ -6251,10 +6251,24 @@ impl SessionObjects<'_> {
                     "the edge use's edge",
                 )
             })?;
-        let curve = crate::topology::edge::curve(self.target, other_edge)?.ok_or_else(|| {
+        let mut curve = crate::topology::edge::curve(self.target, other_edge)?.ok_or_else(|| {
             SolidError::blend_missing("SmFilletNx1Corner::MakeCornerTopology", "the edge's curve")
         })?;
-        let interval = crate::topology::edge::interval(self.target, other_edge)?;
+        let mut interval = crate::topology::edge::interval(self.target, other_edge)?;
+        // (not upstream, #15505) The end cap meets OtherSideEdge only along its own edge
+        // there, from the vertex to the rail's crossing, whose curve the loop above set:
+        // that piece must lie on the extended surface, not the whole edge (upstream tests
+        // the whole edge, so an edge running on past the extension gets a G0 corner patch
+        // although the cap lies on the extended surface)
+        for edge in [gaps.edge1, gaps.edge2] {
+            if self.pseudo.fillet_edge(edge)?.original_edge() != Some(other_edge) {
+                continue;
+            }
+            if let Some(piece) = crate::topology::edge::curve(self.pseudo.brep(), edge)? {
+                curve = piece;
+                interval = piece.natural_interval();
+            }
+        }
         let surface = self.extended_surfaces.get(&face).ok_or_else(|| {
             SolidError::blend_missing(
                 "SmFilletNx1Corner::MakeCornerTopology",
