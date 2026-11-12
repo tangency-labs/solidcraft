@@ -703,6 +703,69 @@ mod tests {
         )
     }
 
+    /// WR-776: a line skew to the axis sweeps a hyperboloid of one sheet. Every point of
+    /// the result is as far from the axis as the profile's point at the same axial
+    /// coordinate, both measured here from the profile's and the axis's own numbers.
+    /// Upstream's one-curve special case made the cone through the end circles, 3.85 mm
+    /// off its hyperboloid half way along this line; with the analytic-faces fix or
+    /// without, the line is its surface of revolution.
+    #[test]
+    fn a_line_skew_to_the_axis_revolves_onto_its_hyperboloid() {
+        let (p0, p1) = ([600.0, 0.0, 0.0], [700.0, 0.0, 200.0]);
+        let o = [500.0, -50.0, 0.0];
+        let n = (40.0_f64 * 40.0 + 80.0 * 80.0 + 300.0 * 300.0).sqrt();
+        let a = [40.0 / n, 80.0 / n, 300.0 / n];
+        let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        // the axial coordinate of p and its distance from the axis
+        let polar = |p: [f64; 3]| {
+            let q = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+            let h = dot(q, a);
+            (h, (dot(q, q) - h * h).max(0.0).sqrt())
+        };
+        let ((h0, _), (h1, _)) = (polar(p0), polar(p1));
+        let profile = segment(p0, p1);
+        for analytic in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.revolve_analytic_profile_faces = analytic;
+            let sheet = create_rotational_sweep(
+                &mut k,
+                &[Some(&profile)],
+                Point3::new(o[0], o[1], o[2]),
+                Vec3::new(a[0], a[1], a[2]),
+                360.0,
+                false,
+            )
+            .unwrap();
+            let faces = crate::topology::brep::p1::faces(&sheet, None).unwrap();
+            assert!(!faces.is_empty());
+            let mut worst = 0.0_f64;
+            for f in faces {
+                let surface = crate::topology::face::p2::surface(&sheet, f)
+                    .unwrap()
+                    .expect("a surface");
+                let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
+                for i in 0..=24 {
+                    for j in 0..=24 {
+                        let uv = crate::geom::vector2d::Point2::new(
+                            d.u_min() + (d.u_max() - d.u_min()) * f64::from(i) / 24.0,
+                            d.v_min() + (d.v_max() - d.v_min()) * f64::from(j) / 24.0,
+                        );
+                        let x = surface.evaluate_point(&k, uv).unwrap();
+                        let (h, r) = polar([x.x, x.y, x.z]);
+                        let t = (h - h0) / (h1 - h0);
+                        assert!((-1e-9..=1.0 + 1e-9).contains(&t), "past the profile: {x:?}");
+                        let on = [0, 1, 2].map(|c| p0[c] + t * (p1[c] - p0[c]));
+                        worst = worst.max((r - polar(on).1).abs());
+                    }
+                }
+            }
+            assert!(
+                worst <= 1e-6,
+                "{worst} mm off the hyperboloid (fix {analytic})"
+            );
+        }
+    }
+
     /// A full turn of a half annulus about its diameter is a hollow ball with the
     /// opt-in; upstream makes the inner ball a second solid.
     #[test]

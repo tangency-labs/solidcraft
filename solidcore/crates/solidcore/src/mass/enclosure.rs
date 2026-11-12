@@ -170,6 +170,8 @@ pub fn enclose_volume(k: &Kernel, b: &mut Brep, width: f64) -> Result<VolumeEncl
 ///
 /// Those of [`enclose_volume`].
 pub fn volume_sign(k: &Kernel, b: &mut Brep) -> Result<VolumeSign> {
+    // each decision a call of this scope (feature `profile`; nothing without it)
+    crate::profile::profile_scope!(k, "mass::enclosure::volume_sign");
     volume_sign_within(k, b, CELL_BUDGET)
 }
 
@@ -462,6 +464,21 @@ fn piece_hull(cn: &NurbsCurve, span: usize) -> (Ivl, Ivl) {
         v = v.hull(q);
     }
     (u, v)
+}
+
+/// Whether `u` is constant on the curve's polynomial piece `span`, exactly: the control points
+/// that define it have one weight `w` and one `u w`, so on it `u = (u w) / w` everywhere (the
+/// basis functions sum to 1). Such a piece (a seam's trim, a closing segment along v) has
+/// `u' = 0`, and each of its cells' integrand carries the factor `u'(t)`: its flux is exactly 0.
+fn constant_u(cn: &NurbsCurve, span: usize) -> bool {
+    let point = |i: usize| {
+        let at = |c: usize| cn.pw.get(4 * i + c).map(|x| x.to_bits());
+        (at(0), at(3))
+    };
+    let first = point((span + 1).saturating_sub(cn.p + 1));
+    first.0.is_some()
+        && first.1.is_some()
+        && ((span + 1).saturating_sub(cn.p + 1)..=span).all(|i| point(i) == first)
 }
 
 /// The closed parameter range of span `k` of `knots` (degree `p`, `n` control points), the
@@ -903,6 +920,11 @@ impl<'a> Work<'a> {
         let levels = fg.levels.clone();
         let lines_v: Vec<f64> = levels.iter().skip(1).copied().collect();
         for (s, a, z) in curve_spans(cn) {
+            // a piece of constant u has no flux (its cells' integrand carries u' = 0): no
+            // cells, and the enclosure is that of the other pieces
+            if constant_u(cn, s) {
+                continue;
+            }
             let mut cuts = vec![a, z];
             for (c, lines) in [(0usize, &lines_u), (1, &lines_v)] {
                 for &line in lines {
@@ -1816,5 +1838,61 @@ mod tests {
         // int |x|^3 = (1.5^4 + 0.5^4) / 4 = 1.28125
         let a = abs_moment(xl, xh, 3);
         assert!(a.lo <= 1.28125 && 1.28125 <= a.hi);
+    }
+
+    /// Constant u is decided exactly, on the control points that define the piece: a segment
+    /// along v (one u, weight 1) is constant, one along u is not, and one whose two weights or
+    /// two `u w` differ in the last bit is not.
+    #[test]
+    fn constant_u_is_exact_on_the_piece_control_points() {
+        assert!(constant_u(&segment([0.25, 0.0], [0.25, 1.0]).unwrap(), 1));
+        assert!(!constant_u(&segment([0.0, 0.5], [1.0, 0.5]).unwrap(), 1));
+        let mut seg = segment([0.25, 0.0], [0.25, 1.0]).unwrap();
+        seg.pw[4] = f64::from_bits(0.25_f64.to_bits() + 1);
+        assert!(!constant_u(&seg, 1));
+        let mut seg = segment([0.25, 0.0], [0.25, 1.0]).unwrap();
+        seg.pw[7] = 2.0;
+        assert!(!constant_u(&seg, 1));
+    }
+
+    /// A piece of constant u adds no cell and leaves the enclosure as it was, bit for bit; a
+    /// piece across u on the same face adds cells. A cylinder's seam is swept by no cell.
+    #[test]
+    fn a_piece_of_constant_u_adds_no_cell() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_cylinder(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            2.0,
+            5.0,
+        )
+        .unwrap();
+        let mut w = Work::new(&k, &mut b).unwrap();
+        // every piece Work made sweeps cells: a constant-u one was left out
+        assert!(w.pieces.iter().all(|p| !constant_u(&p.cn, p.span)));
+        // the curved face, and its parameter box
+        let (face, (u0, u1), (v0, v1)) = w
+            .faces
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.cn.p > 1 || f.cn.q > 1)
+            .map(|(i, f)| {
+                let ends = |k: &[f64]| (*k.first().unwrap(), *k.last().unwrap());
+                (i, ends(&f.cn.u), ends(&f.cn.v))
+            })
+            .unwrap();
+        let um = 0.5 * (u0 + u1);
+        let before = (w.pieces.len(), w.items.len(), w.total());
+        w.add_piece(face, &segment([um, v0], [um, v1]).unwrap(), 1.0)
+            .unwrap();
+        let after = (w.pieces.len(), w.items.len(), w.total());
+        assert_eq!((before.0, before.1), (after.0, after.1));
+        assert_eq!(
+            (before.2.lo.to_bits(), before.2.hi.to_bits()),
+            (after.2.lo.to_bits(), after.2.hi.to_bits())
+        );
+        w.add_piece(face, &segment([u0, v1], [u1, v1]).unwrap(), 1.0)
+            .unwrap();
+        assert!(w.items.len() > before.1);
     }
 }

@@ -34,7 +34,9 @@ pub enum DialogPlace {
 
 /// Does the open dialog hold the left column this frame?
 pub(crate) fn holds(app: &SolveApp) -> bool {
-    app.preferences.dialog_place == DialogPlace::LeftColumn && app.dialog.as_ref().is_some_and(crate::dialogs::docks)
+    !crate::panel_runtime::production_active(app)
+        && app.preferences.dialog_place == DialogPlace::LeftColumn
+        && app.dialog.as_ref().is_some_and(crate::dialogs::docks)
 }
 
 /// The History is drawn at the left this frame (beside or under the browser).
@@ -79,7 +81,7 @@ pub(crate) fn rect(app: &SolveApp, available: Rect, width: f32) -> Rect {
 /// the same column worked out now from the space the browser had; the next frame then leaves
 /// the browser out.
 pub(crate) fn place(app: &SolveApp, ctx: &egui::Context, d: &crate::dialogs::Dialog) -> Option<Rect> {
-    if app.preferences.dialog_place != DialogPlace::LeftColumn || !crate::dialogs::docks(d) {
+    if crate::panel_runtime::production_active(app) || app.preferences.dialog_place != DialogPlace::LeftColumn || !crate::dialogs::docks(d) {
         return None;
     }
     let column = app.shell.dialog_column.or_else(|| {

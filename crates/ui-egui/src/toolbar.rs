@@ -484,6 +484,7 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.export_step", app.tr_label("Export STEP…"), &key("file.export_step"), "export", shown));
     rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
     rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
+    rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
     rows.push(FileRow::Separator);
@@ -531,6 +532,7 @@ fn run_file_row(app: &mut SolveApp, id: &str) {
                 show();
             }
         }
+        "export_glb" => FileAction::Export("glb").run(app),
         "export_json" => FileAction::Export("json").run(app),
         "install" => {
             if let Some(offer) = crate::install::offered(app) {

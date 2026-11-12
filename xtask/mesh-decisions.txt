@@ -20,7 +20,7 @@ crates/doc/src/eval.rs:feature_tools_with_constructor reaches a To Object extent
 crates/doc/src/eval.rs:height_at measures a point's height on a face by the display mesh
 crates/doc/src/eval.rs:hole_axis_size sizes a hole's tools by the bodies its axis meets on the display mesh
 crates/doc/src/eval.rs:hole_depth_to works out a hole's To Object depth on the display mesh
-crates/doc/src/eval.rs:hole_on_surface moves a hole back onto its face by the display mesh
+crates/doc/src/eval.rs:hole_on_surface_in moves a hole back onto its face by the display mesh
 crates/doc/src/eval.rs:hole_reaches decides whether a drill reaches material by the display mesh
 crates/doc/src/eval.rs:nearest_object_face picks an extrusion's To Object face by the display mesh
 crates/doc/src/eval.rs:off_the_ends moves an edge point off the edge's ends by the display mesh

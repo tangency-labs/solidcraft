@@ -6095,11 +6095,13 @@ mod tests {
         let surface = Surface::from(OffsetSurface::new(&k, 0.5, base, true, 0).unwrap());
         let uv = Point2::new(0.0, 0.0);
         assert!(surface.evaluate_point(&k, uv).unwrap().distance(Vec3::ZERO) < 1e-15);
+        let e = surface
+            .evaluate(&k, uv, 2, 2, EvaluateFlags::default())
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(
-            surface
-                .evaluate(&k, uv, 2, 2, EvaluateFlags::default())
-                .unwrap_err(),
-            SolidError::sm_err("surface::offset_surface::OffsetSurface::evaluate")
+            e.operation(),
+            "surface::offset_surface::OffsetSurface::evaluate"
         );
 
         let tol = 1e-5;

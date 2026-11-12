@@ -7,6 +7,7 @@
 //! |-------------------------------------------------------|--------------------------------|
 //! | [`intersect_curves`], [`CurveIntersections`]          | `SmApiIntersectCurves`         |
 //! | [`intersect_surfaces`]                                | `SmApiIntersectSurfaces`       |
+//! | [`intersect_surfaces_within`]                         | (not upstream)                 |
 //! | [`intersect_faces`], [`FaceBodies`], [`Intersections`] | `SmApiIntersectFaces`         |
 //! | [`intersect_breps`], [`BrepOperands`]                 | `SmApiIntersectBreps`          |
 //! | [`intersect_curve_surface`], [`CurveHits`]            | `SmApiIntersectCurveSurface`   |
@@ -69,6 +70,9 @@ use crate::topology::FaceId;
 const OP: &str = "intersect::api_intersectors::intersect_brep_with_plane";
 const OP_CURVES: &str = "intersect::api_intersectors::intersect_curves";
 const OP_SURFACES: &str = "intersect::api_intersectors::intersect_surfaces";
+
+/// The phrase of [`intersect_surfaces`]'s failure when the surfaces do not meet at all.
+pub(crate) const NO_SURFACE_INTERSECTION: &str = "the surfaces do not intersect";
 const OP_BREPS: &str = "intersect::api_intersectors::intersect_breps";
 const OP_CURVE_SURFACE: &str = "intersect::api_intersectors::intersect_curve_surface";
 const OP_CURVE_FACE: &str = "intersect::api_intersectors::intersect_curve_face";
@@ -178,6 +182,23 @@ pub fn intersect_surfaces(
     surface1: &Surface,
     surface2: &Surface,
 ) -> (Vec<Curve>, Result<()>) {
+    intersect_surfaces_within(k, surface1, surface2, None)
+}
+
+/// [`intersect_surfaces`] traced to `approx_tol_3d` (`GlobalSurfaceIntersect`'s
+/// approximation tolerance; `None`: the intersector's default, a thousandth of the size
+/// of the surfaces' domains, which on large surfaces is far coarser than the kernel's
+/// tolerances). Not upstream: `SmApiIntersectSurfaces` takes no tolerance.
+///
+/// # Errors
+///
+/// In the status: those of [`intersect_surfaces`].
+pub fn intersect_surfaces_within(
+    k: &Kernel,
+    surface1: &Surface,
+    surface2: &Surface,
+    approx_tol_3d: Option<f64>,
+) -> (Vec<Curve>, Result<()>) {
     let domains = surface1
         .natural_uv_domain_with_nurb(k)
         .and_then(|d1| Ok((d1, surface2.natural_uv_domain_with_nurb(k)?)));
@@ -191,7 +212,7 @@ pub fn intersect_surfaces(
         surface2,
         &domain2,
         [true, true],
-        None,
+        approx_tol_3d,
         None,
     );
     // check result
@@ -199,7 +220,7 @@ pub fn intersect_surfaces(
         if result.curves_3d.is_empty() {
             Err(SolidError::intersect_failed(
                 OP_SURFACES,
-                "the surfaces do not intersect",
+                NO_SURFACE_INTERSECTION,
             ))
         } else {
             Ok(())

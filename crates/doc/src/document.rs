@@ -866,6 +866,7 @@ pub enum FeatureKind {
         tangent_chain: bool,
     },
     Box {
+        /// The box's lowest corner, or its centre when `centred` is set.
         #[serde(with = "point_expr")]
         #[walk(placement)]
         corner: PointExpr,
@@ -877,6 +878,10 @@ pub enum FeatureKind {
         height: Expr,
         #[serde(default)]
         operation: Operation,
+        /// Placed by its centre: `corner` is the centre, so a new length, width or height grows the box
+        /// on both sides and it stays centred (#14487).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        centred: bool,
     },
     Cylinder {
         #[serde(with = "point_expr")]
@@ -1019,6 +1024,12 @@ pub enum FeatureKind {
         /// part changes. `position` keeps where it was placed.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         references: Vec<HoleReference>,
+        /// Holes at sketch points as older builds drilled them: a point inside a body moves back
+        /// to the body's surface whatever plane the sketch lies on. Designs saved before #11538
+        /// carry it, so their holes rebuild where they were; new holes leave it off, and Edit
+        /// Hole keeps it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        old_surface_start: bool,
     },
     /// A thread on a cylindrical face. Cosmetic by default (no geometry change; drawn and
     /// exported as an annotation); `modeled` cuts the real helical ISO profile into the face.
@@ -1186,6 +1197,10 @@ pub enum FeatureKind {
         tool: Option<FaceAt>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sketch: Option<SketchId>,
+        /// With `sketch`: its curves joined end to end first, so a closed loop cuts along itself
+        /// only. Off (each curve on its own, an open one extended past its ends) in older designs.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        loops: bool,
     },
     /// Scale bodies about a point (uniform, or per axis).
     Scale {
@@ -1425,7 +1440,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
     },
-    /// Sheet metal contour flange: a sheet bent along an open chain of sketch lines.
+    /// Sheet metal contour flange: a sheet bent along an open chain of sketch lines and tangent arcs.
     SheetContour {
         sketch: SketchId,
         curves: Vec<String>,

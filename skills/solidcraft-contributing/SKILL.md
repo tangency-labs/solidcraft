@@ -210,7 +210,7 @@ Use the affected crate and test module in commands such as:
 ```sh
 cargo test --profile ci -p solidcraft-engine --lib -- tests::feature_inputs_are_parameters
 cargo clippy -p solidcraft-engine --all-targets -- -D warnings
-cargo fmt --all -- --check
+cargo xtask fmt --check
 cargo xtask ci
 ```
 

@@ -4,12 +4,20 @@
 //! correspondence, hence on both directed Hausdorff distances. B-splines are
 //! enclosed on every knot span by homogeneous interval de Boor evaluation; no
 //! rounded control-polygon conversion or sampled distance enters the proof.
+//! Ellipses, circles, hyperbolas and parabolas are evaluated through their stored
+//! rational B-spline (`Curve::evaluate_point`), so that is what is enclosed. Planar
+//! conics (`Conic`) are enclosed by interval evaluation of their rational
+//! parametrisation, each ellipse branch on its own; two conics of one kind and
+//! rotation at the same parameters are bounded through the difference of their
+//! coefficients. Hermite, iso, offset, projected, on-surface, in-volume,
+//! tangent-field and composite curves have no enclosure here and are refused.
 //!
 //! Deviations: no recursion. Work is bounded by the stored knot count and the
 //! kernel's NURBS degree limit. Curves without an implemented exact enclosure,
 //! non-positive weights, extrapolation and non-finite bounds are refused.
 
 use crate::blend::fillet_section::interval::Ivl;
+use crate::curve::conic::{Conic, ConicType};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
 use crate::geom::extent1d::Extent1d;
@@ -30,7 +38,9 @@ fn invalid(reason: &'static str) -> SolidError {
 fn unsupported() -> SolidError {
     SolidError::Unsupported {
         operation: OP,
-        reason: "stitch gap enclosure is implemented for lines and positive-weight B-splines only",
+        reason: "stitch gap enclosure is implemented for lines, positive-weight B-splines, \
+                 the ellipses, circles, hyperbolas and parabolas evaluated through them, \
+                 and planar conics only",
     }
 }
 
@@ -282,14 +292,192 @@ fn line_box(line: &Line, t: Ivl) -> Result<Box3> {
     Ok(result)
 }
 
+/// A conic's position in its natural frame, as coefficients over functions of `t`:
+/// `x = cx g_x(t) + x0(t)`, `y = cy g_y(t)` (`Conic::evaluate_point` before its
+/// rotation and translation). `x0` is the line's `t`, the same for two lines at the
+/// same parameter, so a difference of two conics of one kind is
+/// `(cx - cx') g_x, (cy - cy') g_y` exactly.
+struct ConicTerms {
+    cx: f64,
+    gx: Ivl,
+    x0: Ivl,
+    cy: f64,
+    gy: Ivl,
+}
+
+fn square(t: Ivl) -> Ivl {
+    let p = t * t;
+    // The exact square is non-negative; only rounding spill is clipped.
+    Ivl::new(p.lo.max(0.0), p.hi)
+}
+
+/// `g_x`, `g_y` and `x0` of one conic kind over a parameter range that does not
+/// cross an ellipse's branch point `t = 1`.
+fn conic_branch(conic: &Conic, t: Ivl, sign: f64) -> Result<ConicTerms> {
+    let one = Ivl::from(1.0);
+    let two = Ivl::from(2.0);
+    let zero = Ivl::from(0.0);
+    let (cx, gx, x0, cy, gy) = match conic.conic_type() {
+        ConicType::Ellipse => {
+            let t2 = square(t);
+            let denominator = one + t2;
+            (
+                conic.a(),
+                Ivl::from(sign) * ((one - t2) / denominator),
+                zero,
+                conic.b(),
+                Ivl::from(sign) * ((two * t) / denominator),
+            )
+        }
+        ConicType::Hyperbola => {
+            let t2 = square(t);
+            let denominator = one - t2;
+            if denominator.lo <= 0.0 {
+                return Err(invalid("hyperbola parameter at or past its asymptote"));
+            }
+            (
+                conic.a(),
+                (one + t2) / denominator,
+                zero,
+                conic.b(),
+                (two * t) / denominator,
+            )
+        }
+        ConicType::Parabola => (conic.a(), square(t), zero, conic.a(), two * t),
+        ConicType::Line => (0.0, zero, t, conic.a(), one),
+        ConicType::Unknown => return Err(unsupported()),
+    };
+    Ok(ConicTerms { cx, gx, x0, cy, gy })
+}
+
+/// [`ConicTerms`] over `t`, the ellipse's two branches (`t <= 1`, and `t > 1` as
+/// `t - 2` with the sign flipped) each enclosed and hulled.
+fn conic_terms(conic: &Conic, t: Ivl) -> Result<ConicTerms> {
+    let natural = conic.natural_interval();
+    if !finite(t) || t.lo < natural.min() || t.hi > natural.max() {
+        return Err(invalid("curve gap enclosure does not extrapolate"));
+    }
+    if !(conic.a().is_finite() && conic.b().is_finite()) {
+        return Err(invalid("non-finite conic"));
+    }
+    if conic.conic_type() != ConicType::Ellipse || t.hi <= 1.0 {
+        return conic_branch(conic, t, 1.0);
+    }
+    let right = conic_branch(conic, Ivl::new(t.lo.max(1.0), t.hi) - Ivl::from(2.0), -1.0)?;
+    if t.lo > 1.0 {
+        return Ok(right);
+    }
+    let left = conic_branch(conic, Ivl::new(t.lo, 1.0), 1.0)?;
+    Ok(ConicTerms {
+        gx: left.gx.hull(right.gx),
+        gy: left.gy.hull(right.gy),
+        x0: left.x0.hull(right.x0),
+        ..left
+    })
+}
+
+/// Rotates a natural-frame vector as `Conic::evaluate_point` does (its stored
+/// sine and cosine, only when the angle is not zero).
+fn conic_rotate(conic: &Conic, x: Ivl, y: Ivl) -> [Ivl; 2] {
+    if conic.theta_rad() == 0.0 {
+        return [x, y];
+    }
+    let (sin, cos) = conic.sin_cos_theta();
+    let (sin, cos) = (Ivl::from(sin), Ivl::from(cos));
+    [x * cos + y * sin, y * cos - x * sin]
+}
+
+/// Encloses a planar conic (`Conic::evaluate_point`, `z = 0`) over `t`.
+fn conic_box(conic: &Conic, t: Ivl) -> Result<Box3> {
+    let terms = conic_terms(conic, t)?;
+    let x = Ivl::from(terms.cx) * terms.gx + terms.x0;
+    let y = Ivl::from(terms.cy) * terms.gy;
+    let [x, y] = conic_rotate(conic, x, y);
+    let origin = conic.origin();
+    if !(origin.x.is_finite() && origin.y.is_finite()) {
+        return Err(invalid("non-finite conic"));
+    }
+    let result = [
+        x + Ivl::from(origin.x),
+        y + Ivl::from(origin.y),
+        Ivl::from(0.0),
+    ];
+    if !result.into_iter().all(finite) {
+        return Err(invalid("conic enclosure overflows"));
+    }
+    Ok(result)
+}
+
+/// Two conics of one kind and one rotation at the same parameters differ by
+/// `R ((cx - cx') g_x, (cy - cy') g_y) + (o - o')` exactly, so the bound follows
+/// the difference of their coefficients rather than the two curves' widths.
+/// `None` when the two are not of that form.
+fn conic_difference(first: &Conic, second: &Conic, t: Ivl) -> Result<Option<f64>> {
+    if first.conic_type() != second.conic_type()
+        || first.theta_rad() != second.theta_rad()
+        || first.sin_cos_theta() != second.sin_cos_theta()
+    {
+        return Ok(None);
+    }
+    let p = conic_terms(first, t)?;
+    let q = conic_terms(second, t)?;
+    let coefficient = |a: f64, b: f64| {
+        if a == b {
+            Ivl::from(0.0)
+        } else {
+            Ivl::from(a) - Ivl::from(b)
+        }
+    };
+    // The same kind at the same parameter: the same g and x0, so only the
+    // coefficients differ.
+    let (o, r) = (first.origin(), second.origin());
+    if ![o.x, o.y, r.x, r.y].into_iter().all(f64::is_finite) {
+        return Err(invalid("non-finite conic"));
+    }
+    if p.cx == q.cx && p.cy == q.cy && o == r {
+        // The same numbers: the same point at every parameter.
+        return Ok(Some(0.0));
+    }
+    let [x, y] = conic_rotate(
+        first,
+        coefficient(p.cx, q.cx) * p.gx,
+        coefficient(p.cy, q.cy) * p.gy,
+    );
+    norm([
+        x + coefficient(o.x, r.x),
+        y + coefficient(o.y, r.y),
+        Ivl::from(0.0),
+    ])
+    .map(Some)
+}
+
+/// The stored rational B-spline a curve is evaluated through: the B-spline itself,
+/// and the conics derived from `SmBSplineCurve` (ellipse or circle, hyperbola,
+/// parabola), whose evaluation is their base's (`Curve::evaluate_point`). Their
+/// analytic placement and radii are not read: the base is what the edge is.
+fn rational_base(curve: &Curve) -> Result<Option<&Nurbs>> {
+    let base = match curve.kind() {
+        CurveKind::BSpline(b) => b,
+        CurveKind::Ellipse(e) => e.base(),
+        CurveKind::Hyperbola(h) => h.base(),
+        CurveKind::Parabola(p) => p.base(),
+        _ => return Ok(None),
+    };
+    base.gw_nurb()
+        .map(Some)
+        .ok_or_else(|| invalid("missing spline data"))
+}
+
 fn curve_box(curve: &Curve, range: Ivl) -> Result<Box3> {
-    match curve.kind() {
-        CurveKind::Line(l) => line_box(l, range),
-        CurveKind::BSpline(b) => spline_box(
-            b.gw_nurb().ok_or_else(|| invalid("missing spline data"))?,
-            range,
-        ),
-        _ => Err(unsupported()),
+    if let CurveKind::Line(l) = curve.kind() {
+        return line_box(l, range);
+    }
+    if let CurveKind::Conic(c) = curve.kind() {
+        return conic_box(c, range);
+    }
+    match rational_base(curve)? {
+        Some(n) => spline_box(n, range),
+        None => Err(unsupported()),
     }
 }
 
@@ -317,9 +505,18 @@ pub(super) fn curves(first: &Curve, a: [f64; 2], second: &Curve, b: [f64; 2]) ->
     // of the dehomogenized control-point differences. This also proves identity
     // exactly, without subtracting independently widened position boxes.
     if a == b {
-        if let (CurveKind::BSpline(x), CurveKind::BSpline(y)) = (first.kind(), second.kind()) {
-            let x = x.gw_nurb().ok_or_else(|| invalid("missing spline data"))?;
-            let y = y.gw_nurb().ok_or_else(|| invalid("missing spline data"))?;
+        if let (CurveKind::Conic(x), CurveKind::Conic(y)) = (first.kind(), second.kind()) {
+            if let Some(bound) = conic_difference(x, y, ar)? {
+                return Ok(bound);
+            }
+        }
+        let x = rational_base(first)?;
+        let y = if x.is_some() {
+            rational_base(second)?
+        } else {
+            None
+        };
+        if let (Some(x), Some(y)) = (x, y) {
             validate(x, ar)?;
             validate(y, br)?;
             if x.degree() == y.degree()
@@ -503,6 +700,74 @@ mod tests {
         assert!(growth(0.0, f64::from_bits(1)).unwrap() > 0.0);
         assert!(growth(-1.0, 0.0).is_err());
         assert!(growth(0.0, f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn planar_conic_enclosures_hold_their_evaluations_on_every_cell() {
+        use crate::curve::conic::{Conic, ConicType};
+        let mut kinds = Vec::new();
+        for kind in [
+            ConicType::Ellipse,
+            ConicType::Hyperbola,
+            ConicType::Parabola,
+            ConicType::Line,
+        ] {
+            let mut c = Conic::new(kind, 2.0, 0.5);
+            c.transform_2d(0.7, crate::math::Point2::new(3.0, -1.0));
+            kinds.push(c);
+        }
+        for c in kinds {
+            let natural = c.natural_interval();
+            // The ellipse's branch point t = 1 falls inside a cell.
+            let (lo, hi) = match c.conic_type() {
+                ConicType::Ellipse => (-1.0, 3.0),
+                ConicType::Hyperbola => (-0.9, 0.9),
+                _ => (-5.0, 5.0),
+            };
+            assert!(lo >= natural.min() && hi <= natural.max());
+            let cells = 37;
+            for i in 0..cells {
+                let a = lo + (hi - lo) * f64::from(i) / f64::from(cells);
+                let b = lo + (hi - lo) * f64::from(i + 1) / f64::from(cells);
+                let enclosure = conic_box(&c, Ivl::new(a, b)).unwrap();
+                for j in 0..=20 {
+                    let t = a + (b - a) * f64::from(j) / 20.0;
+                    let p = c.evaluate_point(t);
+                    for (value, ivl) in [p.x, p.y, p.z].into_iter().zip(enclosure) {
+                        assert!(ivl.lo <= value && value <= ivl.hi, "{c:?} at {t}");
+                    }
+                }
+            }
+        }
+        // Past the hyperbola's asymptote, or outside the natural interval: refused.
+        let h = Conic::new(ConicType::Hyperbola, 1.0, 1.0);
+        assert!(conic_box(&h, Ivl::new(0.0, 1.0)).is_err());
+        let unknown = Conic::new(ConicType::Unknown, 1.0, 1.0);
+        assert!(matches!(
+            conic_box(&unknown, Ivl::new(0.0, 0.5)),
+            Err(SolidError::Unsupported { .. })
+        ));
+    }
+
+    #[test]
+    fn two_conics_of_one_kind_are_bounded_by_their_coefficient_difference() {
+        use crate::curve::conic::{Conic, ConicType};
+        // 2^-23 is exact, and so are 2 + 2^-23 and the origin it moves to.
+        let d = 1.0 / 8_388_608.0;
+        let first = Conic::new(ConicType::Ellipse, 2.0, 1.0);
+        let mut second = Conic::new(ConicType::Ellipse, 2.0 + d, 1.0);
+        second.transform_2d(0.0, crate::math::Point2::new(0.0, d));
+        let a: Curve = first.into();
+        let b: Curve = second.into();
+        let bound = curves(&a, [-1.0, 3.0], &b, [-1.0, 3.0]).unwrap();
+        // Closed form: the difference is (d g_x(t), d) with |g_x| <= 1, so its
+        // largest norm is d sqrt(2), at t = 0 (g_x = 1).
+        let exact = d * core::f64::consts::SQRT_2;
+        assert!(
+            bound >= exact * (1.0 - 1e-15) && bound <= exact * (1.0 + 1e-12),
+            "{bound:e} against {exact:e}"
+        );
+        assert_eq!(curves(&a, [-1.0, 3.0], &a, [-1.0, 3.0]).unwrap(), 0.0);
     }
 
     #[test]

@@ -2105,15 +2105,17 @@ impl Dialog {
 }
 
 /// The edges a Fillet or Chamfer pick stands for: its tangent chain when `chain` is on, else
-/// the picked edge (both halves of a split circular rim).
+/// the picked edge (both halves of a split circular rim). The chain is the kernel's exact one,
+/// the edges the feature rounds: it ends where a concave edge runs on as a convex one, which
+/// the display mesh cannot tell.
 fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
     let mut picked = crate::viewport::picked_selection(s, sel);
     if chain
-        && let Sel::Edge { body, index, .. } = sel
+        && let Sel::Edge { body, index, point } = sel
         && let Some(b) = crate::open_meshing::session_world(s).body(body)
     {
         let m = b.mesh();
-        for i in m.tangent_chain(*index, 2f64.to_radians()) {
+        for i in b.blend_chain(*index, *point) {
             if !picked.iter().any(|x| matches!(x, Sel::Edge { index: j, .. } if *j == i))
                 && let Some(e) = m.edges.get(i)
             {
@@ -3977,14 +3979,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Physical materials: the library's, then the design's own (material.create).
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
-    // The Sketch Palette owns the right edge for as long as a sketch is being edited. A dialog
-    // started there docks at the left instead, so neither panel hides the other.
+    // In Classic, a dialog starts on the left when the Sketch Palette occupies the right.
+    // Shared-panel workspaces keep the existing editor card floating at the right.
     let column = crate::dialog_column::place(app, ctx, &d);
-    let side = if column.is_some() || (crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx)) {
-        crate::frame::Side::Left
-    } else {
-        crate::frame::Side::Right
-    };
+    let side = crate::shell::floating_editor_side(
+        app,
+        column.is_some() || (crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx)),
+    );
     let top = crate::shell::panel_top(app, vp, vp.bottom(), side);
     // Empty/hostile viewport geometry cannot provide a safe window rectangle.
     if !vp.is_finite() || !vp.is_positive() {
@@ -4341,6 +4342,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 Err(error) => d.refuse(app, error),
             }
         }
+        // Not computing again: the computation ended, applied or refused (saying why).
+        if app.applying.is_none() {
+            let outcome = match &d.error {
+                Some(why) if !applied => crate::operations::Outcome::Failed(why.clone()),
+                _ => crate::operations::Outcome::Done,
+            };
+            crate::operations::ended(app, "apply", outcome);
+        }
     }
     if applied && apply_again {
         for input in &mut d.inputs {
@@ -4355,9 +4364,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if applied && d.editing.is_none() {
         remember(app, &d);
     }
-    // Cancel while computing: the result goes (its worker runs on to its end).
-    if cancel && !applied {
-        app.applying = None;
+    // Cancel while computing: the result goes (its worker stops at its next feature).
+    if cancel && !applied && app.applying.take().is_some() {
+        crate::operations::ended(app, "apply", crate::operations::Outcome::Cancelled);
     }
     if !keep || cancel {
         app.session.feature_edit_sketch = None;
@@ -4639,7 +4648,9 @@ pub fn cancel(app: &mut SolveApp) {
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();
     }
-    app.applying = None;
+    if app.applying.take().is_some() {
+        crate::operations::ended(app, "apply", crate::operations::Outcome::Cancelled);
+    }
     if let Some(mut d) = app.dialog.take() {
         crate::dialogs_motion::closed(app, &mut d, false);
         if let Kind::Text(k) = &mut d.kind {
@@ -7386,6 +7397,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             ease_out,
             to,
             references,
+            old_surface_start: _,
         } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults(s);
@@ -7504,7 +7516,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Box { corner, length, width, height, operation } => {
+        FeatureKind::Box { corner, length, width, height, operation, centred } => {
             let mut d = start("solid.box")?;
             d.kind = Kind::Primitive {
                 cmd: "solid.box",
@@ -7513,7 +7525,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 at: None,
                 refs: Default::default(),
             };
-            d.extra.insert("corner".into(), pt_expr(corner));
+            // A box placed by its centre is edited by that centre, so it stays centred (#14487).
+            d.extra.insert(if *centred { "center" } else { "corner" }.into(), pt_expr(corner));
             d
         }
         FeatureKind::Cylinder { base, axis, radius, height, operation, references } => {

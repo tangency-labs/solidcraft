@@ -72,6 +72,13 @@ pub struct SaveMeshKeys {
     /// other formats. Default: body.
     #[serde(default)]
     pub objects: Option<MeshObjects>,
+    /// True saves each body with a print face (`body.print_face`) laid on it, as a slicer export
+    /// lays it: turned so the face points down at Z = 0, its centre of mass over the origin. Each
+    /// body is laid on its own, so several land on the origin together; a part of a 3MF object
+    /// (`objects: component`) stays as it lies. A file sent to `slicer` is laid on them whatever
+    /// this says. Default: false.
+    #[serde(default)]
+    pub lay_on_print_faces: Option<bool>,
 }
 
 /// Leaves out the keys the handler never reads for this call: `ascii` unless `format` is `stl`,
@@ -345,10 +352,11 @@ pub struct SaveMeshResult {
     pub bytes: usize,
     /// The format written: StlBinary, StlAscii, ThreeMf or ThreeMfTagged.
     pub format: String,
-    /// With `slicer` only: the bodies that were laid on their print face for the slicer.
+    /// With `slicer` or `lay_on_print_faces` only: the bodies that were saved laid on their print face.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub print_faces: Vec<String>,
-    /// With `slicer` only: a warning for each body that has a print face but was saved as it lies.
+    /// With `slicer` or `lay_on_print_faces` only: a warning for each body that has a print face but
+    /// was saved as it lies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// With `slicer` only: what happened when the file was handed over.

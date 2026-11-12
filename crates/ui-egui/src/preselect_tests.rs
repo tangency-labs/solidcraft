@@ -1869,7 +1869,12 @@ fn thread_choices_reset_to_the_face_and_can_freeze_the_same_size() {
     h.app.run("solid.cylinder", json!({"radius":4,"height":10})).unwrap();
     h.app.session.selection = vec![thread_face(&h.app, "Body1")];
     h.step(&json!({"start":"solid.thread"})).unwrap();
-    for handle in ["dialog:Size", "dialog:Size:6 mm", "dialog:Pitch", "dialog:Pitch:0.75 mm"] {
+    h.step(&json!({"click":{"handle":"dialog:Size"}})).unwrap();
+    // The second-choice sizes (M1 to M4.5) come before 6 mm: scroll to it before clicking.
+    let first = crate::scenario::handle_at("dialog:Size:1 mm").unwrap();
+    h.call("ui.scroll", json!({"x":first.x,"y":first.y,"delta":-120}));
+    h.frames(12);
+    for handle in ["dialog:Size:6 mm", "dialog:Pitch", "dialog:Pitch:0.75 mm"] {
         h.step(&json!({"click":{"handle":handle}})).unwrap();
     }
     let d = h.app.dialog.as_ref().unwrap();
@@ -1927,8 +1932,8 @@ fn thread_choices_can_start_without_a_face_and_recover_from_invalid_text() {
     h.step(&json!({"click":{"handle":"dialog:Size"}})).unwrap();
     // Plex's taller rows put 8 mm below the first page of this long popup. Scroll the
     // visible list before clicking its choice, as a person would, rather than a clipped handle.
-    let first = crate::scenario::handle_at("dialog:Size:1.6 mm").unwrap();
-    h.call("ui.scroll", json!({"x":first.x,"y":first.y,"delta":-60}));
+    let first = crate::scenario::handle_at("dialog:Size:1 mm").unwrap();
+    h.call("ui.scroll", json!({"x":first.x,"y":first.y,"delta":-200}));
     h.frames(12);
     h.step(&json!({"click":{"handle":"dialog:Size:8 mm"}})).unwrap();
     // The coarse pitch is written as ISO 261 writes it: without the pitch.
@@ -4314,4 +4319,31 @@ fn fix_takes_a_boxed_selection_with_its_dimensions_and_hundreds_of_entities() {
         assert!(h.app.tool.is_none(), "{lines} lines: Fix applied at once, no pick tool left running");
         assert!(h.app.session.selection.is_empty(), "{lines} lines: the selection is used up");
     }
+}
+
+/// Editing a Split Face made with sketch curves keeps its sketch and `loops`: the dialog has
+/// no box for a sketch, so OK must not turn it into a split by the plane shown in its tool box.
+#[test]
+fn split_face_dialog_keeps_a_sketch_split_and_its_loops() {
+    let app = app_with(json!([
+        {"command":"solid.box", "params":{"length":40,"width":30,"height":20,"body_name":"B"}},
+        {"command":"sketch.create", "params":{"plane":"XY","name":"Loop"}},
+        {"command":"sketch.line", "params":{"points":[[10,5],[30,5],[20,25]],"closed":true}},
+        {"command":"sketch.finish", "params":{}},
+        {"command":"solid.split_face", "params":{"faces":[[20,12,20]],"body":"B","sketch":"Loop","loops":true,"name":"ByLoop"}},
+        {"command":"solid.split_face", "params":{"faces":[[2,2,0]],"body":"B","plane":{"origin":[0,15,0],"normal":[0,1,0]},"name":"ByPlane"}}
+    ]));
+    let commands_for = |name: &str| {
+        let feature = app.session.doc.find_feature(name).unwrap().kind.clone();
+        let (kind, inputs, extra) = crate::dialogs_surface::for_feature(&app, &feature, &solidcraft_engine::doc::IDENTITY).unwrap();
+        let Kind::Surface(k) = kind else { panic!("expected a surface dialog") };
+        crate::dialogs_surface::commands(&app, &k, &inputs, &extra).unwrap().remove(0)
+    };
+    let sketch = app.session.doc.find_feature("Loop").unwrap().id;
+    let (cmd, p) = commands_for("ByLoop");
+    assert_eq!(cmd, "solid.split_face");
+    assert_eq!(p["sketch"], json!(sketch));
+    assert_eq!(p["loops"], json!(true));
+    let (_, p) = commands_for("ByPlane");
+    assert!(p.get("sketch").is_none() && p.get("loops").is_none(), "{p}");
 }

@@ -187,11 +187,11 @@ impl RadialGlue {
             }
         }
         let axis = self.axis.unitize()?;
-        let start = Self::leaving(k, b, first)?.project_to_plane(axis);
+        let start = Self::into_face(k, b, first)?.project_to_plane(axis);
         let side = axis.cross(start);
         // the angle round the axis from the first face to a face
         let angle = |k: &mut Kernel, b: &mut Brep, at: (EdgeId, f64)| -> Result<f64> {
-            let w = Self::leaving(k, b, at)?.project_to_plane(axis);
+            let w = Self::into_face(k, b, at)?.project_to_plane(axis);
             let a = w.dot(side).atan2(w.dot(start));
             Ok(if a < 0.0 { a + 2.0 * PI } else { a })
         };
@@ -268,8 +268,9 @@ impl RadialGlue {
 
     /// The direction a lamina edge's face leaves the edge at a curve parameter: the
     /// binormal of the edge's first edge use, which points into the face whichever face
-    /// use it is in.
-    fn leaving(k: &Kernel, b: &mut Brep, (e, t): (EdgeId, f64)) -> Result<Vec3> {
+    /// use it is in. Not the direction an edge leaves a vertex in
+    /// ([`crate::query::edge_turn::leaving`]): this one is across the edge, into its face.
+    fn into_face(k: &Kernel, b: &mut Brep, (e, t): (EdgeId, f64)) -> Result<Vec3> {
         let eu = edge::edgeuses(b, e, None, None)?
             .first()
             .copied()

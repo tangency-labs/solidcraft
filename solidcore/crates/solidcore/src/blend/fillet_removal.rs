@@ -101,7 +101,7 @@ pub mod ring;
 const OP: &str = "blend::fillet_removal";
 
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::blend_failed(OP, "the fillet could not be removed")
 }
 
 fn null(what: &'static str) -> SolidError {
@@ -110,7 +110,7 @@ fn null(what: &'static str) -> SolidError {
 
 /// `NER(p)`: a `NULL` pointer is `SM_ERR_NULL_POINTER`.
 fn ner<T>(v: Option<T>) -> Result<T> {
-    v.ok_or_else(|| SolidError::null_pointer(OP))
+    v.ok_or_else(|| SolidError::blend_missing(OP, "an object the removal needs"))
 }
 
 /// A status upstream turns into `SER(SM_ERR)` whatever it was: any failure but an
@@ -1194,7 +1194,10 @@ impl FilletRemoval {
         let r = (|| -> Result<Extent1d> {
             // pCurve will have to be a SmBSplineCurve, for JoinWith().
             if bspline_part(&curve).is_none() {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(
+                    OP,
+                    "the side edge curve's B-spline form",
+                ));
             }
             let mut curve_domain = curve.natural_interval();
             if high_end {
@@ -1422,7 +1425,10 @@ impl FilletRemoval {
                 for &eu in &uses {
                     get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
                     if eu1::uv_trim_curve(b, eu)?.0.is_none() {
-                        return Err(SolidError::null_pointer(OP));
+                        return Err(SolidError::blend_missing(
+                            OP,
+                            "the edge use's UV trim curve",
+                        ));
                     }
                 }
             }
@@ -1545,7 +1551,7 @@ fn expand_boundary_span(
         SurfaceKind::ProceduralBlend(pb) => pb.net_mut(),
         // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
         SurfaceKind::BallPatch(pb) => pb.net_mut(),
-        _ => return Err(SolidError::null_pointer(OP)),
+        _ => return Err(SolidError::blend_missing(OP, "the surface's B-spline net")),
     };
     base.expand_boundary_span(param, dir)
 }
@@ -1883,4 +1889,28 @@ pub fn delete_fillet_face(
     // (not upstream: the port's cached topology fields, true again for the caller)
     b.refresh_cached_topology();
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #13790: removing a face while editing is off is refused with a typed blend failure
+    /// that keeps the `SM_ERR` status of the bare `Upstream` it replaced, and the body is
+    /// left alone.
+    #[test]
+    fn removal_with_editing_off_is_a_typed_failure() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        b.set_editing_enabled(false);
+        let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
+        let error = delete_fillet_face(&mut k, &mut b, face, None).unwrap_err();
+        assert_eq!(error, sm_err());
+        assert!(error.blend_failure().is_some());
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(crate::topology::brep::p1::faces(&b, None).unwrap().len(), 6);
+    }
 }
