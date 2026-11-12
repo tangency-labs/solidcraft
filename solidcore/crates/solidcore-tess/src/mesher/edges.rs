@@ -10,6 +10,9 @@ use crate::vec::VecExt as _;
 use super::size::{Rules, SizeAt};
 use crate::{Result, TessError};
 
+/// How near, as a fraction of its segment's parameter length, a node put in on an edge may lie to
+/// another before it is that node ([`insert_at`]).
+const NEAR: f64 = 1e-6;
 /// Most nodes on one edge.
 pub(crate) const MAX_EDGE_NODES: usize = 20_000;
 /// Deepest bisection of one edge segment.
@@ -238,7 +241,10 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
 /// Edge `ei`'s nodes with a node put in at each of the curve parameters `ts` that lies strictly
 /// inside a segment, on the curve (on a line, along its segment, as [`split_segments`] puts a
 /// line's), in order: where the mesh path's shaping split a boundary side of a face of the edge,
-/// so every face of it takes the node. The nodes are unchanged on an error: more than
+/// so every face of it takes the node. Two faces splitting one side in a round give its
+/// fraction each in its own metric, apart by their rounding: a parameter within [`NEAR`] of
+/// its segment's length from a node, or from one put in before it, is the same node and left
+/// out, so no two nodes lie a rounding apart. The nodes are unchanged on an error: more than
 /// [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, naming the edge.
 pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]) -> Result<()> {
     let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
@@ -261,10 +267,14 @@ pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]
         points.push(p);
         params.push(t);
         let (Some(&q), Some(&u)) = (nodes.points.get(k + 1), nodes.params.get(k + 1)) else { continue };
+        // The last node of the segment so far: the one at `t`, then each put in.
+        let mut last = t;
         while let Some(m) = next.next_if(|m| *m < u) {
-            if !(m > t) {
+            let near = NEAR * (u - t);
+            if !(m - last > near && u - m > near) {
                 continue;
             }
+            last = m;
             let pm = match &curve {
                 None => p + (q - p) * ((m - t) / (u - t)),
                 Some(c) => c.point(m).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {m}")))?,

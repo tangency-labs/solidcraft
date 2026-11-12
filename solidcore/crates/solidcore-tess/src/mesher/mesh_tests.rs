@@ -59,6 +59,28 @@ fn worst_of(m: &Mesh, face: u32) -> (f64, usize) {
     (tris.iter().map(|t| smallest_angle(corners(m, t))).fold(180.0, f64::min), tris.len())
 }
 
+/// Two faces of one edge split the same side in a round: each gives its fraction in its own
+/// metric, apart by their rounding, and the edge takes one node, not two a rounding apart (the
+/// plate's top face had a triangle of 1.3e-13 degrees at 5c1a53ef7c).
+#[test]
+fn two_faces_splitting_one_side_put_one_node_on_its_edge() {
+    let b = record(&make_box([0.0; 3], [20.0, 10.0, 5.0]).expect("box"));
+    let rules = size::Rules::new(0.01, 22.9, None);
+    let mut nodes: Vec<edges::Nodes> = (0..b.edges.len()).map(|e| edges::sample_edge(&b, e, &rules, 100.0).expect("nodes")).collect();
+    let ei = (0..b.edges.len()).find(|&e| matches!(b.edges[e].curve, brep::Curve::Line { .. })).expect("a line");
+    assert_eq!(nodes[ei].points.len(), 2, "one segment");
+    let (p0, p1) = (nodes[ei].points[0], nodes[ei].points[1]);
+    let faces: Vec<usize> = b.edges[ei].uses.iter().map(|u| u.face as usize).collect();
+    let [f, g] = faces.as_slice() else { panic!("two faces: {faces:?}") };
+    let mut ts = on_edges(&b.faces[*f], &nodes, &[SplitSide { from: p0, to: p1, at: vec![0.5] }]);
+    ts.extend(on_edges(&b.faces[*g], &nodes, &[SplitSide { from: p1, to: p0, at: vec![0.5 + 1e-13] }]));
+    assert!(ts.len() == 2 && ts.iter().all(|(e, _)| *e == ei), "{ts:?}");
+    let params: Vec<f64> = ts.iter().map(|(_, t)| *t).collect();
+    assert!(params[0] != params[1], "apart by rounding: {params:?}");
+    edges::insert_at(&b, ei, &mut nodes[ei], &params).expect("inserted");
+    assert_eq!(nodes[ei].points.len(), 3, "one node: {:?}", nodes[ei].params);
+}
+
 /// Every triangle's facet normal on the side of its corners' surface normals (nothing folded
 /// over or reversed).
 fn assert_nothing_folds(m: &Mesh, what: &str) {
