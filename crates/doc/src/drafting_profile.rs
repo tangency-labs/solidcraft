@@ -50,7 +50,7 @@ impl DraftingProfile {
             edition: edition.into(),
             number,
             length_decimals: 2,
-            angle_decimals: 1,
+            angle_decimals: 2,
             tolerance_decimals: 2,
             repeat,
         }

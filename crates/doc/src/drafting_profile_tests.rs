@@ -50,7 +50,7 @@ fn the_built_ins_write_their_numbers_their_own_way() {
     assert_eq!(dimension(&DraftingProfile::default(), 4), "4× Ø40.00 ±0.05");
     assert_eq!(dimension(&profile("iso_129_1"), 1), "40,00 ±0,05");
     for p in &library {
-        assert_eq!((p.length_decimals, p.angle_decimals, p.tolerance_decimals), (2, 1, 2), "{}", p.id);
+        assert_eq!((p.length_decimals, p.angle_decimals, p.tolerance_decimals), (2, 2, 2), "{}", p.id);
     }
     assert_eq!(dimension(&profile("asme_y14_5"), 1), "40 ±0.05");
     assert_eq!(dimension(&profile("asme_y14_5"), 4), "4X Ø40 ±0.05");
