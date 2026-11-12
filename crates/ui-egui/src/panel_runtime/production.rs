@@ -180,7 +180,7 @@ impl Product {
             Self::RenderBrowser => vec![
                 ("by-object", "render.tree_by_object", "list"),
                 ("by-look", "render.tree_by_look", "list"),
-                ("search", "render.tree_search", "search"),
+                ("search", "render.tree_search", "zoom"),
             ],
             Self::RenderLibrary => vec![
                 ("grid", "render.library_grid", "grid"),
