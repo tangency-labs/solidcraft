@@ -980,8 +980,9 @@ pub struct MatchedSection {
 ///
 /// # Errors
 /// [`Error::Argument`] for a section with no segments, no length or a point that is not finite,
-/// a plane axis that is not a finite unit vector, or a match past `max_segments`; [`Error::Invariant`]
-/// when the pairing breaks down.
+/// plane axes that are not finite orthogonal unit vectors, a circle whose centre, radius or
+/// angles are not finite, or a match past `max_segments`; [`Error::Invariant`] when the pairing
+/// breaks down.
 pub fn match_loft_sections(
     sections: &[LoftSection],
     max_segments: usize,

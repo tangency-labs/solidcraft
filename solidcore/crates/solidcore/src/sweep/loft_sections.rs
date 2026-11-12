@@ -70,6 +70,13 @@ pub const MAX_DEPTH: usize = 64;
 /// Shares of a gap closer than this are the same point: two lone vertices landing on each other
 /// pair.
 const SAME_SHARE: f64 = 1e-9;
+/// The shortest edge a match makes where the sections have none (the kernel's zone tolerance,
+/// `SM_ZONE_TOL_3D`): two lone vertices that would land closer than this to each other pair, and
+/// cuts of one segment are kept at least this far apart and from its ends where it has room.
+const MIN_EDGE: f64 = 1e-5;
+/// How close a curved segment's parameter is found for a length along it, as a share of the
+/// segment's length ([`param_at`]).
+const LENGTH_TOL: f64 = 1e-12;
 /// How many chords a curved segment's nearest point is found on.
 const CHORDS: usize = 8;
 /// The smallest arc a circle is split into (radians).
@@ -77,6 +84,10 @@ const MIN_SWEEP: f64 = 1e-9;
 /// The least step between two cuts of one segment, and between a cut and the segment's ends,
 /// when lone vertices land on the same point of it.
 const CUT_GAP: f64 = 1e-9;
+
+/// How far from perpendicular (the cosine between them) a section plane's axes may be, and how far
+/// from one their lengths.
+const AXES_TOL: f64 = 1e-6;
 
 const OP: &str = "sweep::loft_sections";
 
@@ -287,6 +298,51 @@ fn length(s: &Seg2) -> f64 {
     }
 }
 
+/// The length of a segment from its start to its parameter `t` (in [0, 1]); at 1, [`length`].
+fn length_to(s: &Seg2, t: f64) -> f64 {
+    match *s {
+        Seg2::Line { a, b } => dist(a, b) * t,
+        Seg2::Arc { radius, sweep, .. } => (radius * sweep).abs() * t,
+        _ => integrate(|u| t * len(derivative(s, t * u))),
+    }
+}
+
+/// The parameter of the point a length `d` along a segment of length `l` from its start: the
+/// share for a line or an arc, and for a curve (whose length is not proportional to its
+/// parameter) the root of [`length_to`] by Newton's method inside a bisection bracket, to
+/// [`LENGTH_TOL`] of the length.
+fn param_at(s: &Seg2, d: f64, l: f64) -> f64 {
+    if !(l > 0.0) {
+        return 0.5;
+    }
+    let share = d / l;
+    if matches!(s, Seg2::Line { .. } | Seg2::Arc { .. }) || !(share > 0.0 && share < 1.0) {
+        return share;
+    }
+    let (mut lo, mut hi, mut t) = (0.0f64, 1.0f64, share);
+    for _ in 0..100 {
+        let f = length_to(s, t) - d;
+        if !f.is_finite() {
+            return share;
+        }
+        if f.abs() <= LENGTH_TOL * l {
+            break;
+        }
+        if f > 0.0 {
+            hi = t;
+        } else {
+            lo = t;
+        }
+        let next = t - f / len(derivative(s, t));
+        t = if next > lo && next < hi {
+            next
+        } else {
+            0.5 * (lo + hi)
+        };
+    }
+    t
+}
+
 /// A homogeneous span split at `t` by de Casteljau: its left and right control points.
 fn split_span(sp: &[H2], t: f64) -> (Vec<H2>, Vec<H2>) {
     let mut left = Vec::new();
@@ -491,12 +547,28 @@ impl Traced {
         for (i, s) in self.segs.iter().enumerate() {
             let from = self.from.get(i)?;
             let (mut rest, mut done) = (*s, 0.0);
+            // A conic's remaining piece as homogeneous control points: `conic` scales a piece's
+            // end weights to one, which changes its parameter other than linearly, so the next
+            // cut is taken from these, whose parameter is the segment's own, moved linearly.
+            let mut rest_h = match s {
+                Seg2::Conic { .. } => Some(span(s)?),
+                _ => None,
+            };
             for &t in cuts.get(i).map_or(&[][..], Vec::as_slice) {
                 if !(t > done && t < 1.0) {
                     return None;
                 }
                 // The remaining piece runs from `done` to 1 of the segment.
-                let (piece, after) = split_at(&rest, (t - done) / (1.0 - done))?;
+                let u = (t - done) / (1.0 - done);
+                let (piece, after) = match rest_h.take() {
+                    Some(h) => {
+                        let (l, r) = split_span(&h, u);
+                        let pieces = (conic(&l)?, conic(&r)?);
+                        rest_h = Some(r);
+                        pieces
+                    }
+                    None => split_at(&rest, u)?,
+                };
                 out.segs.push(piece);
                 out.from.push(from.clone());
                 rest = after;
@@ -717,7 +789,7 @@ impl Cursor<'_, '_> {
             let l = *self.side.len.get(self.seg)?;
             let next = wrap(self.seg + 1, n);
             if d < self.before + l || next == wrap(self.end, n) {
-                let t = if l > 0.0 { (d - self.before) / l } else { 0.5 };
+                let t = param_at(self.side.segs.get(self.seg)?, d - self.before, l);
                 return Some((self.seg, t.clamp(1e-9, 1.0 - 1e-9)));
             }
             self.before += l;
@@ -1085,7 +1157,7 @@ fn correspond(a: &[Seg2], fa: Frame, b: &[Seg2], fb: Frame) -> Result<Correspond
         .filter(|&k| matches!(events.get(k), Some((Place::Vertex(_), Place::Vertex(_)))))
         .collect();
     if pairs.is_empty() {
-        keep_in_order(&mut events, increasing);
+        keep_in_order(&mut events, &|_, _, ts| increasing(ts));
     } else {
         events = by_share(&g, &events, &pairs)?;
         let first = events
@@ -1093,9 +1165,16 @@ fn correspond(a: &[Seg2], fa: Frame, b: &[Seg2], fb: Frame) -> Result<Correspond
             .position(|(p, _)| *p == Place::Vertex(0))
             .ok_or_else(unpaired)?;
         events = rotated(&events, first);
-        // Lone vertices that land on one point of a segment (both past its end, say) are spread
-        // apart along it, as little as keeps them in order.
-        keep_in_order(&mut events, spread);
+        // Lone vertices that land on one point of a segment (both past its end, say), or nearer
+        // each other or its ends than [`MIN_EDGE`], are moved apart along it, as little as keeps
+        // them in order.
+        keep_in_order(&mut events, &|side, e, ts| {
+            let sd = if side == 0 { &g.a } else { &g.b };
+            match (sd.segs.get(e), sd.len.get(e)) {
+                (Some(s), Some(&l)) => spaced(s, l, ts),
+                _ => spread(ts),
+            }
+        });
     }
     let mut a_cuts = vec![Vec::new(); m];
     let mut b_cuts = vec![Vec::new(); n];
@@ -1305,7 +1384,9 @@ fn by_share(g: &Grid, events: &[(Place, Place)], pairs: &[usize]) -> Result<Vec<
             }
             let (ka, sa) = lone_a.get(x).copied().unwrap_or((0, f64::INFINITY));
             let (kb, sb) = lone_b.get(y).copied().unwrap_or((0, f64::INFINITY));
-            if (sa - sb).abs() <= SAME_SHARE {
+            // Not paired, they would leave an edge |sa - sb| times each loop's length between
+            // the pairs long on both loops.
+            if (sa - sb).abs() <= SAME_SHARE || (sa - sb).abs() * la.min(lb) < MIN_EDGE {
                 out.push((Place::Vertex(ka), Place::Vertex(kb)));
                 (x, y) = (x + 1, y + 1);
             } else if sa < sb {
@@ -1322,10 +1403,14 @@ fn by_share(g: &Grid, events: &[(Place, Place)], pairs: &[usize]) -> Result<Vec<
     Ok(out)
 }
 
+/// How [`keep_in_order`] places the landings on one segment: from the side (0 for `a`, 1 for `b`),
+/// the segment and the landings' parameters in order.
+type Adjust<'f> = dyn Fn(usize, usize, &[f64]) -> Vec<f64> + 'f;
+
 /// The landings of the events kept in their order along each segment, as `adjust` places them:
 /// two vertices can land on the same point. The events start at `a`'s vertex 0; along the
 /// segment of `b` that point lies inside, the landings the events end with come first.
-fn keep_in_order(events: &mut [(Place, Place)], adjust: fn(&[f64]) -> Vec<f64>) {
+fn keep_in_order(events: &mut [(Place, Place)], adjust: &Adjust) {
     let count = events.len();
     let lead = events
         .iter()
@@ -1352,7 +1437,7 @@ fn keep_in_order(events: &mut [(Place, Place)], adjust: fn(&[f64]) -> Vec<f64>) 
                     _ => None,
                 })
                 .collect();
-            for (&k, t) in at.iter().zip(adjust(&ts)) {
+            for (&k, t) in at.iter().zip(adjust(side, s, &ts)) {
                 if let Some(e) = events.get_mut(k) {
                     let p = if side == 0 { &mut e.0 } else { &mut e.1 };
                     *p = Place::On(s, t);
@@ -1405,6 +1490,48 @@ fn spread(ts: &[f64]) -> Vec<f64> {
         next = *x;
     }
     out
+}
+
+/// `ts` (in order along the segment `s`, of length `l`) unchanged when they are strictly
+/// increasing inside (0, 1) and at least [`MIN_EDGE`] apart along it and from its ends.
+/// Otherwise moved apart along its length as little as keeps them in order: to [`MIN_EDGE`] when
+/// the segment has room for that, else evenly ([`spread`] when its lengths are not finite).
+fn spaced(s: &Seg2, l: f64, ts: &[f64]) -> Vec<f64> {
+    let k = ts.len();
+    let d: Vec<f64> = ts.iter().map(|&t| length_to(s, t)).collect();
+    if !(l.is_finite() && d.iter().all(|x| x.is_finite())) {
+        return spread(ts);
+    }
+    let mut apart = valid_cuts(ts);
+    let mut prev = 0.0;
+    for &x in &d {
+        apart &= x - prev >= MIN_EDGE;
+        prev = x;
+    }
+    if apart && l - prev >= MIN_EDGE {
+        return ts.to_vec();
+    }
+    let placed: Vec<f64> = if l > MIN_EDGE * (k as f64 + 1.0) {
+        let mut out: Vec<f64> = Vec::new();
+        for &x in &d {
+            let floor = out.last().map_or(MIN_EDGE, |p| p + MIN_EDGE);
+            out.push(x.max(floor));
+        }
+        let mut next = l;
+        for x in out.iter_mut().rev() {
+            *x = x.min(next - MIN_EDGE);
+            next = *x;
+        }
+        out
+    } else {
+        (1..=k).map(|q| l * q as f64 / (k as f64 + 1.0)).collect()
+    };
+    let out: Vec<f64> = placed.iter().map(|&x| param_at(s, x, l)).collect();
+    if valid_cuts(&out) {
+        out
+    } else {
+        spread(ts)
+    }
 }
 
 // --- Circles -------------------------------------------------------------------------------
@@ -1518,14 +1645,20 @@ fn arc_overlaps(pieces: &[Seg2], originals: &[Seg2]) -> Vec<Vec<usize>> {
 /// The full circle `l` re-split into `n` arcs to follow a loop of `n` vertices whose directions
 /// from its centre, seen in this loop's plane, are `angles` ([`circle_breaks`]), counter-
 /// clockwise; each piece runs over every given segment the arcs of `l` it overlaps ran over.
-fn circle_resampled(l: &Traced, n: usize, angles: &[f64], fractions: &[f64]) -> Option<Traced> {
+fn circle_resampled(
+    l: &Traced,
+    n: usize,
+    angles: &[f64],
+    fractions: &[f64],
+    clockwise: bool,
+) -> Option<Traced> {
     if !is_circle(&l.segs) || n == 0 {
         return None;
     }
     let Some(Seg2::Arc { center, radius, .. }) = l.segs.first().copied() else {
         return None;
     };
-    let a = circle_breaks(n, angles, fractions, false);
+    let a = circle_breaks(n, angles, fractions, clockwise);
     let segs: Vec<Seg2> = (0..a.len())
         .filter_map(|i| {
             let s = *a.get(i)?;
@@ -1581,8 +1714,9 @@ fn to_world(origin: Vec3, x: Vec3, y: Vec3, p: Point2) -> Vec3 {
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for a section with no segments, no length or a point that is not
-/// finite, a plane axis that is not a finite unit vector, or a match past `max_segments`;
-/// [`SolidError::PortInvariant`] when the pairing breaks down.
+/// finite, plane axes that are not finite orthogonal unit vectors, a circle whose centre, radius
+/// or angles are not finite, or a match past `max_segments`; [`SolidError::PortInvariant`] when
+/// the pairing breaks down.
 pub fn match_loft_sections(
     sections: &[LoftSection],
     max_segments: usize,
@@ -1599,16 +1733,36 @@ pub fn match_loft_sections(
     }
     let unit_axis = |v: Vec3| {
         let l = dot3(v, v).sqrt();
-        l.is_finite() && (l - 1.0).abs() <= 1e-6
+        l.is_finite() && (l - 1.0).abs() <= AXES_TOL
     };
     if sections.iter().any(|s| {
         !unit_axis(s.x)
             || !unit_axis(s.y)
+            || !(dot3(s.x, s.y).abs() <= AXES_TOL)
             || !(s.origin.x.is_finite() && s.origin.y.is_finite() && s.origin.z.is_finite())
     }) {
         return Err(SolidError::InvalidInput {
             operation: OP,
-            reason: "a loft section's plane has an axis that is not a finite unit vector",
+            reason: "a loft section's plane axes are not finite orthogonal unit vectors",
+        });
+    }
+    // A circle is matched by its centre, radius and angles, not through `without_points`.
+    let finite_arc = |s: &Seg2| match *s {
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => finite(center) && radius.is_finite() && start.is_finite() && sweep.is_finite(),
+        _ => true,
+    };
+    if sections
+        .iter()
+        .any(|s| is_circle(&s.segs) && !s.segs.iter().all(finite_arc))
+    {
+        return Err(SolidError::InvalidInput {
+            operation: OP,
+            reason: "a loft section has no length or a point that is not finite",
         });
     }
     let too_many = || SolidError::InvalidInput {
@@ -1736,7 +1890,9 @@ pub fn match_loft_sections(
             .map(|d| Vec2::new(dot3(*d, w.x), dot3(*d, w.y)))
             .collect();
         let angles: Vec<f64> = local.iter().map(|d| angle(*d)).collect();
-        let mut r = circle_resampled(&w.l, fl.segs.len(), &angles, &shares_of(&fl))
+        // The followed loop winds counter-clockwise about the normal the sections share, so
+        // clockwise in this plane's own axes when it faces back.
+        let mut r = circle_resampled(&w.l, fl.segs.len(), &angles, &shares_of(&fl), w.back)
             .ok_or_else(unpaired)?
             .oriented(w.back);
         if r.segs.len() > max_segments {
@@ -2293,7 +2449,8 @@ mod tests {
     }
 
     /// Two lone vertices that land past the end of one segment of the other loop (two vertices a
-    /// tenth of a nanometre before a corner) are cut apart along it, in order, not refused.
+    /// tenth of a nanometre before a corner) are cut apart along it, in order, not refused: to
+    /// [`MIN_EDGE`] apart and from the corner, so the other loop gets no edge shorter than that.
     #[test]
     fn lone_vertices_landing_on_one_point_are_spread_apart() {
         let close = poly(&[
@@ -2309,8 +2466,13 @@ mod tests {
         sound(&m);
         assert_eq!((m[0].segs.len(), m[1].segs.len()), (6, 6));
         for (a, b) in starts(&m[0]).iter().zip(starts(&m[1])) {
-            assert!(dist(*a, b) < 1e-6, "{a:?} runs to {b:?}");
+            assert!(dist(*a, b) < 2.0 * MIN_EDGE + 1e-9, "{a:?} runs to {b:?}");
         }
+        let shortest = m[1].segs.iter().map(length).fold(f64::INFINITY, f64::min);
+        assert!(
+            shortest >= MIN_EDGE * (1.0 - 1e-9),
+            "shortest edge {shortest}"
+        );
     }
 
     /// The regular `n`-gon of radius `r` about the origin, its first vertex on +x.
@@ -2363,5 +2525,253 @@ mod tests {
         let mut tilted = at(10.0, gon(4, 10.0));
         tilted.x = Vec3::new(2.0, 0.0, 0.0);
         assert!(match_loft_sections(&[at(0.0, gon(4, 10.0)), tilted], 100).is_err());
+    }
+
+    /// The segments' lengths, of every matched section.
+    fn lengths(m: &[MatchedSection]) -> Vec<f64> {
+        m.iter().flat_map(|s| s.segs.iter().map(length)).collect()
+    }
+
+    fn refused(r: &Result<Vec<MatchedSection>>) -> bool {
+        matches!(r, Err(SolidError::InvalidInput { .. }))
+    }
+
+    /// Plane axes of unit length that are not perpendicular are refused.
+    #[test]
+    fn plane_axes_that_are_not_perpendicular_are_refused() {
+        let mut skew = at(10.0, gon(4, 10.0));
+        skew.y = Vec3::new(0.01f64.sin(), 0.01f64.cos(), 0.0);
+        assert!(refused(&match_loft_sections(
+            &[at(0.0, gon(4, 10.0)), skew],
+            100
+        )));
+    }
+
+    /// A full circle of one arc is matched by its centre, radius and angles, which are not
+    /// checked on the way the other sections are: one that is not finite is refused.
+    #[test]
+    fn a_circle_that_is_not_finite_is_refused() {
+        let circle = |center: Vec2, radius: f64| Seg2::Arc {
+            center,
+            radius,
+            start: 0.0,
+            sweep: 2.0 * PI,
+        };
+        for c in [circle(p(f64::NAN, 0.0), 5.0), circle(p(0.0, 0.0), f64::NAN)] {
+            assert!(refused(&match_loft_sections(
+                &[at(0.0, gon(4, 10.0)), at(10.0, vec![c])],
+                100
+            )));
+        }
+    }
+
+    /// A circle after a 40 x 20 rectangle splits at the rectangle's corner directions, and each
+    /// of its vertices runs to the corner in its direction, whether the circle's plane has the
+    /// rectangle's axes or its y axis turned over (its plane facing back). Before, the corners
+    /// seen from the plane facing back went round clockwise, were not taken as one turn, and the
+    /// circle split at its perimeter shares instead.
+    #[test]
+    fn a_circle_on_a_plane_facing_back_splits_at_the_corners() {
+        let rect = poly(&[(-20.0, -10.0), (20.0, -10.0), (20.0, 10.0), (-20.0, 10.0)]);
+        let circle = vec![Seg2::Arc {
+            center: p(0.0, 0.0),
+            radius: 5.0,
+            start: 0.0,
+            sweep: 2.0 * PI,
+        }];
+        for flip in [1.0, -1.0] {
+            let c = LoftSection {
+                origin: Vec3::new(0.0, 0.0, 10.0),
+                x: Vec3::new(1.0, 0.0, 0.0),
+                y: Vec3::new(0.0, flip, 0.0),
+                segs: circle.clone(),
+            };
+            let m = match_loft_sections(&[at(0.0, rect.clone()), c], 100).unwrap();
+            sound(&m);
+            assert_eq!(m[1].segs.len(), 4);
+            for (a, b) in starts(&m[0]).iter().zip(starts(&m[1])) {
+                let world = p(b.x, flip * b.y);
+                let (da, db) = (unit(*a).unwrap(), unit(world).unwrap());
+                assert!(dist(da, db) < 1e-9, "flip {flip}: {a:?} runs to {world:?}");
+            }
+        }
+    }
+
+    /// A lone vertex lands at its share of the length between two pairs, also on a curve whose
+    /// length is not proportional to its parameter: a cubic along the x axis from (0, 0) to
+    /// (40, 0) with its first three control points together, so its length from the start to a
+    /// point is that point's x, and half its length is at x = 20 (its parameter 0.5 is at x = 5).
+    #[test]
+    fn a_lone_vertex_lands_at_its_share_of_a_curves_length() {
+        let a = vec![
+            Seg2::Cubic {
+                p0: p(0.0, 0.0),
+                p1: p(0.0, 0.0),
+                p2: p(0.0, 0.0),
+                p3: p(40.0, 0.0),
+            },
+            line((40.0, 0.0), (40.0, 20.0)),
+            line((40.0, 20.0), (0.0, 20.0)),
+            line((0.0, 20.0), (0.0, 0.0)),
+        ];
+        let b = poly(&[
+            (0.0, 0.0),
+            (20.0, 0.0),
+            (40.0, 0.0),
+            (40.0, 20.0),
+            (0.0, 20.0),
+        ]);
+        let m = match_loft_sections(&[at(0.0, a), at(10.0, b)], 100).unwrap();
+        sound(&m);
+        assert_eq!((m[0].segs.len(), m[1].segs.len()), (5, 5));
+        let k = starts(&m[1])
+            .iter()
+            .position(|q| dist(*q, p(20.0, 0.0)) < 1e-12)
+            .unwrap();
+        let q = starts(&m[0])[k];
+        assert!(
+            q.y.abs() < 1e-12 && (q.x - 20.0).abs() < 1e-9,
+            "(20, 0) runs to {q:?}"
+        );
+    }
+
+    /// Two cuts of one conic land on the conic at their own parameters: the conic from (0, 0)
+    /// through the apex (1, 2) to (2, 0) of weight 7 is at (1, 7/4) at 0.5 and at
+    /// (15/13, 21/13) at 0.75. Before, the second cut was taken on the first cut's remaining
+    /// piece with its end weights scaled to one, whose parameter is not the conic's moved
+    /// linearly, and landed at (1.25, 35/24).
+    #[test]
+    fn two_cuts_of_one_conic_land_at_their_parameters() {
+        let t = Traced {
+            segs: vec![Seg2::Conic {
+                a: p(0.0, 0.0),
+                apex: p(1.0, 2.0),
+                b: p(2.0, 0.0),
+                w: 7.0,
+            }],
+            from: vec![vec![0]],
+        };
+        let c = t.cut(&[vec![0.5, 0.75]]).unwrap();
+        assert_eq!(c.segs.len(), 3);
+        assert!(dist(c.segs[1].start(), p(1.0, 1.75)) < 1e-12);
+        assert!(
+            dist(c.segs[2].start(), p(15.0 / 13.0, 21.0 / 13.0)) < 1e-12,
+            "{:?}",
+            c.segs[2].start()
+        );
+        assert!(dist(c.segs[2].end(), p(2.0, 0.0)) < 1e-12);
+    }
+
+    /// A vertex 8e-8 past the middle of a straight side and the tip of a V across that middle
+    /// (their shares of the length between the corners differ by 2e-9) run to each other, and no
+    /// matched edge is shorter than [`MIN_EDGE`].
+    #[test]
+    fn lone_vertices_whose_shares_nearly_agree_pair() {
+        let a = poly(&[
+            (0.0, 0.0),
+            (20.0 + 8e-8, 0.0),
+            (40.0, 0.0),
+            (40.0, 20.0),
+            (0.0, 20.0),
+        ]);
+        let b = poly(&[
+            (0.0, 0.0),
+            (20.0, -10.0),
+            (40.0, 0.0),
+            (40.0, 20.0),
+            (0.0, 20.0),
+        ]);
+        let m = match_loft_sections(&[at(0.0, a), at(10.0, b)], 100).unwrap();
+        sound(&m);
+        assert_eq!((m[0].segs.len(), m[1].segs.len()), (5, 5));
+        assert!(
+            lengths(&m).iter().all(|l| *l >= MIN_EDGE),
+            "{:?}",
+            lengths(&m)
+        );
+        let k = starts(&m[1])
+            .iter()
+            .position(|q| dist(*q, p(20.0, -10.0)) < 1e-12)
+            .unwrap();
+        assert!(dist(starts(&m[0])[k], p(20.0 + 8e-8, 0.0)) < 1e-12);
+    }
+
+    /// The share placement pairs two lone vertices whose shares of the length between two pairs
+    /// differ by 2e-9 (8e-8 along the 40-long sides), whatever the walk left them as: left apart,
+    /// each lands about 8e-8 from the other, an edge that short on both loops.
+    #[test]
+    fn the_share_placement_pairs_lone_vertices_closer_than_an_edge() {
+        let a = poly(&[
+            (0.0, 0.0),
+            (20.0 + 8e-8, 0.0),
+            (40.0, 0.0),
+            (40.0, 20.0),
+            (0.0, 20.0),
+        ]);
+        let b = poly(&[
+            (0.0, 0.0),
+            (20.0, 0.0),
+            (40.0, 0.0),
+            (40.0, 20.0),
+            (0.0, 20.0),
+        ]);
+        let frame = |segs: &[Seg2]| Frame::new(p(1.0, 0.0), p(0.0, 1.0), segs);
+        let g = Grid {
+            a: Side::new(&a, frame(&a)).unwrap(),
+            b: Side::new(&b, frame(&b)).unwrap(),
+        };
+        let v = Place::Vertex;
+        let events = [
+            (v(0), v(0)),
+            (v(1), Place::On(1, 0.5)),
+            (Place::On(0, 0.5), v(1)),
+            (v(2), v(2)),
+            (v(3), v(3)),
+            (v(4), v(4)),
+        ];
+        let out = by_share(&g, &events, &[0, 3, 4, 5]).unwrap();
+        assert!(out.contains(&(v(1), v(1))), "{out:?}");
+        assert_eq!(out.len(), 5);
+    }
+
+    /// A lone vertex 0.004 from a corner of a 4000-long side lands 4e-6 from the corner of the
+    /// 4-long side it pairs with: it is moved to [`MIN_EDGE`] from the corner, so no matched edge
+    /// is shorter than that where the sections have none.
+    #[test]
+    fn a_lone_vertex_landing_beside_a_corner_keeps_an_edge_away() {
+        let a = poly(&[
+            (0.0, 0.0),
+            (0.004, 0.0),
+            (4000.0, 0.0),
+            (4000.0, 20.0),
+            (0.0, 20.0),
+        ]);
+        let b = poly(&[(0.0, 0.0), (4.0, 0.0), (4.0, 20.0), (0.0, 20.0)]);
+        let m = match_loft_sections(&[at(0.0, a), at(10.0, b)], 100).unwrap();
+        sound(&m);
+        assert_eq!((m[0].segs.len(), m[1].segs.len()), (5, 5));
+        let shortest = lengths(&m).into_iter().fold(f64::INFINITY, f64::min);
+        assert!(
+            shortest >= MIN_EDGE * (1.0 - 1e-9),
+            "shortest edge {shortest}"
+        );
+    }
+
+    /// `max_segments` bounds every section: the first one on its own, and circles.
+    #[test]
+    fn max_segments_bounds_every_section() {
+        assert!(refused(&match_loft_sections(&[at(0.0, gon(5, 10.0))], 3)));
+        let quarters: Vec<Seg2> = (0..4u8)
+            .map(|k| Seg2::Arc {
+                center: p(0.0, 0.0),
+                radius: 5.0,
+                start: f64::from(k) * PI / 2.0,
+                sweep: PI / 2.0,
+            })
+            .collect();
+        assert!(refused(&match_loft_sections(
+            &[at(0.0, quarters.clone()), at(10.0, quarters)],
+            3
+        )));
     }
 }
