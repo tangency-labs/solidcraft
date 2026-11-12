@@ -84,19 +84,20 @@ pub(crate) type Drawn = (Plane, (f64, f64));
 
 /// The depth of a floor through the point `floor` from the panel's face through `face`, the panel's
 /// material toward `z`, `measured` in the panel's frame. Where the extrude `drawn` that cut it ran
-/// from that face to the floor (each within `tol` of an end of its interval), the pocket is as
-/// deep as the extrude ran, exactly: a folded panel's frame is where its fold puts it, to a
-/// rounding, and the floor's plane measured in it is that rounding off what was asked for.
-fn drawn_depth(measured: f64, face: Vec3, floor: Vec3, z: Vec3, drawn: Option<&Drawn>, tol: f64) -> f64 {
+/// from that face to the floor (each an end of its interval, to the `rounding` of the body's
+/// numbers, see [`rounding`]), the pocket is as deep as the extrude ran, exactly: a folded
+/// panel's frame is where its fold puts it, to a rounding, and the floor's plane measured in it is
+/// that rounding off what was asked for. A floor any farther off is another floor.
+fn drawn_depth(measured: f64, face: Vec3, floor: Vec3, z: Vec3, drawn: Option<&Drawn>, rounding: f64) -> f64 {
     let Some((plane, (a, b))) = drawn else { return measured };
     let n = plane.normal();
-    if z.cross(n).len() > 1e-9 {
+    if z.cross(n).len() > 64.0 * f64::EPSILON {
         return measured;
     }
     let at = |p: Vec3| (p - plane.origin).dot(n);
     let (from, to) = (at(face), at(floor));
-    match [(*a, *b), (*b, *a)].into_iter().find(|(s, e)| (from - s).abs() <= tol && (to - e).abs() <= tol) {
-        Some((s, e)) if ((e - s).abs() - measured).abs() <= tol => (e - s).abs(),
+    match [(*a, *b), (*b, *a)].into_iter().find(|(s, e)| (from - s).abs() <= rounding && (to - e).abs() <= rounding) {
+        Some((s, e)) if ((e - s).abs() - measured).abs() <= rounding => (e - s).abs(),
         _ => measured,
     }
 }
@@ -138,10 +139,10 @@ fn on_panel(b: &Body, q: &Query, frame: &Rigid3, t: f64, own: &[Region2], tol: f
         } else if (depth - t).abs() <= tol && toward {
             out.far.extend(mine);
         } else if !toward && depth > tol {
-            let depth = drawn_depth(depth, frame.shift, plane.origin, frame.z, drawn, tol);
+            let depth = drawn_depth(depth, frame.shift, plane.origin, frame.z, drawn, rounding(b));
             out.near_floors.extend(mine.into_iter().map(|r| (depth, r)));
         } else if toward && depth < t - tol {
-            let depth = drawn_depth(t - depth, frame.shift + frame.z * t, plane.origin, frame.z, drawn, tol);
+            let depth = drawn_depth(t - depth, frame.shift + frame.z * t, plane.origin, frame.z, drawn, rounding(b));
             out.far_floors.extend(mine.into_iter().map(|r| (depth, r)));
         }
     }
@@ -346,8 +347,8 @@ fn same_regions(a: &[Region2], b: &[Region2], tol: f64) -> bool {
     a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| same(x, y)))
 }
 
-/// Whether the recesses `a` read from a panel are the ones `b` it has, within `tol`: as many, and
-/// each from the same face, as deep, over the same region.
+/// Whether the recesses `a` read from a panel are the ones `b` it has, to `tol`: as many, and each
+/// from the same face, as deep, over the same region.
 fn same_recesses(a: &[Recess], b: Vec<&Recess>, tol: f64) -> bool {
     a.len() == b.len()
         && a.iter().all(|x| {
@@ -1002,6 +1003,17 @@ fn tolerance(b: &Body) -> f64 {
     (b.size() * 1e-7).clamp(1e-7, 1e-3)
 }
 
+/// How far apart two workings of one length from the coordinates of body `b` can come out: 64
+/// units in the last place of its largest coordinate and size. A folded panel's frame is where
+/// its fold puts it, to a rounding, so a length measured in it differs by that much from the same
+/// length worked out from the numbers a feature was given; two lengths any farther apart are
+/// different lengths (far below the extrusion resolution, 1e-6 mm).
+fn rounding(b: &Body) -> f64 {
+    let o = b.outline_bounds();
+    let far = [o.min.x, o.min.y, o.min.z, o.max.x, o.max.y, o.max.z].into_iter().map(f64::abs).fold(0.0, f64::max);
+    64.0 * f64::EPSILON * (if far.is_finite() { far } else { 0.0 } + b.size())
+}
+
 /// A plane: the slab of a sheet laid out flat.
 static FLAT: Surface = Surface::Plane;
 
@@ -1430,14 +1442,15 @@ fn onto_panels(
             }
         }
         // The panel's recesses are its floors as they are now. Floors read again as they were (a
-        // cut that changed nothing here) keep their records: each recess's depth stays as it was
-        // recorded, not as its floor's plane measures now.
+        // cut that changed nothing here), to the rounding of the body's numbers, keep their
+        // records: each recess's depth stays as it was recorded, not as its floor's plane measures
+        // now. A floor any farther off is another floor, and the panel's records are read anew.
         let fresh: Vec<Recess> = near_floors
             .into_iter()
             .map(|(depth, region)| Recess { panel: p, region, far: false, depth })
             .chain(far_floors.into_iter().map(|(depth, region)| Recess { panel: p, region, far: true, depth }))
             .collect();
-        if !same_recesses(&fresh, recesses.iter().filter(|r| r.panel == p).collect(), tol) {
+        if !same_recesses(&fresh, recesses.iter().filter(|r| r.panel == p).collect(), rounding(now)) {
             recesses.retain(|r| r.panel != p);
             recesses.extend(fresh);
         }
