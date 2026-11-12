@@ -138,6 +138,13 @@ fn f2_on_a_clicked_saved_view_renames_the_view() {
     h.frames(2);
     let names: Vec<&str> = h.app.session.doc.named_views.iter().map(|v| v.name.as_str()).collect();
     assert_eq!(names, ["Front detail"]);
+    // The pick follows the new name, so F2 again renames the same view.
+    h.step(&json!({"key":"F2"})).unwrap();
+    h.frames(2);
+    let what = h.app.menu.rename.as_ref().map(|r| r.what.clone());
+    assert_eq!(what, Some(crate::context_menu::RenameWhat::View("Front detail".into())), "a second F2 renames the renamed view");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(2);
 
     // A click on a body row picks the body instead: F2 renames the body, not the view.
     h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
