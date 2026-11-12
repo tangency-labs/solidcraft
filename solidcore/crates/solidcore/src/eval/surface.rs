@@ -641,10 +641,24 @@ impl SurfaceEval {
             }
         };
         let (u_flag, v_flag) = match self {
-            SurfaceEval::ProceduralSweep(_) => {
-                return Err(unsupported(
-                    "a procedural sweep's exact collapsed directions are not certified",
-                ));
+            // The exact sweep lies within its certified `bound` of its net, so an iso-line of
+            // the sweep is at most `2 bound` shorter than the net's: where the net's is not
+            // collapsed within `reach + 2 bound`, the sweep's is not within `reach`. Where the
+            // net cannot rule a collapse out, it is not decided.
+            SurfaceEval::ProceduralSweep(s) => {
+                let bound = s.record.bound;
+                let wide = reach + 2.0 * bound;
+                if !(bound.is_finite() && bound >= 0.0 && wide.is_finite()) {
+                    return Err(unsupported(
+                        "a procedural sweep's certified bound is not finite",
+                    ));
+                }
+                return match super::collapse::collapse(s.approximation(), uv, wide)? {
+                    Collapse::Neither => Ok(Collapse::Neither),
+                    _ => Err(unsupported(
+                        "a procedural sweep's exact collapsed directions are not certified",
+                    )),
+                };
             }
             SurfaceEval::Eval(e, _) => return super::collapse::collapse(e, uv, reach),
             SurfaceEval::Cylinder { radius, .. } => (circle(*radius, 0.0, within(*radius))?, false),
