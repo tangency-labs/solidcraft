@@ -1857,7 +1857,8 @@ impl AnalyticSupport {
     /// (#15010): the form's circles are its rows across the generator, each a rational arc
     /// whose on-curve control points (those of the end weight) lie on its circle, so each
     /// row's centre is the circumcentre of three of them and its radius their distance from
-    /// it. The axis is the line through the first and last rows' centres, the origin the
+    /// it. The axis is a cylinder's columns' direction (its generators) through the first
+    /// row's centre, or the line through a cone's first and last rows' centres, the origin the
     /// point of it nearest the recogniser's, the x axis the recogniser's made square to it, the
     /// cone's angle the radii's change along it. No fitting and no long chains: the numbers are
     /// the stored control points' to their rounding, where the recognisers' chained
@@ -1944,11 +1945,26 @@ impl AnalyticSupport {
         let circles: Vec<(Vec3, f64)> = (0..rows).filter_map(circle).collect();
         let (&(c0, r0), &(c1, r1)) = (circles.first()?, circles.last()?);
         let along = c1 - c0;
-        let length = along.length();
+        // a cylinder's axis runs along its generators, which are the form's columns: each
+        // column's first and last control points differ by the stored extrusion, exactly for
+        // an extruded circle. The rows' centres carry the rounding of a circumcentre, which a
+        // shallow arc amplifies by its radius over its sagitta: on a 20 mm arc of radius
+        // 77.6 mm the centres' line tilts by 1.3e-14, which `build` refuses. A cone's
+        // generators meet at its apex, so its axis is its centres' line.
+        let generator = if cylinder {
+            let point = |r: usize, c: usize| if along_v { at(r, c) } else { at(c, r) };
+            let last = rows.checked_sub(1)?;
+            (0..len).try_fold(Vec3::new(0.0, 0.0, 0.0), |g, c| {
+                Some(g + (point(last, c)? - point(0, c)?))
+            })?
+        } else {
+            along
+        };
+        let length = generator.length();
         if length.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
             return None;
         }
-        let mut axis = along * (1.0 / length);
+        let mut axis = generator * (1.0 / length);
         if axis.dot(axis_r) < 0.0 {
             axis *= -1.0;
         }

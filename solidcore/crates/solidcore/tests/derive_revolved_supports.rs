@@ -6,7 +6,8 @@
 //! tilted off every axis, at a distance of about 1e3 and 1e5 from the origin. And the cylinder
 //! supports of `box_intersect_splits_the_end_off_a_raked_wedge_after_its_end_rounds` (SolidCraft's
 //! engine regression), their forms as the blend definitions' records hold them
-//! (`data/raked_wedge_supports.jsonl`), whose recognised numbers `build` refused.
+//! (`data/raked_wedge_supports.jsonl`), whose recognised numbers `build` refused, and those of
+//! `the_pleats_join_at_every_wall_from_2_4_to_2_6_mm` (`data/pleated_case_supports.jsonl`).
 
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
@@ -171,5 +172,24 @@ fn the_raked_wedges_cylinder_supports_round_trip() {
     for form in &forms {
         assert_eq!(form.kind, "Cylinder");
         round_trips(&k, SupportKind::Cylinder, &form.surface(), 100.0);
+    }
+}
+
+/// The cylinder supports of SolidCraft's `the_pleats_join_at_every_wall_from_2_4_to_2_6_mm`
+/// engine regression (a shelled case at walls of 2.4, 2.5 and 2.6 mm, with rounds), their forms
+/// as derive met them (`data/pleated_case_supports.jsonl`). Among them is a shallow arc, 20 mm
+/// across at a radius of 77.6 mm, whose rows' centres tilt their line by 1.3e-14: a cylinder's
+/// axis is its columns' direction, which an extrusion stores exactly.
+#[test]
+fn the_pleated_cases_cylinder_supports_round_trip() {
+    let k = Kernel::default();
+    let forms: Vec<Form> = include_str!("data/pleated_case_supports.jsonl")
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(forms.len(), 31);
+    for form in &forms {
+        assert_eq!(form.kind, "Cylinder");
+        round_trips(&k, SupportKind::Cylinder, &form.surface(), 300.0);
     }
 }
