@@ -43,6 +43,7 @@ pub mod curve;
 pub mod curve_fit;
 pub mod curve_knots;
 pub mod curve_plane;
+pub mod dogbone;
 pub mod error;
 pub mod extend;
 pub mod face_surface;
