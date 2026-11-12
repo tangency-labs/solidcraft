@@ -1492,7 +1492,8 @@ fn screen_middle(app: &SolveApp, mut cam: Camera, bounds: &solidcraft_engine::ge
 
 /// What orbit around the view's centre turns about: the point at the camera target's depth under
 /// the middle of the part of the view the panels leave free (`Layout::middle`). Home and Fit move
-/// the model towards that middle, as far as the compass and the navigation bar leave room. With
+/// the model towards that middle, as far as the compass and the navigation bar leave room (with the
+/// navigators' Fit on, Home puts it where [`navigator_home_centre`] says, see [`home_centre`]). With
 /// the Browser open the middle lies beside the window's centre, and turning about the window's
 /// centre swung the model off to one side (#14651). `None`, so that the camera turns about its
 /// target, when the middle is within half a point of the window's centre, before the view is
