@@ -855,7 +855,8 @@ fn loop_shape(lp: &solidcore_record::Loop2) -> FlatShape {
 }
 
 fn flat_json(sh: &SheetBody) -> Result<Value> {
-    let regions = sh.flat_regions()?;
+    // One build of the flat for the outline and the pockets (#13493).
+    let (regions, machined) = sh.flat_with_machining()?;
     let loops: Vec<Ring<Vec2>> = regions.iter().map(|r| r.outer.polyline(1e-3)).collect();
     let size = loops.iter().fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size();
     let (w, h) = (size.x, size.y);
@@ -878,8 +879,7 @@ fn flat_json(sh: &SheetBody) -> Result<Value> {
             end: pt(&b.end),
         })
         .collect();
-    let pockets: Vec<FlatPocket> = sh
-        .machining()?
+    let pockets: Vec<FlatPocket> = machined
         .iter()
         .map(|p| {
             let side = if p.z0 == 0.0 {
@@ -1043,8 +1043,7 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
 /// that follows the file's order cuts inside-out. Free-form curves as `o.curves` says.
 pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
     use solidcraft_io::{DxfEntity, DxfShape};
-    let regions = sh.flat_regions()?;
-    let pockets = sh.machining()?;
+    let (regions, pockets) = sh.flat_with_machining()?;
     let letters = sh.letters();
     let pocket_layer = |p: &solidcraft_doc::sheet::SheetPocket| {
         let side = if p.z0 == 0.0 {
