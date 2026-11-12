@@ -201,15 +201,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         let faces = app.session.selection.iter().any(|s| matches!(s, Sel::Face { .. }))
             && !app.session.selection.iter().any(|s| matches!(s, Sel::Body { .. }));
         let state = crate::open_meshing::session_world(&app.session);
-        let body_look = |body: &solidcraft_engine::doc::ModelBody| {
-            app.session.doc.model_body_look(body).or_else(|| {
-                (body.body.paint().is_some() || body.imported.is_some() || body.body.color().is_some()).then(|| {
-                    let color =
-                        app.session.doc.body_color(body).map(|rgb| rgb.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)).unwrap_or([196, 199, 204]);
-                    solidcraft_engine::doc::appearance::Look::custom(color, app.session.doc.model_body_opacity(body))
-                })
-            })
-        };
+        // The look it shows: its own, its component's or material's, else its imported colour, by its name in the file.
+        let body_look = |body: &solidcraft_engine::doc::ModelBody| app.session.doc.model_display_look(body);
         let existing = app.session.selection.iter().find_map(|sel| match sel {
             Sel::Body { name } => state.body(name).and_then(body_look),
             Sel::Face { body, index, .. } => state
@@ -349,7 +342,7 @@ fn in_design(app: &mut SolveApp) -> Vec<(Look, usize)> {
                         opacity: x.get("opacity").and_then(Value::as_f64).unwrap_or(1.0),
                         pbr: x.get("pbr").and_then(|p| serde_json::from_value(p.clone()).ok()),
                     },
-                    count(x, "bodies") + count(x, "faces") + count(x, "components"),
+                    count(x, "bodies") + count(x, "faces") + count(x, "imported_faces") + count(x, "components"),
                 ))
             })
             .collect();
@@ -374,6 +367,12 @@ pub(crate) fn replacement_library(app: &mut SolveApp) -> Vec<Look> {
         }
     }
     looks
+}
+
+/// Whether the dialog's look is `l`, all of it: an imported look may share a library look's name
+/// in another colour, and is not that look.
+fn is_current(k: &Ap, l: &Look) -> bool {
+    k.look.as_deref() == Some(l.name.as_str()) && k.color == l.color && k.opacity == l.opacity && k.pbr == l.pbr
 }
 
 fn c32(c: [u8; 3], opacity: f64) -> Color32 {
@@ -528,7 +527,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &mut [Sel
         ui_kit::text(ui, solidcraft_ui_text::tr_label("No matching appearances"), ui_kit::Text::Note("appearances_empty"));
     }
     ui_kit::swatch_grid(ui, &shown, |ui, (i, l)| {
-        let picked_look = k.look.as_deref() == Some(l.name.as_str()) && k.pbr == l.pbr;
+        let picked_look = is_current(k, l);
         let available = preset_available(l);
         let tip = l.preset.as_ref().map_or_else(
             || format!("{} (drag onto a body or face)", l.name),
@@ -712,6 +711,29 @@ mod tests {
         assert!(a.session.doc.appearances.faces.is_empty());
         a.run("edit.undo", json!({})).unwrap();
         assert_eq!(a.session.doc.appearances.faces.len(), 1);
+    }
+
+    /// The section lists what the bodies show, not only what was given to them: a body's
+    /// physical material's look, with the bodies that show it. A look of a library look's name in
+    /// another colour does not mark that library swatch as the dialog's.
+    #[test]
+    fn in_this_design_lists_shown_looks_and_a_namesake_is_not_the_library_look() {
+        let mut a = app();
+        a.run("material.assign", json!({"bodies": ["Body1"], "material": "Brass"})).unwrap();
+        let used = in_design(&mut a);
+        let brass = used.iter().find(|(look, _)| look.name == "Brass").expect("the material's look is listed");
+        assert_eq!(brass.1, 1);
+        let library_look = library(&mut a).into_iter().find(|l| l.name == "Steel - Satin").expect("a library look");
+        let mut k = match start(&a, "appearance.assign") {
+            Some((Kind::Appearance(k), _)) => k,
+            _ => panic!("appearance dialog"),
+        };
+        choose_look(&mut k, &library_look).unwrap();
+        assert!(is_current(&k, &library_look));
+        let namesake = Look { color: [160, 160, 160], ..library_look.clone() };
+        choose_look(&mut k, &namesake).unwrap();
+        assert!(!is_current(&k, &library_look), "same name, another colour");
+        assert!(is_current(&k, &namesake));
     }
 
     #[test]

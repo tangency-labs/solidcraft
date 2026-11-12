@@ -320,7 +320,8 @@ pub struct AppearanceListParams {
     pub body: Option<String>,
 }
 
-/// What `appearance.list` returns: the looks the design assigns, by look and by target.
+/// What `appearance.list` returns: the looks the design shows (`in_design`), and the ones it
+/// assigns, by target.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AppearanceListResult {
     /// Each look the design uses, with where it is used.
@@ -339,15 +340,39 @@ pub struct AppearanceListResult {
     pub param_warnings: Vec<String>,
 }
 
-/// A look the design uses, and the bodies, faces and components it is given to.
+/// A look the design shows, and the bodies, faces and components that show it: given to them, or
+/// theirs by their physical material or by the colours they were imported with.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct LookInDesign {
     #[serde(flatten)]
     pub look: LookReply,
+    /// Bodies with this look: given to them, or their material's or imported colour.
     pub bodies: Vec<String>,
+    /// Faces given this look, by the point it was given at.
     pub faces: Vec<FaceSpot>,
     /// Components, by id.
     pub components: Vec<u64>,
+    /// Faces with this look from the colours they were imported with, by face index.
+    pub imported_faces: Vec<BodyFace>,
+    /// Where the look comes from, each source once: `assigned` (given in this design),
+    /// `material` (a body's physical material), `imported` (the colours a body was imported with).
+    pub sources: Vec<LookSource>,
+}
+
+/// Where a look a design shows comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LookSource {
+    Assigned,
+    Material,
+    Imported,
+}
+
+/// A body's face, by its index in `model.faces`.
+#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct BodyFace {
+    pub body: String,
+    pub face: usize,
 }
 
 /// A face's own look.
