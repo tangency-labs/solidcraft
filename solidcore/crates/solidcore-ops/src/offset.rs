@@ -43,19 +43,24 @@ const MAX_DISTANCE: f64 = 1e6;
 const EDGE_VANISHES: &str = "a vertex moved past the other end of an edge";
 
 /// An offset's kernel error as the operation's: a refusal the kernel gives a reason for by that
-/// reason ([`offset_refused`]); one without, by its kind: walls that touch
-/// ([`Error::WallsTouch`]), a wall that folds ([`Error::WallFolds`], no largest wall named), a
-/// vertex moved past an edge's other end ([`Error::Unsupported`]); the rest as
+/// reason ([`offset_refused`]); one without by its kind ([`by_kind`]), else as
 /// [`crate::error::status`].
 fn status(e: SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
     if let Some(Reason::Offset(o)) = e.failure().map(|f| &f.reason) {
         return offset_refused(*o, e.entity(), index);
     }
-    match e.kind() {
-        ErrorKind::OffsetWallsTouch => Error::WallsTouch,
-        ErrorKind::OffsetFolds => Error::WallFolds { largest: None },
-        ErrorKind::OffsetEdgeVanishes => Error::Unsupported(EDGE_VANISHES),
-        _ => kernel_status(e),
+    by_kind(e.kind()).unwrap_or_else(|| kernel_status(e))
+}
+
+/// The operation's error for an offset refusal of `kind` that has one of its own: walls that
+/// touch ([`Error::WallsTouch`]), a wall that folds ([`Error::WallFolds`], no largest wall
+/// named), a vertex moved past an edge's other end ([`Error::Unsupported`]).
+fn by_kind(kind: ErrorKind) -> Option<Error> {
+    match kind {
+        ErrorKind::OffsetWallsTouch => Some(Error::WallsTouch),
+        ErrorKind::OffsetFolds => Some(Error::WallFolds { largest: None }),
+        ErrorKind::OffsetEdgeVanishes => Some(Error::Unsupported(EDGE_VANISHES)),
+        _ => None,
     }
 }
 
@@ -64,9 +69,10 @@ fn status(e: SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
 /// largest wall the kernel names), a vertex moved past an edge's other end
 /// ([`Error::Unsupported`]), and every other reason as [`Error::OffsetRefused`] (#14783): why,
 /// and the face the failure is about (`entity`, the reason's own unless the kernel set another)
-/// through `index` (`None` where it names none, or one `index` does not find). A phrase, or a
-/// reason this version does not name yet, by its class and in the kernel's words
-/// ([`unnamed`], #15035).
+/// through `index` (`None` where it names none, or one `index` does not find). A reason this
+/// version does not name yet takes the error of its class where that has one ([`by_kind`]), as
+/// it did before it had a reason; it and a phrase are otherwise said by their class and in the
+/// kernel's words ([`unnamed`], #15035).
 fn offset_refused(
     o: OffsetFailure,
     entity: Option<EntityRef>,
@@ -109,7 +115,10 @@ fn offset_refused(
         OffsetFailure::Unsound { what } => OffsetRefusal::Unsound { what },
         // the kernel's phrase causes (`OffsetFailure::is_phrase`), and a reason the kernel adds
         // later: still classed and said, never a bare status
-        other => unnamed(&other),
+        other => match by_kind(other.kind()) {
+            Some(e) => return e,
+            None => unnamed(&other),
+        },
     };
     Error::OffsetRefused { face, why }
 }
@@ -440,8 +449,9 @@ fn refused(r: DraftRefusal) -> Error {
 /// face the body does not have, a body that is not a valid solid facing out, or a pull in the
 /// neutral plane for a plane face;
 /// [`Error::Unsupported`] for a face the kernel cannot draft (what it is), or a face drafted past
-/// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face; the kernel's
-/// other errors; those of [`finish`].
+/// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face;
+/// [`Error::OffsetRefused`] for a face the kernel refuses with a reason; the kernel's other
+/// errors; those of [`finish`].
 pub fn draft(
     body: &Body,
     order: &Order,

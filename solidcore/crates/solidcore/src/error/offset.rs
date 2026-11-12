@@ -324,7 +324,8 @@ impl OffsetFailure {
 
     /// True for a failure that is the kernel's fault, not a fact of the input: a consistency
     /// check of a routine's own data that did not hold ([`OffsetFailure::Inconsistent`]).
-    /// Report it.
+    /// Report it. Said per cause, as its class ([`ErrorKind::Failed`]) does not say it, until
+    /// offset failures move onto a class of their own.
     #[must_use]
     pub const fn is_defect(&self) -> bool {
         match self {
@@ -720,9 +721,10 @@ mod tests {
     }
 
     /// Every offset failure's class, and whether it is a phrase (a routine's failure not yet
-    /// given a cause of its own) or a defect of the kernel, pinned. A new reason adds its row
-    /// here (`row` does not compile without it), so a caller outside the crate, which has to
-    /// match with a wildcard, still gets its class and never only its text (#15035).
+    /// given a cause of its own) or a defect of the kernel, pinned. A new reason must answer
+    /// all three (`kind`, `is_phrase` and `is_defect` match exhaustively) and adds its arm to
+    /// `row` and its row here, so a caller outside the crate, which has to match with a
+    /// wildcard, still gets its class and never only its text (#15035).
     #[test]
     fn every_offset_failure_keeps_its_class() {
         use OffsetFailure as O;

@@ -589,6 +589,21 @@ fn an_unnamed_offset_refusal_keeps_the_kernels_words() {
         }
     );
     assert!(!o.to_string().is_empty());
+    // one whose class has an error of its own (a new reason of the walls-touch, fold or
+    // vanishing-edge kind) keeps taking it, as it did before it had a reason
+    assert_eq!(
+        super::by_kind(solidcore::error::ErrorKind::OffsetWallsTouch),
+        Some(Error::WallsTouch)
+    );
+    assert_eq!(
+        super::by_kind(solidcore::error::ErrorKind::OffsetFolds),
+        Some(Error::WallFolds { largest: None })
+    );
+    assert!(matches!(
+        super::by_kind(solidcore::error::ErrorKind::OffsetEdgeVanishes),
+        Some(Error::Unsupported(_))
+    ));
+    assert_eq!(super::by_kind(o.kind()), None);
     let e = Error::OffsetRefused { face: Some(2), why };
     assert_eq!(
         e.to_string(),
