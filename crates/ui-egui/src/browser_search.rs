@@ -15,7 +15,7 @@ use solidcraft_engine::browser_find::{self, Kind, MAX_PATTERN_CHARS, Pattern, Se
 use solidcraft_engine::doc::{Document, FeatureKind, ModelState};
 
 use crate::SolveApp;
-use crate::ui_kit::Item;
+use crate::ui_kit::{BackingTooltipExt as _, Item};
 use solidcraft_theme::Tokens;
 
 /// The search, kept with the browser's state.
@@ -284,7 +284,7 @@ pub(crate) fn header_field(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Re
     }
     // Esc in the field ends the search and closes it (egui gives up the focus on Esc).
     let escaped = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
-    field.on_hover_text(solidcraft_ui_text::tr("ui.browser_search_tip"));
+    field.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_search_tip"));
     {
         let current = kind_label(app.tree.search.kind);
         let picker = ui
@@ -342,7 +342,7 @@ pub(crate) fn results(app: &mut SolveApp, ui: &mut egui::Ui) {
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small);
         crate::scenario::publish_handle("browser:search:select-all", r.rect.center());
         crate::scenario::publish_rect("browser:search:select-all", r.rect);
-        if r.on_hover_text(solidcraft_ui_text::tr("ui.browser_select_all_tip")).clicked() {
+        if r.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_select_all_tip")).clicked() {
             select_found(app);
         }
         // Disabled in place: a child scope (`add_enabled_ui`) would be placed without the row's wrap.
@@ -353,7 +353,7 @@ pub(crate) fn results(app: &mut SolveApp, ui: &mut egui::Ui) {
         let r = crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.browser_hide_others"), crate::ui_kit::Button::Small);
         crate::scenario::publish_handle("browser:search:hide-others", r.rect.center());
         crate::scenario::publish_rect("browser:search:hide-others", r.rect);
-        if r.on_hover_text(solidcraft_ui_text::tr("ui.browser_hide_others_tip")).clicked() {
+        if r.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_hide_others_tip")).clicked() {
             hide_others(app);
         }
     });
