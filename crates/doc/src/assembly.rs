@@ -185,6 +185,8 @@ impl BomType {
     /// The type a word names, if it names one.
     pub fn parse(word: &str) -> Option<BomType> {
         BomType::ALL.into_iter().find(|t| t.as_str() == word)
+    }
+}
 
 /// How far an occurrence's expressed moves take it after a parameter change
 /// ([`Document::expressed_move_shifts`]).
@@ -535,7 +537,7 @@ impl Document {
             for m in &o.expressed_moves {
                 let now = m.eval(&params).unwrap_or(m.at);
                 let d = Vec3::new(now[0] - m.at[0], now[1] - m.at[1], now[2] - m.at[2]);
-                shift = shift + apply_vector(&m.frame, d);
+                shift += apply_vector(&m.frame, d);
                 at.push(now);
             }
             let moved = Vec3::new(o.transform[3][0], o.transform[3][1], o.transform[3][2]) + shift;
@@ -588,7 +590,15 @@ impl Document {
             !self.occurrences.iter().any(|o| o.name == name)
         };
         let k = std::iter::once(next).chain(1..).find(free).unwrap_or(next);
-        self.occurrences.push(crate::Occurrence { id, component, parent, name: format!("{cname}:{k}"), transform, grounded: false, expressed_moves: Vec::new() });
+        self.occurrences.push(crate::Occurrence {
+            id,
+            component,
+            parent,
+            name: format!("{cname}:{k}"),
+            transform,
+            grounded: false,
+            expressed_moves: Vec::new(),
+        });
         Ok(id)
     }
 }

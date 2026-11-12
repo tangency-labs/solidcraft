@@ -2431,11 +2431,31 @@ fn numbers_keep_no_expressions_and_bad_expressions_are_refused() {
         (json!([0, "dy", 0]), false, "captured"),
         (json!([0, "turn", 0]), true, "translate:"),
         (json!([0, "nope", 0]), true, "translate:"),
-        (json!([0, true, 0]), true, "three finite numbers or length expressions"),
+        (json!([0, true, 0]), true, "three finite numbers"),
         (json!([0, true, "dy"]), true, "numbers or length expressions"),
     ] {
         let e = s.execute("occurrence.move", &json!({"occurrence": occ, "translate": translate, "capture": capture})).unwrap_err().to_string();
         assert!(e.contains(expected), "{e}");
         assert_eq!(s.doc, doc);
     }
+}
+
+/// parameters.users names an occurrence moved by an expression, and an absolute pose (`to`) is
+/// not given expressions.
+#[test]
+fn an_expressed_move_is_a_parameter_user_and_absolute_poses_take_numbers_only() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, "dy + 1 mm", 0]}));
+    let r = run(&mut s, "parameters.users", json!({"name": "dy"}));
+    let text = r.to_string();
+    assert!(text.contains("\"occurrence\"") && text.contains("translate y"), "{text}");
+    let doc = s.doc.clone();
+    let e =
+        s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"position": [0, 0, 0]}, "translate": [0, "dy", 0]})).unwrap_err().to_string();
+    assert!(e.contains("not both"), "{e}");
+    assert_eq!(s.doc, doc);
 }

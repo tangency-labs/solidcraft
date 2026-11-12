@@ -323,10 +323,7 @@ fn translation(t: Vec3) -> Mat {
 pub(crate) fn move_vector(p: &Value, key: &str, default: Vec3, coordinate: bool, cmd: &str) -> Result<Vec3> {
     let v = match p.get(key) {
         None => default,
-        Some(value) => {
-            let what = if key == "translate" { "three finite numbers or length expressions" } else { "three finite numbers" };
-            vec3(value).ok_or_else(|| bad(cmd, format!("{key} must contain {what}")))?
-        }
+        Some(value) => vec3(value).ok_or_else(|| bad(cmd, format!("{key} must contain three finite numbers")))?,
     };
     if !v.is_finite() || (coordinate && [v.x, v.y, v.z].iter().any(|x| x.abs() > 1e9)) {
         return Err(bad(cmd, format!("{key} exceeds supported numeric range")));
@@ -996,14 +993,7 @@ fn place_occurrence(s: &mut Session, p: &Value, id: u64, next: Mat, expressed: O
         s.pending_moves.insert(id, next);
         s.revision += 1;
     }
-    reply(MoveResult {
-        occurrence: id,
-        transform: next,
-        pending: !capture,
-        reverted: false,
-        warning: None,
-        param_warnings: Vec::new(),
-    })
+    reply(MoveResult { occurrence: id, transform: next, pending: !capture, reverted: false, warning: None, param_warnings: Vec::new() })
 }
 
 /// A move's `base_transform`: a 4×4 matrix that is finite, affine and invertible, or what is
