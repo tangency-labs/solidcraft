@@ -3167,6 +3167,7 @@ impl CircularCrossSectionFsg {
             intersections_with_rails: Some(&params),
             deriv_surfs: Some([d0.as_ref(), d1.as_ref()]),
             degree: 3,
+            section_params: None,
         };
         let fillet_surface = BSplineSurface::create_skinned_surface(k, &sections, opts)?;
 
