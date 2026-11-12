@@ -2015,6 +2015,86 @@ fn a_dimension_is_drawn_after_the_views_on_the_sheet() {
     assert!(provided.stale_dimensions.is_empty());
 }
 
+/// The id under `key` in a command's reply.
+fn id_in(reply: Value, key: &str) -> u64 {
+    ids::decode(reply[key].as_str().unwrap()).unwrap()
+}
+
+/// Every kind of group `drawings` draws, on one sheet, paints as the code put them in by hand before
+/// paint bands (#4890): the border, an image, the views by id (shaded, the top view following the
+/// front, each picture inside its view's group), the views' dimension and note by view and id, the
+/// sheet's own note, then the title block with its logo. `build` and the provider give the same bytes.
+#[test]
+fn todays_sheets_paint_every_kind_in_the_same_order() {
+    let folder = crate::tests::Folder::new("paint-every-kind");
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let file = folder.path("red-blue.png");
+    std::fs::write(&file, crate::drawing_pictures::tests::red_blue()).unwrap();
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    run(&mut s, "drawing.title_block.logo", json!({"cell": "legal_owner", "file": file}));
+    let image = id_in(run(&mut s, "drawing.image.add", json!({"sheet": ids::encode(sheet), "file": file, "rect_mm": [10, 20, 35, 33]})), "image");
+    // The sheet's note is added first, so its id doesn't put it last.
+    let general =
+        id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": [20, 40], "content": "General"})), "note");
+    let dimension = top_edge(&mut s, front);
+    let on_front =
+        id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(front)}, "at": [0, -20], "content": "Front"})), "note");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "shaded"}}));
+
+    let mut views = [front, top];
+    views.sort_unstable();
+    let mut annotations = [(dimension, ObjectKind::Dimension), (on_front, ObjectKind::Note)];
+    annotations.sort_by_key(|(id, _)| *id);
+    let mut expected: Vec<(u64, ObjectKind)> = border(&s, sheet).iter().map(|g| (g.object, g.kind)).collect();
+    expected.push((image, ObjectKind::SheetImage));
+    expected.extend(views.map(|view| (view, ObjectKind::View)));
+    expected.extend(annotations);
+    expected.extend([(general, ObjectKind::Note), (sheet, ObjectKind::TitleBlock)]);
+    let built = built(&s, sheet);
+    assert_eq!(built.scene.groups.iter().map(|g| (g.object, g.kind)).collect::<Vec<_>>(), expected);
+    let pictures = |group: &Group| group.items.iter().filter(|item| matches!(item, Item::Picture(_))).count();
+    let block = built.scene.groups.last().unwrap();
+    assert!(views.iter().all(|view| pictures(group_of(&built.scene, *view)) > 0) && pictures(block) == 1, "pictures inside their groups");
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built.scene));
+}
+
+/// Groups paint by their band, not by when they join (#4890): a sheet's note that joins before a
+/// view's dimension and note still paints after them, so the scene is `build`'s, byte for byte, and
+/// the sheet's objects are listed in the same order, as `hit` reads them.
+#[test]
+fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let dimension = top_edge(&mut s, front);
+    let on_front =
+        id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(front)}, "at": [0, -20], "content": "Front"})), "note");
+    let note = id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": [20, 40], "content": "General"})), "note");
+    let d = s.drawing("test").unwrap().clone();
+    let (record, on) = (sheet_of(&d, sheet).unwrap(), views_on(&d, sheet).unwrap());
+    let shown = crate::drawing_view::shown(&s);
+    let lettering = Lettering::of(&s, &d);
+    let (text, _) = block_text(record, &lettering, &[], true).unwrap();
+    let (notes, _) = sheet_notes(&s, &d, sheet, &lettering, true);
+    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &shown, *id, view)));
+    let mut assembly = assemble(record, d.projection, &text, &[], &[], drawn).unwrap();
+    let frames: BTreeMap<_, _> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
+    let line_group = |view: u64| on.iter().find(|(id, ..)| *id == view).map(|(_, v, _)| v.line_group.value);
+    let wanted = dimensions_on(&d, on.iter().map(|(id, ..)| *id));
+    let dimensions = draw_dimensions(&s, &d, &wanted, |view| Some((*frames.get(&view)?, line_group(view)?)), true);
+    // The other way round from `build`: the sheet's note joins first.
+    assembly.add_sheet_notes(&notes);
+    assembly.add_dimensions(dimensions.iter());
+    let (scene, _, objects, ..) = assembly.finish().unwrap();
+    let mut view_annotations = [dimension, on_front];
+    view_annotations.sort_unstable();
+    let ours = |object: &u64| [dimension, on_front, note].contains(object);
+    let painted: Vec<u64> = scene.groups.iter().map(|g| g.object).filter(ours).collect();
+    assert_eq!(painted, [view_annotations[0], view_annotations[1], note]);
+    assert_eq!(objects.iter().map(|o| o.object).filter(ours).collect::<Vec<_>>(), painted, "objects in paint order");
+    let built = built(&s, sheet);
+    assert_eq!((bytes(&scene), &objects), (bytes(&built.scene), &built.objects));
+}
+
 /// Moving a view moves its dimensions, the same bytes moved, with no projection and no new read. An
 /// edit of one dimension reads that one alone, and projects nothing.
 #[test]
