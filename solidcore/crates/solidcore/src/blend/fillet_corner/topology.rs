@@ -902,11 +902,10 @@ impl FilletCorner {
         }
 
         // The corner is the blend corner's Turn (WR-697): SmBlendCorner::Classify made a pair
-        // that is G1, or within 5 degrees at a face corner of the other convexity, a Join, with
-        // the same tests on the same edges and tolerance, so the Turn never blends here
-        // (`m_bG1Case` stays FALSE; the fork's smlib#113 e4083c8, #2400). Its edges are G1
-        // only where a sharp edge stands between the blends' faces: the blends still
-        // meet on their crossing. At four edges it is the two blends mitred, one
+        // whose balls are one at the vertex a Join, so the Turn never blends here
+        // (`m_bG1Case` stays FALSE; the fork's smlib#113 e4083c8, #2400). Its edges may meet
+        // within the solvers' tangency tolerance (a few degrees apart, or G1 where a sharp
+        // edge stands between the blends' faces): the blends still meet on their crossing. At four edges it is the two blends mitred, one
         // FILLET_X_FILLET edge; at three the edges' angle and the face corner's convexity
         // choose the mitre's kind.
         let (angle_deg, mixed_convexity) = if total == 3 {
