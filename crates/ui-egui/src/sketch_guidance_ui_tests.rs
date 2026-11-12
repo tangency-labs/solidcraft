@@ -35,8 +35,8 @@ fn preview(h: &mut Harness, curves: usize) {
 #[test]
 fn sketch_dialog_mirror_toggles_clears_references_previews_and_cancels() {
     let mut h = fixture();
-    // Keep the source curves and reference between the floating dialog and Sketch Palette.
-    step(&mut h, json!({"call":"ui.camera","params":{"target":[-40,0,0],"distance":150}}));
+    // Keep the source curves and reference left of the floating editor.
+    step(&mut h, json!({"call":"ui.camera","params":{"target":[-15,0,0],"distance":150}}));
     let original = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
     let revision = h.app.session.revision;
@@ -70,7 +70,7 @@ fn sketch_dialog_mirror_toggles_clears_references_previews_and_cancels() {
 fn sketch_dialog_patterns_update_counts_and_place_an_unsnapped_centre() {
     let mut h = fixture();
     // Keep the picked geometry clear of the two-column rectangular-pattern form.
-    step(&mut h, json!({"call":"ui.camera","params":{"target":[-60,0,0],"distance":120}}));
+    step(&mut h, json!({"call":"ui.camera","params":{"target":[-25,0,0],"distance":180}}));
     step(&mut h, json!({"start":"sketch.pattern.rectangular"}));
     pick(&mut h, [-22.5, 10.0], false);
     if let crate::dialogs::Kind::SketchModify(Mod::PatternRect { count, count2, .. }) = &mut h.app.dialog.as_mut().unwrap().kind {

@@ -14055,7 +14055,7 @@ mod tests {
         let across = line(&mut h, [30.0, 75.0], [75.0, 30.0]);
         let far = line(&mut h, [120.0, 25.0], [120.0, 75.0]);
         h.call("ui.view", json!({"view": "top"}));
-        h.call("ui.view", json!({"view": "fit"}));
+        h.call("ui.camera", json!({"target":[70,50,0],"distance":230}));
         let r = h.call("ui.set", json!({"lassoSelect": true}));
         assert_eq!(r["ok"], true, "{r}");
         let loop_at = |pts: &[[f64; 2]]| pts.iter().map(|p| json!({"world": [p[0], p[1], 0.0]})).collect::<Vec<_>>();

@@ -1223,7 +1223,10 @@ fn frame_rate_readout_stays_beside_a_right_pane() {
             assert!(viewport.contains_rect(readout), "{mode:?}, {width}: {readout:?} outside {viewport:?}");
             assert!(readout.right() <= pane.left() - 12.0 + 0.01, "{mode:?}, {width}: {readout:?} under {pane:?}");
             if mode == LayoutMode::Floating {
-                assert!((readout.right() - (pane.left() - 12.0)).abs() < 0.01, "{width}: {readout:?} not just left of {pane:?}");
+                let frame = h.app.universal_panel_frame().unwrap();
+                let section = frame.layout.sections.iter().find(|section| section.instance.0 == "assistant").unwrap();
+                let card = crate::panel_runtime::egui_rect(section.outer);
+                assert!((readout.right() - (card.left() - 12.0)).abs() < 0.01, "{width}: {readout:?} not just left of {card:?}");
             }
             for covered in crate::shell::covered_rects(&h.app) {
                 assert!(!readout.intersects(covered), "{mode:?}, {width}: {readout:?} under {covered:?}");
