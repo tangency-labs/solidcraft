@@ -251,7 +251,8 @@ pub struct SheetSceneResult {
     pub scene: SheetPaperScene,
     /// Each view on the sheet, in id order.
     pub views: Vec<SheetSceneView>,
-    /// The sheet's border, then each view on it, then each dimension drawn, in paint order.
+    /// The sheet's border, then each view on it, then each dimension and note drawn, in paint order:
+    /// each that is on paper. What draws nothing and has no boundary isn't one.
     pub objects: Vec<SheetObjectResult>,
     /// Each dimension of a view on the sheet, by view and id.
     pub dimensions: Vec<SheetSceneDimension>,

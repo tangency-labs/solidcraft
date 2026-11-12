@@ -1629,6 +1629,27 @@ fn a_view_with_no_lines_is_an_object_at_its_boundary() {
     assert!(near(&held.bounds_mm, [140.0, 140.0], [160.0, 160.0]) && held.boundary_mm == Some(held.bounds_mm), "{held:?}");
 }
 
+/// What draws nothing on paper is no object: a note on the sheet whose one field has no value is in
+/// the scene's notes, drawn, but not among its objects, so nothing picks it and `drawing.scene` never
+/// answers a box with no corners. The note beside it that prints a word is an object.
+#[test]
+fn a_note_that_prints_nothing_is_no_object() {
+    let (mut s, sheet, _) = front_and_top();
+    let note = |s: &mut Session, at: [f64; 2], content: Value| {
+        let added = run(s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": at, "content": content}));
+        ids::decode(added["note"].as_str().unwrap()).unwrap()
+    };
+    let empty = note(&mut s, [20.0, 20.0], json!([{"field": {"source": "component", "key": "part_number"}}]));
+    let printed = note(&mut s, [20.0, 40.0], json!("General"));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{}", reply["objects"]);
+    let shown = built(&s, sheet);
+    let notes: Vec<u64> = shown.objects.iter().filter(|o| o.kind == ObjectKind::Note).map(|o| o.object).collect();
+    assert_eq!(notes, [printed], "{:?}", shown.objects);
+    assert!(shown.notes.iter().any(|n| n.note == empty && n.drawn), "{:?}", shown.notes);
+}
+
 /// A view's box holds what it draws, whatever that is, and one that drew nothing stands at its
 /// boundary rather than at an empty box.
 #[test]
