@@ -46,6 +46,7 @@ use crate::blend::fillet_corner::p1::{
     check_face_complimentary_corner_concavity, test_g1_continuity,
 };
 use crate::blend::fillet_corner::p3::FilletCorner;
+use crate::blend::fillet_corner::topology::check_tangential_edgeuse_at_vertex;
 use crate::blend::fillet_exact::{classify_exact_blend, BlendQuadric, BlendSpine, QuadricKind};
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletEdgeType, FilletSolverId, FilletVertexType};
 use crate::blend::fillet_geom::p4::set_edge_curve;
@@ -238,7 +239,8 @@ impl BlendCorner {
 /// blended edge uses of one convexity among three or four (`all_eus`, the corner's ring).
 /// A Join where their edges continue each other (G1 within `tangency_tol_deg`), or meet at
 /// 5 degrees or less at a face corner of the other convexity, and every other edge of the
-/// ring is a tangent edge (`IsTangentEdge`) within `join_tol_deg`; else a Turn, Mitred. Not
+/// ring is a tangent edge (`IsTangentEdge`) within `tangency_tol_deg`, its faces at the vertex
+/// within `join_tol_deg`; else a Turn, Mitred. Not
 /// two solver edge uses among three or four: no event ([`BlendCornerEvent::None`]).
 ///
 /// Not the fork's: a Join is one section both blends reach. Where an edge stands
@@ -249,9 +251,10 @@ impl BlendCorner {
 /// is the Turn of `docs/generic-blend.md` §3.2: the blends meet on their crossing, a crease
 /// running on from the side edge.
 ///
-/// Not the fork's either: the side edges are tangent within `join_tol_deg`, the angle at which
-/// the two balls are still one within the corner's tolerance ([`join_tolerance_deg`]), not
-/// within the solvers' tangency tolerance (10 degrees by default) the fork reads. A sketch's
+/// Not the fork's either: at the vertex the side edges' faces are tangent within
+/// `join_tol_deg`, the angle at which the two balls are still one within the corner's
+/// tolerance ([`join_tolerance_deg`]), not only within the solvers' tangency tolerance (10
+/// degrees by default) the fork reads. A sketch's
 /// line running into an arc a degree off tangent leaves an upright edge whose faces meet at
 /// that degree: the two balls stand the radius times it apart, one section there leaves a gap
 /// the trim leaks through, and their mitre closes it.
@@ -292,7 +295,16 @@ pub fn classify(
             && check_face_complimentary_corner_concavity(k, b, vertex, eu1_, eu2_, None)?);
     // with a sharp edge between their faces the blends' balls where their rails cross it are
     // two, so they turn there
-    out.event = if continuing && side_edges_tangent(k, b, solver_eus, all_eus, join_tol_deg)? {
+    out.event = if continuing
+        && side_edges_tangent(
+            k,
+            b,
+            vertex,
+            solver_eus,
+            all_eus,
+            tangency_tol_deg,
+            join_tol_deg,
+        )? {
         BlendCornerEvent::Join
     } else {
         BlendCornerEvent::Turn
@@ -314,18 +326,21 @@ pub fn join_tolerance_deg(size: f64, tol: f64, tangency_tol_deg: f64) -> f64 {
 }
 
 /// Whether every edge of the corner's ring (`all_eus`) other than the blended ones
-/// (`solver_eus`) has faces tangent along it within `tol_deg` (`IsTangentEdge`).
+/// (`solver_eus`) has faces tangent along it within `tol_deg` (`IsTangentEdge`), and, where it
+/// is open, at `vertex` within `join_tol_deg`: there the two balls stand off its two faces.
 ///
 /// # Errors
 ///
 /// [`SolidError::null_pointer`] for a ring edge use without an edge; those of the tangency
-/// test.
+/// tests.
 fn side_edges_tangent(
     k: &Kernel,
     b: &mut Brep,
+    vertex: VertexId,
     solver_eus: &[EdgeuseId],
     all_eus: &[EdgeuseId],
     tol_deg: f64,
+    join_tol_deg: f64,
 ) -> Result<bool> {
     let mut blended = Vec::new();
     for &eu in solver_eus {
@@ -340,6 +355,11 @@ fn side_edges_tangent(
             SolidError::blend_missing(OP_CLASSIFY, "an unblended edge use's edge")
         })?;
         if !edge::is_tangent_edge(k, b, e, tol_deg, false)? {
+            return Ok(false);
+        }
+        if !edge::is_closed(b, e)?
+            && !check_tangential_edgeuse_at_vertex(k, b, eu, vertex, join_tol_deg)?
+        {
             return Ok(false);
         }
     }
