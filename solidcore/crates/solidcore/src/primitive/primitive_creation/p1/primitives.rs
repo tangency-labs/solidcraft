@@ -922,10 +922,10 @@ impl PrimitiveCreation {
                         tolerance * 2.0,
                         Some(&other_domain),
                     )?;
-                    // Not upstream (WR-536, opt-in): b's faces are rebuilt on copies of
-                    // the first surface below: one it does not cover would carry edges
-                    // far off its surface
-                    if k.fixes.boolean2d_plane_covers_far_faces && !covered {
+                    // Not upstream (WR-536): b's faces are rebuilt on copies of the first
+                    // surface below: one it does not cover would carry edges far off its
+                    // surface. Upstream ignores the failed cover.
+                    if !covered {
                         return Err(SolidError::primitive(
                             op,
                             crate::error::primitive::PrimitiveFailure::PlaneCannotCover,
@@ -947,8 +947,8 @@ impl PrimitiveCreation {
                 for face in faces {
                     let covered =
                         cover_face_surface(k, brep, *face, &first_surface, tolerance * 2.0, None)?;
-                    // (WR-536, opt-in) a plane that cannot be grown to cover the first face
-                    if k.fixes.boolean2d_plane_covers_far_faces && !covered {
+                    // (WR-536) a plane that cannot be grown to cover the first face
+                    if !covered {
                         return Err(SolidError::primitive(
                             op,
                             crate::error::primitive::PrimitiveFailure::PlaneCannotCover,

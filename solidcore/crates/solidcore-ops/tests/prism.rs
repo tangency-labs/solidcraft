@@ -1052,6 +1052,58 @@ fn disjoint_squares_intersect_in_nothing() {
     assert!(union.iter().all(|r| (area(r) - 100.0).abs() < 1e-9));
 }
 
+/// Planar booleans SolidCraft's sheet tests make (a channel engraved, a sheet with small bends
+/// and holes, a sheet perforated with a thousand round holes: each operand pair recorded from the
+/// call), where a face of one operand lies far from the other's plane face. The 2D boolean
+/// rebuilds the faces on the first face's plane after growing it to cover them, and a plane grew
+/// only 100 of its widths: the faces beyond were rebuilt on a plane that did not hold them
+/// (WR-536), and the call failed (1001, 1006, 1007, or an edge off the plane). Each case's union,
+/// intersection and both differences now build, closed, and their areas agree: the union is the
+/// two differences and the intersection, which share no area.
+#[test]
+fn far_faces_of_recorded_sheet_cuts_build_and_their_areas_agree() {
+    use std::io::BufRead;
+    #[derive(serde::Deserialize)]
+    struct Case {
+        test: String,
+        tol: f64,
+        a: Vec<Region2>,
+        b: Vec<Region2>,
+    }
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/planar_regions_far_faces.jsonl.gz"
+    );
+    let gz = flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap());
+    let mut n = 0;
+    for line in std::io::BufReader::new(gz).lines() {
+        let c: Case = serde_json::from_str(&line.unwrap()).unwrap();
+        let run = |x: &[Region2], y: &[Region2], op| {
+            let out = planar_regions_boolean(x, y, op, c.tol)
+                .unwrap_or_else(|e| panic!("case {n} ({}), {op:?}: {e:?}", c.test));
+            for l in out
+                .iter()
+                .flat_map(|r| std::iter::once(&r.outer).chain(&r.holes))
+            {
+                assert!(closed(l, c.tol * 10.0), "case {n} ({}), {op:?}", c.test);
+            }
+            out.iter().map(area).sum::<f64>()
+        };
+        let union = run(&c.a, &c.b, BooleanOp::Union);
+        let common = run(&c.a, &c.b, BooleanOp::Intersect);
+        let a_less_b = run(&c.a, &c.b, BooleanOp::Subtract);
+        let b_less_a = run(&c.b, &c.a, BooleanOp::Subtract);
+        let parts = a_less_b + b_less_a + common;
+        assert!(
+            (union - parts).abs() <= 1e-9 * union,
+            "case {n} ({}): union {union}, parts {parts}",
+            c.test
+        );
+        n += 1;
+    }
+    assert_eq!(n, 35);
+}
+
 #[test]
 fn planar_region_api_rejects_hostile_values_and_budgets() {
     all_fixes();

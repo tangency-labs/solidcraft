@@ -1015,21 +1015,18 @@ impl Surface {
             None => other.natural_uv_domain_with_nurb(k)?,
         };
 
-        // Not upstream (WR-536), opt-in `boolean2d_plane_covers_far_faces` (the fork's
-        // tangency-labs/smlib@67b8a1e): a plane is unbounded and its STEP parameterization
-        // affine, so it can grow to cover the other surface however far that lies from
+        // Not upstream (WR-536; the fork's tangency-labs/smlib@67b8a1e): a plane is
+        // unbounded and its STEP parameterization affine, so it can grow to cover the other surface however far that lies from
         // this face (two holes 1.5 m apart on a 3 m sheet, each face a few millimetres
         // wide). GetMaxAnalyticDomain's fixed reach of 100 widths is for B-splines, whose
         // extension degrades with distance; for a plane, grow the search domain to the
         // orthogonal projection of the other surface's bounding box, which holds every
         // point the checks below drop.
-        if k.fixes.boolean2d_plane_covers_far_faces {
-            if let SurfaceKind::Plane(plane) = self.kind() {
-                let mut other_box = other.calculate_tight_bounding_box(k, &other_dom)?;
-                other_box.expand_absolute(tol);
-                for corner in other_box.corners() {
-                    big_domain.add_point(plane.project_point_to_uv_domain(corner));
-                }
+        if let SurfaceKind::Plane(plane) = self.kind() {
+            let mut other_box = other.calculate_tight_bounding_box(k, &other_dom)?;
+            other_box.expand_absolute(tol);
+            for corner in other_box.corners() {
+                big_domain.add_point(plane.project_point_to_uv_domain(corner));
             }
         }
 

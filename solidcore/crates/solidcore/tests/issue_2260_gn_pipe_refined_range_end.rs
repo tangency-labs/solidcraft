@@ -49,7 +49,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_corner_failure_is_false",
     "analytic_inversion_answers_apart",
     "ascii_doubles_round_trip",
-    "boolean2d_plane_covers_far_faces",
     "boolean_cleanup_removes_slits",
     "boolean_new_face_closure_both_sides",
     "boolean_outer_shell_first",
