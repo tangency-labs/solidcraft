@@ -23,6 +23,7 @@ pub enum Error {
     /// A body that is not a closed solid facing out, and the test it fails (the kernel's
     /// [`SolidTest`], the first that fails in the order the tests run). [`Error::NotSolid`]
     /// stays for the calls that return it; [`crate::Body::check_solid`] returns this one.
+    #[non_exhaustive]
     NotSolidBecause(SolidTest),
     /// No room for the operation: an inward offset (a shell's wall, faces moved in) leaves none
     /// inside the body, or a blend is larger than the faces it rolls on allow.
@@ -189,10 +190,17 @@ pub enum Error {
     /// before the preparation it needs.
     Exception,
     /// The kernel found one of its own invariants broken part way through a call (the
-    /// kernel's `SolidError::PortInvariant`, a defect to report): the operation, and what did
-    /// not hold. Not [`Error::Exception`], which ops' own consistency checks and a missing
-    /// preparation still give.
+    /// kernel's `SolidError::PortInvariant`): its class, that it is a defect, the operation, and
+    /// what did not hold. Not [`Error::Exception`], which ops' own consistency checks and a
+    /// missing preparation still give.
+    #[non_exhaustive]
     Invariant {
+        /// The kernel's class of the failure (`SolidError::kind`, today
+        /// [`solidcore::error::ErrorKind::PortInvariant`]).
+        class: solidcore::error::ErrorKind,
+        /// True: the failure is the kernel's fault, not a fact of the input (a consistency check
+        /// of its own that did not hold), a bug to report, not a refusal.
+        defect: bool,
         /// The kernel operation whose invariant failed.
         operation: &'static str,
         /// What did not hold.
@@ -474,19 +482,9 @@ impl std::fmt::Display for Error {
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
-            Error::NotSolidBecause(test) => write!(
-                f,
-                "the body is not a closed solid facing out: {}",
-                match test {
-                    SolidTest::NotManifold => "it is not one closed manifold solid",
-                    SolidTest::NotClosedSolids => "it is not closed solids, even ones touching along edges or at vertices",
-                    SolidTest::PointersInvalid => "its pointer check fails",
-                    SolidTest::Invalid => "its validity check fails",
-                    SolidTest::LoopOrientationUndecided => "a loop's orientation is undecided",
-                    SolidTest::VolumeNegative => "it is inside out",
-                    SolidTest::VolumeUndecided => "its volume's sign is undecided",
-                }
-            ),
+            Error::NotSolidBecause(test) => {
+                write!(f, "the body is not a closed solid facing out: {test}")
+            }
             Error::NoRoom => write!(f, "no room"),
             Error::RailPastTolerance {
                 asked,
@@ -568,8 +566,17 @@ impl std::fmt::Display for Error {
             }
             Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
-            Error::Invariant { operation, reason } => {
-                write!(f, "solidcore broke its own invariant in {operation}: {reason}")
+            Error::Invariant {
+                class,
+                defect,
+                operation,
+                reason,
+            } => {
+                let defect = if *defect { ", a defect to report" } else { "" };
+                write!(
+                    f,
+                    "solidcore broke its own invariant in {operation} ({class}{defect}): {reason}"
+                )
             }
             Error::ContactUndecided {
                 other,
@@ -648,7 +655,12 @@ pub(crate) fn status(e: SolidError) -> Error {
         SolidError::Unsupported { reason, .. } => Error::Unsupported(reason),
         SolidError::Unported { upstream, .. } => Error::Unported(upstream),
         SolidError::Cancelled { .. } => Error::Cancelled,
-        SolidError::PortInvariant { operation, reason } => Error::Invariant { operation, reason },
+        e @ SolidError::PortInvariant { operation, reason } => Error::Invariant {
+            class: e.kind(),
+            defect: true,
+            operation,
+            reason,
+        },
         SolidError::PreparationRequired { .. } => Error::Exception,
         // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for

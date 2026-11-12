@@ -685,21 +685,31 @@ fn check_solid_names_the_test_a_body_fails() {
     assert_eq!(bodies.each_ref().map(|b| b.to_smb(true).unwrap()), before);
 }
 
-/// A kernel invariant found broken is `Invariant`, naming the operation and what did not hold;
-/// a call made before its preparation stays `Exception` (#15035). No input reaches a broken
-/// invariant (each one found is a defect, fixed), so the kernel's error is made here.
+/// A kernel invariant found broken is `Invariant`: the kernel's class of it, marked a defect,
+/// the operation and what did not hold; a call made before its preparation stays `Exception`
+/// (#15035). No input reaches a broken invariant (each one found is a defect, fixed), so the
+/// kernel's error is made here.
 #[test]
 fn a_broken_kernel_invariant_is_named_not_an_exception() {
+    use solidcore::error::ErrorKind;
     use solidcore::SolidError;
+    let invariant = crate::error::status(SolidError::PortInvariant {
+        operation: "offset::close_loop_gaps",
+        reason: "a kept edge without a 3D curve",
+    });
     assert_eq!(
-        crate::error::status(SolidError::PortInvariant {
-            operation: "offset::close_loop_gaps",
-            reason: "a kept edge without a 3D curve",
-        }),
+        invariant,
         Error::Invariant {
+            class: ErrorKind::PortInvariant,
+            defect: true,
             operation: "offset::close_loop_gaps",
             reason: "a kept edge without a 3D curve",
         }
+    );
+    assert_eq!(
+        invariant.to_string(),
+        "solidcore broke its own invariant in offset::close_loop_gaps \
+         (port_invariant, a defect to report): a kept edge without a 3D curve"
     );
     assert_eq!(
         crate::error::status(SolidError::PreparationRequired {

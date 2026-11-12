@@ -99,8 +99,11 @@ pub fn is_outward_solid(
 }
 
 /// Which test a body fails to be a closed solid facing out ([`outward_solid_failure`] and its
-/// siblings), in the order the tests run: the first one that fails is the one named.
+/// siblings), in the order the tests run: the first one that fails is the one named. More tests
+/// may be named, so a caller outside the kernel matches it with a wildcard or says it by its
+/// `Display`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SolidTest {
     /// The body is not one closed manifold solid ([`is_manifold_solid`]).
     NotManifold,
@@ -124,6 +127,23 @@ pub enum SolidTest {
     /// The volume's certified enclosure still holds 0 when refinement ends: its sign is not
     /// proved ([`crate::mass::enclosure::VolumeSign::Undecided`]).
     VolumeUndecided,
+}
+
+impl core::fmt::Display for SolidTest {
+    /// What the body fails, as a clause: "it is inside out".
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            SolidTest::NotManifold => "it is not one closed manifold solid",
+            SolidTest::NotClosedSolids => {
+                "it is not closed solids, even ones touching along edges or at vertices"
+            }
+            SolidTest::PointersInvalid => "its pointer check fails",
+            SolidTest::Invalid => "its validity check fails",
+            SolidTest::LoopOrientationUndecided => "a loop's orientation is undecided",
+            SolidTest::VolumeNegative => "it is inside out",
+            SolidTest::VolumeUndecided => "its volume's sign is undecided",
+        })
+    }
 }
 
 /// As [`is_outward_solid`], naming the test the body fails: `None` where it is a valid closed
