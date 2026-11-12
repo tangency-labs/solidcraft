@@ -43,7 +43,6 @@ crates/doc/src/joints_cam.rs:default_reverse picks a cam follower's side by the 
 crates/doc/src/joints_cam.rs:profile_points samples a cam profile's edges from a mesh
 crates/doc/src/joints_edge.rs:edge_frame places an edge snap by the display mesh
 crates/doc/src/joints_edge.rs:edge_snap places an edge snap by the display mesh
-crates/doc/src/joints_edge.rs:face_of picks the planar face beside an edge by the display mesh
 crates/doc/src/joints_edge.rs:nearest_edge picks the edge nearest a point by the display mesh
 crates/doc/src/joints_face.rs:NamedFace::own_cylinder reads a named face's cylinder from the display mesh
 crates/doc/src/joints_face.rs:face_name_at names the face at a pick by its mesh triangles
