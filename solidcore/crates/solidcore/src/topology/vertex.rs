@@ -1874,9 +1874,9 @@ mod tests {
         assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
         assert!(!is_topological_vertex(&k, &mut b, v[0]).unwrap());
 
-        // a cusp (the second line doubles back) counts as topological upstream
+        // a cusp (the second line doubles back) is not topological (WR-92)
         let (mut b, v, _) = chain(true, Vec3::X, -Vec3::X);
-        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
+        assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
 
         let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
         assert!(!are_edges_tangent(&k, &b, v[1], e[0], e[1], 0.5).unwrap());
@@ -2026,39 +2026,28 @@ mod tests {
             BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
         };
 
-        let k_default = Kernel::default();
-        let mut k_fix = Kernel::default();
-        k_fix
-            .fixes
-            .is_topological_vertex_rejects_cusps_and_tangent_errors = true;
+        let k = Kernel::default();
 
         let dir_deg = |deg: f64| -> Vec3 {
             let rad = deg * (PI / 180.0);
             Vec3::new(rad.cos(), rad.sin(), 0.0)
         };
 
-        // Line-chain cases: (d2, expected_default, expected_opt_in)
-        for (d2, want_default, want_fix) in [
-            (Vec3::X, true, true),          // 0.0° smooth G1 continuation
-            (dir_deg(0.3), true, true),     // 0.3° within SM_CONTINUITY_ANGLE (0.5°)
-            (dir_deg(0.6), false, false),   // 0.6° outside SM_CONTINUITY_ANGLE
-            (Vec3::Y, false, false),        // 90.0° right-angle corner
-            (-Vec3::X, true, false),        // 180.0° exact cusp
-            (dir_deg(179.7), true, false),  // 179.7° near-cusp within 0.5° of PI
-            (dir_deg(-179.7), true, false), // -179.7° near-cusp within 0.5° of -PI
+        // Line-chain cases: (d2, expected)
+        for (d2, want) in [
+            (Vec3::X, true),          // 0.0° smooth G1 continuation
+            (dir_deg(0.3), true),     // 0.3° within SM_CONTINUITY_ANGLE (0.5°)
+            (dir_deg(0.6), false),    // 0.6° outside SM_CONTINUITY_ANGLE
+            (Vec3::Y, false),         // 90.0° right-angle corner
+            (-Vec3::X, false),        // 180.0° exact cusp
+            (dir_deg(179.7), false),  // 179.7° near-cusp within 0.5° of PI
+            (dir_deg(-179.7), false), // -179.7° near-cusp within 0.5° of -PI
         ] {
             let (mut b, v, e) = chain(true, Vec3::X, d2);
+            assert_eq!(is_topological_vertex(&k, &mut b, v[1]).unwrap(), want);
             assert_eq!(
-                is_topological_vertex(&k_default, &mut b, v[1]).unwrap(),
-                want_default
-            );
-            assert_eq!(
-                is_topological_vertex(&k_fix, &mut b, v[1]).unwrap(),
-                want_fix
-            );
-            assert_eq!(
-                are_edges_tangent(&k_fix, &b, v[1], e[0], e[1], CONTINUITY_ANGLE).unwrap(),
-                want_fix
+                are_edges_tangent(&k, &b, v[1], e[0], e[1], CONTINUITY_ANGLE).unwrap(),
+                want
             );
         }
 
@@ -2090,11 +2079,11 @@ mod tests {
             1.0,
         );
         assert!(c0
-            .is_line(&k_default, IS_LINE_SAMPLES, ZONE_TOL_3D / 1000.0)
+            .is_line(&k, IS_LINE_SAMPLES, ZONE_TOL_3D / 1000.0)
             .unwrap()
             .is_none());
 
-        for (pts1, want_default, want_fix) in [
+        for (pts1, want) in [
             // Smooth G1 continuation at (1, 0, 0) with outgoing tangent +X
             (
                 [
@@ -2102,7 +2091,6 @@ mod tests {
                     Vec3::new(1.5, 0.0, 0.0),
                     Vec3::new(2.0, 1.0, 0.0),
                 ],
-                true,
                 true,
             ),
             // 180° curved cusp at (1, 0, 0) with outgoing tangent -X
@@ -2112,7 +2100,6 @@ mod tests {
                     Vec3::new(0.5, 0.0, 0.0),
                     Vec3::new(0.0, -1.0, 0.0),
                 ],
-                true,
                 false,
             ),
             // 90° curved corner at (1, 0, 0) with outgoing tangent +Y
@@ -2123,12 +2110,11 @@ mod tests {
                     Vec3::new(2.0, 1.0, 0.0),
                 ],
                 false,
-                false,
             ),
         ] {
             let c1 = quad(pts1, 1.0, 2.0);
             assert!(c1
-                .is_line(&k_default, IS_LINE_SAMPLES, ZONE_TOL_3D / 1000.0)
+                .is_line(&k, IS_LINE_SAMPLES, ZONE_TOL_3D / 1000.0)
                 .unwrap()
                 .is_none());
             let (mut b, v, e) = chain(false, Vec3::X, pts1[2] - Vec3::X);
@@ -2139,14 +2125,7 @@ mod tests {
             e1.curve = Some(c1);
             e1.interval = Extent1d::from_min_max(1.0, 2.0);
 
-            assert_eq!(
-                is_topological_vertex(&k_default, &mut b, v[1]).unwrap(),
-                want_default
-            );
-            assert_eq!(
-                is_topological_vertex(&k_fix, &mut b, v[1]).unwrap(),
-                want_fix
-            );
+            assert_eq!(is_topological_vertex(&k, &mut b, v[1]).unwrap(), want);
         }
     }
 
@@ -2157,11 +2136,7 @@ mod tests {
             BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
         };
 
-        let k_default = Kernel::default();
-        let mut k_fix = Kernel::default();
-        k_fix
-            .fixes
-            .is_topological_vertex_rejects_cusps_and_tangent_errors = true;
+        let k = Kernel::default();
 
         // 1a. Reversed second line edge (at_start1 == false, at_start2 == false):
         // smooth G1 continuation (0,0,0) -> (1,0,0) -> (2,0,0) with opposing raw tangents
@@ -2177,9 +2152,8 @@ mod tests {
         b.edgeuse_mut(EdgeuseId::from_index(2)).unwrap().orientation = OrientType::Opposite;
         b.edgeuse_mut(EdgeuseId::from_index(3)).unwrap().orientation = OrientType::Same;
         assert_eq!(edge_start_vertex(&b, e[1]).unwrap(), Some(v[2]));
-        assert!(are_edges_tangent(&k_fix, &b, v[1], e[0], e[1], CONTINUITY_ANGLE).unwrap());
-        assert!(is_topological_vertex(&k_default, &mut b, v[1]).unwrap());
-        assert!(is_topological_vertex(&k_fix, &mut b, v[1]).unwrap());
+        assert!(are_edges_tangent(&k, &b, v[1], e[0], e[1], CONTINUITY_ANGLE).unwrap());
+        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
 
         // 1b. Reversed second line edge forming a 180° cusp (0,0,0) -> (1,0,0) and
         // (1,0,0) -> (0,0,0) whose raw curve tangents are parallel (+X and +X)
@@ -2192,9 +2166,8 @@ mod tests {
         b.edgeuse_mut(EdgeuseId::from_index(2)).unwrap().orientation = OrientType::Opposite;
         b.edgeuse_mut(EdgeuseId::from_index(3)).unwrap().orientation = OrientType::Same;
         assert_eq!(edge_start_vertex(&b, e[1]).unwrap(), Some(v[2]));
-        assert!(!are_edges_tangent(&k_fix, &b, v[1], e[0], e[1], CONTINUITY_ANGLE).unwrap());
-        assert!(is_topological_vertex(&k_default, &mut b, v[1]).unwrap());
-        assert!(!is_topological_vertex(&k_fix, &mut b, v[1]).unwrap());
+        assert!(!are_edges_tangent(&k, &b, v[1], e[0], e[1], CONTINUITY_ANGLE).unwrap());
+        assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
 
         // 1c. Same reversed-edge check on curved degree-2 B-splines meeting at param 1.0
         let quad = |pts: [Point3; 3]| -> Curve {
@@ -2213,7 +2186,7 @@ mod tests {
                 .unwrap(),
             )
         };
-        for (pts1, want_fix) in [
+        for (pts1, want) in [
             (
                 [
                     Vec3::new(2.0, 1.0, 0.0),
@@ -2241,11 +2214,7 @@ mod tests {
             b.edge_mut(e[1]).unwrap().curve = Some(quad(pts1));
             b.edgeuse_mut(EdgeuseId::from_index(2)).unwrap().orientation = OrientType::Opposite;
             b.edgeuse_mut(EdgeuseId::from_index(3)).unwrap().orientation = OrientType::Same;
-            assert!(is_topological_vertex(&k_default, &mut b, v[1]).unwrap());
-            assert_eq!(
-                is_topological_vertex(&k_fix, &mut b, v[1]).unwrap(),
-                want_fix
-            );
+            assert_eq!(is_topological_vertex(&k, &mut b, v[1]).unwrap(), want);
         }
 
         // 2. Line::bounded with inside_out = true (IsLine returns STEP vector, while NURB
@@ -2264,9 +2233,8 @@ mod tests {
             .approx_eq(Vec3::new(2.0, 0.0, 0.0)));
         let (mut b, v, e) = chain(true, Vec3::X, Vec3::X);
         b.edge_mut(e[1]).unwrap().curve = Some(Curve::from(line_io_smooth));
-        assert!(are_edges_tangent(&k_fix, &b, v[1], e[0], e[1], CONTINUITY_ANGLE).unwrap());
-        assert!(is_topological_vertex(&k_default, &mut b, v[1]).unwrap());
-        assert!(is_topological_vertex(&k_fix, &mut b, v[1]).unwrap());
+        assert!(are_edges_tangent(&k, &b, v[1], e[0], e[1], CONTINUITY_ANGLE).unwrap());
+        assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
 
         // 180° cusp: NURB [0, 1] runs from (1,0,0) back to (0,0,0)
         let line_io_cusp = Line::bounded(Vec3::ZERO, Vec3::X, &domain, &opts);
@@ -2274,9 +2242,8 @@ mod tests {
         assert!(line_io_cusp.evaluate_point(1.0).approx_eq(Vec3::ZERO));
         let (mut b, v, e) = chain(true, Vec3::X, -Vec3::X);
         b.edge_mut(e[1]).unwrap().curve = Some(Curve::from(line_io_cusp));
-        assert!(!are_edges_tangent(&k_fix, &b, v[1], e[0], e[1], CONTINUITY_ANGLE).unwrap());
-        assert!(is_topological_vertex(&k_default, &mut b, v[1]).unwrap());
-        assert!(!is_topological_vertex(&k_fix, &mut b, v[1]).unwrap());
+        assert!(!are_edges_tangent(&k, &b, v[1], e[0], e[1], CONTINUITY_ANGLE).unwrap());
+        assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 
     #[test]
@@ -2284,11 +2251,7 @@ mod tests {
         use crate::curve::composite_curve::CompositeCurve;
         use crate::error::SM_ERR;
 
-        let k_default = Kernel::default();
-        let mut k_fix = Kernel::default();
-        k_fix
-            .fixes
-            .is_topological_vertex_rejects_cusps_and_tangent_errors = true;
+        let k = Kernel::default();
 
         // 1. Edge 1 starts at v[1] (at_start2 == true) at matching parameter 1.0, and
         // CompositeCurve::evaluate returns SM_ERR.
@@ -2296,12 +2259,34 @@ mod tests {
         let e1 = b.edge_mut(e[1]).unwrap();
         e1.curve = Some(Curve::from(CompositeCurve::new(3)));
         e1.interval = Extent1d::from_min_max(1.0, 2.0);
-        assert!(edge_end_tangent(&k_default, &b, e[1], true).is_err());
-        assert!(is_topological_vertex(&k_default, &mut b, v[1]).unwrap());
+        assert!(edge_end_tangent(&k, &b, e[1], true).is_err());
         assert!(matches!(
-            is_topological_vertex(&k_fix, &mut b, v[1]),
+            is_topological_vertex(&k, &mut b, v[1]),
             Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
         ));
+
+        // The callers: `GetTopologicalVertices` and the boolean cleanup return the error;
+        // `RemoveTopologicalEdgesAndVertices` ignores it and keeps the vertex.
+        let mut k_mut = Kernel::default();
+        assert!(matches!(
+            crate::topology::brep::p1::topological_vertices(&k, &mut b),
+            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
+        ));
+        // the cleanup visits an intersection vertex with a mate
+        let mut relations = crate::boolean::merge::p1::CleanupRelations {
+            vertices: vec![v[1]],
+            ..Default::default()
+        };
+        relations.mates.vertices.record(v[1], v[3]).unwrap();
+        assert!(matches!(
+            crate::boolean::merge::p1::boolean_post_process(&mut k_mut, &mut b, &relations, false),
+            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
+        ));
+        crate::topology::brep::p5::remove_topological_edges_and_vertices(
+            &mut k_mut, &mut b, None, None,
+        )
+        .unwrap();
+        assert!(b.vertex_list().contains(&v[1]));
 
         // 2. Edge 0 reversed so it starts at v[1] (at_start1 == true) at matching
         // parameter 0.0, and CompositeCurve::evaluate returns SM_ERR.
@@ -2312,10 +2297,9 @@ mod tests {
         b.edgeuse_mut(EdgeuseId::from_index(0)).unwrap().orientation = OrientType::Opposite;
         b.edgeuse_mut(EdgeuseId::from_index(1)).unwrap().orientation = OrientType::Same;
         assert_eq!(edge_start_vertex(&b, e[0]).unwrap(), Some(v[1]));
-        assert!(edge_end_tangent(&k_default, &b, e[0], true).is_err());
-        assert!(is_topological_vertex(&k_default, &mut b, v[1]).unwrap());
+        assert!(edge_end_tangent(&k, &b, e[0], true).is_err());
         assert!(matches!(
-            is_topological_vertex(&k_fix, &mut b, v[1]),
+            is_topological_vertex(&k, &mut b, v[1]),
             Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
         ));
 
@@ -2326,9 +2310,6 @@ mod tests {
         e0.curve = Some(Curve::from(CompositeCurve::new(3)));
         e0.interval = Extent1d::from_min_max(-1.0, 0.0);
         let mut k_both = Kernel::default();
-        k_both
-            .fixes
-            .is_topological_vertex_rejects_cusps_and_tangent_errors = true;
         k_both.fixes.query_statuses_pass_on = true;
         assert!(!is_topological_vertex(&k_both, &mut b, v[1]).unwrap());
     }
