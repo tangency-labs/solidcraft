@@ -1050,7 +1050,7 @@ preference_settings! {
     /// Share shading and Continuity; false preserves their independent legacy behavior.
     single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.graphics_page.single_surface_analysis");
     /// Linux: the window system the app opens with at its next start (#3083): `auto` (XWayland
-    /// whenever there is an X display, native Wayland on niri), `wayland` or `x11`.
+    /// whenever there is an X display, native Wayland on niri and Hyprland), `wayland` or `x11`.
     window_system: String = "auto".into(), PAGE_GRAPHICS;
     /// Graphics API for the next start; Automatic preserves the platform startup order.
     graphics_backend: String = "auto".into(), PAGE_GRAPHICS;
@@ -1157,6 +1157,9 @@ preference_settings! {
     /// #13262). Off: the grabbed point goes to the pointer and the part may spin about it, as
     /// before.
     joint_drag_trackball: bool = true, PAGE_DESIGN => check_id("prefs.joint_drag_trackball");
+    /// A saved design's tab and its Browser top row are named after its file, so a Save As or a
+    /// renamed file shows (#7267). Off: both show the name stored in the design, as before.
+    names_from_file: bool = true, PAGE_DESIGN => check_id("settings.names_from_file");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Ask separately when closing several unsaved designs, as before grouped saving.
@@ -1372,6 +1375,8 @@ preference_settings! {
     zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
     smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
+    /// The face under the pointer keeps its highlight while the view moves under it (#2130).
+    keep_hover_while_navigating: bool = true, PAGE_NAVIGATION;
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
     trackpad_pan: bool = true, PAGE_NAVIGATION;
     /// Hold this modifier alone to zoom with vertical wheel or two-finger scroll.
@@ -6619,6 +6624,7 @@ mod tests {
             ("space_mouse_speed", json!(2.0), PAGE_MOUSE3D),
             ("nav", json!("blender"), PAGE_NAVIGATION),
             ("look_at_anim", json!(false), PAGE_NAVIGATION),
+            ("keep_hover_while_navigating", json!(false), PAGE_NAVIGATION),
             ("selection_shift_add_only", json!(true), PAGE_SKETCH),
             ("select_other_hidden", json!(false), PAGE_SKETCH),
             ("select_hidden_edges", json!(true), PAGE_SKETCH),

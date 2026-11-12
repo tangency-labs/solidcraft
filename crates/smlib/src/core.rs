@@ -289,7 +289,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.database_io_byte_swaps_read_boolean_and_u16 = true;
-    f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.offset_updates_result_tolerances = true;
@@ -307,7 +306,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
     f.approximate_surface_checks_every_row = true;
-    f.topological_vertex_has_only_edge_uses = true;
     f.planar_section_face_tolerance = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;

@@ -1642,7 +1642,7 @@ struct RowHit {
 const NAMED_BODIES: usize = 8;
 
 /// A body's size, its edges' polylines and which of them are seams.
-type EdgeShape = (f64, Vec<Vec<Vec3>>, Vec<bool>);
+type EdgeShape = (f64, Vec<Vec<Vec3>>, Vec<bool>, Option<solidcraft_geom::Mesh>);
 
 /// How far a polyline is from `q`.
 fn polyline_dist(points: &[Vec3], q: Vec3) -> f64 {
@@ -1722,10 +1722,11 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
             // meeting) can't be blended either: nobody means it by a pick.
             Ok(m) => Some((
                 size,
-                m.edges,
+                Vec::new(),
                 m.seams.iter().zip(&m.smooth_edges).map(|(s, t)| *s || *t).chain(m.seams.iter().skip(m.smooth_edges.len()).copied()).collect(),
+                Some(m),
             )),
-            Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new())),
+            Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new(), None)),
         };
         if let Some(shape) = shape {
             shapes.insert(i, shape);
@@ -1790,14 +1791,19 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
         let mut hits: Vec<RowHit> = Vec::new();
         for (k, q) in culled {
             let Some(r) = rows.get(k) else { continue };
-            let (Some((size, edges, seams)), Some(b)) = (shapes.get(&r.body), st.bodies.get(r.body)) else { continue };
+            let (Some((size, listed, seams, mesh)), Some(b)) = (shapes.get(&r.body), st.bodies.get(r.body)) else { continue };
+            // The display mesh's polylines, else the body's own edge list.
+            let edges = mesh.as_ref().map_or(listed, |m| &m.edges);
             let chord = (size * 2e-3).max(1e-3);
             let mut near = Vec::new();
             let mut candidates = Vec::new();
             for (i, points) in edges.iter().enumerate() {
                 let d = polyline_dist(points, q);
                 if d <= edge_reach(*size) {
-                    let seam = seams.get(i).copied().unwrap_or(false);
+                    // Where two faces meet tangentially (a flat wall running into a round one)
+                    // there is nothing to blend, so nobody means the edge by the pick (#12215).
+                    // Decided only for the edges near the pick: it reads the faces' normals.
+                    let seam = seams.get(i).copied().unwrap_or(false) || mesh.as_ref().is_some_and(|m| m.tangent_join(i, TANGENT_JOIN));
                     near.push((d, seam, leaving(points, q)));
                     candidates.push((i, d, seam));
                 }
@@ -1826,7 +1832,8 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
             for r in &rows {
                 let Some(q) = q_of(r) else { continue };
                 shape_of(r.body, &mut shapes);
-                let Some((_, edges, _)) = shapes.get(&r.body) else { continue };
+                let Some((_, listed, _, mesh)) = shapes.get(&r.body) else { continue };
+                let edges = mesh.as_ref().map_or(listed, |m| &m.edges);
                 nearest = edges.iter().map(|points| polyline_dist(points, q)).fold(nearest, f64::min);
             }
             let far = if nearest.is_finite() { format!("the nearest edge is {nearest:.3} mm away") } else { "there is no edge".to_string() };
@@ -1843,7 +1850,7 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
         let mut groups: Vec<&RowHit> = Vec::new();
         for h in hits.iter().filter(|h| h.d <= 2.0 * d_min + 1e-3) {
             let Some(r) = rows.get(h.row) else { continue };
-            let size = shapes.get(&r.body).map_or(1.0, |(size, _, _)| *size);
+            let size = shapes.get(&r.body).map_or(1.0, |(size, _, _, _)| *size);
             let same = |g: &&RowHit| {
                 rows.get(g.row).is_some_and(|o| o.body == r.body) && ((g.edge.is_some() && g.edge == h.edge) || g.q.dist(h.q) <= 1e-6 * size.max(1.0))
             };
@@ -1919,7 +1926,8 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
                         continue;
                     }
                     shape_of(other.body, &mut shapes);
-                    let Some((size, edges, seams)) = shapes.get(&other.body) else { continue };
+                    let Some((size, listed, seams, mesh)) = shapes.get(&other.body) else { continue };
+                    let edges = mesh.as_ref().map_or(listed, |m| &m.edges);
                     // The exact curve is no nearer than the polyline less its chord tolerance.
                     let chord = (size * 2e-3).max(1e-3);
                     let ghost = edges.iter().enumerate().filter(|(k, _)| !seams.get(*k).copied().unwrap_or(false)).any(|(k, points)| {
@@ -1990,6 +1998,9 @@ fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f
     let d = foot.dist(q);
     d.is_finite().then_some((d, foot))
 }
+
+/// Faces meeting at less than this angle (radians, 2°) meet tangentially, as a tangent chain reads them.
+const TANGENT_JOIN: f64 = 2.0 * std::f64::consts::PI / 180.0;
 
 /// The direction an edge's polyline leaves `pt` in, when `pt` is one of its ends; `None` when
 /// the edge runs on through `pt`.

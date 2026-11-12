@@ -36,7 +36,7 @@
 //! already holds.
 
 use core::cell::{Cell, RefCell};
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::error::SolidError;
@@ -1067,28 +1067,6 @@ pub struct UpstreamFixes {
     pub analytic_copy_keeps_parameterization: bool,
     /// `SmFace::ComputePreciseProperties` scales the volume and moment error bounds by the body size (ten times the root of the estimated area, or the origin's distance when larger), not 1.0.1's tenth of it, so the integration converges at tight accuracies instead of returning `SM_ERR` (WR-472; the SolidCraft fork's tangency-labs/smlib@073d4740).
     pub precise_properties_body_length_scale: bool,
-    /// `SmVertex::IsTopologicalVertex` ([`crate::topology::vertex::is_topological_vertex`])
-    /// propagates a failed start-tangent evaluation (`SmEdge::GetEndTangent(TRUE, ...)`) as
-    /// `Err` instead of returning its `SmStatus` from an `SmBoolean` function as `Ok(true)`,
-    /// and orients both edge tangents along traversal through the vertex (accounting for
-    /// [`crate::topology::vertex::edge_start_vertex`] and [`crate::curve::line::Line::inside_out`])
-    /// so only smooth `G1` continuations within `SM_CONTINUITY_ANGLE` (`|angle_rad| <=
-    /// ang_limit_rad`) count as topological, rejecting `180°` cusps (`|angle_rad ± PI| <=
-    /// ang_limit_rad`) as `Ok(false)` (WR-92, #2214; see
-    /// `plan/upstream-issues/WR-92--addendum-2026-11-01-topological-vertex-cusps-and-errors.md`).
-    /// Off by default for pinned C++ parity.
-    pub is_topological_vertex_rejects_cusps_and_tangent_errors: bool,
-    /// `SmVertex::IsTopologicalVertex` ([`crate::topology::vertex::is_topological_vertex`])
-    /// counts a vertex as removable only when every one of its uses is an edge use of its
-    /// two edges, the precondition of joining two edges at a vertex (Mäntylä's `KEV`).
-    /// Upstream counts only edges, so a vertex that also is a vertex loop in another face
-    /// (two solids touching at one point that lies inside an edge: a sphere touching a box
-    /// face on its seam meridian) passed. `SmMerge::BooleanPostProcess` then joined the
-    /// edge's two halves through `DeleteTopologicalVertex`, whose `SqueezeEdge` moved the
-    /// other face's vertex loop to the far end of the deleted half (the sphere's pole,
-    /// 7.5 off the face: `Bad Vertex Gap`) (WR-727, #2520). Off by default for pinned C++
-    /// parity.
-    pub topological_vertex_has_only_edge_uses: bool,
     /// An offset surface evaluated beyond its base's domain extends the base itself on every side that can grow at once, each by the domain size times the least power of two that reaches the point and never less than the extension it replaces, so two copies of one offset give the same points whatever was evaluated first (WR-458, #419; the fork's tangency-labs/smlib@9f54d05 (was 2d7c7ed)).
     pub offset_extension_from_base: bool,
     /// With `offset_extension_from_base` (which must be on too; this flag does nothing without it), an offset surface whose base is a cylinder, cone, sphere or torus extends that base past its domain as itself, where upstream's tangent ruled extension (G1R) leaves the surface at once: a cylinder R25 continued 0.44 past its face's end was 0.0036 off the circle, and a round traced there was built that far off all along (WR-633, #960; the SolidCraft fork's tangency-labs/smlib@de0a6b8, branch `replay/1.0.1`). The extension is built from the analytic surface (the fork's @93db777): the base's spans are kept and new ones joined at its ends with a knot of full multiplicity, every row round the axis continues in rational quadratic arc spans, a sphere's or torus's generator in quarter turns, and a cone's line straight. Round the axis it reaches no further than closing the turn, half the gap past either end, and once it reaches the closure that direction wraps like a periodic one (WR-650, #1986; the fork's @b298cc2): a 294 deg arc was extended to 882 deg and more. A surface of revolution whose generator is an arc of one circle (SMLib's concave round of a circular edge) continues it as its own circle, as a torus does (the fork's @43fd6b6).
@@ -1383,11 +1361,39 @@ const fn cancelled_error(operation: &'static str) -> SolidError {
 /// on any clone signals every [`Kernel`] configured with [`Kernel::set_cancel_token`], so
 /// one token can also cancel a group of jobs. [`Self::either`] makes a token that also fires
 /// with another one, for work started under two (a dialog's job of a design that may close).
+///
+/// Not upstream: a token made by [`Self::after_polls`] counts the times it is polled
+/// ([`Self::is_cancelled`], [`Self::check`], and so [`Kernel::is_cancelled`] and
+/// [`Kernel::check_cancelled`]) and turns cancelled at a given poll. That stops an operation
+/// at a point fixed by its own work, not by a clock: for deterministic tests that an
+/// operation stops where it is cancelled, and for an application's progress or abort UI
+/// (SolidCraft's), which can read how far an operation got ([`Self::polls`]) or stop it after
+/// a budget of work. A token made by [`Self::new`] counts nothing and pays nothing for it.
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken {
     flag: Arc<AtomicBool>,
     /// Not upstream: the token this one also fires with ([`Self::either`]).
     also: Option<Arc<CancelToken>>,
+    /// Not upstream: the polls counted, and the one it turns cancelled at
+    /// ([`Self::after_polls`]); `None` for a token that counts nothing.
+    polls: Option<Arc<PollCount>>,
+}
+
+/// The polls a [`CancelToken::after_polls`] token counts.
+#[derive(Debug)]
+struct PollCount {
+    /// The poll the token is cancelled from (1: the first).
+    from: u64,
+    /// The polls made so far.
+    made: AtomicU64,
+}
+
+impl PollCount {
+    /// Counts one poll: whether the token is cancelled from it on.
+    fn poll(&self) -> bool {
+        let made = self.made.fetch_add(1, Ordering::Relaxed).saturating_add(1);
+        made >= self.from
+    }
 }
 
 impl CancelToken {
@@ -1402,9 +1408,39 @@ impl CancelToken {
         self.flag.store(true, Ordering::Relaxed);
     }
 
-    /// Clears the cancellation signal (`false`) so the token can be reused.
+    /// Clears the cancellation signal (`false`) so the token can be reused. A token made by
+    /// [`Self::after_polls`] starts counting its polls again from 0.
     pub fn reset(&self) {
         self.flag.store(false, Ordering::Relaxed);
+        if let Some(p) = &self.polls {
+            p.made.store(0, Ordering::Relaxed);
+        }
+    }
+
+    /// Not upstream: an uncancelled token that counts its polls and is cancelled from its
+    /// `n`-th on (`n` = 0 or 1: from the first). [`Self::cancel`] cancels it at once as any
+    /// token's; `after_polls(u64::MAX)` only counts. Clones share the count.
+    #[must_use]
+    pub fn after_polls(n: u64) -> Self {
+        Self {
+            polls: Some(Arc::new(PollCount {
+                from: n,
+                made: AtomicU64::new(0),
+            })),
+            ..Self::default()
+        }
+    }
+
+    /// Not upstream: how many times this token has been polled since it was made or last
+    /// [`Self::reset`], for a token made by [`Self::after_polls`]; `None` for one made by
+    /// [`Self::new`], which counts nothing. A token made by [`Self::either`] counts as the
+    /// token it was made from (`self`): a poll of it is a poll of `self` and of the token it
+    /// was joined with, and is counted by each of them that counts.
+    #[must_use]
+    pub fn polls(&self) -> Option<u64> {
+        self.polls
+            .as_deref()
+            .map(|p| p.made.load(Ordering::Relaxed))
     }
 
     /// Not upstream: a token that is cancelled when `self` or `other` is. Cancelling it
@@ -1418,16 +1454,22 @@ impl CancelToken {
                 Some(more) => more.either(other),
                 None => other.clone(),
             })),
+            // a poll of the joined token is a poll of self: counted, and cancelling, as self's
+            polls: self.polls.clone(),
         }
     }
 
     /// Whether [`Self::cancel`] has been called since construction or the last
-    /// [`Self::reset`] (on this token, or on a token it was joined with by [`Self::either`]).
+    /// [`Self::reset`] (on this token, or on a token it was joined with by [`Self::either`]),
+    /// or, for a token made by [`Self::after_polls`], this is its `n`-th poll or a later one.
+    /// Every call is one poll of each counting token in the chain: none is skipped because
+    /// an earlier one is already cancelled.
     #[must_use]
     #[inline]
     pub fn is_cancelled(&self) -> bool {
-        self.flag.load(Ordering::Relaxed)
-            || self.also.as_deref().is_some_and(CancelToken::is_cancelled)
+        let counted = self.polls.as_deref().is_some_and(PollCount::poll);
+        let also = self.also.as_deref().is_some_and(CancelToken::is_cancelled);
+        counted || also || self.flag.load(Ordering::Relaxed)
     }
 
     /// Returns `Err(SolidError::Cancelled { operation })` when [`Self::is_cancelled`] is
@@ -1703,6 +1745,70 @@ mod tests {
         b.reset();
         ab.cancel();
         assert!(a.is_cancelled() && !b.is_cancelled() && abc.is_cancelled());
+    }
+
+    #[test]
+    fn after_polls_cancels_from_its_nth_poll_and_counts_every_poll() {
+        assert_eq!(CancelToken::new().polls(), None);
+        let t = CancelToken::after_polls(3);
+        assert_eq!(t.polls(), Some(0));
+        assert!(!t.is_cancelled());
+        assert_eq!(t.check("kernel::test"), Ok(()));
+        assert_eq!(
+            t.check("kernel::test"),
+            Err(SolidError::cancelled("kernel::test"))
+        );
+        // cancelled from the third poll on, and every poll counted
+        assert!(t.is_cancelled());
+        assert_eq!(t.polls(), Some(4));
+        // a clone shares the count; a kernel's polls are the token's
+        let mut k = Kernel::default();
+        k.set_cancel_token(t.clone());
+        t.reset();
+        assert_eq!(t.polls(), Some(0));
+        assert!(!k.is_cancelled());
+        assert_eq!(k.check_cancelled("kernel::test"), Ok(()));
+        assert!(k.is_cancelled());
+        assert_eq!(t.polls(), Some(3));
+        // from the first poll for 0 and 1; cancel() at once
+        assert!(CancelToken::after_polls(0).is_cancelled());
+        assert!(CancelToken::after_polls(1).is_cancelled());
+        let c = CancelToken::after_polls(u64::MAX);
+        assert!(!c.is_cancelled());
+        c.cancel();
+        assert!(c.is_cancelled());
+        assert_eq!(c.polls(), Some(2));
+    }
+
+    #[test]
+    fn either_counts_a_poll_on_each_counting_token_of_its_chain() {
+        let (a, b) = (
+            CancelToken::after_polls(u64::MAX),
+            CancelToken::after_polls(2),
+        );
+        let ab = a.either(&b);
+        assert!(!ab.is_cancelled());
+        // the joined token counts as a, and its poll is one of a and one of b
+        assert_eq!(
+            (ab.polls(), a.polls(), b.polls()),
+            (Some(1), Some(1), Some(1))
+        );
+        // b's second poll cancels b and the joined token, not a
+        assert!(ab.is_cancelled());
+        assert!(b.is_cancelled() && !a.is_cancelled());
+        assert_eq!((a.polls(), b.polls()), (Some(3), Some(3)));
+        // a token that counts nothing, joined with b: b counts the poll, the joined token none
+        let plain = CancelToken::new().either(&b);
+        assert!(plain.is_cancelled());
+        assert_eq!((plain.polls(), b.polls()), (None, Some(4)));
+        // a's countdown is the joined token's too, and an earlier cancel skips no count
+        let (c, d) = (
+            CancelToken::after_polls(1),
+            CancelToken::after_polls(u64::MAX),
+        );
+        let cd = c.either(&d);
+        assert!(cd.is_cancelled() && cd.is_cancelled());
+        assert_eq!((c.polls(), d.polls()), (Some(2), Some(2)));
     }
 
     #[test]
