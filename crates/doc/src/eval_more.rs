@@ -295,31 +295,58 @@ fn chain_points(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec2>> {
     Ok(pts)
 }
 
-/// The curves of a chain as connected segments in sketch coordinates, in order, with lines
-/// and arcs kept exact (see [`chain_points`] for the polyline form).
-fn chain_segs(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Seg2>> {
-    let mut segs: Vec<Seg2> = Vec::new();
+/// A contour flange's profile, drawn on the sketch curves `ids` end to end in that order: each
+/// curve's exact pieces (a line, an arc, the Béziers and conics of a free-form curve; see
+/// `Sketch::exact_segs`), each curve run the way the profile goes, the first toward the second
+/// and each next one on from where the one before ends, as [`chain_points`] reads a chain; and
+/// for each piece the sketch curve it was drawn on and its key: the curve's id, with the piece's
+/// place on the curve as drawn (`s3.2`, from 1) where the curve is drawn in several.
+fn contour_profile(ss: &SolvedSketch, ids: &[String]) -> Result<(Vec<Seg2>, Vec<(String, String)>)> {
+    let mut curves: Vec<(&String, Vec<Seg2>)> = Vec::with_capacity(ids.len());
     for id in ids {
         let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
-        segs.extend(ss.sketch.segs(ci));
-    }
-    let Some(first) = segs.first().copied() else { return Err(DocError::Invalid("no curves".into())) };
-    // Orient the first segment toward the second, then chain.
-    let mut chain = vec![first];
-    if let Some(n) = segs.get(1)
-        && (first.start().dist(n.start()) < 1e-6 || first.start().dist(n.end()) < 1e-6)
-    {
-        chain[0] = first.reversed();
-    }
-    for s in segs.iter().skip(1) {
-        let prev = chain.last().map(Seg2::end).unwrap_or_default();
-        let s = if s.end().dist(prev) < s.start().dist(prev) { s.reversed() } else { *s };
-        if s.start().dist(prev) > 1e-5 {
-            return Err(DocError::Invalid("the contour curves are not connected end to end".into()));
+        let pieces = match ss.sketch.exact_segs(ci) {
+            Some(pieces) => pieces,
+            // A free-form curve the sketch holds only as points has no exact surface to push out.
+            None if ss.sketch.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) => {
+                return Err(DocError::Invalid(format!(
+                    "not supported yet: the curve `{id}` in a contour flange, a spline of degree above {} or a rational one above degree 2",
+                    solidcore_record::MAX_BEZIER_DEGREE
+                )));
+            }
+            None => ss.sketch.segs(ci),
+        };
+        if pieces.is_empty() {
+            return Err(DocError::Invalid(format!("the curve `{id}` in a contour flange has no length")));
         }
-        chain.push(s);
+        curves.push((id, pieces));
     }
-    Ok(chain)
+    let ends = |pieces: &[Seg2]| pieces.first().map(Seg2::start).zip(pieces.last().map(Seg2::end));
+    let (mut segs, mut drawn): (Vec<Seg2>, Vec<(String, String)>) = (Vec::new(), Vec::new());
+    for (k, (id, pieces)) in curves.iter().enumerate() {
+        let Some((start, end)) = ends(pieces.as_slice()) else { continue };
+        let back = match segs.last().map(Seg2::end) {
+            Some(at) => end.dist(at) < start.dist(at),
+            None => curves.get(k + 1).and_then(|(_, next)| ends(next.as_slice())).is_some_and(|(s, e)| start.dist(s) < 1e-6 || start.dist(e) < 1e-6),
+        };
+        let n = pieces.len();
+        let key = |i: usize| ((*id).clone(), if n == 1 { (*id).clone() } else { format!("{id}.{}", i + 1) });
+        let run: Vec<(Seg2, (String, String))> = if back {
+            pieces.iter().enumerate().rev().map(|(i, s)| (s.reversed(), key(i))).collect()
+        } else {
+            pieces.iter().enumerate().map(|(i, s)| (*s, key(i))).collect()
+        };
+        if let (Some(at), Some((first, _))) = (segs.last().map(Seg2::end), run.first())
+            && first.start().dist(at) > 1e-5
+        {
+            return Err(DocError::Invalid("the contour flange's curves are not connected end to end".into()));
+        }
+        for (s, key) in run {
+            segs.push(s);
+            drawn.push(key);
+        }
+    }
+    Ok((segs, drawn))
 }
 
 /// A rib wall: the band swept from the curves across the plane by `depth` (or to the body),
@@ -895,21 +922,19 @@ fn new_sheet_body(name: String, sheet: &crate::SurfaceSheet, solid: Body, featur
     mb
 }
 
-/// A region mirrored in the sketch x axis (y → −y), exactly: free-form curves through their
-/// control points.
-fn mirror_y(r: &Region2) -> Region2 {
+/// A segment mirrored in the sketch x axis (y → −y), exactly: an arc turns the other way,
+/// free-form curves through their control points.
+fn mirrored_y(s: &Seg2) -> Seg2 {
     let f = |p: Vec2| Vec2::new(p.x, -p.y);
-    let m = |l: &Loop2| {
-        let segs: Vec<Seg2> = l
-            .segs
-            .iter()
-            .map(|s| match *s {
-                Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center: f(center), radius, start: -start, sweep: -sweep },
-                other => other.map_controls(f),
-            })
-            .collect();
-        Loop2 { segs }.ccw()
-    };
+    match *s {
+        Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center: f(center), radius, start: -start, sweep: -sweep },
+        other => other.map_controls(f),
+    }
+}
+
+/// A region mirrored in the sketch x axis (y → −y), exactly (see [`mirrored_y`]).
+fn mirror_y(r: &Region2) -> Region2 {
+    let m = |l: &Loop2| Loop2 { segs: l.segs.iter().map(mirrored_y).collect() }.ccw();
     Region2 { outer: m(&r.outer), holes: r.holes.iter().map(|h| m(h).reversed()).collect() }
 }
 
@@ -955,16 +980,9 @@ pub(super) fn sheet_eval(
         }
         FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
-            for id in curves {
-                let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
-                if !ss.sketch.segs(ci).iter().all(|s| matches!(s, Seg2::Line { .. })) {
-                    return Err(DocError::Invalid("not supported yet: arcs in a contour flange (use lines; the bends are made for you)".into()));
-                }
-            }
-            let pts = chain_points(&ss, curves)?;
-            // The sketch line each line of the chain was drawn on, and its key: the line, with its
-            // place on it where it was drawn in several.
-            let lines = drawn_lines(&ss, curves);
+            // The profile as the sketch draws it, exactly, end to end, and the sketch curve each
+            // of its pieces was drawn on with the piece's key.
+            let (segs, drawn) = contour_profile(&ss, curves)?;
             let w = val(vals, distance, Kind::Length)?;
             if !(w > 0.0) {
                 return Err(DocError::Invalid("the contour flange distance must be positive".into()));
@@ -972,10 +990,11 @@ pub(super) fn sheet_eval(
             let r = doc.sheet_rule(rule.as_deref());
             let rule = convert_rule(&doc.rule_values(vals, &r)?);
             let plane = if *reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
-            let pts: Vec<Vec2> = if *reverse { pts.iter().map(|p| Vec2::new(p.x, -p.y)).collect() } else { pts };
-            // Mirroring the sketch swaps the material side too. A sheet made from surfaces (#6748).
+            let segs: Vec<Seg2> = if *reverse { segs.iter().map(mirrored_y).collect() } else { segs };
+            // Mirroring the sketch swaps the material side too. A sheet made from surfaces (#6748):
+            // each piece pushed out along the normal is a panel of it.
             let name = new_name(st, f, 0);
-            let (sheet, solid) = crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &pts, w, *flip != *reverse, f.id, &lines)?;
+            let (sheet, solid) = crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &segs, w, *flip != *reverse, f.id, &drawn)?;
             st.bodies.push(new_sheet_body(name, &sheet, solid, f.id));
             st.surface_sheets.push(sheet);
             Ok(())

@@ -83,8 +83,8 @@ impl Flatten {
     }
 
     /// The parameters of a point of the neutral surface laid flat: [`Flatten::point`] undone. A
-    /// cone's angle is the one nearest `near` (radians round its axis). `None` for a free-form
-    /// panel, whose map is not undone yet.
+    /// cone's angle is the one nearest `near` (radians round its axis); a free-form panel's map is
+    /// undone on its own spline (see [`FlatMap::param`]).
     pub(crate) fn param(&self, p: Vec2, near: f64) -> Option<Vec2> {
         match *self {
             Flatten::Same => Some(p),
@@ -94,7 +94,7 @@ impl Flatten {
                 let turn = turn + ((near * scale - turn) / TAU).round() * TAU;
                 Some(Vec2::new(p.len() - shift, turn / scale))
             }
-            Flatten::Fitted(_) => None,
+            Flatten::Fitted(ref m) => m.param(p),
         }
     }
 

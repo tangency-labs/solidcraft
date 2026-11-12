@@ -102,6 +102,18 @@ fn partials_from(s: &NurbsSurface, bu: &[(usize, Vec<f64>)], bv: &[(usize, Vec<f
     Some(out)
 }
 
+/// A spline surface's point at `q` and its first derivatives there along u and along v, exactly,
+/// from the basis functions alive there: on its domain's edges as inside it, so a panel's outline
+/// and the joints along it fold where the surface has them. `None` where its knots are not
+/// clamped or its weights vanish.
+pub(crate) fn surface_frame(s: &NurbsSurface, q: Vec2) -> Option<[Vec3; 3]> {
+    let [p, r] = s.degree();
+    let [ku, kv] = s.knots().clone();
+    let (su, sv) = (Space::new(p, ku).ok()?, Space::new(r, kv).ok()?);
+    let d = partials_from(s, &basis_rows(&su, q.x, 1)?, &basis_rows(&sv, q.y, 1)?, 1)?;
+    Some([d[0][0], d[1][0], d[0][1]])
+}
+
 /// The neutral surface's unit normal toward the material, depth below the sheet, and first
 /// fundamental form (E, F, G) at a point whose derivatives are `d`. The material lies on the
 /// side `Su x Sv` points to; the neutral surface lies K x T from the inside of the bend there,
@@ -376,6 +388,51 @@ impl FlatMap {
     pub(crate) fn dir(&self, p: Vec2, v: Vec2) -> Option<Vec2> {
         let [_, fu, fv] = self.eval(p.x, p.y)?;
         (fu * v.x + fv * v.y).normalized()
+    }
+
+    /// The parameters F puts on the flat point `p`: F undone by Newton's method on its own
+    /// derivatives, kept within its domain, from the point of a grid over its spans (its degree
+    /// and one more across each) that F puts nearest `p`. `None` where F puts no parameters of
+    /// its domain on `p`: a point off the panel's flat by more than the flat's own rounding (the
+    /// nanometre grid its pieces are drawn on).
+    pub(crate) fn param(&self, p: Vec2) -> Option<Vec2> {
+        let (du, dv) = (self.spaces[0].domain(), self.spaces[1].domain());
+        let across = |sp: &Space| -> Vec<f64> {
+            let mut breaks = sp.knots().to_vec();
+            breaks.dedup();
+            let per = sp.degree() + 1;
+            let mut at: Vec<f64> = breaks.windows(2).flat_map(|w| (0..per).map(move |k| w[0] + (w[1] - w[0]) * k as f64 / per as f64)).collect();
+            at.extend(breaks.last().copied());
+            at
+        };
+        let (us, vs) = (across(&self.spaces[0]), across(&self.spaces[1]));
+        let mut q = Vec2::new(du[0], dv[0]);
+        let mut nearest = f64::INFINITY;
+        for &v in &vs {
+            for &u in &us {
+                if let Some([f, ..]) = self.eval(u, v)
+                    && f.dist(p) < nearest
+                {
+                    (q, nearest) = (Vec2::new(u, v), f.dist(p));
+                }
+            }
+        }
+        for _ in 0..50 {
+            let [f, fu, fv] = self.eval(q.x, q.y)?;
+            let (r, det) = (p - f, fu.cross(fv));
+            if !(det.abs() > 0.0) {
+                return None;
+            }
+            // F(q + d) = p to first order: d.x F_u + d.y F_v = p - F(q).
+            let next = Vec2::new((q.x + r.cross(fv) / det).clamp(du[0], du[1]), (q.y + fu.cross(r) / det).clamp(dv[0], dv[1]));
+            let moved = next.dist(q);
+            q = next;
+            if moved <= 1e-15 * (1.0 + q.len()) {
+                break;
+            }
+        }
+        let [f, ..] = self.eval(q.x, q.y)?;
+        (f.dist(p) <= 1e-9 * (1.0 + p.len())).then_some(q)
     }
 
     /// A straight segment of the parameters flattened: F along a line is a polynomial of the

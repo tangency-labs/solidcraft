@@ -6,13 +6,14 @@
 //! away) and a wall along each of its edges that no other piece shares. A flat edge folds to a
 //! line or a circular arc where it lies along or across a bend or a roll, and to a chain of
 //! Bézier pieces of degree 7 elsewhere, such as a slanted edge across a bend, which folds to a
-//! helix.
+//! helix. A free-form panel straight across one way (a curve pushed out along a line, see
+//! `SurfaceSheet::contour`) has its faces ruled between its two edges along the curve.
 
 use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
-use solidcraft_develop::{Bent, Development, Fold, Rigid3};
+use solidcraft_develop::{Bent, Development, Fold, Rigid3, Surface};
 use solidcraft_geom::LINEAR_TOL;
 use solidcraft_kernel::{self as kernel, Body, EdgeSpec, FaceSpec, SurfSpec};
 
@@ -172,19 +173,16 @@ fn solid_of(
         // The face a thickness into the material (its loops as the flat's, about the normal
         // toward the material), and the surface (the other way round).
         for (side, depth, inside) in [(1, t, t * (1.0 - 1e-3)), (0, 0.0, t * 1e-3)] {
-            let loops = edges
+            let loops: Vec<Vec<EdgeSpec>> = edges
                 .iter()
-                .map(|l| {
+                .map(|l| -> Vec<EdgeSpec> {
                     let v = l.iter().filter_map(|pair| pair.get(side).cloned());
                     if side == 0 { v.rev().map(|e| e.reversed()).collect() } else { v.collect() }
                 })
                 .collect();
             let p = f.at(c.piece, center, depth)?;
-            faces.push(FaceSpec {
-                loops,
-                surface: f.surface(c.piece, &samples, depth, curved)?,
-                probe: Some((p, p - f.at(c.piece, center, inside)?)),
-            });
+            let surface = if f.free_form(c.piece) { ruled(&loops)? } else { f.surface(c.piece, &samples, depth, curved)? };
+            faces.push(FaceSpec { loops, surface, probe: Some((p, p - f.at(c.piece, center, inside)?)) });
             names.push(name(c.piece, FaceRole::Cap { surface: side == 0, at: center }));
         }
         // Walls along runs no other cell shares.
@@ -272,6 +270,16 @@ fn cells(pieces: Vec<(Piece, Region2)>, work: &mut FlatWork) -> Result<Vec<Cell>
 impl Folded<'_> {
     fn bent(&self, zone: usize) -> Option<&Bent> {
         self.dev.zones.get(zone).and_then(|z| self.fold?.bends.get(z.joint)).and_then(Option::as_ref)
+    }
+
+    /// Whether a piece lies on a free-form panel, folded (its faces are [`ruled`]).
+    fn free_form(&self, piece: Piece) -> bool {
+        match piece {
+            Piece::Panel(i) | Piece::Tab(_, i) => {
+                self.flat.is_none() && self.fold.and_then(|f| f.surface(i)).is_some_and(|s| matches!(s, Surface::Spline(_)))
+            }
+            Piece::Zone(_) => false,
+        }
     }
 
     /// Where a point of a piece goes, `depth` into the material: a tab's where its panel puts it,
@@ -528,6 +536,20 @@ fn wall(bottom: &EdgeSpec, top: &EdgeSpec) -> Result<SurfSpec> {
         }
         (EdgeSpec::Chain { .. }, EdgeSpec::Chain { .. }) => Ok(SurfSpec::Ruled { a: bottom.clone(), b: top.clone() }),
         _ => Err(DocError::Invalid("not supported yet: an edge that folds to a line on one side of the sheet and a curve on the other".into())),
+    }
+}
+
+/// The surface of a face of a free-form panel straight across one way, a curve pushed out along
+/// a line (see `SurfaceSheet::contour`), whose edges are `loops` as the face runs round them: the
+/// surface ruled between its two edges along the curve (the panel's edges along it, folded to
+/// chains), the second run back the way the first runs, its other edges the rulings across its
+/// ends. A plane where the curve folds straight.
+fn ruled(loops: &[Vec<EdgeSpec>]) -> Result<SurfSpec> {
+    let chains: Vec<&EdgeSpec> = loops.iter().flatten().filter(|e| matches!(e, EdgeSpec::Chain { .. })).collect();
+    match chains.as_slice() {
+        [a, b] if loops.len() == 1 => Ok(SurfSpec::Ruled { a: (*a).clone(), b: b.reversed() }),
+        [] if loops.iter().flatten().all(|e| matches!(e, EdgeSpec::Line { .. })) => Ok(SurfSpec::Plane),
+        _ => Err(DocError::Invalid("not supported yet: a cut into a free-form panel (a hole, or a notch in its edges along its curve)".into())),
     }
 }
 

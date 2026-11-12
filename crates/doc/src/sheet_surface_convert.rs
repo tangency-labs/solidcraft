@@ -3213,7 +3213,7 @@ pub struct SheetFace {
 pub enum PanelMade {
     /// A base flange's panel, from a profile of its sketch.
     Sketch { feature: u64 },
-    /// A contour flange's panel along its sketch line `curve`.
+    /// A contour flange's panel along its sketch curve `curve`.
     Contour { feature: u64, curve: String },
     /// A panel a bend makes (a flange, a hem, a path flange's first) on the rim `on` of another
     /// panel; none where what made that rim is not known.
@@ -3352,6 +3352,96 @@ pub struct SurfaceBendLine {
     pub joint: usize,
 }
 
+/// A piece of a contour flange's profile pushed out along its plane's normal (see
+/// [`SurfaceSheet::contour`]): its panel's surface, where the panel's frame lies, the panel's
+/// region in its chart, the piece's way along the profile at its start and at its end (unit, in
+/// space), and where the joints at its start and at its end run in the panel's chart, each from
+/// where it starts to where it ends.
+struct Pushed {
+    surface: Surface,
+    place: Rigid3,
+    region: Region2,
+    ways: [Vec3; 2],
+    ends: [[Vec2; 2]; 2],
+}
+
+/// Piece `seg` of a contour flange's profile in `plane` pushed out `width` along the plane's
+/// normal, the piece as drawn the sheet's surface and its material on the right of the travel (on
+/// the left when `flip`); the joints at its ends run from the height `z0` above the plane to `z1`.
+/// A line's panel is a plane; a circular arc's a roll keeping the arc's own radius; any other
+/// curve's its exact extrusion, a spline surface of the curve's own control points and weights
+/// along u, over [0, 1], and straight along v, which runs the normal in mm.
+fn pushed(plane: &Plane, seg: &Seg2, width: f64, flip: bool, (z0, z1): (f64, f64)) -> Result<Pushed> {
+    let normal = plane.normal();
+    // The chart's rectangle from `lo` to `hi`, counterclockwise.
+    let rect = |lo: Vec2, hi: Vec2| Region2 { outer: Loop2::polygon(&[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)]).ccw(), holes: Vec::new() };
+    // A height above the plane as a plane's or a spline's chart has it across the profile: up the
+    // normal, or flipped down it from the far side, so that the chart's `u x v` points to the
+    // material. (The same map takes the chart's coordinate back to the height.)
+    let across = |z: f64| if flip { width - z } else { z };
+    let ways = [plane.dir_to_world(seg.start_tangent()), plane.dir_to_world(seg.end_tangent())];
+    // Any other curve's: its control points and weights along u, its rows at the heights the
+    // chart's v = 0 and v = `width` are.
+    let extruded = |points: &[Vec2], weights: &[f64]| -> Result<Pushed> {
+        let degree = points.len().saturating_sub(1);
+        let row = |z: f64| points.iter().map(move |p| Vec3::new(p.x, p.y, z));
+        let net: Vec<Vec3> = row(across(0.0)).chain(row(across(width))).collect();
+        let weights: Vec<f64> = weights.iter().chain(weights).copied().collect();
+        let mut knots = vec![0.0; degree + 1];
+        knots.extend(std::iter::repeat_n(1.0, degree + 1));
+        let spline = solidcraft_geom::bspline::NurbsSurface::new([degree, 1], [knots, vec![0.0, 0.0, width, width]], &net, &weights)
+            .map_err(|e| DocError::Invalid(format!("a contour curve's surface: {e}")))?;
+        // Its frame is the plane's own: the curve's points are its x and y, a height its z.
+        let place = Rigid3::frame(plane.origin, plane.x, plane.y).ok_or_else(|| DocError::Invalid("a contour curve has no frame".into()))?;
+        let at = |u: f64| [Vec2::new(u, across(z0)), Vec2::new(u, across(z1))];
+        Ok(Pushed {
+            surface: Surface::Spline(std::sync::Arc::new(spline)),
+            place,
+            region: rect(Vec2::ZERO, Vec2::new(1.0, width)),
+            ways,
+            ends: [at(0.0), at(1.0)],
+        })
+    };
+    match *seg {
+        Seg2::Line { a, b } => {
+            let (a, b) = (plane.to_world(a), plane.to_world(b));
+            let d = (b - a).normalized().ok_or_else(|| DocError::Invalid("a zero-length line in the contour".into()))?;
+            // The frame's z toward the material: right of the travel (d x n), or left when flipped.
+            let (origin, y) = if flip { (a + normal * width, normal * -1.0) } else { (a, normal) };
+            let place = Rigid3::frame(origin, d, y).ok_or_else(|| DocError::Invalid("a contour line has no frame".into()))?;
+            let len = a.dist(b);
+            let at = |x: f64| [Vec2::new(x, across(z0)), Vec2::new(x, across(z1))];
+            Ok(Pushed { surface: Surface::Plane, place, region: rect(Vec2::ZERO, Vec2::new(len, width)), ways: [d, d], ends: [at(0.0), at(len)] })
+        }
+        Seg2::Arc { center, radius, start, sweep } => {
+            // The material lies outside the arc where it is on the right of a counterclockwise
+            // travel or on the left of a clockwise one, and the drawn arc is the roll's inside;
+            // otherwise it lies inside, and the drawn arc is the roll's outside.
+            let inward = (sweep < 0.0) != flip;
+            // The roll's axis is the normal through the arc's center, its chart the length along
+            // it and the angle round it from the plane's x, toward its y where the material lies
+            // inward and toward -y where it lies outward (see `Surface::Cylinder`).
+            let place = Rigid3::frame(plane.to_world(center), plane.x, plane.y).ok_or_else(|| DocError::Invalid("a contour arc has no frame".into()))?;
+            let turned = |angle: f64| if inward { angle } else { -angle };
+            let (v0, v1) = (turned(start), turned(start + sweep));
+            let at = |v: f64| [Vec2::new(z0, v), Vec2::new(z1, v)];
+            Ok(Pushed {
+                surface: Surface::Cylinder { radius, material_inward: inward },
+                place,
+                region: rect(Vec2::new(0.0, v0.min(v1)), Vec2::new(width, v0.max(v1))),
+                ways,
+                ends: [at(v0), at(v1)],
+            })
+        }
+        Seg2::Cubic { p0, p1, p2, p3 } => extruded(&[p0, p1, p2, p3], &[1.0; 4]),
+        Seg2::Conic { a, apex, b, w } => extruded(&[a, apex, b], &[1.0, w, 1.0]),
+        Seg2::Bezier { n, p } => {
+            let k = usize::from(n) + 1;
+            extruded(p.get(..k).unwrap_or_default(), &vec![1.0; k])
+        }
+    }
+}
+
 impl SurfaceSheet {
     /// A converted body's sheet as the model keeps it, for the body `body` under the rule `rule`,
     /// and its folded solid. `feature` is the Convert: each panel's key is its and the face of the
@@ -3449,84 +3539,95 @@ impl SurfaceSheet {
         Self::made(body, rule_name, rule, vec![panel], vec![Some(place)], Vec::new(), curves, recipes)
     }
 
-    /// A sheet from an open chain of lines (a contour flange): `pts` in `plane`, the face of the
-    /// sheet, its material on the right of the travel (or the left when `flip`) and `width` along
-    /// the plane's normal; one panel per line, bent at the rule's radius at each corner, the
-    /// corner its virtual sharp. And its folded body. `feature` is the contour flange, `lines` the
-    /// sketch line each line of the chain was drawn on, with the line's place on it where it was
-    /// drawn in several (`l3.2`): each panel's key is the feature's and its line's (see
-    /// [`PanelMade::Contour`]).
+    /// A sheet from an open profile pushed out along its plane's normal (a contour flange): `segs`
+    /// in `plane`, end to end, the face of the sheet, its material on the right of the travel (or
+    /// the left when `flip`), `width` along the plane's normal. Each piece of the profile is a
+    /// panel on its own surface (see `pushed`): a line's a plane, a circular arc's a roll that
+    /// keeps the arc's own radius, any other curve's its exact extrusion. Where two pieces meet,
+    /// the sheet runs on across a seam where their ways there are one, within `SMOOTH` as Convert
+    /// reads a body's faces; anywhere else it bends at the rule's radius, the corner its virtual
+    /// sharp. Its other edges, the profile's two long edges and its two ends, are free. And its
+    /// folded body, built as every sheet is (see [`SurfaceSheet::build`]). `feature` is the
+    /// contour flange, `curves` the sketch curve each piece was drawn on and the piece's key: the
+    /// curve's id, with the piece's place on it where it was drawn in several (`s3.2`); each
+    /// panel's key is the feature's and its piece's (see [`PanelMade::Contour`]).
     #[allow(clippy::too_many_arguments)]
     pub fn contour(
         body: &str,
         rule_name: &str,
         rule: &ConvertRule,
         plane: &Plane,
-        pts: &[Vec2],
+        segs: &[Seg2],
         width: f64,
         flip: bool,
         feature: u64,
-        lines: &[(String, String)],
+        curves: &[(String, String)],
     ) -> Result<(SurfaceSheet, Body)> {
-        if pts.len() < 2 {
-            return err("a contour flange needs an open chain of lines");
+        if segs.is_empty() {
+            return err("a contour flange needs an open profile");
         }
-        if lines.len() + 1 != pts.len() {
-            return err("a contour flange's lines and its chain differ");
+        if curves.len() != segs.len() {
+            return err("a contour flange's curves and its profile differ");
         }
-        let mut recipes = Vec::with_capacity(lines.len());
+        // A profile that ends where it starts, as near as its curves are read to meet end to end
+        // (see `contour_profile`), is closed.
+        if let (Some(first), Some(last)) = (segs.first(), segs.last())
+            && first.start().dist(last.end()) <= 1e-5
+        {
+            return err("a contour flange needs an open profile");
+        }
+        // Two pieces that meet anywhere but where one runs on into the next would put the sheet's
+        // material where it has some already.
+        for (i, a) in segs.iter().enumerate() {
+            if segs.iter().skip(i + 2).any(|b| !solidcraft_develop::crossings(std::slice::from_ref(a), std::slice::from_ref(b)).is_empty()) {
+                return err("a contour flange's profile crosses itself");
+            }
+        }
         let normal = plane.normal();
         let side = if flip { -1.0 } else { 1.0 };
-        let mut panels = Vec::with_capacity(pts.len() - 1);
-        let mut places = Vec::with_capacity(pts.len() - 1);
-        let mut ways = Vec::with_capacity(pts.len() - 1);
-        for (i, w) in pts.windows(2).enumerate() {
-            let (a, b) = (plane.to_world(w[0]), plane.to_world(w[1]));
-            let d = (b - a).normalized().ok_or_else(|| DocError::Invalid("a zero-length line in the contour".into()))?;
-            // The frame's z toward the material: right of the travel (d x n), or left when flipped.
-            let (origin, y) = if flip { (a + normal * width, normal * -1.0) } else { (a, normal) };
-            places.push(Some(Rigid3::frame(origin, d, y).ok_or_else(|| DocError::Invalid("a contour line has no frame".into()))?));
-            let rect = [Vec2::new(0.0, 0.0), Vec2::new(a.dist(b), 0.0), Vec2::new(a.dist(b), width), Vec2::new(0.0, width)];
-            let region = Region2 { outer: Loop2::polygon(&rect).ccw(), holes: Vec::new() };
-            let (curve, key) = lines.get(i).ok_or_else(|| DocError::Invalid("a contour flange's lines and its chain differ".into()))?;
+        // Where a joint between two pieces runs, as heights above the plane: up its normal, or
+        // down it when flipped, so that the material of the piece before it lies on its left.
+        let heights = if flip { (width, 0.0) } else { (0.0, width) };
+        let pieces: Vec<Pushed> = segs.iter().map(|s| pushed(plane, s, width, flip, heights)).collect::<Result<_>>()?;
+        let mut joints = Vec::with_capacity(pieces.len().saturating_sub(1));
+        for (i, pair) in pieces.windows(2).enumerate() {
+            let [a, b] = pair else { continue };
+            // How far the profile turns where the two meet, from their own ways there.
+            let (da, db) = (a.ways[1], b.ways[0]);
+            let angle = da.cross(db).len().atan2(da.dot(db));
+            // The joint on each panel, as its chart has it, from where it starts.
+            let anchor = |panel: usize, [from, to]: [Vec2; 2]| (to - from).normalized().map(|dir| Anchor { panel, origin: from, dir });
+            let (Some(on_a), Some(on_b)) = (anchor(i, a.ends[1]), anchor(i + 1, b.ends[0])) else {
+                return err("the contour flange distance must be positive");
+            };
+            let kind = if angle <= SMOOTH {
+                // The pieces run on into each other: the sheet does too.
+                JointKind::Seam
+            } else {
+                // The material of the piece before the corner lies on the right of its travel, or
+                // on its left when flipped.
+                let toward = da.cross(normal) * side;
+                JointKind::Bend(Bend {
+                    angle,
+                    radius: rule.bend_radius,
+                    toward_material: db.dot(toward) > 0.0,
+                    datum: Datum::Sharp,
+                    length: width,
+                    ends: ZoneEnds { near: (0.0, width), far: (0.0, width) },
+                    tails: (Tail::Keep, Tail::Keep),
+                    relief: (Relief::None, Relief::None),
+                })
+            };
+            joints.push(Joint { a: on_a, b: on_b, kind });
+        }
+        let mut panels = Vec::with_capacity(pieces.len());
+        let mut places = Vec::with_capacity(pieces.len());
+        let mut recipes = Vec::with_capacity(pieces.len());
+        for (piece, (curve, key)) in pieces.into_iter().zip(curves) {
             let name = format!("F{feature}/{key}");
             recipes.push((name.clone(), PanelMade::Contour { feature, curve: curve.clone() }));
-            panels.push(Panel { name, surface: Surface::Plane, region });
-            ways.push((b, d, d.cross(normal) * side));
-        }
-        let chart = |place: &Rigid3, p: Vec3| {
-            let q = place.inverse().point(p);
-            Vec2::new(q.x, q.y)
-        };
-        let mut joints = Vec::with_capacity(ways.len().saturating_sub(1));
-        for (i, pair) in ways.windows(2).enumerate() {
-            let [(corner, da, toward), (_, db, _)] = pair else { continue };
-            let angle = da.dot(*db).clamp(-1.0, 1.0).acos();
-            if angle < 1e-9 {
-                return err("straight corners in a contour flange");
-            }
-            let (Some(pa), Some(pb)) = (places[i], places[i + 1]) else { continue };
-            // Along the corner, so that `a`'s material lies to its left: `a` lies back along its
-            // line from the corner.
-            let (mut s0, mut s1) = (*corner, *corner + normal * width);
-            let (c0, c1) = (chart(&pa, s0), chart(&pa, s1));
-            if (c1 - c0).cross(Vec2::new(-1.0, 0.0)) < 0.0 {
-                (s0, s1) = (s1, s0);
-            }
-            let (a0, a1, b0, b1) = (chart(&pa, s0), chart(&pa, s1), chart(&pb, s0), chart(&pb, s1));
-            let (Some(dir_a), Some(dir_b)) = ((a1 - a0).normalized(), (b1 - b0).normalized()) else { continue };
-            let bend = Bend {
-                angle,
-                radius: rule.bend_radius,
-                toward_material: db.dot(*toward) > 0.0,
-                datum: Datum::Sharp,
-                length: width,
-                ends: ZoneEnds { near: (0.0, width), far: (0.0, width) },
-                tails: (Tail::Keep, Tail::Keep),
-                relief: (Relief::None, Relief::None),
-            };
-            let (a, b) = (Anchor { panel: i, origin: a0, dir: dir_a }, Anchor { panel: i + 1, origin: b0, dir: dir_b });
-            joints.push(Joint { a, b, kind: JointKind::Bend(bend) });
+            panels.push(Panel { name, surface: piece.surface, region: piece.region });
+            places.push(Some(piece.place));
         }
         Self::made(body, rule_name, rule, panels, places, joints, Vec::new(), recipes)
     }

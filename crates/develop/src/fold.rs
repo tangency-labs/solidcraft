@@ -4,8 +4,9 @@
 //! A panel's surface has a frame of its own. A plane is the frame's `z = 0`. A cylinder's or a
 //! cone's axis is the frame's `z` axis, a cone's apex at its origin, and the angle round it runs
 //! from `x` toward `y` where the material is inward and toward `-y` where it is outward, so that
-//! `u x v` points to the material either way. A bend's metal is the ring sector round its axis
-//! between its inside and outside radii, and its flat zone wraps onto it by its neutral arc.
+//! `u x v` points to the material either way. A free-form panel's spline is drawn in its frame,
+//! its `u x v` toward the material. A bend's metal is the ring sector round its axis between its
+//! inside and outside radii, and its flat zone wraps onto it by its neutral arc.
 
 use solidcraft_geom::prelude::*;
 use std::collections::VecDeque;
@@ -176,6 +177,11 @@ impl Fold {
         self.maps.get(i)?.param(neutral, self.middle.get(i).copied().unwrap_or(0.0))
     }
 
+    /// The surface panel `i` lies on.
+    pub fn surface(&self, i: usize) -> Option<&Surface> {
+        self.surfaces.get(i)
+    }
+
     /// A roll's axis: a point of it and its direction, round which the roll's angle turns
     /// positively (right-handed). `None` for a plane.
     pub fn axis(&self, i: usize) -> Option<(Vec3, Vec3)> {
@@ -200,9 +206,6 @@ pub fn fold(sheet: &Sheet, dev: &Development, roots: &[Rigid3]) -> Result<Fold, 
     let mut maps = Vec::with_capacity(sheet.panels.len());
     let mut middle = Vec::with_capacity(sheet.panels.len());
     for (i, panel) in sheet.panels.iter().enumerate() {
-        if matches!(panel.surface, Surface::Spline(_)) {
-            return Err(DevelopError::Panel(i, "not supported yet: folding a free-form panel"));
-        }
         maps.push(Flatten::of(&panel.surface, sheet).map_err(|e| DevelopError::Panel(i, e))?);
         middle.push(if panel.region.outer.segs.is_empty() {
             0.0
@@ -324,7 +327,7 @@ fn turn_sign(material_inward: bool) -> f64 {
 }
 
 /// The point of a surface at the parameters `q`, `depth` into the material, in the surface's
-/// frame, and the unit normal toward the material there. `None` for a free-form surface.
+/// frame, and the unit normal toward the material there.
 fn embed(surface: &Surface, q: Vec2, depth: f64) -> Option<(Vec3, Vec3)> {
     match *surface {
         Surface::Plane => Some((Vec3::new(q.x, q.y, depth), Vec3::Z)),
@@ -342,25 +345,28 @@ fn embed(surface: &Surface, q: Vec2, depth: f64) -> Option<(Vec3, Vec3)> {
             Some(((out * sa + Vec3::Z * ca) * q.x + normal * depth, normal))
         }
         Surface::Spline(ref spline) => {
-            // Its own points, and its normal from the way they run: `u x v` toward the material.
-            let h = PARAM_STEP * (1.0 + q.x.abs().max(q.y.abs()));
-            let at = |d: Vec2| spline.eval(q.x + d.x, q.y + d.y).ok();
-            let su = at(Vec2::new(h, 0.0))? - at(Vec2::new(-h, 0.0))?;
-            let sv = at(Vec2::new(0.0, h))? - at(Vec2::new(0.0, -h))?;
+            // Its own point, and its normal `u x v` toward the material, from its derivatives
+            // there exactly: on the edges of its domain, where its outline lies, as inside it.
+            let [p, su, sv] = crate::fitted::surface_frame(spline, q)?;
             let normal = su.cross(sv).normalized()?;
-            Some((at(Vec2::ZERO)? + normal * depth, normal))
+            Some((p + normal * depth, normal))
         }
     }
 }
 
-/// A step in a surface's parameters, as a fraction of their size, over which its directions and
-/// its metric are measured where they are not worked out exactly.
+/// A step in a surface's parameters, as a fraction of their size, over which its metric is
+/// measured where it is not worked out exactly.
 const PARAM_STEP: f64 = 1e-6;
 
 /// The first fundamental form of a surface at `q`, `[E, F, G]`: how the lengths of and the angle
-/// between parameter directions there come out on the surface. Measured from the surface's own
-/// points, so the same for every kind of surface.
+/// between parameter directions there come out on the surface. A spline's from its derivatives
+/// exactly (see [`crate::fitted::surface_frame`]); any other surface's measured from its own
+/// points.
 pub(crate) fn metric(surface: &Surface, q: Vec2) -> Option<[f64; 3]> {
+    if let Surface::Spline(spline) = surface {
+        let [_, su, sv] = crate::fitted::surface_frame(spline, q)?;
+        return Some([su.dot(su), su.dot(sv), sv.dot(sv)]);
+    }
     let h = PARAM_STEP * (1.0 + q.x.abs().max(q.y.abs()));
     let at = |d: Vec2| embed(surface, q + d, 0.0).map(|(p, _)| p);
     let su = (at(Vec2::new(h, 0.0))? - at(Vec2::new(-h, 0.0))?) * (1.0 / (2.0 * h));
@@ -382,9 +388,9 @@ fn tangent(surface: &Surface, q: Vec2, dir: Vec2) -> Option<Vec3> {
             let out = Vec3::new(q.y.cos(), s * q.y.sin(), 0.0);
             (out * sa + Vec3::Z * ca) * dir.x + Vec3::new(-q.y.sin(), s * q.y.cos(), 0.0) * (q.x * sa * dir.y)
         }
-        Surface::Spline(_) => {
-            let h = PARAM_STEP * (1.0 + q.x.abs().max(q.y.abs()));
-            embed(surface, q + dir * h, 0.0)?.0 - embed(surface, q - dir * h, 0.0)?.0
+        Surface::Spline(ref spline) => {
+            let [_, su, sv] = crate::fitted::surface_frame(spline, q)?;
+            su * dir.x + sv * dir.y
         }
     };
     along.normalized()

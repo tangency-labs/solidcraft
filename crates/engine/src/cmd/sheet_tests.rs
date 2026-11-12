@@ -700,10 +700,14 @@ fn contour_flange_hem_and_tray() {
     assert!(rel(v, want) < 1e-4 && rel(v, 29666.234) < 1e-4, "{v} {want}");
 }
 
+/// Main's #15287, on a sheet made from surfaces (#6748): a contour flange takes tangent arcs, and a
+/// drawn arc is a rolled panel that keeps its own radius (a modelled cylinder face is a roll, a
+/// sharp corner a bend at the rule's radius), so its development is the roll's, with the numbers
+/// main gave the bend.
 #[test]
 fn contour_flange_takes_tangent_arcs_and_develops_their_bends() {
     // A 90° arc after a 30 mm line and before a 20 mm line. The chain turns toward the material,
-    // so the arc is the outer surface: radius 10 with the bend's inner radius 10 - 2 = 8.
+    // so the arc is the outer surface: radius 10 with the roll's inner radius 10 - 2 = 8.
     // Developed length = 30 + (π/2)(8 + 0.5·2) + 20.
     let mut s = Session::default();
     run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 2, "k_factor": 0.5, "bend_radius": 2, "active": true}));
@@ -719,11 +723,13 @@ fn contour_flange_takes_tangent_arcs_and_develops_their_bends() {
     let want = 50.0 + FRAC_PI_2 * (8.0 + 0.5 * 2.0);
     let got = f["flat_size_mm"][0].as_f64().unwrap_or(f64::NAN);
     assert!((got - want).abs() < 1e-6, "{got} vs {want}: {f}");
-    let bends = f["bends"].as_array().cloned().unwrap_or_default();
-    assert_eq!(bends.len(), 1, "{f}");
-    assert!((bends[0]["radius"].as_f64().unwrap_or(0.0) - 8.0).abs() < 1e-9, "{f}");
-    assert!((bends[0]["angle_deg"].as_f64().unwrap_or(0.0) - 90.0).abs() < 1e-9, "{f}");
-    assert!((bends[0]["allowance"].as_f64().unwrap_or(0.0) - FRAC_PI_2 * 9.0).abs() < 1e-9, "{f}");
+    // One roll, no bend: inside radius 8, a quarter turn, as wide in the flat as its neutral arc.
+    assert_eq!(f["bends"].as_array().map(Vec::len), Some(0), "{f}");
+    let rolls = f["roll_table"].as_array().cloned().unwrap_or_default();
+    assert_eq!(rolls.len(), 1, "{f}");
+    assert!((rolls[0]["radius"].as_f64().unwrap_or(0.0) - 8.0).abs() < 1e-9, "{f}");
+    assert!((rolls[0]["angle_deg"].as_f64().unwrap_or(0.0) - 90.0).abs() < 1e-9, "{f}");
+    assert!((rolls[0]["width"].as_f64().unwrap_or(0.0) - FRAC_PI_2 * 9.0).abs() < 1e-9, "{f}");
     // A 180° half pipe alone: outer radius 56 and 1.5 thick, with no flat panel before or
     // after it.
     let mut s = Session::default();
@@ -741,6 +747,140 @@ fn contour_flange_takes_tangent_arcs_and_develops_their_bends() {
     let f = flat(&mut s);
     let want = PI * (54.5 + 0.5 * 1.5);
     assert!((f["flat_size_mm"][0].as_f64().unwrap_or(f64::NAN) - want).abs() < 1e-6, "{f}");
+}
+
+/// The rule the curved contour flanges below are made under: 2 thick, K 0.4 (its bend radius, 2,
+/// is no tangent corner's).
+fn curved_contour_rule(s: &mut Session) {
+    run(s, "sheet.manage_rules", json!({"name": "Curved", "thickness": "2 mm", "bend_radius": "2 mm", "gap": "0.5 mm", "k_factor": "0.4", "active": true}));
+}
+
+/// A contour flange's flat pattern, once every feature built, and its two sides, the shorter
+/// first.
+fn contour_flat(s: &mut Session) -> (Value, [f64; 2]) {
+    let failing: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(failing.is_empty(), "{failing:?}");
+    let f = flat(s);
+    let side = |k: usize| f["flat_size_mm"][k].as_f64().unwrap_or(f64::NAN);
+    let (a, b) = (side(0), side(1));
+    let sides = if a <= b { [a, b] } else { [b, a] };
+    (f, sides)
+}
+
+/// A contour flange through a tangent arc rolls the arc (#6748): a 30 mm line, a quarter turn of
+/// radius 8 tangent to it, and a 20 mm line, pushed 50 along the sketch's normal under a rule 2
+/// thick, K 0.4. The arc is a roll that keeps its own radius, joined to the lines by seams: the
+/// flat has no bend. Its material on the right of the travel (counterclockwise round the arc) lies
+/// outside the arc, so the drawn arc is the roll's inside, R 8, and its outside R 10. The develop
+/// engine lays a roll out at its neutral surface, K·T from its inside (`Flatten::Roll`: R + K·T
+/// with the material outward, R − (1 − K)·T inward), here 8 + 0.8 = 8.8: the flat is
+/// 30 + (π/2)·8.8 + 20 = 63.823008 long and 50 across. Flipped, the material lies inside the arc:
+/// the drawn arc is the roll's outside, R 8, its inside 6, its neutral surface 6.8, and the flat
+/// 30 + (π/2)·6.8 + 20 = 60.681415 long. The folded volume is the lines' 2·50·(30 + 20) = 5000 and
+/// the roll's ring sector, (π/2)(10² − 8²)/2·50 = 450π (flipped (π/2)(8² − 6²)/2·50 = 350π):
+/// 6413.716694 (6099.557429). That is the flat's area times T plus (½ − K)·T²·(π/2)·50 = 10π, as
+/// for a bend.
+#[test]
+fn a_contour_flange_rolls_a_tangent_arc_at_its_own_radius() {
+    for (flip, neutral, ring) in [(false, 8.8, 450.0 * PI), (true, 6.8, 350.0 * PI)] {
+        let mut s = Session::default();
+        curved_contour_rule(&mut s);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["l1"]}));
+        let arc = run(&mut s, "sketch.arc.center_point", json!({"center": [30, 8], "start": [30, 0], "sweep": 90}));
+        let arc = arc["created"]["curves"][0].clone();
+        run(&mut s, "sketch.line", json!({"points": [[38, 8], [38, 28]], "ids": ["l2"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"type": "contour", "sketch": "Profile", "curves": ["l1", arc, "l2"], "distance": 50, "flip": flip}));
+        let (f, sides) = contour_flat(&mut s);
+        // 30 + (π/2)·8.8 + 20 = 63.823008 by 50 (flipped 30 + (π/2)·6.8 + 20 = 60.681415 by 50).
+        let length = 30.0 + FRAC_PI_2 * neutral + 20.0;
+        assert!((sides[0] - 50.0).abs() < 1e-6 && (sides[1] - length).abs() < 1e-6, "flip {flip}: {sides:?} vs {length}");
+        assert_eq!(f["bends"].as_array().map(Vec::len), Some(0), "flip {flip}: {f}");
+        assert_eq!(f["rolls"].as_u64(), Some(1), "flip {flip}: {f}");
+        // 5000 + 450π = 6413.716694 (flipped 5000 + 350π = 6099.557429), which is
+        // 2·63.823008·50 + 10π = 6382.300768 + 31.415927 (flipped 6068.141502 + 31.415927).
+        let v = volume(&mut s);
+        assert!(rel(v, 5000.0 + ring) < 1e-9, "flip {flip}: {v} vs {}", 5000.0 + ring);
+        assert!(rel(v, 2.0 * length * 50.0 + 0.1 * 4.0 * FRAC_PI_2 * 50.0) < 1e-9, "flip {flip}: {v}");
+    }
+}
+
+/// A single half turn is a half pipe (#6748): an arc of radius 20 round 180°, pushed 50, a sheet
+/// of one roll and no planar panel at all, under a rule 2 thick, K 0.4. With its material on the
+/// right of the (counterclockwise) travel, outside the arc, the drawn arc is its inside: Ri 20,
+/// Ro 22, and the volume (π/2)(Ro² − Ri²)·50 = (π/2)·84·50 = 2100π = 6597.344573. Flipped, the
+/// material lies inside the arc: Ro 20, Ri 18, (π/2)·76·50 = 1900π = 5969.026042. Its flat is the
+/// roll laid out at its neutral radius Ri + K·T: 50 by π·20.8 = 65.345127 (flipped π·18.8 =
+/// 59.061942).
+#[test]
+fn a_contour_flange_of_one_half_turn_is_a_half_pipe() {
+    for (flip, ri) in [(false, 20.0), (true, 18.0)] {
+        let mut s = Session::default();
+        curved_contour_rule(&mut s);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+        let arc = run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [20, 0], "sweep": 180}));
+        let arc = arc["created"]["curves"][0].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"type": "contour", "sketch": "Profile", "curves": [arc], "distance": 50, "flip": flip}));
+        let (f, sides) = contour_flat(&mut s);
+        // (π/2)(22² − 20²)·50 = 2100π (flipped (π/2)(20² − 18²)·50 = 1900π).
+        let ro: f64 = ri + 2.0;
+        let want = FRAC_PI_2 * (ro * ro - ri * ri) * 50.0;
+        let v = volume(&mut s);
+        assert!(rel(v, want) < 1e-9, "flip {flip}: {v} vs {want}");
+        // 50 by π·(Ri + 0.4·2): π·20.8 = 65.345127 (flipped π·18.8 = 59.061942).
+        let around = PI * (ri + 0.4 * 2.0);
+        assert!((sides[0] - 50.0).abs() < 1e-6 && (sides[1] - around).abs() < 1e-6, "flip {flip}: {sides:?} vs {around}");
+        assert_eq!(f["bends"].as_array().map(Vec::len), Some(0), "flip {flip}: {f}");
+    }
+}
+
+/// A contour flange along a free-form curve is the curve's exact extrusion (#6748), laid out to
+/// the curve's own length at its neutral surface. A quarter of the ellipse with half axes 40 and
+/// 20, from (40, 0) round to (0, 20): a conic through the apex (40, 20) with ρ = √2 − 1, of weight
+/// ρ/(1 − ρ) = 1/√2, which is that ellipse exactly. Pushed 30 under a rule 2 thick, K 0.4. Its
+/// length L is ∫ √(40² sin²θ + 20² cos²θ) dθ over [0, π/2], taken here by five-point
+/// Gauss–Legendre on each of 64 spans: 48.442241. Its tangent turns a quarter turn, always the
+/// same way, and its radius of curvature is 10 at least, so a curve a depth h from it toward its
+/// center is L − h·π/2 long, and one h away from its center L + h·π/2. With the material on the
+/// right of the (counterclockwise) travel, outside the curve, the drawn curve is the inside of
+/// the sheet's turn and the neutral surface lies K·T = 0.8 out: L + 0.8·π/2 = 49.698878. Flipped,
+/// the material lies inside it, and the neutral surface (1 − K)·T = 1.2 in: L − 1.2·π/2 =
+/// 46.557286. The folded volume is the band between the curve and its offset T into the
+/// material, (T·L ± (T²/2)·(π/2))·30 = 60·L ± 30π: 3000.782246 (flipped 2812.286687), which is
+/// the flat's area times T plus (½ − K)·T²·(π/2)·30 = 6π, as for a bend or a roll.
+#[test]
+fn a_contour_flange_along_an_elliptical_arc_flattens_to_its_neutral_length() {
+    // Five-point Gauss–Legendre on [−1, 1]: its nodes and weights.
+    let (x1, x2) = ((5.0 - 2.0 * (10.0f64 / 7.0).sqrt()).sqrt() / 3.0, (5.0 + 2.0 * (10.0f64 / 7.0).sqrt()).sqrt() / 3.0);
+    let (w1, w2) = ((322.0 + 13.0 * 70.0f64.sqrt()) / 900.0, (322.0 - 13.0 * 70.0f64.sqrt()) / 900.0);
+    let gauss = [(0.0, 128.0 / 225.0), (x1, w1), (-x1, w1), (x2, w2), (-x2, w2)];
+    // The quarter ellipse's speed along θ, and its length over 64 spans of π/128.
+    let speed = |t: f64| (40.0 * t.sin()).hypot(20.0 * t.cos());
+    let h = FRAC_PI_2 / 64.0;
+    let length: f64 = (0..64).map(|k| gauss.iter().map(|(x, w)| w * speed((k as f64 + 0.5 + x / 2.0) * h)).sum::<f64>() * h / 2.0).sum();
+    assert!((length - 48.442241).abs() < 1e-6, "{length}");
+    let cases = [(false, length + 0.8 * FRAC_PI_2, 60.0 * length + 30.0 * PI), (true, length - 1.2 * FRAC_PI_2, 60.0 * length - 30.0 * PI)];
+    for (flip, neutral, band) in cases {
+        let mut s = Session::default();
+        curved_contour_rule(&mut s);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+        let conic = run(&mut s, "sketch.conic", json!({"start": [40, 0], "end": [0, 20], "apex": [40, 20], "rho": std::f64::consts::SQRT_2 - 1.0}));
+        let conic = conic["curves"][0].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"type": "contour", "sketch": "Profile", "curves": [conic], "distance": 30, "flip": flip}));
+        let (f, sides) = contour_flat(&mut s);
+        // L + 0.8·π/2 = 49.698878 by 30 (flipped L − 1.2·π/2 = 46.557286 by 30).
+        assert!((sides[0] - 30.0).abs() < 1e-6 && (sides[1] - neutral).abs() < 1e-6, "flip {flip}: {sides:?} vs {neutral}");
+        assert!(f["stretch"].as_f64().is_some_and(|x| x < 1e-6), "flip {flip}: {f}");
+        assert_eq!(f["bends"].as_array().map(Vec::len), Some(0), "flip {flip}: {f}");
+        // 60·L + 30π = 3000.782246 (flipped 60·L − 30π = 2812.286687), which is 2·30 times the
+        // flat's length plus 6π: 60·(L + 0.4π) + 6π (flipped 60·(L − 0.6π) + 6π).
+        let v = volume(&mut s);
+        assert!(rel(v, band) < 1e-6, "flip {flip}: {v} vs {band}");
+        assert!(rel(band, 2.0 * neutral * 30.0 + 0.1 * 4.0 * FRAC_PI_2 * 30.0) < 1e-12, "flip {flip}");
+    }
 }
 
 /// A 150 x 100 base on a 2 mm rule with one 40 mm wall on its left edge: the part a chained
