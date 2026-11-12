@@ -264,7 +264,12 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     let h = &data.handles;
     let r = bar;
     let left = content.left();
-    let compact = r.right() - left < COMPACT;
+    // The Plugins button takes its width from the room the rest of the bar had, so the bar turns
+    // compact that much sooner and the document tabs keep their room.
+    let plugins_width = data.plugins.map_or(0.0, |(label, _)| {
+        ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text).size().x + 18.0
+    });
+    let compact = r.right() - left < COMPACT + plugins_width;
     let mut actions = Vec::new();
     (data.mark)(ui.painter(), pos2(left + 20.0, r.center().y));
     // Home's place: after the name as drawn, and never before HOME_MIN.
