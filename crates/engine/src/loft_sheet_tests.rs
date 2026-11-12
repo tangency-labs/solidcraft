@@ -25,8 +25,9 @@ fn square(s: &mut Session, name: &str, half: f64, z: f64) {
 }
 
 /// #13331: a 110 mm square lofted to a 200 mm square 120 mm above it is a hopper whose four
-/// sides each join two parallel lines, so they are planes; shelled 1.5 mm with both ends open
-/// and converted to sheet metal with three corner bends, it converts.
+/// sides each join two parallel lines, so they are planes; shelled 1.5 mm with both ends open,
+/// it is a thin solid, which Recognize makes sheet metal with three corner bends (#6748: Convert
+/// turns every face into a panel, Recognize reads a thin solid as a sheet metal part).
 #[test]
 fn a_loft_between_parallel_squares_converts_to_sheet_metal() {
     let mut s = Session::default();
@@ -45,7 +46,7 @@ fn a_loft_between_parallel_squares_converts_to_sheet_metal() {
     assert_eq!(types["plane"].as_u64(), Some(10), "{types}");
     run(
         &mut s,
-        "sheet.convert",
+        "sheet.recognize",
         json!({"body": "Hopper", "face": [0, -77.5, 60], "bends": [[77.5, 77.5, 60], [77.5, -77.5, 60], [-77.5, -77.5, 60]]}),
     );
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
