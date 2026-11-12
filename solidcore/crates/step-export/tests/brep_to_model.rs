@@ -557,6 +557,8 @@ struct FaceMeasure {
     same_sense: bool,
     /// On a void's shell (turned over by its `ORIENTED_CLOSED_SHELL`).
     void: bool,
+    /// Its shell's place in the solid: 0 the outer, then the voids.
+    shell: usize,
     /// Its loops alone don't say which side the face is (a seam loop round a closed
     /// surface traces its whole (u, v) box either way): the side is the one `same_sense`
     /// gives, as ISO readers settle it.
@@ -722,17 +724,18 @@ fn measure(text: &str) -> Vec<FaceMeasure> {
             shells.push((rid(&oriented[2]), sign));
         }
     }
-    let faces: Vec<(u64, f64)> = shells
+    let faces: Vec<(u64, f64, usize)> = shells
         .iter()
-        .flat_map(|&(shell, sign)| {
+        .enumerate()
+        .flat_map(|(index, &(shell, sign))| {
             list(&file.params(shell, "CLOSED_SHELL")[1])
                 .iter()
-                .map(move |face| (rid(face), sign))
+                .map(move |face| (rid(face), sign, index))
                 .collect::<Vec<_>>()
         })
         .collect();
     let mut out = Vec::new();
-    for (face, shell_sign) in faces {
+    for (face, shell_sign, shell) in faces {
         let p = file.params(face, "ADVANCED_FACE");
         let surface_id = rid(&p[2]);
         let same_sense = flag(&p[3]);
@@ -829,6 +832,7 @@ fn measure(text: &str) -> Vec<FaceMeasure> {
             kind,
             same_sense,
             void: shell_sign < 0.0,
+            shell,
             settled_by_sense,
             by_loops: shell_sign * by_loops / 3.0,
             by_sense: shell_sign * by_sense / 3.0,
@@ -877,6 +881,24 @@ fn assert_right_side_out(name: &str, brep: &Brep, expected: f64, rel: f64) {
         silent.is_empty(),
         "{name}: faces that add nothing: {silent:?}"
     );
+    // each shell bounds a volume of its own the right way round: the outer shell's is
+    // positive, each void's negative once its ORIENTED_CLOSED_SHELL turns it over
+    let shells = faces.iter().map(|f| f.shell).max().map_or(0, |m| m + 1);
+    for shell in 0..shells {
+        let of = |by: fn(&FaceMeasure) -> f64| {
+            faces
+                .iter()
+                .filter(|f| f.shell == shell)
+                .map(by)
+                .sum::<f64>()
+        };
+        let (loops, sense) = (of(|f| f.by_loops), of(|f| f.by_sense));
+        assert!(
+            (shell == 0) == (loops > 0.0) && (shell == 0) == (sense > 0.0),
+            "{name}: shell {shell} ({}) bounds {loops} by loops, {sense} by same_sense",
+            if shell == 0 { "outer" } else { "void" }
+        );
+    }
     let inconsistent: Vec<_> = faces
         .iter()
         .filter(|f| (f.by_loops - f.by_sense).abs() > rel * scale)
@@ -959,6 +981,34 @@ fn a_lofted_b_spline_solid_is_written_right_side_out() {
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let skin = create_skin_primitive(&mut kernel, &[4, 4], &refs, 1, true).unwrap();
     assert_right_side_out("loft", &skin.brep, 20.0 + 4.0 * 3.0_f64.sqrt(), 1e-9);
+}
+
+/// The cup and lid: a 100-cube hollowed to an open cup (walls and floor 10), joined with a
+/// lid over its top 10, which seals an 80-cube cavity, 1000000 − 512000. On the default
+/// kernel the union leaves the cavity's shell first in the region's list; the file's outer
+/// shell is still the cube's.
+#[test]
+fn a_cavity_sealed_by_a_union_is_written_as_a_void() {
+    for lid_first in [false, true] {
+        let mut kernel = Kernel::default();
+        let cube =
+            api::create_box(&mut kernel, Point3::new(3.0, 4.0, 5.0), 100.0, 100.0, 100.0).unwrap();
+        let pocket = api::create_box(
+            &mut kernel,
+            Point3::new(13.0, 14.0, 15.0),
+            80.0,
+            80.0,
+            100.0,
+        )
+        .unwrap();
+        let lid =
+            api::create_box(&mut kernel, Point3::new(3.0, 4.0, 95.0), 100.0, 100.0, 10.0).unwrap();
+        let cup = boolean_difference(&mut kernel, cube, pocket).unwrap();
+        let (a, b) = if lid_first { (lid, cup) } else { (cup, lid) };
+        let solid = boolean_union(&mut kernel, a, b).unwrap();
+        let name = format!("cup and lid (lid first: {lid_first})");
+        assert_right_side_out(&name, &solid, 488_000.0, 1e-12);
+    }
 }
 
 /// A 10-cube with a 3-cube cavity: one `BREP_WITH_VOIDS`, the cavity a void (its shell

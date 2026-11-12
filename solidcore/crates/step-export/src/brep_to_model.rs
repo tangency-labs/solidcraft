@@ -287,6 +287,44 @@ fn reverses_normal(surface: &solidcore::surface::surface::Surface) -> bool {
     }
 }
 
+/// Each region's outer shell, the one that bounds it from outside: the region tree is
+/// walked from the infinite region through the shells' mates, and a region's outer shell
+/// is the one mated to the region it was reached from (the region enclosing it). Its other
+/// shells bound regions nested inside it. The kernel's own list order says nothing here:
+/// a union that seals a void can leave the void's shell first.
+fn outer_shells(
+    brep: &Brep,
+) -> Result<BTreeMap<solidcore::topology::RegionId, solidcore::topology::ShellId>, ExportModelError>
+{
+    let mut kernel = Kernel::default();
+    let mut outer = BTreeMap::new();
+    let Some(infinite) = brep.infinite_region() else {
+        return Ok(outer);
+    };
+    let mut reached = vec![infinite];
+    let mut next = 0;
+    while let Some(&region_id) = reached.get(next) {
+        next += 1;
+        let region = brep.region(region_id).map_err(|e| err(e.to_string()))?;
+        for shell_id in &region.shells {
+            let shell = brep.shell(*shell_id).map_err(|e| err(e.to_string()))?;
+            for mate in shell
+                .mated_shells(&mut kernel, brep)
+                .map_err(|e| err(e.to_string()))?
+            {
+                let Some(beyond) = brep.shell(mate).map_err(|e| err(e.to_string()))?.region else {
+                    continue;
+                };
+                if !reached.contains(&beyond) {
+                    reached.push(beyond);
+                    outer.insert(beyond, mate);
+                }
+            }
+        }
+    }
+    Ok(outer)
+}
+
 /// Maps one B-rep to the neutral STEP model.
 pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     let vertex_ids = brep.vertex_list().to_vec();
@@ -351,13 +389,13 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     // ISO 10303-42 wants a solid's faces written from outside its material: each face's
     // normal (the surface's, reversed where `same_sense` is false) pointing out of the
     // material, and its loops anticlockwise about that normal. A faceuse in a shell of a
-    // material region faces into that region. A region's first shell is its outer one (the
-    // kernel keeps it first); each face of it is written from its mate, the faceuse on the
-    // outer side. Its other shells bound voids, each written as a BREP_WITH_VOIDS void: a
+    // material region faces into that region. A region's outer shell ([`outer_shells`]):
+    // each face of it is written from its mate, the faceuse on the outer side. Its other shells bound voids, each written as a BREP_WITH_VOIDS void: a
     // closed shell whose faces point out of the void's own volume (the material faceuses
     // themselves, pointing into the material), under an ORIENTED_CLOSED_SHELL of
     // orientation .F., which turns them out of the material.
     let mut written_faceuses = BTreeMap::new();
+    let outer_of = outer_shells(brep)?;
     // each material region's shells, outer first
     let mut solids: Vec<Vec<solidcore::topology::ShellId>> = Vec::new();
     for region_id in brep.regions().ids() {
@@ -365,7 +403,19 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
         if region.is_void() != 0 {
             continue;
         }
-        for (position, shell_id) in region.shells.iter().enumerate() {
+        let mut shells = region.shells.clone();
+        if shells.len() > 1 {
+            let outer = *outer_of.get(&region_id).ok_or_else(|| {
+                err("a solid region with voids is not reached from the infinite region")
+            })?;
+            if !shells.contains(&outer) {
+                return Err(err("a region's outer shell is not one of its shells"));
+            }
+            shells = std::iter::once(outer)
+                .chain(shells.into_iter().filter(|s| *s != outer))
+                .collect();
+        }
+        for (position, shell_id) in shells.iter().enumerate() {
             let shell = brep.shell(*shell_id).map_err(|e| err(e.to_string()))?;
             for faceuse_id in shell.get_faceuses().map_err(|e| err(e.to_string()))? {
                 let faceuse = brep.faceuse(faceuse_id).map_err(|e| err(e.to_string()))?;
@@ -381,7 +431,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                 }
             }
         }
-        solids.push(region.shells.clone());
+        solids.push(shells);
     }
     for id in brep.face_list() {
         let face = brep.face(*id).map_err(|e| err(e.to_string()))?;
