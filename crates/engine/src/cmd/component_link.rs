@@ -311,6 +311,20 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
     Some(digest)
 }
 
+/// The design in `bytes`, the file shown as `shown`, opened as the app opens it: the model the
+/// file keeps is its evaluation when this build saved it for exactly that design.
+pub(super) fn linked_session(shown: &str, bytes: &[u8], validation: solidcraft_kernel::Validation) -> Result<Session> {
+    let fail = |e: solidcraft_io::IoError| EngineError::Other(format!("{shown}: {e}"));
+    let (doc, saved) = if solidcraft_io::is_design_container(bytes) {
+        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).map_err(fail)?;
+        let saved = reader.geometry();
+        (reader.read_document().map_err(fail)?, saved)
+    } else {
+        (solidcraft_io::read_design(bytes).map_err(fail)?, None)
+    };
+    Ok(Session::opened_at_validating(doc, saved.as_ref(), Some(shown), validation))
+}
+
 /// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
 /// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
 fn design_bodies(

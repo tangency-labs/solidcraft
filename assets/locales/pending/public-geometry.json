@@ -2,46 +2,73 @@
   "en": {
     "cmd.geometry_publish": "Public Geometry",
     "cmd.geometry_unpublish": "Remove Public Geometry",
-    "cmd.geometry_publications": "Public Geometries"
+    "cmd.geometry_publications": "Public Geometries",
+    "cmd.geometry_import": "Copy Geometry from File",
+    "cmd.geometry_update": "Update Geometry Copies",
+    "cmd.geometry_copies": "Geometry Copies"
   },
   "ar": {
     "cmd.geometry_publish": "هندسة عامة",
     "cmd.geometry_unpublish": "إزالة الهندسة العامة",
-    "cmd.geometry_publications": "الهندسات العامة"
+    "cmd.geometry_publications": "الهندسات العامة",
+    "cmd.geometry_import": "نسخ هندسة من ملف",
+    "cmd.geometry_update": "تحديث نسخ الهندسة",
+    "cmd.geometry_copies": "نسخ الهندسة"
   },
   "de": {
     "cmd.geometry_publish": "Öffentliche Geometrie",
     "cmd.geometry_unpublish": "Öffentliche Geometrie entfernen",
-    "cmd.geometry_publications": "Öffentliche Geometrien"
+    "cmd.geometry_publications": "Öffentliche Geometrien",
+    "cmd.geometry_import": "Geometrie aus Datei kopieren",
+    "cmd.geometry_update": "Geometriekopien aktualisieren",
+    "cmd.geometry_copies": "Geometriekopien"
   },
   "fr": {
     "cmd.geometry_publish": "Géométrie publique",
     "cmd.geometry_unpublish": "Supprimer la géométrie publique",
-    "cmd.geometry_publications": "Géométries publiques"
+    "cmd.geometry_publications": "Géométries publiques",
+    "cmd.geometry_import": "Copier la géométrie depuis un fichier",
+    "cmd.geometry_update": "Mettre à jour les copies de géométrie",
+    "cmd.geometry_copies": "Copies de géométrie"
   },
   "he": {
     "cmd.geometry_publish": "גאומטריה ציבורית",
     "cmd.geometry_unpublish": "הסרת גאומטריה ציבורית",
-    "cmd.geometry_publications": "גאומטריות ציבוריות"
+    "cmd.geometry_publications": "גאומטריות ציבוריות",
+    "cmd.geometry_import": "העתקת גאומטריה מקובץ",
+    "cmd.geometry_update": "עדכון העתקי גאומטריה",
+    "cmd.geometry_copies": "העתקי גאומטריה"
   },
   "ja": {
     "cmd.geometry_publish": "公開ジオメトリ",
     "cmd.geometry_unpublish": "公開ジオメトリを削除",
-    "cmd.geometry_publications": "公開ジオメトリ一覧"
+    "cmd.geometry_publications": "公開ジオメトリ一覧",
+    "cmd.geometry_import": "ファイルからジオメトリをコピー",
+    "cmd.geometry_update": "ジオメトリのコピーを更新",
+    "cmd.geometry_copies": "ジオメトリのコピー"
   },
   "ko": {
     "cmd.geometry_publish": "공개 형상",
     "cmd.geometry_unpublish": "공개 형상 제거",
-    "cmd.geometry_publications": "공개 형상 목록"
+    "cmd.geometry_publications": "공개 형상 목록",
+    "cmd.geometry_import": "파일에서 형상 복사",
+    "cmd.geometry_update": "형상 복사본 업데이트",
+    "cmd.geometry_copies": "형상 복사본"
   },
   "vi": {
     "cmd.geometry_publish": "Hình học công khai",
     "cmd.geometry_unpublish": "Xóa hình học công khai",
-    "cmd.geometry_publications": "Các hình học công khai"
+    "cmd.geometry_publications": "Các hình học công khai",
+    "cmd.geometry_import": "Sao chép hình học từ tệp",
+    "cmd.geometry_update": "Cập nhật các bản sao hình học",
+    "cmd.geometry_copies": "Các bản sao hình học"
   },
   "zh": {
     "cmd.geometry_publish": "公开几何",
     "cmd.geometry_unpublish": "移除公开几何",
-    "cmd.geometry_publications": "公开几何列表"
+    "cmd.geometry_publications": "公开几何列表",
+    "cmd.geometry_import": "从文件复制几何",
+    "cmd.geometry_update": "更新几何副本",
+    "cmd.geometry_copies": "几何副本"
   }
 }
