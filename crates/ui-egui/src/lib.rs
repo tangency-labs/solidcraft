@@ -785,6 +785,8 @@ pub struct SolveApp {
     /// When the note was first drawn (the window's clock), or since the pointer was last on it; it
     /// goes after `stand_up::NOTE_SECONDS`.
     pub stand_up_note_since: Option<f64>,
+    /// An offer to stand bodies up that waits for their estimate (`stand_up::tick`).
+    pub(crate) stand_up_later: Option<stand_up::Later>,
     /// The anti-aliasing sample counts the scene colour/depth formats support (empty without a GPU).
     pub msaa_supported: Vec<u32>,
     /// The startup check selected 1x; Graphics explains the workaround.
@@ -1016,6 +1018,7 @@ impl SolveApp {
             stand_up_assembly: false,
             stand_up_note: false,
             stand_up_note_since: None,
+            stand_up_later: None,
             msaa_supported: Vec::new(),
             msaa_compatibility: false,
             graphics_fallback: None,
@@ -3391,6 +3394,7 @@ impl SolveApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);
+        stand_up::tick(self, ctx);
         open_meshing::refresh(self, ctx.input(|i| i.time));
         // Routing survives a layout re-pass, but never the next input frame. The legacy
         // policy retains its original per-pass cancellation flag behavior.
