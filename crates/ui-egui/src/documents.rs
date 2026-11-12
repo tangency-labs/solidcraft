@@ -1120,10 +1120,63 @@ fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
 
 /// Where a tab's design is saved (home shortened to `~`), or that it isn't yet; below, that a
 /// saved design has changes not saved yet (`dirty`), which the bullet after a cut name no longer
-/// shows (#11408). The tab puts its full name above when it cuts it short (#5868).
-fn tab_place(path: Option<&str>, dirty: bool) -> String {
-    let place = path.map_or_else(|| solidcraft_ui_text::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
-    if dirty && path.is_some() { format!("{place}\n{}", solidcraft_ui_text::tr("document.tab_unsaved_changes")) } else { place }
+/// shows (#11408), and what its signature says. The tab puts its full name above when it cuts it
+/// short (#5868).
+fn tab_place(path: Option<&str>, dirty: bool, security: Option<&str>) -> String {
+    let mut place = path.map_or_else(|| solidcraft_ui_text::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
+    if dirty && path.is_some() {
+        place.push('\n');
+        place.push_str(solidcraft_ui_text::tr("document.tab_unsaved_changes"));
+    }
+    if let Some(security) = security {
+        place.push('\n');
+        place.push_str(security);
+    }
+    place
+}
+
+/// What a design's signature says, for its tab's tooltip: the last verification when one ran, or
+/// that the file carries records that have not been checked in this session.
+fn tab_security(app: &SolveApp) -> Vec<Option<String>> {
+    open_sessions(app)
+        .into_iter()
+        .map(|session| {
+            if let Some(report) = &session.provenance {
+                return Some(signature_line(report));
+            }
+            let signed = session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+            signed.then(|| solidcraft_ui_text::tr("ui.open_signature_unverified").to_string())
+        })
+        .collect()
+}
+
+/// A verification report as one line for a tab tooltip.
+fn signature_line(report: &solidcraft_engine::io::ProvenanceReport) -> String {
+    match &report.status {
+        solidcraft_engine::io::ProvenanceStatus::Valid => {
+            let key = report.newest().map(signer_name).unwrap_or_default();
+            solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
+        }
+        solidcraft_engine::io::ProvenanceStatus::NotCovered => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
+        solidcraft_engine::io::ProvenanceStatus::Invalid(why) => solidcraft_ui_text::format("ui.open_signature_invalid", &[("reason", why)]),
+        solidcraft_engine::io::ProvenanceStatus::Unsupported(_) => solidcraft_ui_text::tr("ui.open_signature_unsupported").to_string(),
+    }
+}
+
+/// The name to show for the key that signed a record.
+fn signer_name(record: &solidcraft_engine::io::ProvenanceRecord) -> String {
+    match &record.signer {
+        solidcraft_engine::io::ProvenanceSigner::Ed25519 { key_id, .. } => {
+            use std::fmt::Write as _;
+            let mut hex = String::with_capacity(16);
+            for byte in &key_id[..8] {
+                // Writing to a `String` cannot fail.
+                let _ = write!(&mut hex, "{byte:02x}");
+            }
+            hex
+        }
+        solidcraft_engine::io::ProvenanceSigner::OpenPgp { fingerprint, user_id } => user_id.clone().unwrap_or_else(|| fingerprint.clone()),
+    }
 }
 
 /// The designs a launch with no file to open reopens: those open at the last quit that still
@@ -1278,7 +1331,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let n = info.len();
     let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     let names: Vec<String> = info.iter().map(|(name, _)| locale.given_name(name)).collect();
-    let places: Vec<String> = info.iter().zip(&paths).map(|((_, dirty), path)| tab_place(path.as_deref(), *dirty)).collect();
+    let security = tab_security(app);
+    let places: Vec<String> = info
+        .iter()
+        .zip(&paths)
+        .zip(&security)
+        .map(|(((_, dirty), path), security)| tab_place(path.as_deref(), *dirty, security.as_deref()))
+        .collect();
     let selected = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
     let mut rename = app.menu.rename.take();
     let renaming = renaming_tab_state(rename.as_ref());
@@ -1658,7 +1717,7 @@ pub fn tab_list_open(ctx: &egui::Context) -> bool {
 /// A tab's tooltip ([`crate::app_bar::tab_tip`] over [`tab_place`]).
 #[cfg(test)]
 fn tab_tooltip(name: &str, path: Option<&str>, cut: bool, dirty: bool) -> String {
-    crate::app_bar::tab_tip(name, &tab_place(path, dirty), cut)
+    crate::app_bar::tab_tip(name, &tab_place(path, dirty, None), cut)
 }
 
 #[cfg(test)]

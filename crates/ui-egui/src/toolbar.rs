@@ -3,7 +3,7 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::ribbon::{self, BUTTON_MIN_WIDTH, ButtonSize, GROUP_HEIGHT, ICON_GROUP_HEIGHT};
 use crate::{SolveApp, app_bar, icons};
@@ -575,6 +575,20 @@ pub fn design_shown(app: &SolveApp) -> bool {
     !app.home.open
 }
 
+/// The parameters a save takes from Preferences. Signing is off by default; a signing key left
+/// empty asks GnuPG for its default key.
+pub(crate) fn provenance_params(app: &SolveApp) -> Value {
+    let mut params = json!({});
+    if app.preferences.sign_saved_designs {
+        params["sign"] = json!(true);
+        let key = app.preferences.signing_key.trim();
+        if !key.is_empty() {
+            params["signing_key"] = json!(key);
+        }
+    }
+    params
+}
+
 pub fn save(app: &mut SolveApp) {
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
@@ -583,7 +597,7 @@ pub fn save(app: &mut SolveApp) {
     if app.session.path.is_some() {
         // Read-only, or changed on disk since it was opened: Save As, or a question, instead.
         if crate::open_elsewhere::check_save(app) {
-            crate::save_job::start(app, "file.save", json!({}));
+            crate::save_job::start(app, "file.save", provenance_params(app));
         }
     } else {
         save_as(app);
@@ -617,7 +631,11 @@ pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
     app.pick_save(&name, &[solidcraft_engine::io::DESIGN_EXT, "json"], |app, path| {
         // A save under way answers a closing tab when it ends.
         if let Some(path) = path
-            && crate::save_job::start(app, "file.save_as", json!({"path": path}))
+            && {
+                let mut params = provenance_params(app);
+                params["path"] = json!(path);
+                crate::save_job::start(app, "file.save_as", params)
+            }
         {
             return;
         }

@@ -1,0 +1,24 @@
+{
+  "en": {
+    "prefs.security": "Security",
+    "prefs.security_note": "Signing and checking the designs you save. Off by default.",
+    "prefs.security.signing": "Signing",
+    "prefs.security.sign_saved": "Sign saved designs with GnuPG",
+    "prefs.security.sign_saved_help": "Each save adds a signature from your GnuPG key. A key on a YubiKey stays on the smartcard; GnuPG asks for its PIN.",
+    "prefs.security.signing_key": "Signing key",
+    "prefs.security.signing_key_hint": "Empty: GnuPG's default signing key",
+    "prefs.security.signing_key_help": "A key fingerprint or user id. Empty uses GnuPG's default signing key.",
+    "prefs.security.verify_opened": "Check signatures when opening designs",
+    "prefs.security.verify_opened_help": "Reads every payload to check the signature. Off: a signed design opens without that extra read, and File > Verify Signature checks it on request.",
+    "prefs.security.encryption": "Encryption",
+    "prefs.security.encryption_note": "Encrypting design files with GnuPG is the next part of this work: encrypted designs and an encrypted indicator arrive together.",
+    "ui.design_saved_signed": "Saved {path}, signed with {key}",
+    "ui.open_signature_valid": "Signed by {key}",
+    "ui.open_signature_invalid": "Signature check failed: {reason}",
+    "ui.open_signature_not_covered": "Signed earlier, then saved without a key",
+    "ui.open_signature_unsupported": "This signature needs a newer SolidCraft",
+    "ui.open_signature_unverified": "Signed; not checked in this session",
+    "cmd.file.verify": "Verify Signature",
+    "cmd.file.gpg_keys": "Signing Keys"
+  }
+}

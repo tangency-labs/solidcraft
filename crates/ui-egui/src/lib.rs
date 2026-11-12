@@ -1780,8 +1780,18 @@ impl SolveApp {
                     self.home.add_recent(&p);
                     if matches!(id, "file.save" | "file.save_as") {
                         home::remember_session(&mut self.home, &self.session);
-                        // Say where it went, as an export does (#8693).
-                        let saved = self.tr("ui.design_saved").replace("{path}", &p);
+                        // Say where it went, as an export does (#8693), and who signed it.
+                        let saved = match v.get("signature").and_then(Value::as_object) {
+                            Some(signature) => {
+                                let key = signature
+                                    .get("user_id")
+                                    .and_then(Value::as_str)
+                                    .or_else(|| signature.get("fingerprint").and_then(Value::as_str))
+                                    .unwrap_or("");
+                                self.tr("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
+                            }
+                            None => self.tr("ui.design_saved").replace("{path}", &p),
+                        };
                         self.set_status(saved, false);
                     }
                 }
@@ -2899,6 +2909,36 @@ impl SolveApp {
         self.set_status(text, false);
     }
 
+    /// Say what a design's signature check found (a `doc.open {verify: true}` or `file.verify`).
+    pub(crate) fn say_signature(&mut self, result: &serde_json::Value) {
+        let Some(signature) = result.get("signature") else { return };
+        let status = signature.get("status").and_then(serde_json::Value::as_str).unwrap_or("");
+        let key = signature
+            .get("records")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|records| records.last())
+            .map(|record| {
+                record
+                    .get("user_id")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| record.get("key_id").and_then(serde_json::Value::as_str))
+                    .unwrap_or("")
+                    .to_owned()
+            })
+            .unwrap_or_default();
+        let text = match status {
+            "valid" => solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)]),
+            "not_covered" => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
+            "invalid" => {
+                let reason = signature.get("reason").and_then(serde_json::Value::as_str).unwrap_or("");
+                solidcraft_ui_text::format("ui.open_signature_invalid", &[("reason", reason)])
+            }
+            "unsupported" => solidcraft_ui_text::tr("ui.open_signature_unsupported").to_string(),
+            _ => return,
+        };
+        self.set_status(text, status == "invalid");
+    }
+
     /// Open the design (or file) at `path` here and now: it is read and evaluated before this
     /// returns, which blocks the thread for a large design. The app opens through
     /// [`Self::open_path_async`] or [`Self::open_path_answered`] (progress and Cancel, #10198);
@@ -2930,6 +2970,7 @@ impl SolveApp {
             self.fit_view();
             stand_up::offer(self, path, &[], Some(&r));
             self.say_newer_file();
+            self.say_signature(&r);
         }
     }
 
@@ -2962,6 +3003,9 @@ impl SolveApp {
             params.entry(k).or_insert(v);
         }
         file_load::step_folder_option(self, path, &mut params);
+        if self.preferences.verify_opened_designs && solidcraft_engine::io::is_design_path(path) {
+            params.insert("verify".into(), json!(true));
+        }
         Value::Object(params)
     }
 

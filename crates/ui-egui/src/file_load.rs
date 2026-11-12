@@ -446,7 +446,11 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     if crate::mesh_units::ask(app, path, insert) {
         return;
     }
-    let _ = begin_request(app, Request::new(path, if insert { Kind::Insert } else { Kind::Open }));
+    let mut request = Request::new(path, if insert { Kind::Insert } else { Kind::Open });
+    if !insert && app.preferences.verify_opened_designs && solidcraft_engine::io::is_design_path(path) {
+        request.options.insert("verify".into(), json!(true));
+    }
+    let _ = begin_request(app, request);
 }
 
 /// A STEP, IGES, FreeCAD or Rhino file the app opens or inserts gets a `Group #N` history folder
@@ -479,6 +483,13 @@ pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<S
 
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
+    if request.kind == Kind::Open
+        && app.preferences.verify_opened_designs
+        && solidcraft_engine::io::is_design_path(&request.path)
+        && !request.options.contains_key("verify")
+    {
+        request.options.insert("verify".into(), json!(true));
+    }
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
@@ -1672,6 +1683,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     );
                     if !request.insert() {
                         app.say_newer_file();
+                        app.say_signature(&made.result);
                     }
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);
