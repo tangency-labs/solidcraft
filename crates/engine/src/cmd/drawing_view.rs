@@ -60,11 +60,11 @@ use crate::drawing_view::{
 };
 use crate::params::bad;
 use crate::schema::drawing_view::{
-    AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, CopyParams, CreateResult, DPI_RANGE,
-    DrawnJointResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FromResult, InspectParams, InspectResult, LineResult, LinesStatusResult,
-    MeasureParam, MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult,
-    ProjectedParams, ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, StudyPoseParam,
-    StudyStepResult, ToSheetResult, ViewLineParam, ViewResult, ViewSet,
+    AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, ConfigurationResult, CopyParams,
+    CreateResult, DPI_RANGE, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FromResult, InspectParams,
+    InspectResult, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult,
+    PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams,
+    SnapshotResult, SourceResult, StudyPoseParam, StudyStepResult, ToSheetResult, ViewLineParam, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -436,6 +436,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let mut sessions = ViewSessions::new(s);
     let placed = crate::drawing_view::on_sheet_from(&mut sessions, d, view.id, INSPECT)?;
     let pose = pose_result(s, &mut sessions, &resolved, view.settings.pose.clone());
+    let configuration = configuration_result(&mut sessions, &resolved, view.settings.configuration);
     let (parent, side) = match view.kind {
         ViewKind::Base { .. } => (None, None),
         ViewKind::Projected { parent, side } => (Some(ids::encode(parent)), Some(snake_name(side))),
@@ -464,7 +465,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             hide: setting(resolved.hide, own.hide.clone().map(Some), path_lists),
             exploded: setting(resolved.exploded, own.exploded, exploded_value),
             pose,
-            configuration: setting(resolved.configuration, own.configuration, configuration_value),
+            configuration,
         },
         reference_shown_percent: view.reference_shown_percent,
         boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
@@ -701,6 +702,28 @@ fn exploded_value(exploded: Exploded) -> Value {
 /// A configuration as inspect shows it and a view saves it: `"active"`, or `{"row": id}`.
 fn configuration_value(configuration: ViewConfiguration) -> Value {
     serde_json::to_value(configuration).unwrap_or(Value::Null)
+}
+
+/// Saved view `view`'s configuration as inspect shows it, where `own` is what the view sets itself, and
+/// what it draws from `sessions`: the row its copy is put in, or else the design's active row while the
+/// design is still in it, and the features the row fails to build that the design builds
+/// ([`crate::drawing_view::ViewCopy`]).
+fn configuration_result(sessions: &mut ViewSessions, view: &ResolvedView, own: Option<ViewConfiguration>) -> ConfigurationResult {
+    let setting = setting(view.configuration, own, configuration_value);
+    let choice = sessions.choice(view);
+    // The answer the key already holds for a view of the active row: the design isn't compared again.
+    let in_active = choice.row().is_none() && sessions.matches();
+    let (drawn, errors) = match sessions.drawing(&choice) {
+        Ok((from, failing)) => {
+            let row = match choice.row() {
+                Some(row) => from.doc.configs.row(RowKey::Id(row)),
+                None => from.doc.configs.active_row().filter(|_| in_active),
+            };
+            (row.map(|row| DrawnRowResult { id: row.id, name: row.name.clone() }), failing.to_vec())
+        }
+        Err(_) => (None, Vec::new()),
+    };
+    ConfigurationResult { setting, drawn, errors }
 }
 
 /// `chosen` as a view saves it, for `cmd`: active, or a row of the design's configuration table found

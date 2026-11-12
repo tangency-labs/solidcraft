@@ -935,7 +935,7 @@ fn an_exploded_copy_holds_its_moves_in_its_own_design() {
     let (s, _, [.., apart], _) = two_assembled_one_apart();
     let placed = s.doc.occurrences.clone();
     let view = s.drawing("test").unwrap().resolve_view(apart).unwrap();
-    let copy = crate::drawing_view::copy_for(&s, &Choice::of(&view)).unwrap();
+    let copy = crate::drawing_view::copy_for(&s, &Choice::of(&view)).unwrap().session;
     let mut shown = s.scratch();
     shown.pending_moves = exploded_at(&explode_moves(&shown, &s.doc.assembly.exploded[0]), 1.0);
     let boxes = |s: &Session| -> Vec<(String, String)> {
@@ -1138,6 +1138,41 @@ fn a_copy_that_panics_after_evaluating_leaves_the_design_drawing_its_row_right()
     let (panicked, fresh) = (width_after(true), width_after(false));
     assert_eq!(panicked, fresh);
     assert!(panicked.iter().all(|w| (w - 60.0).abs() < 1e-6), "{panicked:?}");
+}
+
+/// A view of a row whose features fail to build says so beside it once its job has drawn it, in the
+/// words the sheet built at once says (#13048).
+#[test]
+fn a_views_job_says_its_row_rebuilds_with_errors() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "R", "expression": "5 mm"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.sphere", json!({"radius": "R"}));
+    run(&mut s, "config.configure", json!({"params": ["R"]}));
+    run(&mut s, "config.row", json!({"name": "Broken", "values": {"R": "-1 mm"}}));
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Broken"}}));
+    let says = Some("its configuration `Broken` rebuilds with 1 failing feature".to_string());
+    let answer = settled(&mut s, sheet);
+    assert_eq!(answer.views.iter().find(|v| v.view == front).map(|v| v.why.clone()), Some(says.clone()));
+    assert_eq!(built(&s, sheet).views.iter().find(|v| v.view == front).map(|v| v.why.clone()), Some(says));
+}
+
+/// A view of a row that fails to build, in a position whose joint is gone, says both, the row first,
+/// joined as `config.activate` joins its errors (#13048).
+#[test]
+fn a_views_row_and_position_reasons_are_joined() {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    in_the_model(&mut s, "parameters.add", json!({"name": "R", "expression": "5 mm"}));
+    in_the_model(&mut s, "solid.sphere", json!({"radius": "R"}));
+    in_the_model(&mut s, "config.configure", json!({"params": ["R"]}));
+    in_the_model(&mut s, "config.row", json!({"name": "Broken", "values": {"R": "-1 mm"}}));
+    let set = json!({"configuration": "Broken", "pose": [{"joint": "Hinge", "values": [0]}]});
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": set}));
+    in_the_model(&mut s, "joint.delete", json!({"joint": "Hinge"}));
+    let says = "its configuration `Broken` rebuilds with 1 failing feature; its position names 1 joint the design no longer has";
+    assert_eq!(built(&s, sheet).views.iter().find(|v| v.view == view).and_then(|v| v.why.clone()).as_deref(), Some(says));
 }
 
 /// A view in a position of its own is up to date by what it draws: driving the hinge in the design
@@ -2420,7 +2455,7 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
     let lettering = Lettering::of(&s, &d);
     let (text, _) = block_text(record, &lettering, &[], true).unwrap();
     let (notes, _) = sheet_notes(&s, &d, sheet, &lettering, true);
-    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &shown, *id, view)));
+    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &[], &shown, *id, view)));
     let mut assembly = assemble(record, d.projection, &text, &[], &[], drawn).unwrap();
     let frames: BTreeMap<_, _> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let line_group = |view: u64| on.iter().find(|(id, ..)| *id == view).map(|(_, v, _)| v.line_group.value);

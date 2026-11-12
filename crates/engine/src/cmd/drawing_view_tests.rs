@@ -2326,6 +2326,7 @@ fn a_deleted_configuration_row_leaves_the_views_that_named_it() {
         "{gone}"
     );
     assert_eq!(gone["settings"]["configuration"]["value"], json!({"row": long}), "the choice stays, for an undo: {gone}");
+    assert_eq!(gone["settings"]["configuration"].get("drawn"), Some(&Value::Null), "it draws no row: {gone}");
     for view in [front, right, top] {
         assert_eq!(scene_entry(&mut s, view), (json!("placeholder"), json!(NO_ROW)), "{view}");
     }
@@ -2370,6 +2371,40 @@ fn a_row_that_cant_be_put_on_the_design_is_a_placeholder() {
     assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d);
 }
 
+/// A view of a row whose features fail to build draws what the row builds, as activating it would, and
+/// says so: its scene reason names the row and counts the features that fail there and not in the
+/// design, and inspect lists them as `config.activate` does. A view of the active row says nothing
+/// (#13048).
+#[test]
+fn a_view_of_a_row_that_rebuilds_with_errors_draws_what_it_builds_and_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "100 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "R", "expression": "5 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 50, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.sphere", json!({"radius": "R"}));
+    let sphere = s.doc.features.last().map(|f| f.name.clone()).unwrap();
+    run(&mut s, "config.configure", json!({"params": ["L", "R"]}));
+    run(&mut s, "config.row", json!({"name": "Broken", "values": {"L": "120 mm", "R": "-1 mm"}}));
+    let broken = s.doc.configs.rows.iter().find(|row| row.name == "Broken").map(|row| row.id).unwrap();
+    let (mut s, [front, _, top]) = three_views_of(s);
+    edit_view(&mut s, front, json!({"configuration": "Broken"}));
+    let configuration = &inspect_view(&mut s, front)["settings"]["configuration"];
+    assert_eq!(configuration["drawn"], json!({"id": broken, "name": "Broken"}), "{configuration}");
+    let errors = configuration["errors"].as_array().cloned().unwrap_or_default();
+    assert!(errors.len() == 1 && errors[0].as_str().is_some_and(|e| e.starts_with(&format!("{sphere}: "))), "{configuration}");
+    assert!((width(&mut s, front) - 60.0).abs() < 1e-6, "the block draws at the row's length");
+    let says = json!("its configuration `Broken` rebuilds with 1 failing feature");
+    assert_eq!(scene_entry(&mut s, front), (json!("drawn"), says.clone()));
+    assert_eq!(scene_entry(&mut s, top), (json!("drawn"), says), "a view that follows it says it too");
+    edit_view(&mut s, front, json!({"configuration": "active"}));
+    let configuration = &inspect_view(&mut s, front)["settings"]["configuration"];
+    assert_eq!((configuration["drawn"]["name"].as_str(), configuration.get("errors")), (Some("Default"), None), "{configuration}");
+    assert_eq!(scene_entry(&mut s, front), (json!("drawn"), Value::Null));
+    // Edited by hand, the design is in none of its rows.
+    in_the_design(&mut s, "parameters.change", json!({"name": "L", "expression": "110 mm"}));
+    assert_eq!(inspect_view(&mut s, front)["settings"]["configuration"].get("drawn"), Some(&Value::Null));
+}
+
 /// A shaded view's pictures are rendered from the design as it is, so a view of a configuration of its
 /// own can't be shaded yet: refused, as on an exploded view, and nothing changes. Its dimensions are
 /// read where it draws (#13048): the front bottom edge measures the Long row's 120 mm, not the
@@ -2408,8 +2443,14 @@ fn a_view_takes_a_configuration_by_name_or_id_and_saves_the_rows_id() {
     assert_eq!(followers, expected, "{edited}");
     assert_eq!(s.undo.len(), steps + 1);
     assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(long)));
-    let followed = json!({"value": {"row": long}, "from": "parent", "parent": ids::encode(front), "set": null});
-    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], followed);
+    // What each draws: the row by its id and name, or the design's active row while it matches it.
+    let followed = |name: &str| {
+        let drawn = json!({"id": long, "name": name});
+        json!({"value": {"row": long}, "from": "parent", "parent": ids::encode(front), "set": null, "drawn": drawn})
+    };
+    let default = s.doc.configs.rows.iter().find(|row| row.name == "Default").map(|row| row.id).unwrap();
+    let active = json!({"id": default, "name": "Default"});
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], followed("Long"));
     // Renamed in the design, the view stays on its row.
     let drawing = ids::encode(s.open_drawing.unwrap());
     run(&mut s, "drawing.close", json!({}));
@@ -2423,12 +2464,12 @@ fn a_view_takes_a_configuration_by_name_or_id_and_saves_the_rows_id() {
     assert_eq!(s.undo.len(), steps);
     // "active" is a choice of its own under a parent that draws another row.
     edit_view(&mut s, right, json!({"configuration": "ACTIVE"}));
-    let own = json!({"value": "active", "from": "parent", "parent": ids::encode(right), "set": null});
+    let own = json!({"value": "active", "from": "parent", "parent": ids::encode(right), "set": null, "drawn": active.clone()});
     assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], own);
     edit_view(&mut s, right, json!({"configuration": null}));
-    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], followed, "null follows the parent again");
+    assert_eq!(inspect_view(&mut s, top)["settings"]["configuration"], followed("Longer"), "null follows the parent again");
     edit_view(&mut s, front, json!({"configuration": null}));
-    let base = json!({"value": "active", "from": "default", "set": null});
+    let base = json!({"value": "active", "from": "default", "set": null, "drawn": active});
     assert_eq!(inspect_view(&mut s, front)["settings"]["configuration"], base);
     // A base view made with a row saves its id.
     let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);

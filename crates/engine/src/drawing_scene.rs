@@ -139,8 +139,9 @@ pub struct ViewState {
     pub status: Status,
     /// What working out its lines cost, when they were.
     pub stats: Option<Stats>,
-    /// What it says beside its lines, when its status doesn't say why, as a note does: the joints or
-    /// motion study its position names that are gone ([`crate::drawing_view::position_reason`]).
+    /// What it says beside its lines, when its status doesn't say why, as a note does: the features its
+    /// configuration row fails to build, and the joints or motion study its position names that are
+    /// gone ([`crate::drawing_view::state_reason`]).
     pub why: Option<String>,
 }
 
@@ -372,8 +373,8 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let drawn = on.iter().map(|(id, view, centre)| {
         let choice = sessions.choice(view);
         let drawn = match sessions.drawing(&choice) {
-            Ok(from) => draw(from, shown.entry(choice.clone()).or_insert_with(|| crate::drawing_view::shown(from)), *id, view),
-            Err(why) => draw(s, &Err(why), *id, view),
+            Ok((from, failing)) => draw(from, failing, shown.entry(choice.clone()).or_insert_with(|| crate::drawing_view::shown(from)), *id, view),
+            Err(why) => draw(s, &[], &Err(why), *id, view),
         };
         owners.extend(drawn.owners.clone().map(|of| (*id, choice, of)));
         (*id, *centre, drawn)
@@ -542,12 +543,13 @@ impl Lettering {
     }
 }
 
-/// View `id`, drawing as `view` does, of the bodies `shown` holds: its lines, the hidden ones too
+/// View `id`, drawing as `view` does, of the bodies `shown` holds, from `s`, where its configuration
+/// row fails to build `failing` features the design builds: its lines, the hidden ones too
 /// when its style draws them, sampled at
 /// [`CHORD_MM`] on paper, or coarser past 100:1, where that would ask the mesh for chords finer than
 /// [`MIN_MODEL_CHORD_MM`]; centred on the view ([`assemble`] moves them to its centre). Lines past
 /// the paper scene's [`MAX_RECORDS`] are refused here, so no view holds more than a scene takes.
-fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64, view: &ResolvedView) -> Drawn {
+fn draw(s: &Session, failing: &[String], shown: &std::result::Result<ShownSet, Unmeasured>, id: u64, view: &ResolvedView) -> Drawn {
     // What the view chooses to show ([`crate::drawing_view::measured`]), and its reference parts' reach.
     let measured = crate::drawing_view::measured(shown, view).map(|(set, extents)| {
         let around = crate::drawing_view::shows(&set, &view.basis, &extents, view.reference_shown_percent);
@@ -555,7 +557,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     });
     let placing = measured.as_ref().map(|(_, extents, around)| (*extents, *around)).map_err(|why| *why);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
-    let why = crate::drawing_view::position_reason(s, view);
+    let why = crate::drawing_view::state_reason(s, view, failing);
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone() };
     let styles = Styles::from(view);
     let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
@@ -1544,12 +1546,12 @@ impl Job {
             }))
         });
         let panicked = matches!(made, Some(Err(_)));
-        let (copy, refused) = match made {
-            Some(Ok(Ok(made))) => (made, None),
-            Some(Ok(Err(why))) => (copy, Some(why)),
+        let (copy, failing, refused) = match made {
+            Some(Ok(Ok(made))) => (made.session, made.failing, None),
+            Some(Ok(Err(why))) => (copy, Vec::new(), Some(why)),
             // Drawn as its placeholder, then failed, below.
-            Some(Err(_)) => (copy, Some(Unmeasured::NotConfigured)),
-            None => (copy, refused),
+            Some(Err(_)) => (copy, Vec::new(), Some(Unmeasured::NotConfigured)),
+            None => (copy, Vec::new(), refused),
         };
         // A design whose parts can't be placed draws its views as placeholders (`shown` says why).
         let state = copy.world_state().unwrap_or_else(|_| copy.model.state());
@@ -1558,7 +1560,7 @@ impl Job {
             (None, Some((was, shown))) if Arc::ptr_eq(&was, &state) => shown,
             _ => crate::drawing_view::shown(&copy),
         };
-        let mut drawn = draw(&copy, &shown, ticket.view, &ticket.resolved);
+        let mut drawn = draw(&copy, &failing, &shown, ticket.view, &ticket.resolved);
         if panicked {
             drawn.status = Status::Failed(COPY_PANICKED.into());
         }
@@ -1631,7 +1633,7 @@ fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state
         (designed(s), None, Some(choice), None)
     } else {
         match copy_for(s, &choice) {
-            Ok(copy) => (copy, None, None, None),
+            Ok(copy) => (copy.session, None, None, None),
             Err(why) => (designed(s), Some(why), None, None),
         }
     };
@@ -1764,8 +1766,9 @@ fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView
 /// Each is worked out only when a view drawing it is behind. A view of another configuration is left
 /// behind: its copy evaluates the design, which only its job does ([`Job::run`]).
 fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
-    // Each with what it says now: a joint deleted may leave its picture as it was.
-    let says = |view: &ResolvedView| crate::drawing_view::position_reason(s, view);
+    // Each with what it says now: a joint deleted may leave its picture as it was. A view whose row
+    // fails to build features is of another configuration, which is left behind.
+    let says = |view: &ResolvedView| crate::drawing_view::state_reason(s, view, &[]);
     // Each by the key of the session it draws from, so a view of the active row is the design's.
     let behind: Vec<(u64, Choice, Option<String>)> = {
         let sessions = ViewSessions::new(s);
@@ -1788,7 +1791,7 @@ fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clo
         let mut sessions = ViewSessions::new(s);
         for (_, choice, _) in &behind {
             if !now.contains_key(choice) && !choice.evaluates() {
-                let shown = sessions.drawing(choice).and_then(crate::drawing_view::shown);
+                let shown = sessions.drawing(choice).and_then(|(from, _)| crate::drawing_view::shown(from));
                 now.insert(choice.clone(), SourceKey::of(&shown));
             }
         }

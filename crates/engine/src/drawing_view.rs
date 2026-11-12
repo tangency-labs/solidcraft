@@ -244,8 +244,21 @@ impl Choice {
     /// doesn't: it only moves parts already built (0.02-0.38 ms a copy on the test assemblies), so any
     /// reader makes it, the window's frame paths included.
     pub fn evaluates(&self) -> bool {
-        self.configuration.is_some()
+        self.row().is_some()
     }
+
+    /// The row of the configuration table its copy is put in, if any; on a key, see
+    /// [`Choice::evaluates`].
+    pub fn row(&self) -> Option<u64> {
+        self.configuration
+    }
+}
+
+/// A copy of the design a view draws from ([`copy_for`]), and the features its configuration row fails
+/// to build that the design builds, each as `name: error`, as `config.activate` says them.
+pub struct ViewCopy {
+    pub session: Session,
+    pub failing: Vec<String>,
 }
 
 /// The sessions the views of one read of a drawing draw from (#13048): the design as it places its
@@ -257,7 +270,7 @@ pub struct ViewSessions<'a> {
     placed: &'a Session,
     /// Whether the design still matches its active row ([`ViewSessions::matches`]).
     matches: OnceCell<bool>,
-    copies: BTreeMap<Choice, std::result::Result<Session, Unmeasured>>,
+    copies: BTreeMap<Choice, std::result::Result<ViewCopy, Unmeasured>>,
 }
 
 impl<'a> ViewSessions<'a> {
@@ -285,16 +298,18 @@ impl<'a> ViewSessions<'a> {
     /// The session saved view `view` draws from, or why it can't be drawn ([`copy_for`]).
     pub fn of(&mut self, view: &ResolvedView) -> std::result::Result<&Session, Unmeasured> {
         let choice = self.choice(view);
-        self.drawing(&choice)
+        self.drawing(&choice).map(|(from, _)| from)
     }
 
-    /// The session the views whose key is `choice` ([`ViewSessions::choice`]) draw from.
-    pub fn drawing(&mut self, choice: &Choice) -> std::result::Result<&Session, Unmeasured> {
+    /// The session the views whose key is `choice` ([`ViewSessions::choice`]) draw from, and the
+    /// features it fails to build that the design builds ([`ViewCopy`]).
+    pub fn drawing(&mut self, choice: &Choice) -> std::result::Result<(&Session, &[String]), Unmeasured> {
         if choice.is_placed() {
-            return Ok(self.placed);
+            return Ok((self.placed, &[]));
         }
         let placed = self.placed;
-        self.copies.entry(choice.clone()).or_insert_with(|| copy_for(placed, choice)).as_ref().map_err(|why| *why)
+        let copy = self.copies.entry(choice.clone()).or_insert_with(|| copy_for(placed, choice));
+        copy.as_ref().map(|copy| (&copy.session, copy.failing.as_slice())).map_err(|why| *why)
     }
 
     /// How many copies it made.
@@ -309,7 +324,10 @@ impl<'a> ViewSessions<'a> {
     pub fn of_view(&mut self, d: &Drawing, view: u64) -> &Session {
         let placed = self.placed;
         match d.resolve_view(view) {
-            Ok(view) => self.drawing(&Choice::of(&view)).unwrap_or(placed),
+            Ok(view) => {
+                let choice = self.choice(&view);
+                self.drawing(&choice).map_or(placed, |(from, _)| from)
+            }
             Err(_) => placed,
         }
     }
@@ -326,13 +344,13 @@ impl<'a> ViewSessions<'a> {
     ) -> solidcraft_doc::Result<Vec<T>> {
         let mut states: BTreeMap<Choice, Vec<usize>> = BTreeMap::new();
         for (at, (_, view)) in records.iter().enumerate() {
-            let choice = d.resolve_view(*view).map(|view| Choice::of(&view)).unwrap_or_default();
+            let choice = d.resolve_view(*view).map(|view| self.choice(&view)).unwrap_or_default();
             states.entry(choice).or_default().push(at);
         }
         let mut out: Vec<Option<T>> = records.iter().map(|_| None).collect();
         let placed = self.placed;
         for (choice, ats) in states {
-            let from = self.drawing(&choice).unwrap_or(placed);
+            let from = self.drawing(&choice).map_or(placed, |(from, _)| from);
             let ids: Vec<u64> = ats.iter().filter_map(|at| records.get(*at)).map(|(id, _)| *id).collect();
             for (at, one) in ats.into_iter().zip(read(&from.doc, &from.model, d, &ids)?) {
                 if let Some(slot) = out.get_mut(at) {
@@ -354,16 +372,18 @@ impl<'a> ViewSessions<'a> {
 /// can't be: the row is no longer in the design (found before anything is evaluated) or can't be put
 /// on it, the exploded view is no longer in the design or moves a part out of range (a hostile file),
 /// or the joints can't be driven.
-pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<Session, Unmeasured> {
+pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<ViewCopy, Unmeasured> {
     use crate::cmd::motion::{drive_with_contact, explode_moves, exploded_at, keyed, values_at};
     // From where the design places its parts: an occurrence move not captured yet is left out.
     let mut copy = placed.scratch();
     copy.pending_moves.clear();
     // The configuration first: the position and the explode start from the geometry it builds.
+    let mut failing = Vec::new();
     if let Some(row) = choice.configuration {
         copy.doc.configs.row(RowKey::Id(row)).ok_or(Unmeasured::NoConfiguration)?;
         // Whatever keeps it off is said as `NotConfigured`: the message, and the command it names, are dropped.
-        crate::cmd::put_row(&mut copy, RowKey::Id(row), crate::drawing_scene::CMD).map_err(|_| Unmeasured::NotConfigured)?;
+        let put = crate::cmd::put_row(&mut copy, RowKey::Id(row), crate::drawing_scene::CMD).map_err(|_| Unmeasured::NotConfigured)?;
+        failing = put.new_errors;
     }
     // A study sets the values it keys, and the joints' other values follow the solve; joint values
     // set every value they give.
@@ -395,7 +415,7 @@ pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<Sessio
             }
         }
     }
-    Ok(copy)
+    Ok(ViewCopy { session: copy, failing })
 }
 
 /// The joints saved view `view`'s position names that `s`'s design no longer has, in its order. The
@@ -405,16 +425,29 @@ pub fn gone_joints(s: &Session, view: &ResolvedView) -> Vec<u64> {
     joints.iter().map(|j| j.joint).filter(|id| !s.doc.assembly.joints.iter().any(|joint| joint.id == *id)).collect()
 }
 
-/// What the sheet says beside saved view `view` when its position names joints or a motion study
-/// `s`'s design no longer has (#13048), as a drawn note says why. With none of its joints left, or
-/// its study gone, it draws the design's placement.
-pub fn position_reason(s: &Session, view: &ResolvedView) -> Option<String> {
-    if let Pose::Study(at) = view.pose.value {
-        let gone = at.drawn(&s.doc.assembly.studies).is_none();
-        return gone.then(|| "its position names a motion study the design no longer has".into());
+/// What the sheet says beside saved view `view`, drawn from `s` (#13048), as a drawn note says why:
+/// that its configuration row rebuilds with `failing` features that the design builds ([`ViewCopy`]),
+/// and that its position names joints or a motion study `s`'s design no longer has. With none of its
+/// joints left, or its study gone, it draws the design's placement.
+pub fn state_reason(s: &Session, view: &ResolvedView, failing: &[String]) -> Option<String> {
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+    let configuration = match view.configuration.value {
+        ViewConfiguration::Row(id) if !failing.is_empty() => {
+            let row = s.doc.configs.row(RowKey::Id(id)).map_or("", |row| row.name.as_str());
+            Some(format!("its configuration `{row}` rebuilds with {} failing feature{}", failing.len(), plural(failing.len())))
+        }
+        _ => None,
+    };
+    let position = match view.pose.value {
+        Pose::Study(at) => at.drawn(&s.doc.assembly.studies).is_none().then(|| "its position names a motion study the design no longer has".into()),
+        _ => Some(gone_joints(s, view).len())
+            .filter(|gone| *gone > 0)
+            .map(|gone| format!("its position names {gone} joint{} the design no longer has", plural(gone))),
+    };
+    match (configuration, position) {
+        (Some(configuration), Some(position)) => Some(format!("{configuration}; {position}")),
+        (configuration, position) => configuration.or(position),
     }
-    let gone = gone_joints(s, view).len();
-    (gone > 0).then(|| format!("its position names {gone} joint{} the design no longer has", if gone == 1 { "" } else { "s" }))
 }
 
 /// What saved view `view` draws from `sessions`: every body its session places ([`shown`]), or why

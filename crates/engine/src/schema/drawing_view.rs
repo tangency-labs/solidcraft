@@ -626,7 +626,29 @@ pub struct SettingsResult {
     pub pose: PoseResult,
     /// The configuration of the design it draws: `"active"`, or `{"row": id}` for a row of the
     /// design's configuration table.
-    pub configuration: SettingResult<Value>,
+    pub configuration: ConfigurationResult,
+}
+
+/// A view's configuration as inspect shows it: the setting, and what it draws.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ConfigurationResult {
+    #[serde(flatten)]
+    pub setting: SettingResult<Value>,
+    /// The row it draws: the one it names, or for `"active"` the design's active row while the design
+    /// matches it. Null when it draws none: the row is no longer in the design or can't be applied to
+    /// it, or the design matches none of its rows.
+    pub drawn: Option<DrawnRowResult>,
+    /// The features its row fails to build that the design builds, each as `name: error`, as
+    /// `config.activate` lists them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
+/// A row of the design's configuration table as a view draws it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DrawnRowResult {
+    pub id: u64,
+    pub name: String,
 }
 
 /// A view's position as inspect shows it: the setting, and for a position of its own what it draws.
