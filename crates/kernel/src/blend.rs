@@ -304,8 +304,16 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 /// one of its faces is planar and it is concave (material in front of that face on the other
 /// face's side), and at each end of the edge a planar face square to it ends the blend, so the
 /// slab's square ends add no material the blend could run into. `None` where it does not apply
-/// or a step fails: the caller keeps SMLib's refusal. Decided on exact geometry.
+/// or a step fails: the caller keeps SMLib's refusal. Decided on exact geometry. Its steps are
+/// checked as they are built whatever the evaluation checks, also under `Validation::Off`.
 fn concave_overflow_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Option<Body> {
+    // Each step checked as it is built: one whose result the check refuses gives `None`, so the
+    // caller keeps the kernel's refusal rather than a body the feature's check refuses later.
+    crate::validation::validating(crate::Validation::EachStep, || carried_on_round(body, pick, reach, blend)).0
+}
+
+/// [`concave_overflow_round`]'s steps.
+fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Option<Body> {
     use solidcore_record::{Loop2, Plane, Region2, Vec2};
     if !(reach.is_finite() && reach > 0.0) {
         return None;
@@ -1580,6 +1588,26 @@ mod tests {
         let (_, _, area) = boss_chamfer_section(7.0);
         let added = crate::measure(&out).unwrap().volume - crate::measure(&body).unwrap().volume;
         assert!((24.0 * area - added).abs() < 1e-3, "{added}");
+    }
+
+    /// The carried-on sequence checks each step as it is built, whatever the evaluation around it
+    /// checks: a step the check refuses gives the kernel's refusal, not a body the feature's check
+    /// refuses later.
+    #[test]
+    fn a_carried_on_blend_checks_each_step_whatever_the_evaluation_checks() {
+        let body = boss_on_rounded_plate();
+        for mode in crate::Validation::ALL {
+            let seen = std::cell::Cell::new(None);
+            let (out, deferred) = crate::validation::validating(mode, || {
+                concave_overflow_round(&body, BOSS_EDGE, 8.0, |carried| {
+                    seen.set(Some(crate::validation::step()));
+                    chamfer(carried, &[BOSS_EDGE], 8.0)
+                })
+            });
+            assert!(out.is_some(), "{mode:?}");
+            assert_eq!(seen.get(), Some(crate::validation::Step::Check), "{mode:?}");
+            assert!(!deferred, "{mode:?}: no step's check is left for the feature");
+        }
     }
 
     /// Just past the largest chamfer that fits (7.00), SMLib fails it as an operation instead of
