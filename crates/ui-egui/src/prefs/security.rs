@@ -20,7 +20,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             if cfg!(not(target_arch = "wasm32")) {
                 ui_kit::settings_form(ui, labels, |ui| {
-                    if ui.button(app.tr("prefs.security.choose_key")).clicked() {
+                    if ui_kit::button(ui, app.tr("prefs.security.choose_key"), ui_kit::Button::Normal).clicked() {
                         list_signing_keys(app);
                     }
                 });
@@ -42,10 +42,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 }
                                 Ok(keys) => {
                                     ui.label(app.tr("prefs.security.signing_keys_heading"));
-                                    for key in keys {
+                                    for (index, key) in keys.into_iter().enumerate() {
                                         let suffix = if key.on_card { format!(" ({})", app.tr("prefs.security.key_on_card")) } else { String::new() };
                                         let label = format!("{}{suffix} — {}", key.user_id, key.fingerprint);
-                                        if ui.selectable_label(false, label).clicked() {
+                                        if ui_kit::list_picker(ui, &format!("prefs:signing_key:{index}"), &label, false).clicked() {
                                             app.preferences.signing_key = key.fingerprint.clone();
                                             app.prefs_window.signing_keys = SigningKeys::Idle;
                                         }
@@ -58,7 +58,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     ui_kit::settings_inline_note(ui, &error);
                                 }
                             }
-                            if ui.button(app.tr("prefs.security.refresh_keys")).clicked() {
+                            if ui_kit::button(ui, app.tr("prefs.security.refresh_keys"), ui_kit::Button::Normal).clicked() {
                                 list_signing_keys(app);
                             }
                         });
