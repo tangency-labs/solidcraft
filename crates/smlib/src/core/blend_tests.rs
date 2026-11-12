@@ -516,6 +516,37 @@ fn a_knife_edge_chamfer_too_large_names_its_distance() {
     assert!((v - (before - removed)).abs() < 1e-9 * v, "{v} vs {}", before - removed);
 }
 
+/// The knife edge of `a_knife_edge_chamfer_too_large_names_its_distance` chamfered 200: the
+/// reason is an overflow that keeps nothing, not corners that take the whole edge (the knife
+/// edge's ends have no corners), and the distance named is where the chord takes all the
+/// part, `TIP² / R` (its far bottom corner, at x = -TIP, y = -R from the tip, the chord
+/// pivoting about the point opposite the tip, so `d = R (TIP / (2R - R))²`), less the fit
+/// margin (#15250).
+#[test]
+fn a_knife_edge_chamfer_wider_than_the_part_keeps_nothing() {
+    use super::sweep::extrude;
+    use crate::sweeps::{Curve, DraftCorner};
+    const R: f64 = 21.0;
+    const TIP: f64 = 62.0 + 1.0 / 6.0;
+    const H: f64 = 10.0;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line { start: [a[0], a[1], 0.0], end: [b[0], b[1], 0.0] };
+    let profile = [
+        line([0.0, 0.0], [0.0, -R]),
+        line([0.0, -R], [TIP - R, -R]),
+        Curve::Arc { center: [TIP, -R, 0.0], axis: [0.0, 0.0, -1.0], reference: [1.0, 0.0, 0.0], radius: R, start: PI, end: 1.5 * PI },
+        line([TIP, 0.0], [0.0, 0.0]),
+    ];
+    let part = extrude(&profile, [0.0, 0.0, 1.0], H, 0.0, DraftCorner::Curvature, true).unwrap();
+    let tip = [TIP, 0.0, H / 2.0];
+    let e =
+        timed("knife_keeps_nothing", move || blend(&part, Blend::Chamfer, &[tip], &[200.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
+    let Error::TooLarge { size: d, kind: crate::FitKind::Distance, at: Some(_), why } = e else { panic!("{e:?}") };
+    assert_eq!(why, Some(crate::RoomReason::OverflowKeepsNothing));
+    assert_ne!(why, Some(crate::RoomReason::CornersTakeWholeEdge));
+    let closed = TIP * TIP / R - 0.01;
+    assert!((d - closed).abs() < 1e-9, "{d} vs {closed}");
+}
+
 /// A cliff overflow the fork refuses too (`fixes.fillet_cliff_overflow`, solidcore#960): the
 /// three edges at a 20 mm cube's corner rounded r20, their fillet's boundary on two faces'
 /// surfaces, has no room, as on the fork, not "not supported": too large, the largest radius that
