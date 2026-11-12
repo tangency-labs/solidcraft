@@ -59,6 +59,11 @@
 //! written program back through the machine's kinematics and holds every rapid against the
 //! part, fixtures and the stock, and every position against the machine's travel.
 //!
+//! [`machine_time`] times a written program as the machine runs it: every axis held to its
+//! own rate, with the accelerations where the machine gives them, spindle starts, tool changes
+//! and stops for the operator. A [`setup_sheet`] tells the operator how to set the job up and
+//! run it, as a self-contained HTML page or as Markdown.
+//!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
 //! retract to the machine's top, the tool length offset on the first Z move, modal motion
@@ -100,6 +105,7 @@ pub mod rapids;
 mod readback;
 pub mod readback5;
 pub mod rotary;
+pub mod setup_sheet;
 pub mod stock;
 pub mod stop;
 mod surface;
@@ -192,6 +198,8 @@ mod machine_time_tests;
 mod rapids_tests;
 #[cfg(test)]
 mod rotary_tests;
+#[cfg(test)]
+mod setup_sheet_tests;
 #[cfg(test)]
 mod stock_tests;
 #[cfg(test)]
