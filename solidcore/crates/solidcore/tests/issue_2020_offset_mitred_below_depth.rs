@@ -221,7 +221,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_wire_edge_keeps_faceuse_shell = true;
-    k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_check_min_radius = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.check_loop_projected_seam_ends = true;

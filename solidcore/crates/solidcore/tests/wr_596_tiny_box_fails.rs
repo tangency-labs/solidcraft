@@ -2,8 +2,8 @@
 //! @449c81c; SolidCraft's capi smoke test `smlib_make_box`): `SmApiCreateBox` of a box
 //! far smaller than the tolerance (`smlib_fuzz` leak-000bffce). Pinned `CreateBox` drops
 //! every face and stitch status and returns success with a 4-face body that fails its
-//! own check; the fork returns the failing status (1001). With
-//! `Kernel::fixes.box_face_failures_propagate` the port's `create_box` does the same.
+//! own check; the fork returns the failing status (1001), and so does the port's
+//! `create_box` (tangency-labs/solidcraft#15350: no longer opt-in).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -16,9 +16,8 @@ use solidcore::primitive::api_primitives::create_box;
 use solidcore::{Brep, Kernel};
 
 /// The fuzz case's origin and size (the record's hex floats).
-fn tiny_box(fix: bool) -> solidcore::Result<Brep> {
+fn tiny_box() -> solidcore::Result<Brep> {
     let mut k = Kernel::default();
-    k.fixes.box_face_failures_propagate = fix;
     create_box(
         &mut k,
         Point3::new(
@@ -33,8 +32,8 @@ fn tiny_box(fix: bool) -> solidcore::Result<Brep> {
 }
 
 #[test]
-fn wr_596_tiny_box_is_sm_err_with_the_fix() {
-    let r = tiny_box(true);
+fn wr_596_tiny_box_is_sm_err() {
+    let r = tiny_box();
     assert!(
         matches!(&r, Err(e) if solidcore::error::upstream_status(e) == Some(1001)),
         "{:?}",
@@ -43,17 +42,8 @@ fn wr_596_tiny_box_is_sm_err_with_the_fix() {
 }
 
 #[test]
-fn wr_596_tiny_box_is_a_four_face_success_by_default() {
-    let b = tiny_box(false).unwrap();
-    assert_eq!(b.face_list().len(), 4);
-}
-
-#[test]
-fn wr_596_an_ordinary_box_is_unchanged_by_the_fix() {
-    for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.box_face_failures_propagate = fix;
-        let b = create_box(&mut k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
-        assert_eq!(b.face_list().len(), 6, "fix {fix}");
-    }
+fn wr_596_an_ordinary_box_has_six_faces() {
+    let mut k = Kernel::default();
+    let b = create_box(&mut k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
+    assert_eq!(b.face_list().len(), 6);
 }

@@ -267,7 +267,7 @@
 {"case":"set_params_per_edge_r4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0,1.0,0.0,1.0,1.0,1.0,2.0,0.0]}}
 {"case":"set_params_per_edge_r5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0,0.0,0.0,1.0,0.0,1.0,1.0,1.0,0.0,2.0]}}
 {"case":"set_params_per_edge_r6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0,0.0,0.0,1.0,0.0,1.0,1.0,1.0,0.0,2.0]}}
-{"case":"set_params_short_box_regression","deferred":null,"error":"box_edge_count","ints":{},"topology":null,"values":{}}
+{"case":"set_params_short_box_regression","deferred":null,"error":"brep_build_status_1001","ints":{},"topology":null,"values":{}}
 {"case":"set_params_single_fsg_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0,0.0,0.0,1.0,0.0,1.0,1.0,1.0,0.0,2.0]}}
 {"case":"set_params_single_fsg_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0,1.0,0.0,1.0,1.0,1.0,2.0,0.0]}}
 {"case":"set_params_single_fsg_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0,1.0,0.0,1.0,1.0,1.0,2.0,0.0]}}

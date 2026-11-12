@@ -192,7 +192,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_rails_meet_at_one_end_point = true;
     f.fillet_trace_reaches_rails = true;
     f.delete_vertex_joins_seam_iso_curve = true;
-    f.box_face_failures_propagate = true;
     f.ellipse_adjust_step_interval_keeps_turns = true;
     f.fillet_rail_end_on_continued_surface = true;
     f.glue_vertices_joins_every_region = true;
