@@ -550,8 +550,10 @@ fn sphere_box_corner_volume(r: f64, delta: f64, zmin: f64) -> f64 {
 /// the circle, so no crossing was found, the box edge was not split, and the boolean gave
 /// nothing, the sphere alone (57 % off) or "no radial sector" (`gen0150` of the golden unit
 /// `boolean.api_brep` is this case with the sphere's seam close to the side face). The
-/// crossings are now merged only within the intersection tolerance: union, intersection
-/// and difference integrate to the exact volume and check clean at Level2. The volume
+/// crossings are now merged only when their midpoint lies on the circle within the
+/// intersection tolerance: union, intersection and difference integrate to the exact
+/// volume, have the expected faces, edges and vertices, every vertex on the sphere or
+/// the box, and check clean at Level2. The volume
 /// tolerance (1e-3 relative) allows for tolerance-wide slivers at a 0.3 mm scale
 /// (measured: below 1e-5).
 #[test]
@@ -564,10 +566,15 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
         let size = [8e-4, 4e-4 - delta, 4e-4 - zmin];
         let block = size[0] * size[1] * size[2];
         let common = sphere_box_corner_volume(r, delta, zmin);
-        for (op, want) in [
-            (Op::Union, sphere + block - common),
-            (Op::Intersection, common),
-            (Op::Difference, sphere - common),
+        // Faces, edges, vertices. Intersection: the sphere piece and the two box face
+        // pieces, bounded by the two arcs and the box edge between its crossings (plus the
+        // sphere's seam piece); union: the box's six faces and the sphere; difference: the
+        // sphere and the two box face pieces. Measured, the same for both cases; a lost
+        // crossing or an unintended split changes them.
+        for (op, want, want_counts) in [
+            (Op::Union, sphere + block - common, [7, 17, 13]),
+            (Op::Intersection, common, [3, 4, 3]),
+            (Op::Difference, sphere - common, [3, 5, 5]),
         ] {
             let name = match op {
                 Op::Union => "union",
@@ -604,10 +611,59 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
             };
             let v = brep_volume(&k, &mut brep, 1e-9, &attrs).unwrap();
             let rel = (v - want).abs() / want;
-            if rel > 1e-3 {
+            // Written to accept: a NaN volume fails.
+            if !(rel <= 1e-3) {
                 failures.push(format!(
                     "delta {delta:e} cap {cap:e} {name}: volume {v:e} vs {want:e} (rel {rel:.2e})"
                 ));
+            }
+            let counts = [
+                solidcore::topology::brep::p1::faces(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::edges(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::vertices(&brep, None)
+                    .unwrap()
+                    .len(),
+            ];
+            if counts != want_counts {
+                failures.push(format!(
+                    "delta {delta:e} cap {cap:e} {name}: faces/edges/vertices {counts:?} vs {want_counts:?}"
+                ));
+            }
+            // Every vertex lies on the sphere or on the box within the tolerance band.
+            let (lo, hi) = (
+                Point3::new(-4e-4, -4e-4, zmin),
+                Point3::new(-4e-4 + size[0], -delta, 4e-4),
+            );
+            for vid in solidcore::topology::brep::p1::vertices(&brep, None).unwrap() {
+                let p = brep.vertex(vid).unwrap().point;
+                let on_sphere = (p.length() - r).abs();
+                let inside = Point3::new(
+                    p.x.clamp(lo.x, hi.x),
+                    p.y.clamp(lo.y, hi.y),
+                    p.z.clamp(lo.z, hi.z),
+                );
+                let outside = p.distance(inside);
+                let to_planes = [
+                    p.x - lo.x,
+                    hi.x - p.x,
+                    p.y - lo.y,
+                    hi.y - p.y,
+                    p.z - lo.z,
+                    hi.z - p.z,
+                ]
+                .into_iter()
+                .map(f64::abs)
+                .fold(f64::INFINITY, f64::min);
+                let on_box = outside.max(to_planes);
+                if !(on_sphere.min(on_box) <= 2e-5) {
+                    failures.push(format!(
+                        "delta {delta:e} cap {cap:e} {name}: vertex {p:?} is {on_sphere:e} off the sphere and {on_box:e} off the box"
+                    ));
+                }
             }
             let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
             if !check.is_valid() {

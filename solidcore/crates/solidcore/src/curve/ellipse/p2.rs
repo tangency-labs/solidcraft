@@ -80,8 +80,8 @@
 //!   intersection tolerance, which upstream also uses to merge the line's two
 //!   crossings into one: crossings up to ten tolerances apart became a single point
 //!   mid-chord, off the circle, and both were lost. The port keeps the ten-fold band for
-//!   finding the line and merges the crossings only within the intersection tolerance
-//!   ([`line_coplanar_circle_intersect_distinct`]). Where upstream would have merged
+//!   finding the line and merges the crossings only when the merged point lies on the
+//!   circle within the intersection tolerance ([`line_coplanar_circle_intersect_distinct`]). Where upstream would have merged
 //!   them, a solution of the second crossing that repeats one of the first (both
 //!   dropped onto the end of a short arc) is not added again.
 //! - **Co-port.** The geometric constructor belongs to unit `curve.ellipse_p1`; it is
