@@ -2409,8 +2409,8 @@
 {"case":"surf_sphere150_vu0_q","deferred":null,"error":null,"ints":{"q":{"blocks":[[32020,224227]],"n":24}},"topology":null,"values":{}}
 {"case":"surf_sphere150_vu0_seam","deferred":null,"error":null,"ints":{"q":[0,0,0]},"topology":null,"values":{}}
 {"case":"surf_sphere150_vu0_seam_nouv","deferred":null,"error":null,"ints":{"q":[0,-1,0]},"topology":null,"values":{}}
-{"case":"surf_sphere150_vu0_sector0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[380.345996117752,380.3460147689061,5561.417660992085]],"n":21}}}
-{"case":"surf_sphere150_vu0_sector1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[380.345996117752,380.3460147689061,5561.417660992085]],"n":21}}}
+{"case":"surf_sphere150_vu0_sector0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[380.34630753284534,380.3463155000336,5561.422310850447]],"n":21}}}
+{"case":"surf_sphere150_vu0_sector1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[380.34630753284534,380.3463155000336,5561.422310850447]],"n":21}}}
 {"case":"surf_sphere150_vu0_uvpt0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,15.34653975957921,0.0]}}
 {"case":"surf_sphere150_vu0_uvpt1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,15.34653975957921,0.0]}}
 {"case":"surf_sphere150_vu5_conn16003","deferred":null,"error":null,"ints":{"q":[1]},"topology":null,"values":{}}
@@ -2435,8 +2435,8 @@
 {"case":"surf_sphere150_vu5_q","deferred":null,"error":null,"ints":{"q":{"blocks":[[32022,224232]],"n":24}},"topology":null,"values":{}}
 {"case":"surf_sphere150_vu5_seam","deferred":null,"error":null,"ints":{"q":[0,0,0]},"topology":null,"values":{}}
 {"case":"surf_sphere150_vu5_seam_nouv","deferred":null,"error":null,"ints":{"q":[0,-1,0]},"topology":null,"values":{}}
-{"case":"surf_sphere150_vu5_sector0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[422.55552358636436,426.5555395206775,5947.996941491103]],"n":21}}}
-{"case":"surf_sphere150_vu5_sector1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[422.55552358636436,426.5555395206775,5947.996941491103]],"n":21}}}
+{"case":"surf_sphere150_vu5_sector0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[422.55576115133556,426.5557689353644,5948.0004968153635]],"n":21}}}
+{"case":"surf_sphere150_vu5_sector1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[422.55576115133556,426.5557689353644,5948.0004968153635]],"n":21}}}
 {"case":"surf_sphere150_vu5_uvpt0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.0,22.60472414010265]}}
 {"case":"surf_sphere150_vu5_uvpt1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.0,22.60472414010265]}}
 {"case":"torus_rebuild_vu2_conn16002","deferred":null,"error":null,"ints":{"q":[1]},"topology":null,"values":{}}

@@ -1643,7 +1643,7 @@ impl Revolved for Torus {
 /// end's column is that boundary curve's own control polygon, and a meridian lies in a plane
 /// through the axis, so every one of its control points has the meridian's angle about the
 /// axis.
-fn meridians(srf: &BSplineSurface, swap_uv: bool) -> Result<[Vec<Point3>; 2]> {
+pub(crate) fn meridians(srf: &BSplineSurface, swap_uv: bool) -> Result<[Vec<Point3>; 2]> {
     let nurb = srf
         .gw_nurb()
         .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the form's NURB"))?;
@@ -1662,7 +1662,7 @@ fn meridians(srf: &BSplineSurface, swap_uv: bool) -> Result<[Vec<Point3>; 2]> {
 
 /// The directions, about the axis, of the fitted first sweep row's ends (`is_arc`'s frame and
 /// angles): [`sweep_frame`] reads only their sides from them.
-fn fitted_sides(frame: &Axis2Placement, angles: Extent1d) -> [Vec3; 2] {
+pub(crate) fn fitted_sides(frame: &Axis2Placement, angles: Extent1d) -> [Vec3; 2] {
     let at = |deg: f64| {
         let a = deg * PI / 180.0;
         a.cos() * frame.x_axis() + a.sin() * frame.y_axis()
@@ -1670,7 +1670,8 @@ fn fitted_sides(frame: &Axis2Placement, angles: Extent1d) -> [Vec3; 2] {
     [at(angles.min()), at(angles.max())]
 }
 
-/// Not upstream (#3199): a recognised torus's x axis, y axis and sweep interval (degrees) from
+/// Not upstream (#3199): a recognised torus's (or sphere's, [`crate::surface::sphere`]) x axis,
+/// y axis and sweep interval (degrees) from
 /// its form's first and last meridians (`meridians`: their control points, exact data), about
 /// the axis through `origin` along the unit `z`. A meridian lies in a plane through the axis,
 /// so its control points share its angle on the side the tube's centre is on, and the
@@ -1685,7 +1686,7 @@ fn fitted_sides(frame: &Axis2Placement, angles: Extent1d) -> [Vec3; 2] {
 /// (1e-14 rad on #3185's grooves); the converter centres the sweep circle on the axis, so its
 /// ends and its inside now agree to rounding. `None` when a meridian has no control point off
 /// the axis on its side.
-fn sweep_frame(
+pub(crate) fn sweep_frame(
     origin: Point3,
     z: Vec3,
     sides: [Vec3; 2],
