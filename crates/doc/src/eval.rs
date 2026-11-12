@@ -5051,7 +5051,7 @@ fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> 
         .iter()
         .enumerate()
         .map(|(i, b)| {
-            let bb = b.mesh().bounds();
+            let bb = b.body.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
             let q = Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
             (i, q.dist(*p))
         })
