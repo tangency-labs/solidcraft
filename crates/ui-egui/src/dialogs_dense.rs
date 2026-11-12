@@ -1040,7 +1040,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             // length that keeps its place as the path changes. Empty: the path's start.
             form_row(ui, "pattern.start_point", |ui| {
                 let mut i = usize::from(*fraction);
-                if ui_kit::segmented(ui, &mut i, &["Distance", "pattern.start_fraction"], Default::default()) && (i == 1) != *fraction {
+                if ui_kit::segmented(ui, &mut i, &["pattern.start_distance", "pattern.start_fraction"], Default::default()) && (i == 1) != *fraction {
                     *fraction = i == 1;
                     start.clear();
                 }
