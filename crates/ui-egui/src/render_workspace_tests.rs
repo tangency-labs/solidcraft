@@ -1963,7 +1963,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     );
     assert!(gpu.lines.is_empty() && gpu.overlay.is_empty() && gpu.under.is_empty() && gpu.hidden.is_empty() && gpu.ghost.is_empty());
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
-    s.section = Some((solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X));
+    s.section = vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::ZERO, normal: solidcore_record::Vec3::X }];
     let after = solidcraft_engine::product_scene::extract(&s).unwrap();
     assert_eq!(gpu_scene(&after).unwrap().0, key);
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.0})).unwrap();
