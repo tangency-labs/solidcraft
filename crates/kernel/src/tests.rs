@@ -753,6 +753,15 @@ fn flat_loft_sides_are_planar_faces() {
     }
     assert_eq!(splines, 4, "the loft's sides are planes");
     let flat = crate::smlib_sweeps::body_from_record(&record, "flat loft sides as B-splines").unwrap();
+    let splines = flat
+        .record()
+        .faces
+        .iter()
+        .filter(|face| {
+            matches!(face.surface, solidcore_record::brep::Surface::Spline { .. } | solidcore_record::brep::Surface::RationalSpline { .. })
+        })
+        .count();
+    assert_eq!(splines, 4, "the sides read back as B-splines");
     let faces = flat.faces(0.01).unwrap();
     assert_eq!(faces.len(), 6);
     let centre = Vec3::new(0.0, 0.0, 10.0);
