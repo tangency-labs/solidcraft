@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_kernel::{self as kernel, FaceSurface};
 
 use crate::eval::{ModelBody, ModelState};
@@ -432,9 +433,12 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
             // it, so a vertex took that edge's end (#8650).
             bodies(st).find_map(|b| {
                 let hit = crate::name_lookup::locate_edge(b, n, at).ok()?;
-                let m = b.mesh();
-                let pts = m.edges.get(hit.edge)?;
-                Some((std::ptr::from_ref(b), hit.edge, [*pts.first()?, *pts.last()?]))
+                let rec = b.body.record();
+                let edge = rec.edges.get(hit.edge)?;
+                let eval = CurveEval::new(edge.parameters()).ok()?;
+                let a = eval.point(edge.interval[0])?;
+                let z = eval.point(edge.interval[1])?;
+                Some((std::ptr::from_ref(b), hit.edge, [a, z]))
             })
         })
         .collect::<Option<_>>()?;
@@ -1173,11 +1177,22 @@ impl GeoRef {
             }
             GeoRef::Vertex { at, edges: edges @ None } => {
                 for b in bodies(st) {
+                    if b.body.is_mesh() {
+                        continue;
+                    }
                     let tol = (b.body.size() * 1e-3).max(1e-3);
-                    let m = b.mesh();
-                    let ends_here = |e: &Vec<Vec3>| [e.first(), e.last()].into_iter().flatten().any(|q| q.dist(*at) <= tol);
-                    let mut meet: Vec<String> =
-                        m.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
+                    let rec = b.body.record();
+                    let ends_here = |edge_idx: usize| -> bool {
+                        let Some(edge) = rec.edges.get(edge_idx) else { return false };
+                        let Ok(eval) = CurveEval::new(edge.parameters()) else { return false };
+                        [eval.point(edge.interval[0]), eval.point(edge.interval[1])].into_iter().flatten().any(|q| q.dist(*at) <= tol)
+                    };
+                    let mut meet: Vec<String> = crate::naming::edge_names(b)
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(ei, n)| !n.is_empty() && ends_here(*ei))
+                        .map(|(_, n)| n)
+                        .collect();
                     if meet.is_empty() {
                         continue;
                     }
