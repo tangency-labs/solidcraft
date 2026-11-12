@@ -60,7 +60,7 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(input_schema_for::<OffsetBreakParams>(), &["curve", "sketch"]);
     assert_keys(input_schema_for::<MirrorParams>(), &["entities", "line", "sketch"]);
-    assert_keys(input_schema_for::<MoveParams>(), &["angle", "center", "copy", "entities", "rotate_constraints", "sketch", "translate"]);
+    assert_keys(input_schema_for::<MoveParams>(), &["angle", "center", "copy", "entities", "rotate_constraints", "sketch", "translate", "z"]);
     assert_keys(input_schema_for::<ScaleParams>(), &["base", "entities", "factor", "sketch"]);
     assert_keys(input_schema_for::<CircularPatternParams>(), &["alignment", "angle", "center", "count", "entities", "pattern", "reversed", "sketch"]);
     assert_keys(

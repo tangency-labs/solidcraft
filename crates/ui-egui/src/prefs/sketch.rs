@@ -230,6 +230,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 );
                 check(
                     ui,
+                    "sketch_move_classic",
+                    "prefs.sketch_move_classic",
+                    Some("prefs.sketch_move_classic_note"),
+                    &mut app.preferences.sketch_move_classic,
+                );
+                check(
+                    ui,
                     "sketch_cursor_coordinates",
                     "prefs.sketch.cursor_coordinates",
                     Some("prefs.sketch.cursor_coordinates_note"),

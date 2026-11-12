@@ -875,7 +875,7 @@ no box selection.
 | `ui.rename` | `text?`, `commit?` (default true) | finishes the rename box a Rename item opened |
 | `ui.selection` | | the selection, the open dialog's inputs, the hovered item, and the active sketch's drawn dimensions (`dimensions`: id and text centre, `dimension_selected`, `dimension_editing`), and finished sketches' dimensions shown in the model view (`shown_dimensions`: sketch, id and text centre; a double-click there edits the value) |
 | `ui.worldToScreen` | `points`: `[[x, y, z]…]` world points | their screen points |
-| `ui.triad` | | screen points of the 3D sketch move triad's handles (`x`, `y`, `z`, `plane`) |
+| `ui.triad` | | screen points of a clicked drawn 3D point's arrows (`x`, `y`, `z`, `plane`), there under the `sketch_move_classic` preference |
 | `ui.sketchToScreen` | `points`: `[[x, y]…]` in active-sketch coordinates | their screen points (null when behind the camera) |
 | `ui.dialogInput` | `index` | what clicking an input's Select chip does: picks go to that input |
 | `ui.at` | `world: [x,y,z]` \| `sketch: [x,y]` \| `plane: "XY"` \| `axis: "Z"` \| `dimension: "d1"` (its value text) \| `handle: "arrow"` (a manipulator handle, see `scenario::publish_handle`) | the screen point (a scenario step's target; see `crates/ui-egui/src/scenario.rs`) |
@@ -1034,6 +1034,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `sketch_construction_lines` (default true: show the Construction Line tool family in Sketch CREATE; false restores the earlier menu)
 - `sketch_exit_view` (`keep` (default: the view stays where it is when a sketch ends), `previous` (back to the view from before the sketch), `unless_rotated` (back unless the sketch view was turned))
 - `sketch_mirror_auto_line` (default true: opening Sketch Mirror uses the only preselected straight construction line of the active sketch as its reference; unselected lines do not count; false keeps manual reference selection)
+- `sketch_move_classic` (bool, default false: Move/Copy Sketch Entities has only its X arrow, and a drawn 3D point clicked gets its own arrows instead of dragging freely).
 - `sketch_open_look_at` (default true: creating or editing a sketch turns the view to face it; false leaves the view as it is, and Look At faces the sketch when asked)
 - `sketch_recent_snap` (default false: while drawing, the cursor snaps where the horizontal guide of one recent circle or arc centre or straight-edge midpoint meets the vertical guide of another; a free coordinate, with no constraint and no construction geometry. Off: those guides stay visual and the cursor does not move. The references come from `sketch_tracking_guides`, #8694)
 - `sketch_snap_to_visible_grid` (default true: a point in a sketch snaps to the crossings of the lines the grid draws when the pointer means one, and to the finer lattice between them otherwise; false: the point snaps to the finer lattice only, as before, #7114)
