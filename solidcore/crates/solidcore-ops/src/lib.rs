@@ -74,7 +74,7 @@ pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
-pub use error::{Error, FitKind, OffsetRefusal, Result, RoomReason, Unblendable};
+pub use error::{Error, FitKind, OffsetRefusal, Result, RoomReason, SolidTest, Unblendable};
 pub use measure::{
     point_distance, Distance, EdgePoint, FaceCentroid, GapSample, MassPropertiesEstimate, Normal,
     PointClass,
