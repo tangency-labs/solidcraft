@@ -31,6 +31,7 @@ pub mod iges;
 pub(crate) mod index;
 pub mod knots;
 pub mod math;
+pub mod n_sided;
 pub mod nurbs_crv;
 pub mod nurbs_srf;
 pub mod spiral;
