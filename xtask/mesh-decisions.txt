@@ -113,7 +113,6 @@ crates/engine/src/cmd/face.rs:sketch_of_face finds the planar face a sketch star
 crates/engine/src/cmd/face.rs:sketch_of_faces groups coplanar picked faces by mesh triangles
 crates/engine/src/cmd/features.rs:auto_operation_in chooses a feature's operation by probing the display mesh
 crates/engine/src/cmd/features.rs:edge_points turns edge references into points on a mesh
-crates/engine/src/cmd/features.rs:through_all_reach sizes a Through All reach by the display mesh
 crates/engine/src/cmd/features_more.rs:emboss places an emboss by the display mesh
 crates/engine/src/cmd/features_more.rs:snap_point snaps a feature's point by the display mesh
 crates/engine/src/cmd/inspect.rs:dist_to measures a distance on the display mesh
