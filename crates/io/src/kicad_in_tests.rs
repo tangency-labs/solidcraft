@@ -515,15 +515,148 @@ fn copper_overlay_is_a_flat_face_on_the_board() {
     let front = find("Copper F.Cu");
     let back = find("Copper B.Cu");
     let zs: Vec<f64> = front.positions.as_chunks::<3>().0.iter().map(|p| p[2]).collect();
-    assert!(zs.iter().all(|z| (z - 1.6).abs() < 1e-9 || (z - 1.601).abs() < 1e-9), "{zs:?}");
+    assert!(zs.iter().all(|z| (z - 1.601).abs() < 1e-9), "{zs:?}");
     let zs: Vec<f64> = back.positions.as_chunks::<3>().0.iter().map(|p| p[2]).collect();
-    assert!(zs.iter().all(|z| z.abs() < 1e-9 || (z + 0.001).abs() < 1e-9), "{zs:?}");
-    // The film is a thin closed solid: it builds, with a tiny (positive) volume.
+    assert!(zs.iter().all(|z| (z + 0.001).abs() < 1e-9), "{zs:?}");
+    for (mesh, sign) in [(front, 1.0), (back, -1.0)] {
+        let positions = mesh.positions.as_chunks::<3>().0;
+        for triangle in mesh.triangles.as_chunks::<3>().0 {
+            let [a, b, c] = triangle.map(|index| positions[index as usize]);
+            let cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+            assert!(cross * sign > 0.0, "{} has an inward face", mesh.name);
+        }
+    }
     let positions: Vec<Vec3> = front.positions.as_chunks::<3>().0.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
     let triangles: Vec<[u32; 3]> = front.triangles.as_chunks::<3>().0.to_vec();
     let body = solidcraft_kernel::mesh_body(&positions, &triangles).unwrap();
-    let measure = solidcraft_kernel::measure(&body).unwrap();
-    assert!(measure.volume > 0.0 && measure.volume < 0.1, "{measure:?}");
+    assert!(!body.is_closed_mesh());
+}
+
+#[test]
+fn copper_overlay_clips_a_drill_crossing_a_zone_boundary() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts"))
+      (via (at 2.1 10) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+      (zone (net 1) (net_name "GND") (layer "F.Cu")
+        (filled_polygon (layer "F.Cu") (pts (xy 2 2) (xy 18 2) (xy 18 18) (xy 2 18)))))"#;
+    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "crossing.kicad_pcb", &options, &mut load).unwrap();
+    assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    let mesh = meshes.iter().find(|mesh| mesh.name == "Copper F.Cu").unwrap();
+    let positions = mesh.positions.as_chunks::<3>().0;
+    let area: f64 = mesh
+        .triangles
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|triangle| {
+            let [a, b, c] = triangle.map(|index| positions[index as usize]);
+            ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs() * 0.5
+        })
+        .sum();
+    assert!(area > 255.0 && area < 258.0, "{area}");
+}
+
+#[test]
+fn modelled_copper_is_a_closed_prism() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1))
+      (via (at 14 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1)))"#;
+    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "prism.kicad_pcb", &options, &mut load).unwrap();
+    assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &imported.feature.kind else { panic!("expected a mesh import") };
+    let mesh = meshes.iter().find(|mesh| mesh.name == "Copper F.Cu").unwrap();
+    let positions: Vec<Vec3> = mesh.positions.as_chunks::<3>().0.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
+    let triangles: Vec<[u32; 3]> = mesh.triangles.as_chunks::<3>().0.to_vec();
+    let body = solidcraft_kernel::mesh_body(&positions, &triangles).unwrap();
+    // The caps and the walls meet, so the copper is a solid of the copper's real thickness, not a
+    // skin: its volume is the profile's area times the foil.
+    assert!(body.is_closed_mesh());
+    let expected = (9.0 * 0.3 + std::f64::consts::PI * (0.6 * 0.6 - 0.3 * 0.3)) * 0.035;
+    let got = solidcraft_kernel::measure(&body).unwrap().volume;
+    assert!((got - expected).abs() < 0.005, "{got} vs {expected}");
+}
+
+#[test]
+fn a_prism_stays_one_surface_where_its_hole_crosses_the_outline() {
+    // A fill whose drill crosses its outline is where a profile carries coincident points and a
+    // boundary the triangulation has to split: either could leave a surface with an edge of its
+    // own, so the extruded prism is checked as a closed mesh, not by its volume.
+    let square = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)];
+    for (what, center) in [
+        ("a hole inside", Vec2::new(5.0, 5.0)),
+        ("a hole crossing the outline", Vec2::new(0.5, 5.0)),
+        ("a hole reaching past it", Vec2::new(-1.0, 5.0)),
+    ] {
+        let region = Region2 { outer: Loop2::polygon(&square), holes: vec![Loop2::circle_from(center, 1.0, 0.0).reversed()] };
+        let meshes = extrude_regions(&[region], 0.0, 0.035).unwrap();
+        assert_eq!(meshes.len(), 1, "{what} came apart into {} pieces", meshes.len());
+        let mesh = meshes.into_iter().next().expect("one prism");
+        let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+        assert!(body.is_closed_mesh(), "{what} left a surface that is not one skin");
+    }
+}
+
+#[test]
+fn a_fill_outline_that_touches_itself_keeps_its_area() {
+    // A pour's outline runs up a clearance gap and back down it, so it passes the same place twice.
+    // Both visits are part of the shape: dropping one cuts a piece out of the fill. Two squares
+    // meeting at a corner, as one loop, is the same thing in miniature.
+    let square = |x: f64, y: f64| [Vec2::new(x, y), Vec2::new(x + 10.0, y), Vec2::new(x + 10.0, y + 10.0), Vec2::new(x, y + 10.0)];
+    let (a, b) = (square(0.0, 0.0), square(10.0, 10.0));
+    let points = [a[0], a[1], a[2], b[1], b[2], b[3], b[0], a[3]];
+    let region = Region2 { outer: Loop2::polygon(&points), holes: Vec::new() };
+    let loops = region_loops(&region).unwrap();
+    let (points, triangles) = solidcore_tess::triangulate_planar(&loops).unwrap();
+    let area: f64 = triangles
+        .iter()
+        .map(|[a, b, c]| {
+            let (a, b, c) = (points[*a as usize], points[*b as usize], points[*c as usize]);
+            ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs() * 0.5
+        })
+        .sum();
+    assert!((area - 200.0).abs() < 1e-6, "the fill lost area: {area}");
+}
+
+#[test]
+fn a_wide_trace_reaches_the_copper_it_ends_on() {
+    // Half of a 1 mm trace is 0.5 mm: clearing the 0.6 mm drill of a via by that much would end the
+    // trace 0.2 mm short of the 1.2 mm ring, and a 1.2 mm drill in a 2 mm pad would leave it 0.1 mm
+    // short of the pad. The trace has to reach the copper, not the hole's clearance.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 40 10) (layer "Edge.Cuts"))
+      (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+      (segment (start 10 5) (end 18 5) (width 1.0) (layer "F.Cu") (net 1))
+      (segment (start 20 5) (end 30 5) (width 1.0) (layer "F.Cu") (net 1))
+      (footprint "test:TH" (layer "F.Cu") (at 30 5)
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1.2) (layers "F.Cu" "B.Cu"))))"#;
+    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "wide.kicad_pcb", &options, &mut load).unwrap();
+    let area = layer_area(&imported, "Copper F.Cu", 0.035);
+    // The via's ring, the strip from the ring's edge (a hair inside it) to 18, the pad's ring and
+    // the strip from 20 to the pad's edge at 29.
+    let ring = std::f64::consts::PI * (0.6 * 0.6 - 0.3 * 0.3);
+    let strip = (18.0 - 10.6) * 1.0;
+    let pad = std::f64::consts::PI * (1.0 - 0.6 * 0.6);
+    let to_pad = (29.0 - 20.0) * 1.0;
+    let want = ring + strip + pad + to_pad;
+    assert!(area > want - 0.02 && area < want + 0.02, "{area} vs {want}");
+}
+
+#[test]
+fn via_regions_keep_analytic_circles() {
+    let region = via_region([10.0, -5.0], 0.6, 0.3).unwrap();
+    assert_eq!(region.outer.segs.len(), 1);
+    assert_eq!(region.holes.len(), 1);
+    assert_eq!(region.holes[0].segs.len(), 1);
+    assert!(matches!(region.outer.segs[0], solidcore_record::Seg2::Arc { .. }));
+    assert!(matches!(region.holes[0].segs[0], solidcore_record::Seg2::Arc { .. }));
 }
 
 #[test]
@@ -536,10 +669,12 @@ fn trace_into_a_via_stops_at_its_drill() {
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let area = copper_area(&imported, "Copper F.Cu", 0.035);
-    // The via's ring plus the trace from 10.5 (its 0.3 drill plus half the 0.4 stroke) to 16:
-    // nothing over the hole, not even the stroke's corner.
-    let expected = std::f64::consts::PI * (0.6 * 0.6 - 0.3 * 0.3) + 5.5 * 0.4;
-    assert!((area - expected).abs() < 0.03, "{area} vs {expected}");
+    // The via's ring plus the trace from 10.5 (its 0.3 drill plus half the 0.4 stroke) to 16, with
+    // nothing over the hole, not even the stroke's corner. They are one copper surface, so the
+    // piece of the strip that lies inside the ring's annulus counts once.
+    let ring = std::f64::consts::PI * (0.6 * 0.6 - 0.3 * 0.3);
+    let strip = 5.5 * 0.4;
+    assert!(area > ring + strip - 0.05 && area < ring + strip + 1e-6, "{area} vs {}", ring + strip);
 }
 
 #[test]
@@ -552,9 +687,28 @@ fn a_trace_crossing_a_hole_is_cut_at_the_hole() {
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let area = copper_area(&imported, "Copper F.Cu", 0.035);
-    // The ring plus the trace on either side of the hole (6 → 9.5 and 10.5 → 14).
-    let expected = std::f64::consts::PI * (0.6 * 0.6 - 0.3 * 0.3) + 2.0 * 3.5 * 0.4;
-    assert!((area - expected).abs() < 0.03, "{area} vs {expected}");
+    // The ring plus the trace on either side of the hole (6 → 9.5 and 10.5 → 14), each end of the
+    // strip lying inside the ring's annulus counted once because it is one copper surface.
+    let ring = std::f64::consts::PI * (0.6 * 0.6 - 0.3 * 0.3);
+    let strip = 2.0 * 3.5 * 0.4;
+    assert!(area > ring + strip - 0.1 && area < ring + strip + 1e-6, "{area} vs {}", ring + strip);
+}
+
+/// The copper of one layer as area, over every piece of it: copper that touches itself at a single
+/// point has to be more than one body to stay manifold.
+fn layer_area(imported: &KicadImport, layer: &str, thickness: f64) -> f64 {
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &imported.feature.kind else { panic!("expected a mesh import") };
+    let piece = format!("{layer} (");
+    meshes
+        .iter()
+        .filter(|mesh| mesh.name == layer || mesh.name.starts_with(&piece))
+        .map(|mesh| {
+            let positions: Vec<Vec3> = mesh.positions.as_chunks::<3>().0.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
+            let triangles: Vec<[u32; 3]> = mesh.triangles.as_chunks::<3>().0.to_vec();
+            let body = solidcraft_kernel::mesh_body(&positions, &triangles).unwrap();
+            solidcraft_kernel::measure(&body).unwrap().volume / thickness
+        })
+        .sum()
 }
 
 #[test]
@@ -568,13 +722,9 @@ fn traces_stop_at_drilled_holes() {
     let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "trace.kicad_pcb", &options, &mut load).unwrap();
-    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
-    let copper = meshes.iter().find(|m| m.name == "Copper F.Cu").expect("front copper");
-    let positions: Vec<Vec3> = copper.positions.as_chunks::<3>().0.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
-    let triangles: Vec<[u32; 3]> = copper.triangles.as_chunks::<3>().0.to_vec();
-    let body = solidcraft_kernel::mesh_body(&positions, &triangles).unwrap();
-    let area = solidcraft_kernel::measure(&body).unwrap().volume / 0.035;
-    // The trace stops at the pad; its copper and the remaining trace are one joined plate.
+    let area = layer_area(&imported, "Copper F.Cu", 0.035);
+    // The trace stops at the pad, and the two touch only where the cut meets the pad's round edge,
+    // so they are separate surfaces; together they are the trace on either side of it plus the pad.
     assert!(area > 10.5 && area < 11.5, "trace and pad copper area: {area}");
 }
 

@@ -32,9 +32,14 @@ fn a_board_opens_as_a_solid_substrate() {
     assert_eq!(r["board_solid"], json!(true), "{r}");
     let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
     assert!(names.iter().any(|name| name == "board"), "{names:?}");
-    // The copper overlay is on by default: the film is 0.001 mm over the 9 mm × 0.3 mm track.
+    // The copper overlay is on by default: the 9 mm × 0.3 mm track is a flat face over the board,
+    // so it adds no volume, and the measure says so by counting it among the open bodies.
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["total"]["open_bodies_skipped"], json!(1), "{measured}");
     let got = volume(&mut s);
-    assert!((got - (400.0 + 9.0 * 0.3 * 0.001)).abs() < 1e-3, "{got}");
+    assert!((got - 400.0).abs() < 1e-6, "{got}");
+    let open = measured["bodies"].as_array().into_iter().flatten().filter(|b| b["name"] == json!("Copper F.Cu")).all(|b| b["closed"] == json!(false));
+    assert!(open, "{measured}");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 

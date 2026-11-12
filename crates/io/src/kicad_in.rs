@@ -11,11 +11,11 @@
 //! footprint, which also puts them below the board.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use solidcraft_doc::Mat;
 use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_doc::Mat;
 use solidcraft_geom::prelude::*;
 
 use crate::{IoError, Result};
@@ -47,7 +47,8 @@ const CURVE_TOLERANCE: f64 = 0.02;
 const MAX_CURVE_SEGMENTS: usize = 4_096;
 /// Copper foil thickness (1 oz) in millimetres.
 const COPPER_THICKNESS: f64 = 0.035;
-/// The copper overlay's thickness (mm): a thin film on the board surface.
+/// How far (mm) the flat copper overlay floats above (or below) the board's own surface: far
+/// enough not to fight the substrate for the pixel, with no volume of its own.
 const OVERLAY_THICKNESS: f64 = 0.001;
 /// Silkscreen ink thickness in millimetres.
 const SILK_THICKNESS: f64 = 0.01;
@@ -857,11 +858,16 @@ pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::Mes
     }
     let loops = outline_loops(board)?;
     let regions = regions_from_loops(loops.clone(), Some(&board.drills));
-    let mesh = extrude_regions(&regions, 0.0, thickness).or_else(|_| {
+    let parts = extrude_regions(&regions, 0.0, thickness).or_else(|_| {
         // A drill that touches a cutout can defeat the profile: keep the board and lose the holes.
         let regions = regions_from_loops(loops, None);
         extrude_regions(&regions, 0.0, thickness)
     })?;
+    // One body: the board's areas, at the height it stands at.
+    let mut mesh = solidcraft_geom::Mesh::default();
+    for part in &parts {
+        mesh.append(part, 0);
+    }
     Ok(crate::MeshObject {
         name: board.name.clone(),
         positions: mesh.positions,
@@ -1057,16 +1063,24 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     }
     report_import(3);
     if options.copper != KicadCopper::None {
-        for (mesh, name, color) in copper_meshes(&board, thickness, options.copper, &mut warnings) {
-            meshes.push(mesh_data(name, mesh.positions, mesh.triangles, Some(color)));
-            plan.bodies.push(None);
+        for (plate, name, color) in copper_meshes(&board, thickness, options.copper, &mut warnings) {
+            for (index, (positions, triangles)) in plate.into_meshes().into_iter().enumerate() {
+                // A layer whose copper touches itself only at points is several pieces; the first
+                // keeps the layer's name.
+                let name = if index == 0 { name.clone() } else { format!("{name} ({})", index + 1) };
+                meshes.push(mesh_data(name, positions, triangles, Some(color)));
+                plan.bodies.push(None);
+            }
         }
     }
     report_import(4);
     if options.silkscreen {
-        for (mesh, layer) in silkscreen_meshes(&board, thickness, &mut warnings) {
-            meshes.push(mesh_data(format!("Silkscreen {layer}"), mesh.positions, mesh.triangles, Some([0.92, 0.92, 0.90])));
-            plan.bodies.push(None);
+        for (plate, layer) in silkscreen_meshes(&board, thickness, &mut warnings) {
+            for (index, (positions, triangles)) in plate.into_meshes().into_iter().enumerate() {
+                let name = if index == 0 { format!("Silkscreen {layer}") } else { format!("Silkscreen {layer} ({})", index + 1) };
+                meshes.push(mesh_data(name, positions, triangles, Some([0.92, 0.92, 0.90])));
+                plan.bodies.push(None);
+            }
         }
     }
     report_import(5);
@@ -1458,15 +1472,268 @@ fn extrude_regions_bodies(regions: &[Region2], z0: f64, z1: f64) -> Result<Vec<s
         .map_err(|e| IoError::Invalid(format!("KiCad profile: {e}")))
 }
 
-/// Extrude regions between `z0` and `z1` and merge them into one mesh.
-fn extrude_regions(regions: &[Region2], z0: f64, z1: f64) -> Result<solidcraft_geom::Mesh> {
-    let bodies = extrude_regions_bodies(regions, z0, z1)?;
-    let mut out = solidcraft_geom::Mesh::default();
-    for body in &bodies {
-        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).map_err(|e| IoError::Invalid(format!("KiCad mesh: {e}")))?;
-        out.append(&mesh, 0);
+/// How finely a copper outline is sampled into points for a plate or a meshed prism (mm): fine
+/// enough that a small via's ring is round to the eye and its area within a thousandth.
+const PLATE_CHORD: f64 = 0.001;
+
+/// A region's boundaries as point loops: the outer loop first, then its holes. Only a point that
+/// repeats the one before it is dropped: a fill's outline passes the same place twice wherever its
+/// clearance gaps meet, and both visits are part of the shape, so collapsing them would cut a piece
+/// out of the fill. A loop left with no area is refused.
+fn region_loops(region: &Region2) -> Result<Vec<Vec<[f64; 2]>>> {
+    let mut loops = Vec::with_capacity(1 + region.holes.len());
+    for boundary in std::iter::once(&region.outer).chain(&region.holes) {
+        let mut points: Vec<[f64; 2]> = Vec::with_capacity(boundary.segs.len() + 4);
+        for point in boundary.polyline(PLATE_CHORD).iter() {
+            let p = [point.x, point.y];
+            if !(p[0].is_finite() && p[1].is_finite()) {
+                return Err(IoError::Invalid("a KiCad copper outline has a non-finite point".into()));
+            }
+            if points.last().is_some_and(|last: &[f64; 2]| (last[0] - p[0]).hypot(last[1] - p[1]) <= 1e-9) {
+                continue;
+            }
+            points.push(p);
+        }
+        while points.len() > 1
+            && points.first().zip(points.last()).is_some_and(|(first, last)| (first[0] - last[0]).hypot(first[1] - last[1]) <= 1e-9)
+        {
+            points.pop();
+        }
+        if points.len() < 3 {
+            return Err(IoError::Invalid("a KiCad copper outline is too small to fill".into()));
+        }
+        loops.push(points);
+    }
+    Ok(loops)
+}
+
+/// Extrude regions between `z0` and `z1` into closed triangle meshes: the caps of their union and
+/// a wall for every edge of it. No B-rep is built, so nothing is stitched or validated: this is
+/// the mesh the copper is drawn and exported from, and every point of it is the exact profile
+/// extruded straight up. Every face of the result is planar, so flat shading is exact.
+///
+/// The union is what keeps it manifold: copper items that overlap or abut (a via's ring in a
+/// pour, a trace running into its pad) share one surface instead of meeting along an edge with
+/// four faces. Two areas that meet at a single vertex share no edge, so they come back as
+/// separate meshes — one surface each, since a body whose surfaces touch at a point is not a
+/// manifold either.
+fn extrude_regions(regions: &[Region2], z0: f64, z1: f64) -> Result<Vec<solidcraft_geom::Mesh>> {
+    if regions.is_empty() {
+        return Err(IoError::Invalid("nothing to extrude".into()));
+    }
+    if !(z0.is_finite() && z1.is_finite() && (z1 - z0).abs() >= 1e-6) {
+        return Err(IoError::Invalid("KiCad copper has a zero or invalid thickness".into()));
+    }
+    let too_many = || IoError::Invalid("the copper has too many points to mesh".into());
+    let mut items: Vec<Vec<Vec<[f64; 2]>>> = Vec::with_capacity(regions.len());
+    for region in regions {
+        items.push(region_loops(region)?);
+    }
+    let (mut points, triangles) = solidcore_tess::triangulate_union(&items).map_err(|error| IoError::Invalid(format!("KiCad copper: {error}")))?;
+    // One face of each triangle, without the ones that could not be on a surface: a corner twice
+    // has an edge of its own, and the same triangle twice would put two faces on one edge.
+    let mut seen: HashSet<[u32; 3]> = HashSet::with_capacity(triangles.len());
+    let mut faces: Vec<[u32; 3]> = Vec::with_capacity(triangles.len());
+    for [a, b, c] in &triangles {
+        if a == b || b == c || a == c {
+            return Err(IoError::Invalid("a KiCad copper outline filled a triangle with no area".into()));
+        }
+        let mut key = [*a, *b, *c];
+        key.sort_unstable();
+        if seen.insert(key) {
+            faces.push([*a, *b, *c]);
+        }
+    }
+    // Since every cap's material is on its left, parts joined by a shared edge are the same
+    // surface: they are grouped by that, so parts joined only at a point fall apart.
+    let mut owner: HashMap<(u32, u32), usize> = HashMap::with_capacity(faces.len().saturating_mul(3));
+    for (index, [a, b, c]) in faces.iter().enumerate() {
+        owner.insert((*a, *b), index);
+        owner.insert((*b, *c), index);
+        owner.insert((*c, *a), index);
+    }
+    let mut root: Vec<usize> = (0..faces.len()).collect();
+    for (&(a, b), &index) in &owner {
+        let Some(&other) = owner.get(&(b, a)) else { continue };
+        let (x, y) = (find_root(&root, index), find_root(&root, other));
+        if x != y
+            && let Some(slot) = root.get_mut(x)
+        {
+            *slot = y;
+        }
+    }
+    let mut pieces: Vec<(usize, Vec<[u32; 3]>)> = Vec::new();
+    let mut by_root: HashMap<usize, Vec<[u32; 3]>> = HashMap::new();
+    for (index, face) in faces.iter().enumerate() {
+        by_root.entry(find_root(&root, index)).or_default().push(*face);
+    }
+    for (root, group) in by_root {
+        pieces.push((root, group));
+    }
+    // Sorted by the places each piece covers, so the bodies come out the same way every run (the
+    // grouping above ends wherever the hash map's order puts it).
+    let span = |group: &Vec<[u32; 3]>| {
+        let mut ids: Vec<u32> = group.iter().flatten().copied().collect();
+        ids.sort_unstable();
+        (ids.first().copied().unwrap_or(0), ids.last().copied().unwrap_or(0))
+    };
+    pieces.sort_by_key(|(_, group)| span(group));
+    // Pieces that share no point go in one body, as before. Pieces that share one are surfaces
+    // that touch at that point; a body welds its points together, which would leave four faces on
+    // the edge there, so they are kept apart.
+    let mut bodies: Vec<(Vec<[u32; 3]>, HashSet<u32>)> = Vec::new();
+    for (_, group) in pieces {
+        let points_used: HashSet<u32> = group.iter().flatten().copied().collect();
+        let fits = bodies.iter().position(|(_, used)| !points_used.iter().any(|point| used.contains(point)));
+        match fits.and_then(|at| bodies.get_mut(at)) {
+            Some((faces, used)) => {
+                faces.extend(group);
+                used.extend(points_used);
+            }
+            None => bodies.push((group, points_used)),
+        }
+    }
+    let mut out: Vec<solidcraft_geom::Mesh> = Vec::with_capacity(bodies.len());
+    for (mut group, _) in bodies {
+        // A body's own pinches, before its walls are built from the outline.
+        split_pinches(&mut points, &mut group);
+        // Only the points this piece uses, at the bottom and again at the top, so a cap and its
+        // wall share their points exactly.
+        let mut used: Vec<u32> = group.iter().flatten().copied().collect();
+        used.sort_unstable();
+        used.dedup();
+        let local = |id: u32| used.binary_search(&id).map(|at| at as u32).unwrap_or(u32::MAX);
+        let count = u32::try_from(used.len()).map_err(|_| too_many())?;
+        count.checked_add(count).ok_or_else(too_many)?;
+        let mut mesh = solidcraft_geom::Mesh::default();
+        for z in [z0, z1] {
+            for &id in &used {
+                let Some(point) = points.get(id as usize) else { return Err(too_many()) };
+                mesh.positions.push(Vec3::new(point[0], point[1], z));
+            }
+        }
+        // The caps: the triangulation is counter-clockwise in the plane, so the top faces up and
+        // the bottom, with two of its corners swapped, faces down.
+        let mut directed: HashSet<(u32, u32)> = HashSet::with_capacity(group.len().saturating_mul(3));
+        for [a, b, c] in &group {
+            let (a, b, c) = (local(*a), local(*b), local(*c));
+            mesh.triangles.push([c, b, a]);
+            mesh.triangles.push([count + a, count + b, count + c]);
+            directed.insert((a, b));
+            directed.insert((b, c));
+            directed.insert((c, a));
+        }
+        // The walls go on the caps' boundary edges: the directed edges that have no opposite. The
+        // cap keeps the material on its left, so an outer boundary runs counter-clockwise and a
+        // hole's runs clockwise, and one rule faces every wall the right way. Taking them from
+        // the caps rather than from the loops means a boundary the triangulation had to split (a
+        // drill crossing a zone's outline) still gets its wall.
+        let mut boundary: Vec<(u32, u32)> = directed.iter().copied().filter(|(u, v)| !directed.contains(&(*v, *u))).collect();
+        boundary.sort_unstable();
+        for (u, v) in boundary {
+            mesh.triangles.push([u, v, count + v]);
+            mesh.triangles.push([u, count + v, count + u]);
+        }
+        out.push(mesh);
     }
     Ok(out)
+}
+
+/// The representative of a set in a union-find whose parents are `root`.
+fn find_root(root: &[usize], mut index: usize) -> usize {
+    while let Some(&up) = root.get(index) {
+        if up == index {
+            break;
+        }
+        index = up;
+    }
+    index
+}
+
+/// How far a pinched point is moved to separate the two surfaces that meet there (mm): one unit of
+/// a KiCad board file, so the copper moves by less than the file can describe.
+const PINCH_GAP: f64 = 1e-6;
+
+/// Split a surface's pinches: where the outline passes one place twice, its material is two pieces
+/// that touch only there, and one point for both would put four faces on the edge rising from it.
+/// Each piece gets its own point, [`PINCH_GAP`] away in its own direction, so every edge of the
+/// result is shared by exactly two faces.
+fn split_pinches(points: &mut Vec<[f64; 2]>, faces: &mut [[u32; 3]]) {
+    let mut around: HashMap<u32, Vec<usize>> = HashMap::new();
+    for (index, face) in faces.iter().enumerate() {
+        for id in face {
+            around.entry(*id).or_default().push(index);
+        }
+    }
+    let mut places: Vec<u32> = around.keys().copied().collect();
+    places.sort_unstable();
+    for place in places {
+        let Some(at) = around.get(&place).cloned() else { continue };
+        if at.len() < 2 {
+            continue;
+        }
+        // Faces around the place that share an edge through it are one piece of material.
+        let mut parent: Vec<usize> = (0..at.len()).collect();
+        let mut outgoing: HashMap<u32, usize> = HashMap::new();
+        let mut incoming: HashMap<u32, usize> = HashMap::new();
+        for (slot, &index) in at.iter().enumerate() {
+            let Some(face) = faces.get(index) else { continue };
+            let Some(k) = face.iter().position(|id| *id == place) else { continue };
+            outgoing.insert(*face.get((k + 1) % 3).unwrap_or(&place), slot);
+            incoming.insert(*face.get((k + 2) % 3).unwrap_or(&place), slot);
+        }
+        for (next, &slot) in &outgoing {
+            let Some(&other) = incoming.get(next) else { continue };
+            let (x, y) = (find_root(&parent, slot), find_root(&parent, other));
+            if x != y
+                && let Some(slot) = parent.get_mut(x)
+            {
+                *slot = y;
+            }
+        }
+        let mut fans: HashMap<usize, Vec<usize>> = HashMap::new();
+        for slot in 0..at.len() {
+            fans.entry(find_root(&parent, slot)).or_default().push(slot);
+        }
+        if fans.len() < 2 {
+            continue;
+        }
+        // The first piece keeps the place; each other piece moves a hair into its own material.
+        let mut roots: Vec<usize> = fans.keys().copied().collect();
+        roots.sort_unstable();
+        let home = points.get(place as usize).copied().unwrap_or([0.0, 0.0]);
+        for root in roots.into_iter().skip(1) {
+            let Some(slots) = fans.get(&root).cloned() else { continue };
+            let mut sum = [0.0f64; 2];
+            let mut count = 0.0f64;
+            for &slot in &slots {
+                let Some(&index) = at.get(slot) else { continue };
+                let Some(face) = faces.get(index) else { continue };
+                for id in face {
+                    if let Some(p) = points.get(*id as usize) {
+                        sum = [sum[0] + p[0], sum[1] + p[1]];
+                        count += 1.0;
+                    }
+                }
+            }
+            let mean = if count > 0.0 { [sum[0] / count, sum[1] / count] } else { [home[0] + 1.0, home[1]] };
+            let (dx, dy) = (mean[0] - home[0], mean[1] - home[1]);
+            let length = dx.hypot(dy);
+            let step = if length > 1e-12 { [dx / length * PINCH_GAP, dy / length * PINCH_GAP] } else { [PINCH_GAP, 0.0] };
+            let Ok(copy) = u32::try_from(points.len()) else { continue };
+            points.push([home[0] + step[0], home[1] + step[1]]);
+            for &slot in &slots {
+                let Some(&index) = at.get(slot) else { continue };
+                if let Some(face) = faces.get_mut(index) {
+                    for value in face.iter_mut() {
+                        if *value == place {
+                            *value = copy;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// What a stroke of `width` along `points` fills: its outline as one region, with mitered corners
@@ -1824,13 +2091,15 @@ fn add_text_plate(plate: &mut Plate, text: &KicadText, origin: Vec2, angle: f64,
     if regions.is_empty() {
         return false;
     }
-    match extrude_regions(&regions, z0, z1) {
-        Ok(mesh) => {
-            plate.add_mesh(mesh.positions, mesh.triangles);
-            true
-        }
-        Err(_) => false,
+    if plate.surface.is_some() {
+        // Every glyph is drawn, even after one fails (a short-circuit would drop the rest).
+        return surface_regions(plate, &regions, z0, z1);
     }
+    // Held with the plate's other copper, so the text is united with what it sits on.
+    for region in &regions {
+        plate.add_region(region, z0, z1);
+    }
+    true
 }
 
 /// Accumulate simple polygonal plates into one mesh.
@@ -1838,9 +2107,49 @@ fn add_text_plate(plate: &mut Plate, text: &KicadText, origin: Vec2, angle: f64,
 struct Plate {
     positions: Vec<Vec3>,
     triangles: Vec<[u32; 3]>,
+    surface: Option<bool>,
+    /// The regions of a meshed plate, with the height each is extruded between. Every region at
+    /// one height is united into one surface when the plate is sealed, so a layer's overlapping
+    /// copper (a via's ring in a pour, a trace running into its pad) comes out as one manifold
+    /// body instead of separate shells that share edges.
+    pieces: Vec<Piece>,
+}
+
+/// The regions of a plate between one pair of heights.
+struct Piece {
+    z0: f64,
+    z1: f64,
+    regions: Vec<Region2>,
 }
 
 impl Plate {
+    /// The plate as finished meshes, one per connected piece: each height's regions are united and
+    /// extruded, and a layer whose copper touches itself at a point comes back as several
+    /// surfaces. A body is welded by position when it is built, so pieces that share a point must
+    /// be separate bodies to stay manifold.
+    fn into_meshes(mut self) -> Vec<(Vec<Vec3>, Vec<[u32; 3]>)> {
+        let mut out: Vec<(Vec<Vec3>, Vec<[u32; 3]>)> = Vec::new();
+        for piece in std::mem::take(&mut self.pieces) {
+            match extrude_regions(&piece.regions, piece.z0, piece.z1) {
+                Ok(meshes) => out.extend(meshes.into_iter().map(|mesh| (mesh.positions, mesh.triangles))),
+                Err(_) => {
+                    // A profile the triangulator cannot fill should not cost the whole layer: the
+                    // other items still come in, each on its own.
+                    for region in &piece.regions {
+                        if let Ok(meshes) = extrude_regions(std::slice::from_ref(region), piece.z0, piece.z1) {
+                            out.extend(meshes.into_iter().map(|mesh| (mesh.positions, mesh.triangles)));
+                        }
+                    }
+                }
+            }
+        }
+        // A flat plate (the overlay) has its faces already.
+        if !self.triangles.is_empty() {
+            out.push((self.positions, self.triangles));
+        }
+        out
+    }
+
     /// Append a mesh whose triangle indices start from zero.
     fn add_mesh(&mut self, positions: Vec<Vec3>, triangles: Vec<[u32; 3]>) {
         let Ok(base) = u32::try_from(self.positions.len()) else { return };
@@ -1851,35 +2160,10 @@ impl Plate {
         }
     }
 
+    /// A plate's region without holes: one flat face (a surface) or one closed prism.
     fn add_loop(&mut self, points: &[[f64; 2]], z0: f64, z1: f64) {
-        let Some(loop_) = clean_loop(points) else { return };
-        let pts: Vec<Vec2> = loop_.polyline(1e-3).to_vec();
-        let pts: Vec<[f64; 2]> = pts.into_iter().map(|p| [p.x, p.y]).collect();
-        if pts.len() < 3 {
-            return;
-        }
-        let Ok(triangles) = triangulate_outline(&pts) else { return };
-        let count = match u32::try_from(pts.len()) {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        let base = match u32::try_from(self.positions.len()) {
-            Ok(b) => b,
-            Err(_) => return,
-        };
-        self.positions.extend(pts.iter().map(|p| Vec3::new(p[0], p[1], z0)));
-        self.positions.extend(pts.iter().map(|p| Vec3::new(p[0], p[1], z1)));
-        for [a, b, c] in triangles {
-            self.triangles.push([a + base + count, b + base + count, c + base + count]);
-            self.triangles.push([c + base, b + base, a + base]);
-        }
-        let ccw = polygon_area(&pts) > 0.0;
-        for index in 0..count {
-            let next = (index + 1) % count;
-            let (a, b) = if ccw { (index, next) } else { (next, index) };
-            self.triangles.push([a + base, b + base, b + base + count]);
-            self.triangles.push([a + base, b + base + count, a + base + count]);
-        }
+        let Some(outer) = clean_loop(points) else { return };
+        self.add_region(&Region2 { outer, holes: Vec::new() }, z0, z1);
     }
 
     fn add_track(&mut self, points: &[[f64; 2]], width: f64, closed: bool, z0: f64, z1: f64) {
@@ -1928,14 +2212,118 @@ impl Plate {
 
     /// A region (a filled loop, maybe with holes) as a closed mesh.
     fn add_region(&mut self, region: &Region2, z0: f64, z1: f64) {
-        if let Ok(mesh) = extrude_regions(std::slice::from_ref(region), z0, z1) {
-            self.add_mesh(mesh.positions, mesh.triangles);
+        if self.surface.is_some() {
+            self.add_surface_region(region, z0, z1);
+            return;
+        }
+        // Held until the plate is sealed, so every region at one height is united at once.
+        match self.pieces.iter_mut().find(|piece| piece.z0.to_bits() == z0.to_bits() && piece.z1.to_bits() == z1.to_bits()) {
+            Some(piece) => piece.regions.push(region.clone()),
+            None => self.pieces.push(Piece { z0, z1, regions: vec![region.clone()] }),
         }
     }
 
-    fn is_empty(&self) -> bool {
-        self.triangles.is_empty()
+    fn add_surface_region(&mut self, region: &Region2, z0: f64, z1: f64) -> bool {
+        let Some(front) = self.surface else { return false };
+        let Ok(loops) = region_loops(region) else { return false };
+        let Ok((points, mut triangles)) = solidcore_tess::triangulate_planar(&loops) else { return false };
+        if triangles.is_empty() {
+            return false;
+        }
+        if !front {
+            for triangle in &mut triangles {
+                triangle.swap(1, 2);
+            }
+        }
+        let height = if front { z1 } else { z0 };
+        self.add_mesh(points.into_iter().map(|point| Vec3::new(point[0], point[1], height)).collect(), triangles);
+        true
     }
+
+    fn is_empty(&self) -> bool {
+        self.triangles.is_empty() && self.pieces.is_empty()
+    }
+}
+
+/// Add every region of a surface plate, and say whether all of them went in. Each region is
+/// tried whatever the others did: stopping at the first failure would silently drop the copper
+/// that follows it.
+fn surface_regions(plate: &mut Plate, regions: &[Region2], z0: f64, z1: f64) -> bool {
+    let mut built = true;
+    for region in regions {
+        if !plate.add_surface_region(region, z0, z1) {
+            built = false;
+        }
+    }
+    built
+}
+
+/// Whether a point is inside a closed polygon (even-odd rule).
+fn point_in_polygon(point: Vec2, polygon: &[[f64; 2]]) -> bool {
+    let mut inside = false;
+    for (a, b) in polygon.iter().zip(polygon.iter().cycle().skip(1)).take(polygon.len()) {
+        if (a[1] > point.y) != (b[1] > point.y) && point.x < a[0] + (point.y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]) {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// The middle of a drill outline: the average of its points, which is the centre of a round drill
+/// and of a slot alike.
+fn outline_centre(outline: &[[f64; 2]]) -> Vec2 {
+    let count = outline.len().max(1) as f64;
+    let sum = outline.iter().fold([0.0, 0.0], |sum, p| [sum[0] + p[0], sum[1] + p[1]]);
+    Vec2::new(sum[0] / count, sum[1] / count)
+}
+
+/// The board's vias as the copper ring each side has: front, then back.
+fn via_outlines(board: &KicadBoard) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>>) {
+    let mut front = Vec::new();
+    let mut back = Vec::new();
+    for via in &board.vias {
+        let center = [via.at[0], -via.at[1]];
+        let points = circle_points(center, (via.size * 0.5).abs());
+        if points.len() < 3 {
+            continue;
+        }
+        let two_sided = via.layers.iter().any(|l| l == "F.Cu" || l == "*.Cu" || l == "F&B.Cu");
+        if two_sided || via.layers.iter().any(|l| l == "F.Cu") {
+            front.push(points.clone());
+        }
+        if two_sided || via.layers.iter().any(|l| l == "B.Cu") {
+            back.push(points);
+        }
+    }
+    (front, back)
+}
+
+/// The board's holes that have no copper round them on one side: a trace must keep clear of these,
+/// while one inside a pad or a via's ring stops at that copper instead.
+fn bare_drills(drills: &[Vec<[f64; 2]>], copper: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
+    drills
+        .iter()
+        .filter(|drill| {
+            let centre = outline_centre(drill);
+            !copper.iter().any(|outline| point_in_polygon(centre, outline))
+        })
+        .cloned()
+        .collect()
+}
+
+/// How far a trace reaches into a via's ring (mm): the same copper, so it joins the ring instead
+/// of ending on its edge — a trace that stopped exactly on the edge would share a point with it
+/// and the two would have to be separate bodies to stay manifold.
+const TRACE_OVERLAP: f64 = 1e-3;
+
+/// Where a trace on one side stops: the copper it runs into (pads as they are, vias a shaving
+/// inside their ring), and the holes with no copper round them that it must keep clear of.
+fn cut_lists(pads: &[Vec<[f64; 2]>], vias: &[Vec<[f64; 2]>], drills: &[Vec<[f64; 2]>]) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>>) {
+    let mut copper: Vec<Vec<[f64; 2]>> = Vec::with_capacity(pads.len() + vias.len());
+    copper.extend(pads.iter().cloned());
+    copper.extend(vias.iter().map(|ring| grow_outline(ring, -TRACE_OVERLAP)));
+    let bare = bare_drills(drills, &copper);
+    (copper, bare)
 }
 
 /// Every drilled hole of the board as a convex outline in the board frame: no copper may cover
@@ -2008,10 +2396,10 @@ fn inside_span(a: [f64; 2], b: [f64; 2], outline: &[[f64; 2]]) -> Option<(f64, f
     (t1 - t0 > 1e-9).then_some((t0, t1))
 }
 
-/// A convex drill outline grown by `margin` all round: radially from its own centre, which is
-/// exact for a round drill and close enough for a slot.
+/// A convex drill outline grown by `margin` all round (or shrunk by a negative one): radially from
+/// its own centre, which is exact for a round drill and close enough for a slot.
 fn grow_outline(outline: &[[f64; 2]], margin: f64) -> Vec<[f64; 2]> {
-    if !(margin > 0.0) || outline.len() < 3 {
+    if !margin.is_finite() || margin == 0.0 || outline.len() < 3 {
         return outline.to_vec();
     }
     let count = outline.len() as f64;
@@ -2058,20 +2446,21 @@ fn pad_outlines(board: &KicadBoard) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>>) 
     (front, back)
 }
 
-/// The runs of a polyline that no drilled hole (or pad) covers: copper stops at a hole, and a
-/// trace that runs into one comes back as the pieces on either side of it. A hole is grown by
-/// half the stroke's width, so the stroke's own corners never reach into it; a pad is not, since
-/// the pad's own copper carries on from its edge.
-fn trim_around_drills(points: &[[f64; 2]], width: f64, drills: &[Vec<[f64; 2]>], pads: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
+/// The runs of a polyline that no drilled hole (or copper) covers: copper stops at a hole, and a
+/// trace that runs into one comes back as the pieces on either side of it. A hole with no copper
+/// round it on this side is grown by half the stroke's width, so the stroke's own corners never
+/// reach into it; a pad's or a via's copper is not, since the trace stops at its edge and the
+/// copper carries on from there.
+fn trim_around_drills(points: &[[f64; 2]], width: f64, bare: &[Vec<[f64; 2]>], copper: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
     let half = if width.is_finite() && width > 0.0 { width * 0.5 } else { 0.0 };
     let at = |a: [f64; 2], b: [f64; 2], t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
     let mut pieces: Vec<([f64; 2], [f64; 2])> = Vec::new();
     for pair in points.windows(2) {
         let (Some(a), Some(b)) = (pair.first().copied(), pair.get(1).copied()) else { continue };
-        let mut spans: Vec<(f64, f64)> = drills
+        let mut spans: Vec<(f64, f64)> = bare
             .iter()
             .map(|outline| grow_outline(outline, half))
-            .chain(pads.iter().cloned())
+            .chain(copper.iter().cloned())
             .filter_map(|outline| inside_span(a, b, &outline))
             .collect();
         spans.sort_by(|x, y| x.0.total_cmp(&y.0));
@@ -2112,13 +2501,14 @@ fn trim_around_drills(points: &[[f64; 2]], width: f64, drills: &[Vec<[f64; 2]>],
 /// Front and back copper plates: tracks, vias, pads and zones, modelled with their thickness or
 /// as a thin film overlaid on the board's surfaces.
 fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings: &mut Vec<String>) -> Vec<(Plate, String, [f32; 3])> {
-    let mut front = Plate::default();
-    let mut back = Plate::default();
+    let surface = mode == KicadCopper::Overlay;
+    let mut front = Plate { surface: surface.then_some(true), ..Default::default() };
+    let mut back = Plate { surface: surface.then_some(false), ..Default::default() };
     // Pads whose mask is open: bare copper, a plate of their own so it can keep its colour.
-    let mut front_pads = Plate::default();
-    let mut back_pads = Plate::default();
-    // Modelled copper has its real thickness; an overlay is a thin film on the board's
-    // surfaces (below the silkscreen).
+    let mut front_pads = Plate { surface: surface.then_some(true), ..Default::default() };
+    let mut back_pads = Plate { surface: surface.then_some(false), ..Default::default() };
+    // Modelled copper has its real thickness; an overlay is a flat face just off the board's
+    // surfaces (below the silkscreen), with no thickness to stitch or validate.
     let (top, bottom, under, under_top) = if mode == KicadCopper::Overlay {
         (thickness, thickness + OVERLAY_THICKNESS, -OVERLAY_THICKNESS, 0.0)
     } else {
@@ -2134,15 +2524,19 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
         items += 1;
         f(plate);
     };
-    // A routed trace is one item, however many legs KiCad stores it in; it stops at every drill,
-    // and at every pad, whose own copper (bare metal) takes over from its edge.
+    // A routed trace is one item, however many legs KiCad stores it in; it stops at every pad and
+    // via, whose own copper takes over from its edge, and keeps clear of a hole that has no copper
+    // round it on that side.
     let drills = drill_outlines(board);
     let (pad_front, pad_back) = pad_outlines(board);
+    let (via_front, via_back) = via_outlines(board);
+    let (cut_front, bare_front) = cut_lists(&pad_front, &via_front, &drills);
+    let (cut_back, bare_back) = cut_lists(&pad_back, &via_back, &drills);
     for (front_side, width, points) in track_polylines(&board.tracks) {
         let (z0, z1) = if front_side { (top, bottom) } else { (under, under_top) };
         let plate = if front_side { &mut front } else { &mut back };
-        let pads = if front_side { &pad_front } else { &pad_back };
-        for run in trim_around_drills(&points, width, &drills, pads) {
+        let (copper, bare) = if front_side { (&cut_front, &bare_front) } else { (&cut_back, &bare_back) };
+        for run in trim_around_drills(&points, width, bare, copper) {
             add(plate, &|p| p.add_track(&run, width, false, z0, z1));
         }
     }
@@ -2174,9 +2568,16 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
         let front_side = zone.layer == "F.Cu";
         let (z0, z1) = if front_side { (top, bottom) } else { (under, under_top) };
         let plate = if front_side { &mut front } else { &mut back };
-        match extrude_regions(&regions, z0, z1) {
-            Ok(mesh) => plate.add_mesh(mesh.positions, mesh.triangles),
-            Err(_) => warnings.push(format!("a copper zone on {} could not be built", zone.layer)),
+        if surface {
+            if !surface_regions(plate, &regions, z0, z1) {
+                warnings.push(format!("a copper zone on {} could not be built", zone.layer));
+            }
+        } else {
+            // Held with the layer's other copper, so the pour and what sits in it are united into
+            // one surface when the plate is sealed.
+            for region in &regions {
+                plate.add_region(region, z0, z1);
+            }
         }
     }
     for footprint in &board.footprints {
@@ -2417,15 +2818,12 @@ fn pad_loops(pad: &KicadPad) -> Vec<Vec<[f64; 2]>> {
 
 /// A via's copper in the board frame: a disc, or a ring when the via is drilled.
 fn via_region(center: [f64; 2], radius: f64, hole: f64) -> Option<Region2> {
-    if !(radius.is_finite() && radius > 1e-9) {
+    if !(center.iter().all(|coordinate| coordinate.is_finite()) && radius.is_finite() && radius > 1e-9) {
         return None;
     }
-    let outer = clean_loop(&circle_points(center, radius))?;
-    let holes = if hole.is_finite() && hole > 1e-9 && hole < radius {
-        clean_loop(&circle_points(center, hole)).map(|l| l.reversed()).into_iter().collect()
-    } else {
-        Vec::new()
-    };
+    let center = Vec2::new(center[0], center[1]);
+    let outer = Loop2::circle(center, radius);
+    let holes = if hole.is_finite() && hole > 1e-9 && hole < radius { vec![Loop2::circle(center, hole).reversed()] } else { Vec::new() };
     Some(Region2 { outer, holes })
 }
 
@@ -2516,68 +2914,6 @@ fn rounded_rect_points(sx: f64, sy: f64, radius: f64) -> Vec<[f64; 2]> {
         }
     }
     points
-}
-
-fn polygon_area(points: &[[f64; 2]]) -> f64 {
-    (0..points.len())
-        .map(|i| {
-            let a = points[i];
-            let b = points[(i + 1) % points.len()];
-            a[0] * b[1] - b[0] * a[1]
-        })
-        .sum::<f64>()
-        * 0.5
-}
-
-fn triangulate_outline(points: &[[f64; 2]]) -> Result<Vec<[u32; 3]>> {
-    let area = polygon_area(points);
-    if !area.is_finite() || area.abs() <= 1e-12 {
-        return Err(IoError::Invalid("KiCad board outline has zero area".into()));
-    }
-    let ccw = area > 0.0;
-    let mut remaining: Vec<usize> = (0..points.len()).collect();
-    let mut triangles = Vec::with_capacity(points.len() - 2);
-    while remaining.len() > 3 {
-        let mut ear = None;
-        for i in 0..remaining.len() {
-            let prev = remaining[(i + remaining.len() - 1) % remaining.len()];
-            let curr = remaining[i];
-            let next = remaining[(i + 1) % remaining.len()];
-            if turn(points[prev], points[curr], points[next]) * if ccw { 1.0 } else { -1.0 } <= 1e-12 {
-                continue;
-            }
-            if remaining.iter().copied().any(|other| {
-                other != prev && other != curr && other != next && point_in_triangle(points[other], points[prev], points[curr], points[next], ccw)
-            }) {
-                continue;
-            }
-            ear = Some((i, [prev, curr, next]));
-            break;
-        }
-        let Some((index, mut triangle)) = ear else {
-            return Err(IoError::Invalid("KiCad board outline is self-intersecting or cannot be triangulated".into()));
-        };
-        if !ccw {
-            triangle.swap(1, 2);
-        }
-        triangles.push(triangle.map(|v| v as u32));
-        remaining.remove(index);
-    }
-    let mut triangle = [remaining[0], remaining[1], remaining[2]];
-    if !ccw {
-        triangle.swap(1, 2);
-    }
-    triangles.push(triangle.map(|v| v as u32));
-    Ok(triangles)
-}
-
-fn turn(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
-    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-}
-
-fn point_in_triangle(p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2], ccw: bool) -> bool {
-    let sign = if ccw { 1.0 } else { -1.0 };
-    turn(a, b, p) * sign >= -1e-12 && turn(b, c, p) * sign >= -1e-12 && turn(c, a, p) * sign >= -1e-12
 }
 
 fn parse_footprint(
