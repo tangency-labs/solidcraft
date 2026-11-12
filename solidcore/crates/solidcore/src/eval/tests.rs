@@ -1539,6 +1539,15 @@ fn a_saved_screw_keeps_exact_evaluation_projection_and_its_display_net() {
     let record = definition.to_record(&net).unwrap();
     let evaluator = SurfaceEval::new(&Surface::ProceduralSweep(Box::new(record.clone()))).unwrap();
     let uv = [0.37, 0.11];
+    // A screw wall whose profile stays off the axis collapses nowhere: its net, widened by the
+    // certified bound, rules a collapse out (no refusal).
+    for q in [[0.0, 0.0], uv, [1.0, 0.6]] {
+        assert_eq!(
+            evaluator.collapse(q, 1e-9).unwrap(),
+            Collapse::Neither,
+            "{q:?}"
+        );
+    }
     let exact = definition
         .evaluate_definition_point(crate::math::Point2::new(uv[0], uv[1]))
         .unwrap();
