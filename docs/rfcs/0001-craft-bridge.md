@@ -6,8 +6,11 @@
 | Started | 2026-11-07 |
 | Apps | SolidCraft, CamCraft, PCBCraft |
 | Discussion | the pull request that adds this file, then an issue per phase |
+| Superseded | the PCBCraft rows by [RFC 0008](0008-electronics.md): electronics is in-tree. The CamCraft rows stand |
 
-Nothing here is built yet.
+Nothing here is built yet. The PCBCraft parts of this proposal (a sibling EDA app and its ownership
+rows) are superseded by RFC 0008; the board data described here remains useful as an exchange format
+for external EDA and CAM tools.
 
 ## 1. Goals and non-goals
 
