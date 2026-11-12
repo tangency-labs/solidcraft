@@ -9,3 +9,7 @@
 //! With its wall and joints chosen it saves them (`joints`: the wall thickness, what bends and
 //! cuts get, and the edges with a joint of their own) and the feature that makes the printable
 //! body (`solid`).
+//! Faces carved out of the pattern into parts of their own are saved as `groups` (a point
+//! inside each face, the face a part starts at first), and the feature that holds their
+//! printable bodies as `group_solids`. `generator` (1 or 2, absent for 1) says which generator
+//! makes the printable body; generator 2 keeps its parts in `group_solids` too.

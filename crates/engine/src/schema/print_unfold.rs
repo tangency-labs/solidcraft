@@ -14,6 +14,10 @@ pub struct StartParams {
     pub body: String,
     /// A point on the face it will lie on (the base face), in mm, in the design's coordinates.
     pub face: Point3,
+    /// Which generator makes the printable body: 1 (with joints, the default) or 2 (the body's
+    /// own walls, mitred where they meet, a cut a press fit where chosen).
+    #[serde(default)]
+    pub generator: Option<u8>,
 }
 
 /// Set a bend at an edge of the body being unfolded, or clear the bend that is there.
@@ -71,7 +75,7 @@ pub struct JointsParams {
     #[serde(default)]
     pub bends: Option<String>,
     /// How walls meet at every cut: `butt`, `mitre`, `filament` or `press` (default: as it is,
-    /// `butt` at first).
+    /// `butt` at first). Generator 2 makes a `press` cut a press fit and mitres every other.
     #[serde(default)]
     pub cuts: Option<String>,
 }
@@ -83,7 +87,8 @@ pub struct JointParams {
     /// A point on the edge in the flat pattern, in mm.
     pub edge: Point3,
     /// `plain` (a bend's film, a cut's butt or mitre), `filament`, `press`, or `default` to
-    /// follow what all bends or cuts get again.
+    /// follow what all bends or cuts get again. With generator 2 only a cut takes one: `plain`
+    /// (mitred) or `press`.
     pub kind: String,
 }
 
@@ -156,6 +161,8 @@ pub struct PrintUnfoldFlatEdge {
 pub struct PrintUnfoldState {
     /// The body being unfolded.
     pub body: String,
+    /// The generator that makes the printable body: 1 or 2.
+    pub generator: u8,
     /// `edges`: the bends and cuts are being set. `surface`: the surface model is made. `flat`: it
     /// is laid flat. `solid`: the printable body is made.
     pub step: String,

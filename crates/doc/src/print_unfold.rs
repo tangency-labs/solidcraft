@@ -156,6 +156,14 @@ pub struct PrintGroup {
     pub faces: Vec<Vec3>,
 }
 
+fn first_generator() -> u8 {
+    1
+}
+
+fn is_first_generator(generator: &u8) -> bool {
+    *generator == 1
+}
+
 /// A design's unfolded print: the body lying on its base face, and its bends.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PrintUnfold {
@@ -166,6 +174,10 @@ pub struct PrintUnfold {
     /// A point on each bend edge (its middle), in the order they were set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bends: Vec<Vec3>,
+    /// Which generator makes the printable body: 1 (a foldable print of Convert to Sheet Metal,
+    /// with its joints) or 2 (the body's own walls, mitred, [`crate::print_unfold_walls`]).
+    #[serde(default = "first_generator", skip_serializing_if = "is_first_generator")]
+    pub generator: u8,
     /// The groups of faces carved out of the pattern.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<PrintGroup>,
@@ -227,7 +239,7 @@ impl UnfoldFace {
 
     /// Whether `p` (a point in the face's plane) lies inside the face: inside its outer loop
     /// and outside its holes (even-odd over all its loops).
-    fn contains(&self, p: Vec3) -> bool {
+    pub(crate) fn contains(&self, p: Vec3) -> bool {
         let q = self.local(p);
         let mut inside = false;
         for lp in &self.loops {

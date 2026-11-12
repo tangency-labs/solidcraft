@@ -317,6 +317,153 @@ fn the_walls_of_a_hole_are_carved_out_into_a_chain_that_folds_at_its_inside_corn
 }
 
 #[test]
+fn generator_2_makes_the_bodys_own_walls_mitred_and_joined_by_the_film() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30, "corner": [0, 0, 0], "body_name": "Block"}));
+    let why = refused(&mut s, "print.unfold.start", json!({"body": "Block", "face": [50, 30, 0], "generator": 3}));
+    assert!(why.contains("must be 1 or 2"), "{why}");
+    let v = run(&mut s, "print.unfold.start", json!({"body": "Block", "face": [50, 30, 0], "generator": 2}));
+    assert_eq!(v["generator"].as_u64(), Some(2), "{v}");
+    // The four walls on the bottom face, the top on a wall.
+    for e in v["cuts"].as_array().cloned().unwrap_or_default() {
+        run(&mut s, "print.unfold.bend", json!({"edge": mid(&e)}));
+    }
+    let v = run(&mut s, "print.unfold.state", json!({}));
+    let top =
+        v["cuts"].as_array().into_iter().flatten().find(|e| e["start"][2] == e["end"][2] && e["start"][2].as_f64().unwrap_or(0.0) > 10.0).cloned();
+    run(&mut s, "print.unfold.bend", json!({"edge": mid(&top.unwrap_or_else(|| panic!("no top edge")))}));
+    let v = run(&mut s, "print.unfold.flatten", json!({}));
+    assert_eq!((v["step"].as_str(), v["complete"].as_bool()), (Some("flat"), Some(true)), "{v}");
+    // Every cut is mitred, every bend turns on the film, and no wall is asked for beyond the film.
+    assert!(v["flat_cuts"].as_array().into_iter().flatten().all(|e| e["joint"] == "mitre"), "{v}");
+    assert!(v["flat_bends"].as_array().into_iter().flatten().all(|e| e["joint"] == "film"), "{v}");
+    assert_eq!(v["min_wall"].as_f64(), Some(0.0), "{v}");
+    let why = refused(&mut s, "print.unfold.joint", json!({"edge": mid(&v["flat_bends"][0]), "kind": "press"}));
+    assert!(why.contains("a bend turns on the film"), "{why}");
+    let why = refused(&mut s, "print.unfold.joint", json!({"edge": mid(&v["flat_cuts"][0]), "kind": "filament"}));
+    assert!(why.contains("no filament joints"), "{why}");
+    let v = run(&mut s, "print.unfold.make", json!({}));
+    assert_eq!(v["step"].as_str(), Some("solid"), "{v}");
+    // One part, lying flat, as thick as the wall: one piece, joined by the film under its bends.
+    let (lo, hi) = bbox(&mut s, "Block Part 1");
+    assert!((hi[2] - lo[2] - 2.0).abs() < 1e-6, "{lo:?} {hi:?}");
+    {
+        let world = s.world_state().unwrap_or_else(|e| panic!("{e}"));
+        let part = &world.body("Block Part 1").unwrap_or_else(|| panic!("no part")).body;
+        assert_eq!(part.lumps().map(|l| l.len()).unwrap_or(0), 1, "the film joins the walls into one piece");
+        // The walls are the block's faces 2 mm deep, 43200 mm³, less what they share behind
+        // its twelve edges (760 mm of them, 4 mm² each: 3040 mm³). The clearance takes a little
+        // more and the film adds a little: the part is the block's shell and no more.
+        let volume = solidcraft_kernel::measure(part).unwrap_or_else(|e| panic!("{e}")).volume;
+        assert!(volume > 39_700.0 && volume < 40_200.0, "{volume}");
+    }
+    let v = run(&mut s, "print.unfold.unmake", json!({}));
+    assert_eq!(v["step"].as_str(), Some("flat"), "{v}");
+}
+
+/// A block `height` high laid flat by generator 2: its four walls on the bottom face, the top
+/// on a wall. The state once flat.
+fn generator_2_block(s: &mut Session, height: f64) -> Value {
+    run(s, "solid.box", json!({"length": 100, "width": 60, "height": height, "corner": [0, 0, 0], "body_name": "Block"}));
+    let v = run(s, "print.unfold.start", json!({"body": "Block", "face": [50, 30, 0], "generator": 2}));
+    for e in v["cuts"].as_array().cloned().unwrap_or_default() {
+        run(s, "print.unfold.bend", json!({"edge": mid(&e)}));
+    }
+    let v = run(s, "print.unfold.state", json!({}));
+    let top =
+        v["cuts"].as_array().into_iter().flatten().find(|e| e["start"][2] == e["end"][2] && e["start"][2].as_f64().unwrap_or(0.0) > 1.0).cloned();
+    run(s, "print.unfold.bend", json!({"edge": mid(&top.unwrap_or_else(|| panic!("no top edge")))}));
+    run(s, "print.unfold.flatten", json!({}))
+}
+
+#[test]
+fn generator_2_press_fits_a_cut_with_fingers_and_leaves_its_bends_alone() {
+    let mut s = Session::default();
+    let v = generator_2_block(&mut s, 30.0);
+    // Every cut lies in the flat twice, once on each of its faces.
+    let cuts = v["flat_cuts"].as_array().cloned().unwrap_or_default();
+    let edges = |v: &Value, kind: &str| -> std::collections::BTreeSet<u64> {
+        v["flat_cuts"].as_array().into_iter().flatten().filter(|e| e["joint"] == kind).filter_map(|e| e["edge"].as_u64()).collect()
+    };
+    assert_eq!(edges(&v, "mitre").len(), 7, "{v}");
+    // One cut of its own, then every cut: all of them are square and long enough.
+    let v = run(&mut s, "print.unfold.joint", json!({"edge": mid(&cuts[0]), "kind": "press"}));
+    assert_eq!(edges(&v, "press").len(), 1, "{v}");
+    run(&mut s, "print.unfold.joint", json!({"edge": mid(&cuts[0]), "kind": "default"}));
+    let v = run(&mut s, "print.unfold.joints", json!({"cuts": "press"}));
+    assert_eq!((edges(&v, "press").len(), edges(&v, "mitre").len()), (7, 0), "{v}");
+    assert!(v["flat_bends"].as_array().into_iter().flatten().all(|e| e["joint"] == "film"), "{v}");
+    assert_eq!(v["min_wall"].as_f64(), Some(1.2), "{v}");
+    run(&mut s, "print.unfold.make", json!({}));
+    let (lo, hi) = bbox(&mut s, "Block Part 1");
+    assert!((hi[2] - lo[2] - 2.0).abs() < 1e-6, "the fingers and their nubs stay in the wall: {lo:?} {hi:?}");
+    {
+        let world = s.world_state().unwrap_or_else(|e| panic!("{e}"));
+        let part = &world.body("Block Part 1").unwrap_or_else(|| panic!("no part")).body;
+        assert_eq!(part.lumps().map(|l| l.len()).unwrap_or(0), 1, "no fragment lies loose beside the part");
+        // The fingers deal the shared corners out anew, they add nothing: the shell's volume
+        // as with mitres, a little less for the clearance round every finger.
+        let volume = solidcraft_kernel::measure(part).unwrap_or_else(|e| panic!("{e}")).volume;
+        assert!(volume > 39_500.0 && volume < 40_200.0, "{volume}");
+    }
+    // A block too low for a finger clear of the corners: its upright cuts stay mitred.
+    let mut s = Session::default();
+    generator_2_block(&mut s, 8.0);
+    let v = run(&mut s, "print.unfold.joints", json!({"cuts": "press"}));
+    assert_eq!((edges(&v, "mitre").len(), edges(&v, "press").len()), (4, 3), "{v}");
+    let short = v["flat_cuts"].as_array().into_iter().flatten().find(|e| e["joint"] == "mitre").cloned().unwrap_or_else(|| panic!("no mitred cut"));
+    let why = refused(&mut s, "print.unfold.joint", json!({"edge": mid(&short), "kind": "press"}));
+    assert!(why.contains("can't be a press fit"), "{why}");
+    run(&mut s, "print.unfold.make", json!({}));
+}
+
+#[test]
+fn generator_2_keeps_fingers_off_a_cut_another_wall_lies_beside_in_the_flat() {
+    // An L 20 mm high. Its walls fold out from the bottom face, all but one of the two at the
+    // inside corner of the L: that one hangs on the top face, which hangs on a wall.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "L"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 20], [20, 20], [20, 40], [0, 40]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "L", "distance": 20, "body_name": "L"}));
+    let v = run(&mut s, "print.unfold.start", json!({"body": "L", "face": [10, 10, 0], "generator": 2}));
+    // Where the L's corner at the origin lies in the copy being unfolded.
+    let least = |i: usize| {
+        v["cuts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|e| [e["start"][i].as_f64(), e["end"][i].as_f64()])
+            .flatten()
+            .fold(f64::INFINITY, f64::min)
+    };
+    let (ox, oy) = (least(0), least(1));
+    for (x, y, z) in
+        [(20.0, 0.0, 0.0), (40.0, 10.0, 0.0), (30.0, 20.0, 0.0), (10.0, 40.0, 0.0), (0.0, 20.0, 0.0), (20.0, 0.0, 20.0), (20.0, 30.0, 20.0)]
+    {
+        run(&mut s, "print.unfold.bend", json!({"edge": [x + ox, y + oy, z]}));
+    }
+    let v = run(&mut s, "print.unfold.flatten", json!({}));
+    assert_eq!((v["step"].as_str(), v["complete"].as_bool()), (Some("flat"), Some(true)), "{v}");
+    let v = run(&mut s, "print.unfold.joints", json!({"cuts": "press"}));
+    let edges = |kind: &str| -> std::collections::BTreeSet<u64> {
+        v["flat_cuts"].as_array().into_iter().flatten().filter(|e| e["joint"] == kind).filter_map(|e| e["edge"].as_u64()).collect()
+    };
+    // Mitred all the same: the upright cut in the inside corner, and the two cuts a wall folded
+    // out at that corner lies beside (the bottom's and the top's). A finger there would print
+    // as one with that wall.
+    assert_eq!((edges("press").len(), edges("mitre").len()), (8, 3), "{v}");
+    for e in v["flat_cuts"].as_array().into_iter().flatten().filter(|e| e["joint"] == "mitre") {
+        let why = refused(&mut s, "print.unfold.joint", json!({"edge": mid(e), "kind": "press"}));
+        assert!(why.contains("can't be a press fit"), "{why}");
+    }
+    run(&mut s, "print.unfold.make", json!({}));
+    let world = s.world_state().unwrap_or_else(|e| panic!("{e}"));
+    let part = &world.body("L Part 1").unwrap_or_else(|| panic!("no part")).body;
+    assert_eq!(part.lumps().map(|l| l.len()).unwrap_or(0), 1, "no fragment lies loose beside the part");
+}
+
+#[test]
 fn a_box_with_flat_chamfers_unfolds_as_any_body_of_flat_faces() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Box"}));

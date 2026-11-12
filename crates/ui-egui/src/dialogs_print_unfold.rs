@@ -75,6 +75,8 @@ thread_local! {
     /// The session whose tool box is at step 5 (wall and joints), which also works on the flat
     /// pattern.
     static JOINING: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    /// The generator chosen in step 1 (0: generator 1, 1: generator 2), for the next body unfolded.
+    static GENERATOR: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// The tool box asked to open again at the step the design is at now.
     static REOPEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -260,6 +262,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
         Pu::Base => {
             step_note(ui, "1");
             note(ui, solidcraft_ui_text::tr("ui.print_unfold_base_note"));
+            // While both are being developed: which generator makes the printable body.
+            let names: Vec<String> = ["1", "2"].iter().map(|n| solidcraft_ui_text::format("ui.print_unfold_generator_n", &[("n", n)])).collect();
+            let mut chosen = GENERATOR.with(std::cell::Cell::get).min(1);
+            crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_generator"), "pu_generator", &mut chosen, &refs(&names));
+            GENERATOR.with(|c| c.set(chosen));
+            note(ui, solidcraft_ui_text::tr(if chosen == 1 { "ui.print_unfold_generator_2_note" } else { "ui.print_unfold_generator_1_note" }));
         }
         Pu::Edges => {
             let picked: Vec<Sel> = inputs.first_mut().map(|i| std::mem::take(&mut i.items)).unwrap_or_default();
@@ -437,8 +445,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
                 }
             }
             step_note(ui, "5");
-            note(ui, solidcraft_ui_text::tr("ui.print_unfold_joints_note"));
-            note(ui, solidcraft_ui_text::tr("ui.print_unfold_rigid_note"));
+            // Generator 2 has one rule for its edges: only the wall is set.
+            let plain = state(app).is_some_and(|s| s.generator == 2);
+            if plain {
+                note(ui, solidcraft_ui_text::tr("ui.print_unfold_gen2_joints_note"));
+            } else {
+                note(ui, solidcraft_ui_text::tr("ui.print_unfold_joints_note"));
+                note(ui, solidcraft_ui_text::tr("ui.print_unfold_rigid_note"));
+            }
             if let Some(s) = state(app)
                 && s.min_wall > 0.0
             {
@@ -452,9 +466,23 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
             enter |= crate::ui_kit::expr_row(ui, solidcraft_ui_text::tr("ui.print_wall"), wall);
             let names = |kinds: &[(&str, &str)]| -> Vec<String> { kinds.iter().map(|k| solidcraft_ui_text::tr(k.1).to_string()).collect() };
             let (bend_names, cut_names, own_names) = (names(&BEND_KINDS), names(&CUT_KINDS), names(&OWN_KINDS));
-            crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_bends"), "pu_bend_kind", bends, &refs(&bend_names));
-            crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_cuts"), "pu_cut_kind", cuts, &refs(&cut_names));
-            crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_own_kind"), "pu_own_kind", assign, &refs(&own_names));
+            if plain {
+                // Generator 2: a cut is mitred or a press fit, and so is a cut of its own.
+                let row = |ui: &mut egui::Ui, label: &str, id: &str, at: &mut usize, all: &[String], shown: &[usize]| {
+                    let names: Vec<String> = shown.iter().filter_map(|i| all.get(*i).cloned()).collect();
+                    let mut chosen = shown.iter().position(|i| i == at).unwrap_or(0);
+                    crate::ui_kit::choice_row(ui, label, id, &mut chosen, &refs(&names));
+                    if let Some(i) = shown.get(chosen) {
+                        *at = *i;
+                    }
+                };
+                row(ui, solidcraft_ui_text::tr("ui.print_unfold_cuts"), "pu_cut_kind_2", cuts, &cut_names, &[1, 3]);
+                row(ui, solidcraft_ui_text::tr("ui.print_unfold_own_kind"), "pu_own_kind_2", assign, &own_names, &[0, 1, 3]);
+            } else {
+                crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_bends"), "pu_bend_kind", bends, &refs(&bend_names));
+                crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_cuts"), "pu_cut_kind", cuts, &refs(&cut_names));
+                crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_own_kind"), "pu_own_kind", assign, &refs(&own_names));
+            }
             // What the rows say goes to the design at once.
             if let Some(s) = state(app) {
                 let (b, c) = (BEND_KINDS.get(*bends).map_or("film", |k| k.0), CUT_KINDS.get(*cuts).map_or("butt", |k| k.0));
@@ -491,7 +519,8 @@ pub fn run(app: &mut SolveApp, k: &Pu, inputs: &[SelInput]) -> Result<(), String
             let Some(Sel::Face { body, point, .. }) = inputs.first().and_then(|i| i.items.first()) else {
                 return Err(solidcraft_ui_text::tr("ui.print_unfold_base_tip").to_string());
             };
-            app.run(COMMAND, json!({"body": body, "face": [point.x, point.y, point.z]})).map(|_| ())
+            let generator = GENERATOR.with(std::cell::Cell::get).min(1) + 1;
+            app.run(COMMAND, json!({"body": body, "face": [point.x, point.y, point.z], "generator": generator})).map(|_| ())
         }
         // The surface model is made and laid flat in one go.
         Pu::Edges | Pu::Surface => {
@@ -540,7 +569,14 @@ pub fn start_in_tab(app: &mut SolveApp, params: &Value) -> Result<Value, String>
     let body = params["body"].as_str().ok_or("print.unfold.start: give `body`")?;
     let face =
         params.get("face").and_then(solidcraft_engine::params::vec3).ok_or("print.unfold.start: `face` must be [x, y, z] of numbers, in mm")?;
-    let fresh = solidcraft_engine::cmd::print_unfold::unfold_design(&app.session, body, face).map_err(|e| e.to_string())?;
+    let mut fresh = solidcraft_engine::cmd::print_unfold::unfold_design(&app.session, body, face).map_err(|e| e.to_string())?;
+    let generator = match params.get("generator") {
+        None | Some(Value::Null) => 1,
+        Some(v) => v.as_u64().filter(|g| (1..=2).contains(g)).ok_or("print.unfold.start: `generator` must be 1 or 2")? as u8,
+    };
+    if let Some(u) = fresh.doc_mut().print_unfold.as_mut() {
+        u.generator = generator;
+    }
     let reply = solidcraft_engine::cmd::print_unfold::state_of(&fresh, COMMAND).map_err(|e| e.to_string())?;
     crate::documents::open_tab(app, fresh)?;
     serde_json::to_value(reply).map_err(|e| e.to_string())
@@ -694,8 +730,13 @@ pub fn answer_changed(app: &mut SolveApp, answer: Changed) {
             let source =
                 app.docs.slots.get(i).and_then(|s| s.as_ref()).and_then(|s| s.session.doc.print_unfold.as_ref()).and_then(|u| u.source.clone());
             let Some(source) = source else { return };
+            let generator =
+                app.docs.slots.get(i).and_then(|s| s.as_ref()).and_then(|s| s.session.doc.print_unfold.as_ref()).map_or(1, |u| u.generator);
             match solidcraft_engine::cmd::print_unfold::unfold_design(&app.session, &source.body, source.face) {
-                Ok(fresh) => {
+                Ok(mut fresh) => {
+                    if let Some(u) = fresh.doc_mut().print_unfold.as_mut() {
+                        u.generator = generator;
+                    }
                     if let Some(Some(slot)) = app.docs.slots.get_mut(i) {
                         slot.session.replace_design(fresh);
                     }

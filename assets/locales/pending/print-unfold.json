@@ -77,7 +77,12 @@
     "ui.print_unfold_bed_name": "Name",
     "ui.print_unfold_bed_save": "Save printer",
     "ui.print_unfold_bed_remove": "Remove printer",
-    "ui.print_unfold_bed_saved": "The printer is saved in the list"
+    "ui.print_unfold_bed_saved": "The printer is saved in the list",
+    "ui.print_unfold_generator": "Generator",
+    "ui.print_unfold_generator_n": "Generator {n}",
+    "ui.print_unfold_generator_1_note": "Generator 1 makes the printable body with joints: fingers, press fits and filament channels.",
+    "ui.print_unfold_generator_2_note": "Generator 2 makes the printable parts from the body's own walls: mitred where they meet, a film under each bend. A cut can be a press fit. Folded up, the walls are the body's shell.",
+    "ui.print_unfold_gen2_joints_note": "Generator 2: every bend turns on the film. A cut is mitred for gluing, or a press fit (red): fingers with nubs along its middle, where its two faces meet square and it is long enough. Its ends stay mitred. Click single cuts to give them a joint of their own."
   },
   "de": {
     "cmd.print_unfold_start": "Entfalten für Druck",
@@ -157,7 +162,12 @@
     "ui.print_unfold_bed_name": "Name",
     "ui.print_unfold_bed_save": "Drucker speichern",
     "ui.print_unfold_bed_remove": "Drucker entfernen",
-    "ui.print_unfold_bed_saved": "Der Drucker ist in der Liste gespeichert"
+    "ui.print_unfold_bed_saved": "Der Drucker ist in der Liste gespeichert",
+    "ui.print_unfold_generator": "Generator",
+    "ui.print_unfold_generator_n": "Generator {n}",
+    "ui.print_unfold_generator_1_note": "Generator 1 erzeugt den Druckkörper mit Verbindungen: Stege, Pressungen und Filamentkanäle.",
+    "ui.print_unfold_generator_2_note": "Generator 2 erzeugt die Druckteile aus den Wänden des Körpers selbst: mit Gehrung, wo sie sich treffen, und einem Film unter jeder Biegekante. Eine Schnittkante kann eine Pressung erhalten. Gefaltet ergeben die Wände die Hülle des Körpers.",
+    "ui.print_unfold_gen2_joints_note": "Generator 2: Jede Biegekante faltet über den Film. Eine Schnittkante bekommt eine Gehrung zum Kleben oder eine Pressung (rot): Stege mit Nasen entlang ihrer Mitte, wenn ihre beiden Flächen rechtwinklig aufeinandertreffen und sie lang genug ist. Ihre Enden bleiben Gehrung. Klicken Sie einzelne Schnittkanten an, um ihnen einen eigenen Typ zu geben."
   },
   "ar": {
     "cmd.print_unfold_start": "فرد للطباعة",
@@ -237,7 +247,12 @@
     "ui.print_unfold_bed_name": "الاسم",
     "ui.print_unfold_bed_save": "حفظ الطابعة",
     "ui.print_unfold_bed_remove": "إزالة الطابعة",
-    "ui.print_unfold_bed_saved": "تم حفظ الطابعة في القائمة"
+    "ui.print_unfold_bed_saved": "تم حفظ الطابعة في القائمة",
+    "ui.print_unfold_generator": "المولّد",
+    "ui.print_unfold_generator_n": "المولّد {n}",
+    "ui.print_unfold_generator_1_note": "المولّد 1 ينشئ الجسم القابل للطباعة مع الوصلات: أصابع ووصلات ضغط وقنوات خيوط.",
+    "ui.print_unfold_generator_2_note": "المولّد 2 ينشئ الأجزاء القابلة للطباعة من جدران الجسم نفسها: بشطف مائل حيث تلتقي، وغشاء تحت كل ثنية. يمكن أن يكون القطع وصلة ضغط. عند الطي تشكّل الجدران غلاف الجسم.",
+    "ui.print_unfold_gen2_joints_note": "المولّد 2: كل ثنية تدور على الغشاء. القطع يُشطف بزاوية للّصق أو يكون وصلة ضغط (أحمر): أصابع ذات نتوءات على طول وسطه، حين يلتقي وجهاه بزاوية قائمة ويكون طويلًا بما يكفي. يبقى طرفاه مشطوفين. انقر قطوعًا مفردة لمنحها وصلة خاصة بها."
   },
   "he": {
     "cmd.print_unfold_start": "פריסה להדפסה",
@@ -317,7 +332,12 @@
     "ui.print_unfold_bed_name": "שם",
     "ui.print_unfold_bed_save": "שמירת מדפסת",
     "ui.print_unfold_bed_remove": "הסרת מדפסת",
-    "ui.print_unfold_bed_saved": "המדפסת נשמרה ברשימה"
+    "ui.print_unfold_bed_saved": "המדפסת נשמרה ברשימה",
+    "ui.print_unfold_generator": "מחולל",
+    "ui.print_unfold_generator_n": "מחולל {n}",
+    "ui.print_unfold_generator_1_note": "מחולל 1 יוצר את הגוף להדפסה עם חיבורים: אצבעות, חיבורי לחיצה ותעלות פילמנט.",
+    "ui.print_unfold_generator_2_note": "מחולל 2 יוצר את החלקים להדפסה מדפנות הגוף עצמן: בחיתוך זווית במקום שבו הן נפגשות, עם שכבה דקה מתחת לכל כיפוף. חיתוך יכול להיות חיבור לחיצה. בקיפול הדפנות יוצרות את מעטפת הגוף.",
+    "ui.print_unfold_gen2_joints_note": "מחולל 2: כל כיפוף מסתובב על השכבה הדקה. חיתוך נחתך בזווית להדבקה, או הופך לחיבור לחיצה (אדום): אצבעות עם בליטות לאורך אמצעו, כששני פניו נפגשים בזווית ישרה והוא ארוך מספיק. קצותיו נשארים חתוכים בזווית. לחצו על חיתוכים בודדים כדי לתת להם חיבור משלהם."
   },
   "ja": {
     "cmd.print_unfold_start": "印刷用に展開",
@@ -397,7 +417,12 @@
     "ui.print_unfold_bed_name": "名前",
     "ui.print_unfold_bed_save": "プリンターを保存",
     "ui.print_unfold_bed_remove": "プリンターを削除",
-    "ui.print_unfold_bed_saved": "プリンターをリストに保存しました"
+    "ui.print_unfold_bed_saved": "プリンターをリストに保存しました",
+    "ui.print_unfold_generator": "ジェネレーター",
+    "ui.print_unfold_generator_n": "ジェネレーター {n}",
+    "ui.print_unfold_generator_1_note": "ジェネレーター 1 は、フィンガー、圧入、フィラメント溝などの接合付きで造形用ボディを作成します。",
+    "ui.print_unfold_generator_2_note": "ジェネレーター 2 は、ボディ自体の壁から造形用パーツを作成します。壁が接する箇所は留め継ぎになり、各曲げの下に薄膜が付きます。カットは圧入にできます。折りたたむと壁がボディの外殻になります。",
+    "ui.print_unfold_gen2_joints_note": "ジェネレーター 2: すべての曲げは薄膜で曲がります。カットは接着用の留め継ぎ、または圧入（赤）になります。圧入は、2 つの面が直角に接し、十分な長さがある場合に、カットの中央部に突起付きのフィンガーを作ります。両端は留め継ぎのままです。個別のカットをクリックすると、独自の接合を指定できます。"
   },
   "ko": {
     "cmd.print_unfold_start": "인쇄용 펼치기",
@@ -477,7 +502,12 @@
     "ui.print_unfold_bed_name": "이름",
     "ui.print_unfold_bed_save": "프린터 저장",
     "ui.print_unfold_bed_remove": "프린터 제거",
-    "ui.print_unfold_bed_saved": "프린터를 목록에 저장했습니다"
+    "ui.print_unfold_bed_saved": "프린터를 목록에 저장했습니다",
+    "ui.print_unfold_generator": "생성기",
+    "ui.print_unfold_generator_n": "생성기 {n}",
+    "ui.print_unfold_generator_1_note": "생성기 1은 핑거, 압입, 필라멘트 채널 같은 이음과 함께 인쇄용 본체를 만듭니다.",
+    "ui.print_unfold_generator_2_note": "생성기 2는 본체 자체의 벽으로 인쇄용 파트를 만듭니다. 벽이 만나는 곳은 연귀 맞춤이 되고 각 굽힘 아래에 필름이 생깁니다. 절단은 압입으로 할 수 있습니다. 접으면 벽이 본체의 외피가 됩니다.",
+    "ui.print_unfold_gen2_joints_note": "생성기 2: 모든 굽힘은 필름에서 접힙니다. 절단은 접착용 연귀 맞춤이 되거나 압입(빨간색)이 됩니다. 압입은 두 면이 직각으로 만나고 길이가 충분할 때 절단의 가운데 구간에 돌기가 있는 핑거를 만듭니다. 양 끝은 연귀 맞춤으로 남습니다. 개별 절단을 클릭하면 고유한 이음을 지정할 수 있습니다."
   },
   "vi": {
     "cmd.print_unfold_start": "Trải phẳng để in",
@@ -557,7 +587,12 @@
     "ui.print_unfold_bed_name": "Tên",
     "ui.print_unfold_bed_save": "Lưu máy in",
     "ui.print_unfold_bed_remove": "Xóa máy in",
-    "ui.print_unfold_bed_saved": "Đã lưu máy in vào danh sách"
+    "ui.print_unfold_bed_saved": "Đã lưu máy in vào danh sách",
+    "ui.print_unfold_generator": "Bộ tạo",
+    "ui.print_unfold_generator_n": "Bộ tạo {n}",
+    "ui.print_unfold_generator_1_note": "Bộ tạo 1 tạo khối in có mối nối: ngón, lắp ép và rãnh sợi nhựa.",
+    "ui.print_unfold_generator_2_note": "Bộ tạo 2 tạo các phần in từ chính các thành của khối: vát chéo ở nơi chúng gặp nhau, có một lớp màng dưới mỗi cạnh uốn. Một đường cắt có thể là mối lắp ép. Khi gấp lại, các thành tạo nên lớp vỏ của khối.",
+    "ui.print_unfold_gen2_joints_note": "Bộ tạo 2: mọi cạnh uốn gấp trên lớp màng. Một đường cắt được vát chéo để dán, hoặc là mối lắp ép (màu đỏ): các ngón có gờ dọc phần giữa của nó, khi hai mặt gặp nhau vuông góc và nó đủ dài. Hai đầu của nó vẫn vát chéo. Nhấp vào từng đường cắt để cho nó một mối nối riêng."
   },
   "zh": {
     "cmd.print_unfold_start": "展开以打印",
@@ -637,6 +672,11 @@
     "ui.print_unfold_bed_name": "名称",
     "ui.print_unfold_bed_save": "保存打印机",
     "ui.print_unfold_bed_remove": "移除打印机",
-    "ui.print_unfold_bed_saved": "打印机已保存到列表"
+    "ui.print_unfold_bed_saved": "打印机已保存到列表",
+    "ui.print_unfold_generator": "生成器",
+    "ui.print_unfold_generator_n": "生成器 {n}",
+    "ui.print_unfold_generator_1_note": "生成器 1 生成带连接的可打印实体：指接、压合和线材通道。",
+    "ui.print_unfold_generator_2_note": "生成器 2 用实体自身的壁生成可打印部分：壁相接处为斜接，每个折弯下方有一层薄膜。切边可以做成压合。折叠后，这些壁构成实体的外壳。",
+    "ui.print_unfold_gen2_joints_note": "生成器 2：每个折弯都在薄膜上转动。切边为用于粘接的斜接，或做成压合（红色）：当两个面垂直相接且切边足够长时，沿其中段生成带凸点的指接。切边两端保持斜接。单击单条切边可为其指定自己的连接。"
   }
 }
