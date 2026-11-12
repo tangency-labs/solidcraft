@@ -5,9 +5,10 @@
 //! material so that the flat stays as drawn. Where two
 //! flanges meet at a corner of the panel they stand on, their surfaces meet along a line, and a
 //! rip parts them there: the corner is the sheet's like any other, its bends ending with the
-//! corner's relief.
+//! corner's relief. An edge split into stretches (an edge flange's segments) bends each stretch
+//! at its own angle and height, to its own side: the stretches' bends butt where they meet.
 //!
-//! Not built yet: flanges on part of an edge, and flanges on a curved edge or a roll's edge.
+//! Not built yet: flanges on a curved edge or a roll's edge.
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::Cut;
@@ -15,7 +16,7 @@ use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Lap, Panel, Reli
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::BoolOp;
 
-use crate::sheet::HeightFrom;
+use crate::sheet::{HeightFrom, WHOLE_EDGE};
 use crate::{DocError, FoldSide, Result, SurfaceSheet};
 
 fn err<T>(msg: impl Into<String>) -> Result<T> {
@@ -120,6 +121,36 @@ impl SurfaceSheet {
             return err("that edge is the bend line of a flange; pick a free edge of the sheet");
         }
         Ok(best.map(|(_, e)| e))
+    }
+
+    /// Whether the edge of the sheet's outline nearest the point `p` (the body's coordinates),
+    /// on a face of a planar panel or its rim within twice the thickness of `p` as
+    /// [`SurfaceSheet::free_edge_at`] reads a pick, is a curve (an arc or a free-form edge) rather
+    /// than a line: no straight edge lies there, and a stretch of it given as fractions would
+    /// follow no line.
+    pub fn curved_edge_at(&self, p: Vec3) -> bool {
+        let Ok(dev) = self.develop() else { return false };
+        let Ok(folded) = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places) else { return false };
+        let t = self.sheet.thickness;
+        let reach = t * 2.0 + 1e-3;
+        let mut best: Option<(f64, bool)> = None;
+        for (panel, place) in self.sheet.panels.iter().zip(&folded.places) {
+            let (Surface::Plane, Some(place)) = (&panel.surface, place) else { continue };
+            let q = place.inverse().point(p);
+            if !(q.z >= -t - 1e-6 && q.z <= 2.0 * t + 1e-6) {
+                continue;
+            }
+            let at = Vec2::new(q.x, q.y);
+            let off = (q.z.clamp(0.0, t) - q.z).abs();
+            for s in std::iter::once(&panel.region.outer).chain(&panel.region.holes).flat_map(|l| &l.segs) {
+                let d = s.point_at(s.closest_param(at).clamp(0.0, 1.0)).dist(at);
+                let dist = (d * d + off * off).sqrt();
+                if dist <= reach && best.is_none_or(|(x, _)| dist < x) {
+                    best = Some((dist, !matches!(s, Seg2::Line { .. })));
+                }
+            }
+        }
+        best.is_some_and(|(_, curved)| curved)
     }
 
     /// The stretches of panel `i`'s rips' edges that are free (see [`SurfaceSheet::free_edge_at`]),
@@ -322,19 +353,18 @@ impl SurfaceSheet {
         })
     }
 
-    /// Moves the edge `a`–`b` of panel `i` `by` mm outward (inward where negative), its bend
-    /// starting `start` mm inside it: the panel gains, or loses, the strip between. At each end
-    /// the line of the outline beside the edge is followed to the edge's new line (on a slanted
-    /// edge the strip is a parallelogram); where it runs nearly along the edge, the end moves
-    /// square to it; where it is round, the strip runs square from where the round crosses the
-    /// bend's start (see `round_ends`), taking all of the round between the two lines.
-    fn move_edge(&mut self, i: usize, (a, b, d): (Vec2, Vec2, Vec2), by: f64, start: f64) -> Result<()> {
+    /// Moves a stretch of an edge of panel `i` `by` mm outward (inward where negative): the panel
+    /// gains, or loses, the strip between the stretch on the edge's line, from `a` to `b`, and
+    /// the moved line, from `p` to `q`. At an end of the edge the strip follows the line of the
+    /// outline beside it to the edge's new line (on a slanted edge the strip is a parallelogram);
+    /// where it runs nearly along the edge, the end moves square to it; where it is round, the
+    /// strip runs square from where the round crosses the bend's start, taking all of the round
+    /// between the two lines (see `moved_ends` and `round_ends`). Where two stretches of a split
+    /// edge meet, each one's strip ends square to the edge there.
+    fn move_stretch(&mut self, i: usize, (a, b): (Vec2, Vec2), (p, q): (Vec2, Vec2), by: f64) -> Result<()> {
         if by.abs() <= 1e-9 {
             return Ok(());
         }
-        let (p, q) = self.moved_ends(i, (a, b, d), by, start);
-        let (r0, r1) = self.round_ends(i, (a, b, d), start);
-        let (a, b) = (a + d * r0.unwrap_or(0.0), b + d * r1.unwrap_or(0.0));
         let panel = self.sheet.panels.get(i).ok_or_else(|| DocError::Invalid("panel".into()))?;
         let strip = if by > 0.0 { [a, b, q, p] } else { [p, q, b, a] };
         let strip = Region2 { outer: Loop2::polygon(&strip).ccw(), holes: Vec::new() };
@@ -527,7 +557,36 @@ impl SurfaceSheet {
     /// (side flanges across a bend) is there when the corner the three bends make is closed.
     #[allow(clippy::too_many_arguments)]
     pub fn flange_on(&mut self, edge: FreeEdge, height: f64, angle: f64, radius: f64, position: &str, from: HeightFrom, flip: bool) -> Result<usize> {
-        if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {
+        let made = self.flanges_on(edge, &[(WHOLE_EDGE.0, WHOLE_EDGE.1, height, angle, flip)], radius, position, from)?;
+        made.first().copied().ok_or_else(|| DocError::Invalid("the flange has no bend".into()))
+    }
+
+    /// Flanges on stretches of the free edge `edge`, as [`SurfaceSheet::flange_on`] makes one on
+    /// all of it: `runs` tile the edge in order along it, each `(from, to, height, angle, flip)`
+    /// the stretch from the fraction `from` of the edge to the fraction `to`, with its own height,
+    /// angle and side (`flip` as `flange_on` takes it). The fractions run from the edge's end `b`
+    /// to its end `a`: with the material on their left seen from outside the sheet's surface (a
+    /// panel's chart has it on the right there, its material lying on the side `u × v` points to),
+    /// as a base flange's sketch outline runs, counterclockwise, seen from the sketch's side. The
+    /// first run starts at 0, each next one where the one before it ends, and the last ends at 1;
+    /// one run from 0 to 1 is `flange_on`'s flange. Every run is worked out on the sheet as it is,
+    /// before any of them moves the edge: at an end of the edge its anchor, its strip of the edge
+    /// and its flange's side end as the whole edge's would there (see `moved_ends`); where two
+    /// runs meet, at a junction inside the edge, each ends square across the edge. So the panel
+    /// moves by each run's own setback over that run's stretch only, and steps where their
+    /// setbacks differ. The two bends at a junction butt (see [`SurfaceSheet::junctions`]): no
+    /// corner is closed and no bend relief is cut there. Their corners elsewhere are not closed
+    /// yet (see [`SurfaceSheet::close_flange_corners`]). The new bends' joints, in the order of
+    /// `runs`.
+    pub fn flanges_on(
+        &mut self,
+        edge: FreeEdge,
+        runs: &[(f64, f64, f64, f64, bool)],
+        radius: f64,
+        position: &str,
+        from: HeightFrom,
+    ) -> Result<Vec<usize>> {
+        if runs.iter().any(|&(_, _, _, angle, _)| !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6)) {
             return err("the flange angle must be between 0 and 180°");
         }
         let (a, b, d) = straight(&edge)?;
@@ -536,71 +595,118 @@ impl SurfaceSheet {
             return err("not supported yet: a flange on the edge of a hole");
         }
         let t = self.sheet.thickness;
-        let half = (angle / 2.0).tan();
-        // How far inside the edge the bend starts, as a flange-built sheet has it.
-        let start = match position {
-            "inside" | "" => (radius + t) * half,
-            "outside" => 0.0,
-            "middle" | "mid" => (radius + t) * half / 2.0,
-            "material_outside" => radius * half,
-            "tangent" if angle < std::f64::consts::FRAC_PI_2 => (radius + t) * angle.sin(),
-            "tangent" => radius + t,
-            other => return err(format!("unknown bend position `{other}` (inside, outside, middle, material_outside or tangent)")),
+        let out = Vec2::new(d.y, -d.x);
+        // The point of the edge at the fraction `s` of it, from `b`: its ends exactly.
+        let point = |s: f64| {
+            if s <= WHOLE_EDGE.0 {
+                b
+            } else if s >= WHOLE_EDGE.1 {
+                a
+            } else {
+                b.lerp(a, s)
+            }
         };
-        // On the side of the face picked: toward the material from the face a thickness in.
-        let toward = edge.far_face != flip;
-        // The panels' surface is the bend's outside where it turns toward the material: the
-        // anchors mark that surface's virtual sharp, this far past the bend's start.
-        let sharp = if toward { (radius + t) * half } else { radius * half };
-        let leg = height - from.before_leg(angle, radius, t);
-        if !(leg >= -1e-9) {
-            let datum = match from {
-                HeightFrom::Outer => String::new(),
-                other => format!(" from {}", other.datum()),
+        // Each run's stretch as its bend's anchors run, from `a` to `b`: it starts at its `to`
+        // (`hi`) and ends at its `from` (`lo`).
+        let mut plans = Vec::with_capacity(runs.len());
+        for &(lo, hi, height, angle, flip) in runs {
+            if !(hi > lo) {
+                return err("a segment of the edge has no length");
+            }
+            let half = (angle / 2.0).tan();
+            // How far inside the edge the bend starts, as a flange-built sheet has it.
+            let start = match position {
+                "inside" | "" => (radius + t) * half,
+                "outside" => 0.0,
+                "middle" | "mid" => (radius + t) * half / 2.0,
+                "material_outside" => radius * half,
+                "tangent" if angle < std::f64::consts::FRAC_PI_2 => (radius + t) * angle.sin(),
+                "tangent" => radius + t,
+                other => return err(format!("unknown bend position `{other}` (inside, outside, middle, material_outside or tangent)")),
             };
-            return err(format!("the flange height{datum} must be at least {:.3} mm for this bend", from.before_leg(angle, radius, t)));
+            // On the side of the face picked: toward the material from the face a thickness in.
+            let toward = edge.far_face != flip;
+            // The panels' surface is the bend's outside where it turns toward the material: the
+            // anchors mark that surface's virtual sharp, this far past the bend's start.
+            let sharp = if toward { (radius + t) * half } else { radius * half };
+            let leg = height - from.before_leg(angle, radius, t);
+            if !(leg >= -1e-9) {
+                let datum = match from {
+                    HeightFrom::Outer => String::new(),
+                    other => format!(" from {}", other.datum()),
+                };
+                return err(format!("the flange height{datum} must be at least {:.3} mm for this bend", from.before_leg(angle, radius, t)));
+            }
+            let by = sharp - start;
+            // The anchor runs where the edge's neighbours meet its line moved to the sharp (on a
+            // slanted edge, not square across from its ends); at a junction, square across from
+            // the junction.
+            let (p, q) = self.moved_ends(edge.panel, (a, b, d), by, start);
+            let (r0, r1) = self.round_ends(edge.panel, (a, b, d), start);
+            let junction = (hi < WHOLE_EDGE.1, lo > WHOLE_EDGE.0);
+            let (x0, x1) = (point(hi), point(lo));
+            plans.push(FlangeRun {
+                angle,
+                toward,
+                sharp,
+                leg,
+                by,
+                junction,
+                anchor: (if junction.0 { x0 + out * by } else { p }, if junction.1 { x1 + out * by } else { q }),
+                strip: (if junction.0 { x0 } else { a + d * r0.unwrap_or(0.0) }, if junction.1 { x1 } else { b + d * r1.unwrap_or(0.0) }),
+            });
         }
-        let by = sharp - start;
-        // The anchor runs where the edge's neighbours meet its line moved to the sharp (on a
-        // slanted edge, not square across from its ends).
-        let (from, to) = self.moved_ends(edge.panel, (a, b, d), by, start);
-        // A sharp inside the edge by no more than the thickness needs no cut: the bend's band runs
-        // a thickness past its anchor and takes that strip, leaving the panel's other edges (and
-        // the rips along them) as they are.
-        if by > 0.0 || by < -t - 1e-9 {
-            self.move_edge(edge.panel, (a, b, d), by, start)?;
+        let mut made = Vec::with_capacity(plans.len());
+        for run in plans {
+            let (origin, to) = run.anchor;
+            // A sharp inside the edge by no more than the thickness needs no cut: the bend's band
+            // runs a thickness past its anchor and takes that strip, leaving the panel's other
+            // edges (and the rips along them) as they are.
+            if run.by > 0.0 || run.by < -t - 1e-9 {
+                self.move_stretch(edge.panel, run.strip, run.anchor, run.by)?;
+            }
+            let len = (to - origin).dot(d);
+            if !(len > 1e-9) {
+                return err("the edge's neighbours leave its flange no length at its bend");
+            }
+            let bend = Bend {
+                angle: run.angle,
+                radius,
+                toward_material: run.toward,
+                datum: Datum::Sharp,
+                length: len,
+                ends: ZoneEnds { near: (0.0, len), far: (0.0, len) },
+                tails: (Tail::Keep, Tail::Keep),
+                relief: (Relief::None, Relief::None),
+            };
+            // Its sides carry on the edges beside it, as laid out in the flat with the bend: through
+            // the anchor's ends on the plate, `slant` along for each mm out (square where those
+            // edges are, and at a junction, where the next stretch's flange stands beside it). The
+            // flange's own anchor lies `allowance - 2·setback` out in the flat.
+            let (k0, k1) = self.edge_slants(edge.panel, (a, b, d));
+            let (k0, k1) = (if run.junction.0 { 0.0 } else { k0 }, if run.junction.1 { 0.0 } else { k1 });
+            let depth = run.leg.max(0.0) + run.sharp;
+            let base = bend.allowance(t, self.sheet.k_factor) - 2.0 * bend.setback(t);
+            let at = |y: f64| (k0 * (base - y), len + k1 * (base - y));
+            let ((p0, p1), (q0, q1)) = (at(0.0), at(-depth));
+            if !(p1 - p0 > 1e-9 && q1 - q0 > 1e-9) {
+                return err("the edges beside it close the flange before it reaches its height");
+            }
+            let n = self.add_panel("flange", &edge, origin, d, len, depth, bend);
+            if let Some(panel) = self.sheet.panels.get_mut(n) {
+                let corners = [Vec2::new(p0, 0.0), Vec2::new(q0, -depth), Vec2::new(q1, -depth), Vec2::new(p1, 0.0)];
+                panel.region = Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() };
+            }
+            made.push(self.sheet.joints.len() - 1);
         }
-        let len = (to - from).dot(d);
-        if !(len > 1e-9) {
-            return err("the edge's neighbours leave its flange no length at its bend");
+        // Where two runs meet, their bends butt: the later run's, nearer `a`, ends there, and the
+        // earlier one's starts there.
+        for pair in made.windows(2) {
+            if let [earlier, later] = pair {
+                self.junctions.push([*later, *earlier]);
+            }
         }
-        let bend = Bend {
-            angle,
-            radius,
-            toward_material: toward,
-            datum: Datum::Sharp,
-            length: len,
-            ends: ZoneEnds { near: (0.0, len), far: (0.0, len) },
-            tails: (Tail::Keep, Tail::Keep),
-            relief: (Relief::None, Relief::None),
-        };
-        // Its sides carry on the edges beside it, as laid out in the flat with the bend: through
-        // the anchor's ends on the plate, `slant` along for each mm out (square where those
-        // edges are). The flange's own anchor lies `allowance - 2·setback` out in the flat.
-        let (k0, k1) = self.edge_slants(edge.panel, (a, b, d));
-        let depth = leg.max(0.0) + sharp;
-        let base = bend.allowance(t, self.sheet.k_factor) - 2.0 * bend.setback(t);
-        let at = |y: f64| (k0 * (base - y), len + k1 * (base - y));
-        let ((p0, p1), (q0, q1)) = (at(0.0), at(-depth));
-        if !(p1 - p0 > 1e-9 && q1 - q0 > 1e-9) {
-            return err("the edges beside it close the flange before it reaches its height");
-        }
-        let n = self.add_panel("flange", &edge, from, d, len, depth, bend);
-        if let Some(panel) = self.sheet.panels.get_mut(n) {
-            let corners = [Vec2::new(p0, 0.0), Vec2::new(q0, -depth), Vec2::new(q1, -depth), Vec2::new(p1, 0.0)];
-            panel.region = Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() };
-        }
-        Ok(self.sheet.joints.len() - 1)
+        Ok(made)
     }
 
     /// Closes the corners the bend `j`, a flange's just added, makes with the other bends standing
@@ -623,7 +729,9 @@ impl SurfaceSheet {
     fn close_corners(&mut self, j: usize) -> Result<()> {
         let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
         let places = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?.places;
-        close_corners_on(&mut self.sheet, &places, self.reliefs.gap, j, None)
+        let junctions = self.junctions.clone();
+        let butt = move |joint: usize, at_end: bool| crate::sheet_surface_convert::butts(&junctions, joint, at_end);
+        close_corners_on(&mut self.sheet, &places, self.reliefs.gap, j, None, &butt)
     }
 
     /// A hem on the free edge at `pick`: half a turn at the edge back over the face opposite the
@@ -1275,6 +1383,11 @@ impl SurfaceSheet {
                 }
             }
         }
+        // Each bend runs from its other end: the one that ended at a junction of a split edge now
+        // starts there, and the one that started there ends there.
+        for pair in &mut self.junctions {
+            pair.swap(0, 1);
+        }
         for c in &mut self.sheet.cuts {
             c.region = r(&c.region);
         }
@@ -1287,6 +1400,7 @@ impl SurfaceSheet {
         // The flat lies in the sheet's flat frame, which `copied` turns with `place`: it turns
         // over with the frame.
         self.regions = self.regions.iter().map(r).collect();
+        self.slits = self.slits.iter().map(|[a, b]| [f(*a), f(*b)]).collect();
         for b in &mut self.bends {
             b.zone = r(&b.zone);
             // It runs the other way, as its joint does, with the same panel on each side of it.
@@ -1649,8 +1763,17 @@ impl SurfaceSheet {
 /// before it settles them, with `open_in` the sheet's joints as the body gave them: only a
 /// corner the body left open closes, where neither flange is joined there to any of those. (Read
 /// on the joints as they were, not as earlier closings left them, so that which corner closes
-/// does not depend on the order the bends are met in.)
-pub(crate) fn close_corners_on(sheet: &mut Sheet, places: &[Option<Rigid3>], gap: f64, j: usize, open_in: Option<&[Joint]>) -> Result<()> {
+/// does not depend on the order the bends are met in.) No corner is made at a bend's end that
+/// `butt` says butts the next bend of a split edge (by the bend's joint, and whether the end is at
+/// its anchors' length or their origin; see [`crate::SurfaceSheet::junctions`]).
+pub(crate) fn close_corners_on(
+    sheet: &mut Sheet,
+    places: &[Option<Rigid3>],
+    gap: f64,
+    j: usize,
+    open_in: Option<&[Joint]>,
+    butt: &dyn Fn(usize, bool) -> bool,
+) -> Result<()> {
     let t = sheet.thickness;
     let reach_of = |b: &Bend| (b.radius + t) * (b.angle / 2.0).tan();
     for k in 0..sheet.joints.len() {
@@ -1709,6 +1832,10 @@ pub(crate) fn close_corners_on(sheet: &mut Sheet, places: &[Option<Rigid3>], gap
         let (e1, e2) = (nearer(s1, nb.length), nearer(s2, ob.length));
         let reach = reach_of(&nb) + reach_of(&ob) + t;
         if (s1 - e1).abs() > reach || (s2 - e2).abs() > reach {
+            continue;
+        }
+        // Where the stretches of a split edge meet, the two bends butt: no corner there.
+        if butt(j, e1 != 0.0) || butt(k, e2 != 0.0) {
             continue;
         }
         // A corner the panel fills: each bend runs off into the panel's side of the other. (Across
@@ -1929,6 +2056,22 @@ const CURVE_REACH: f64 = 1e-3;
 /// How wide (mm) a piece the planar booleans leave must be to be one: where two of their edges
 /// coincide they leave slivers of no width, about their tolerance (1e-9 mm) across.
 const SLIVER: f64 = 1e-8;
+
+/// One stretch of an edge to bend (see [`SurfaceSheet::flanges_on`]), worked out on the sheet as
+/// it was before any stretch of the edge moved it: its bend's angle and side, the virtual sharp
+/// past the bend's start, its leg past the bend, and how far the edge moves out to the sharp (in
+/// where negative); whether its start and its end are junctions with the stretches beside it; its
+/// anchor's ends; and the ends, on the edge's line, of the strip the edge's move takes or adds.
+struct FlangeRun {
+    angle: f64,
+    toward: bool,
+    sharp: f64,
+    leg: f64,
+    by: f64,
+    junction: (bool, bool),
+    anchor: (Vec2, Vec2),
+    strip: (Vec2, Vec2),
+}
 
 /// A fold worked out before anything of the sheet changes (see [`SurfaceSheet::add_fold`]).
 struct FoldPlan {

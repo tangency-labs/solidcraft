@@ -613,6 +613,139 @@ fn surface_sheet_at(st: &ModelState, body: &Option<crate::BodyName>, name: Optio
     st.surface_sheets.iter().position(|s| !matches!(s.free_edge_at(p), Ok(None)))
 }
 
+/// The sheet made from surfaces an edge flange on `edges` works on: the one [`surface_sheet_at`]
+/// finds at its first pick; else, where no body is named and the first edge is split into
+/// segments, the one with a curved edge at that pick, so that the split is refused for what it
+/// is (a curved edge is no free edge, by which `surface_sheet_at` finds a sheet).
+fn surface_flange_sheet(st: &ModelState, body: &Option<crate::BodyName>, f: &Feature, edges: &[crate::FlangeEdge]) -> Option<usize> {
+    let first = edges.first();
+    surface_sheet_at(st, body, f.edge_names.first().map(String::as_str), first.map(|e| e.point.0)).or_else(|| {
+        let p = first.filter(|e| body.is_none() && !e.segments.is_empty())?.point.0;
+        st.surface_sheets.iter().position(|s| s.curved_edge_at(p))
+    })
+}
+
+/// The stretches the `k`th edge `e` of an edge flange bends in, each `(from, to, height, angle,
+/// flip)`: `from` and `to` fractions of the stretch of the edge the sheet still has, in order
+/// along it. An edge with no segments is one stretch, the whole edge, at `height` and `angle` (its
+/// own, else the feature's) to the feature's side `flip`. A split edge makes one stretch for each
+/// run of its segments that share a height, an angle and a side (a segment's own, else the
+/// edge's; a segment's `flip` replaces the feature's outright): the same bend carries on.
+///
+/// The runs keep this invariant: the first starts at the edge's start (0), the last ends at its
+/// end (1), and each starts where the one before it ends, so they are sorted, contiguous and
+/// non-overlapping, and every stretch the segments give is covered. `sheet.flange` accepts
+/// segments that meet within [`crate::sheet::SEGMENT_JOIN_EPS`], and a junction it accepts is shut
+/// here, on the numbers given, before anything is built: a stretch starts where the edge is
+/// covered so far, and one narrower than that tolerance, or one ending behind the covered end, is
+/// no bend of its own (its angle and height do not build) but goes to the run before it. A list
+/// that does not tile the edge (a design file's: the command refuses it) is refused, naming the
+/// segment, as is a segment's angle outside 0…180° or a height below `least` for its angle (the
+/// least height the feature's bend takes); a list of such narrow stretches only is the whole edge.
+fn segment_runs(
+    k: usize,
+    e: &crate::FlangeEdge,
+    vals: &BTreeMap<String, Value>,
+    (height, angle, flip): (f64, f64, bool),
+    least: &dyn Fn(f64) -> f64,
+) -> Result<Vec<(f64, f64, f64, f64, bool)>> {
+    use crate::sheet::{SEGMENT_JOIN_EPS, WHOLE_EDGE};
+    let (edge_height, edge_angle) = (height, angle);
+    if e.segments.is_empty() {
+        return Ok(vec![(WHOLE_EDGE.0, WHOLE_EDGE.1, edge_height, edge_angle, flip)]);
+    }
+    let mut runs: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
+    // The end of the edge the runs made so far cover. A run starts here, never before it, so the
+    // runs are sorted, contiguous and non-overlapping by construction.
+    let mut covered = WHOLE_EDGE.0;
+    // The `to` of the segment before, as stored: the segments must tile the edge, and a stored
+    // list that does not is refused rather than built past the edge or with part of it bare.
+    let mut prev_to = WHOLE_EDGE.0;
+    for (j, seg) in e.segments.iter().enumerate() {
+        if !(0.0..=1.0).contains(&seg.from) {
+            return Err(DocError::Invalid(format!("edges[{k}].segments[{j}].from must be a fraction from 0 to 1")));
+        }
+        if !(0.0..=1.0).contains(&seg.to) {
+            return Err(DocError::Invalid(format!("edges[{k}].segments[{j}].to must be a fraction from 0 to 1")));
+        }
+        if j == 0 && seg.from > SEGMENT_JOIN_EPS {
+            return Err(DocError::Invalid(format!("edges[{k}].segments[0].from must be 0: the segments cover the whole edge")));
+        }
+        if j > 0 && (seg.from - prev_to).abs() > SEGMENT_JOIN_EPS {
+            return Err(DocError::Invalid(format!(
+                "edges[{k}].segments[{j}].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)"
+            )));
+        }
+        prev_to = seg.to;
+        let height = match &seg.height {
+            Some(x) => val(vals, x, Kind::Length)?,
+            None => edge_height,
+        };
+        let angle = match &seg.angle {
+            Some(x) => val(vals, x, Kind::Angle)?,
+            None => edge_angle,
+        };
+        // A segment's own angle and height are checked here, where its index is known, so a
+        // refusal names the segment the caller wrote.
+        if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {
+            return Err(DocError::Invalid(format!("edges[{k}].segments[{j}]: the flange angle must be between 0 and 180°")));
+        }
+        let at_least = least(angle);
+        if !(height >= at_least - 1e-9) {
+            return Err(DocError::Invalid(format!("edges[{k}].segments[{j}]: the flange height must be at least {at_least:.3} mm for this bend")));
+        }
+        let side = seg.flip.unwrap_or(flip);
+        // A junction the command accepts is shut here, whether the two stretches match or not:
+        // the stretch starts where the edge is covered, so no gap or overlap of the junction
+        // tolerance reaches the sheet. The 1e-12 comparison below only says whether they are one
+        // bend.
+        let start = seg.from.max(covered);
+        let start = if start <= covered + SEGMENT_JOIN_EPS { covered } else { start };
+        if seg.to - start <= SEGMENT_JOIN_EPS {
+            // No bend of its own: narrower than the junction tolerance, or ending behind the
+            // covered end. The run before it takes it, its end moving on to the stretch's end but
+            // never back, so the edge stays covered; one taken before any run is covered by the
+            // run that follows, which starts at the edge's start.
+            covered = covered.max(seg.to);
+            if let Some(last) = runs.last_mut() {
+                last.1 = covered;
+            }
+            continue;
+        }
+        let same_bend = runs.last().is_some_and(|last| (last.2 - height).abs() < 1e-12 && (last.3 - angle).abs() < 1e-12 && last.4 == side);
+        if same_bend {
+            // The same bend carries on: the junction closes, and the run takes the stretch's end.
+            if let Some(last) = runs.last_mut() {
+                last.1 = seg.to;
+            }
+        } else {
+            // Another bend starts where the run before it ends; the first starts at the edge's
+            // start however far the stretches taken before it have covered.
+            let start = if runs.is_empty() { WHOLE_EDGE.0 } else { start };
+            runs.push((start, seg.to, height, angle, side));
+        }
+        covered = seg.to;
+    }
+    if !runs.is_empty() && prev_to < WHOLE_EDGE.1 - SEGMENT_JOIN_EPS {
+        // A stored list that stops short of the edge's end leaves part of the edge without a
+        // flange: refused, as the command refuses it.
+        let n = e.segments.len() - 1;
+        return Err(DocError::Invalid(format!("edges[{k}].segments[{n}].to must be 1: the segments cover the whole edge")));
+    }
+    if runs.is_empty() {
+        // A stored list of narrow stretches only (`sheet.flange` cannot write one): the edge
+        // still builds whole, as the feature's own bend.
+        runs.push((WHOLE_EDGE.0, WHOLE_EDGE.1, edge_height, edge_angle, flip));
+    }
+    // A last `to` within the junction tolerance of the edge's end is its end.
+    if let Some(last) = runs.last_mut()
+        && (last.1 - WHOLE_EDGE.1).abs() <= SEGMENT_JOIN_EPS
+    {
+        last.1 = WHOLE_EDGE.1;
+    }
+    Ok(runs)
+}
+
 /// Why a feature found no sheet made from surfaces to work on: the named body is no sheet metal
 /// body, or there is none.
 fn no_sheet(body: &Option<crate::BodyName>) -> DocError {
@@ -821,10 +954,13 @@ pub(super) fn sheet_eval(
             Ok(())
         }
         FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief }
-            if surface_sheet_at(st, body, f.edge_names.first().map(String::as_str), edges.first().map(|e| e.point.0)).is_some() =>
+            if surface_flange_sheet(st, body, f, edges).is_some() =>
         {
-            let i = surface_sheet_at(st, body, f.edge_names.first().map(String::as_str), edges.first().map(|e| e.point.0))
-                .ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            // The sheet with a free edge at the first pick; else, for an edge split into
+            // segments, the one with a curved edge there, where the split is refused for what it
+            // is (see `surface_flange_sheet`).
+            let at_free = surface_sheet_at(st, body, f.edge_names.first().map(String::as_str), edges.first().map(|e| e.point.0));
+            let i = at_free.or_else(|| surface_flange_sheet(st, body, f, edges)).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             let (h, a) = (val(vals, height, Kind::Length)?, val(vals, angle, Kind::Angle)?);
             let sk = st.surface_sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             if sk.unfolded {
@@ -840,10 +976,12 @@ pub(super) fn sheet_eval(
                     .ok_or_else(|| DocError::Invalid(format!("unknown flange height datum `{name}` (outer, inner or tangent)")))?,
                 None => sheet::HeightFrom::Outer,
             };
-            // Every edge is found on the sheet as it was before any of them.
-            let mut sk = sk.clone();
-            let before = sk.clone();
-            let mut picks = Vec::with_capacity(edges.len());
+            // Each edge's own height and angle, else the feature's, and the stretches it bends in:
+            // the whole edge, or each run of its segments (see `segment_runs`). Every segment is
+            // checked before any edge is looked for, so a refusal names the segment written.
+            let t = sk.sheet.thickness;
+            let least = |angle: f64| from.before_leg(angle, rr, t);
+            let mut runs_of = Vec::with_capacity(edges.len());
             for (k, e) in edges.iter().enumerate() {
                 let height = match &e.height {
                     Some(x) => val(vals, x, Kind::Length)?,
@@ -853,8 +991,26 @@ pub(super) fn sheet_eval(
                     Some(x) => val(vals, x, Kind::Angle)?,
                     None => a,
                 };
-                let edge = surface_edge_pick(st, &before, f.edge_names.get(k), e.point.0)?;
-                picks.push((edge, height, angle));
+                runs_of.push(segment_runs(k, e, vals, (height, angle, *flip), &least)?);
+            }
+            // Every edge is found on the sheet as it was before any of them.
+            let mut sk = sk.clone();
+            let before = sk.clone();
+            let mut picks = Vec::with_capacity(edges.len());
+            for (k, (e, runs)) in edges.iter().zip(runs_of).enumerate() {
+                let edge = match surface_edge_pick(st, &before, f.edge_names.get(k), e.point.0) {
+                    Ok(edge) => edge,
+                    // A split edge picked on a curved edge: its stretches' fractions would follow
+                    // no straight line.
+                    Err(_) if runs.len() > 1 && before.curved_edge_at(e.point.0) => {
+                        return Err(DocError::Invalid("not supported yet: segments on a curved edge (pick a straight edge of the sheet)".into()));
+                    }
+                    // The sheet was found only by a curved edge at the first pick: no free edge
+                    // lies there.
+                    Err(_) if at_free.is_none() => return Err(no_free_edge(st, body, edges.first().map(|e| e.point.0))),
+                    Err(why) => return Err(why),
+                };
+                picks.push((edge, runs));
             }
             // The corner relief these flanges ask for in place of the rule's, at the corners
             // their bends make.
@@ -889,16 +1045,20 @@ pub(super) fn sheet_eval(
             // the later one's is cut.
             let order = doc.feature_index(f.id).unwrap_or(usize::MAX);
             let mut made = Vec::with_capacity(picks.len());
-            for (k, (edge, height, angle)) in picks.into_iter().enumerate() {
-                let joint = sk.flange_on(edge, height, angle, rr, position, from, *flip).map_err(named(k))?;
+            for (k, (edge, runs)) in picks.into_iter().enumerate() {
+                // One bend for each run: a split edge's butt where its runs meet.
+                let joints = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
                 if let Some((relief, size)) = own {
-                    sk.corner_reliefs.push((joint, relief, size, order));
+                    for &joint in &joints {
+                        sk.corner_reliefs.push((joint, relief, size, order));
+                    }
                 }
-                made.push(joint);
+                made.push(joints);
             }
-            for (k, joint) in made.iter().enumerate() {
-                sk.close_flange_corners(std::slice::from_ref(joint)).map_err(named(k))?;
+            for (k, joints) in made.iter().enumerate() {
+                sk.close_flange_corners(joints).map_err(named(k))?;
             }
+            let made: Vec<usize> = made.into_iter().flatten().collect();
             sk.clear_of_neighbours(&made)?;
             tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[]));
             if let Some(slot) = st.surface_sheets.get_mut(i) {

@@ -1095,6 +1095,11 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
     if !bores.is_empty() {
         out["bores"] = Value::Array(bores);
     }
+    // Where stretches of a split edge bend to opposite sides, the blank is cut along their
+    // junction: a cut with no width, from the bend line out, beside the outline.
+    if !sk.slits.is_empty() {
+        out["slits"] = Value::Array(sk.slits.iter().map(|[a, b]| json!([pt(a), pt(b)])).collect());
+    }
     out
 }
 
@@ -1231,6 +1236,7 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
         perforation: sk.perforations.iter().flat_map(|p| sk.perforation_holes(p).into_iter().map(|c| (c, p.diameter / 2.0))).collect(),
         bends: sk.bend_infos(),
         rolls: sk.roll_lines.iter().map(|l| (l.start, l.end)).collect(),
+        slits: sk.slits.iter().map(|[a, b]| (*a, *b)).collect(),
         display,
         thickness: sk.thickness,
     };
@@ -1238,8 +1244,9 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
 }
 
 /// What a flat pattern's DXF draws: the flat material, the pockets machined in it, which of its
-/// loops are text, the perforation's holes, the bends, their notes' angles read as `display`, and
-/// the rolls' lines (where each starts and ends, and its middle).
+/// loops are text, the perforation's holes, the bends, their notes' angles read as `display`, the
+/// rolls' lines (where each starts and ends, and its middle), and the cuts with no width along
+/// the junctions of split edges whose stretches bend to opposite sides.
 struct FlatDrawing {
     regions: Vec<solidcore_record::Region2>,
     pockets: Vec<solidcraft_doc::sheet::SheetPocket>,
@@ -1247,6 +1254,7 @@ struct FlatDrawing {
     perforation: Vec<(Vec2, f64)>,
     bends: Vec<solidcraft_doc::sheet::BendInfo>,
     rolls: Vec<(Vec2, Vec2)>,
+    slits: Vec<(Vec2, Vec2)>,
     display: sheet::AngleDisplay,
     thickness: f64,
 }
@@ -1331,6 +1339,12 @@ impl FlatDrawing {
             };
             // A whole ellipse is one ELLIPSE; every other segment is an entity of its own.
             entities.extend(solidcraft_io::loop_shapes(h).into_iter().map(|shape| DxfEntity { layer: layer.clone(), shape }));
+        }
+        // Each junction's cut is cut with the outline, on its layer: out along the junction and
+        // back, as the outline would run round a cut with no width.
+        for (a, b) in &self.slits {
+            entities.push(DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Line(*a, *b) });
+            entities.push(DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Line(*b, *a) });
         }
         for b in &self.bends {
             if !o.no_bend_lines {
