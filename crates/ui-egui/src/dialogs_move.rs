@@ -397,11 +397,6 @@ fn names(p: &Value) -> Vec<String> {
     p.get("bodies").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()
 }
 
-/// The bodies the dialog moves.
-pub(crate) fn moved_bodies(app: &SolveApp, d: &Dialog) -> Vec<String> {
-    names(&targets_json(app, d))
-}
-
 /// Whether Keep Axes With Body is ticked (it starts ticked).
 pub(crate) fn keeps_axes(d: &Dialog) -> bool {
     d.extra.get("keep_axes").and_then(Value::as_bool).unwrap_or(true)
