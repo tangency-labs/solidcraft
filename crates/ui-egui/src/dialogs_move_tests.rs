@@ -1445,7 +1445,8 @@ fn shown_angles(h: &crate::scenario::Harness) -> [String; 3] {
 
 /// The whole move the dialog makes, in the world.
 fn whole_move(h: &crate::scenario::Harness) -> Mat {
-    let p = params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let p = params(&h.app, d).unwrap();
     transform(&h.app, &p).unwrap()
 }
 
@@ -1547,4 +1548,146 @@ fn a_ring_dragged_back_to_its_start_is_back_at_its_angle() {
     }
     ring(&mut d, 0.0, true, true);
     assert_eq!(rx_of(&d), "12.50 deg", "a click leaves the typed angle as it is");
+}
+
+/// Move works in the world, so the triad of a body in a placed component sits on the body where
+/// it is placed, not where it was modelled, and a turn leaves the body's centre there.
+#[test]
+fn the_triad_sits_on_a_body_where_its_component_places_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "translate": [50, 10, 20]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.start("solid.move");
+    let mut d = h.app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    let world = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - world).len() < 1e-6, "triad at {at:?}, body at {world:?}");
+    if let Kind::Move { rz, .. } = &mut d.kind {
+        *rz = "90 deg".into();
+    }
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let turned = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    assert!((turned - world).len() < 1e-6, "turned from {world:?} to {turned:?}");
+    // Editing a later move finds the body the same way, where it stands before that move.
+    let moved = h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": ["5 mm", "0 mm", "0 mm"]})).unwrap()["feature"].as_u64().unwrap();
+    let d = crate::dialogs::for_feature(&h.app, moved, None).unwrap();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - turned - Vec3::X * 5.0).len() < 1e-6, "triad at {at:?}, body was at {turned:?}");
+}
+
+/// Rotate holds the picked axis still, and a move's type can change on the way, in a placed
+/// component too: the dialog names the world point it turns about, which a turn with no origin
+/// would take as the component's origin.
+#[test]
+fn a_placed_body_turns_about_the_picked_axis_through_a_type_change() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 10, 20]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let world = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    h.app.start("solid.move");
+    let mut d = h.app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    if let Kind::Move { rz, .. } = &mut d.kind {
+        *rz = "90 deg".into();
+    }
+    switch_type(&h.app, &mut d, ROTATE);
+    d.inputs[1].items = vec![Sel::Axis { name: "Z".into() }];
+    if let Kind::Move { angle, .. } = &mut d.kind {
+        *angle = "90 deg".into();
+    }
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    // A quarter turn on the spot, then a quarter turn about the world's Z through the origin.
+    let want = gizmo::apply(&gizmo::rotation(Vec3::Z, std::f64::consts::FRAC_PI_2), world);
+    let got = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    assert!((got - want).len() < 1e-5, "{got:?} != {want:?}");
+}
+
+/// In a turned component the stored axis is the component's, like the distances: read as the
+/// world's, the reopened move drew the body elsewhere, and OK would have moved it there.
+#[test]
+fn reopening_a_move_in_a_turned_component_changes_nothing() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "30 deg", "translate": [130, 20, 20]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let id = h
+        .app
+        .run("solid.move", json!({"bodies": ["Body1"], "translate": ["10 mm", "-5 mm", "0 mm"], "axis": [1.0, 0.0, 0.0], "angle": "25 deg"}))
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let bounds = |h: &crate::scenario::Harness| h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds();
+    let before = bounds(&h);
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - before.center()).len() < 1e-4, "triad at {at:?}, body at {:?}", before.center());
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let after = bounds(&h);
+    assert!((after.min - before.min).len() < 1e-3 && (after.max - before.max).len() < 1e-3, "{before:?} -> {after:?}");
+}
+
+/// A stored turn is about the origin, but its triad sits on the body where the move leaves it,
+/// not at the origin plus the stored distance. The stored values stay until a ring is dragged,
+/// which then turns the body on the spot.
+#[test]
+fn a_reopened_turned_move_has_its_triad_on_the_body() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let id = h
+        .app
+        .run("solid.move", json!({"bodies": ["Body1"], "translate": ["30 mm", "0 mm", "0 mm"], "axis": [0.0, 0.0, 1.0], "angle": "90 deg"}))
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let body = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - body).len() < 1e-6, "triad at {at:?}, body at {body:?}");
+    let p = params(&h.app, &d).unwrap();
+    assert_eq!((&p["translate"][0], &p["angle"]), (&json!("30 mm"), &json!("90 deg")), "the stored values stay: {p}");
+
+    let change = Change::Rotate { axis: 2, angle: 10_f64.to_radians() };
+    drag(&h.app, &mut d, crate::gizmo::Drag { handle: crate::gizmo::Handle::Ring(2), change, started: true, done: true });
+    let Kind::Move { rz, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!(rz, "100 deg");
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - body).len() < 1e-4, "a ring turns the body on the spot: {at:?}, body at {body:?}");
+    let p = params(&h.app, &d).unwrap();
+    let m = transform(&h.app, &p).unwrap();
+    assert!((apply_point(&m, Vec3::new(10.0, 10.0, 10.0)) - body).len() < 1e-4, "{p}");
+}
+
+/// A component copied with Create Copy turns about the world origin (`occurrence.move`), not about
+/// its frame's like a body of it: the copy of a placed part turned a quarter on its centre stays on
+/// the part, where it landed 100 mm off when the move was given for the frame's origin.
+#[test]
+fn a_turned_copy_of_a_placed_component_turns_on_its_centre() {
+    let (mut h, occurrence) = part_harness();
+    h.app.run("occurrence.move", json!({"occurrence": occurrence, "translate": [100, 0, 0]})).unwrap();
+    h.app.start("solid.move");
+    h.settle();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Occurrence { path: vec![occurrence] }];
+    d.extra.insert("copy".into(), json!(true));
+    set_angles(&mut h, ["0 deg", "0 deg", "90 deg"]);
+    let p = params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(p["occurrences"] == json!([[occurrence]]) && p.get("angle").is_some(), "{p}");
+    let copy = h.app.session.execute("solid.move", &p).unwrap()["occurrences"][0].as_u64().unwrap();
+    let mut landed = solidcraft_engine::geom::Aabb3::EMPTY;
+    for name in h.app.session.occurrence_bodies(&[copy], true).unwrap() {
+        landed = landed.union(&h.app.session.world_state().unwrap().body(&name).unwrap().mesh().bounds());
+    }
+    assert!(landed.center().dist(Vec3::new(110.0, 10.0, 10.0)) < 1e-6, "{landed:?}");
 }

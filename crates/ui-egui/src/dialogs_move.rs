@@ -17,6 +17,7 @@ use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::{Mat, apply_point, apply_vector, is_identity, mat_inverse, mat_mul, rigid};
+use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
@@ -316,29 +317,40 @@ fn items(d: &Dialog, i: usize) -> &[Sel] {
     crate::selection::items(&d.inputs, i)
 }
 
-/// The centre of the picked bodies where they are before this move (after the earlier types').
-fn bodies_center(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
-    let st = match d.editing {
-        Some((id, _)) => app.session.model.state_before(id),
-        None => app.session.model.state(),
+/// The box around the picked bodies (see [`bodies_of`]) in the world, where they are before this move.
+fn bodies_bounds(app: &SolveApp, d: &Dialog) -> Aabb3 {
+    let names = bodies_of(app, d);
+    let mut bb = Aabb3::EMPTY;
+    let Some((id, _)) = d.editing else {
+        let st = crate::open_meshing::session_world(&app.session);
+        for b in names.iter().filter_map(|n| st.body(n)) {
+            bb = bb.union(&b.mesh().bounds());
+        }
+        return bb;
     };
-    let mut bb: Option<(Vec3, Vec3)> = None;
-    for n in bodies_of(app, d) {
-        let Some(b) = st.body(&n) else { continue };
-        let x = b.mesh().bounds();
-        bb = Some(match bb {
-            None => (x.min, x.max),
-            Some((lo, hi)) => (
-                Vec3::new(lo.x.min(x.min.x), lo.y.min(x.min.y), lo.z.min(x.min.z)),
-                Vec3::new(hi.x.max(x.max.x), hi.y.max(x.max.y), hi.z.max(x.max.z)),
-            ),
-        });
+    // This runs every frame: place the box rather than every body of the earlier model.
+    let st = app.session.model.state_before(id);
+    for (name, source, _, _, m) in app.session.doc.body_frames_with_source(&st) {
+        if !names.contains(&name) {
+            continue;
+        }
+        let Some(x) = st.body(&source).map(|b| b.mesh().bounds()) else { continue };
+        for corner in 0..8 {
+            let pick = |bit: u8, lo: f64, hi: f64| if corner >> bit & 1 == 0 { lo } else { hi };
+            bb.add(apply_point(&m, Vec3::new(pick(0, x.min.x, x.max.x), pick(1, x.min.y, x.max.y), pick(2, x.min.z, x.max.z))));
+        }
     }
-    bb.map(|(lo, hi)| carried(d, true, (lo + hi) * 0.5))
+    bb
 }
 
-/// What a Free Move turns about: the picked pivot, else the kept one (editing), else the
-/// bodies' centre.
+/// The centre of the picked bodies where they are before this move (after the earlier types').
+fn bodies_center(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
+    let bb = bodies_bounds(app, d);
+    (!bb.is_empty()).then(|| carried(d, true, bb.center()))
+}
+
+/// What a Free Move turns about: the picked pivot, else the kept one (editing: the stored
+/// origin, in the world), else the bodies' centre.
 fn pivot(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     if let Some(p) = sel_point(app, d, items(d, 1).first()) {
         return Some(p);
@@ -347,6 +359,44 @@ fn pivot(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
         return Some(Vec3::new(a[0], a[1], a[2]));
     }
     bodies_center(app, d)
+}
+
+/// Whether the move turns about the origin an edited move stored: its stored values, expressions
+/// included, mean that. The triad still sits on the bodies, as that origin can be far from them.
+fn kept_turn(d: &Dialog) -> bool {
+    d.extra.contains_key("pivot") && items(d, 1).is_empty()
+}
+
+/// Where the bodies' centre is after the move as it stands.
+fn moved_centre(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
+    Some(apply_point(&made(app, d)?, bodies_center(app, d)?))
+}
+
+/// Turn the same move about the bodies' centre instead of the kept point: the angles stay, the
+/// distances become how far that centre goes. A ring needs this, as it turns about the triad.
+fn turn_on_centre(app: &SolveApp, d: &mut Dialog) {
+    // A kept turn that does not evaluate lives in `axis` and `angle`, about the kept point.
+    if !kept_turn(d) || d.extra.contains_key("angle") {
+        return;
+    }
+    let (Some(at), Some(centre)) = (moved_centre(app, d), bodies_center(app, d)) else { return };
+    let t = at - centre;
+    for key in ["pivot", "origin"] {
+        d.extra.remove(key);
+    }
+    if let Kind::Move { x, y, z, .. } = &mut d.kind {
+        (*x, *y, *z) = (length(app, t.x), length(app, t.y), length(app, t.z));
+    }
+}
+
+/// The turn part of a placement, as rows.
+pub(crate) fn rows_of(m: &Mat) -> [[f64; 3]; 3] {
+    [0, 1, 2].map(|r| [m[0][r], m[1][r], m[2][r]])
+}
+
+/// A distance worked out from a turn, without its rounding noise.
+fn length(app: &SolveApp, v: f64) -> String {
+    crate::length_input::model(&app.session.doc, (v * 1e6).round() / 1e6 + 0.0)
 }
 
 fn len(app: &SolveApp, s: &str) -> Result<f64, String> {
@@ -450,8 +500,7 @@ fn transform(app: &SolveApp, p: &Value) -> Result<Mat, String> {
 /// `p` with its translation and turn replaced by `m`'s. `m` turns about the world origin, so a
 /// turn names that origin: an omitted one would be the moved body's own frame's origin.
 fn with_transform(mut p: Value, m: &Mat) -> Value {
-    let rows = [0, 1, 2].map(|r| [m[0][r], m[1][r], m[2][r]]);
-    let (axis, th) = gizmo::axis_angle(&rows);
+    let (axis, th) = gizmo::axis_angle(&rows_of(m));
     p["translate"] = json!([mm(m[3][0]), mm(m[3][1]), mm(m[3][2])]);
     if let Some(o) = p.as_object_mut() {
         o.remove("axis");
@@ -561,14 +610,20 @@ fn modelled_axis(app: &SolveApp, s: &Sel) -> Option<(Vec3, Vec3)> {
     e.iter().all(|p| (*p - a).cross(dir).len() < 1e-6 * (1.0 + (b - a).len())).then_some((a, dir))
 }
 
-/// Where the triad sits: the pivot carried by the move so far (Free Move and Translate only).
+/// Where the triad sits: the pivot carried by the move so far, on the bodies for an edited
+/// move's kept turn (Free Move and Translate only).
 pub fn triad(app: &SolveApp, d: &Dialog) -> Option<gizmo::Triad> {
     let Kind::Move { mode, x, y, z, .. } = &d.kind else { return None };
     if !matches!(*mode, FREE | TRANSLATE) || bodies_empty(d) {
         return None;
     }
     let t = Vec3::new(len(app, x).unwrap_or(0.0), len(app, y).unwrap_or(0.0), len(app, z).unwrap_or(0.0));
-    Some(gizmo::Triad { center: pivot(app, d)? + t, translate: true, rotate: *mode == FREE })
+    let on_body = if kept_turn(d) { moved_centre(app, d) } else { None };
+    let center = match on_body {
+        Some(at) => at,
+        None => pivot(app, d)? + t,
+    };
+    Some(gizmo::Triad { center, translate: true, rotate: *mode == FREE })
 }
 
 /// Rotate's ring lies on the selected axis, level with the picked bodies' centre.
@@ -640,6 +695,7 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
         && angle != 0.0
         && !d.extra.contains_key("ring_set")
     {
+        turn_on_centre(app, d);
         settle_ring(app, d, axis);
         d.extra.insert("ring_set".into(), json!(true));
         snapshot(d);
