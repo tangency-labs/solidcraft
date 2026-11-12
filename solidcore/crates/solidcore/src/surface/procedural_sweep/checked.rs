@@ -122,11 +122,21 @@ impl<K: Copy + PartialEq, V: Copy> Memo<K, V> {
 }
 
 /// A station span's turn constants: `tan(width / 4)` enclosed, and its scalar candidate
-/// when that candidate passed [`verify`] (`None` keeps the refusal for a fresh call).
+/// when that candidate passed [`verify`] (`None` keeps the refusal for a fresh call); and
+/// the span's rotation certificate, the sine and cosine of its middle `(a + b) / 2`
+/// enclosed ([`span_mid_sin_cos`]), from which [`ProceduralSweep::span_rotation`] encloses
+/// the rotation at every turn in the span with no series.
 #[derive(Clone, Copy, Debug)]
 struct SpanTurn {
     tau_box: Ivl,
     tau: Option<f64>,
+    mid_sin_cos: (Ivl, Ivl),
+}
+
+/// The sine and cosine of the middle `(a + b) / 2` of the station span `[a, b]`, enclosed
+/// (the twenty-step series over the middle's enclosure).
+fn span_mid_sin_cos(a: f64, b: f64) -> (Ivl, Ivl) {
+    sin_cos_certified((Ivl::from(a) + Ivl::from(b)) / Ivl::from(2.0))
 }
 
 /// The enclosure of `tan(width / 4)` for the station span `[a, b]`.
@@ -232,6 +242,15 @@ pub(super) fn powi(x: f64, n: usize) -> Result<f64> {
     verify(candidate, enclosure, enclosure.mag())
 }
 
+/// The candidate sine and cosine of `theta`, formed in one place for every check of a
+/// rotation: a compiler may form a sine and a cosine of the same angle together (one
+/// `sincos` call), whose last bit can differ from a lone `sin`, so each check takes its
+/// candidates from this one function and they are the same bits whichever check runs.
+#[inline(never)]
+fn candidates(theta: f64) -> (f64, f64) {
+    (theta.sin(), theta.cos())
+}
+
 /// A checked rotation by `theta`: its sine and cosine, and the enclosures of the exact
 /// sine and cosine of `theta` that checked them (which a point check reuses).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -249,7 +268,8 @@ impl Rotation {
     /// so the order never changes an answer.
     pub(super) fn new(theta: f64) -> Result<Self> {
         let (s, c) = sin_cos_point_certified(theta);
-        match (verify(theta.sin(), s, theta), verify(theta.cos(), c, theta)) {
+        let (sine, cosine) = candidates(theta);
+        match (verify(sine, s, theta), verify(cosine, c, theta)) {
             (Ok(sine), Ok(cosine)) => Ok(Self {
                 sine,
                 cosine,
@@ -263,9 +283,10 @@ impl Rotation {
     /// [`Self::new`] against the twenty-step enclosures alone.
     fn new_full(theta: f64) -> Result<Self> {
         let (s, c) = sin_cos_certified(Ivl::from(theta));
+        let (sine, cosine) = candidates(theta);
         Ok(Self {
-            sine: verify(theta.sin(), s, theta)?,
-            cosine: verify(theta.cos(), c, theta)?,
+            sine: verify(sine, s, theta)?,
+            cosine: verify(cosine, c, theta)?,
             sine_box: s,
             cosine_box: c,
         })
@@ -285,8 +306,9 @@ pub(super) struct Turn {
 }
 
 /// The proof of a [`Turn`]'s angle: the clamped parameter `t` it was taken at, in the
-/// station span `[a, b]` whose `tan(width / 4)` is enclosed by `tau_box`, and the
-/// enclosure of the exact turn at `t` that `theta` was checked against.
+/// station span `[a, b]` whose `tan(width / 4)` is enclosed by `tau_box`, the enclosure
+/// `x_box` of the exact `x` at `t` ([`turn_x_box`]), and the enclosure of the exact turn
+/// at `t` that `theta` was checked against.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct TurnProof {
     t: f64,
@@ -294,6 +316,7 @@ struct TurnProof {
     a: f64,
     b: f64,
     tau_box: Ivl,
+    x_box: Ivl,
     theta_box: Ivl,
 }
 
@@ -339,8 +362,8 @@ fn finite_box(a: Box3) -> bool {
 /// `|x| <= 1/2`, where the series is not taken, the angle's enclosure is the whole line,
 /// as there. The rate is the same expression as there.
 fn turn_near(t: f64, a: f64, b: f64, tau_box: Ivl, x: f64, atan_x: Ivl) -> (Ivl, Ivl) {
+    let x_box = turn_x_box(t, a, b, tau_box);
     let width = Ivl::from(b) - Ivl::from(a);
-    let x_box = tau_box * (Ivl::from(2.0) * (Ivl::from(t) - Ivl::from(a)) / width - Ivl::from(1.0));
     let rate = Ivl::from(4.0) * tau_box / (width * (Ivl::from(1.0) + x_box * x_box));
     if !(x_box.lo >= -0.5 && x_box.hi <= 0.5) {
         return (Ivl::whole(), rate);
@@ -349,6 +372,13 @@ fn turn_near(t: f64, a: f64, b: f64, tau_box: Ivl, x: f64, atan_x: Ivl) -> (Ivl,
     let atan = atan_x + Ivl::new(-off, off);
     let theta = (Ivl::from(a) + Ivl::from(b)) / Ivl::from(2.0) + Ivl::from(2.0) * atan;
     (theta, rate)
+}
+
+/// The enclosure of the exact `x = tan(width / 4) (2 (t - a) / width - 1)` at `t` in the
+/// station span `[a, b]`, `tau_box` enclosing `tan(width / 4)`.
+fn turn_x_box(t: f64, a: f64, b: f64, tau_box: Ivl) -> Ivl {
+    let width = Ivl::from(b) - Ivl::from(a);
+    tau_box * (Ivl::from(2.0) * (Ivl::from(t) - Ivl::from(a)) / width - Ivl::from(1.0))
 }
 
 impl ProceduralSweep {
@@ -365,6 +395,7 @@ impl ProceduralSweep {
         Some(*slot.get_or_init(|| SpanTurn {
             tau_box: span_tau_box(a, b),
             tau: span_tau(a, b).ok(),
+            mid_sin_cos: span_mid_sin_cos(a, b),
         }))
     }
 
@@ -484,6 +515,7 @@ impl ProceduralSweep {
                 a,
                 b,
                 tau_box,
+                x_box: turn_x_box(t, a, b, tau_box),
                 theta_box,
             },
         })
@@ -511,7 +543,12 @@ impl ProceduralSweep {
             return Ok(kept);
         }
         let turn = self.checked_turn_at_side(t, ending)?;
-        let rotation = Rotation::new(turn.theta)?;
+        // the span's certificate first; where it cannot prove the rotation, the series at
+        // the angle (either proves it, and both check the same candidates)
+        let rotation = match self.span_rotation(&turn) {
+            Some(rotation) => rotation,
+            None => Rotation::new(turn.theta)?,
+        };
         self.checked_cache.turns.put(key, slot, (turn, rotation));
         Ok((turn, rotation))
     }
@@ -546,6 +583,51 @@ impl ProceduralSweep {
             Some(power) => Ok(power),
             None => powi(base, n),
         }
+    }
+
+    /// The checked rotation by `turn`'s angle from its station span's certificate, no
+    /// series taken: the candidates `sin theta` and `cos theta` checked against
+    /// enclosures formed from the span's middle sine and cosine ([`SpanTurn`]) by a few
+    /// interval products; `None` where those cannot prove them.
+    ///
+    /// Soundness: the exact turn at the turn's `t` is `theta(t) = m + 2 atan x`, `m = (a +
+    /// b) / 2` the span's middle and `x` the exact `x(t)`, which `x_box` encloses. With
+    /// `cos(2 atan x) = (1 - x^2) / (1 + x^2)` and `sin(2 atan x) = 2 x / (1 + x^2)` (the
+    /// rational turn the station spans are built on), `sin theta(t) = sin m (1 - x^2) / (1 +
+    /// x^2) + cos m 2 x / (1 + x^2)` and `cos theta(t) = cos m (1 - x^2) / (1 + x^2) - sin m 2
+    /// x / (1 + x^2)`, which interval arithmetic over the enclosures of `sin m`, `cos m` and
+    /// `x` encloses. Sine and cosine move by at most the change of their angle, and the
+    /// candidate angle `theta` lies within `|theta_box - theta|` of `theta(t)` (`theta_box`
+    /// encloses `theta(t)`), so widened by that the boxes enclose the exact `sin theta` and
+    /// `cos theta` the candidates are checked against, as [`Rotation::new`]'s do; the check
+    /// is the same [`verify`] with the same scale.
+    fn span_rotation(&self, turn: &Turn) -> Option<Rotation> {
+        let proof = &turn.proof;
+        let span = self.span_turn(proof.index, proof.a, proof.b)?;
+        let (sin_m, cos_m) = span.mid_sin_cos;
+        let x = proof.x_box;
+        let square = x * x;
+        // the exact square is not negative
+        let square = Ivl::new(square.lo.max(0.0), square.hi);
+        let one = Ivl::from(1.0);
+        let den = one + square;
+        let cos_2 = (one - square) / den;
+        let sin_2 = Ivl::from(2.0) * x / den;
+        let moved = (proof.theta_box - Ivl::from(turn.theta)).mag();
+        let widen = Ivl::new(-moved, moved);
+        let sine_box = sin_m * cos_2 + cos_m * sin_2 + widen;
+        let cosine_box = cos_m * cos_2 - sin_m * sin_2 + widen;
+        if !(sine_box.is_finite() && cosine_box.is_finite()) {
+            return None;
+        }
+        let theta = turn.theta;
+        let (sine, cosine) = candidates(theta);
+        Some(Rotation {
+            sine: verify(sine, sine_box, theta).ok()?,
+            cosine: verify(cosine, cosine_box, theta).ok()?,
+            sine_box,
+            cosine_box,
+        })
     }
 
     /// Monotone mathematical turn range, including exact station endpoints.
@@ -950,6 +1032,52 @@ mod tests {
                 [h.lo, h.hi].map(f64::to_bits),
                 [w.lo, w.hi].map(f64::to_bits)
             );
+        }
+    }
+
+    /// The rotation from the span's certificate checks the same candidates as the
+    /// series at the angle, and proves them at every turn of short and long spans,
+    /// small and large angles, the stations and the clamped ends included; its boxes
+    /// meet the series' boxes.
+    #[test]
+    fn span_rotations_meet_the_series_ones() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::ScrewMotion;
+
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let far = (0..=8)
+            .map(|i| 4000.0 + f64::from(i) * 0.45)
+            .collect::<Vec<_>>();
+        for stations in [vec![0.0, 0.3, 0.7, 1.2, 1.25], far] {
+            let definition =
+                ProceduralSweep::create(&profile, motion.clone(), &stations, 0.3).unwrap();
+            let (first, last) = (stations[0], stations[stations.len() - 1]);
+            let mut covered = 0;
+            for i in -10..=1010 {
+                let t = first + (last - first) * f64::from(i) / 1000.0;
+                for t in stations.iter().copied().chain([t, t + 1.0e-13]) {
+                    for ending in [false, true] {
+                        let turn = definition.checked_turn_at_side(t, ending).unwrap();
+                        let series = Rotation::new(turn.theta).unwrap();
+                        let span = definition.span_rotation(&turn).unwrap();
+                        assert_eq!(
+                            [span.sine, span.cosine].map(f64::to_bits),
+                            [series.sine, series.cosine].map(f64::to_bits)
+                        );
+                        let meet = |a: Ivl, b: Ivl| a.lo <= b.hi && b.lo <= a.hi;
+                        assert!(meet(span.sine_box, series.sine_box), "t {t}");
+                        assert!(meet(span.cosine_box, series.cosine_box), "t {t}");
+                        covered += 1;
+                    }
+                }
+            }
+            assert!(covered > 2000);
         }
     }
 
