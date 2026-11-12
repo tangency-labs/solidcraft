@@ -3,7 +3,7 @@
     clippy::type_complexity,
     clippy::needless_range_loop
 )] // test arithmetic and its tables
-use super::super::{form, CurveEval, Frame, SurfaceEval};
+use super::super::{CurveEval, Frame, SurfaceEval, form};
 use super::*;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 

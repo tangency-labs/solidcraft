@@ -1736,7 +1736,9 @@ impl SurfaceSheet {
         }
         // The hem's bend keeps an inside radius of half the gap: a gap of 0 is a knife edge.
         if gap == 0.0 {
-            return err("the hem gap must be more than 0: the hem's bend keeps an inside radius of half the gap, and no material bends to a knife edge");
+            return err(
+                "the hem gap must be more than 0: the hem's bend keeps an inside radius of half the gap, and no material bends to a knife edge",
+            );
         }
         let radius = gap / 2.0;
         let leg = length - (radius + t);
@@ -2537,10 +2539,14 @@ pub(crate) fn lap_band(rip: &Rip, on_a: bool, t: f64) -> Option<LapBand> {
 pub(crate) fn reaches(region: &Region2, band: &LapBand) -> Vec<(f64, f64)> {
     let on = |p: Vec2| (band.at(p).1 - band.cut).abs() <= ON_LAP;
     // Far enough past the outline, by a box that holds each of its edges exactly.
-    let (lo, hi) = region.outer.segs.iter().map(crate::sheet_surface_cuts::seg_box).fold(
-        (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY)),
-        |(l, h), (a, b)| (Vec2::new(l.x.min(a.x), l.y.min(a.y)), Vec2::new(h.x.max(b.x), h.y.max(b.y))),
-    );
+    let (lo, hi) = region
+        .outer
+        .segs
+        .iter()
+        .map(crate::sheet_surface_cuts::seg_box)
+        .fold((Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(l, h), (a, b)| {
+            (Vec2::new(l.x.min(a.x), l.y.min(a.y)), Vec2::new(h.x.max(b.x), h.y.max(b.y)))
+        });
     let far = (hi - lo).len() + (lo - band.start).len() + (hi - band.start).len() + band.length + 1.0;
     let line = [Seg2::Line { a: band.inner(-far), b: band.inner(band.length + far) }];
     // Where the outline meets the line, and its edges along the line: their stretch, and whether
@@ -2576,9 +2582,8 @@ pub(crate) fn reaches(region: &Region2, band: &LapBand) -> Vec<(f64, f64)> {
         let m = (lo + hi) / 2.0;
         let on_edges: Vec<bool> = along.iter().filter(|e| e.0 <= m && m <= e.1).map(|e| e.2).collect();
         // Off every edge, held where the outline holds the point, exactly (no chords).
-        let inside = |p: Vec2| {
-            crate::sheet_surface_cuts::holds(&region.outer, p) && !region.holes.iter().any(|h| crate::sheet_surface_cuts::holds(h, p))
-        };
+        let inside =
+            |p: Vec2| crate::sheet_surface_cuts::holds(&region.outer, p) && !region.holes.iter().any(|h| crate::sheet_surface_cuts::holds(h, p));
         let held = if on_edges.is_empty() { inside(band.inner(m)) } else { on_edges.contains(&true) };
         if !held {
             continue;

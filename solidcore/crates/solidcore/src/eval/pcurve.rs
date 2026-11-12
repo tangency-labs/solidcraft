@@ -28,7 +28,7 @@
 //! [`find_span`]) as the routine had them.
 use super::spline::EvalSurface;
 use super::uv::{self, Domain};
-use super::vec::{v3, VecExt};
+use super::vec::{VecExt, v3};
 use super::{Axes, Curve, Curve2, CurveEval, EvalError, Surface, SurfaceEval};
 use crate::math::Vec3;
 
@@ -958,7 +958,10 @@ pub fn eval_d1(c: &Curve2, t: f64) -> Option<([f64; 2], [f64; 2])> {
         return None;
     }
     let pt = [a[0] / a[2], a[1] / a[2]];
-    Some((pt, [(d[0] - d[2] * pt[0]) / a[2], (d[1] - d[2] * pt[1]) / a[2]]))
+    Some((
+        pt,
+        [(d[0] - d[2] * pt[0]) / a[2], (d[1] - d[2] * pt[1]) / a[2]],
+    ))
 }
 
 /// The `p + 1` basis functions non-zero on knot span `span` at `t`, of any degree (NURBS Book

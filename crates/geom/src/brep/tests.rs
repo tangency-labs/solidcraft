@@ -1,8 +1,8 @@
 use super::*;
 use crate::prelude::*;
 use solidcore_ops::{label, pcurve, record_check as check};
-use solidcore_record::brep::*;
 use solidcore_record::Vec3;
+use solidcore_record::brep::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 fn segment(a: f64, b: f64) -> Curve2 {

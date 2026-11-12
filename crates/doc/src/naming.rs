@@ -1459,8 +1459,7 @@ mod tests {
         let mut weak = vec![Arc::downgrade(&state)];
         for depth in 0..count {
             let mut next = body.clone();
-            next.names =
-                NameCell::new(Some(Arc::new(NamingOrigin { feature: feature.clone(), before: state, depth, mats: Vec::new() })));
+            next.names = NameCell::new(Some(Arc::new(NamingOrigin { feature: feature.clone(), before: state, depth, mats: Vec::new() })));
             let mut next_state = ModelState::default();
             next_state.bodies.push(next);
             state = Arc::new(next_state);

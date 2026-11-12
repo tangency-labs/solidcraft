@@ -9,7 +9,7 @@
 
 use solidcore::eval::pcurve as k;
 use solidcore_record::brep::{
-    check_curve, check_curve2, check_interval, check_surface, Budget, Curve, Curve2, Surface,
+    Budget, Curve, Curve2, Surface, check_curve, check_curve2, check_interval, check_surface,
 };
 
 pub use solidcore::eval::pcurve::{Error, SURFACE_GAP_MARGIN};

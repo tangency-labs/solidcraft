@@ -760,7 +760,11 @@ fn contour_flange_takes_tangent_arcs_and_develops_their_bends() {
 /// The rule the curved contour flanges below are made under: 2 thick, K 0.4 (its bend radius, 2,
 /// is no tangent corner's).
 fn curved_contour_rule(s: &mut Session) {
-    run(s, "sheet.manage_rules", json!({"name": "Curved", "thickness": "2 mm", "bend_radius": "2 mm", "gap": "0.5 mm", "k_factor": "0.4", "active": true}));
+    run(
+        s,
+        "sheet.manage_rules",
+        json!({"name": "Curved", "thickness": "2 mm", "bend_radius": "2 mm", "gap": "0.5 mm", "k_factor": "0.4", "active": true}),
+    );
 }
 
 /// A contour flange's flat pattern, once every feature built, and its two sides, the shorter
@@ -7935,7 +7939,11 @@ fn a_flange_on_part_of_a_stepped_outline_spans_that_part() {
 /// from z 22 up through its top, which leaves the side wall's end edge free from z 22 up. Without
 /// the front wall (`front` false) the side wall stands alone.
 fn notched_corner(s: &mut Session, front: bool, notch: bool) {
-    run(s, "sheet.manage_rules", json!({"name": "S", "thickness": "1.2 mm", "bend_radius": "1.2 mm", "k_factor": 0.4, "gap": "0.8 mm", "active": true}));
+    run(
+        s,
+        "sheet.manage_rules",
+        json!({"name": "S", "thickness": "1.2 mm", "bend_radius": "1.2 mm", "k_factor": 0.4, "gap": "0.8 mm", "active": true}),
+    );
     run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
     run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [130, 90]}));
     run(s, "sketch.finish", json!({}));
@@ -8075,7 +8083,6 @@ fn a_flange_on_a_lone_wall_end_stands_on_that_wall() {
     let want = (127.6 + CORNER_BA - 2.4 + 40.0, 90.0 + 17.6 + CORNER_BA - 2.4);
     assert!((size.0 - want.0).abs() < 1e-6 && (size.1 - want.1).abs() < 1e-6, "{size:?} vs {want:?}");
 }
-
 
 // ---------------------------------------------------------------------------------------------
 // `sheet.flange` segments (FR-3 #5927, FR-4 #5928): one picked edge split into stretches, each

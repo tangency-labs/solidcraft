@@ -21,7 +21,7 @@ use std::f64::consts::PI;
 use std::path::Path;
 
 use solidcore_record::Vec3;
-use solidcraft_kernel::{BoolOp, Body, EdgeSpec, FaceSpec, SurfSpec, boolean, sew, sphere};
+use solidcraft_kernel::{Body, BoolOp, EdgeSpec, FaceSpec, SurfSpec, boolean, sew, sphere};
 
 const OUTER: f64 = 50.0;
 const INNER: f64 = 48.0;

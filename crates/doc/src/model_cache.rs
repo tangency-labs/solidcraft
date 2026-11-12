@@ -767,8 +767,7 @@ impl SavedModel {
         let surface_sheets = list("surface_sheets").cloned().unwrap_or_default();
         let threads = list("threads").cloned().unwrap_or_default();
         let key_sets = list("sketch_key_sets").cloned().unwrap_or_default();
-        let mut used =
-            [&surface_sheets, &threads, &key_sets].iter().flat_map(|l| bytes(l.as_slice())).fold(0usize, |t, b| t.saturating_add(b));
+        let mut used = [&surface_sheets, &threads, &key_sets].iter().flat_map(|l| bytes(l.as_slice())).fold(0usize, |t, b| t.saturating_add(b));
         for s in std::iter::once(last).chain(order) {
             let (mut adds, mut new_names, mut new_sketches) = (HashMap::new(), std::collections::HashSet::new(), std::collections::HashSet::new());
             let mut records = *state_bytes.get(s)?;

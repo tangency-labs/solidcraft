@@ -9,9 +9,7 @@ pub(crate) fn remap_sheet_metadata(st: &mut ModelState, names: &[String], transf
         return Err(DocError::Invalid("body transfer metadata exceeds its finite processing budget".into()));
     }
     let names: std::collections::BTreeSet<&str> = names.iter().map(String::as_str).collect();
-    if !st.surface_sheets.iter().any(|s| names.contains(s.body.as_str()))
-        && !st.threads.iter().any(|t| names.contains(t.body.as_str()))
-    {
+    if !st.surface_sheets.iter().any(|s| names.contains(s.body.as_str())) && !st.threads.iter().any(|t| names.contains(t.body.as_str())) {
         return Ok(());
     }
     if !crate::valid_transfer_matrix(transform) {

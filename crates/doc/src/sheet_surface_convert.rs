@@ -1381,9 +1381,9 @@ fn read_surfaces(
     // on `f` (a boss) is none either: the walk does not cross onto it, and `f`'s panel refuses it
     // as no sheet of even thickness.
     let recessed = |f: usize, g: usize| -> bool {
-        openings.get(f).is_some_and(|ls| {
-            ls.iter().any(|(_, what)| matches!(what, Opening::Recess(faces) | Opening::Raised(_, faces) if faces.contains(&g)))
-        })
+        openings
+            .get(f)
+            .is_some_and(|ls| ls.iter().any(|(_, what)| matches!(what, Opening::Recess(faces) | Opening::Raised(_, faces) if faces.contains(&g))))
     };
     // The side a walk from face `from` reaches, crossing onto none of the faces in `rims`.
     let reach = |from: usize, rims: &BTreeSet<usize>| -> BTreeSet<usize> {
@@ -1436,11 +1436,8 @@ fn read_surfaces(
             if sheet.is_none() {
                 return side;
             }
-            let more: Vec<usize> = side
-                .iter()
-                .copied()
-                .filter(|g| *g != from && side.iter().any(|k| k != g && thick(*k) && touches(*k, *g) && rim(*k, *g)))
-                .collect();
+            let more: Vec<usize> =
+                side.iter().copied().filter(|g| *g != from && side.iter().any(|k| k != g && thick(*k) && touches(*k, *g) && rim(*k, *g))).collect();
             if more.is_empty() {
                 return side;
             }
@@ -2555,8 +2552,7 @@ fn junction_slits(sheet: &Sheet, dev: &Development, junctions: &[[usize; 2]]) ->
             _ => None,
         };
         let zone = |j: usize| dev.zones.iter().find(|z| z.joint == j);
-        let (Some((bx, toward_x, length)), Some((by, toward_y, _)), Some(zx), Some(zy)) = (bend(ends), bend(starts), zone(ends), zone(starts))
-        else {
+        let (Some((bx, toward_x, length)), Some((by, toward_y, _)), Some(zx), Some(zy)) = (bend(ends), bend(starts), zone(ends), zone(starts)) else {
             continue;
         };
         if toward_x == toward_y {
@@ -2571,7 +2567,14 @@ fn junction_slits(sheet: &Sheet, dev: &Development, junctions: &[[usize; 2]]) ->
             let place = dev.placements.get(an.panel).copied().flatten()?;
             let corner = an.origin + an.dir * at;
             let region = &sheet.panels.get(an.panel)?.region;
-            region.outer.segs.iter().map(Seg2::start).filter(|v| (*v - corner).dot(an.dir).abs() <= 1e-9).map(|v| place.point(v).dot(n)).reduce(f64::max)
+            region
+                .outer
+                .segs
+                .iter()
+                .map(Seg2::start)
+                .filter(|v| (*v - corner).dot(an.dir).abs() <= 1e-9)
+                .map(|v| place.point(v).dot(n))
+                .reduce(f64::max)
         };
         let (Some(far_x), Some(far_y)) = (reach(&bx, length), reach(&by, 0.0)) else { continue };
         let (start, end) = (near_x.dot(n).min(near_y.dot(n)), far_x.min(far_y));
@@ -3401,7 +3404,8 @@ struct Pushed {
 fn pushed(plane: &Plane, seg: &Seg2, width: f64, flip: bool, (z0, z1): (f64, f64)) -> Result<Pushed> {
     let normal = plane.normal();
     // The chart's rectangle from `lo` to `hi`, counterclockwise.
-    let rect = |lo: Vec2, hi: Vec2| Region2 { outer: Loop2::polygon(&[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)]).ccw(), holes: Vec::new() };
+    let rect =
+        |lo: Vec2, hi: Vec2| Region2 { outer: Loop2::polygon(&[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)]).ccw(), holes: Vec::new() };
     // A height above the plane as a plane's or a spline's chart has it across the profile: up the
     // normal, or flipped down it from the far side, so that the chart's `u x v` points to the
     // material. (The same map takes the chart's coordinate back to the height.)
@@ -3448,7 +3452,8 @@ fn pushed(plane: &Plane, seg: &Seg2, width: f64, flip: bool, (z0, z1): (f64, f64
             // The roll's axis is the normal through the arc's center, its chart the length along
             // it and the angle round it from the plane's x, toward its y where the material lies
             // inward and toward -y where it lies outward (see `Surface::Cylinder`).
-            let place = Rigid3::frame(plane.to_world(center), plane.x, plane.y).ok_or_else(|| DocError::Invalid("a contour arc has no frame".into()))?;
+            let place =
+                Rigid3::frame(plane.to_world(center), plane.x, plane.y).ok_or_else(|| DocError::Invalid("a contour arc has no frame".into()))?;
             let turned = |angle: f64| if inward { angle } else { -angle };
             let (v0, v1) = (turned(start), turned(start + sweep));
             let at = |v: f64| [Vec2::new(z0, v), Vec2::new(z1, v)];

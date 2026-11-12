@@ -369,8 +369,7 @@ fn same_recesses(a: &[Recess], b: Vec<&Recess>, tol: f64) -> bool {
 fn inside_by_loops(a: &[Region2], b: &[Region2], tol: f64) -> bool {
     let holds = |x: &Region2, y: &Region2| same_loop(&x.outer, &y.outer, tol) && y.holes.iter().all(|k| x.holes.iter().any(|h| same_loop(h, k, tol)));
     let new_hole_at = |p: Vec2| {
-        a.iter()
-            .any(|x| b.iter().any(|y| holds(x, y) && x.holes.iter().any(|h| self::holds(h, p) && !y.holes.iter().any(|k| same_loop(h, k, tol)))))
+        a.iter().any(|x| b.iter().any(|y| holds(x, y) && x.holes.iter().any(|h| self::holds(h, p) && !y.holes.iter().any(|k| same_loop(h, k, tol)))))
     };
     a.iter().all(|x| b.iter().any(|y| holds(x, y)) || x.outer.segs.first().is_some_and(|s| new_hole_at(s.start())))
 }
