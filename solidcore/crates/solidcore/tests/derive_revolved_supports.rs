@@ -83,7 +83,7 @@ fn round_trips(k: &Kernel, kind: SupportKind, form: &BSplineSurface, size: f64) 
 #[test]
 fn an_off_axis_tilted_cylinder_far_from_the_origin_round_trips() {
     let k = Kernel::default();
-    for d in [1.0e3] {
+    for d in [1.0e3, 1.0e5] {
         let origin = Vec3::new(d * 0.6, -d * 0.48, d * 0.64);
         round_trips(
             &k,
