@@ -1525,6 +1525,46 @@ fn a_whole_turn_a_rounding_short_of_a_quarter_line_has_its_form_from_it() {
     }
 }
 
+/// A saved screw wall whose record states a smaller bound than its net's certified one is
+/// answered with the certified bound: the collapse test widens by what the definition
+/// proves, never by what the record claims.
+#[test]
+fn a_saved_screw_collapse_uses_its_certified_bound_not_the_stated_one() {
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+    let profile =
+        BSplineCurve::create_line_segment(3, Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 1.0))
+            .unwrap();
+    let motion = ScrewMotion::new(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), 1.5, None).unwrap();
+    let stations = [0.0, 0.3, 0.6];
+    let net = crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap();
+    let definition = ProceduralSweep::create(&profile, motion, &stations, 0.15).unwrap();
+    let mut record = definition.to_record(&net).unwrap();
+    let honest = SurfaceEval::new(&Surface::ProceduralSweep(Box::new(record.clone()))).unwrap();
+    let SurfaceEval::ProceduralSweep(honest) = &honest else {
+        panic!("a procedural sweep")
+    };
+    let certified = honest.certified_bound();
+    assert!(certified > 0.0 && certified.is_finite());
+    // the record claims a net twice as close as certified
+    record.bound = 0.5 * certified;
+    let claimed = SurfaceEval::new(&Surface::ProceduralSweep(Box::new(record.clone()))).unwrap();
+    let rebuilt = ProceduralSweep::from_record(&record).unwrap();
+    let live = rebuilt.procedural_sweep().unwrap().bound();
+    assert!(live > record.bound);
+    let SurfaceEval::ProceduralSweep(saved) = &claimed else {
+        panic!("a procedural sweep")
+    };
+    assert_eq!(saved.certified_bound().to_bits(), live.to_bits());
+    for q in [[0.0, 0.0], [0.37, 0.11], [1.0, 0.6]] {
+        assert_eq!(
+            claimed.collapse(q, 1e-9).unwrap(),
+            Collapse::Neither,
+            "{q:?}"
+        );
+    }
+}
+
 #[test]
 fn a_saved_screw_keeps_exact_evaluation_projection_and_its_display_net() {
     use crate::nurbs::b_spline_curve::BSplineCurve;
