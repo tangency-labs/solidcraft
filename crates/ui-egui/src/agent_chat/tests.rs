@@ -6115,3 +6115,19 @@ fn lengths_of_time_read_in_seconds_minutes_and_hours() {
     assert_eq!(times::running(&noon, noon.at + 30_000.0).as_deref(), Some("running for 30 s"));
     assert_eq!(times::took(&times::Stamp { at: 1.0, took: Some((61_000.0, true)) }).as_deref(), Some("Answered in 1 min"));
 }
+
+#[test]
+fn plugin_runs_always_keep_per_run_consent() {
+    for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
+        for command in ["plugin.run", "PLUGIN.RUN"] {
+            let (mut app, tx) = app_in_a_turn();
+            app.agent_chat.running_id = "claude".into();
+            app.preferences.ai_permissions = mode;
+            agents::remember(&mut app.preferences, "claude", command);
+            let reply = ask(&tx, "engine.execute", json!({"command":command,"params":{"path":"sample","entry":"make"}}));
+            pump_tools(&mut app);
+            assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: {command}");
+            assert!(reply.try_recv().is_err(), "consent must precede dispatch");
+        }
+    }
+}
