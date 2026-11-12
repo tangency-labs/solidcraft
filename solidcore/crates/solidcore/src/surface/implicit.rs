@@ -1831,11 +1831,139 @@ impl AnalyticSupport {
         // a surface of revolution: the analytic surface the kernel recognises in the form
         // (on the form's own frame, sweep and generator ranges and swap), of the label's
         // kind; `build` checks it evaluates as the form
-        recognise(k, kind, form)?
+        let recognised = recognise(k, kind, form)?
             .as_ref()
             .and_then(Self::of)
-            .filter(|a| a.kind() == kind)
-            .ok_or_else(not_kind)
+            .ok_or_else(not_kind)?;
+        match (kind, recognised) {
+            // a cylinder's or cone's numbers read off the form's control structure, on the
+            // recogniser's conventions; a cylinder the recogniser reads as a cone of an angle
+            // of rounding (1e-10 degrees far from the origin) is the cylinder its rows are
+            (SupportKind::Cylinder, Self::Cylinder { .. } | Self::Cone { .. }) => {
+                Self::revolved_from_rows(recognised, true, &net, form).ok_or_else(not_kind)
+            }
+            (SupportKind::Cone, Self::Cone { .. }) => {
+                Self::revolved_from_rows(recognised, false, &net, form).ok_or_else(not_kind)
+            }
+            (kind, other) if other.kind() == kind => Ok(other),
+            _ => Err(not_kind()),
+        }
+    }
+
+    /// A cylinder's or cone's numbers read straight off its NURBS form's control structure
+    /// (#15010): the form's circles are its rows across the generator, each a rational arc
+    /// whose on-curve control points (those of the end weight) lie on its circle, so each
+    /// row's centre is the circumcentre of three of them and its radius their distance from
+    /// it. The axis is the line through the first and last rows' centres, the origin the
+    /// point of it nearest the recogniser's, the x axis the recogniser's made square to it, the
+    /// cone's angle the radii's change along it. No fitting and no long chains: the numbers are
+    /// the stored control points' to their rounding, where the recognisers' chained
+    /// computations tilt the axis by about 1e-13 (an ulp of the origin's size), which a form
+    /// far from the world origin turns into a parametrisation `build` refuses. The
+    /// recogniser's frame turn, sweep, generator range and swap are kept: they are
+    /// conventions, not numbers. `None` where the form gives no such rows (fewer than two
+    /// circles, or three on-curve points in line).
+    fn revolved_from_rows(
+        recognised: Self,
+        cylinder: bool,
+        net: &[Vec<Vec3>],
+        form: &BSplineSurface,
+    ) -> Option<Self> {
+        let (placement_r, semi_r) = match recognised {
+            Self::Cylinder { placement, .. } => (placement, 0.0),
+            Self::Cone {
+                placement,
+                semi_angle_deg,
+                ..
+            } => (placement, semi_angle_deg),
+            _ => return None,
+        };
+        let axis_r = placement_r.z_axis();
+        let (nu, nv) = (net.len(), net.first().map_or(0, Vec::len));
+        let at = |i: usize, j: usize| net.get(i).and_then(|r| r.get(j)).copied();
+        // the circles run along the direction whose rows stay square to the axis
+        let spread = |along_v: bool| {
+            let (rows, len) = if along_v { (nu, nv) } else { (nv, nu) };
+            let mut worst = 0.0_f64;
+            for r in 0..rows {
+                let first = if along_v { at(r, 0) } else { at(0, r) };
+                for c in 0..len {
+                    let p = if along_v { at(r, c) } else { at(c, r) };
+                    if let (Some(p), Some(f)) = (p, first) {
+                        worst = worst.max((p - f).dot(axis_r).abs());
+                    }
+                }
+            }
+            worst
+        };
+        let along_v = spread(true) <= spread(false);
+        let (rows, len) = if along_v { (nu, nv) } else { (nv, nu) };
+        // each row's circle from its first rational quadratic arc, control points p0, p1, p2:
+        // the tangents at p0 and p2 meet at p1, so the centre lies on the line from p1 through
+        // the chord's midpoint m, where |c - p1| |m - p1| = |p0 - p1|^2 (the right angle at p0)
+        let degree = form.degree(if along_v {
+            crate::nurbs::b_spline_surface::SurfParamType::V
+        } else {
+            crate::nurbs::b_spline_surface::SurfParamType::U
+        });
+        if degree != 2 || len < 3 {
+            return None;
+        }
+        let circle = |r: usize| -> Option<(Vec3, f64)> {
+            let point = |c: usize| if along_v { at(r, c) } else { at(c, r) };
+            let (p0, p1, p2) = (point(0)?, point(1)?, point(2)?);
+            let m = (p0 + p2) * 0.5;
+            let to_m = m - p1;
+            let mm = to_m.dot(to_m);
+            if !(mm > 0.0) {
+                return None;
+            }
+            let side = p0 - p1;
+            let centre = p1 + to_m * (side.dot(side) / mm);
+            let radius = ((p0 - centre).length() + (p2 - centre).length()) * 0.5;
+            (centre.x.is_finite() && centre.y.is_finite() && centre.z.is_finite() && radius > 0.0)
+                .then_some((centre, radius))
+        };
+        let circles: Vec<(Vec3, f64)> = (0..rows).filter_map(circle).collect();
+        let (&(c0, r0), &(c1, r1)) = (circles.first()?, circles.last()?);
+        let along = c1 - c0;
+        let length = along.length();
+        if !(length > 0.0) {
+            return None;
+        }
+        let mut axis = along * (1.0 / length);
+        if axis.dot(axis_r) < 0.0 {
+            axis = axis * -1.0;
+        }
+        let origin = c0 + axis * (placement_r.origin() - c0).dot(axis);
+        let xr = placement_r.x_axis();
+        let x = xr - axis * xr.dot(axis);
+        let x = x * (1.0 / x.length());
+        let y = axis.cross(x);
+        let placement = Axis2Placement::from_stored(origin, x, y);
+        let finite = [origin, x, y]
+            .iter()
+            .all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite());
+        if !finite {
+            return None;
+        }
+        if cylinder {
+            #[allow(clippy::cast_precision_loss)] // a few rows
+            let radius = circles.iter().map(|(_, r)| r).sum::<f64>() / circles.len() as f64;
+            return Some(Self::Cylinder { placement, radius });
+        }
+        // the radius changes by tan(angle) per unit along the axis
+        let tan = (r1 - r0) / along.dot(axis);
+        let semi_angle_deg = tan.atan().to_degrees();
+        if semi_r != 0.0 && (semi_angle_deg > 0.0) != (semi_r > 0.0) {
+            return None;
+        }
+        let base_radius = r0 + tan * (origin - c0).dot(axis);
+        Some(Self::Cone {
+            placement,
+            base_radius,
+            semi_angle_deg,
+        })
     }
 
     /// Not a support's kind (#2485): the surface of revolution a NURBS form is, as the
