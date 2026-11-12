@@ -310,3 +310,15 @@ fn a_bad_cylinder_reference_is_refused() {
     }
     assert!(panicked.is_empty(), "solid.cylinder panicked:\n{}", panicked.join("\n"));
 }
+
+#[test]
+fn reference_face_boundary_checks_brep_loops() {
+    let mut s = plate();
+    run(&mut s, "solid.hole", json!({"position": [20, 20, 10], "diameter": 10, "name": "Bore"}));
+    let edge = |p: [f64; 3], d: Value| json!({"edge": p, "distance": d});
+    let p = referenced(json!([edge([0.0, 20.0, 10.0], json!(20)), edge([25.0, 0.0, 10.0], json!(20))]));
+    match s.execute("solid.hole", &p) {
+        Err(e) => assert!(e.to_string().contains("off its face"), "unexpected error: {e}"),
+        Ok(_) => panic!("expected hole inside opening to be refused"),
+    }
+}
