@@ -62,6 +62,7 @@ pub mod cam;
 pub mod cam_adaptive;
 pub mod cam_rates;
 pub mod cam_sheet;
+pub mod cam_sim;
 pub mod cam_stock;
 pub mod canvas;
 pub mod clearance;

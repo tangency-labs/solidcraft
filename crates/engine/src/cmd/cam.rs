@@ -1,7 +1,7 @@
-//! CAM (`cam.job`, `cam.post.list`, `cam.post.get`, `cam.gcode.check`): toolpaths for a
-//! design's profiles and surfaces and G-code for a machine, through the `solidcraft-cam` crate.
-//! The job (machine, post, tools, operations) is a JSON file next to the design, never part of
-//! it, so nothing new is saved in a design (docs/cam-jobs.md).
+//! CAM (`cam.job`, `cam.post.list`, `cam.post.get`, `cam.gcode.check`, `cam.simulate`): toolpaths
+//! for a design's profiles and surfaces and G-code for a machine, through the `solidcraft-cam`
+//! crate. The job (machine, post, tools, operations) is a JSON file next to the design, never part
+//! of it, so nothing new is saved in a design (docs/cam-jobs.md).
 //!
 //! `cam.job` plans every operation in work coordinates (the design less the job's origin): the
 //! 2D ones on profiles, the 3D ones on the part's bodies tessellated from their exact surfaces
@@ -110,7 +110,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              HTML path, another file than output (the part and toolpaths, self-contained); setup_sheet?: .html | .md path (the \
              operator's sheet: work zero, A convention, tools with Z min, operations, checks, warnings); dry_run?: plan and check, write \
              nothing; allow_unsafe?: write even when a check fails (its first line then says so); split_by_tool?: one program \
-             per tool, named after output (part-2-T6.ngc), each complete on its own → name, machine, post, operations: [{name, \
+             per tool, named after output (part-2-T6.ngc), each complete on its own; simulate?: also run the written program through \
+             cam.simulate's stock model (a gouge or a rapid in material fails); simulate_resolution?: its cell mm → name, machine, post, operations: [{name, \
              kind, tool, moves, cut_length, cut_minutes, rewinds, max_tilt_deg, a_deg?, gouge, gouge_at?, holder_collisions, adaptive? (the engagement measured \
              along its path: max_engagement_deg, full_slot_share, levels, helices, …, pocket?: the plain pocket compared), warnings}], program_lines, program_head, readback: {max_tip_deviation, \
              max_axis_deviation_deg, allowed_tip, allowed_axis_deg, cut_minutes, pass}, gouge: {worst, tolerance, tessellation, \
@@ -120,7 +121,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              at?, message, fix}], stock_above_jaws?, bar_grip?, pass, setup?, setup_warnings?}, cut_minutes, rapid_minutes?, machine_time?: \
              {cut_minutes, written_cut_minutes, rapid_minutes, home_returns, spindle_minutes, total_minutes, slowed_blocks, rotary_over, \
              feed_over, peak_rotary_deg_min?, peak_feed_mm_min?, spindle_out_of_range, span_mm, warnings}, passed, failures, dry_run, \
-             outputs: {gcode?, preview?, setup_sheet?, programs?}, notes, summary: {work_zero, part_extent, work_offset, rotary, tools: \
+             outputs: {gcode?, preview?, setup_sheet?, programs?}, notes, simulation? (as cam.simulate), summary: {work_zero, part_extent, work_offset, rotary, tools: \
              [{number, kind, diameter, flute_length, stickout?, holder?, z_min?, operations}], operations: [{name, kind, tool, \
              spindle_rpm, feed, plunge_feed, rotary?, cut_length, cut_minutes}], totals, checks, warnings}, warnings?, programs?: \
              [{order, path?, tool, stickout?, operations, lines, cut_minutes}]. Without dry_run or allow_unsafe a failed check refuses \
@@ -151,6 +152,21 @@ pub static COMMANDS: &[CommandSpec] = &[
              rapid_minutes?, arcs, g93_blocks, rotary_ranges: [{letter, min_deg, max_deg}], bounds?: [[x,y,z] low, [x,y,z] high], \
              errors: [{line, message}] (the first line the reader cannot read; it reads the G-code SolidCraft's posts write, others on a \
              best-effort basis)",
+        ),
+    CommandSpec::new("cam.simulate", "Simulate G-code", crate::checked!("cam.simulate", sim::simulate))
+        .noundo()
+        .icon("play")
+        .contract(&sim::CONTRACT)
+        .output(output_schema_for::<crate::schema::cam_sim::CamSimulateReply>)
+        .params(
+            "path: G-code file; then?: [G-code files] run after it, in order, on the stock it leaves (a job written one program per \
+             tool); job: {…} | job_path: .json (the job it was written for: machine, tools, bodies, origin, tolerance); resolution?: \
+             cell mm (default 5 × tolerance, coarser to fit a large stock or a long program); stock_stl?: STL path for the stock left \
+             → stock: {kind: box | cylinder, min?, max?, x_range?, radius?}, resolution, cells, gouge: {worst, cells, at?}, \
+             rapids_in_material: [{line, volume, depth}], leftover: {max, mean, cells, at?}, part_left, verdict, removed_volume, \
+             minutes, slot_moves, air_moves, air_length, passed, failures, warnings, notes, stock_stl?. The stock is taken from the \
+             part and swept by every block (3-axis: a heightfield; 4th axis: radii over x and A) and compared with the part; a \
+             failure is reported, not refused",
         ),
 ];
 
@@ -1356,9 +1372,10 @@ fn job_name(cmd: &str, s: &Session, job: &CamJob) -> Result<String> {
     }
 }
 
-/// The job of `params` and the folder its relative paths are read from (the job file's).
-fn load_job(cmd: &str, p: &Value, params: &CamJobParams) -> Result<(CamJob, Option<PathBuf>)> {
-    match (params.job.is_some(), &params.job_path) {
+/// The job of a call (`inline` under `job`, or the file `path`) and the folder its relative
+/// paths are read from (the job file's).
+fn load_job(cmd: &str, p: &Value, inline: bool, path: Option<&String>) -> Result<(CamJob, Option<PathBuf>)> {
+    match (inline, path) {
         (true, Some(_)) => Err(bad(cmd, "give `job` or `job_path`, not both")),
         (false, None) => Err(bad(cmd, "give the `job` (an object) or a `job_path` (a .json file)")),
         (true, None) => Ok((parse(cmd, p.get("job").unwrap_or(&Value::Null), "`job`")?, None)),
@@ -1405,7 +1422,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         }
         sheet::distinct(cmd, output.as_deref(), params.preview.as_deref(), params.setup_sheet.as_deref())?;
     }
-    let (job, base) = load_job(cmd, raw, &params)?;
+    let (job, base) = load_job(cmd, raw, params.job.is_some(), params.job_path.as_ref())?;
     let base = base.as_deref();
 
     // The job, read and checked.
@@ -1668,6 +1685,22 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
             num(readback.allowed_axis_deg)
         ));
     }
+    // The written program swept through stock taken from the part and held against the part.
+    let simulation = if params.simulate.unwrap_or(false) {
+        let span = solidcraft_profile::span("cam", "job.simulate");
+        let mut part_notes = Vec::new();
+        let part = sim::part_surface(cmd, s, &job, &place, tol, &mut part_notes)?;
+        let (mut reply, _) = sim::check_program(cmd, &text, &machine, &tools, &part, tol, params.simulate_resolution, sim::most_left(&job))?;
+        reply.notes.extend(part_notes);
+        failures.extend(reply.failures.iter().cloned());
+        drop(span);
+        Some(reply)
+    } else {
+        if params.simulate_resolution.is_some() {
+            return Err(bad(cmd, "`simulate_resolution` goes with `simulate: true`"));
+        }
+        None
+    };
     let passed = failures.is_empty();
     if !passed && !dry_run && !allow_unsafe {
         return Err(bad(
@@ -1688,6 +1721,8 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     let split_by_tool = params.split_by_tool.unwrap_or(false);
     let parts = if split_by_tool { programs::split(cmd, &program, &planned, &post, &machine, output.as_deref())? } else { Vec::new() };
     let mut warnings: Vec<String> = programs::warning(job.tool_change, &planned, split_by_tool).into_iter().collect();
+    // Material the simulation found left on the part: a finding, not a failed check.
+    warnings.extend(simulation.iter().flat_map(|r| r.warnings.iter().filter(|w| w.starts_with(sim::PART_NOT_FINISHED)).cloned()));
     // An older program of every tool under the same name would cut on with the first tool where
     // the machine ignores the tool change.
     if let Some(old) = output.as_deref().filter(|o| split_by_tool && !dry_run && Path::new(o).is_file()) {
@@ -1712,6 +1747,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         attention: machine_time.iter().flat_map(|t| t.limits.iter().cloned()).collect(),
         tool_change: programs::sheet_note(job.tool_change, &planned, split_by_tool),
         programs: parts.iter().map(|w| programs::part_words(&w.part)).collect(),
+        simulation: simulation.as_ref(),
         program_files: parts
             .iter()
             .filter_map(|w| w.part.path.as_deref().and_then(|f| Path::new(f).file_name()).map(|f| f.to_string_lossy().to_string()))
@@ -1780,6 +1816,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         dry_run,
         outputs,
         notes,
+        simulation,
         summary,
         warnings,
         programs: parts.into_iter().map(|w| w.part).collect(),
@@ -2360,6 +2397,8 @@ mod programs;
 mod rates;
 #[path = "cam_sheet.rs"]
 mod sheet;
+#[path = "cam_sim.rs"]
+mod sim;
 
 #[cfg(test)]
 #[path = "cam_tests.rs"]

@@ -3408,3 +3408,180 @@ fn a_split_job_beside_an_older_whole_program_warns_about_it() {
     assert!(w.iter().filter_map(|w| w.as_str()).any(|w| w.contains("block.ngc") && w.contains("delete")), "{w:?}");
     assert!(!r["warnings"].to_string().contains("   "), "no run of spaces in the text: {w:?}");
 }
+
+// The stock-removal simulation.
+
+/// `cam.simulate` and `cam.job`'s `simulate`: the written program swept through stock taken
+/// from the part (its box) and held against the part.
+#[test]
+fn the_simulation_passes_a_good_program_and_catches_a_gouge_and_a_rapid() {
+    let mut s = top_pocket();
+    let dir = Dir::new("sim");
+    let (out, sheet) = (dir.file("pocket.ngc"), dir.file("pocket.md"));
+    let r = run(&mut s, "cam.job", json!({"job": pocket_job(), "output": out, "setup_sheet": sheet, "simulate": true}));
+    assert_clean(&r);
+    let sim = &r["simulation"];
+    assert_eq!(sim["passed"], true, "{sim}");
+    assert_eq!(sim["gouge"]["cells"], 0, "{sim}");
+    assert!(sim["rapids_in_material"].as_array().is_some_and(Vec::is_empty), "{sim}");
+    assert_eq!(sim["stock"]["kind"], "box", "{sim}");
+    assert_eq!(sim["stock"]["max"], json!([20.0, 15.0, 0.0]), "the block's box: {sim}");
+    // The pocket, 16 × 12 × 4, less the corners a 4 mm tool cannot reach.
+    let removed = sim["removed_volume"].as_f64().unwrap();
+    assert!((700.0..=768.0).contains(&removed), "{sim}");
+    assert!(sim["minutes"].as_f64().is_some_and(|m| m > 0.0), "{sim}");
+    // Those corners are left on the part: a finding, not a failed check, and the sheet says so.
+    assert_eq!(sim["verdict"], "part not finished", "{sim}");
+    assert!(sim["part_left"]["open_max"].as_f64().is_some_and(|t| t > 0.3), "{sim}");
+    assert!(r["warnings"].to_string().contains("part not finished"), "{r}");
+    assert!(r["summary"]["checks"].to_string().contains("Simulation: part not finished"), "{r}");
+    assert!(std::fs::read_to_string(&sheet).unwrap().contains("Simulation"), "the sheet's checks");
+    // The file on its own, with the stock left as an STL file.
+    let stl = dir.file("stock.stl");
+    let c = run(&mut s, "cam.simulate", json!({"path": out, "job": pocket_job(), "stock_stl": stl}));
+    assert_eq!(c["passed"], true, "{c}");
+    assert_eq!(c["path"], out.as_str());
+    assert_eq!(c["removed_volume"], sim["removed_volume"]);
+    assert_eq!(c["stock_stl"], stl.as_str());
+    assert!(std::fs::metadata(&stl).is_ok_and(|m| m.len() > 84 + 50 * 1000));
+    // 1 mm into the block's top beside the pocket, then a rapid on through the block.
+    let bad = dir.file("bad.ngc");
+    std::fs::write(&bad, "G21\nT1 M6\nG0 X-18. Y-13. Z10.\nG1 Z-1. F300\nG1 X-12.\nG0 Y-10.\nG0 Z30.\n").unwrap();
+    let c = run(&mut s, "cam.simulate", json!({"path": bad, "job": pocket_job(), "resolution": 0.1}));
+    assert_eq!(c["passed"], false, "{c}");
+    assert_eq!(c["verdict"], "failed", "{c}");
+    assert!((c["gouge"]["worst"].as_f64().unwrap() - 1.0).abs() < 0.01, "{c}");
+    let lines: Vec<u64> = c["rapids_in_material"].as_array().unwrap().iter().filter_map(|m| m["line"].as_u64()).collect();
+    assert_eq!(lines, vec![6], "{c}");
+    assert_eq!(c["failures"].as_array().map(Vec::len), Some(2), "{c}");
+    // A job whose simulation fails is refused, as for every other check.
+    let mut deep = pocket_job();
+    deep["operations"][0]["heights"]["bottom"] = json!(-5);
+    let e = s.execute("cam.job", &json!({"job": deep, "output": out, "simulate": true})).unwrap_err();
+    assert!(e.to_string().contains("simulation: the program cuts up to"), "{e}");
+    let r = run(&mut s, "cam.job", json!({"job": deep, "dry_run": true, "simulate": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["summary"]["checks"].to_string().contains("Simulation: FAILED"), "{r}");
+    // `simulate_resolution` goes with `simulate`.
+    let e = s.execute("cam.job", &json!({"job": pocket_job(), "dry_run": true, "simulate_resolution": 0.1})).unwrap_err();
+    assert!(e.to_string().contains("simulate_resolution"), "{e}");
+}
+
+/// A bar on a 4th axis: the stock is the cylinder through the part's farthest point, and a
+/// program that never writes A has no move the simulation can follow, which is a failure, not a
+/// pass with nothing checked.
+#[test]
+fn a_simulation_on_a_4th_axis_that_follows_no_move_does_not_pass() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 30, "base": [-15, 0, 0], "axis": "X", "body_name": "Bar"}));
+    let job = json!({"machine": "4axis_a", "post": "linuxcnc_4axis", "tools": [flat(3, 4.0)], "operations": []});
+    let dir = Dir::new("sim-no-a");
+    let gcode = dir.file("no-a.ngc");
+    std::fs::write(&gcode, "G21\nT3 M6\nG0 X0. Y0. Z30.\nG0 Z5.\nG1 X5. F100\nG0 Z30.\n").unwrap();
+    let r = run(&mut s, "cam.simulate", json!({"path": gcode, "job": job, "resolution": 0.2}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["failures"].as_array().unwrap().iter().any(|f| f.as_str().is_some_and(|f| f.contains("no move"))), "{r}");
+    assert_eq!(r["stock"]["kind"], "cylinder", "{r}");
+    assert!((r["stock"]["radius"].as_f64().unwrap() - 10.0).abs() < 1e-6, "{r}");
+    // With the A written, the plunge into the bar is caught.
+    std::fs::write(&gcode, "G21\nT3 M6\nG0 X0. Y0. Z30. A0.\nG0 Z5.\nG1 X5. F100\nG0 Z30.\n").unwrap();
+    let r = run(&mut s, "cam.simulate", json!({"path": gcode, "job": job, "resolution": 0.2}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["rapids_in_material"].as_array().is_some_and(|m| !m.is_empty()), "{r}");
+    assert!(r["gouge"]["worst"].as_f64().is_some_and(|w| w > 4.0), "{r}");
+}
+
+#[test]
+fn hostile_simulations_are_refused_without_panics() {
+    let mut s = top_pocket();
+    let dir = Dir::new("sim-hostile");
+    let gcode = dir.file("p.ngc");
+    std::fs::write(&gcode, "G21\nT1 M6\nG0 X0. Y0. Z10.\nG1 Z8. F300\n").unwrap();
+    let junk = dir.file("junk.ngc");
+    std::fs::write(&junk, "G21\nT1 M6\nG0 X0 Y0 Z10\n\u{0}garbage QQQ\n").unwrap();
+    let five = json!({"name": "5ax", "rotaries": [
+        {"letter": "A", "direction": [1, 0, 0], "center": [0, 0, 0], "carrier": "table"},
+        {"letter": "C", "direction": [0, 0, 1], "center": [0, 0, 0], "carrier": "table"}]});
+    let mut five_job = pocket_job();
+    five_job["machine"] = five;
+    let mut no_body = pocket_job();
+    no_body["bodies"] = json!(["Nothing"]);
+    let cases = [
+        json!({"path": gcode}),
+        json!({"job": pocket_job()}),
+        json!({"path": gcode, "job": pocket_job(), "job_path": dir.file("j.json")}),
+        json!({"path": gcode, "job": pocket_job(), "resolution": 0}),
+        json!({"path": gcode, "job": pocket_job(), "resolution": -1}),
+        json!({"path": gcode, "job": pocket_job(), "resolution": 1e-5}),
+        json!({"path": gcode, "job": pocket_job(), "resolution": 0.001}),
+        json!({"path": gcode, "job": pocket_job(), "resolution": "fine"}),
+        json!({"path": gcode, "job": pocket_job(), "stock_stl": ""}),
+        json!({"path": gcode, "job": pocket_job(), "stock_stl": gcode}),
+        json!({"path": gcode, "job": pocket_job(), "then": vec![gcode.clone(); 201]}),
+        json!({"path": dir.file("missing.ngc"), "job": pocket_job()}),
+        json!({"path": junk, "job": pocket_job()}),
+        json!({"path": gcode, "job": five_job}),
+        json!({"path": gcode, "job": no_body}),
+        json!({"path": gcode, "job": pocket_job(), "resolutoin": 0.1}),
+    ];
+    for p in &cases {
+        match s.execute("cam.simulate", p) {
+            Err(EngineError::Internal(_, msg)) => panic!("{p}: panicked: {msg}"),
+            Err(_) => {}
+            Ok(v) => panic!("{p}: accepted: {v}"),
+        }
+    }
+    // A tool the program loads that the job lacks.
+    std::fs::write(&gcode, "G21\nT9 M6\nG0 X0. Y0. Z10.\n").unwrap();
+    let e = s.execute("cam.simulate", &json!({"path": gcode, "job": pocket_job()})).unwrap_err();
+    assert!(e.to_string().contains("tool 9"), "{e}");
+}
+
+/// The simulation warns about spindle speeds outside the machine's range and notes the program's
+/// stops for tool changes.
+#[test]
+fn the_simulation_checks_spindle_speeds_and_lists_tool_change_stops() {
+    let mut s = top_pocket();
+    let dir = Dir::new("sim-spindle");
+    let tap = dir.file("speeds.ngc");
+    let text = "G21 G90\nT1 M6\nS30000 M3\nG0 X-30 Y-30 Z10\nT2 M6\nM0\nS1000 M3\nG0 X30 Y-30 Z10\nT1 M6\nS12000 M3\nG0 X30 Y30 Z10\nM30\n";
+    std::fs::write(&tap, text).unwrap();
+    let job = json!({
+        "machine": "3axis",
+        "post": "linuxcnc_4axis",
+        "tools": [flat(1, 6.0), flat(2, 4.0)],
+        "operations": [],
+        "machine_rates": {"rapid_xyz_mm_min": 5000, "spindle_rpm": [3000, 24000]}
+    });
+    let c = run(&mut s, "cam.simulate", json!({"path": tap, "job": job, "resolution": 0.5}));
+    let warnings = c["warnings"].to_string();
+    assert!(warnings.contains("2 spindle speeds are outside the machine's 3000-24000 rpm (S30000 at line 3)"), "{c}");
+    let notes = c["notes"].to_string();
+    assert!(notes.contains("stops for 3 tool changes") && notes.contains("at lines 2, 5, 9"), "{notes}");
+    // In range: no spindle warning.
+    let mut quiet = job.clone();
+    quiet["machine_rates"]["spindle_rpm"] = json!([500, 40000]);
+    let c = run(&mut s, "cam.simulate", json!({"path": tap, "job": quiet, "resolution": 0.5}));
+    assert!(!c["warnings"].to_string().contains("spindle speeds"), "{c}");
+}
+
+/// The programs of a job written one per tool, simulated in order on one stock, leave what the
+/// whole program leaves; the last one alone leaves the first one's cuts out.
+#[test]
+fn programs_written_one_per_tool_simulate_in_order_as_the_whole_program() {
+    let mut s = top_pocket();
+    let dir = Dir::new("sim-split");
+    let mut job = two_tool_job();
+    job["tool_change"] = json!("ignored");
+    let (whole, out) = (dir.file("whole.ngc"), dir.file("block.ngc"));
+    run(&mut s, "cam.job", json!({"job": job, "output": whole}));
+    let r = run(&mut s, "cam.job", json!({"job": job, "output": out, "split_by_tool": true}));
+    let files: Vec<String> = r["outputs"]["programs"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect();
+    let a = run(&mut s, "cam.simulate", json!({"path": whole, "job": job}));
+    let b = run(&mut s, "cam.simulate", json!({"path": files[0], "then": [files[1]], "job": job}));
+    let last = run(&mut s, "cam.simulate", json!({"path": files[1], "job": job}));
+    let removed = |r: &Value| r["removed_volume"].as_f64().unwrap_or_else(|| panic!("{r}"));
+    assert!((removed(&a) - removed(&b)).abs() <= 1e-6 * removed(&a), "{} {}", a["removed_volume"], b["removed_volume"]);
+    assert!(removed(&last) < removed(&b) - 1.0, "{} {}", last["removed_volume"], b["removed_volume"]);
+    assert!(b["notes"].as_array().unwrap().iter().any(|n| n.as_str().is_some_and(|n| n.contains("2 programs simulated in order"))), "{b}");
+}

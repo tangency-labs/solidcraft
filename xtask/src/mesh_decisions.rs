@@ -89,7 +89,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/project3d.rs:flat_outline", "mesh bodies: the flat patch of an imported mesh's triangles that a face pick on it means"),
     (
         "crates/engine/src/cmd/cam.rs:bodies_mesh",
-        "CAM toolpaths: the part and fixtures tessellated within a quarter of the job's tolerance for the drop-cutter and the gouge check (not yet on exact geometry)",
+        "CAM toolpaths: the part and fixtures tessellated within a quarter of the job's tolerance for the drop-cutter, the gouge check and the simulation's part (not yet on exact geometry)",
     ),
     ("crates/engine/src/cmd/cam.rs:preview_part", "the part drawn in a CAM job's HTML preview page"),
     (
@@ -108,6 +108,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
         "crates/engine/src/cmd/cam_hold.rs:model_of",
         "CAM machine model: its mesh files on the table marked `check`, checked against the program as the fixtures are (mesh bodies)",
     ),
+    ("crates/engine/src/cmd/cam_sim.rs:export_stock", "the simulated stock exported as an STL file"),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
     ("crates/kernel/src/body.rs:Body::classify_point", "mesh bodies: its mesh-body branch (a B-rep is classified by SMLib)"),
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),

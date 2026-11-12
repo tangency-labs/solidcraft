@@ -63,6 +63,15 @@ pub struct CamJobParams {
     /// a machine that does not stop at a tool change (`tool_change: ignored`). Default: false.
     #[serde(default)]
     pub split_by_tool: Option<bool>,
+    /// Also simulate the written program removing material from stock taken from the part
+    /// (`cam.simulate`): a gouge or a rapid through material fails the job like the other
+    /// checks; material left on the part is a warning. Default: false.
+    #[serde(default)]
+    pub simulate: Option<bool>,
+    /// With `simulate`: the simulation's cell size, mm (0.0001 to 10000). Default: five times
+    /// the tolerance, coarser where the stock or the program is too large for that.
+    #[serde(default)]
+    pub simulate_resolution: Option<f64>,
 }
 
 /// What the machine does at a tool change (`T.. M6`): a job's `tool_change`.
@@ -877,6 +886,9 @@ pub struct CamJobReply {
     /// Anything else worth knowing: a post that writes no work offset, an output extension
     /// other than the post's, what the machine's rates say about the program.
     pub notes: Vec<String>,
+    /// The stock-removal simulation of the written program, with `simulate`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub simulation: Option<super::cam_sim::CamSimulateReply>,
     /// What the operator sets up: the setup sheet's tables in compact form.
     pub summary: super::cam_sheet::SetupSummary,
     /// What to look at that does not fail the job (a program of several tools for a machine that

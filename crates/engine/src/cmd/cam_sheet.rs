@@ -20,6 +20,7 @@ use super::{Planned, num, same_file};
 use crate::params::bad;
 use crate::schema::cam::ReadbackReport;
 use crate::schema::cam_sheet::{SetupSummary, SummaryOperation, SummaryTool, SummaryTotals};
+use crate::schema::cam_sim::CamSimulateReply;
 use crate::{Result, Session};
 
 /// Largest angle a rotary turns to before the sheet warns (degrees): a full turn either way.
@@ -65,6 +66,8 @@ pub(super) struct Inputs<'a> {
     pub program_file: Option<&'a str>,
     /// The machine's spindle-speed and feed limits the job runs into.
     pub attention: Vec<String>,
+    /// The stock-removal simulation, when it ran.
+    pub simulation: Option<&'a CamSimulateReply>,
     /// What the machine does at a tool change and what that asks of the operator.
     pub tool_change: Option<String>,
     /// With one program per tool: each, in words, in the order to run them.
@@ -277,7 +280,7 @@ pub(super) fn build(i: &Inputs<'_>) -> SetupSheet {
     let zero = work_zero(i.origin, lo, hi, rotary_about_x(machine), None);
 
     let rb = i.readback;
-    let checks = vec![SheetCheck {
+    let mut checks = vec![SheetCheck {
         name: "Read-back".into(),
         passed: rb.pass,
         detail: format!(
@@ -288,6 +291,29 @@ pub(super) fn build(i: &Inputs<'_>) -> SetupSheet {
             num(rb.allowed_axis_deg)
         ),
     }];
+
+    if let Some(sim) = i.simulation {
+        let unfinished = sim.verdict == super::sim::PART_NOT_FINISHED;
+        checks.push(SheetCheck {
+            name: "Simulation".into(),
+            passed: sim.passed && !unfinished,
+            detail: if sim.passed && unfinished {
+                sim.warnings
+                    .iter()
+                    .find(|w| w.starts_with(super::sim::PART_NOT_FINISHED))
+                    .cloned()
+                    .unwrap_or_else(|| super::sim::PART_NOT_FINISHED.into())
+            } else if sim.passed {
+                format!(
+                    "the program cut from the stock ({} mm cells): no gouge and no rapid in material; {}",
+                    num(sim.resolution),
+                    leftover_words(sim.leftover.max, sim.resolution)
+                )
+            } else {
+                sim.failures.join("; ")
+            },
+        });
+    }
 
     let totals = Totals {
         operations: operations.len(),
@@ -330,6 +356,16 @@ pub(super) fn build(i: &Inputs<'_>) -> SetupSheet {
         revision: None,
         probing: Vec::new(),
         stops: Vec::new(),
+    }
+}
+
+/// What the simulation left on the part, in words: within a cell of the simulation is as close
+/// as it can tell (a sliver at a wall, not material to worry about).
+fn leftover_words(max: f64, cell: f64) -> String {
+    if max <= cell {
+        format!("at most {} mm left on the part, within one {} mm cell of the simulation", num(max), num(cell))
+    } else {
+        format!("up to {} mm left on the part", num(max))
     }
 }
 
@@ -388,7 +424,15 @@ pub(super) fn summary(s: &SetupSheet) -> SetupSummary {
             cut_minutes: round(s.totals.cut_minutes, 2),
             program_minutes: s.totals.program_minutes.map(|m| round(m, 2)),
         },
-        checks: s.checks.iter().map(|c| format!("{}: {} ({})", c.name, if c.passed { "passed" } else { "FAILED" }, c.detail)).collect(),
+        checks: s
+            .checks
+            .iter()
+            .map(|c| match c.detail.strip_prefix(super::sim::PART_NOT_FINISHED).and_then(|d| d.strip_prefix(": ")) {
+                // Not a pass and not a failure: a finding.
+                Some(d) if !c.passed => format!("{}: {} ({d})", c.name, super::sim::PART_NOT_FINISHED),
+                _ => format!("{}: {} ({})", c.name, if c.passed { "passed" } else { "FAILED" }, c.detail),
+            })
+            .collect(),
         warnings: s.warnings.clone(),
     }
 }

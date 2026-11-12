@@ -10,6 +10,7 @@ commands work with jobs, from scripts, the CLI and MCP alike:
 | `cam.post.list` | Lists the built-in posts |
 | `cam.post.get` | Returns a built-in post as JSON, to copy into a post file |
 | `cam.gcode.check` | Reads a G-code file and reports lengths, time, the rotary range, inverse-time blocks and the first line it cannot read |
+| `cam.simulate` | Runs a written program through a model of the stock and holds what it leaves against the part: gouges, rapids through material, material left |
 
 Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`, …).
 
@@ -29,6 +30,8 @@ Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`,
 | `dry_run` | Plan and check, write nothing; the reply says whether the checks pass instead of refusing. |
 | `allow_unsafe` | Write the program even when a check fails. Its first line (the program's name, as a comment) then ends `WRITTEN WITH FAILED CHECKS`, so the file says so; no line moves. |
 | `split_by_tool` | Write one program per tool instead of one program: each run of operations with one tool is a program of its own, named after `output` with its place and tool (`bracket-2-T6.ngc`). Each is complete on its own (the post's safe start, the same work offset, the tool change and the tool's length offset on its first Z), with a header naming its place in the order, the tool (`THIS PROGRAM USES T6 - ...`, not a line a checker reads as a tool table entry), its stickout and the length offset to set; each is read back on its own. The reply's `programs` and `outputs.programs` list them in the order to run them, and the setup sheet does too. An older program of every tool under `output`'s name left beside them is a warning. For a machine that ignores tool changes (`tool_change: ignored`, below). |
+| `simulate` | Also run the program as written through the stock-removal simulation (below): a gouge or a rapid through material fails the job like the other checks, material left on the part is a warning, and the reply carries `simulation`. |
+| `simulate_resolution` | With `simulate`: the simulation's cell size in mm, as `cam.simulate`'s `resolution`. Default: five times the tolerance, coarser where the stock or the program is too large for that. |
 
 Every file is read and written through the session's file access, so an MCP server's
 `--allow-path` folders apply; every path is checked before anything is computed or written.
@@ -96,7 +99,8 @@ feed: as the machine runs it with the job's `machine_rates`, otherwise as writte
 `rapid_minutes` and `machine_time` (with `machine_rates`, see [Machine rates](#machine-rates);
 `null` without), `passed`, `failures`, `dry_run`, `outputs` (`gcode`, `preview`, `setup_sheet`,
 `programs`), `notes` (a post that writes no work offset, an output extension other than the
-post's, what the machine's rates say about the program, in a dry run too), `summary` (the setup
+post's, what the machine's rates say about the program, in a dry run too), `simulation` (with
+`simulate`, as [`cam.simulate`](#stock-removal-simulation) replies), `summary` (the setup
 sheet's tables, see [Setup sheet](#setup-sheet)), `warnings` (what to look at that does not fail
 the job) and, with `split_by_tool`, `programs` (`order`, `path`, `tool`, `stickout`,
 `operations`, `lines`, `cut_minutes`). The operations' minutes add up to
@@ -1014,7 +1018,10 @@ It holds, in order:
 - **Totals:** operations, tools, tool changes, length and time at feed as planned and as the
   controller times the written program, the program's line count, and the X, Y, Z and A range
   the program moves over.
-- **Checks:** the read-back, with its result.
+- **Checks:** the read-back and, when it ran (`simulate`), the simulation, each with its result.
+  The simulation's leftover is the most material left on the part (see
+  [Stock-removal simulation](#stock-removal-simulation)); within one cell of the simulation the
+  line says so, as the raster can tell no finer.
 - **Warnings:** failed checks (a sheet is only written with them under `allow_unsafe`), the
   job's warnings (a program of several tools for a machine that ignores tool changes), a rotary
   that turns past a full turn either way.
@@ -1030,6 +1037,98 @@ tell the user what to set up without opening the sheet: `work_zero` (the sentenc
 `z_min?`, `operations`), `operations` (`name`, `kind`, `tool`, `spindle_rpm`, `feed`,
 `plunge_feed`, `rotary?`, `cut_length`, `cut_minutes`), `totals` (`operations`, `tools`,
 `tool_changes`, `cut_length`, `cut_minutes`, `program_minutes?`), `checks` and `warnings`.
+
+## Stock-removal simulation
+
+`cam.simulate` checks a written program independently of the toolpaths it came from: it reads
+the G-code as the controller would, sweeps each tool through a model of the stock along every
+block (rapids included), and compares what is left with the part. `cam.job` runs the same check
+on the program it has just written when given `simulate: true`.
+
+```json
+{"path": "C:/parts/bracket.ngc", "job_path": "C:/parts/bracket.cam.json", "resolution": 0.05, "stock_stl": "C:/parts/bracket-stock.stl"}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `path` | The G-code file, in the job's work coordinates. |
+| `job` / `job_path` | The job the program was written for: its machine, tools (by `T` number; `T… M6` loads one), part bodies, `origin` and `tolerance`. |
+| `resolution` | The cell size in mm. Default: five times the tolerance, coarser when that would be more than 4 million cells, or when the program's cuts would visit more cells than the simulation allows (a long 4th-axis program: a warning gives the cell used). More than 20 million cells is refused. |
+| `stock_stl` | Write the stock the program leaves as a binary STL file (its top surface, or its round surface on a 4th axis), for a preview. |
+| `then` | Programs run after `path`, in order, on the stock it leaves (a job written one program per tool): what they leave together is checked. Line numbers count on through them. |
+
+The reply: `stock` (`kind`: `box` or `cylinder`, and its size), `resolution`, `cells`,
+`gouge: {worst, cells, at?}` (the deepest cut into the part beyond the tolerance, how many
+cells, and where the deepest is, work coordinates), `rapids_in_material: [{line, volume, depth}]`
+(rapids that cut more than the tolerance into the stock: a crash on the machine),
+`leftover: {max, mean, cells, at?}` (material left above the part over the cells the program
+cut, and where the most is), `part_left` (material left on the part anywhere, below),
+`verdict`, `removed_volume` (mm³), `minutes` (at feed, as the controller times it),
+`slot_moves` (cuts at the tool's full width, also listed in `warnings`: keep their depth and
+feed low on a light machine), `air_moves` and `air_length` (cutting moves that removed nothing,
+and their length in mm: cutting air), `passed` (no gouge and no rapid in material), `failures`,
+`warnings`, `notes` and `stock_stl`. A program with no move the simulation can follow (on a 4th
+axis, one that never writes A: no block's position is known) fails rather than passing with
+nothing checked. A failed simulation is reported, never refused; inside `cam.job` its failures
+join the job's. Spindle speeds outside the job's `machine_rates.spindle_rpm` are a warning, and
+the tool changes the program stops for (an `M6`, or an `M0` on a machine that ignores them) are
+a note.
+
+**The stock.** The simulation starts from stock taken from the part: on a 3-axis machine the
+part's box, on a 4th axis the cylinder about work X through the part's farthest point from the
+axis, over the part's length. A program whose rapids are safe for a block-shaped part may then
+cut that round bar at its retract height, which is what the bar would do on the machine.
+
+**Material left on the part.** Each column of the simulated stock (every few cells) is held
+against all of the part along it, so stock never cut (an unmachined pocket, what stands under
+the part's own material) is found too; the stock round the part and below its bottom is not
+counted. `part_left` gives the `volume` (mm³), `hidden_volume` (under the part's own material
+along Z), the thickest `max`, the worst `spots` (`[x, y, z, thickness]`), `hidden_area` and
+`allowed` (the tolerance, a cell and the job's most `stock_to_leave`). On a 3-axis machine what
+stands under the part's own material is a setup from the other side's (`later_volume`); the
+rest is `open_volume`, thickest `open_max`. When the rest is thicker than `allowed` the verdict
+is `part not finished`, with a warning naming the spots: not a pass and not a failure. Inside
+`cam.job` that warning is in the reply's `warnings`, and the setup sheet's Simulation row says so.
+
+**3-axis.** The stock is a heightfield over the box: one top height per cell, at the cell's
+centre. Every block lowers each cell to the tool's lowest point over it along the whole move,
+found exactly, not at sampled positions: along a straight move the tool's height over a cell is
+convex in the position along the move, so its least value is found in closed form (flat end
+mill, ball, drill point at 118°) or by bisection on its slope to rounding (bull nose). A level arc
+is exact as well; an arc that also moves in Z (a helix) is followed as chords at most a quarter
+of the tolerance inside it. An arc whose end is written at its start is a whole turn, as the
+controller runs it. An arc in the XZ plane (`G18`, centre from `I K`, `G2` clockwise seen from
++Y) or the YZ plane (`G19`, centre from `J K`, `G2` clockwise seen from +X) is followed about its
+own centre, as chords at most a quarter of the tolerance inside it. The tool is its cutting end
+with its diameter carried on up, so a cut deeper than the flutes still removes material.
+
+**4th axis (A about X).** The stock is a grid over (x, A) holding how far out the material
+reaches along the ray from the axis. A block that turns A while X moves is a helix in the work
+frame, so the tool is placed at points along each block (every axis moving evenly, as written),
+close enough that the cusps between them are at most half the tolerance. At each point every
+ray near the tool is cut over the stretch of it inside the tool. A cut that reaches out of the
+material along the ray ends the ray where the tool enters it; one that crosses the ray inside
+the material without reaching out of it leaves a stretch of air inside the ray's material, so
+indexed work (A held while X, Y and Z move) is modelled in the part's own frame as exactly as
+turning is. A ray holds at most 32 stretches of air and a band of the stock 4 million: a cut
+beyond is left out and counted in a warning.
+
+**Against the part.** The part is the job's bodies tessellated from their exact surfaces within
+a quarter of the job's tolerance, in work coordinates. Each cell's part height (or radius) is
+where a ray from above (from outside) first meets the part's facets. A cell cut below the part
+by more than the tolerance is measured again in 3D over the part's material along its column,
+so a cut beside a steep wall within the tolerance of the wall is not a gouge, and neither is a
+column down the air of a hole or a pocket. Where a column's crossings do not pair up (a part
+whose facets face inwards, bodies that overlap), the whole column past its first crossing counts
+as material, so a gouge is never passed as air. Leftover is measured along Z (along the ray),
+and where it could be the most also in 3D from the part's surface, so a sliver beside a steep
+wall counts as thin as it is there, not the wall's height. The position is lost at a return home
+or a move in machine coordinates (`G28`, `G30`, `G53`); the next block is taken as coming
+straight down the tool axis from above the stock, and so is the program's first.
+
+**Time.** The grid is split into bands of rows (of angles on a 4th axis), each running the whole
+program on a thread of its own, one per core up to sixteen (one on the web); the result does not
+depend on how many.
 
 ## `cam.post.list` and `cam.post.get`
 

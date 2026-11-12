@@ -1,0 +1,10 @@
+{
+  "en": { "cmd.cam.simulate": "Simulate G-code" },
+  "ar": { "cmd.cam.simulate": "محاكاة G-code" },
+  "de": { "cmd.cam.simulate": "G-Code simulieren" },
+  "fr": { "cmd.cam.simulate": "Simuler le G-code" },
+  "he": { "cmd.cam.simulate": "הדמיית G-code" },
+  "ja": { "cmd.cam.simulate": "Gコードをシミュレート" },
+  "vi": { "cmd.cam.simulate": "Mô phỏng G-code" },
+  "zh": { "cmd.cam.simulate": "模拟 G 代码" }
+}
