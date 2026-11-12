@@ -46,7 +46,21 @@ pub(super) struct CheckedCache {
     turns: Memo<(u64, bool), (Turn, Rotation)>,
     /// The points [`ProceduralSweep::verify_runtime_point`] passed, by `(u, v, point)`.
     points: Memo<[u64; 5], ()>,
+    /// [`MapPowers`], formed on first use.
+    map_powers: OnceLock<MapPowers>,
 }
+
+/// The checked powers [`powi`]`(b, n)`, `n <= 4`, of the map's two scales `b`, kept with
+/// the scales' bits: a pure function of them, so a kept power is the one formed afresh;
+/// a refused power is `None` and formed afresh, so it carries the same error.
+#[derive(Debug)]
+struct MapPowers {
+    bits: [u64; 2],
+    powers: [[Option<f64>; MAP_POWERS]; 2],
+}
+
+/// How many powers of each map scale are kept: orders `0..=4`, the partials' bound.
+const MAP_POWERS: usize = 5;
 
 /// Slots of a [`Memo`].
 const MEMO_SLOTS: usize = 1024;
@@ -500,6 +514,38 @@ impl ProceduralSweep {
         let rotation = Rotation::new(turn.theta)?;
         self.checked_cache.turns.put(key, slot, (turn, rotation));
         Ok((turn, rotation))
+    }
+
+    /// The checked power [`powi`]`(b, n)` of the map's scale `b` on the profile's
+    /// (`axis` 0) or the turn's (`axis` 1) parameter, from the definition's kept powers
+    /// ([`MapPowers`]) when they were formed for the scales the map has now.
+    ///
+    /// # Errors
+    /// Those of [`powi`]; an `axis` past the two.
+    pub(super) fn checked_map_power(&self, axis: usize, n: usize) -> Result<f64> {
+        let base = *self
+            .map
+            .b
+            .get(axis)
+            .ok_or_else(|| bad("a sweep map has two scales"))?;
+        let bits = self.map.b.map(f64::to_bits);
+        let kept = self.checked_cache.map_powers.get_or_init(|| MapPowers {
+            bits,
+            powers: self.map.b.map(|b| std::array::from_fn(|n| powi(b, n).ok())),
+        });
+        let hit = (kept.bits == bits)
+            .then(|| {
+                kept.powers
+                    .get(axis)
+                    .and_then(|p| p.get(n))
+                    .copied()
+                    .flatten()
+            })
+            .flatten();
+        match hit {
+            Some(power) => Ok(power),
+            None => powi(base, n),
+        }
     }
 
     /// Monotone mathematical turn range, including exact station endpoints.
@@ -1154,6 +1200,42 @@ mod tests {
         moved.swap_map();
         assert!(moved.checked_cache.spans.get().is_none());
         assert!(moved.checked_cache.section.get().is_none());
+    }
+
+    /// The kept map powers are [`powi`]'s, bit for bit, on both scales and every order,
+    /// refusals included; a map edited after they were formed gets its own powers.
+    #[test]
+    fn kept_map_powers_are_the_fresh_ones() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::ScrewMotion;
+
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.3, 0.7, 1.2, 1.25];
+        let mut definition = ProceduralSweep::create(&profile, motion, &stations, 0.3).unwrap();
+        let same = |d: &ProceduralSweep| {
+            for axis in 0..2 {
+                for n in 0..=5 {
+                    let kept = d.checked_map_power(axis, n).map(f64::to_bits);
+                    let fresh = powi(d.map.b[axis], n).map(f64::to_bits);
+                    assert_eq!(kept.ok(), fresh.ok(), "axis {axis}, n {n}");
+                }
+            }
+        };
+        same(&definition);
+        assert!(definition.checked_map_power(2, 0).is_err());
+        definition.reparametrize_map(true, 1e8, -2.0);
+        same(&definition);
+        // a scale changed in place, past the editors, is not met by the kept powers
+        let kept = definition.checked_map_power(1, 3).unwrap();
+        definition.map.b[1] *= 3.0;
+        assert_ne!(definition.checked_map_power(1, 3).unwrap(), kept);
+        same(&definition);
     }
 
     /// The kept turns and points are what the checks give afresh, bit for bit, at stations
