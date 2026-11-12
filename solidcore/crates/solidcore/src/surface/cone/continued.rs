@@ -9,11 +9,15 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{Result, SolidError};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::nurbs::math::gamma;
+use crate::surface::cone::checked::HeightMap;
 use crate::surface::cone::Cone;
 use crate::surface::continued::{at_most_a_turn, step_rows, widen};
 use crate::surface::extend::{Continuity, ExtendRefusal};
@@ -35,6 +39,17 @@ impl Cone {
     /// polar coefficients and conversion metadata are copied exactly. Thus every
     /// retained UV trim still names the same mathematical point. Native arithmetic
     /// is covered by the cylinder's checked runtime point allowance.
+    ///
+    /// A cylinder read back from a record has its STEP height from its net's end rows
+    /// and its native height from its knots, which can differ by rounding (an M10
+    /// thread's root, `[0, 1.6894999999999998]` against `[0, 1.6895]`): its height map is
+    /// then an affine map a few ulps from the identity. Its continuation keeps that map:
+    /// the new STEP ends are the source's converter applied to the new native ends, and
+    /// the two maps' exact coefficients ([`HeightMap::exact_coefficients`]) are enclosed
+    /// over the whole continued height. The continuation is refused unless the farthest
+    /// they move a native height along the axis is within the cylinder's checked runtime
+    /// allowance, the bound its checked evaluation already holds a native point to; so
+    /// every retained UV trim names a point of the source's within that same allowance.
     ///
     /// `None` denotes a different parameterization or an unproved analytic label,
     /// before construction. A failed continuation is an error, not a fallback.
@@ -61,7 +76,6 @@ impl Cone {
             || self.inside_out
             || step.u_min() != 0.0
             || step.u_max() != 360.0
-            || height != step.v_interval()
             || !self.rev.is_bounded()?
             || self.rev.polar_curve().is_none()
             || !matches!(
@@ -106,15 +120,33 @@ impl Cone {
                 "cylinder continuation changed its angular chart or failed to extend its height",
             ));
         }
+        // the identity height map stays the identity; any other keeps its own map, the
+        // source's converter giving the new STEP ends
+        let new_step = if height == step.v_interval() {
+            new_height
+        } else {
+            let at = |h: f64| -> Result<f64> {
+                let native = if self.rev.swap_uv {
+                    Point2::new(h, angle.min())
+                } else {
+                    Point2::new(angle.min(), h)
+                };
+                Ok(self.convert_uv_from_nurbs_to_step(k, native)?.y)
+            };
+            let (low, high) = (at(new_height.min())?, at(new_height.max())?);
+            if !(low.is_finite() && high.is_finite() && low < high) {
+                return Err(SolidError::invalid_input(
+                    OP_MAP,
+                    "cylinder height continuation has no ordered STEP height",
+                ));
+            }
+            Extent1d::from_min_max(low, high)
+        };
         let mut result = self.clone();
         result.rev = self.rev.clone_exact();
         result.rev.base = form;
-        result.rev.anal_uv_domain = Extent2d::from_bounds(
-            step.u_min(),
-            new_height.min(),
-            step.u_max(),
-            new_height.max(),
-        );
+        result.rev.anal_uv_domain =
+            Extent2d::from_bounds(step.u_min(), new_step.min(), step.u_max(), new_step.max());
         let Some(CurveKind::Line(generator)) = result.rev.gen_curve.as_mut().map(Curve::kind_mut)
         else {
             return Err(SolidError::invalid_input(
@@ -122,15 +154,46 @@ impl Cone {
                 "cylinder continuation lost its linear generator",
             ));
         };
-        generator.adjust_step_interval(&new_height)?;
-        if generator.natural_interval() != new_height {
+        generator.adjust_step_interval(&new_step)?;
+        if generator.natural_interval() != new_step {
             return Err(SolidError::invalid_input(
                 OP_MAP,
                 "cylinder generator did not retain its height interval",
             ));
         }
+        if new_step != new_height {
+            result.certify_height_map_kept(k, self, new_height)?;
+        }
         AnalyticSupport::check(k, &Surface::from(result.clone()))?;
         Ok(Some(result))
+    }
+
+    /// That this continuation's height map moves no native height of `native` along the
+    /// axis farther from where `source`'s map puts it than this cylinder's checked
+    /// runtime allowance: both maps' exact affine coefficients enclosed, their difference
+    /// bounded over the whole interval, times the axis's length.
+    fn certify_height_map_kept(&self, k: &Kernel, source: &Self, native: Extent1d) -> Result<()> {
+        const OP_KEPT: &str = "surface::cone::Cone::extended_cylinder_keeping_parameters";
+        let [o0, s0] = HeightMap::new(k, source)?.exact_coefficients();
+        let [o1, s1] = HeightMap::new(k, self)?.exact_coefficients();
+        let span = Ivl::new(native.min(), native.max());
+        let shift = ((o1 - o0) + (s1 - s0) * span).mag();
+        let axis = self.canonical().origin.z_axis();
+        let length = (Ivl::from(axis.x) * Ivl::from(axis.x)
+            + Ivl::from(axis.y) * Ivl::from(axis.y)
+            + Ivl::from(axis.z) * Ivl::from(axis.z))
+        .sqrt();
+        let moved = (Ivl::from(shift) * length).hi;
+        let cap = self.cylinder_runtime_allowance(k)?.ok_or_else(|| {
+            SolidError::invalid_input(OP_KEPT, "continued cylinder has no checked allowance")
+        })?;
+        if !moved.is_finite() || moved > cap {
+            return Err(SolidError::invalid_input(
+                OP_KEPT,
+                "cylinder continuation moved its height map past its checked allowance",
+            ));
+        }
+        Ok(())
     }
 
     /// The cone continued naturally `distance` past side `side` of the face box `dom` (in the
