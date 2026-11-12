@@ -1636,6 +1636,17 @@ pub enum JointWords {
 }
 
 impl JointWords {
+    /// The block's line.
+    pub fn line(&self) -> usize {
+        match self {
+            JointWords::Rapid { line, .. }
+            | JointWords::Feed { line, .. }
+            | JointWords::Arc { line, .. }
+            | JointWords::PlaneArc { line, .. }
+            | JointWords::Dwell { line, .. } => *line,
+        }
+    }
+
     /// The arc of an `Arc` or `PlaneArc` block that starts at `from`, in its plane.
     pub fn arc_from(&self, from: Vec3) -> Option<PlaneArc> {
         match *self {

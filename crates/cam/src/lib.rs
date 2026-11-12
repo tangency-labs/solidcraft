@@ -54,6 +54,11 @@
 //! [`engagement`] measures the engagement along a finished path from the material itself, not
 //! from the planner's model, so a path can be checked against it.
 //!
+//! A job's raw material is a [`stock::Stock`]: a box, or a bar turned on the 4th axis. Facing
+//! ([`stock::face`]) cuts its top flat, entering every level from beside it. [`rapids`] reads a
+//! written program back through the machine's kinematics and holds every rapid against the
+//! part, fixtures and the stock, and every position against the machine's travel.
+//!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
 //! retract to the machine's top, the tool length offset on the first Z move, modal motion
@@ -91,9 +96,11 @@ mod par;
 mod path;
 mod piece;
 mod post;
+pub mod rapids;
 mod readback;
 pub mod readback5;
 pub mod rotary;
+pub mod stock;
 pub mod stop;
 mod surface;
 pub mod surface_ops;
@@ -182,7 +189,11 @@ mod leads_tests;
 #[cfg(test)]
 mod machine_time_tests;
 #[cfg(test)]
+mod rapids_tests;
+#[cfg(test)]
 mod rotary_tests;
+#[cfg(test)]
+mod stock_tests;
 #[cfg(test)]
 mod surface_ops_tests;
 #[cfg(test)]
