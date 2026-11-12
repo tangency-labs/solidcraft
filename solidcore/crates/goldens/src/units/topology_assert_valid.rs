@@ -8,7 +8,7 @@
 //! report identity.
 
 use super::topology_edgeuse_p1::BrepIn;
-use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use crate::{AbsFloor, Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::geom::assert_array::{labels, obj_type_string, AssertArray, ObjectKey as ReportKey};
@@ -828,6 +828,26 @@ impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "topology.assert_valid"
     }
+    /// Test 13 (edge-on-face) and test 1 (vertex corner) gaps are exact zero for a
+    /// body that passes: a gap below this floor is rounding noise in the projection,
+    /// which differs in the last bits between architectures. The floor is far below
+    /// any real gap (a failing edge or vertex is off by the tolerance, ~1e-5).
+    fn abs_floors(&self) -> &'static [AbsFloor] {
+        const FLOOR: f64 = 1e-12;
+        static FLOORS: &[AbsFloor] = &[
+            AbsFloor {
+                key: "edge_test13_max_gap",
+                abs: FLOOR,
+                why: "a passing edge's gap is exact zero, so sub-floor values are architecture rounding",
+            },
+            AbsFloor {
+                key: "vertex_test1_max_gap_3d",
+                abs: FLOOR,
+                why: "a passing vertex's gap is exact zero, so sub-floor values are architecture rounding",
+            },
+        ];
+        FLOORS
+    }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
         let mut k = Kernel::default();
@@ -942,5 +962,22 @@ impl UnitDiff for Runner {
             value,
         })
         .ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Runner;
+    use crate::UnitDiff;
+
+    /// The near-zero gaps of tests 13 and 1 carry an absolute floor so they agree
+    /// across architectures; without it they differ in the last bits (WR-777's
+    /// arm64/x86-64 noise).
+    #[test]
+    fn floors_cover_the_architecture_noise_keys() {
+        let floors = Runner.abs_floors();
+        let keys: Vec<_> = floors.iter().map(|f| f.key).collect();
+        assert_eq!(keys, ["edge_test13_max_gap", "vertex_test1_max_gap_3d"]);
+        assert!(floors.iter().all(|f| f.abs > 0.0 && f.abs < 1e-6));
     }
 }
