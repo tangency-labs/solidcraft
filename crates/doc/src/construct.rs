@@ -423,7 +423,7 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
     if names.len() < 2 || names.len() > MAX_VERTEX_EDGES {
         return None;
     }
-    let ends: Vec<[Vec3; 2]> = names
+    let found: Vec<(*const ModelBody, usize, [Vec3; 2])> = names
         .iter()
         .map(|n| {
             // The edge with that name itself, never the one nearest the old pick, and its ends
@@ -434,10 +434,16 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
                 let hit = crate::name_lookup::locate_edge(b, n, at).ok()?;
                 let m = b.mesh();
                 let pts = m.edges.get(hit.edge)?;
-                Some([*pts.first()?, *pts.last()?])
+                Some((std::ptr::from_ref(b), hit.edge, [*pts.first()?, *pts.last()?]))
             })
         })
         .collect::<Option<_>>()?;
+    // Two names of a vertex name two edges: a name the point decides (where the body grew so the
+    // vertex lies inside another edge) can find an edge another name found.
+    if found.iter().enumerate().any(|(i, (b, e, _))| found.iter().take(i).any(|(c, f, _)| std::ptr::eq(*b, *c) && e == f)) {
+        return None;
+    }
+    let ends: Vec<[Vec3; 2]> = found.into_iter().map(|(_, _, ends)| ends).collect();
     let (first, rest) = ends.split_first()?;
     let tol = |p: Vec3| 1e-6 * (1.0 + p.len());
     first
