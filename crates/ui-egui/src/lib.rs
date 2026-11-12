@@ -3686,6 +3686,8 @@ impl SolveApp {
                 // Preferences and Keyboard Shortcuts open from Home too (its links, the gear, Ctrl+,).
                 prefs::show(self, ui.ctx());
                 browser::editors(self, ui);
+                // File › Install plugin… is offered on Home too: its question must show there.
+                plugin_install::show(self, ui.ctx());
                 return;
             }
         }

@@ -43,7 +43,7 @@ manifest asks for the group in `permissions.command_groups` and the user grants 
 File access requires approved folder grants. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
 and invalid manifest fields return structured errors. Later phases add
-import/export, author tooling, installation and browser execution after the
+import/export, author tooling and browser execution after the
 phase 1 design review.
 
 ## Installing
