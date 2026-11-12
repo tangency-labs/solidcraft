@@ -3128,6 +3128,26 @@ fn intersection_tool_union(tools: Vec<Traced>) -> Result<Vec<Traced>> {
     Ok(vec![union_all(&tools.iter().collect::<Vec<_>>())?])
 }
 
+/// Refuses a cut or intersect of `tools` that would change the sheet's body `body`, for machining
+/// the sheet can't keep: a cut that meets the body changes it, as does an intersect whose tools
+/// leave some of it out.
+fn sheet_boolean_unchanged(body: &Body, tools: &[Body], op: Operation) -> Result<()> {
+    let united;
+    let tools: &[Body] = if op == Operation::Intersect {
+        united = intersection_tool_union(tools.iter().cloned().map(Traced::unnamed).collect())?.into_iter().map(|t| t.body).collect::<Vec<_>>();
+        &united
+    } else {
+        tools
+    };
+    let test = if op == Operation::Cut { BoolOp::Intersect } else { BoolOp::Cut };
+    for tool in tools {
+        if kernel::boolean(body, tool, test)?.is_some() {
+            return Err(DocError::Invalid("this sheet machining cannot be preserved in its flat material: use a parallel, untapered extrude pocket/cut, or unfold before intersecting; unsupported 3D sheet machining is refused to prevent material restoration".into()));
+        }
+    }
+    Ok(())
+}
+
 /// The union of `operands` (traced bodies) in one kernel call, keeping their lineage.
 fn union_all(operands: &[&Traced]) -> Result<Traced> {
     let bodies: Vec<&Body> = operands.iter().map(|t| &t.body).collect();
