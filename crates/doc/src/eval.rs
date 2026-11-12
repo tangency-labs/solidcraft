@@ -5020,7 +5020,7 @@ pub fn through_all_distance(st: &ModelState, plane: &Plane, targets: &[String]) 
     let mut far: f64 = 0.0;
     let mut any = false;
     for b in st.bodies.iter().filter(|b| targets.is_empty() || targets.contains(&b.name)) {
-        let bb = b.mesh().bounds();
+        let bb = b.body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
         if bb.is_empty() {
             continue;
         }
