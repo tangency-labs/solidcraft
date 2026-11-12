@@ -1054,9 +1054,10 @@ fn second_face_first(l0: f64, l1: f64) -> Option<bool> {
 }
 
 /// The outward unit normal, at the middle of the edge `pick` takes, of the face [`chamfer_sides`]
-/// gives its first distance on `body`: the edge's two faces and how far each leans along a
-/// direction are the kernel's ([`solidcore_ops::edge_faces_along_ordered`]), asked along up (down
-/// with `flip`) for the choice ([`second_face_first`]) and along x, y and z for the normal.
+/// gives its first distance on `body`: the edge's two faces and how far each leans along up (down
+/// with `flip`) are the kernel's ([`solidcore_ops::edge_faces_along_ordered`]), for the choice
+/// ([`second_face_first`]), and so is the chosen face's normal there
+/// ([`solidcore_ops::Body::face_normal_at_edge`]).
 ///
 /// `None` where the edge, its faces or the choice cannot be told (a mesh body, an edge not
 /// between two faces, leans that rounding decides), and where the two faces do not lean clearly
@@ -1072,8 +1073,8 @@ fn first_face_normal(body: &Body, pick: Vec3, flip: bool) -> Option<Vec3> {
     }
     let second = second_face_first(l0, l1)?;
     let first = if second { f1 } else { f0 };
-    let lean = |dir: [f64; 3]| leans(dir)?.into_iter().find(|(f, _)| *f == first).map(|(_, l)| l);
-    let n = Vec3::new(lean([1.0, 0.0, 0.0])?, lean([0.0, 1.0, 0.0])?, lean([0.0, 0.0, 1.0])?);
+    let [x, y, z] = ops.face_normal_at_edge(order, *e, first).ok()?.value;
+    let n = Vec3::new(x, y, z);
     let [(_, a), (_, b)] = leans([n.x, n.y, n.z])?;
     (a != b && second_face_first(a, b)? == second).then_some(n)
 }
