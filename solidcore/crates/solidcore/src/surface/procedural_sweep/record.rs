@@ -270,7 +270,10 @@ impl ProceduralSweep {
             } else {
                 mapped_clamped_net_distance(&net, &expected, a, b, swapped)?
             };
-            let certified = (Ivl::from(definition.certify()?) + Ivl::from(discrepancy)).hi;
+            // `create` stored `certify()` as the bound, and the certificate reads the
+            // profile, motion, stations and half angle alone (not the map set since, and
+            // there is no offset here): the same value, not derived twice
+            let certified = (Ivl::from(definition.bound) + Ivl::from(discrepancy)).hi;
             if !certified.is_finite() {
                 return Err(bad("saved screw net error is not certified finite"));
             }
