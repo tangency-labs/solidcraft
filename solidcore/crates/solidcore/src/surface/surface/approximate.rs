@@ -1062,7 +1062,8 @@ mod tests {
             .unwrap();
         // the cubic is reproduced by its Hermite data
         assert!(r.achieved_tol < 1e-12, "{}", r.achieved_tol);
-        let SurfaceKind::BSpline(b) = r.surface.unwrap().kind() else {
+        let s = r.surface.unwrap();
+        let SurfaceKind::BSpline(b) = s.kind() else {
             panic!("not a B-spline");
         };
         assert_eq!(b.number_control_points(SurfParamType::U), 4);
