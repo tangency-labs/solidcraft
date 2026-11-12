@@ -1,7 +1,8 @@
 //! Tests of the stock-removal simulation: the tool's swept envelope against closed forms and
 //! brute force, a pocket's floor and walls, gouges and rapids caught, a rotary finish, indexed
-//! work on a bar, the side lines under an undercut, the limits, how long a 50 × 50 mm part
-//! takes, and the simulation advanced a part at a time.
+//! work on a bar, the side lines under an undercut, what is left over the whole part, the
+//! limits, how long a 50 × 50 mm part takes, the simulation advanced a part at a time, the
+//! stock and tool meshes, and the findings.
 
 use std::time::Instant;
 
@@ -224,6 +225,70 @@ fn box_triangles(lo: Vec3, hi: Vec3) -> Vec<[Vec3; 3]> {
 }
 
 #[test]
+fn the_whole_part_is_held_against_what_is_left_not_only_where_the_program_cut() {
+    let text = program(&square_pocket_moves());
+    // The part is the pocket's floor block: everything the program cut, nothing left on it.
+    let done = block(Vec3::new(11.0, 11.0, -10.0), Vec3::new(29.0, 29.0, -3.0));
+    let r = run(&text, &flat(6.0), &done, 0.1);
+    assert_eq!(r.gouge_cells, 0);
+    assert!(r.part_left.volume < 1e-9, "{:?}", r.part_left);
+    assert_eq!(r.part_left.max(), 0.0);
+    assert_eq!(r.part_left.hidden_area, 0.0);
+    // The part is faced 3 mm down all over, but the program only cut the pocket: 3 mm left over
+    // the rest of the top (where the program never cut, so the leftover where it cut is none).
+    let faced = block(Vec3::new(0.0, 0.0, -10.0), Vec3::new(40.0, 40.0, -3.0));
+    let r = run(&text, &flat(6.0), &faced, 0.1);
+    assert!(r.leftover_max < 1e-9, "{}", r.leftover_max);
+    let left = &r.part_left;
+    // 40² less the pocket (its corners are the tool's radius), 3 deep.
+    let expected = (1600.0 - (400.0 - (4.0 - std::f64::consts::PI) * 9.0)) * 3.0;
+    assert!((left.volume - expected).abs() < 0.03 * expected, "{} against {expected}", left.volume);
+    assert_eq!(left.hidden_volume, 0.0);
+    close(left.max(), 3.0, 1e-6);
+    assert!(!left.spots.is_empty() && left.spots.len() <= crate::sim::SPOTS);
+    assert!(left.spots.iter().all(|(t, at)| *t > 0.01 && !((10.0..=30.0).contains(&at.x) && (10.0..=30.0).contains(&at.y))), "{:?}", left.spots);
+    // A part with material over air over material (a slot through it along X): faces from above
+    // a height map cannot see, and the stock in the slot is left under the part's own material.
+    let mut tris = box_triangles(Vec3::new(0.0, 0.0, -10.0), Vec3::new(40.0, 40.0, -6.0));
+    tris.extend(box_triangles(Vec3::new(0.0, 0.0, -4.0), Vec3::new(40.0, 40.0, 0.0)));
+    let slotted = Surface::new(tris).unwrap();
+    let r = run(
+        &program(
+            "G0 Z10.
+",
+        ),
+        &flat(6.0),
+        &slotted,
+        0.1,
+    );
+    close(r.part_left.hidden_area, 1600.0, 1.0);
+    close(r.part_left.hidden_volume, 1600.0 * 2.0, 1.0);
+    close(r.part_left.volume, r.part_left.hidden_volume, 1e-9);
+    // The slot has part material over and under it along Z: neither this setup nor one turned
+    // over reaches it.
+    assert!(r.part_left.pieces.iter().all(|p| p.hidden && p.enclosed));
+    assert!(!r.part_left.spots.is_empty());
+    // An overhang with nothing under it along Z: what stands under it is hidden, but not
+    // enclosed.
+    let mut tris = box_triangles(Vec3::new(0.0, 0.0, -4.0), Vec3::new(40.0, 40.0, 0.0));
+    tris.extend(box_triangles(Vec3::new(0.0, 0.0, -10.0), Vec3::new(40.0, 10.0, -4.0)));
+    let overhung = Surface::new(tris).unwrap();
+    let r = run(
+        &program(
+            "G0 Z10.
+",
+        ),
+        &flat(6.0),
+        &overhung,
+        0.1,
+    );
+    close(r.part_left.hidden_volume, 40.0 * 30.0 * 6.0, 0.01 * 7200.0);
+    assert!(r.part_left.pieces.iter().all(|p| p.hidden && !p.enclosed));
+    // Turned over, a later setup reaches what stands under the overhang.
+    close(r.part_left.volume, r.part_left.hidden_volume, 1e-9);
+}
+
+#[test]
 fn an_undercut_a_vertical_tool_cannot_reach_is_left_open_on_the_side_lines() {
     // A slab with a plate over half of it, 2 mm of air between (an undercut under the plate, open
     // at the plate's edge): a 6 mm end mill clears the open half down to the slab, and cannot
@@ -271,10 +336,18 @@ G1 X{}
     close(line[0][1], 20.0, 0.01);
     let r = state.finish(&plan, &part);
     assert_eq!(r.gouge_cells, 0, "{:?}", r.gouge_at);
+    // The undercut's material is left, held against the whole part, and no setup along Z cuts
+    // it.
+    let undercut = 40.0 * 20.0 * 2.0;
+    close(r.part_left.volume, undercut, 0.05 * undercut);
+    assert!(r.part_left.pieces.iter().all(|p| p.enclosed), "{:?}", r.part_left.pieces.first());
+    let spot = r.part_left.spots.first().map(|s| s.1).unwrap();
+    assert!(spot.y < 20.0 && spot.z > -6.0 && spot.z < -4.0, "{spot:?}");
     // `simulate` keeps the side lines for such a part by itself, and hands them on.
     let auto = simulate(&text, &machine, &[flat(6.0)], &stock(), &part, &params(0.01, 0.1)).unwrap();
     assert_eq!(auto.sides.len(), 2);
     assert_eq!(auto.gouge_cells, 0);
+    close(auto.part_left.volume, r.part_left.volume, 1e-9);
 }
 
 #[test]
@@ -872,6 +945,9 @@ fn a_fifty_millimetre_part_at_a_twentieth_of_a_millimetre() {
     let visits = crate::sim::SIM_VISITS.with(std::cell::Cell::get);
     // Some 233 updates a cell (2.3e8), half as much again allowed.
     assert!(visits <= 350_000_000, "{visits} cell updates ({secs} s)");
+    // The preview mesh is bounded.
+    let mesh = r.stock.mesh(256);
+    assert!(mesh.positions.len() <= 257 * 257 && mesh.triangles.len() > 1000);
 }
 
 #[test]
@@ -1132,6 +1208,74 @@ fn tile_maxima_bound_their_cells() {
     assert!(state.tile_version(12, 12) > 0);
     assert_eq!(state.tile_version(0, 0), 0);
     assert!(state.last_tool(&plan, 200, 200) == 0 && state.last_tool(&plan, 0, 0) == crate::sim::UNCUT);
+}
+
+/// The stock drawn for a view, a tile at a time: the tops of the cells coloured by the tool that
+/// cut them last, and a tile the program never reached all uncut.
+#[test]
+fn the_stock_is_drawn_a_tile_at_a_time_in_the_colour_of_the_tool_that_cut_it() {
+    use crate::stock_mesh::{CLASS_TOOL, CLASS_UNCUT, display_step, tile_mesh};
+    let plan = plan_sim(&pocket_program(), &Machine::three_axis(), &[flat(6.0)], &stock(), &params(0.01, 0.1)).unwrap();
+    let mut state = SimState::new(&plan);
+    state.advance(&plan, plan.moves(), 0.0).unwrap();
+    let step = display_step(&plan, 1024);
+    assert_eq!(step, 1, "400 cells a side fit in 1024");
+    assert_eq!(display_step(&plan, 100), 4);
+    let tile = tile_mesh(&plan, &state, 12, 12, step);
+    assert!(!tile.triangles.is_empty() && tile.tri_face.len() == tile.triangles.len());
+    assert!(tile.tri_face.contains(&CLASS_TOOL));
+    assert!(tile_mesh(&plan, &state, 0, 0, step).tri_face.iter().all(|c| *c == CLASS_UNCUT));
+    // The pocket's floor in the middle tile, at its depth.
+    assert!(tile.positions.iter().any(|p| (p.z + 3.0).abs() < 1e-9));
+    // Past the grid, nothing.
+    assert!(tile_mesh(&plan, &state, 99, 0, step).triangles.is_empty());
+}
+
+/// Where the stock is kept along X and Y too (a part with faces under its own material along
+/// Z), the view draws what those lines hold that the heights cannot: a slot an earlier setup cut
+/// across the part under the stock's top shows its ceiling and its floor; without the lines the
+/// column is drawn solid.
+#[test]
+fn the_stock_view_shows_the_air_the_side_lines_keep_under_material() {
+    use crate::stock_mesh::tile_mesh;
+    let part = block(Vec3::new(0.0, 0.0, -10.0), Vec3::new(40.0, 40.0, -6.0));
+    let text = program(
+        "G0 X20. Y20.
+G0 Z5.",
+    );
+    let plan = plan_sim(&text, &Machine::three_axis(), &[flat(6.0)], &stock(), &SimParams { tolerance: 0.01, resolution: Some(0.5) }).unwrap();
+    // The slot, y under 20 and z from -6 to -4, cut by the earlier setup.
+    let carried = |p: Vec3| !(p.y < 20.0 && p.z > -6.0 && p.z < -4.0);
+    // Triangles over the slot facing down at its ceiling and up at its floor, and any facing
+    // down at that height past its edge.
+    let faces = |state: &SimState| {
+        let (tx, ty) = plan.grid().tiles();
+        let (mut down, mut up, mut past) = (0usize, 0usize, 0usize);
+        for tj in 0..ty {
+            for ti in 0..tx {
+                let m = tile_mesh(&plan, state, ti, tj, 1);
+                for t in &m.triangles {
+                    let [a, b, c] = t.map(|i| m.positions[i as usize]);
+                    let (u, v) = (b - a, c - a);
+                    let n = Vec3::new(0.0, 0.0, u.x * v.y - u.y * v.x);
+                    let mid = Vec3::new((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0, (a.z + b.z + c.z) / 3.0);
+                    if n.z < 0.0 && (mid.z + 4.0).abs() < 0.1 {
+                        if mid.y < 20.0 { down += 1 } else { past += 1 }
+                    }
+                    if n.z > 0.0 && (mid.z + 6.0).abs() < 0.1 && mid.y < 20.0 {
+                        up += 1;
+                    }
+                }
+            }
+        }
+        (down, up, past)
+    };
+    assert_eq!(faces(&SimState::new(&plan)), (0, 0, 0));
+    let mut kept = SimState::new(&plan);
+    assert!(kept.carve_sides(&plan, &carried, &part));
+    // Every display cell over the slot (80 × 40 of them, half a millimetre each), two
+    // triangles each, at its ceiling and at its floor; none past it.
+    assert_eq!(faces(&kept), (2 * 80 * 40, 2 * 80 * 40, 0));
 }
 
 #[test]
@@ -1489,6 +1633,127 @@ fn the_part_reach_per_column_bounds_the_part() {
     assert!(crate::sim::column_reach(&part, -20.0, 0.0, 40).iter().all(|r| *r == 0.0));
     assert!(crate::sim::column_reach(&part, -20.0, f64::NAN, 40).iter().all(|r| *r == 0.0));
     assert!(crate::sim::column_reach(&part, -20.0, 1.0, 0).is_empty());
+}
+
+#[test]
+fn tools_are_drawn_from_their_profile() {
+    let held = Tool {
+        stickout: Some(30.0),
+        holder: vec![HolderSection { diameter: 34.0, length: 4.0 }, HolderSection { diameter: 34.0, length: 18.0 }],
+        ..Tool::new(1, ToolKind::BallEndmill, 6.0, 12.0)
+    };
+    let m = crate::tool_mesh::tool_meshes(&held, 24).unwrap();
+    let top = |mesh: &solidcraft_geom::Mesh| mesh.positions.iter().map(|p| p.z).fold(f64::NEG_INFINITY, f64::max);
+    let low = |mesh: &solidcraft_geom::Mesh| mesh.positions.iter().map(|p| p.z).fold(f64::INFINITY, f64::min);
+    close(low(&m.cutting), 0.0, 1e-12);
+    close(top(&m.cutting), 12.0, 1e-12);
+    close(top(&m.shank), 30.0, 1e-12);
+    close(top(&m.holder), 52.0, 1e-12);
+    // The ball's points are on its sphere.
+    assert!(
+        m.cutting.positions.iter().filter(|p| p.z < 3.0 - 1e-9).all(|p| ((p.x * p.x + p.y * p.y + (p.z - 3.0).powi(2)).sqrt() - 3.0).abs() < 1e-9)
+    );
+    let thread = Tool { thread_pitch: Some(1.5), tooth_height: Some(0.8), ..Tool::new(2, ToolKind::ThreadMill, 8.0, 9.0) };
+    assert!(
+        crate::tool_mesh::tool_meshes(&thread, 16).unwrap().cutting.positions.len()
+            > crate::tool_mesh::tool_meshes(&Tool::new(3, ToolKind::FlatEndmill, 8.0, 9.0), 16).unwrap().cutting.positions.len()
+    );
+}
+
+/// Every kind of tool the view draws, each with its closed-form height above the tip at a
+/// distance from its axis (written here from the tools' sizes, not taken from the simulation).
+type HeightAt = Box<dyn Fn(f64) -> f64>;
+fn kinds() -> Vec<(Tool, HeightAt)> {
+    let r = 3.0;
+    let bull = 1.0;
+    let drill = 1.0 / (118f64.to_radians() * 0.5).tan();
+    let face_corner = 0.8;
+    let corner = move |c: f64| move |d: f64| if d <= r - c { 0.0 } else { c - (c * c - (d - (r - c)).powi(2)).max(0.0).sqrt() };
+    vec![
+        (Tool::new(1, ToolKind::FlatEndmill, 6.0, 20.0), Box::new(|_d: f64| 0.0)),
+        (Tool::new(2, ToolKind::BallEndmill, 6.0, 20.0), Box::new(move |d: f64| r - (r * r - d * d).max(0.0).sqrt())),
+        (Tool { corner_radius: Some(bull), ..Tool::new(3, ToolKind::BullNose, 6.0, 20.0) }, Box::new(corner(bull))),
+        (Tool { angle_deg: Some(90.0), ..Tool::new(4, ToolKind::Chamfer, 6.0, 20.0) }, Box::new(|d: f64| d)),
+        (Tool { point_angle_deg: Some(118.0), ..Tool::new(5, ToolKind::Drill, 6.0, 20.0) }, Box::new(move |d: f64| drill * d)),
+        (Tool { corner_radius: Some(face_corner), ..Tool::new(6, ToolKind::FaceMill, 6.0, 20.0) }, Box::new(corner(face_corner))),
+    ]
+}
+
+#[test]
+fn every_kind_of_tool_is_drawn_with_its_own_profile_and_size() {
+    for (t, h) in kinds() {
+        let m = crate::tool_mesh::tool_meshes(&t, 48).unwrap();
+        let r = t.diameter * 0.5;
+        let widest = m.cutting.positions.iter().map(|p| p.x.hypot(p.y)).fold(0.0, f64::max);
+        assert!((widest - r).abs() < 1e-9, "{:?}: drawn {} mm across, is {} mm", t.kind, 2.0 * widest, t.diameter);
+        let lowest = m.cutting.positions.iter().map(|p| p.z).fold(f64::INFINITY, f64::min);
+        assert!(lowest.abs() < 1e-12, "{:?}: the tip is drawn at {lowest}, not at the origin", t.kind);
+        // Every point is on the cutting end's surface, on the side, or on the top's centre.
+        for p in &m.cutting.positions {
+            let rho = p.x.hypot(p.y);
+            let on_end = (p.z - h(rho)).abs() < 1e-9;
+            let on_side = (rho - r).abs() < 1e-9 && p.z >= h(r) - 1e-9;
+            let top = rho < 1e-9 && (p.z - t.flute_length).abs() < 1e-9;
+            assert!(on_end || on_side || top, "{:?}: a point at r {rho}, z {} is off the tool", t.kind, p.z);
+        }
+        assert!(m.cutting.positions.iter().all(|p| p.z <= t.flute_length + 1e-9), "{:?}", t.kind);
+    }
+}
+
+/// Findings merged by their code: counted, the first lines kept once each and no more than
+/// [`crate::findings::MAX_LINES`], the deepest kept, errors listed first; a log keeps its events
+/// in move order, and merges those past its cap.
+#[test]
+fn findings_merge_by_code_and_a_log_keeps_them_by_move() {
+    use crate::findings::{FindingEvent, FindingLog, Findings, MAX_EVENTS, MAX_LINES, Severity};
+    let event = |code: &str, severity: Severity, at_move: Option<usize>, line: usize, depth: f64| FindingEvent {
+        code: code.into(),
+        severity,
+        at_move,
+        line,
+        op: None,
+        at: None,
+        depth,
+        message: format!("{code} at line {line}"),
+    };
+    let mut f = Findings::default();
+    assert!(f.is_empty());
+    f.add(&event("air-cut", Severity::Info, Some(1), 12, 0.0));
+    f.add(&event("rapid-in-stock", Severity::Error, Some(2), 14, 0.5));
+    f.add(&event("rapid-in-stock", Severity::Error, Some(3), 14, 1.5));
+    f.add(&event("rapid-in-stock", Severity::Error, Some(4), 20, 0.2));
+    assert!(f.has("rapid-in-stock") && !f.has("gouge"));
+    let list = f.list();
+    assert_eq!(list.iter().map(|x| x.code.as_str()).collect::<Vec<_>>(), ["rapid-in-stock", "air-cut"]);
+    assert_eq!((list[0].count, list[0].lines.clone(), list[0].worst), (3, vec![14, 20], 1.5));
+    assert_eq!(list[0].message, "rapid-in-stock at line 14");
+    assert_eq!((f.count(Severity::Error), f.count(Severity::Warning), f.count(Severity::Info)), (3, 0, 1));
+    for line in 100..200 {
+        f.add(&event("air-cut", Severity::Info, None, line, 0.0));
+    }
+    assert_eq!(f.list()[1].lines.len(), MAX_LINES);
+    let mut g = Findings::default();
+    g.add(&event("gouge", Severity::Error, Some(9), 30, 0.3));
+    g.add(&event("rapid-in-stock", Severity::Error, Some(9), 31, 2.0));
+    f.merge(&g);
+    let list = f.list();
+    assert_eq!(list.iter().map(|x| x.code.as_str()).collect::<Vec<_>>(), ["rapid-in-stock", "gouge", "air-cut"]);
+    assert_eq!((list[0].count, list[0].worst), (4, 2.0));
+    // A log in move order: the setup's events first, then each move's in the order found.
+    let mut log = FindingLog::default();
+    log.push(event("gouge", Severity::Error, Some(5), 40, 0.1));
+    log.push(event("holder-hits-stock", Severity::Error, None, 0, 0.0));
+    log.push(event("gouge", Severity::Error, Some(2), 33, 0.4));
+    log.sort();
+    assert_eq!(log.events().iter().map(|e| e.at_move).collect::<Vec<_>>(), [None, Some(2), Some(5)]);
+    assert_eq!(log.until(3).count(), 2);
+    assert_eq!(log.merged_until(3).list().iter().map(|x| x.count).sum::<usize>(), 2);
+    for k in 0..MAX_EVENTS + 5 {
+        log.push(event("air-cut", Severity::Info, Some(k), k + 1, 0.0));
+    }
+    assert_eq!(log.len(), MAX_EVENTS);
+    assert_eq!(log.dropped().count(Severity::Info), 8);
+    assert_eq!(log.merged().count(Severity::Info), MAX_EVENTS + 5);
 }
 
 /// Stock left standing in a through hole is leftover: a column whose ray from above meets no

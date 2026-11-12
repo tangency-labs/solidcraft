@@ -70,7 +70,10 @@
 //! (gouges, measured in 3D), material left where the program cut, rapids that cut, and cuts at
 //! the tool's full width. A 3-axis stock is a heightfield, with lines along X and Y beside it
 //! for a part with faces under its own material; a 4th axis's stock is rays from the axis, with
-//! the air an indexed cut leaves inside them.
+//! the air an indexed cut leaves inside them. It also finds the material left over the whole
+//! part. What a simulation finds can be kept as events at their move and place and merged by
+//! kind ([`findings`]); the stock and the tool are drawn as meshes for a view ([`stock_mesh`],
+//! [`tool_mesh`]).
 //!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
@@ -93,6 +96,7 @@ mod cutter;
 pub mod drill;
 mod dropcutter;
 pub mod engagement;
+pub mod findings;
 pub mod finish3d;
 mod frame;
 mod gcode;
@@ -116,10 +120,12 @@ pub mod rotary;
 pub mod setup_sheet;
 pub mod sim;
 pub mod stock;
+pub mod stock_mesh;
 pub mod stop;
 mod surface;
 pub mod surface_ops;
 mod tool;
+pub mod tool_mesh;
 pub mod wrapped;
 
 pub use chamfer::{ChamferGeometry, ChamferParams, DEFAULT_TIP_OFFSET, band_gouges, chamfer, chamfer_geometry};

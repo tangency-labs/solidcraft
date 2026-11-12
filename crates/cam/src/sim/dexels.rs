@@ -17,6 +17,9 @@ pub(super) const MAX_SIDE_SPLITS: usize = 4096;
 pub(super) const SIDE_RUN: usize = 256;
 /// Vertical rays [`hides_faces`] casts each way over the stock's footprint.
 pub(super) const HIDDEN_PROBES: usize = 128;
+/// The longest piece of a side line's leftover looked at as one (mm): each is held against the
+/// part above and below its middle on its own.
+const SIDE_CHUNK: f64 = 2.0;
 
 /// One set of side lines of the stock as a simulation left it ([`SimReport::sides`]): lines
 /// along X (`axis` 0) or Y (1) from `lo` to `hi`, line `k·nu + i` at `u0 + (i + ½)·du` across (Y
@@ -103,6 +106,27 @@ impl DexelSet {
     pub(super) fn point(&self, i: usize, k: usize, t: f64) -> Vec3 {
         let (u, z) = (self.u0 + (i as f64 + 0.5) * self.du, self.z0 + (k as f64 + 0.5) * self.dz);
         if self.axis == 0 { Vec3::new(t, u, z) } else { Vec3::new(u, t, z) }
+    }
+
+    /// How far from line `(i, k)` the lines next to it up (`way` 1) or down (-1) hold material
+    /// at `t`, from the middle of its height, at most `cap`.
+    pub(super) fn material_up(&self, i: usize, k: usize, t: f64, cap: f64, way: i64) -> f64 {
+        let holds = |k: usize| {
+            self.lines.get(k * self.nu + i).is_some_and(|l| {
+                let s = l.partition_point(|p| p[1] < t);
+                l.get(s).is_some_and(|p| p[0] <= t)
+            })
+        };
+        let mut n = 0usize;
+        let mut kk = k;
+        while (n as f64 + 0.5) * self.dz < cap {
+            let Some(next) = kk.checked_add_signed(way as isize).filter(|&q| q < self.nz) else { break };
+            if !holds(next) {
+                break;
+            }
+            (kk, n) = (next, n + 1);
+        }
+        ((n as f64 + 0.5) * self.dz).min(cap)
     }
 
     pub(super) fn dir(&self) -> Vec3 {
@@ -385,18 +409,22 @@ impl SideDexels {
         self.sets.iter().map(|s| s.unmodelled).sum()
     }
 
-    /// What the lines cut into the part under its own material both from above and from below
-    /// along Z (where the height map cannot see), as a gouge: the worst, where, and how many
-    /// pieces.
-    pub(super) fn compare(&self, part: &Surface, tol: f64) -> (f64, Vec3, usize) {
+    /// What the lines leave under the part's own material both from above and from below along
+    /// Z (no setup along Z reaches it), as [`PartLeft`] pieces (each set's half of the volume),
+    /// and what they cut into the part there, as a gouge (the worst, where, and how many pieces).
+    pub(super) fn compare(&self, part: &Surface, tol: f64) -> (PartLeft, f64, Vec3, usize) {
+        let mut left = PartLeft::default();
         let (mut worst, mut worst_at, mut gouged) = (0.0f64, Vec3::ZERO, 0usize);
         let b = part.bounds();
         let reach = (b.max - b.min).len() + 1.0;
         let up = Vec3::new(0.0, 0.0, reach);
-        // Whether the part is both above and below `p` along Z.
-        let enclosed = |p: Vec3| part.raycast(p, up).is_some() && part.raycast(p, up * -1.0).is_some();
+        // How far the part is above and below `p` along Z, when it is both.
+        let over_under = |p: Vec3| Some((part.raycast(p, up)?.0 * reach, part.raycast(p, up * -1.0)?.0 * reach));
+        let enclosed = |p: Vec3| over_under(p).is_some();
         for set in &self.sets {
             let stride = (((set.nu * set.nz) as f64 / (0.5 * WHOLE_SAMPLES as f64)).sqrt().ceil() as usize).max(1);
+            let allowance = tol + set.du.max(set.dz);
+            let area = set.du * set.dz * (stride * stride) as f64 * 0.5;
             let (ax, ac) = (set.axis, 1 - set.axis);
             let (pa, pb) = (comp(b.min, ax).max(set.lo), comp(b.max, ax).min(set.hi));
             if !(pa < pb) {
@@ -415,6 +443,34 @@ impl SideDexels {
                     let Some(list) = segment_stretches(part, set.point(i, k, from), set.dir() * len) else { continue };
                     let stretches: Vec<[f64; 2]> = list.iter().map(|s| [from + s[0] * len, from + s[1] * len]).collect();
                     let point = |t: f64| set.point(i, k, t);
+                    // Material outside the part, within the part's extent along the line, in
+                    // pieces each held against the part above and below its middle.
+                    let material: Vec<[f64; 2]> = line.iter().filter(|m| m[1].min(pb) > m[0].max(pa)).map(|m| [m[0].max(pa), m[1].min(pb)]).collect();
+                    for (o, _) in outside_part(&material, &stretches) {
+                        if o[1] - o[0] <= allowance {
+                            continue;
+                        }
+                        let pieces = ((o[1] - o[0]) / SIDE_CHUNK).ceil().max(1.0) as usize;
+                        let piece = (o[1] - o[0]) / pieces as f64;
+                        for c in 0..pieces {
+                            let (a, e) = (o[0] + c as f64 * piece, o[0] + (c + 1) as f64 * piece);
+                            let t = 0.5 * (a + e);
+                            let m = point(t);
+                            let Some((over, under)) = over_under(m) else { continue };
+                            // As thick as it is along the line, or up the lines over and under
+                            // it that hold material there, to the part.
+                            let ends = distance_within(part, point(a), piece).max(distance_within(part, point(e), piece));
+                            let along = ends.max(2.0 * distance_within(part, m, piece)).min(piece);
+                            let thick = along.max(set.material_up(i, k, t, over, 1) + set.material_up(i, k, t, under, -1));
+                            if thick > allowance {
+                                let volume = piece * area;
+                                left.volume += volume;
+                                left.hidden_volume += volume;
+                                left.spot(thick, m);
+                                left.pieces.push(LeftPiece { from: point(a), to: point(e), volume, thick, hidden: true, enclosed: true });
+                            }
+                        }
+                    }
                     // Air cut into the part where the height map cannot see.
                     let mut at = set.lo;
                     let mut air: Vec<[f64; 2]> = Vec::new();
@@ -451,7 +507,7 @@ impl SideDexels {
                 }
             }
         }
-        (worst, worst_at, gouged)
+        (left, worst, worst_at, gouged)
     }
 }
 
@@ -602,6 +658,44 @@ impl SimState {
     pub fn track_sides(&mut self, plan: &SimPlan) -> bool {
         self.side = SideDexels::new(&plan.grid, &self.bands, plan.cell).map(Box::new);
         self.side.is_some()
+    }
+
+    /// The material the side lines hold along Z over `(x, y)` (work coordinates), bottom up:
+    /// what is at a point is what every set of lines holds there (each line nearest it), read
+    /// at the middle of each layer of the finest set. `None` without side lines (they keep the
+    /// stock only for a part with faces under its own material along Z); with them given up, as
+    /// they stood then (no less than the material left). For a view: material under a cut the
+    /// height map cannot show, and air under material it shows as solid.
+    pub fn side_column(&self, x: f64, y: f64) -> Option<Vec<[f64; 2]>> {
+        let side = self.side.as_deref().or(self.given_up.as_deref())?;
+        let base = side.sets.iter().min_by(|a, b| a.dz.total_cmp(&b.dz))?;
+        let holds = |set: &DexelSet, z: f64| {
+            let (u, t) = if set.axis == 0 { (y, x) } else { (x, y) };
+            let (i, k) = (index((u - set.u0) / set.du, set.nu), index((z - set.z0) / set.dz, set.nz));
+            set.lines.get(k * set.nu + i).is_some_and(|l| {
+                let s = l.partition_point(|p| p[1] < t);
+                l.get(s).is_some_and(|p| p[0] <= t)
+            })
+        };
+        let mut out: Vec<[f64; 2]> = Vec::new();
+        for k in 0..base.nz {
+            let (lo, hi) = (base.z0 + k as f64 * base.dz, base.z0 + (k + 1) as f64 * base.dz);
+            let z = 0.5 * (lo + hi);
+            if !side.sets.iter().all(|s| holds(s, z)) {
+                continue;
+            }
+            match out.last_mut() {
+                Some(last) if last[1] >= lo - 1e-9 => last[1] = hi,
+                _ => out.push([lo, hi]),
+            }
+        }
+        Some(out)
+    }
+
+    /// The finest layer of the side lines along Z (mm), when they are kept ([`SimState::side_column`]).
+    pub fn side_layer(&self) -> Option<f64> {
+        let side = self.side.as_deref().or(self.given_up.as_deref())?;
+        side.sets.iter().map(|s| s.dz).min_by(f64::total_cmp)
     }
 
     /// The stretches of material of the side line along X (`axis` 0) or Y (1) nearest `p`.

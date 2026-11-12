@@ -1,5 +1,6 @@
 //! What is left held against the part: cuts into it (gouges), measured in 3D over the material
-//! each cut column runs through, and the material left on it where the program cut.
+//! each cut column runs through, the material left on it where the program cut, and what is
+//! left over the whole part ([`PartLeft`]).
 
 use super::*;
 
@@ -12,6 +13,7 @@ pub(super) struct Comparison {
     pub(super) leftover_at: Vec3,
     pub(super) leftover_sum: f64,
     pub(super) machined: usize,
+    pub(super) part_left: PartLeft,
 }
 
 impl Default for Comparison {
@@ -25,6 +27,7 @@ impl Default for Comparison {
             leftover_at: Vec3::ZERO,
             leftover_sum: 0.0,
             machined: 0,
+            part_left: PartLeft::default(),
         }
     }
 }
@@ -41,6 +44,7 @@ impl Comparison {
         }
         self.leftover_sum += o.leftover_sum;
         self.machined += o.machined;
+        self.part_left.add(&o.part_left);
     }
 }
 
@@ -150,8 +154,9 @@ pub(super) fn through_hole_floor(part: &Surface, x: f64, y: f64, z: f64, bottom:
 /// The stock left in `model` (a band) against the part; cells the program cut are those below
 /// `initial` (the stock's top or radius). At most `refine` gouged cells are measured in 3D. On a
 /// 4th axis `reach` is how far the part reaches from the axis at each column ([`column_reach`]).
-pub(super) fn compare(model: &Model, part: &Surface, tol: f64, initial: f64, refine: usize, reach: &[f64]) -> Comparison {
-    let mut cmp = Comparison::default();
+/// What is left over the whole part looks at every `stride`-th column ([`part_left`]).
+pub(super) fn compare(model: &Model, part: &Surface, tol: f64, initial: f64, refine: usize, reach: &[f64], stride: usize, sides: bool) -> Comparison {
+    let mut cmp = Comparison { part_left: part_left(model, part, tol, stride, sides), ..Comparison::default() };
     let (mut refined, mut unrefined, mut measured) = (0usize, 0usize, 0usize);
     // The depth into the part of a column cut from `point(outer)` (outside the part, or inside
     // it for air inside a ray's material) in to `at`, `gap` deep below the part's surface along

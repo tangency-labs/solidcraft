@@ -62,9 +62,15 @@
 //! A height map cannot tell air under material from material. For a part with faces under its
 //! own material along Z (an undercut, a hole across it), the 3-axis stock is also kept as lines
 //! along X and along Y (a tri-dexel stock, [`SimState::track_sides`]), cut by every block as the
-//! height map is: what they cut into the part where part material stands both over and under
-//! it along Z is a gouge, and the report hands them on ([`SimReport::sides`]) to a next setup
-//! turned onto its side. Other parts keep none.
+//! height map is: what they leave with part material both over and under it along Z (where no
+//! setup along Z, from above or turned over, reaches) is left on the part and accounted for by no
+//! later setup along Z, and what they cut into the part there is a gouge. The report hands them
+//! on ([`SimReport::sides`]) to a next setup turned onto its side. Other parts keep none.
+//!
+//! What the program left over the whole part, not only where it cut ([`PartLeft`]), is found by
+//! holding columns of the stock (every few cells) against all of the part's stretches along
+//! them: stock never cut over a pocket, a bore's core on a 4th axis, and what stands under the
+//! part's own material are found too.
 //!
 //! [`simulate`] runs in three parts that can also be driven one at a time, for a view that
 //! plays the program move by move: [`plan_sim`] reads the program into steps (one per motion
@@ -85,8 +91,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_geom::Aabb3;
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Aabb3, Mesh};
 
 use crate::gcode::words;
 use crate::gcode5::{JointWords, parse5};
@@ -100,6 +106,7 @@ use crate::{CamError, Result, invalid};
 mod compare;
 mod dexels;
 mod heights;
+mod left;
 mod params;
 mod profile;
 mod program;
@@ -110,6 +117,7 @@ mod state;
 use self::compare::*;
 use self::dexels::*;
 use self::heights::*;
+use self::left::*;
 use self::params::*;
 use self::profile::*;
 use self::program::*;
@@ -121,6 +129,7 @@ pub(crate) use self::compare::column_depth;
 pub(crate) use self::compare::distance_within;
 pub use self::dexels::SideLines;
 pub use self::heights::Removed;
+pub use self::left::{LeftPiece, PartLeft, SPOT_APART, SPOTS};
 pub use self::params::{DEFAULT_CELL_TOLERANCES, DEFAULT_CELLS, Grid, MAX_CELLS, SimParams, StockShape, stock_around};
 pub(crate) use self::profile::Profile;
 pub use self::program::{PartFloor, SimPlan, StepView, plan_sim};
@@ -138,7 +147,7 @@ const FIT_SHARE: f64 = 0.5;
 pub const TILE: usize = 16;
 /// The tool slot of a cell no tool has cut.
 pub const UNCUT: u8 = 255;
-/// About how many columns (lines) a check over the whole part looks at.
+/// About how many columns (lines) a check over the whole part looks at ([`PartLeft`]).
 pub const WHOLE_SAMPLES: usize = 60_000;
 
 /// `√(a² + b²)`, without the care (and the cost) of `f64::hypot`.

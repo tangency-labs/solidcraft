@@ -59,6 +59,8 @@ pub struct SimReport {
     pub leftover_at: Option<Vec3>,
     pub leftover_mean: f64,
     pub machined_cells: usize,
+    /// Material left on the part anywhere, not only where the program cut ([`PartLeft`]).
+    pub part_left: PartLeft,
     /// Cutting moves that removed nothing (cutting air), and their length (mm).
     pub air_moves: usize,
     pub air_length: f64,
@@ -86,7 +88,10 @@ impl SimState {
             Grid::Radii { x0, dx, nx, .. } => column_reach(part, x0, dx, nx),
             Grid::Heights { .. } => Vec::new(),
         };
-        let cmps = each_threaded(models, threaded, |m| Ok(compare(m, part, tol, initial, refine, &reach))).unwrap_or_default();
+        // Every so many columns each way for the whole part's leftover, about WHOLE_SAMPLES of them.
+        let stride = ((plan.cells() as f64 / WHOLE_SAMPLES as f64).sqrt().ceil() as usize).max(1);
+        let sides = self.side.is_some();
+        let cmps = each_threaded(models, threaded, |m| Ok(compare(m, part, tol, initial, refine, &reach, stride, sides))).unwrap_or_default();
         let mut removals = Vec::new();
         for (k, step) in plan.steps.iter().enumerate() {
             let r = self.removed.get(k).copied().unwrap_or_default();
@@ -122,13 +127,13 @@ impl SimState {
         if self.side_dropped {
             warnings.push(
                 "the stock along X and Y (kept for a part with faces under its own material along Z) took too long to cut and was given \
-                 up: what is cut under the part's own material is not checked"
+                 up: what is left under the part's own material is not checked as cut, and is measured as on a height map alone"
                     .into(),
             );
         }
         if let Some(side) = &self.side {
-            let (worst, worst_at, gouged) = side.compare(part, tol);
-            cmp.add(&Comparison { worst, worst_at, gouged, ..Comparison::default() });
+            let (left, worst, worst_at, gouged) = side.compare(part, tol);
+            cmp.add(&Comparison { worst, worst_at, gouged, part_left: left, ..Comparison::default() });
             let unmodelled = side.unmodelled();
             if unmodelled > 0 {
                 warnings.push(format!(
@@ -199,6 +204,7 @@ impl SimState {
             leftover_at: (cmp.leftover_max > 0.0).then_some(cmp.leftover_at),
             leftover_mean: if cmp.machined > 0 { cmp.leftover_sum / cmp.machined as f64 } else { 0.0 },
             machined_cells: cmp.machined,
+            part_left: cmp.part_left,
             air_moves,
             air_length,
             minutes: plan.minutes,
@@ -217,6 +223,79 @@ pub(super) fn stock_grid(grid: &Grid, values: Vec<f64>, mut gaps: Vec<(usize, Ga
             gaps.sort_by_key(|(c, _)| *c);
             StockGrid::Radii { x0, dx, nx, nt, radius, radii: values, gaps }
         }
+    }
+}
+
+impl StockGrid {
+    /// The stock's surface as triangles (top heights, or the radial surface), every `step`-th
+    /// cell so that a side has at most `max_side` points; for a preview.
+    pub fn mesh(&self, max_side: usize) -> Mesh {
+        let max_side = max_side.max(2);
+        let mut m = Mesh::default();
+        let (nu, nv, point): (usize, usize, Box<dyn Fn(usize, usize) -> Option<Vec3> + '_>) = match self {
+            StockGrid::Heights { x0, y0, dx, dy, nx, ny, heights, .. } => (
+                *nx,
+                *ny,
+                Box::new(move |i, j| heights.get(j * nx + i).map(|&z| Vec3::new(x0 + (i as f64 + 0.5) * dx, y0 + (j as f64 + 0.5) * dy, z))),
+            ),
+            StockGrid::Radii { x0, dx, nx, nt, radii, .. } => (
+                *nx,
+                *nt,
+                Box::new(move |i, k| {
+                    let th = (k as f64 + 0.5) * TAU / *nt as f64;
+                    radii.get(k * nx + i).map(|&r| Vec3::new(x0 + (i as f64 + 0.5) * dx, r * th.sin(), r * th.cos()))
+                }),
+            ),
+        };
+        let su = nu.div_ceil(max_side).max(1);
+        let sv = nv.div_ceil(max_side).max(1);
+        let us: Vec<usize> = (0..nu).step_by(su).chain((nu > 0 && (nu - 1) % su != 0).then(|| nu - 1)).collect();
+        let vs: Vec<usize> = (0..nv).step_by(sv).chain((nv > 0 && (nv - 1) % sv != 0).then(|| nv - 1)).collect();
+        for &v in &vs {
+            for &u in &us {
+                m.positions.push(point(u, v).unwrap_or(Vec3::ZERO));
+            }
+        }
+        let wrap = matches!(self, StockGrid::Radii { .. });
+        let (cu, cv) = (us.len(), vs.len());
+        let rows = if wrap { cv } else { cv.saturating_sub(1) };
+        for b in 0..rows {
+            let b1 = (b + 1) % cv.max(1);
+            for a in 0..cu.saturating_sub(1) {
+                let at = |a: usize, b: usize| u32::try_from(b * cu + a).ok();
+                if let (Some(p), Some(q), Some(r), Some(s)) = (at(a, b), at(a + 1, b), at(a + 1, b1), at(a, b1)) {
+                    m.triangles.push([p, q, r]);
+                    m.triangles.push([p, r, s]);
+                }
+            }
+        }
+        // Air inside the rays' material (a pocket or a flat in the side seen at a slant): a
+        // patch where each stretch starts (facing out, a floor) and ends (facing in).
+        if let StockGrid::Radii { x0, dx, nx, nt, gaps, .. } = self {
+            let (dth, half_x) = (TAU / (*nt).max(1) as f64, 0.5 * su as f64 * dx);
+            for &v in &vs {
+                for &u in &us {
+                    let Ok(at) = gaps.binary_search_by_key(&(v * nx + u), |(c, _)| *c) else { continue };
+                    let Some((_, list)) = gaps.get(at) else { continue };
+                    let x = x0 + (u as f64 + 0.5) * dx;
+                    let th = (v as f64 + 0.5) * dth;
+                    let (t0, t1) = (th - 0.5 * sv as f64 * dth, th + 0.5 * sv as f64 * dth);
+                    for g in list {
+                        for (r, out) in [(g[0], true), (g[1], false)] {
+                            let p = |xx: f64, t: f64| Vec3::new(xx, r * t.sin(), r * t.cos());
+                            let Ok(base) = u32::try_from(m.positions.len()) else { return m };
+                            m.positions.extend([p(x - half_x, t0), p(x + half_x, t0), p(x + half_x, t1), p(x - half_x, t1)]);
+                            if out {
+                                m.triangles.extend([[base, base + 1, base + 2], [base, base + 2, base + 3]]);
+                            } else {
+                                m.triangles.extend([[base, base + 3, base + 2], [base, base + 2, base + 1]]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        m
     }
 }
 
