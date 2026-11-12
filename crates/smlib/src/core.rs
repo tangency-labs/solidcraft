@@ -243,7 +243,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.circle_offset_antiparallel_normal = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.volume_lift_third_derivative_terms = true;
-    f.stop_tracking_checks_own_callback = true;
     f.plane_reparameterize_moves_origin = true;
     f.crv_in_volume_mults_by_break_index = true;
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;

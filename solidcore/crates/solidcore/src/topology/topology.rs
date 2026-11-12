@@ -35,7 +35,7 @@
 //! | [`NotifyCallback::owner_link`] for `TopologyChangeCallback` | the `GetOwner()` / `GetEdge()` its geometry walk reads |
 //! | `add_unique`, `remove_key` (private) | `SmTopologyChangeCallback::AddUnique`, `Remove` |
 //! | [`TrackTopologyChanges`]                     | `SmTrackTopologyChanges`                         |
-//! | [`TrackTopologyChanges::new`], [`TrackTopologyChanges::new_with_kernel`] | `SmTrackTopologyChanges::SmTrackTopologyChanges` |
+//! | [`TrackTopologyChanges::new`]               | `SmTrackTopologyChanges::SmTrackTopologyChanges` |
 //! | [`TrackTopologyChanges::start_tracking`]     | `SmTrackTopologyChanges::StartTracking`          |
 //! | [`TrackTopologyChanges::stop_tracking`], [`TrackTopologyChanges::stop_tracking_with_brep`] | `SmTrackTopologyChanges::StopTracking` |
 //! | [`TopologyChangeLists::record_dependencies`] | `SmTopologyChangeCallback::RecordDependencies`   |
@@ -86,13 +86,11 @@
 //!   keys: the caller translates keys and B-rep entities. `StopTracking` without the
 //!   B-rep ([`TrackTopologyChanges::stop_tracking`], [`TrackTopologyChanges::finish`])
 //!   records none; [`TrackTopologyChanges::stop_tracking_with_brep`] is the full one.
-//!   By default both stop methods follow upstream's `!last_notify_callback` test
-//!   (`m_pLastNotifyCallback == NULL`); when opted in via
-//!   [`TrackTopologyChanges::new_with_kernel`] or
-//!   [`TrackTopologyChanges::set_stop_checks_own_callback`]
-//!   ([`crate::kernel::UpstreamFixes::stop_tracking_checks_own_callback`], WR-17),
-//!   they clear the callback and record post-edit dependencies only when
-//!   [`TrackTopologyChanges::is_tracking`] holds.
+//!   Both stop methods clear the callback (and `stop_tracking_with_brep` records
+//!   post-edit dependencies) only when [`TrackTopologyChanges::is_tracking`] holds,
+//!   where upstream tests `m_pLastNotifyCallback == NULL`, which also holds for a
+//!   tracker never started or one whose callback another caller replaced, and fails
+//!   for a tracker started twice, whose callback then stays installed (WR-17).
 //! - `AssertValid`, `CheckPointerChain`, `Dump`, the obsolete `NewMark*` / `Mark2`
 //!   helpers, `UnMark`, `IsUnMarked`, `IsMarkLocked`, the flag bit helpers and the
 //!   placement `operator new` / `delete` are not part of this unit.
@@ -106,7 +104,6 @@ use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::{Context, MarkType, NotifyCallback};
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol;
-use crate::kernel::Kernel;
 use crate::topology::brep::p1::is_live_topology_member;
 use crate::topology::{edge, vertex, Brep, BrepId, EdgeId, FaceId};
 
@@ -1205,10 +1202,6 @@ pub struct TrackTopologyChanges {
     /// `m_pLastNotifyCallback != NULL`: a system callback was already installed when
     /// tracking last started.
     last_notify_callback: bool,
-    /// Whether `stop_tracking` and `stop_tracking_with_brep` verify `is_tracking`
-    /// before clearing the context's system notify callback and recording post-edit
-    /// dependencies (`UpstreamFixes::stop_tracking_checks_own_callback`, WR-17).
-    stop_checks_own_callback: bool,
 }
 
 impl TrackTopologyChanges {
@@ -1222,40 +1215,11 @@ impl TrackTopologyChanges {
         start_now: bool,
         context: Option<&mut Context>,
     ) -> Self {
-        Self::new_inner(brep, key, start_now, false, context)
-    }
-
-    /// [`TrackTopologyChanges::new`] configured from `k.fixes`
-    /// ([`crate::kernel::UpstreamFixes::stop_tracking_checks_own_callback`], WR-17).
-    pub fn new_with_kernel(
-        k: &Kernel,
-        brep: Option<BrepId>,
-        key: u64,
-        start_now: bool,
-        context: Option<&mut Context>,
-    ) -> Self {
-        Self::new_inner(
-            brep,
-            key,
-            start_now,
-            k.fixes.stop_tracking_checks_own_callback,
-            context,
-        )
-    }
-
-    fn new_inner(
-        brep: Option<BrepId>,
-        key: u64,
-        start_now: bool,
-        stop_checks_own_callback: bool,
-        context: Option<&mut Context>,
-    ) -> Self {
         let mut t = Self {
             brep,
             key,
             state: Arc::new(Mutex::new(ChangeState::default())),
             last_notify_callback: false,
-            stop_checks_own_callback,
         };
         // when asked start tracking now - else just init the Rm and Add arrays.
         if start_now {
@@ -1266,24 +1230,6 @@ impl TrackTopologyChanges {
         t
     }
 
-    /// Whether [`TrackTopologyChanges::stop_tracking`] and
-    /// [`TrackTopologyChanges::stop_tracking_with_brep`] check
-    /// [`TrackTopologyChanges::is_tracking`] before clearing the context's system
-    /// notify callback and recording post-edit dependencies
-    /// ([`crate::kernel::UpstreamFixes::stop_tracking_checks_own_callback`], WR-17).
-    #[must_use]
-    pub const fn stop_checks_own_callback(&self) -> bool {
-        self.stop_checks_own_callback
-    }
-
-    /// Sets whether [`TrackTopologyChanges::stop_tracking`] and
-    /// [`TrackTopologyChanges::stop_tracking_with_brep`] check
-    /// [`TrackTopologyChanges::is_tracking`] before clearing the context's system
-    /// notify callback and recording post-edit dependencies (WR-17).
-    pub fn set_stop_checks_own_callback(&mut self, on: bool) {
-        self.stop_checks_own_callback = on;
-    }
-
     /// The tracked B-rep.
     #[must_use]
     pub const fn brep(&self) -> Option<BrepId> {
@@ -1291,8 +1237,9 @@ impl TrackTopologyChanges {
     }
 
     /// Whether a system callback was already installed when tracking last started
-    /// (`m_pLastNotifyCallback != NULL`); [`TrackTopologyChanges::stop_tracking`]
-    /// then leaves the context alone.
+    /// (`m_pLastNotifyCallback != NULL`), this tracker's own included when it was
+    /// started twice. [`TrackTopologyChanges::stop_tracking`] does not read it: it
+    /// tests [`TrackTopologyChanges::is_tracking`].
     #[must_use]
     pub const fn last_notify_callback(&self) -> bool {
         self.last_notify_callback
@@ -1339,26 +1286,16 @@ impl TrackTopologyChanges {
             .is_some_and(|c| c.tracker == self.key)
     }
 
-    /// When the B-rep and its context exist and this tracker found no callback
-    /// installed when it started (or, with
-    /// [`TrackTopologyChanges::stop_checks_own_callback`] enabled, when
-    /// [`TrackTopologyChanges::is_tracking`] holds), clears the context's system
-    /// notify callback (`StopTracking`); otherwise does nothing (upstream asserts).
-    /// Without the B-rep no dependencies are recorded:
-    /// [`TrackTopologyChanges::stop_tracking_with_brep`] is the full `StopTracking`.
+    /// When [`TrackTopologyChanges::is_tracking`] holds, clears the context's system
+    /// notify callback (`StopTracking`); otherwise does nothing. Upstream clears it
+    /// whenever this tracker found none installed when it started, which also wipes
+    /// out a callback installed after a tracker that never started, or one that
+    /// replaced this tracker's (WR-17). Without the B-rep no dependencies are
+    /// recorded: [`TrackTopologyChanges::stop_tracking_with_brep`] is the full
+    /// `StopTracking`.
     pub fn stop_tracking(&mut self, context: Option<&mut Context>) {
-        if self.stop_checks_own_callback {
-            if let Some(context) = context {
-                if self.is_tracking(Some(&*context)) {
-                    context.set_sys_notify_callback(None);
-                }
-            }
-            return;
-        }
-        // when m_pBrep and its Context exist
-        if let (Some(_), Some(context)) = (self.brep, context) {
-            // when LastNotifyCallback was NULL (it was turned on by this object)
-            if !self.last_notify_callback {
+        if let Some(context) = context {
+            if self.is_tracking(Some(&*context)) {
                 // turn off SmObject::Notify() tracking
                 context.set_sys_notify_callback(None);
             }
@@ -1366,10 +1303,8 @@ impl TrackTopologyChanges {
     }
 
     /// `StopTracking` with the tracked B-rep `b`: [`TrackTopologyChanges::stop_tracking`],
-    /// then, when this tracker had installed the callback (or, with
-    /// [`TrackTopologyChanges::stop_checks_own_callback`] enabled, when
-    /// [`TrackTopologyChanges::is_tracking`] held before stopping), its lists record
-    /// the dependencies of the completed edit
+    /// then, when [`TrackTopologyChanges::is_tracking`] held before stopping, its
+    /// lists record the dependencies of the completed edit
     /// ([`TopologyChangeLists::record_dependencies`]; notifications can occur midway
     /// through rewiring edge uses, so they are traversed only now). `entity_of` /
     /// `key_of` translate the notification keys.
@@ -1384,31 +1319,14 @@ impl TrackTopologyChanges {
         entity_of: &dyn Fn(ObjectKey) -> Option<EntityRef>,
         key_of: &dyn Fn(EntityRef) -> ObjectKey,
     ) -> Result<()> {
-        if self.stop_checks_own_callback {
-            let was_tracking = self.is_tracking(context.as_deref());
-            self.stop_tracking(context);
-            if was_tracking {
-                // Notifications can occur midway through rewiring edgeuses. Traverse
-                // dependencies only now, after the caller has completed its edit.
-                change_state(&self.state)
-                    .lists
-                    .record_dependencies(b, entity_of, key_of)?;
-            }
-            return Ok(());
-        }
-        // when m_pBrep and its Context exist
-        if let (Some(_), Some(context)) = (self.brep, context) {
-            // when LastNotifyCallback was NULL (it was turned on by this object)
-            if !self.last_notify_callback {
-                // turn off SmObject::Notify() tracking
-                context.set_sys_notify_callback(None);
-
-                // Notifications can occur midway through rewiring edgeuses. Traverse
-                // dependencies only now, after the caller has completed its edit.
-                change_state(&self.state)
-                    .lists
-                    .record_dependencies(b, entity_of, key_of)?;
-            }
+        let was_tracking = self.is_tracking(context.as_deref());
+        self.stop_tracking(context);
+        if was_tracking {
+            // Notifications can occur midway through rewiring edgeuses. Traverse
+            // dependencies only now, after the caller has completed its edit.
+            change_state(&self.state)
+                .lists
+                .record_dependencies(b, entity_of, key_of)?;
         }
         Ok(())
     }
@@ -1463,6 +1381,7 @@ impl TrackTopologyChanges {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kernel::Kernel;
 
     /// `reset_to_keys` leaves exactly the map a fresh store seeded with the keys has,
     /// whatever was changed (one key, through each mutable access, or in bulk), added or
@@ -2352,27 +2271,5 @@ mod tests {
         let mut expected_add = vec![v_key];
         expected_add.extend(expected_deps);
         assert_eq!(outer.add_list(), expected_add);
-    }
-
-    #[test]
-    fn wr17_flag_lookup() {
-        let mut k = Kernel::default();
-        assert!(!k.fixes.stop_tracking_checks_own_callback);
-        assert!(!k
-            .fixes
-            .flags()
-            .any(|f| f == ("stop_tracking_checks_own_callback", true)));
-        assert!(k
-            .fixes
-            .flags()
-            .any(|f| f == ("stop_tracking_checks_own_callback", false)));
-        *k.fixes
-            .flag_mut("stop_tracking_checks_own_callback")
-            .unwrap() = true;
-        assert!(k.fixes.stop_tracking_checks_own_callback);
-        assert!(k
-            .fixes
-            .flags()
-            .any(|f| f == ("stop_tracking_checks_own_callback", true)));
     }
 }

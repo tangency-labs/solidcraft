@@ -56,7 +56,6 @@
   "torus_check_spindle_apex",
   "extent3d_contains_both_segment_endpoints",
   "local_surface_intersect_guards_max_boundary_retry",
-  "stop_tracking_checks_own_callback",
   "cylinder_rebuild_mean_radius",
   "nurb_cylinder_inside_out_frame",
   "plane_reparameterize_moves_origin",

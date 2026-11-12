@@ -217,7 +217,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "ssi_tangent_contact_points",
     "ssi_tangent_curve_tracer",
     "ssi_trace_tangent_curves_once",
-    "stop_tracking_checks_own_callback",
     "surface_continuity_checks_last_v_knot",
     "surface_parallel_to_vector_checks",
     "sweep_statuses_pass_on",
