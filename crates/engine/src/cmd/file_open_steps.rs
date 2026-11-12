@@ -126,7 +126,7 @@ impl OpenSteps {
             self.model.evaluate_shared(&self.doc);
         }
         let opened = Session::with_model(self.doc, self.visibility, self.model).located(Some(&self.path));
-        opened_design(s, opened, &self.path, self.read_only, self.disk)
+        opened_design(s, opened, &self.path, self.read_only, self.disk, false)
     }
 }
 

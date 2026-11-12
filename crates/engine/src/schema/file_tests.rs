@@ -155,6 +155,7 @@ fn replies_match_the_output_schema() {
         newer_file: None,
         warnings: None,
         param_warnings: Vec::new(),
+        signature: None,
     };
     matches(output_schema_for::<OpenResult>(), "doc.open", &serde_json::to_value(OpenResult::Design(busy)).unwrap_or_default());
     // A design a newer SolidCraft saved: the notice and what wasn't read.
@@ -174,6 +175,7 @@ fn replies_match_the_output_schema() {
         }),
         warnings: Some(vec!["Saved by a newer SolidCraft".into(), "Not read: feature 3. Saving keeps it.".into()]),
         param_warnings: Vec::new(),
+        signature: None,
     };
     matches(output_schema_for::<OpenResult>(), "doc.open", &serde_json::to_value(OpenResult::Design(newer)).unwrap_or_default());
     let warned = run(&mut s, "doc.open", json!({"path": at("part.sc"), "pathh": 1}));

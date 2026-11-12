@@ -23,14 +23,17 @@ use solidcraft_io::Format;
 use super::CommandSpec;
 use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::schema::file::GpgKeyInfo;
 use crate::schema::file::{
-    ExportResult, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing, OpenedFile, OpenedPointCloud, RecoverParams,
-    RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams, RecoveryListResult,
+    ExportResult, GpgKeysParams, GpgKeysResult, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing, OpenedFile,
+    OpenedPointCloud, RecoverParams, RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
+    RecoveryListResult, SignatureRecord, SignatureReport, VerifyParams, VerifyResult,
 };
 use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
 use crate::schema::insert_step::{InsertStepParams, StepInserted};
 use crate::schema::new_design::{NewDesignParams, NewDesignResult};
-use crate::schema::save::{SaveAsParams, SaveParams, SaveResult};
+use crate::schema::save::{SaveAsParams, SaveParams, SaveResult, SignedSave};
 use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
 use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::schema::{TypedContract, output_schema_for};
@@ -53,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -72,14 +75,24 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SAVE_CONTRACT)
         .output(output_schema_for::<SaveResult>)
-        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused)"),
+        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (default false: sign the save with GnuPG, appending a provenance record; container only); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
     CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as))
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
         .contract(&SAVE_AS_CONTRACT)
         .output(output_schema_for::<SaveResult>)
-        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file)"),
+        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file); sign?: bool and signing_key? (as file.save)"),
+    CommandSpec::new("file.verify", "Verify Signature", crate::checked!("file.verify", verify))
+        .noundo()
+        .contract(&VERIFY_CONTRACT)
+        .output(output_schema_for::<VerifyResult>)
+        .params("path? (default: the design's current file) → {path, status, reason?, truncated, records: [{method, key_id, user_id?, author?, created?, format, covered}]}: status is unsigned, valid, not_covered (signed earlier, saved since without a key), invalid or unsupported"),
+    CommandSpec::new("file.gpg_keys", "Signing Keys", crate::checked!("file.gpg_keys", gpg_keys))
+        .noundo()
+        .contract(&GPG_KEYS_CONTRACT)
+        .output(output_schema_for::<GpgKeysResult>)
+        .params("→ {available, keys: [{fingerprint, key_id, user_id, on_card}]}: the GnuPG secret keys a save can sign with (desktop only)"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", crate::checked!("doc.recovery_list", recovery_list)).icon("restore")
         .noundo()
         .contract(&RECOVERY_LIST_CONTRACT)
@@ -215,6 +228,8 @@ const NEW_DESIGN_CONTRACT: TypedContract<NewDesignParams> = TypedContract::new()
 const EXPORT_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportParams> = crate::schema::TypedContract::new();
 const SAVE_CONTRACT: TypedContract<SaveParams> = TypedContract::new();
 const SAVE_AS_CONTRACT: TypedContract<SaveAsParams> = TypedContract::new();
+const VERIFY_CONTRACT: TypedContract<VerifyParams> = TypedContract::new();
+const GPG_KEYS_CONTRACT: TypedContract<GpgKeysParams> = TypedContract::new();
 const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportStepParams> = crate::schema::TypedContract::new();
 const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportStlParams> = crate::schema::TypedContract::new();
 const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
@@ -866,11 +881,12 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         }));
     }
     let read_only = bool_(p, "read_only").unwrap_or(false);
+    let verify = bool_(p, "verify").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
     let (doc, saved) = read_design(s, path)?;
     let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
-    opened_design(s, opened, path, read_only, disk)
+    opened_design(s, opened, path, read_only, disk, verify)
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
@@ -890,10 +906,13 @@ fn opened_design(
     path: &str,
     read_only: bool,
     disk: Option<solidcraft_io::design_lock::FileStamp>,
+    verify: bool,
 ) -> Result<Value> {
     s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
+    s.provenance_chain = solidcraft_io::read_design_provenance_chain_file(path);
+    s.provenance = verify.then(|| solidcraft_io::read_design_provenance_file(path)).flatten();
     // A design saved with print faces (by an older version, or with them kept) opens without
     // them when they are not kept (#11512). The rest of it opens as saved, and dropping them is
     // neither an unsaved change nor a step to undo.
@@ -924,6 +943,7 @@ fn opened_design(
             notice: file.notice(),
         }),
         warnings: s.doc.newer_file.as_ref().map(|file| file.warnings()),
+        signature: s.provenance.as_ref().map(signature_report),
         param_warnings: Vec::new(),
     }))
 }
@@ -1091,7 +1111,18 @@ fn check_design_name(cmd: &str, path: &str) -> Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
+fn write(
+    s: &mut Session,
+    cmd: &str,
+    path: &str,
+    format: &str,
+    compression: &str,
+    preview: bool,
+    cache: bool,
+    overwrite: bool,
+    sign: bool,
+    signing_key: Option<&str>,
+) -> Result<Value> {
     // A path outside the agent's folders says so first, whatever its name.
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
     check_design_name(cmd, path)?;
@@ -1121,7 +1152,7 @@ fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str
     if let Some((from, to)) = &renamed {
         rename_design(s, from, to);
     }
-    let r = write_file(s, path, format, compression, preview, cache);
+    let r = write_file(s, path, format, compression, preview, cache, sign, signing_key);
     if r.is_err()
         && let Some((from, to)) = &renamed
     {
@@ -1130,13 +1161,22 @@ fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str
     r
 }
 
-fn write_file(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool) -> Result<Value> {
+fn write_file(
+    s: &mut Session,
+    path: &str,
+    format: &str,
+    compression: &str,
+    preview: bool,
+    cache: bool,
+    sign: bool,
+    signing_key: Option<&str>,
+) -> Result<Value> {
     let compression = match compression {
         "fast" => solidcraft_io::DesignCompression::Fast,
         "compact" => solidcraft_io::DesignCompression::Compact,
         _ => return Err(bad("file.save", "compression must be fast or compact")),
     };
-    write_bytes(s, path, format, compression, preview, cache)
+    write_bytes(s, path, format, compression, preview, cache, sign, signing_key)
 }
 
 fn write_bytes(
@@ -1146,11 +1186,38 @@ fn write_bytes(
     compression: solidcraft_io::DesignCompression,
     preview: bool,
     cache: bool,
+    sign: bool,
+    signing_key: Option<&str>,
 ) -> Result<Value> {
-    let bytes = match format {
-        "container" => s.design_container_at(Some(path), compression, preview, cache)?,
-        "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
-        _ => return Err(bad("file.save", "format must be container or json")),
+    let chain = s.provenance_chain.clone().unwrap_or_default();
+    let mut signature = None;
+    let bytes = if sign {
+        if format != "container" {
+            return Err(bad("file.save", "only a container can carry a signature: save as .sc (format container), not json"));
+        }
+        let (bytes, signed) = write_signed_container(s, &chain, path, compression, preview, cache, signing_key)?;
+        signature = signed;
+        bytes
+    } else if !chain.records.is_empty() {
+        // A save without a key keeps the history it opened with, so the newest record is reported
+        // as covering an earlier version instead of the chain being destroyed.
+        if format != "container" {
+            s.provenance_chain = None;
+            match format {
+                "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+                _ => return Err(bad("file.save", "format must be container or json")),
+            }
+        } else {
+            let save =
+                solidcraft_io::ProvenanceSave { source: None, chain: &chain, author: None, tool: Some("SolidCraft"), note: None, created: None };
+            s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
+        }
+    } else {
+        match format {
+            "container" => s.design_container_at(Some(path), compression, preview, cache)?,
+            "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+            _ => return Err(bad("file.save", "format must be container or json")),
+        }
     };
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
@@ -1162,6 +1229,8 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
+    s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
+    s.provenance = None;
     s.mark_saved();
     let mut out = SaveResult {
         path: path.to_string(),
@@ -1171,6 +1240,7 @@ fn write_bytes(
         warnings: None,
         not_kept: None,
         param_warnings: Vec::new(),
+        signature,
     };
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
     // couldn't go back, because the design was changed around it, is said.
@@ -1186,6 +1256,126 @@ fn write_bytes(
         }
     }
     serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
+}
+
+/// Write the container with one GnuPG-signed provenance record appended to the session's chain.
+#[cfg(not(target_arch = "wasm32"))]
+fn write_signed_container(
+    s: &Session,
+    chain: &solidcraft_io::ProvenanceChain,
+    path: &str,
+    compression: solidcraft_io::DesignCompression,
+    preview: bool,
+    cache: bool,
+    signing_key: Option<&str>,
+) -> Result<(Vec<u8>, Option<SignedSave>)> {
+    let gpg = crate::gpg::Gpg::find().ok_or_else(|| bad("file.save", "signing needs GnuPG, which was not found on this computer"))?;
+    let signer = crate::gpg::Signer::new(&gpg, signing_key.map(str::trim).filter(|key| !key.is_empty()));
+    let save = solidcraft_io::ProvenanceSave {
+        source: Some(solidcraft_io::SignatureSource::OpenPgp(&signer)),
+        chain,
+        author: None,
+        tool: Some("SolidCraft"),
+        note: None,
+        created: Some(solidcraft_io::design_lock::now_secs()),
+    };
+    let bytes = s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let info = signer.signing_info().ok_or_else(|| EngineError::Other(format!("{path}: GnuPG signed the design but named no key")))?;
+    Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id })))
+}
+
+/// The browser cannot run GnuPG.
+#[cfg(target_arch = "wasm32")]
+fn write_signed_container(
+    _s: &Session,
+    _chain: &solidcraft_io::ProvenanceChain,
+    _path: &str,
+    _compression: solidcraft_io::DesignCompression,
+    _preview: bool,
+    _cache: bool,
+    _signing_key: Option<&str>,
+) -> Result<(Vec<u8>, Option<SignedSave>)> {
+    Err(bad("file.save", "signing needs the desktop app and GnuPG; the browser cannot sign"))
+}
+
+/// `file.verify`: check a saved design's signature.
+fn verify(s: &mut Session, p: &Value) -> Result<Value> {
+    let path = match str_(p, "path") {
+        Some(path) if !path.trim().is_empty() => path.to_owned(),
+        _ => s.path.clone().ok_or_else(|| bad("file.verify", "the design has no file yet: give a `path`"))?,
+    };
+    let report = solidcraft_io::read_design_provenance_file(&path);
+    s.provenance = report.clone();
+    let signature = match &report {
+        Some(report) => signature_report(report),
+        None => SignatureReport { status: "unsigned".to_owned(), reason: None, truncated: false, records: Vec::new() },
+    };
+    serde_json::to_value(VerifyResult { path, signature }).map_err(|e| bad("file.verify", e.to_string()))
+}
+
+/// `file.gpg_keys`: the GnuPG keys a signed save can use.
+fn gpg_keys(_s: &mut Session, _p: &Value) -> Result<Value> {
+    gpg_keys_result()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn gpg_keys_result() -> Result<Value> {
+    let Some(gpg) = crate::gpg::Gpg::find() else {
+        return serde_json::to_value(GpgKeysResult { available: false, keys: Vec::new() }).map_err(|e| bad("file.gpg_keys", e.to_string()));
+    };
+    let keys = gpg.secret_keys().map_err(|e| EngineError::Other(format!("GnuPG: {e}")))?;
+    let keys = keys
+        .into_iter()
+        .map(|key| GpgKeyInfo { fingerprint: key.fingerprint, key_id: key.key_id, user_id: key.user_id, on_card: key.on_card })
+        .collect();
+    serde_json::to_value(GpgKeysResult { available: true, keys }).map_err(|e| bad("file.gpg_keys", e.to_string()))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn gpg_keys_result() -> Result<Value> {
+    serde_json::to_value(GpgKeysResult { available: false, keys: Vec::new() }).map_err(|e| bad("file.gpg_keys", e.to_string()))
+}
+
+/// A provenance report as the UI and scripts read it.
+fn signature_report(report: &solidcraft_io::ProvenanceReport) -> SignatureReport {
+    let (status, reason) = match &report.status {
+        solidcraft_io::ProvenanceStatus::Valid => ("valid", None),
+        solidcraft_io::ProvenanceStatus::NotCovered => ("not_covered", None),
+        solidcraft_io::ProvenanceStatus::Invalid(why) => ("invalid", Some(why.clone())),
+        solidcraft_io::ProvenanceStatus::Unsupported(version) => {
+            ("unsupported", Some(format!("a newer SolidCraft wrote this signature (format {version})")))
+        }
+    };
+    let records = report
+        .records
+        .iter()
+        .map(|record| {
+            let (method, key_id, user_id) = match &record.signer {
+                solidcraft_io::ProvenanceSigner::Ed25519 { key_id, .. } => ("ed25519", hex(key_id), None),
+                solidcraft_io::ProvenanceSigner::OpenPgp { fingerprint, user_id } => ("openpgp", fingerprint.clone(), user_id.clone()),
+            };
+            SignatureRecord {
+                method: method.to_owned(),
+                key_id,
+                user_id,
+                author: record.author.clone(),
+                created: record.created,
+                format: record.format.clone(),
+                covered: record.covered,
+            }
+        })
+        .collect();
+    SignatureReport { status: status.to_owned(), reason, truncated: report.chain.truncated, records }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        // Writing to a `String` cannot fail.
+        let _ = write!(&mut out, "{byte:02x}");
+    }
+    out
 }
 
 impl Session {
@@ -1210,6 +1400,9 @@ impl Session {
     pub(crate) fn located(self, path: Option<&str>) -> Self {
         let mut session = self;
         session.path = path.map(str::to_owned);
+        // A saved design keeps its provenance for the next save to append to, whichever path
+        // opened it (the UI, the CLI, recovery, a linked design).
+        session.provenance_chain = path.and_then(solidcraft_io::read_design_provenance_chain_file);
         // A design saved before body names were pinned (#6403) is pinned now, as its first
         // command would pin it: that command pinned them as part of itself, so undoing it went
         // back to the unpinned design, whose fingerprints no evaluated result matched, and the
@@ -1310,6 +1503,8 @@ impl Session {
         self.path.clone_from(&done.path);
         self.disk = done.disk;
         self.read_only = done.read_only;
+        self.provenance_chain.clone_from(&done.provenance_chain);
+        self.provenance.clone_from(&done.provenance);
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
     }
@@ -1351,11 +1546,46 @@ impl Session {
         preview: bool,
         cache: bool,
     ) -> solidcraft_io::Result<Vec<u8>> {
+        self.container_bytes(path, compression, preview, cache, None)
+    }
+
+    /// The container bytes with one signed provenance record appended to `save.chain`.
+    pub fn design_container_signed(
+        &self,
+        path: Option<&str>,
+        compression: solidcraft_io::DesignCompression,
+        preview: bool,
+        cache: bool,
+        save: &solidcraft_io::ProvenanceSave<'_>,
+    ) -> solidcraft_io::Result<Vec<u8>> {
+        self.container_bytes(path, compression, preview, cache, Some(save))
+    }
+
+    fn container_bytes(
+        &self,
+        path: Option<&str>,
+        compression: solidcraft_io::DesignCompression,
+        preview: bool,
+        cache: bool,
+        provenance: Option<&solidcraft_io::ProvenanceSave<'_>>,
+    ) -> solidcraft_io::Result<Vec<u8>> {
         let design = self.design_at(path);
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
-        solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
+        match provenance {
+            Some(save) => solidcraft_io::write_design_container_with_provenance(
+                &design,
+                compression,
+                preview.as_ref(),
+                geometry.as_ref(),
+                thumbnail.as_deref(),
+                save,
+            ),
+            None => {
+                solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
+            }
+        }
     }
 }
 
@@ -1413,6 +1643,8 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         bool_(p, "preview").unwrap_or(false),
         bool_(p, "cache").unwrap_or(true),
         bool_(p, "overwrite").unwrap_or(false),
+        bool_(p, "sign").unwrap_or(false),
+        str_(p, "signing_key"),
     )
 }
 
@@ -1431,6 +1663,8 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
         bool_(p, "preview").unwrap_or(false),
         bool_(p, "cache").unwrap_or(true),
         bool_(p, "overwrite").unwrap_or(false),
+        bool_(p, "sign").unwrap_or(false),
+        str_(p, "signing_key"),
     )
 }
 
