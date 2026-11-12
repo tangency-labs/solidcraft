@@ -6,9 +6,11 @@ use std::collections::BTreeMap;
 
 use solidcore_ops::boolean::boolean;
 use solidcore_ops::{BooleanOp, make_box, make_cylinder, make_sphere};
+use solidcore::eval::plan::EvalSurface;
 use solidcore_record::Vec3 as P;
+use solidcore_record::brep;
 
-use crate::{Mesh, MeshSpec, TessError, TessPlan, WeldedMesh};
+use crate::{Mesh, MeshSpec, PlanStats, TessError, TessPlan, WeldedMesh};
 
 fn record(body: &solidcore_ops::Body) -> brep::Brep {
     body.to_record().expect("the body's record").0
