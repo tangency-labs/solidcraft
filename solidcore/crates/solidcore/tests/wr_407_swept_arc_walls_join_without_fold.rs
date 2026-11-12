@@ -121,12 +121,14 @@ fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
     );
 }
 
-/// Without the fold rule the cover merges onto the folded continuation: the join is too
-/// large by more than 1000 mm3 (7744 mm3; it was short by 5573 mm3 with upstream's sweep
-/// frame, and by 14596 mm3 with a drop piece stretched onto each trim's edge).
+/// Without the fold rule the cover merges onto the folded continuation: the join is short
+/// by more than 1000 mm3 (4258 mm3 with `solidcore::math::det`'s libm, #13866, as with
+/// Apple's libm before it; glibc's last bits made it too large by 7744 mm3 instead. It was
+/// short by 5573 mm3 with upstream's sweep frame, and by 14596 mm3 with a drop piece
+/// stretched onto each trim's edge).
 #[test]
 fn wr_407_default_join_loses_the_folded_cover() {
     let (k, mut b) = joined(false);
     let v = volume(&k, &mut b);
-    assert!(v - closed_form() > 1000.0, "{v} against {}", closed_form());
+    assert!(closed_form() - v > 1000.0, "{v} against {}", closed_form());
 }
