@@ -611,6 +611,87 @@ fn an_unnamed_offset_refusal_keeps_the_kernels_words() {
     );
 }
 
+/// `refusal` is what the offset operations give for a kernel error, with any face unnamed: the
+/// same routing as `status`, which agrees with it on every kind of error (an offset refusal is
+/// typed, in words from its fields; an error with no offset reason is the kernel's status).
+#[test]
+fn a_kernel_offset_refusal_is_typed_for_a_caller_without_an_order() {
+    use solidcore::error::offset::{LoopCrossing, OffsetFailure, Unsoundness};
+    use solidcore::error::Failure;
+    let face = solidcore::FaceId::from_index(4);
+    let failed = |o| Failure::new("offset::offset_executive::crossing_loops", o).into_error();
+    let crossing = LoopCrossing::ThreeAtOnePoint;
+    let e = super::refusal(&failed(OffsetFailure::LoopsCross {
+        face: Some(face),
+        crossing,
+    }));
+    assert_eq!(
+        e,
+        Some(Error::OffsetRefused {
+            face: None,
+            why: crate::OffsetRefusal::LoopsCross { crossing }
+        })
+    );
+    assert_eq!(
+        e.map(|e| e.to_string()).as_deref(),
+        Some("the offset is refused: its offset's loops cross in a way the offset cannot resolve: three loops cross at one point")
+    );
+    let what = Unsoundness::NotManifoldSolid;
+    assert_eq!(
+        super::refusal(&failed(OffsetFailure::Unsound { what })).map(|e| e.to_string()),
+        Some(format!("the offset is refused: {what}"))
+    );
+    assert_eq!(
+        what.to_string(),
+        "the body built is not a manifold solid, as its input was"
+    );
+    assert_eq!(
+        super::refusal(&failed(OffsetFailure::Folds {
+            face,
+            distance: 2.0,
+            largest: 1.0
+        })),
+        Some(Error::WallFolds { largest: Some(1.0) })
+    );
+    assert_eq!(super::refusal(&solidcore::SolidError::sm_err("x")), None);
+    // `status` and `refusal` agree: `status` is the refusal, else the kernel's status
+    let errors = [
+        failed(OffsetFailure::Failed("x")),
+        failed(OffsetFailure::InvalidValue("x")),
+        failed(OffsetFailure::Folds {
+            face,
+            distance: 2.0,
+            largest: 1.0,
+        }),
+        failed(OffsetFailure::NotCertified {
+            face,
+            distance: -1.0,
+        }),
+        failed(OffsetFailure::Collapses {
+            face,
+            distance: -2.0,
+            radius: 1.5,
+        }),
+        failed(OffsetFailure::LoopsCross {
+            face: Some(face),
+            crossing,
+        }),
+        failed(OffsetFailure::SeamOpened { face }),
+        failed(OffsetFailure::Unsound { what }),
+        failed(OffsetFailure::ExactCurveUncut),
+        solidcore::SolidError::sm_err("x"),
+        solidcore::SolidError::Upstream {
+            operation: "offset::x",
+            code: solidcore::error::SM_ERR_OFFSET_WALLS_TOUCH,
+            entity: None,
+        },
+    ];
+    for e in errors {
+        let expected = super::refusal(&e).unwrap_or_else(|| crate::error::status(e.clone()));
+        assert_eq!(super::status(e.clone(), &|_| None), expected, "{e:?}");
+    }
+}
+
 /// A face whose surface the kernel's room test cannot measure (an offset surface): the room
 /// test's answer maps to `Unsupported`, not to a room or `NoRoom`.
 #[test]

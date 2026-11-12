@@ -92,6 +92,9 @@ pub enum Error {
     Record(import::Unsupported),
     /// solidcore reported an error (the call, then its message).
     Solidcore(String),
+    /// A refusal solidcore-ops types, carried as it is: the app words it from its fields
+    /// (an offset refused with its reason, [`solidcore_ops::Error::OffsetRefused`]).
+    Refused(solidcore_ops::Error),
     /// solidcore panicked; the guard caught it (the call, then the panic's message).
     Internal(String),
     /// A step of SMLib solidcore has not ported yet, refused rather than built another way: what
@@ -175,6 +178,7 @@ impl std::fmt::Display for Error {
             Error::Exception => write!(f, "SMLib raised an internal exception"),
             Error::Record(u) => write!(f, "{u}"),
             Error::Solidcore(e) => write!(f, "solidcore: {e}"),
+            Error::Refused(e) => write!(f, "{e}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
             Error::Unported(what) => write!(f, "not supported yet: {what}"),
             Error::Cancelled(call) => write!(f, "{call}: cancelled"),
