@@ -36,6 +36,14 @@
 //!   never used: two of its points farther apart than `reach` certify it is not collapsed within
 //!   reach, and otherwise the question is refused.
 //!
+//! On the analytic forms ([`SurfaceEval::collapse`](super::SurfaceEval::collapse)) a direction is
+//! collapsed within `reach` only where the surface narrows to a pole: where its circles along
+//! that direction are somewhere wider than `reach`. A form nowhere wider (a cylinder, a sphere's
+//! meridian, a torus's tube, or any of them no more than `reach` across) is thin, not collapsed,
+//! and only an exact pole is one there. Splines and revolutions do not follow that rule yet:
+//! their iso-lines are decided within `reach` as above, so a round written as a B-spline thinner
+//! than `reach` still reads as collapsed where its analytic form does not.
+//!
 //! The iso-line is taken over the spline's whole knot range along `d`, or over `range` when
 //! one is given ([`collapsed_on`]): over a sub-range only the control points of the knot spans
 //! it meets matter (the B-splines not zero on an interval are independent on it), so a face

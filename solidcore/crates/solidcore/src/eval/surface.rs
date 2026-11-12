@@ -552,7 +552,8 @@ impl SurfaceEval {
     /// reach (a cone's apex; a sphere's poles when its diameter exceeds the reach; a torus's ring
     /// when it does). A form whose circles are nowhere wider (a cylinder, a sphere's meridian, a
     /// torus's tube, or any of them no more than the reach across) is thin, not collapsed: only
-    /// an exact pole is one there. A cylinder never is.
+    /// an exact pole is one there. A cylinder never is. Splines and revolutions do not follow
+    /// that rule yet: their iso-lines are decided within the reach ([`super::collapse`]).
     ///
     /// A spline's parameters off its knot range (a pcurve's end fitted a little past it) are
     /// asked at the nearest point of the range with the reach less a certified bound on the
