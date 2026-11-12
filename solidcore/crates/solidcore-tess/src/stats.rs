@@ -43,6 +43,49 @@ pub struct PlanStats {
     /// The other poles of higher order get the exact limit normal per triangle
     /// ([`crate::PoleRule`]).
     pub averaged_poles: Vec<crate::AveragedPole>,
+    /// The mesh path's ([`crate::mesh()`]) faces left short of its shape: a triangle sharper
+    /// than the spec's angle, or a bound that stopped the shaping. Each is meshed, named with
+    /// its smallest angle and what limited it. Apart from [`PlanStats::over_tolerance`], which
+    /// names the faces whose sag refinement stopped, as on the display path.
+    pub unshaped: Vec<Unshaped>,
+}
+
+/// A face the mesh path left short of its shape (see [`PlanStats::unshaped`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unshaped {
+    /// The face's index in the record.
+    pub face: usize,
+    /// Its triangles' smallest angle in 3D (degrees).
+    pub smallest_angle: f64,
+    /// What limited it, each once, in the order met; empty where nothing did and a triangle is
+    /// still sharper than the spec's angle.
+    pub limits: Vec<ShapeLimit>,
+}
+
+/// What stopped the mesh path's shaping of a face ([`Unshaped::limits`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShapeLimit {
+    /// It added all the points a face may have (`MAX_MESH_REFINE`, 200 000) with a triangle
+    /// still too sharp, too long or off the surface.
+    Points,
+    /// Its lattice had more seeds than a face may have (`MAX_SEEDS`, 200 000): it was refined
+    /// from its boundary alone.
+    Seeds,
+    /// A point it would add encroaches on a boundary side, and the rounds of putting such points
+    /// on the edges (`MAX_SPLIT_ROUNDS`, 16) ran out: the side was kept whole.
+    Rounds,
+    /// A point it would add encroaches on a boundary side on no edge (a pole's collapsed side,
+    /// the line a seamless face is cut along), which no node can be put on: kept whole.
+    SidesOnNoEdge,
+    /// A point it would add lies within half a side of a pole of the surface, where the
+    /// parameters collapse: not added, so the refinement does not crowd towards the pole.
+    Pole,
+    /// A triangle smaller than refinement splits (the spec's chord over a thousand, squared) is
+    /// still too sharp.
+    Floor,
+    /// A triangle's sharpest corner is a corner of the boundary sharper than the spec's angle,
+    /// between two of its sides: no point inside the face widens it.
+    Corner,
 }
 
 /// An edge a bound of its sampling stopped (see [`PlanStats::edges_capped`]).
@@ -118,14 +161,6 @@ pub enum Cap {
     /// The sag refinement added all the points it may (`MAX_REFINE`) with triangles still off
     /// the surface by more than the tolerance.
     Refine,
-    /// The mesh path's ([`crate::mesh()`]) refinement for sag, side length and shape stopped at a
-    /// bound with work left: it added all the points it may (`MAX_MESH_REFINE`), or ran all its
-    /// rounds, with a triangle still off the surface, longer than the side asked or sharper than
-    /// the spec's angle; or the face's lattice had more seeds than a face may have (`MAX_SEEDS`,
-    /// 200 000), and it was refined from its boundary alone; or the rounds of putting the
-    /// boundary sides its shaping splits on their edges (`MAX_SPLIT_ROUNDS`, 16) ran out, and it
-    /// was shaped with its sides whole.
-    Shape,
 }
 
 /// An edge the planner could not sample: its index in the record and why.

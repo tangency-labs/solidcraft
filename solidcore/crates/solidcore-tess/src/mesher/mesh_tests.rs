@@ -1,12 +1,12 @@
 //! The mesh path ([`crate::mesh()`]): every face by constrained Delaunay with lattice seeds and
-//! Ruppert shaping, closed, sized by the spec and the caller's size function, the same plan for
-//! any number of threads.
+//! shaping by its triangles in 3D, closed, sized by the spec and the caller's size function, the
+//! same plan for any number of threads.
 
 use std::collections::BTreeMap;
 
 use solidcore::eval::plan::EvalSurface;
 use solidcore_ops::boolean::boolean;
-use solidcore_ops::{BooleanOp, make_box, make_cylinder, make_sphere};
+use solidcore_ops::{BooleanOp, make_box, make_cylinder, make_sphere, make_torus};
 use solidcore_record::Vec3 as P;
 use solidcore_record::brep;
 
@@ -57,6 +57,53 @@ fn corners(m: &Mesh, t: &[u32; 3]) -> [P; 3] {
 fn worst_of(m: &Mesh, face: u32) -> (f64, usize) {
     let tris: Vec<&[u32; 3]> = m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| **f == face).map(|(t, _)| t).collect();
     (tris.iter().map(|t| smallest_angle(corners(m, t))).fold(180.0, f64::min), tris.len())
+}
+
+/// The smallest angle of any triangle (degrees), and its face.
+fn worst_anywhere(m: &Mesh) -> (f64, u32) {
+    m.triangles.iter().zip(&m.tri_face).map(|(t, f)| (smallest_angle(corners(m, t)), *f)).fold((180.0, u32::MAX), |w, x| if x.0 < w.0 { x } else { w })
+}
+
+/// A body on the mesh path at a side of 2 mm and a chord of 0.01 mm: every triangle keeps 20
+/// degrees in 3D, nothing folds and it is closed.
+fn shaped_in_3d(b: &brep::Brep, size: f64, what: &str) {
+    let spec = MeshSpec { chord: 0.01, size: Some(2.0), min_angle: 25.0 };
+    let (plan, stats) = meshed(b, &spec, size, None);
+    let (m, refused) = plan.evaluate();
+    assert!(refused.is_empty(), "{what}: {refused:?}");
+    let (worst, face) = worst_anywhere(&m);
+    eprintln!("{what} on the mesh path: smallest angle {worst} degrees (face {face}) over {} triangles", m.triangles.len());
+    assert!(worst >= 20.0, "{what}: smallest angle {worst} degrees, on face {face}; unshaped: {:?}", stats.unshaped);
+    assert_nothing_folds(&m, what);
+    let (w, refused) = plan.welded();
+    assert!(refused.is_empty(), "{what}: {refused:?}");
+    assert_closed(&w, what);
+}
+
+/// A sphere of radius 10, its poles included: 20 degrees in 3D (FieldCraft's trial at
+/// e728f90e: 1.10 degrees at the pole, shaped in (u, v) scaled by the mean speeds; the display
+/// 4.94).
+#[test]
+fn a_sphere_on_the_mesh_path_keeps_its_angle_at_its_poles() {
+    let b = record(&make_sphere([0.0; 3], 10.0).expect("sphere"));
+    shaped_in_3d(&b, 20.0 * 3f64.sqrt(), "sphere");
+}
+
+/// A torus 20 / 5: its speed round the tube varies by 3 / 5 to 5 / 3 of the mean between its
+/// inside and outside (FieldCraft's trial at e728f90e: a bent tube at 0.06 degrees; the display
+/// 9.54).
+#[test]
+fn a_torus_on_the_mesh_path_keeps_its_angle() {
+    let b = record(&make_torus([0.0; 3], 20.0, 5.0).expect("torus"));
+    shaped_in_3d(&b, (50f64.powi(2) * 2.0 + 10f64.powi(2)).sqrt(), "torus");
+}
+
+/// A box with its top edges rounded: the fillets are strips a few sides wide, curved across
+/// (FieldCraft's trial at e728f90e: 0.08 degrees on a blend).
+#[test]
+fn rounded_edges_on_the_mesh_path_keep_their_angle() {
+    let name = "box_with_filleted_top";
+    shaped_in_3d(&crate::fixtures::fixture(name), crate::fixtures::size_of(name), name);
 }
 
 /// Two faces of one edge split the same side in a round: each gives its fraction in its own
@@ -143,7 +190,11 @@ fn a_plate_a_ball_sinks_into_has_no_needles_on_the_mesh_path() {
     top.dedup();
     let [top] = top.as_slice() else { panic!("one top face: {top:?}") };
     let (worst, count) = worst_of(&m, *top);
-    assert!(worst >= 20.0, "the top face's smallest angle is {worst} degrees over {count} triangles; caps: {:?}", stats.over_tolerance);
+    assert!(worst >= 20.0, "the top face's smallest angle is {worst} degrees over {count} triangles; unshaped: {:?}", stats.unshaped);
+    // The ball's face too, its pole included (FieldCraft's trial at e728f90e: 1.95 degrees at
+    // the pole, shaped in (u, v) scaled by the mean speeds).
+    let (worst, face) = worst_anywhere(&m);
+    assert!(worst >= 20.0, "smallest angle {worst} degrees, on face {face}; unshaped: {:?}", stats.unshaped);
     assert_nothing_folds(&m, "sunk ball");
     let (w, refused) = plan.welded();
     assert!(refused.is_empty(), "{refused:?}");
@@ -178,10 +229,9 @@ fn a_box_on_the_mesh_path_keeps_its_angle_and_its_side() {
     assert_closed(&w, "box");
 }
 
-/// A cylinder's wall: its (u, v) scaled by the surface's mean speeds is the wall unrolled, so the
-/// shaping in (u, v) holds in 3D but for the chords' turn and the sag refinement and flips that
-/// follow it (the display's, kept on the mesh path). Its smallest angle is asserted at 10 degrees
-/// and printed; shaping in the surface's own metric is a follow-up.
+/// A cylinder's wall, shaped by its triangles in 3D, keeps 20 degrees (FieldCraft's trial at
+/// e728f90e: 0.08 degrees on a cylinder's side, shaped in (u, v) and then flipped toward the
+/// surface's normals as the display is).
 #[test]
 fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
     let b = record(&make_cylinder([0.0; 3], 10.0, 20.0).expect("cylinder"));
@@ -194,7 +244,7 @@ fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
     let [wall] = wall.as_slice() else { panic!("one curved face: {wall:?}") };
     let (worst, count) = worst_of(&m, *wall);
     eprintln!("cylinder wall on the mesh path: smallest angle {worst} degrees over {count} triangles");
-    assert!(worst >= 10.0, "the wall's smallest angle is {worst} degrees over {count} triangles; caps: {:?}", stats.over_tolerance);
+    assert!(worst >= 20.0, "the wall's smallest angle is {worst} degrees over {count} triangles; unshaped: {:?}", stats.unshaped);
     assert_nothing_folds(&m, "cylinder");
     let (w, _) = plan.welded();
     assert_closed(&w, "cylinder");

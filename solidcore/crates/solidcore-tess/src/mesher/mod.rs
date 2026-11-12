@@ -54,6 +54,7 @@ pub(crate) mod pieces;
 pub(crate) mod poles;
 pub(crate) mod sag;
 pub(crate) mod seam;
+pub(crate) mod shape;
 pub(crate) mod size;
 pub(crate) mod surface;
 pub(crate) mod tangle;
@@ -120,7 +121,7 @@ const FLAT_MIN_ANGLE_DEG: f64 = 15.0;
 const MAX_REFINE: usize = 20_000;
 /// Most points the mesh path's refinement for sag, side length and shape may add to one face,
 /// beyond its seeds ([`Purpose::Mesh`]; as many as its lattice may have): past it the face is
-/// named in [`PlanStats::over_tolerance`] with [`crate::Cap::Shape`].
+/// named in [`PlanStats::unshaped`] ([`crate::ShapeLimit::Points`]).
 const MAX_MESH_REFINE: usize = 200_000;
 
 /// What a plan is for: the display's planner ([`plan`]), which takes the cheapest layout that
@@ -157,8 +158,8 @@ pub(crate) enum Sides {
     /// It may not: its shaping split only sides on no edge (a pole's collapsed side, the line a
     /// seamless face is cut along), which no node can be put on.
     Kept,
-    /// It may not: the rounds of splitting ran out ([`MAX_SPLIT_ROUNDS`]); the face is named
-    /// with [`crate::Cap::Shape`].
+    /// It may not: the rounds of splitting ran out ([`MAX_SPLIT_ROUNDS`]); where that leaves
+    /// it short, the face is named ([`crate::ShapeLimit::Rounds`]).
     Exhausted,
 }
 
@@ -434,6 +435,7 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpos
         stats.lenient.extend(s.lenient);
         stats.averaged_poles.extend(s.averaged_poles);
         stats.over_tolerance.extend(s.over_tolerance);
+        stats.unshaped.extend(s.unshaped);
     }
     if let Some(e) = first_error
         && stats.unmeshed.len() == faces.len()
@@ -1493,6 +1495,62 @@ pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rule
     Ok(Polygons { uvs, fixed, ranges, seamed })
 }
 
+/// The fastest the surface `s` runs along u and along v (mm per parameter unit) over the box
+/// `bbox`, sampled on a 9 x 9 grid, and at least `mean`: a lattice of side `h / fast` in each
+/// parameter is no wider than `h` in 3D anywhere the samples see.
+fn fastest(s: &EvalSurface, bbox: [(f64, f64); 2], mean: [f64; 2]) -> [f64; 2] {
+    const SAMPLES: usize = 9;
+    let mut fast = mean;
+    let [(u0, u1), (v0, v1)] = bbox;
+    for i in 0..SAMPLES {
+        for j in 0..SAMPLES {
+            let u = u0 + (u1 - u0) * (i as f64 + 0.5) / SAMPLES as f64;
+            let v = v0 + (v1 - v0) * (j as f64 + 0.5) / SAMPLES as f64;
+            if let Some((_, su, sv)) = s.derivs(u, v) {
+                fast = [fast[0].max(su.len()), fast[1].max(sv.len())];
+            }
+        }
+    }
+    fast.map(|x| if x.is_finite() && x > 0.0 { x } else { 1.0 })
+}
+
+/// How near in 3D, as a fraction of the side asked there, a seed may lie to another seed or a
+/// boundary node ([`mesh_seeds`]).
+const SEED_GAP: f64 = 0.8;
+
+/// The mesh path's seeds of a face: the equilateral lattice of side `h / fast` over `bbox`
+/// inside the loops `polys` (no wider than `h` in 3D, see [`fastest`]), taken in its order
+/// where its point lies at least [`SEED_GAP`] of the side asked there (`h`, or less where
+/// `size_at` asks) from the boundary nodes `fixed` and the seeds taken before it, in 3D: where
+/// the surface runs slower than its fastest (towards a sphere's pole, round a torus's inside)
+/// the lattice crowds in 3D, and the seeds are thinned to the side. Whether the lattice was
+/// looked through ([`cdt::lattice_scanned`]).
+fn mesh_seeds(s: &EvalSurface, bbox: [(f64, f64); 2], h: f64, polys: &[&[[f64; 2]]], fast: [f64; 2], fixed: &[Vec3], size_at: Option<size::SizeAt<'_>>) -> (Vec<[f64; 2]>, bool) {
+    let (lattice, whole) = cdt::lattice_scanned(bbox, [h / fast[0], h / fast[1]], polys, fast);
+    if !(h.is_finite() && h > 0.0) {
+        return (lattice, whole);
+    }
+    // The points taken so far, by cell of a grid a side wide: every point nearer than the gap
+    // is in the cell of the seed or a neighbour.
+    let cell = |p: Vec3| [p.x, p.y, p.z].map(|x| (x / h).floor() as i64);
+    let mut taken: crate::hash::BitsMap<[i64; 3], Vec<Vec3>> = crate::hash::BitsMap::default();
+    for p in fixed {
+        taken.entry(cell(*p)).or_default().push(*p);
+    }
+    let mut seeds = Vec::new();
+    for q in lattice {
+        let Some((p, _, _)) = s.derivs(q[0], q[1]) else { continue };
+        let gap = SEED_GAP * size::local(h, size_at, p);
+        let [x, y, z] = cell(p);
+        let crowded = (-1..=1).any(|i| (-1..=1).any(|j| (-1..=1).any(|k| taken.get(&[x + i, y + j, z + k]).is_some_and(|ps| ps.iter().any(|o| o.dist(p) < gap)))));
+        if !crowded {
+            taken.entry([x, y, z]).or_default().push(p);
+            seeds.push(q);
+        }
+    }
+    (seeds, whole)
+}
+
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
 /// `reach`: how near a pole a point is taken as one ([`Boundary::reach`]). `lenient`: the last resort
@@ -1550,31 +1608,74 @@ fn plan_face(
     // Planar and curved faces alike: a structured grid where the boundary runs along the
     // parameter box (a rectangle, a cylinder half), a Coons grid on four corners, else Delaunay.
     // The lenient fill is the constrained Delaunay alone: the caller names the face in the stats.
+    // What limited the mesh path's shaping of the face, where it was shaped.
+    let mut unshaped: Option<Vec<crate::ShapeLimit>> = None;
     let (extra, triangles) = if let Purpose::Mesh(shape) = purpose {
-        // The mesh path: every face, planar ones too, by constrained Delaunay with an equilateral
-        // lattice of side `h`, refined for sag and side length and shaped, the two in turn.
+        // The mesh path: every face, planar ones too, by constrained Delaunay with seeds a side
+        // apart in 3D, refined for sag and side length, then shaped by its triangles in 3D.
         if planar {
             stats.planar += 1;
         } else {
             stats.delaunay += 1;
         }
-        let seeds = cdt::lattice_scanned(bbox, step, &polys, speed);
+        let fast = fastest(s, bbox, speed);
+        let (seeds, whole) = mesh_seeds(s, bbox, h, &polys, fast, &fixed, shape.size_at);
         let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
-        let sag = cdt::Sag { eval: &eval, tol, h, turn: rules.turn, scale: speed };
-        let filled = cdt::mesh(&uvs, &ranges, (seeds.0.as_slice(), seeds.1), &sag, shape.size_at, MAX_MESH_REFINE, shape.min_angle, shape.sides == Sides::Split)
-            .ok_or_else(|| fail("boundary crosses itself"))?;
-        let meshed = match filled {
-            cdt::Filled::Done(meshed) => meshed,
-            // The sides its shaping split go on their edges first ([`plan_at`]).
-            cdt::Filled::Split(split) => {
+        let sag = cdt::Sag { eval: &eval, tol, h, turn: rules.turn, scale: fast };
+        let meshed = cdt::mesh(&uvs, &ranges, &seeds, &sag, shape.size_at, MAX_MESH_REFINE).ok_or_else(|| fail("boundary crosses itself"))?;
+        let mut limits: Vec<crate::ShapeLimit> = Vec::new();
+        if !whole {
+            limits.push(crate::ShapeLimit::Seeds);
+        }
+        if meshed.capped {
+            limits.push(crate::ShapeLimit::Points);
+        }
+        let mut nodes: Vec<[f64; 2]> = uvs.clone();
+        nodes.extend(meshed.extra);
+        let mut pos: Vec<Vec3> = Vec::new();
+        for (i, q) in nodes.iter().enumerate() {
+            let p = match fixed.get(i) {
+                Some(p) => *p,
+                None => s.derivs(q[0], q[1]).map(|d| d.0).ok_or_else(|| fail(&format!("the surface does not evaluate at {q:?}")))?,
+            };
+            pos.push(p);
+        }
+        let mut tris = meshed.triangles;
+        // The surface's poles on the face: its boundary nodes where a parameter collapses.
+        let mut at_poles: Vec<Vec3> =
+            uvs.iter().zip(&fixed).filter(|(q, _)| (0..2).any(|d| s.pole(**q, d, reach))).map(|(_, p)| *p).collect();
+        at_poles.dedup();
+        let point = |q: [f64; 2]| s.derivs(q[0], q[1]).map(|d| d.0);
+        let whole_sides = match shape.sides {
+            Sides::Split => None,
+            Sides::Kept => Some(crate::ShapeLimit::SidesOnNoEdge),
+            Sides::Exhausted => Some(crate::ShapeLimit::Rounds),
+        };
+        let shaping = shape::Rules {
+            min_angle: shape.min_angle.to_radians(),
+            tol,
+            h,
+            size_at: shape.size_at,
+            budget: MAX_MESH_REFINE.saturating_sub(nodes.len().saturating_sub(uvs.len())),
+            whole: whole_sides,
+            poles: &at_poles,
+        };
+        match shape::shape(&mut nodes, &mut pos, &mut tris, &ranges, &point, &shaping) {
+            // The sides its shaping would split go on their edges first ([`plan_at`]).
+            shape::Shaped::Split(split) => {
                 let sides = split.into_iter().filter_map(|(i, j, at)| Some(SplitSide { from: *fixed.get(i)?, to: *fixed.get(j)?, at })).collect();
                 return Ok(Planned::Split(sides));
             }
-        };
-        if meshed.capped || shape.sides == Sides::Exhausted {
-            caps.push(crate::Cap::Shape);
+            shape::Shaped::Done(more) => {
+                for l in more {
+                    if !limits.contains(&l) {
+                        limits.push(l);
+                    }
+                }
+            }
         }
-        (meshed.extra, meshed.triangles)
+        unshaped = Some(limits);
+        (nodes.split_off(uvs.len()), tris)
     } else if lenient == Lenient::Yes {
         delaunay()?
     } else {
@@ -1694,17 +1795,25 @@ fn plan_face(
         if sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE) {
             caps.push(crate::Cap::Refine);
         }
-        sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
+        // The mesh path's triangles are the surface's Delaunay ones, shaped in 3D: flips toward
+        // the surface's normals, for shading, would undo their shape.
+        if matches!(purpose, Purpose::Display) {
+            sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
+        }
         // A face a bound limited is named with the sag its triangles reach.
         if !caps.is_empty() {
             let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
             stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within: sag <= tol && unmeasured == 0, caps: std::mem::take(&mut caps) });
         }
-    } else if matches!(purpose, Purpose::Mesh(_)) && !caps.is_empty() {
-        // A plane on the mesh path a bound limited is named too (its triangles lie in it).
-        let poles = sag::Poles::new(s, reach);
-        let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
-        stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within: sag <= tol && unmeasured == 0, caps: std::mem::take(&mut caps) });
+    }
+    // A face the mesh path left short of its shape is named with its smallest angle in 3D.
+    if let (Some(limits), Purpose::Mesh(shape)) = (unshaped, purpose) {
+        let at = |i: u32| fixed.get(i as usize).copied().or_else(|| all.get(i as usize).and_then(|q| s.derivs(q[0], q[1])).map(|d| d.0));
+        let smallest =
+            triangles.iter().filter_map(|t| Some(shape::smallest([at(t[0])?, at(t[1])?, at(t[2])?]))).fold(f64::INFINITY, f64::min).to_degrees();
+        if !limits.is_empty() || smallest < shape.min_angle {
+            stats.unshaped.push(crate::Unshaped { face: fi, smallest_angle: smallest, limits });
+        }
     }
     // Both evaluators take a closed spline's parameters inside its active interval.
     for q in &mut all {

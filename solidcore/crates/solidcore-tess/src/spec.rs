@@ -50,23 +50,29 @@ impl MeshSpec {
 /// normals, [`TessPlan::welded`] for one whose faces share their vertices).
 ///
 /// **Not for display**: for mesh bodies, mesh export (STL, OBJ, 3MF, PLY) and analysis meshers.
-/// Every face, planar ones included, goes through constrained Delaunay in its own (u, v) scaled
-/// to millimetres: an equilateral lattice of seeds of the face's side, refined where a triangle
-/// sags off the surface by more than `spec.chord` or has a side longer than 1.5 times the side
-/// asked there, then shaped by Ruppert refinement to `spec.min_angle`, the two in turn. It is
-/// slow by design; [`crate::plan`] is the display's.
+/// Every face, planar ones included, goes through constrained Delaunay in its own (u, v): seeds
+/// of an equilateral lattice a side apart in 3D, refined where a triangle sags off the surface
+/// by more than `spec.chord` or has a side longer than 1.5 times the side asked there, then
+/// shaped by its triangles in 3D (Delaunay refinement on the surface: flips by the 3D angles,
+/// and a point at the 3D circumcentre of each triangle sharper than `spec.min_angle`, longer
+/// than asked or off the surface). It is slow by design; [`crate::plan`] is the display's.
 ///
 /// A face's side is `spec.size` where its curvature asks for no less, and less where
 /// `size_at` asks for less at a point (a value that is not finite and positive asks for nothing
 /// there). Every edge is sampled once, its segments no longer than the side of either face it
 /// bounds or than `size_at` asks at their middles, and both faces take its nodes, so the mesh
-/// is closed wherever the B-rep is. Where shaping would split a boundary side (Ruppert's rule
-/// for a side a new point encroaches on), the point is put on the side's edge as a node, and
-/// every face of the edge is planned again with it, until no face splits one. A bound that stops a face's refinement with work left names
-/// the face in [`PlanStats::over_tolerance`] ([`crate::Cap::Shape`]); an edge a bound stopped,
-/// in [`PlanStats::edges_capped`]. Faces are planned in parallel where there are several, each
-/// on its own, and collected in the record's order: the plan is the same for any number of
-/// threads.
+/// is closed wherever the B-rep is. Where shaping would add a point that encroaches on a
+/// boundary side (Ruppert's rule), the side's edge takes a node at its middle instead, and every
+/// face of the edge is planned again with it, until no face asks for one.
+///
+/// What the plan's stats name: [`PlanStats::unshaped`], each face left short of its shape (a
+/// triangle sharper than `spec.min_angle`, or a bound that stopped the shaping: its points, the
+/// rounds of splitting sides, a side on no edge kept whole, a pole), with its smallest angle in
+/// 3D; [`PlanStats::over_tolerance`], each face whose sag refinement stopped at its bound, with
+/// whether its triangles are still within `spec.chord` (`within`), as on the display path; and
+/// [`PlanStats::edges_capped`], each edge a bound of its sampling stopped. Faces are planned in
+/// parallel where there are several, each on its own, and collected in the record's order: the
+/// plan is the same for any number of threads.
 ///
 /// # Errors
 /// [`TessError::Invalid`] for a `spec` out of range (a chord or size that is not a positive
@@ -136,8 +142,9 @@ impl TessPlan {
     /// each face's boundary node (a shared edge node, at its exact position, bit for bit the
     /// same in every face that runs the edge) is one vertex however many faces run it, numbered
     /// where the first face in the record's order meets it, and every other point is its face's
-    /// own. No normals: a face's are [`TessPlan::evaluate`]'s. With the faces left out (the
-    /// surface does not evaluate at a node), as there.
+    /// own. No normals: a face's are [`TessPlan::evaluate`]'s. Returns the mesh and the faces
+    /// left out of it, each with why (the surface does not evaluate at one of its nodes), as
+    /// [`TessPlan::evaluate`] leaves them out.
     #[must_use]
     pub fn welded(&self) -> (WeldedMesh, Vec<RefusedFace>) {
         let mut out = WeldedMesh::default();

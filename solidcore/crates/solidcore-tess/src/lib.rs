@@ -52,7 +52,10 @@ pub use par::guarded;
 pub use plan::{FacePlan, TessPlan};
 pub use pole::{AveragedPole, PoleNode, PoleRule};
 pub use spec::{MAX_MESH_MIN_ANGLE, MESH_MIN_ANGLE, MeshSpec, WeldedMesh, mesh};
-pub use stats::{Cap, CappedEdge, EdgeCap, OverTolerance, PlanStats, RefusedEdge, RefusedFace};
+pub use stats::{
+    Cap, CappedEdge, EdgeCap, OverTolerance, PlanStats, RefusedEdge, RefusedFace, ShapeLimit,
+    Unshaped,
+};
 pub use tolerance::{DISPLAY_ANGLE, MeshTolerance};
 
 /// The plan evaluator's curve and surface forms a [`TessPlan`] holds (its `surfaces`), so a
