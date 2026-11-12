@@ -30,8 +30,8 @@
 //! Not upstream (WR-776): [`analytic_rotational_sweep`] makes its cone only for a line in
 //! one plane with the axis ([`coplanar_with_axis`]); upstream makes the cone through the
 //! end circles of a line skew to the axis too, which sweeps a hyperboloid of one sheet. A
-//! skew line is refused here (`SM_ERR`) before any edit, so the caller gives it its
-//! surface of revolution.
+//! skew line is refused here (a described failure, `SM_ERR` status) before any edit, so
+//! the caller gives it its surface of revolution.
 //! Not upstream (WR-565, tangency-labs/solidcore#1477, opt-in
 //! `Kernel::fixes.linear_sweep_arc_is_cylinder`; SolidCraft change, tangency-labs/smlib
 //! 12918e9): [`PrimitiveCreation::create_linear_sweep`] makes a circular arc short of a
@@ -1464,7 +1464,7 @@ pub(crate) fn coplanar_with_axis(
 /// Lines on the axis, interior axis crossings and unsuitable circular arcs return
 /// `SM_ERR`; topology construction defers at its exact owning unit. Not upstream
 /// (WR-776): a line skew to the axis and neither parallel nor square to it
-/// ([`coplanar_with_axis`] at the B-rep's tolerance) returns `SM_ERR` before any edit,
+/// ([`coplanar_with_axis`] at the B-rep's tolerance) fails, described, before any edit,
 /// where upstream makes it the cone through its end circles.
 pub fn analytic_rotational_sweep(
     k: &mut Kernel,
@@ -1549,7 +1549,10 @@ pub fn analytic_rotational_sweep(
             // Not upstream (WR-776): a line skew to the axis sweeps a hyperboloid, not the
             // cone through its end circles
             if !coplanar_with_axis(axis_base, axis, ends.start, ends.end, tol) {
-                return Err(SolidError::sm_err(op));
+                return Err(SolidError::primitive_failed(
+                    op,
+                    "the line is skew to the axis: it sweeps a hyperboloid, not a cone",
+                ));
             }
             let (bottom_radius, bottom_parameter) =
                 line_point_distance(axis_base, axis, ends.start);
