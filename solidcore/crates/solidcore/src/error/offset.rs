@@ -319,6 +319,7 @@ impl OffsetFailure {
             | Self::ToleranceUnresolved { .. }
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
+            | Self::TangentEndOffCurve
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
@@ -347,6 +348,7 @@ impl OffsetFailure {
             | Self::ToleranceUnresolved { .. }
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
+            | Self::TangentEndOffCurve
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
@@ -817,6 +819,7 @@ mod tests {
             ),
             (O::SeamOpened { face }, ErrorKind::Unsupported, false, false),
             (O::ExactCurveUncut, ErrorKind::Unsupported, false, false),
+            (O::TangentEndOffCurve, ErrorKind::Unsupported, false, false),
             (O::FacesApart { face }, ErrorKind::Unsupported, false, false),
             (
                 O::ReachUncertified { face },
@@ -856,14 +859,15 @@ mod tests {
                 O::ToleranceUnresolved { .. } => 7,
                 O::SeamOpened { .. } => 8,
                 O::ExactCurveUncut => 9,
-                O::FacesApart { .. } => 10,
-                O::ReachUncertified { .. } => 11,
-                O::LoopGapUncertified { .. } => 12,
-                O::Unsound { .. } => 13,
-                O::Failed(_) => 14,
-                O::Missing(_) => 15,
-                O::InvalidValue(_) => 16,
-                O::Inconsistent(_) => 17,
+                O::TangentEndOffCurve => 10,
+                O::FacesApart { .. } => 11,
+                O::ReachUncertified { .. } => 12,
+                O::LoopGapUncertified { .. } => 13,
+                O::Unsound { .. } => 14,
+                O::Failed(_) => 15,
+                O::Missing(_) => 16,
+                O::InvalidValue(_) => 17,
+                O::Inconsistent(_) => 18,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
