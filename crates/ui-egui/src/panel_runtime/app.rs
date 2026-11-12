@@ -1152,7 +1152,9 @@ impl crate::SolveApp {
         let render_domain = ui.available_rect_before_wrap();
         self.viewport.host_confirm = None;
         crate::ui_kit::Container::begin_host_windows(ui.ctx());
-        self.viewport.host_windows = Some(Vec::new());
+        // Navigation runs before the editors repaint. Keep their last measured bounds
+        // until this frame has replacements so orbit and fitting use the same room.
+        self.viewport.host_windows.get_or_insert_with(Vec::new);
         self.viewport.palette_rect = None;
         // Clear stale Browser-owned metadata; the retained independent
         // redefine/feature editor publishes its actual paint later in this pass.
