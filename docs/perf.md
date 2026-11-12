@@ -34,6 +34,20 @@ reply carries its own profile while recording.
 
 # Design loading
 
+## The stand-up offer waits beside the window (2026-11-12)
+
+After a STEP or IGES file opens, SolidCraft may offer to stand it up, after weighing how its
+bodies rest. That meshes up to 64 of them. Just after an open, the same bodies are being meshed
+beside the window (`open_meshing`), and the window thread waited for that work: the frame that
+finished the open of a 561-body STEP printer assembly took 0.96–1.66 s, of which 0.79–1.51 s
+was the offer (`SOLIDCRAFT_PROFILE_FRAMES=1`, NVIDIA GB10, release build, three opens each,
+alternating). Only about 0.2 s of that was work: `perf` found the window thread waiting on the
+meshes' `OnceLock`.
+
+While bodies are being meshed, the estimate now runs on a thread of its own and the offer is made
+on a later frame; a design changed meanwhile gets no offer. The same frame now takes 136–168 ms,
+none of it in the offer.
+
 ## Edges made by booleans: each point evaluated once (2026-10-16)
 
 A boolean meshes both operands with truck-meshalgo, which first divides every edge into a
