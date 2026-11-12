@@ -1079,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "craft-plugin"
-version = "0.40.1"
+version = "0.41.0"
 dependencies = [
  "schemars",
  "serde",
@@ -1089,7 +1089,7 @@ dependencies = [
 
 [[package]]
 name = "craft-plugin-wasm"
-version = "0.40.1"
+version = "0.41.0"
 dependencies = [
  "cap-std",
  "craft-plugin",
