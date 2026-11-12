@@ -72,6 +72,7 @@ use crate::{Error, Result};
 type Out<T> = std::result::Result<T, Error>;
 
 pub mod birail;
+pub mod controlled;
 pub mod railed;
 mod record;
 

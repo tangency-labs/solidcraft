@@ -4916,7 +4916,7 @@
   "ui.pitch": "Stigning",
   "ui.placement": "Placering",
   "ui.placement_handles": "Placeringshåndtag",
-  "ui.placement_handles_tip": "Håndtag på forhåndsvisningen af en Understøtning, Skruebøsning eller Snapforbindelse: Træk i markøren for at flytte den hen over modellen, og drej den ved dens ring",
+  "ui.placement_handles_tip": "En markør til at trække featuren hen over modellen og, hvor featuren kan drejes, en ring til at dreje den.",
   "ui.plane": "Plan",
   "ui.plane_at_angle": "Plan i vinkel",
   "ui.plugins": "Plugins",

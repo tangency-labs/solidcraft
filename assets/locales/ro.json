@@ -4915,7 +4915,7 @@
   "ui.pitch": "Pas",
   "ui.placement": "Plasare",
   "ui.placement_handles": "Mânere de plasare",
-  "ui.placement_handles_tip": "Mânere pe previzualizarea unui Reazem, Bosaj sau a unei Prinderi cu clichet: trageți marcajul pentru a-l muta pe model, rotiți-l cu inelul său",
+  "ui.placement_handles_tip": "Un marcaj pentru a trage operația pe model și, acolo unde operația se poate roti, un inel pentru a o roti.",
   "ui.plane": "Plan",
   "ui.plane_at_angle": "Plan în unghi",
   "ui.plugins": "Pluginuri",

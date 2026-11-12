@@ -427,7 +427,7 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
 
 /// The B-spline a curve is (every kernel line, conic and spline is one, its NURB made on a
 /// copy where it has none yet); `None` for the curves that are not.
-fn b_spline_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<Cow<'c, BSplineCurve>>> {
+pub(crate) fn b_spline_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<Cow<'c, BSplineCurve>>> {
     use crate::curve::curve::CurveKind;
     Ok(Some(match c.kind() {
         CurveKind::BSpline(b) => Cow::Borrowed(b),

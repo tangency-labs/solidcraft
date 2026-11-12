@@ -987,16 +987,35 @@ mod tests {
 
     #[test]
     fn revolution_of_an_unbounded_line_measures_from_its_profile() {
-        // An unbounded line profile through (2, 0, 0): the kernel places the
-        // revolution from the line's far start, its X axis (-1, 0, 0), while its u = 0
+        // An unbounded line profile through (2, 0, 0), placed from the line's far
+        // start (upstream's `CreateCanonical`), its X axis (-1, 0, 0), while its u = 0
         // is the profile at +X (u = 90 at +Y): the frame of its angles is turned half a
-        // turn from its position.
+        // turn from its position. (The kernel's `create_canonical` places it from the
+        // profile's origin, X = (1, 0, 0).)
         let k = k();
-        let profile = Curve::from(Line::create_canonical(p(2.0, 0.0, 0.0), v3(1.0, 0.0, 2.0)));
-        let s = Surface::from(
-            SurfOfRevolution::create_canonical(&k, profile, p(0.0, 0.0, 0.0), Vec3::Z, false)
-                .unwrap(),
+        let profile = || Curve::from(Line::create_canonical(p(2.0, 0.0, 0.0), v3(1.0, 0.0, 2.0)));
+        let canonical =
+            SurfOfRevolution::create_canonical(&k, profile(), p(0.0, 0.0, 0.0), Vec3::Z, false)
+                .unwrap();
+        assert_eq!(canonical.position().x_axis(), v3(1.0, 0.0, 0.0));
+        let domain = Extent2d::from_bounds(
+            0.0,
+            -crate::math::INFINITE_PARAMETER,
+            360.0,
+            crate::math::INFINITE_PARAMETER,
         );
+        let mut far_start = SurfOfRevolution::new(
+            &k,
+            profile(),
+            p(0.0, 0.0, 0.0),
+            v3(-1.0, 0.0, 0.0),
+            v3(0.0, -1.0, 0.0),
+            domain,
+            false,
+        )
+        .unwrap();
+        far_start.make_nurb(&k).unwrap();
+        let s = Surface::from(far_start);
         assert_eq!(position(&s).x_axis(), v3(-1.0, 0.0, 0.0));
         let at90 = s.evaluate_step_point(&k, Point2::new(90.0, 0.0)).unwrap();
         assert!(at90.distance(p(0.0, 2.0, 0.0)) <= 1e-15);

@@ -160,7 +160,7 @@ pub struct RailedLoft {
 /// A section curve as plain numbers: degree, full knots, Euclidean control points, weights
 /// (`None` for a polynomial curve).
 #[derive(Debug, Clone)]
-struct Plain {
+pub(crate) struct Plain {
     degree: usize,
     knots: Vec<f64>,
     points: Vec<Point3>,
@@ -361,7 +361,7 @@ fn wire_point(curves: &[(Plain, NurbCurve)], g: f64) -> Result<Point3> {
 }
 
 /// A station's curves, and per rail its parameter and point there.
-type StationAt = (Vec<Plain>, Vec<(f64, Point3)>);
+pub(crate) type StationAt = (Vec<Plain>, Vec<(f64, Point3)>);
 
 /// An affine move: `x` goes to `to + m (x - from)`.
 struct Affine {
@@ -710,11 +710,11 @@ impl<'a> Loft<'a> {
 
 /// A wire of the loft: a section's curves or a station's, at loft parameter `(span, f)`, and
 /// per rail the rail's parameter and point there.
-struct Wire {
-    span: usize,
-    f: f64,
-    curves: Vec<Plain>,
-    hits: Vec<(f64, Point3)>,
+pub(crate) struct Wire {
+    pub(crate) span: usize,
+    pub(crate) f: f64,
+    pub(crate) curves: Vec<Plain>,
+    pub(crate) hits: Vec<(f64, Point3)>,
 }
 
 /// The loft through `sections` guided by `rails` (module docs).
@@ -759,6 +759,35 @@ pub fn loft_rails(
             hits,
         });
     }
+    skin_and_certify(
+        k,
+        wires,
+        spans,
+        rails,
+        opts,
+        &mut |k: &Kernel, i: usize, f: f64| loft.station(k, i, f),
+    )
+}
+
+/// The loft's skin-and-certificate loop (module docs, "Where the stations go, and the
+/// certificate"): from the wires `wires` (the sections, each with its rails' crossings, `spans`
+/// spans between them), a station placed by `station(k, span, f)` at each span's middle, the
+/// wires skinned, each rail bounded against the skin on every span between neighbouring wires,
+/// and a span whose bound is above the tolerance given a station at its middle, until every
+/// span is certified; past [`RailLoftOptions::max_wires`] refused, naming the bound reached.
+///
+/// # Errors
+///
+/// [`crate::error::sweep::SweepFailure::RailPastStationCap`] past the wire cap; those of
+/// `station`, the skin and the bound.
+pub(crate) fn skin_and_certify(
+    k: &mut Kernel,
+    mut wires: Vec<Wire>,
+    spans: usize,
+    rails: &[&Curve],
+    opts: &RailLoftOptions,
+    station: &mut dyn FnMut(&Kernel, usize, f64) -> Result<StationAt>,
+) -> Result<RailedLoft> {
     // one station at each span's middle
     let mut pending: Vec<(usize, f64)> = (0..spans).map(|i| (i, 0.5)).collect();
     // the largest bound the last skin proved (none before the first)
@@ -776,7 +805,7 @@ pub fn loft_rails(
             .into_error());
         }
         for (i, f) in pending.drain(..) {
-            let (curves, hits) = loft.station(k, i, f)?;
+            let (curves, hits) = station(&*k, i, f)?;
             wires.push(Wire {
                 span: i,
                 f,

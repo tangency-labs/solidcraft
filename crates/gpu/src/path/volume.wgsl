@@ -20,8 +20,13 @@ fn volume_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f32> {
 fn volume_transmittance_precise(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, distance: f32) -> f32 {
     if all(o_low==vec3<f32>(0.0)) { return volume_transmittance(o,d,distance); }
     if u.volume_min.w<=0.0 { return 1.0; }
-    let lo=precise_point_delta(u.volume_min.xyz,vec3<f32>(0.0),o,o_low);
-    let hi=precise_point_delta(u.volume_max.xyz,vec3<f32>(0.0),o,o_low);
+    // Both box bounds share one inlined precise subtraction.
+    var lo=vec3<f32>(0.0);
+    var hi=vec3<f32>(0.0);
+    for (var k=0u; k<2u; k+=1u) {
+        let delta=precise_point_delta(select(u.volume_min.xyz,u.volume_max.xyz,k==1u),vec3<f32>(0.0),o,o_low);
+        if k==0u { lo=delta; } else { hi=delta; }
+    }
     var enter=0.0; var leave=distance;
     for(var axis=0u;axis<3u;axis+=1u) {
         if d[axis]==0.0 { if lo[axis]>0.0 || hi[axis]<0.0 { return 1.0; } }

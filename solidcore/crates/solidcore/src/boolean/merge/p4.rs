@@ -36,6 +36,10 @@
 //! `boolean_union_refuses_solid_leak` (own design, WR-619), a union whose step 6 would
 //! delete a face between the infinite region and a solid region is refused with `SM_ERR`
 //! (the face in the error) instead of returning a body whose solid merged into the outside.
+//! Own design, not upstream: in step 6 a region that a deleted face joins to another, neither
+//! with merge data (no face of the other body was copied into them, as when a union fills a
+//! void exactly), takes the class a deleted face has on both sides ([`deleted_face_sides`]);
+//! upstream leaves it the flag it had, so the filled void stayed void.
 
 use super::p1::{self, MergeOptions};
 use crate::error::boolean::BooleanFailure;
@@ -1216,6 +1220,58 @@ fn result_solid(operation: BooleanOperation, data: &MergeRegionData, was_solid: 
     }
 }
 
+/// What a regularized operation makes both sides of a face it deletes (§4.4 of
+/// `docs/booleans.md`): solid for a union, void for an intersection or a difference. Each
+/// deletes a face exactly where the result is the same on both sides: a union a face inside
+/// the other body or a coincident pair bounding material on opposite sides, an intersection
+/// a face outside it or such a pair, a difference a face inside it or a pair bounding
+/// material on the same side. `None` for the operations whose deletions are not all one class.
+fn deleted_face_sides(operation: BooleanOperation) -> Option<bool> {
+    match operation {
+        BooleanOperation::Union => Some(true),
+        BooleanOperation::Intersection | BooleanOperation::Difference => Some(false),
+        _ => None,
+    }
+}
+
+/// The regions of `primary` on either side of a face in `delete` that joins two of them
+/// with no merge data on either, the infinite region aside. A region gets merge data when a
+/// face of the other body is copied into it ([`remember_split`]); one whose boundary the
+/// other body's faces all lie on gets none, as the void a union fills exactly, so the
+/// deletion joins it to its neighbour with nothing to give the joined region its flag.
+fn joined_without_data(
+    primary: &Brep,
+    intersector: &impl ManifoldIntersector,
+    attributes: &AttributeStore,
+    delete: &[FaceId],
+) -> Result<Vec<RegionId>> {
+    let infinite = primary.infinite_region();
+    let recorded = |r: RegionId| {
+        merge_data(
+            attributes,
+            intersector.object_key(false, MergeEntity::Region(r)),
+        )
+        .is_some()
+    };
+    let mut joined = Vec::new();
+    for &f in delete {
+        let Some(fu) = face::faceuses(primary, f)?.0 else {
+            continue;
+        };
+        let (r1, r2) = region_pair(primary, fu)?;
+        if r1 == r2 || infinite == Some(r1) || infinite == Some(r2) || recorded(r1) || recorded(r2)
+        {
+            continue;
+        }
+        for r in [r1, r2] {
+            if !joined.contains(&r) {
+                joined.push(r);
+            }
+        }
+    }
+    Ok(joined)
+}
+
 /// Every region's enclosing shell first, the region's outer shell that
 /// `SmBrep::AssertValid` test 12 takes it to be (the fork's fix, tangency-labs/smlib
 /// `abastran/void-shell-check`), only with the opt-in
@@ -1485,6 +1541,7 @@ fn editing_stages(
             return Err(Failure::new(OP, BooleanFailure::SolidLeaks { face: f }).into_error());
         }
     }
+    let joined = joined_without_data(primary, intersector, attributes, &faces.delete)?;
     intersector.delete_faces(
         kernels,
         primary,
@@ -1498,6 +1555,8 @@ fn editing_stages(
             intersector.object_key(false, MergeEntity::Region(r)),
         ) {
             let solid = result_solid(operation, data, void(primary, r)? == 0);
+            primary.region_mut(r)?.set_is_void(i32::from(!solid));
+        } else if let (true, Some(solid)) = (joined.contains(&r), deleted_face_sides(operation)) {
             primary.region_mut(r)?.set_is_void(i32::from(!solid));
         }
     }

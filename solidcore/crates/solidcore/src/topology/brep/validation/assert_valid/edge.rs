@@ -22,11 +22,11 @@
 //! `Kernel::fixes.edge_check_orders_tangent_faces`, #383): where two faces round an edge
 //! leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
 //! direction to its point 20 edge tolerances into the face, square to the edge (the
-//! fork's tangency-labs/smlib@5533bbb). Opt-in (WR-668,
-//! `Kernel::fixes.curve_check_zero_speed_tangent_end`, tangency-labs/smlib ecf1963):
-//! the edge check and edge-use check build the edge's [`EdgeEnds`] (its interval and
-//! whether its faces are tangent at each end) before checking its curve or a UV trim,
-//! since a Rust curve does not point back to its edge as the fork's check reads it.
+//! fork's tangency-labs/smlib@5533bbb). Not upstream (WR-668, tangency-labs/smlib
+//! ecf1963, the default since its flag was retired): the edge check and edge-use
+//! check build the edge's [`EdgeEnds`] (its interval and whether its faces are tangent
+//! at each end) before checking its curve or a UV trim, since a Rust curve does not
+//! point back to its edge as the fork's check reads it.
 //! Only `SmBSplineCurve`, parabola and hyperbola checks take it; a line has too few
 //! control points for a zero-speed end and an ellipse's conic segments have no
 //! coincident end control points.
@@ -57,8 +57,7 @@ use crate::topology::{
 /// `polar_key`. `trim_surface` is the face's surface of a UV trim (WR-560, read by the
 /// `SmBSplineCurve` checks with `Kernel::fixes.uv_trim_checks_on_surface`).
 /// `edge_ends` is the edge the curve is the 3D curve or a UV trim of (WR-668, read by
-/// the `SmBSplineCurve` checks with `Kernel::fixes.curve_check_zero_speed_tangent_end`;
-/// see [`edge_ends`]).
+/// the `SmBSplineCurve` checks; see [`edge_ends`]).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn curve(
     k: &Kernel,
@@ -175,26 +174,22 @@ pub(super) struct EdgeSets {
     wire_edges: BTreeMap<ShellId, BTreeSet<EdgeId>>,
 }
 
-/// Not upstream (fork tangency-labs/smlib ecf1963, WR-668, opt-in): what the fork's
+/// Not upstream (fork tangency-labs/smlib ecf1963, WR-668): what the fork's
 /// `sm_IsZeroSpeedTangentEnd` reads from the edge `e` of a curve it checks, built
-/// before the check since a Rust curve does not point back to its edge. `None` with
-/// `Kernel::fixes.curve_check_zero_speed_tangent_end` off (nothing is evaluated).
+/// before the check since a Rust curve does not point back to its edge.
 ///
 /// # Errors
 ///
 /// The arena lookups'.
-pub(super) fn edge_ends(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Option<EdgeEnds>> {
-    if !k.fixes.curve_check_zero_speed_tangent_end {
-        return Ok(None);
-    }
+pub(super) fn edge_ends(k: &Kernel, b: &Brep, e: EdgeId) -> Result<EdgeEnds> {
     let interval = b.edge(e)?.interval;
-    Ok(Some(EdgeEnds {
+    Ok(EdgeEnds {
         interval,
         faces_tangent: [
             faces_tangent_at(k, b, e, interval.min()),
             faces_tangent_at(k, b, e, interval.max()),
         ],
-    }))
+    })
 }
 
 /// Whether the faces of the edge `e`'s uses are tangent at its parameter `edge_end`:
@@ -260,7 +255,7 @@ fn edge_curve_check(k: &Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> Res
         geometry_key(20001, e.index()),
         geometry_key(20004, e.index()),
         None,
-        ends.as_ref(),
+        Some(&ends),
     )
 }
 
@@ -927,9 +922,9 @@ pub(super) fn edgeuse(
         } else {
             None
         };
-        // not upstream (WR-668, opt-in): the trim's edge (`GetEdgeuse()->GetEdge()`)
+        // not upstream (WR-668): the trim's edge (`GetEdgeuse()->GetEdge()`)
         let ends = match eu1::edge(b, eu)? {
-            Some(e) => edge_ends(k, b, e)?,
+            Some(e) => Some(edge_ends(k, b, e)?),
             None => None,
         };
         let list = cx.rep.array.as_deref_mut();
@@ -1001,7 +996,7 @@ mod tests {
         let ids: Vec<EdgeId> = b.edges().ids().collect();
         let mut tangent = 0;
         for &e in &ids {
-            let ends = edge_ends(k, b, e).unwrap().unwrap();
+            let ends = edge_ends(k, b, e).unwrap();
             let [s, t] = &ends.faces_tangent;
             if *s.as_ref().unwrap() && *t.as_ref().unwrap() {
                 tangent += 1;
@@ -1013,15 +1008,11 @@ mod tests {
     /// WR-668's edge context: a box's faces meet at right angles at every edge end;
     /// a box minus a cylinder resting on its face x = 20 (WR-540's shape) keeps the
     /// tangency as an edge whose faces (the plane's and the cylinder's) are tangent
-    /// at both ends. With the flag off nothing is built.
+    /// at both ends.
     #[test]
     fn wr_668_edge_ends_read_the_faces_tangency() {
         let mut k = Kernel::default();
         let block = create_box(&mut k, Point3::new(20.0, 5.0, 5.0), 15.0, 15.0, 27.5).unwrap();
-        let ids: Vec<EdgeId> = block.edges().ids().collect();
-        assert!(edge_ends(&k, &block, ids[0]).unwrap().is_none());
-
-        k.fixes.curve_check_zero_speed_tangent_end = true;
         assert_eq!(tangent_edges(&k, &block), (0, 12));
         let block = create_box(&mut k, Point3::new(20.0, 5.0, 5.0), 15.0, 15.0, 27.5).unwrap();
         let pin = create_cylinder(&mut k, Point3::new(25.0, 12.5, 22.5), 5.0, 25.0).unwrap();

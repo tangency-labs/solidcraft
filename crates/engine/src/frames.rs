@@ -794,7 +794,7 @@ fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'
     use solidcraft_doc::FeatureKind as Feature;
     let point = placement_point;
     match (kind, cmd) {
-        (Feature::Box { corner, .. }, "solid.box") => vec![("corner", point(corner))],
+        (Feature::Box { corner, centred, .. }, "solid.box") => vec![(if *centred { "center" } else { "corner" }, point(corner))],
         (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],
         (Feature::Cylinder { base, axis, .. }, "solid.cylinder") | (Feature::Coil { base, axis, .. }, "solid.coil") => {
             vec![("base", point(base)), ("axis", pt(axis.0))]

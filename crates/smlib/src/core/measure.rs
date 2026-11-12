@@ -211,20 +211,40 @@ pub(crate) fn classify_point(body: &Body, p: [f64; 3]) -> Result<PointClass> {
     with_body("classify_point", body, |k, b| {
         let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
         let mut classifier = BrepClassifier::of_brep(b);
-        let pc = match classifier.point_3d_classify(k, Point3::new(p[0], p[1], p[2]), tol, true) {
-            Ok(pc) => pc,
-            // Its status, as the capi passes it on (no ray finding a region is SM_ERR).
-            Err(e) => return Ok(Err(status(e))),
-        };
-        Ok(match (pc.point_class(), pc.object()) {
-            (PointClassType::Vertex | PointClassType::Edge | PointClassType::Face, _) => Ok(PointClass::OnBoundary),
-            (PointClassType::Region, Some(EntityRef::Region(r))) => {
-                Ok(if classifier.brep().region(r)?.is_void() == 1 { PointClass::Outside } else { PointClass::Inside })
-            }
-            // Point3DClassify reports only the four classes above on success: SM_ERR.
-            _ => Err(Error::Status(SM_ERR)),
-        })
+        Ok(classify_with(k, &mut classifier, tol, p))
     })?
+}
+
+/// [`classify_point`] for each of `points`, through one `BrepClassifier`: the body's private copy
+/// and its search structures are made once for all of them, not once a point (on a large body
+/// they cost far more than a point's own solve). Each point's class, or its own error.
+pub(crate) fn classify_points(body: &Body, points: &[[f64; 3]]) -> Result<Vec<Result<PointClass>>> {
+    if points.iter().all(|p| !finite(p)) {
+        return Ok(points.iter().map(|_| Err(Error::Argument)).collect());
+    }
+    with_body("classify_points", body, |k, b| {
+        let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+        let mut classifier = BrepClassifier::of_brep(b);
+        Ok(points.iter().map(|p| if finite(p) { classify_with(k, &mut classifier, tol, *p) } else { Err(Error::Argument) }).collect())
+    })
+}
+
+/// Where `p` lies, through `classifier` at zone tolerance `tol` ([`classify_point`]).
+fn classify_with(k: &Kernel, classifier: &mut BrepClassifier<'_, '_>, tol: f64, p: [f64; 3]) -> Result<PointClass> {
+    let pc = match classifier.point_3d_classify(k, Point3::new(p[0], p[1], p[2]), tol, true) {
+        Ok(pc) => pc,
+        // Its status, as the capi passes it on (no ray finding a region is SM_ERR).
+        Err(e) => return Err(status(e)),
+    };
+    match (pc.point_class(), pc.object()) {
+        (PointClassType::Vertex | PointClassType::Edge | PointClassType::Face, _) => Ok(PointClass::OnBoundary),
+        (PointClassType::Region, Some(EntityRef::Region(r))) => match classifier.brep().region(r) {
+            Ok(region) => Ok(if region.is_void() == 1 { PointClass::Outside } else { PointClass::Inside }),
+            Err(e) => Err(Error::Solidcore(format!("classify_point: {e}"))),
+        },
+        // Point3DClassify reports only the four classes above on success: SM_ERR.
+        _ => Err(Error::Status(SM_ERR)),
+    }
 }
 
 /// `SM_ERR`.

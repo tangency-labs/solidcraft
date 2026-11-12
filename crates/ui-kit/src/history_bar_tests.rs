@@ -18,6 +18,7 @@ fn bar(steps: usize, marker: usize, play: bool) -> Bar<'static> {
         marker,
         steps,
         floating: false,
+        reorder: true,
         handles: HANDLES,
     }
 }
@@ -197,6 +198,19 @@ fn a_dragged_step_returns_reorder_with_the_slot_and_side_of_the_marker() {
     let right = marker + vec2(5.0, 0.0);
     assert_eq!(rig.drag(a, left), vec![Action::Reorder { step: 1, slot: 2, before: true }], "the marker's slot, before it");
     assert_eq!(rig.drag(a, right), vec![Action::Reorder { step: 1, slot: 2, before: false }], "the marker's slot, after it");
+}
+
+#[test]
+fn without_reorder_a_dragged_step_returns_nothing_and_a_click_still_selects() {
+    let mut rig = Rig::new(&["A", "B", "C"], 2);
+    rig.bar.reorder = false;
+    let (a, c) = (rig.at("test:A"), rig.at("test:C"));
+    let end = c + vec2(32.0 - 14.0 + 2.0, 0.0);
+    assert_eq!(rig.drag(a, end), Vec::new(), "no reorder");
+    assert_eq!(rig.drag(c, a - vec2(12.0, 0.0)), Vec::new());
+    assert_eq!(rig.click(c), vec![Action::Select { step: 3, modifiers: Modifiers::NONE }]);
+    // the marker still drags
+    assert_eq!(rig.drag(rig.marker(), a - vec2(12.0, 0.0)), vec![Action::Seek(Seek::Slot { slot: 0, before: true })]);
 }
 
 #[test]

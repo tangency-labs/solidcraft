@@ -409,6 +409,10 @@ pub struct BuiltComposites {
     /// The input curves no composite uses (shorter than the same point tolerance;
     /// upstream leaves them with the caller), in input order.
     pub unused: Vec<Curve>,
+    /// For each composite, where each of its segments came from, in segment order: the
+    /// input curve's index, or `None` for a line the builder put across a gap (not upstream:
+    /// the skin's trace, tangency-labs/solidcraft#13632).
+    pub sources: Vec<Vec<Option<usize>>>,
 }
 
 impl CurveEvaluate for CompositeCurve {
@@ -1191,12 +1195,14 @@ impl CompositeCurve {
 
         // init output
         let mut composites: Vec<CompositeCurve> = Vec::new();
+        let mut sources: Vec<Vec<Option<usize>>> = Vec::new();
 
         let total = curves.len();
         if total == 0 {
             return Ok(BuiltComposites {
                 composites,
                 unused: Vec::new(),
+                sources: Vec::new(),
             });
         }
 
@@ -1301,6 +1307,7 @@ impl CompositeCurve {
                     same_point_tolerance,
                     distance_to_create_line,
                     &mut composites,
+                    &mut sources,
                 )?;
 
                 // Now look for 1st remaining curve segment to start another composite
@@ -1343,7 +1350,11 @@ impl CompositeCurve {
 
         // the curves no composite took stay with the caller
         let unused = items.into_iter().filter_map(|c| c.curve).collect();
-        Ok(BuiltComposites { composites, unused })
+        Ok(BuiltComposites {
+            composites,
+            unused,
+            sources,
+        })
     }
 }
 
@@ -1429,6 +1440,7 @@ fn flush_crv(
     same_point_tolerance: f64,
     distance_to_create_line: f64,
     composites: &mut Vec<CompositeCurve>,
+    sources: &mut Vec<Vec<Option<usize>>>,
 ) -> Result<()> {
     // locals: the curves (by item), senses and gaps of the composite being built,
     // and the line segments filling gaps (by position)
@@ -1526,10 +1538,17 @@ fn flush_crv(
         if create_composite {
             let use_gaps = gaps.len() == curves.len();
             let mut cs = Vec::new();
+            let mut from = Vec::new();
             for p in curves.drain(..) {
                 cs.push(match p {
-                    Pending::Item(i) => take_curve(items, i)?,
-                    Pending::Line(l) => Curve::from(l),
+                    Pending::Item(i) => {
+                        from.push(Some(i));
+                        take_curve(items, i)?
+                    }
+                    Pending::Line(l) => {
+                        from.push(None);
+                        Curve::from(l)
+                    }
                 });
             }
             let comp = CompositeCurve::with_curves(
@@ -1540,6 +1559,7 @@ fn flush_crv(
                 use_gaps.then_some(gaps.as_slice()),
             )?;
             composites.push(comp);
+            sources.push(from);
 
             // reset scratch arrays
             senses.clear();

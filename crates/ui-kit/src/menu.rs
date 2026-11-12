@@ -579,6 +579,94 @@ pub fn menu_frame<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     Menu::show(ui, LIST_W, add)
 }
 
+/// Points per second a scroll bar of [`scroll_rows`] moves the rows while the pointer rests on it.
+const SCROLL_BAR_SPEED: f32 = 480.0;
+
+/// What [`scroll_rows`] remembers between frames under its id: the rows' measured height and
+/// how far they are scrolled.
+#[derive(Clone, Copy, Default)]
+struct ScrollRows {
+    content: f32,
+    offset: f32,
+}
+
+/// `add`'s rows in at most `room` points of height. Rows that fit are drawn as they are. Taller
+/// rows (`estimate` high until they have been measured once) scroll: a full-width bar with an
+/// up chevron above them and one with a down chevron below them scroll while the pointer rests
+/// on them and by a page when clicked, and the wheel scrolls too. A bar is dimmed at its end.
+/// `id` keeps the scroll position, so a menu opened afresh should use a new one.
+pub fn scroll_rows<R>(ui: &mut Ui, id: egui::Id, room: f32, estimate: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let t = Tokens::get();
+    let mut state = ui.ctx().data(|d| d.get_temp::<ScrollRows>(id)).unwrap_or(ScrollRows { content: estimate, offset: 0.0 });
+    let room = if room.is_finite() { room.max(0.0) } else { 0.0 };
+    if !(state.content.is_finite() && state.content > room + 0.5) {
+        // Measure the rows as they are, so a list that grows past the room starts scrolling.
+        let rows = ui.scope(add);
+        state.content = rows.response.rect.height();
+        ui.ctx().data_mut(|d| d.insert_temp(id, state));
+        return rows.inner;
+    }
+    let bar = t.control_height;
+    let view = (room - 2.0 * bar).max(bar);
+    let end = (state.content - view).max(0.0);
+    let dt = ui.input(|i| i.stable_dt).clamp(0.0, 0.1);
+    let mut offset = state.offset.clamp(0.0, end);
+    let up = scroll_bar(ui, id.with("up"), true, offset > 0.5);
+    if up.hovered() {
+        offset -= SCROLL_BAR_SPEED * dt;
+    }
+    if up.clicked() {
+        offset -= view * 0.8;
+    }
+    let offset = offset.clamp(0.0, end);
+    let out = egui::ScrollArea::vertical()
+        .id_salt(id.with("rows"))
+        .max_height(view)
+        .min_scrolled_height(view)
+        .vertical_scroll_offset(offset)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .show(ui, add);
+    let mut offset = out.state.clamped_offset().y;
+    let down = scroll_bar(ui, id.with("down"), false, offset < end - 0.5);
+    if down.hovered() {
+        offset += SCROLL_BAR_SPEED * dt;
+    }
+    if down.clicked() {
+        offset += view * 0.8;
+    }
+    if up.hovered() || down.hovered() {
+        ui.ctx().request_repaint();
+    }
+    let content = out.content_size.y;
+    let content = if content.is_finite() && content > 0.0 { content } else { state.content };
+    ui.ctx().data_mut(|d| d.insert_temp(id, ScrollRows { content, offset: offset.clamp(0.0, (content - view).max(0.0)) }));
+    out.inner
+}
+
+/// One of [`scroll_rows`]' full-width bars: a chevron pointing `up` or down, inert and dimmed
+/// when the rows cannot scroll that way.
+fn scroll_bar(ui: &mut Ui, id: egui::Id, up: bool, active: bool) -> Response {
+    let t = Tokens::get();
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), Sense::hover());
+    let response = ui.interact(r, id, if active { Sense::click() } else { Sense::hover() });
+    let hot = active && response.hovered();
+    if hot {
+        ui.painter().rect_filled(r, t.control_radius, t.accent_soft);
+    }
+    let ink = if hot { t.form_primary } else { t.form_dim };
+    let ink = if active { ink } else { ink.gamma_multiply(0.4) };
+    let c = r.center();
+    let (w, h) = (t.space_8, if up { -t.space_4 } else { t.space_4 });
+    ui.painter().add(egui::Shape::line(vec![c + vec2(-w, -h / 2.0), c + vec2(0.0, h / 2.0), c + vec2(w, -h / 2.0)], Stroke::new(1.5, ink)));
+    let label = if up { "Scroll up" } else { "Scroll down" };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, active, label));
+    solidcraft_ui_registry::publish_target(&format!("menu:scroll_{}", if up { "up" } else { "down" }), r);
+    if active && response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
+}
+
 /// A menu row that acts as a button.
 pub fn button(ui: &mut Ui, label: &str, icon: &str) -> Response {
     button_enabled(ui, label, icon, true)

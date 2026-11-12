@@ -186,6 +186,107 @@ fn node_key(imp: &StepImport, node: &StepNode, depth: usize) -> u64 {
     h.finish()
 }
 
+/// For each body `now` gives, the index `stored` gave the same body, or `None` for a body
+/// `stored` doesn't have. A body is the same one when it has the same place in both trees: the
+/// same product at the same position among its siblings, and the same position among that
+/// product's bodies. `None` when the trees disagree about their products (a name or a number of
+/// children), or a body index is out of range or used twice: then nothing can be matched.
+fn matched_bodies(stored: &[StepNode], now: &[StepNode], count: usize) -> Option<Vec<Option<usize>>> {
+    let mut matched = vec![None; count];
+    let mut taken = std::collections::HashSet::new();
+    let mut pending: Vec<(&[StepNode], &[StepNode])> = vec![(stored, now)];
+    while let Some((was, is)) = pending.pop() {
+        if was.len() != is.len() {
+            return None;
+        }
+        for (a, b) in was.iter().zip(is) {
+            if a.name != b.name {
+                return None;
+            }
+            for (old, new) in a.bodies.iter().zip(&b.bodies) {
+                let slot = matched.get_mut(*new)?;
+                if slot.is_some() || !taken.insert(*old) {
+                    return None;
+                }
+                *slot = Some(*old);
+            }
+            pending.push((&a.children, &b.children));
+        }
+    }
+    Some(matched)
+}
+
+/// An Import feature written against `imp`'s numbering of the file's bodies (#13382). The
+/// feature keeps its body names, skipped bodies and linked face names by body index, as the
+/// STEP reader that inserted the file numbered them. A later reader can number the same file's
+/// bodies differently, for example when it reads a body an earlier one left out. Each name
+/// then went to the wrong body, which its name put in another component: bodies opened moved
+/// and with another body's shape. The stored tree says which body each index was, so each
+/// stored value moves to the index `imp` gives that body. A body only `imp` has gets the
+/// reader's name, and is skipped when a new insert would skip it. Returns whether anything
+/// changed; the feature is left as it is when the trees can't be matched.
+pub(crate) fn realign_import(f: &mut solidcraft_doc::Feature, imp: &StepImport) -> bool {
+    let FeatureKind::Import { components, skip, .. } = &f.kind else { return false };
+    if components.is_empty() || *components == imp.tree {
+        return false;
+    }
+    let count = imp.bodies.len();
+    let Some(matched) = matched_bodies(components, &imp.tree, count) else { return false };
+    let stored_count = {
+        let mut all = Vec::new();
+        for n in components {
+            collect_bodies(n, &mut all, 0);
+        }
+        all.len()
+    };
+    if stored_count == count && matched.iter().enumerate().all(|(k, m)| *m == Some(k)) {
+        // The same numbering: only placements or names that don't move bodies differ.
+        return false;
+    }
+    let old_skip: std::collections::HashSet<u64> = skip.iter().copied().collect();
+    let new_skip: std::collections::HashSet<u64> = Plan::of(imp).skip.into_iter().collect();
+    let skip: Vec<u64> = (0..count as u64)
+        .filter(|k| match matched.get(*k as usize).copied().flatten() {
+            Some(old) => old_skip.contains(&(old as u64)),
+            None => new_skip.contains(k),
+        })
+        .collect();
+    f.body_names = by_new_index(&matched, &f.body_names);
+    if !f.link_faces.is_empty() {
+        f.link_faces = by_new_index(&matched, &f.link_faces);
+    }
+    if let FeatureKind::Import { components, skip: stored, .. } = &mut f.kind {
+        components.clone_from(&imp.tree);
+        *stored = skip;
+    }
+    true
+}
+
+/// `stored`, kept by the old body indices, as a list by the new ones (empty for a new body).
+fn by_new_index<T: Clone + Default>(matched: &[Option<usize>], stored: &[T]) -> Vec<T> {
+    matched.iter().map(|m| m.and_then(|old| stored.get(old)).cloned().unwrap_or_default()).collect()
+}
+
+/// [`realign_import`] for every Import feature of `doc` that is not suppressed, read with the
+/// reader that will build it. The reads are returned so the caller can hold them while it
+/// evaluates `doc`: the evaluation then finds each file read already instead of reading it again.
+pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sync::Arc<StepImport>> {
+    let mut reads = Vec::new();
+    for f in doc.features.iter_mut().filter(|f| !f.suppressed) {
+        let FeatureKind::Import { step, components, .. } = &f.kind else { continue };
+        if step.is_empty() || components.is_empty() {
+            continue;
+        }
+        // A file that doesn't read fails the feature when it is evaluated, which reports it.
+        let Ok(imp) = solidcraft_doc::kernel::step_import_shared(step) else { continue };
+        if realign_import(f, &imp) {
+            log::info!("{}: the stored body names follow this version's numbering of the file's bodies", f.name);
+        }
+        reads.push(imp);
+    }
+    reads
+}
+
 /// The import's component, as the command reports it. The reply types in `schema/insert_mesh.rs`
 /// and `schema/insert_step.rs` are what the commands answer with these fields.
 pub(crate) struct Placed {
