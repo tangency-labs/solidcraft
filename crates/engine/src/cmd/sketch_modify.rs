@@ -1997,7 +1997,12 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
     // The end on the shorter side of the meeting point moves (the nearer end, for a line that
     // stops short of it).
     let (na, nb) = (if t >= 0.5 { a1 } else { a0 }, if u >= 0.5 { b1 } else { b0 });
+    // An end already at the meeting point does not move, so what holds it does not matter.
+    let at_meet = |sk: &Sketch, e: usize| sk.point(e).is_some_and(|q| q.dist(meet) <= 1e-9 * (1.0 + meet.len()));
     for (l, e) in [(la, na), (lb, nb)] {
+        if at_meet(sk, e) {
+            continue;
+        }
         let id = sk.curves.get(l).map(|c| c.id.clone()).unwrap_or_default();
         let other_curve = sk.curves.iter().enumerate().any(|(i, c)| i != l && c.kind.uses(e));
         let positioned = sk.points.get(e).is_some_and(|q| q.fixed || q.exprs.is_some() || q.link.is_some());
@@ -2017,11 +2022,64 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
             q.pos = meet;
         }
     }
-    // One corner point: b's moved end becomes a's.
-    for c in sk.curves.iter_mut() {
-        c.kind.map_points(&|x| if x == nb { na } else { x });
+    // One corner point: b's moved end becomes a's, and what held b's end holds the corner. The
+    // sketch origin is never the one merged away: it stays the corner, so what else ends there
+    // keeps sharing it.
+    let (keep, gone) = if nb == 0 { (nb, na) } else { (na, nb) };
+    let placed = |sk: &Sketch, e: usize| sk.points.get(e).map(|q| (q.exprs.clone(), q.link.clone())).unwrap_or_default();
+    let (keep_placed, gone_placed) = (placed(sk, keep), placed(sk, gone));
+    // The merged-away end's placement must be one the kept end already has, or take on (the
+    // origin takes on none).
+    fn clash<T: PartialEq>(keep_is_origin: bool, k: &Option<T>, g: &Option<T>) -> bool {
+        g.is_some() && (keep_is_origin || k.is_some()) && k != g
     }
-    sk.remove_points(&[nb]);
+    // Nor may one end bring an expression placement and the other a link: the expressions would
+    // overwrite where the linked model vertex moves the corner to.
+    let kinds = |(e, l): &(Option<Box<solidcraft_sketch::PointExprs>>, Option<String>)| (e.is_some(), l.is_some());
+    let mixed = |a: (bool, bool), b: (bool, bool)| a == (true, false) && b == (false, true);
+    let (keep_kinds, gone_kinds) = (kinds(&keep_placed), kinds(&gone_placed));
+    if clash(keep == 0, &keep_placed.0, &gone_placed.0)
+        || clash(keep == 0, &keep_placed.1, &gone_placed.1)
+        || mixed(keep_kinds, gone_kinds)
+        || mixed(gone_kinds, keep_kinds)
+    {
+        return Err(bad(
+            cmd,
+            "the lines' ends at the corner are each placed by their own expressions or reference, and one corner point can't follow both",
+        ));
+    }
+    if let Some(held) = sk.points.get(gone).map(|q| (q.fixed, q.exprs.clone(), q.link.clone()))
+        && let Some(q) = sk.points.get_mut(keep)
+    {
+        q.fixed |= held.0;
+        if q.exprs.is_none() {
+            q.exprs = held.1;
+        }
+        if q.link.is_none() {
+            q.link = held.2;
+        }
+    }
+    for c in sk.curves.iter_mut() {
+        c.kind.map_points(&|x| if x == gone { keep } else { x });
+    }
+    // Only a constraint the move changed can now repeat another: such a repeat is said once. Equal
+    // constraints elsewhere in the sketch are not this fillet's to touch.
+    let mut moved: Vec<(solidcraft_sketch::Constraint, bool)> = Vec::with_capacity(sk.constraints.len());
+    for mut k in std::mem::take(&mut sk.constraints) {
+        let before = k.kind.clone();
+        k.kind.remap(&|x| Some(if x == gone { keep } else { x }), &Some);
+        let changed = k.kind != before;
+        moved.push((k, changed));
+    }
+    let same = |a: &solidcraft_sketch::Constraint, b: &solidcraft_sketch::Constraint| a.kind == b.kind && a.param == b.param;
+    let repeats: Vec<bool> = moved
+        .iter()
+        .enumerate()
+        .map(|(i, (k, changed))| *changed && moved.iter().enumerate().any(|(j, (o, o_changed))| j != i && same(k, o) && (j < i || !*o_changed)))
+        .collect();
+    let kept: Vec<solidcraft_sketch::Constraint> = moved.into_iter().zip(repeats).filter(|(_, repeat)| !repeat).map(|((k, _), _)| k).collect();
+    sk.constraints = kept;
+    sk.remove_points(&[gone]);
     Ok(())
 }
 
