@@ -1,0 +1,44 @@
+{
+  "en": {
+    "ui.agent_chat_export": "Export conversation as Markdown",
+    "ui.agent_chat_export_tools": "Export with tool calls",
+    "ui.agent_chat_export_saved": "Conversation exported to {path}",
+    "ui.agent_chat_export_failed": "Could not export the conversation: {error}"
+  },
+  "ar": {
+    "ui.agent_chat_export": "تصدير المحادثة بصيغة Markdown",
+    "ui.agent_chat_export_tools": "التصدير مع استدعاءات الأدوات",
+    "ui.agent_chat_export_saved": "تم تصدير المحادثة إلى {path}",
+    "ui.agent_chat_export_failed": "تعذّر تصدير المحادثة: {error}"
+  },
+  "de": {
+    "ui.agent_chat_export": "Unterhaltung als Markdown exportieren",
+    "ui.agent_chat_export_tools": "Mit Tool-Aufrufen exportieren",
+    "ui.agent_chat_export_saved": "Unterhaltung nach {path} exportiert",
+    "ui.agent_chat_export_failed": "Unterhaltung konnte nicht exportiert werden: {error}"
+  },
+  "he": {
+    "ui.agent_chat_export": "ייצוא השיחה כ־Markdown",
+    "ui.agent_chat_export_tools": "ייצוא עם קריאות כלים",
+    "ui.agent_chat_export_saved": "השיחה יואה ל־{path}",
+    "ui.agent_chat_export_failed": "לא ניתן לייצא את השיחה: {error}"
+  },
+  "ja": {
+    "ui.agent_chat_export": "会話を Markdown としてエクスポート",
+    "ui.agent_chat_export_tools": "ツール呼び出しを含めてエクスポート",
+    "ui.agent_chat_export_saved": "会話を {path} にエクスポートしました",
+    "ui.agent_chat_export_failed": "会話をエクスポートできませんでした: {error}"
+  },
+  "vi": {
+    "ui.agent_chat_export": "Xuất hội thoại dạng Markdown",
+    "ui.agent_chat_export_tools": "Xuất kèm lời gọi công cụ",
+    "ui.agent_chat_export_saved": "Đã xuất hội thoại tới {path}",
+    "ui.agent_chat_export_failed": "Không thể xuất hội thoại: {error}"
+  },
+  "zh": {
+    "ui.agent_chat_export": "将对话导出为 Markdown",
+    "ui.agent_chat_export_tools": "导出时包含工具调用",
+    "ui.agent_chat_export_saved": "对话已导出到 {path}",
+    "ui.agent_chat_export_failed": "无法导出对话：{error}"
+  }
+}
