@@ -1056,19 +1056,19 @@ fn inspect_design_gives_a_timeline_summary_and_body_names_when_asked() {
         let gone = tool(&mut s, "inspect_design", with(json!({"timeline": false, "bodies": false})));
         assert!(gone.get("timeline").is_none() && gone.get("bodies").is_none(), "{opts:?}: {gone}");
 
-        // A value the tool doesn't take is refused before anything is sent.
-        for bad in [json!({"timeline": "full"}), json!({"timeline": 1})] {
-            let r = raw_tool(&mut s, "inspect_design", bad.clone());
-            assert_eq!(r["error"]["code"], -32602, "{opts:?} {bad}: {r}");
-        }
-        // `bodies` takes a list with compact output, so its check names every form.
-        let r = raw_tool(&mut s, "inspect_design", json!({"bodies": "all"}));
-        if opts.compact {
-            assert_eq!(r["result"]["isError"], json!(true), "{r}");
-            assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("list of body names, true, false or \"names\""), "{r}");
-        } else {
-            assert_eq!(r["error"]["code"], -32602, "{r}");
-        }
+        // A value the tool doesn't take is refused before anything is sent: a wrong type by the
+        // argument check, a word it doesn't know by the tool, which names every form (#15306).
+        let r = raw_tool(&mut s, "inspect_design", json!({"timeline": 1}));
+        assert_eq!(r["error"]["code"], -32602, "{opts:?}: {r}");
+        let refused = |s: &mut Server, args: Value, forms: &str| {
+            let r = raw_tool(s, "inspect_design", args);
+            assert_eq!(r["result"]["isError"], json!(true), "{opts:?}: {r}");
+            assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains(forms), "{opts:?}: {r}");
+        };
+        refused(&mut s, json!({"timeline": "full"}), "`timeline` must be true, false or \"summary\"");
+        // `bodies` takes a list with compact output, so its check names that form too.
+        let forms = if opts.compact { "list of body names, true, false or \"names\"" } else { "`bodies` must be true, false or \"names\"" };
+        refused(&mut s, json!({"bodies": "all"}), forms);
 
         // As a batch step.
         let r = tool(
@@ -4228,6 +4228,38 @@ fn server_with_big_sketch(options: crate::Options) -> Server {
 fn inspect_text(s: &mut Server, args: Value) -> (bool, String) {
     let r = raw_tool(s, "inspect_design", args);
     (r["result"]["isError"] == json!(true), r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string())
+}
+
+/// No tool argument has a list of types and an `enum` together: some OpenAI-compatible
+/// endpoints (Moonshot) refuse every tool when one does, so the agent chat could not start
+/// a turn (#15306). The tool itself checks the words such an argument takes.
+#[test]
+fn no_tool_argument_has_a_list_of_types_with_an_enum() {
+    fn mixed(path: &str, schema: &Value, found: &mut Vec<String>) {
+        match schema {
+            Value::Object(o) => {
+                if o.get("type").is_some_and(Value::is_array) && o.contains_key("enum") {
+                    found.push(path.to_string());
+                }
+                for (k, v) in o {
+                    mixed(&format!("{path}.{k}"), v, found);
+                }
+            }
+            Value::Array(items) => {
+                for (i, v) in items.iter().enumerate() {
+                    mixed(&format!("{path}[{i}]"), v, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+        let mut found = Vec::new();
+        for def in crate::tool_definitions_with(opts) {
+            mixed(def["name"].as_str().unwrap_or("?"), &def["inputSchema"], &mut found);
+        }
+        assert!(found.is_empty(), "{opts:?}: {found:?}");
+    }
 }
 
 /// Off by default: `inspect_design` has its old arguments and returns every sketch in full,
