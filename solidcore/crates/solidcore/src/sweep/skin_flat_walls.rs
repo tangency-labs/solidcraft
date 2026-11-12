@@ -82,24 +82,23 @@ fn flat_wall_plane(k: &Kernel, b: &Brep, f: FaceId) -> Option<Surface> {
         (frame.x, -frame.y)
     };
     let (_, _, points) = spline.control_points().ok()?;
-    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    let (mut u0, mut v0) = (f64::INFINITY, f64::INFINITY);
+    let (mut u1, mut v1) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
     for p in points {
         let w = if p.w == NOW { 1.0 } else { p.w };
-        if !(w > 0.0) {
+        if w.is_nan() || w <= 0.0 {
             return None;
         }
         let d = Vec3::new(p.x / w, p.y / w, p.z / w) - frame.origin;
-        for (i, t) in [d.dot(x), d.dot(y)].into_iter().enumerate() {
-            lo[i] = lo[i].min(t);
-            hi[i] = hi[i].max(t);
-        }
+        let (u, v) = (d.dot(x), d.dot(y));
+        (u0, u1, v0, v1) = (u0.min(u), u1.max(u), v0.min(v), v1.max(v));
     }
-    let size = (hi[0] - lo[0]).max(hi[1] - lo[1]);
-    if !(size > 0.0 && size.is_finite()) {
+    let size = (u1 - u0).max(v1 - v0);
+    if !size.is_finite() || size <= 0.0 {
         return None;
     }
     let m = MARGIN * size;
-    let domain = Extent2d::from_bounds(lo[0] - m, lo[1] - m, hi[0] + m, hi[1] + m);
+    let domain = Extent2d::from_bounds(u0 - m, v0 - m, u1 + m, v1 + m);
     Some(Surface::from(Plane::new(
         frame.origin,
         x,
