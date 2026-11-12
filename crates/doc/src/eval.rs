@@ -7431,6 +7431,15 @@ fn eval_feature(
                 more::surface_thin_layer_refused(st, &reach, &c.plane, c.interval, &crate::plain(targets))?;
                 st.cut_extents.insert(f.id, (c.plane, c.interval));
             }
+            // A tapered cut's walls are not square to a sheet made from surfaces: refused where it
+            // changes one.
+            if matches!(operation, Operation::Cut | Operation::Intersect)
+                && matches!(&f.kind, FeatureKind::Extrude { extent, .. } if extent.taper.is_some())
+                && !st.surface_sheets.is_empty()
+            {
+                let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
+                more::surface_taper_refused(st, &bodies, &crate::plain(targets), *operation)?;
+            }
             // A cut square through flat panels of sheets made from surfaces goes into their outlines.
             if *operation == Operation::Cut && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.surface_sheets.is_empty() {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();

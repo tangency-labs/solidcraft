@@ -1406,6 +1406,27 @@ pub(super) fn surface_prism_cut(
     Ok(handled)
 }
 
+/// Refuses a tapered extrude cut (or intersect) that changes a sheet made from surfaces it targets
+/// (#6748), as the flat model refuses it: its walls are not square to the sheet, so the sheet
+/// can't keep it (read back, only its floor would show). A sheet clear of every tool by their
+/// exact boxes is passed over by a cut: a cut beside the sheet changes nothing.
+pub(super) fn surface_taper_refused(st: &ModelState, tools: &[Body], targets: &[String], op: Operation) -> Result<()> {
+    let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
+    let reach: Vec<Option<Aabb3>> = tools.iter().map(exact_box).collect();
+    for sk in &st.surface_sheets {
+        if !(all || targets.is_empty() || targets.contains(&sk.body)) {
+            continue;
+        }
+        let Some(mb) = st.body(&sk.body) else { continue };
+        let target = exact_box(&mb.body);
+        if op == Operation::Cut && reach.iter().all(|tool| boxes_apart(tool, &target)) {
+            continue;
+        }
+        super::sheet_boolean_unchanged(&mb.body, tools, op)?;
+    }
+    Ok(())
+}
+
 /// What the drills of hole feature `f` take from the sheets made from surfaces they reach, of the
 /// bodies the hole cuts (see [`takes_part`]) (#6748): a drill square across a flat panel, through
 /// its thickness and clear inside its material, is a round hole in its outline; one along a flat
