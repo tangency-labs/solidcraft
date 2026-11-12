@@ -1,0 +1,49 @@
+{
+  "url": "https://solidcraft.io/app/?webgl",
+  "browser_events": [
+    "pointermove button=-1 buttons=0",
+    "pointerdown button=2 buttons=2",
+    "mousedown button=2 buttons=2",
+    "pointermove button=0 buttons=3",
+    "mousedown button=0 buttons=3",
+    "pointermove button=-1 buttons=3",
+    "pointermove button=2 buttons=1",
+    "mouseup button=2 buttons=1",
+    "pointerup button=0 buttons=0",
+    "mouseup button=0 buttons=0",
+    "pointermove button=-1 buttons=0"
+  ],
+  "after_chord": {
+    "camera": {
+      "distance": 123.55514437862206,
+      "fov": 0,
+      "pitch": 0.6154797086703874,
+      "roll": 0,
+      "target": [
+        15.909845271309504,
+        7.498080565427149,
+        14.088235294117647
+      ],
+      "up": "z",
+      "yaw": -0.4653981633974483
+    },
+    "buttons": "n/a (no buttons() in this build)"
+  },
+  "after_plain_move": {
+    "camera": {
+      "distance": 123.55514437862206,
+      "fov": 0,
+      "pitch": -0.3445202913296126,
+      "roll": 0,
+      "target": [
+        15.909845271309504,
+        7.498080565427149,
+        14.088235294117647
+      ],
+      "up": "z",
+      "yaw": 1.454601836602552
+    },
+    "buttons": "n/a (no buttons() in this build)"
+  },
+  "camera_moved_without_a_button": true
+}

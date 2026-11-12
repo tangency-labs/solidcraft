@@ -1,0 +1,49 @@
+{
+  "url": "http://127.0.0.1:18793/?webgl",
+  "browser_events": [
+    "pointermove button=-1 buttons=0",
+    "pointerdown button=2 buttons=2",
+    "mousedown button=2 buttons=2",
+    "pointermove button=0 buttons=3",
+    "mousedown button=0 buttons=3",
+    "pointermove button=-1 buttons=3",
+    "pointermove button=2 buttons=1",
+    "mouseup button=2 buttons=1",
+    "pointerup button=0 buttons=0",
+    "mouseup button=0 buttons=0",
+    "pointermove button=-1 buttons=0"
+  ],
+  "after_chord": {
+    "camera": {
+      "distance": 123.55514437862206,
+      "fov": 0,
+      "pitch": 0.6154797086703874,
+      "roll": 0,
+      "target": [
+        13.229691967828405,
+        12.952970876564745,
+        14.088235294117649
+      ],
+      "up": "z",
+      "yaw": -0.4653981633974483
+    },
+    "buttons": 0
+  },
+  "after_plain_move": {
+    "camera": {
+      "distance": 123.55514437862206,
+      "fov": 0,
+      "pitch": 0.6154797086703874,
+      "roll": 0,
+      "target": [
+        13.229691967828405,
+        12.952970876564745,
+        14.088235294117649
+      ],
+      "up": "z",
+      "yaw": -0.4653981633974483
+    },
+    "buttons": 0
+  },
+  "camera_moved_without_a_button": false
+}
