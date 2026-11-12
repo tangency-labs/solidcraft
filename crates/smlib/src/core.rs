@@ -97,7 +97,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;
-    f.uv_trim_reversal_on_surface = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
@@ -119,7 +118,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_edge_self_loop_on_vertex_degenerate = true;
     f.slice_coincident_faces_sheet_side = true;
     f.boolean_outer_shell_first = true;
-    f.edge_reversal_keeps_failed_edge = true;
     f.topology_failed_evaluations_propagate = true;
     f.heal_stage3_failures_propagate = true;
     f.cover_refuses_folded_continuation = true;
@@ -152,7 +150,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_skips_faces_apart = true;
     f.uv_trim_checks_on_surface = true;
     f.local_operation_box_holds_new_surfaces = true;
-    f.uv_trim_joins_drop_pieces = true;
     f.shell_edges_on_analytics_exact = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.iso_curve_sliver_domain_is_degenerate = true;
@@ -180,7 +177,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.cylinder_plane_tangent_within_tolerance = true;
-    f.boolean_wire_edge_keeps_faceuse_shell = true;
     f.fillet_nx1_tangent_corner_edge = true;
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;

@@ -164,7 +164,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.boolean_skips_faces_apart = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
-    k.fixes.boolean_wire_edge_keeps_faceuse_shell = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_check_min_radius = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
@@ -183,7 +182,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
     k.fixes.edge_check_orders_tangent_faces = true;
-    k.fixes.edge_reversal_keeps_failed_edge = true;
     k.fixes.ellipse_adjust_step_interval_keeps_turns = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.extrusion_origin_scaled_zero = true;
@@ -291,8 +289,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_checks_on_surface = true;
     k.fixes.uv_trim_corner_end_points_only = true;
-    k.fixes.uv_trim_joins_drop_pieces = true;
-    k.fixes.uv_trim_reversal_on_surface = true;
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
     let edges = top_edges(&k, &b);
