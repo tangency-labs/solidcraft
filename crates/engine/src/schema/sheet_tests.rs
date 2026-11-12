@@ -575,7 +575,7 @@ fn path_flange_replies_match_the_output_schema() {
         (json!({"edge": [1, 0, 20], "sketch": "Path", "curves": ["p2", "p1"], "radius": null, "body": null}), 3),
     ] {
         let mut s = path_bracket();
-        let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+        let body = s.model.state().surface_sheets.first().map(|sk| sk.body.clone()).unwrap_or_default();
         let mut p = p;
         if p["body"] == "?" {
             p["body"] = json!(body);
@@ -621,7 +621,7 @@ fn flat_pattern_replies_match_the_output_schema() {
     let schema = output_schema_for::<FlatPatternResult>();
     let schema = schema.as_value();
     let mut s = worked_sheet();
-    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let body = s.model.state().surface_sheets.first().map(|sk| sk.body.clone()).unwrap_or_default();
     let f = quiet(&mut s, "sheet.flat_pattern", json!({}));
     assert!(conforms(schema, schema, &f), "{f} doesn't match {schema}");
     // Every part of the reply is there, from the features above.
@@ -668,7 +668,7 @@ fn bend_table_replies_match_the_output_schema() {
     let schema = output_schema_for::<BendTableResult>();
     let schema = schema.as_value();
     let mut s = worked_sheet();
-    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let body = s.model.state().surface_sheets.first().map(|sk| sk.body.clone()).unwrap_or_default();
     let flat = quiet(&mut s, "sheet.flat_pattern", json!({}));
     let rows = flat["bends"].as_array().map_or(0, Vec::len);
     let table = |s: &mut Session, p: Value| {

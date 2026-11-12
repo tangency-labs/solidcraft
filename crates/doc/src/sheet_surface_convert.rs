@@ -2495,6 +2495,35 @@ fn junction_slits(sheet: &Sheet, dev: &Development, junctions: &[[usize; 2]]) ->
     out
 }
 
+/// The stretches of the cut `[a, b]` that lie in the material of the flat `regions`: the line split
+/// where it crosses their loops, each piece kept where its middle lies inside an outline and in
+/// none of its holes. A notch through a junction's far edge leaves the cut from the bend line out
+/// to the notch's edge; where it takes the whole line, no cut is left.
+fn in_material(regions: &[Region2], [a, b]: [Vec2; 2]) -> Vec<[Vec2; 2]> {
+    let line = [Seg2::Line { a, b }];
+    let mut at = vec![0.0, 1.0];
+    for l in regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)) {
+        at.extend(solidcraft_develop::crossings(&line, &l.segs).iter().map(|c| c.1));
+    }
+    at.sort_by(f64::total_cmp);
+    at.dedup();
+    let holds = crate::sheet_surface_cuts::holds;
+    let inside = |p: Vec2| regions.iter().any(|r| holds(&r.outer, p) && !r.holes.iter().any(|h| holds(h, p)));
+    let mut out: Vec<[Vec2; 2]> = Vec::new();
+    for w in at.windows(2) {
+        let &[t0, t1] = w else { continue };
+        if t1 <= t0 || !inside(a.lerp(b, (t0 + t1) / 2.0)) {
+            continue;
+        }
+        let (p, q) = (a.lerp(b, t0), a.lerp(b, t1));
+        match out.last_mut() {
+            Some(last) if last[1] == p => last[1] = q,
+            _ => out.push([p, q]),
+        }
+    }
+    out
+}
+
 /// Whether the end of the bend of joint `joint` at its anchors' length (`at_end`), or at their
 /// origin, butts the next bend of a split edge, of the pairs `junctions` (see
 /// [`SurfaceSheet::junctions`]).
@@ -4020,7 +4049,7 @@ impl SurfaceSheet {
             })
             .collect();
         self.regions = regions;
-        self.slits = junction_slits(&self.sheet, dev, &self.junctions);
+        self.slits = junction_slits(&self.sheet, dev, &self.junctions).into_iter().flat_map(|s| in_material(&self.regions, s)).collect();
         self.stretch = dev.panels.iter().flatten().map(|p| p.stretch).fold(0.0, f64::max);
         self.rolls = self.sheet.panels.iter().filter(|p| p.surface != Surface::Plane).count();
         self.roll_lines =
