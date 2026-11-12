@@ -179,6 +179,8 @@ fn invalid(reason: &'static str) -> SolidError {
 /// upstream, not a status) pass through.
 fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
     match e {
+        // a certificate's work budget spent: never flattened into a status
+        e if e.is_not_certified() => e,
         SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
         | SolidError::InvalidInput { .. }
@@ -1926,7 +1928,14 @@ impl FilletSolver {
 fn bool_status(r: Result<bool>) -> Result<bool> {
     match r {
         Ok(v) => Ok(v),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(e)
+            if matches!(
+                e,
+                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+            ) || e.is_not_certified() =>
+        {
+            Err(e)
+        }
         Err(_) => Ok(true),
     }
 }
@@ -1938,7 +1947,14 @@ fn singularity_status(
 ) -> Result<crate::surface::surface::p5::Singularity> {
     match r {
         Ok(v) => Ok(v),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(e)
+            if matches!(
+                e,
+                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+            ) || e.is_not_certified() =>
+        {
+            Err(e)
+        }
         Err(_) => Ok(crate::surface::surface::p5::Singularity {
             singular: true,
             direction: SurfParamType::Neither,
@@ -3520,6 +3536,23 @@ pub use rails::{compute_support_edge, split_rail, RailOwnership, RetainedRailOwn
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A G^n section certificate that spent its work budget is not flattened to `SM_ERR`
+    /// ([`as_sm_err`]) nor read as `TRUE` ([`bool_status`], [`singularity_status`]).
+    #[test]
+    fn a_certificate_past_its_budget_passes_the_solver_s_status_filters() {
+        let e = SolidError::blend(
+            "t",
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert_eq!(as_sm_err(e.clone(), "op"), e);
+        assert_eq!(bool_status(Err(e.clone())), Err(e.clone()));
+        assert!(singularity_status(Err(e.clone())).is_err());
+        assert_eq!(bool_status(Err(SolidError::sm_err("t"))), Ok(true));
+    }
 
     #[test]
     fn audit_483_edge_domain_is_no_trimmed_curve_after_a_failed_trim() {

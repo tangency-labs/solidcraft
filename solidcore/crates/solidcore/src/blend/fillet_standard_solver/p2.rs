@@ -210,6 +210,8 @@ fn interval_at<'a>(ivls: &'a mut ExtentNd, i: usize, op: &'static str) -> Result
 /// out of bounds) are kept.
 fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
     match e {
+        // a certificate's work budget spent: never flattened into a status
+        e if e.is_not_certified() => e,
         SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
         | SolidError::InvalidInput { .. }
@@ -3964,6 +3966,19 @@ pub struct SurfaceSurfaceStart {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A G^n section certificate that spent its work budget is not flattened to `SM_ERR`.
+    #[test]
+    fn a_certificate_past_its_budget_is_not_flattened_to_sm_err() {
+        let e = SolidError::blend(
+            "t",
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert_eq!(as_sm_err(e.clone(), "op"), e);
+    }
     use crate::blend::fillet_standard_solver::p1::{
         FilletLawKind, CONSTANT_RADIUS_FS_TYPE, SURFACE_SURFACE_FS_TYPE, VARIABLE_RADIUS_FS_TYPE,
     };

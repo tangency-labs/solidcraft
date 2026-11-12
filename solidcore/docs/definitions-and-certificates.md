@@ -501,7 +501,18 @@ A reviewer checks each of these on a change that touches a definition, a net or 
     net and knots bit for bit; `Ruled` past the reach of rows whose end weight ratios differ keeps
     the surface and parameters within `Extended::source` (§6.2).
 12. **Bounded work.** Certificates run fixed loop counts (8 Krawczyk steps, levels 0 to 6, budgets
-    on cells and mirror steps) with no recursion, and poll the kernel's cancel token.
+    on cells and mirror steps) with no recursion, and poll the kernel's cancel token. The Gⁿ
+    section's certificate (`fillet_section::section`) halves at most 3 spans per first span (two
+    full levels of halving; first spans are the solver's stations and the knot-line crossings)
+    plus 128 (`GN_HALVINGS_PER_SPAN`, `GN_HALVING_BUDGET`). A round of halvings that would pass
+    that budget, or a certificate past the fork's 4096 stations, is refused as not certified
+    (`BlendFailure::NotCertified`). It names no size: invariant 3 names one only where the
+    cause's geometry gives it. The budget counts spans, so a model scaled with its tolerance,
+    which makes the same spans, gets the same budget. With the tolerance held, the solver placed
+    more first spans on larger copies of the tightest measured rounds, and the budget grew with
+    them. A budget predicted from each span's own bound is not enough: a round whose ball's
+    offset tube nearly collapses converges at its bounds' h⁴ rate once its spans are proved, so a
+    convergence budget allows its whole cost.
 
 ## 8. If you're stuck
 

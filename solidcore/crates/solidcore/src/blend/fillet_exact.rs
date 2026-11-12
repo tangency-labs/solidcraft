@@ -474,7 +474,12 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
         } else {
             match Sphere::is_nurb_surface_sphere_on(k, bss, 1.0, this) {
                 Ok(Some(s)) => sphere = Some((s.base().position().origin(), s.radius())),
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                Err(e)
+                    if matches!(
+                        e,
+                        SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                    ) || e.is_not_certified() =>
+                {
                     return Err(e)
                 }
                 // no sphere, or TRUE without a sphere (its SER statuses)
@@ -483,7 +488,12 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
             if sphere.is_none() {
                 match Torus::is_nurb_surface_torus(k, bss, 1.0) {
                     Ok(Some(t)) => torus = Some(TorusData::of(&t)),
-                    Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    Err(e)
+                        if matches!(
+                            e,
+                            SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                        ) || e.is_not_certified() =>
+                    {
                         return Err(e)
                     }
                     // no torus, or TRUE without a torus (its SER statuses)

@@ -237,8 +237,8 @@ pub fn rebuild_for_face(
     rec: &ProceduralBlendRecord,
 ) -> Result<ProceduralBlend> {
     rebuild(k, rec).map_err(|e| {
-        // (a cancel ends the operation; it is no refusal of the face)
-        if e.is_cancelled() {
+        // (a cancel, or a certificate's budget spent, ends the operation; it is no refusal of the face)
+        if e.is_cancelled() || e.is_not_certified() {
             return e;
         }
         SolidError::surface_at(
@@ -698,10 +698,11 @@ pub fn definition_surface(
         ));
     };
     let net = surface_record(&form)?;
-    // (a cancel ends the operation; any other failure of the certificate refuses the net)
+    // (a cancel, or a certificate's work budget spent, ends the operation; any other failure
+    // of the certificate refuses the net)
     let certified = |r: Result<f64>, eps: f64| match r {
         Ok(_) => Ok(Ok(())),
-        Err(e) if e.is_cancelled() => Err(e),
+        Err(e) if e.is_cancelled() || e.is_not_certified() => Err(e),
         Err(_) => Ok(Err(eps)),
     };
     Ok(match definition {

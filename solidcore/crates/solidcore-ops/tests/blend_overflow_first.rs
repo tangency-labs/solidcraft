@@ -106,3 +106,73 @@ fn the_notched_block_s_second_rounds_meet_the_first() {
     assert!((v - 10_198.718_249_145).abs() <= 1e-9 * v, "{v}");
     assert_eq!(dropped, vec![false; 4]);
 }
+
+/// A G^n section certificate whose spans stay unproved is refused within its work budget,
+/// not spent (SolidCraft's fuzz `atomic_commands`, seed 2: its body `b27` as the rig's export
+/// gives it, edges 28 and 22 of the five-edge tangent chain at their record indices, rounded
+/// 2.99). Edge 28's face is a 3 mm round already in the body, so the ball's offset tube is
+/// 0.01 across: the section's 41 first spans are all unproved, and most stay so for several
+/// halvings. Without a budget the five-edge chain's certificate certified after 1,271 halvings
+/// at 1,295 stations (about 450 s, measured 2026-11-11) and the operation then failed with
+/// status 1001. It is refused at its budget (3 halvings per first span plus 128), naming no
+/// size. A guard cancels it after two minutes, so a budget that stops holding fails the test
+/// instead of running on.
+#[test]
+fn a_certificate_whose_spans_stay_unproved_is_refused_within_its_budget() {
+    use solidcore_ops::blend::{blend_ordered, BlendOptions};
+    use solidcore_ops::Error;
+    use std::io::Read;
+    let fixes: Vec<String> = serde_json::from_str(include_str!(
+        "../../solidcore/tests/kernel_cases/fixes.json"
+    ))
+    .unwrap();
+    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    let gz: &[u8] = include_bytes!("data/atomic_seed2_b27.bodies.json.gz");
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(gz)
+        .read_to_string(&mut text)
+        .unwrap();
+    let mut records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: solidcore_record::brep::Brep =
+        serde_json::from_value(records["b27"].take()).unwrap();
+    let (input, order) = Body::from_record(&record, true).unwrap();
+    let (body, order) = input.copy_with_order(&order).unwrap();
+    // a guard: a certificate that is not held to its budget is cancelled after two minutes
+    // (and the test fails, Cancelled), instead of running on for hours
+    let token = solidcore_ops::cancel::CancelToken::default();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let guard = {
+        let token = token.clone();
+        std::thread::spawn(move || {
+            if done_rx
+                .recv_timeout(std::time::Duration::from_secs(120))
+                .is_err()
+            {
+                token.cancel();
+            }
+        })
+    };
+    let r = solidcore_ops::cancel::within(&token, || {
+        blend_ordered(
+            &body,
+            &order,
+            Blend::Round,
+            &[28, 22],
+            &[2.99],
+            &[],
+            Corners::Filled,
+            BlendOptions::default(),
+        )
+    });
+    let _ = done_tx.send(());
+    guard.join().unwrap();
+    match r {
+        Err(Error::BlendNotCertified { halvings, stations }) => {
+            // 41 first spans: a budget of 251 halvings. After 123 (165 stations) the next round
+            // would halve 160 more, so it is refused before it starts
+            assert_eq!((halvings, stations), (123, 165));
+        }
+        Err(e) => panic!("{e:?}"),
+        Ok(_) => panic!("built"),
+    }
+}

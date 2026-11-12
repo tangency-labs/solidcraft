@@ -38,6 +38,7 @@ use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
 use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::blend::round_room::rounds_cross;
+use solidcore::error::blend::BlendFailure;
 use solidcore::geom::attribute::{ids, Attribute, AttributeHandle, AttributeHandlers, Behavior};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::api_queries::point_distance;
@@ -472,7 +473,8 @@ pub fn session_refusal(
     if matches!(
         e,
         SolidError::Unsupported { .. } | SolidError::Unported { .. }
-    ) {
+    ) || matches!(e.blend_failure(), Some(BlendFailure::NotCertified { .. }))
+    {
         return Err(e);
     }
     if let Some(fit) = fit {
@@ -1147,11 +1149,15 @@ fn overflow_first(
 
 /// A kernel error as ops' blend failure, for a caller that runs the kernel's blend itself: a
 /// failure the kernel states in words where it replaced a bare status (its `BlendFailure`), as
-/// [`Error::BlendFailed`] with its class, its status and the kernel's statement; `None` for any
-/// other error.
+/// [`Error::BlendFailed`] with its class, its status and the kernel's statement; a surface not
+/// certified within its tolerance in its certificate's work budget as
+/// [`Error::BlendNotCertified`], the refusal [`status`] gives it; `None` for any other error.
 #[must_use]
 pub fn failure(e: &SolidError) -> Option<Error> {
     let b = e.blend_failure().filter(|b| b.replaces_upstream_status())?;
+    if let BlendFailure::NotCertified { halvings, stations } = *b {
+        return Some(Error::BlendNotCertified { halvings, stations });
+    }
     Some(Error::BlendFailed {
         class: b.class(),
         status: e.sm_status().unwrap_or(solidcore::error::SM_ERR),

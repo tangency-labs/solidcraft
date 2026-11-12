@@ -213,7 +213,14 @@ const CONCAVITY_ANGLE_LIMIT_DEG: f64 = 2.0;
 fn ignored<T>(r: Result<T>, fallback: T) -> Result<T> {
     match r {
         Ok(v) => Ok(v),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(e)
+            if matches!(
+                e,
+                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+            ) || e.is_not_certified() =>
+        {
+            Err(e)
+        }
         Err(_) => Ok(fallback),
     }
 }
@@ -1254,11 +1261,16 @@ pub fn check_nx1_degeneracy_status(
     let binormal = |b: &mut Brep, eu: EdgeuseId, t: f64| -> Result<Result<Vec3, SolidError>> {
         match eu3::evaluate_binormal(k, b, eu, t, false, &options) {
             Ok(e) => Ok(Ok(e.face_normal)),
-            Err(
-                e @ (SolidError::Unported { .. }
-                | SolidError::Cancelled { .. }
-                | SolidError::NotFound { .. }),
-            ) => Err(e),
+            Err(e)
+                if matches!(
+                    e,
+                    SolidError::Unported { .. }
+                        | SolidError::Cancelled { .. }
+                        | SolidError::NotFound { .. }
+                ) || e.is_not_certified() =>
+            {
+                Err(e)
+            }
             Err(e)
                 if matches!(
                     &e,
@@ -1464,7 +1476,12 @@ impl FilletCorner {
             already_processed.push(is_processed(context, fv)?);
             match calculate(context, fv) {
                 Ok(()) => {}
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                Err(e)
+                    if matches!(
+                        e,
+                        SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                    ) || e.is_not_certified() =>
+                {
                     return Err(e)
                 }
                 Err(_) => {
@@ -2003,8 +2020,14 @@ impl FilletCorner {
             // Branch on SmFilletEdge->m_eType to pass call to
             // the appropriate edgeBuilding function
             let calc = calculate(context, self, curr_edge);
-            if let Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) = calc {
-                return Err(e);
+            if let Err(e) = &calc {
+                if matches!(
+                    e,
+                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                ) || e.is_not_certified()
+                {
+                    return calc;
+                }
             }
             if calc.is_err() {
                 // CalcCornerEdgeGeom() failed
