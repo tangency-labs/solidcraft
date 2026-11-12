@@ -2388,8 +2388,14 @@ impl SolveApp {
                 }
                 return;
             }
-            // Curve-pair constraints can consume an exact preselection. Leave ambiguous
-            // selections to the ordinary pick tool; never silently constrain a subset.
+            // Curve-pair constraints can consume an exact preselection: two curves, or for
+            // Collinear and Tangent a curve and an origin axis (#15461). Leave ambiguous selections to
+            // the ordinary pick tool; never silently constrain a subset.
+            let operand = |sel: &solidcraft_engine::Sel| match sel {
+                solidcraft_engine::Sel::SketchCurve { id, .. } => Some(json!(id)),
+                solidcraft_engine::Sel::Axis { name } if tools::takes_axis_curve(id) => tools::axis_operand(self, name),
+                _ => None,
+            };
             if matches!(
                 id,
                 "sketch.constraint.parallel"
@@ -2398,8 +2404,9 @@ impl SolveApp {
                     | "sketch.constraint.tangent"
                     | "sketch.constraint.concentric"
                     | "sketch.constraint.collinear"
-            ) && let [solidcraft_engine::Sel::SketchCurve { id: a, .. }, solidcraft_engine::Sel::SketchCurve { id: b, .. }] =
-                self.session.selection.as_slice()
+            ) && let [first, second] = self.session.selection.as_slice()
+                && matches!((first, second), (solidcraft_engine::Sel::SketchCurve { .. }, _) | (_, solidcraft_engine::Sel::SketchCurve { .. }))
+                && let (Some(a), Some(b)) = (operand(first), operand(second))
                 && a != b
             {
                 let params = json!({ "a": a, "b": b });
