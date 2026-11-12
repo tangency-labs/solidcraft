@@ -386,7 +386,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 act("ui.workspace.render", "Render", "ws_render")
                     .with(json!({"workspace":"render"}))
                     .key(if rendering { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load_holds()),
+                    .on(crate::render_workspace::entry_open(app)),
             ];
             for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", ""), ("Drawing", "ws_drawing")] {
                 v.push(act("ui.workspace", w, icon).key("coming later").on(false));
@@ -3614,5 +3614,32 @@ mod workspace_menu_tests {
         h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
         assert!(!crate::render_workspace::active(&h.app));
         assert!(h.app.viewport.context_menu.is_some());
+    }
+
+    /// Isocurve Analysis leaves its face-picking tool running. That tool edits nothing, so the
+    /// Render row stays enabled; choosing it ends the tool and keeps the curves (#14993). A
+    /// modelling operation still holds the workspace switcher.
+    #[test]
+    fn render_row_opens_while_isocurve_analysis_is_on() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1200,"height":1000}));
+        h.app.run("solid.cylinder", json!({"radius": 10, "height": 30})).unwrap();
+        h.settle();
+        let render_row = |app: &SolveApp| items(app, &Target::Workspace).iter().any(|i| i.id == "ui.workspace.render" && i.enabled);
+        h.step(&json!({"start": "inspect.isocurve"})).unwrap();
+        h.step(&json!({"click": {"world": [10, 0, 15]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("inspect.isocurve"));
+        assert_eq!(h.app.session.isocurves.len(), 1, "{:?}", h.app.status);
+        assert!(render_row(&h.app), "a look-only Inspect tool does not lock Render");
+        h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();
+        h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
+        assert!(crate::render_workspace::active(&h.app), "{:?}", h.app.status);
+        assert!(h.app.tool.is_none(), "the picking tool ended");
+        assert_eq!(h.app.session.isocurves.len(), 1, "the curves stay on");
+        crate::render_workspace::enter(&mut h.app, false).unwrap();
+        h.step(&json!({"start": "solid.fillet"})).unwrap();
+        assert!(h.app.tool.is_some() || h.app.dialog.is_some());
+        assert!(!render_row(&h.app), "a modelling operation still locks Render");
+        assert!(crate::render_workspace::enter(&mut h.app, true).is_err());
     }
 }

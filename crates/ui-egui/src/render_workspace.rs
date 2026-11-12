@@ -961,12 +961,31 @@ pub fn invalidate_scene(app: &mut SolveApp) {
     }
 }
 
+/// Inspect tools that only pick what an analysis shows. They edit nothing, so ending one loses
+/// no work, and a running one does not hold the Render workspace closed (#14993).
+const LOOK_ONLY_TOOLS: &[&str] =
+    &["inspect.center_of_mass", "inspect.continuity", "inspect.curvature_comb", "inspect.isocurve", "inspect.minimum_radius"];
+
+/// Whether the Render workspace can be entered now: no sketch, dialog or file load is open and
+/// no tool is running, except a look-only Inspect tool, which [`enter`] ends as Esc does.
+pub(crate) fn entry_open(app: &SolveApp) -> bool {
+    let tool_holds = app.tool.as_ref().is_some_and(|tool| !LOOK_ONLY_TOOLS.contains(&tool.cmd));
+    app.session.active_sketch.is_none() && !tool_holds && app.dialog.is_none() && !app.file_load_holds()
+}
+
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
     if render {
-        if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load_holds() {
+        if !entry_open(app) {
             return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
         }
         app.run("render.scene", json!({}))?;
+        // A look-only Inspect tool ends as Esc ends it; Isocurve's curves stay on (#14993).
+        if app.tool.is_some() {
+            crate::tools::finish(app);
+            if app.tool.is_some() {
+                return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
+            }
+        }
         let entering = !active(app);
         if entering {
             app.render_workspace.displayed.clear();
