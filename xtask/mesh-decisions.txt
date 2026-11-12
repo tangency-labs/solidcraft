@@ -40,7 +40,6 @@ crates/doc/src/eval_more.rs:sheet_eval places sheet-metal features by a mesh
 crates/doc/src/history_names.rs:OperandNames::edge names an operand's edge by the display mesh
 crates/doc/src/hole_reference.rs:on_reference_face decides whether a point lies on a hole's reference face by the display mesh
 crates/doc/src/hole_reference.rs:reference_frame finds a hole's reference edges on the display mesh
-crates/doc/src/joints.rs:nearest_plane picks a joint's planar face by the display mesh
 crates/doc/src/joints_cam.rs:default_reverse picks a cam follower's side by the display mesh
 crates/doc/src/joints_cam.rs:profile_points samples a cam profile's edges from a mesh
 crates/doc/src/joints_edge.rs:edge_frame places an edge snap by the display mesh
@@ -48,9 +47,7 @@ crates/doc/src/joints_edge.rs:edge_snap places an edge snap by the display mesh
 crates/doc/src/joints_edge.rs:face_of picks the planar face beside an edge by the display mesh
 crates/doc/src/joints_edge.rs:nearest_edge picks the edge nearest a point by the display mesh
 crates/doc/src/joints_face.rs:NamedFace::own_cylinder reads a named face's cylinder from the display mesh
-crates/doc/src/joints_face.rs:NamedFace::plane reads a named face's centre and normal from the display mesh
 crates/doc/src/joints_face.rs:face_name_at names the face at a pick by its mesh triangles
-crates/doc/src/joints_face.rs:outline_centre finds a planar face's centre from mesh triangles
 crates/doc/src/joints_face.rs:rim_neighbour finds the face across a cylinder's rim by the display mesh
 crates/doc/src/joints_face.rs:round_end_at finds a cylinder's round end by the display mesh
 crates/doc/src/lineage.rs:order_legacy_family orders a face family by the display mesh
