@@ -221,6 +221,15 @@ pub enum Error {
     },
     /// The application cancelled the call.
     Cancelled,
+    /// A body built from a record whose blend face's net its definition does not certify (the
+    /// kernel's `DefinitionNotCertified`): the face, by its index in the body's face order, and
+    /// the bound ε its definition states.
+    DefinitionNotCertified {
+        /// The face's index in the body's face order.
+        face: usize,
+        /// The bound the definition states.
+        eps: f64,
+    },
     /// Ops was called from inside a kernel call or from the failure callback.
     Reentered,
     /// A record the conversion cannot carry to the kernel, and why.
@@ -504,6 +513,9 @@ impl std::fmt::Display for Error {
                 "the loft's guided edges were asked within {asked} of their rails; at {wires} wires the bound proved is {reached}"
             ),
             Error::WallsTouch => write!(f, "the offset's walls meet"),
+            Error::DefinitionNotCertified { face, eps } => {
+                write!(f, "the definition of face {face} does not certify its net within {eps}")
+            }
             Error::TooLarge { size, kind, .. } => {
                 write!(f, "too large: the largest {kind:?} that fits is {size}")
             }

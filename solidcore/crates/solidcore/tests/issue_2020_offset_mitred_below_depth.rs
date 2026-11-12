@@ -252,7 +252,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_cliff_overflow = true;
     k.fixes.fillet_corner_ball_center_from_axes = true;
     k.fixes.fillet_corner_ball_patch = true;
-    k.fixes.fillet_corner_sphere_from_four_arcs = true;
     k.fixes.fillet_half_degree_crease = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_mitre_concave_face_corners = true;

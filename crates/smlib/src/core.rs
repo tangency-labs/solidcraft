@@ -25,6 +25,7 @@ mod boolean_tests;
 mod convert;
 #[cfg(test)]
 mod convert_tests;
+pub(crate) mod definition;
 pub(crate) mod dump;
 pub(crate) mod file;
 pub(crate) mod history;
@@ -102,7 +103,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.nurb_cylinder_inside_out_frame = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
-    f.fillet_corner_sphere_from_four_arcs = true;
     f.fillet_nx1_opposite_continuation_side_edge = true;
     f.torus_iso_circle_axis_from_midpoint = true;
     f.torus_keeps_inside_out = true;
@@ -254,12 +254,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
     f.fillet_exact_round_classes = true;
-    f.curve_check_zero_speed_tangent_end = true;
     f.cpoly_remove_poly_face_check_member = true;
     f.check_seam_crossing_unclosed = true;
     f.ascii_doubles_round_trip = true;
     f.transform_aligned_bbox_image = true;
-    f.bspline_simple_offset_matches_parameterization = true;
     f.offset_edges_keep_source_tolerance = true;
     f.circle_silhouette_perspective_center = true;
     f.ellipse_convert_to_2d_uses_both_axes = true;

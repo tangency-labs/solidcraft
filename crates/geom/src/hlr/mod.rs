@@ -24,7 +24,7 @@ use serde::Serialize;
 
 use crate::section::CurveAccuracy;
 use curve::{C3, as_circle};
-use solidcore_record::brep::Brep;
+use solidcore_record::brep::{Brep, Surface};
 use solidcore_record::{Seg2, Vec2, Vec3};
 use surface::{Analytic, Hit, S3};
 use trim::Trim;
@@ -405,12 +405,19 @@ fn anchor(b: &Brep) -> Vec3 {
 }
 
 /// The body's records with every position moved by `-d`: points, control points and NURBS forms,
-/// a placed revolution through its matrix; regions, parameters and pcurves as they are.
+/// a placed revolution through its matrix; regions, parameters and pcurves as they are. A blend
+/// by its definition is drawn as its net, its NURBS form: the definition is no line of the drawing.
 fn shifted(b: &Brep, d: Vec3) -> Brep {
-    crate::brep::placement::moved(
-        b,
-        &crate::brep::placement::Rigid { rotation: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], translation: [-d.x, -d.y, -d.z] },
-    )
+    let mut nets = b.clone();
+    for f in &mut nets.faces {
+        if matches!(f.surface, Surface::Blend { .. })
+            && let Some(net) = f.nurbs.take()
+        {
+            f.surface = net;
+        }
+    }
+    let motion = crate::brep::placement::Rigid { rotation: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], translation: [-d.x, -d.y, -d.z] };
+    crate::brep::placement::moved(&nets, &motion).unwrap_or(nets)
 }
 
 #[derive(Clone, Copy, Debug)]

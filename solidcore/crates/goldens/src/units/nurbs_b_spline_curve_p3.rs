@@ -1098,16 +1098,14 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
-    /// WR-668's opt-in (`curve_check_zero_speed_tangent_end`, tangency-labs/smlib#76
-    /// 6ca3405) takes a zero-speed end only at a vertex of the curve's edge: on the
-    /// free curves of `zero_speed_end.json`, which the C++ gate compares with the
-    /// default, it reports exactly what the default reports, bit for bit, with and
-    /// without the minimum radius read (`bspline_check_min_radius`, WR-382). Coincident
-    /// first control points fail test 3. Coincident last ones pass test 4, which
-    /// reports the first pair's values, so the backwards curve fails only once the
-    /// minimum radius is read (tests 13/14).
+    /// WR-668 (tangency-labs/smlib#76 6ca3405) takes a zero-speed end only at a vertex
+    /// of the curve's edge, so the free curves of `zero_speed_end.json` report as
+    /// upstream, with and without the minimum radius read (`bspline_check_min_radius`,
+    /// WR-382). Coincident first control points fail test 3. Coincident last ones pass
+    /// test 4, which reports the first pair's values, so the backwards curve fails only
+    /// once the minimum radius is read (tests 13/14).
     #[test]
-    fn zero_speed_end_fixtures_on_no_edge_ignore_the_fix() {
+    fn zero_speed_end_fixtures_on_no_edge_report_as_upstream() {
         let fixtures: Value = serde_json::from_str(include_str!(
             "../../../../fixtures/nurbs.b_spline_curve_p3/zero_speed_end.json"
         ))
@@ -1115,18 +1113,13 @@ mod tests {
         let cases = fixtures["cases"].as_array().unwrap();
         assert!(cases.len() >= 8);
         for min_radius in [false, true] {
-            let mut off = UpstreamFixes::default();
-            off.bspline_check_min_radius = min_radius;
-            let mut on = off;
-            on.curve_check_zero_speed_tangent_end = true;
+            let mut fixes = UpstreamFixes::default();
+            fixes.bspline_check_min_radius = min_radius;
             for case in cases {
                 let name = case["name"].as_str().unwrap();
                 let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
                 assert!(matches!(i.op, OpIn::Assert { .. }), "{name}");
-                let a = rust_with_fixes(&i, &off).unwrap();
-                let b = rust_with_fixes(&i, &on).unwrap();
-                // (`Debug` prints each value exactly, so equal text is equal bits)
-                assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name}");
+                let a = rust_with_fixes(&i, &fixes).unwrap();
                 let valid = name.starts_with("zero_speed_end") && !min_radius;
                 assert_eq!(
                     a.values["flag"],
