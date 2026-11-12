@@ -9,8 +9,9 @@
 //!   (u, v) (Lawson's flips, by 3D angles).
 //! - A triangle sharper than the angle, longer than [`LONG`] times the side asked, or off the
 //!   surface by more than the tolerance gets a point at its circumcentre: the centre of its 3D
-//!   circle, taken to (u, v) by the triangle's own map from its plane (its corners' (u, v) at
-//!   the circle centre's barycentric coordinates), then put on the surface there.
+//!   circle, put on the surface at its closest point (from the parameters the triangle's own
+//!   map from its plane gives it), so the point is chosen in 3D, and (u, v) only locates it.
+//!   A point nearer a node than [`CROWDED`] of the triangle's longest side is not added.
 //! - A point that would encroach on a boundary side (lie within the ball the side is a diameter
 //!   of, or past it) is not added: the side is split instead, which the face cannot do alone,
 //!   since the side is an edge's segment its neighbour shares. The sides are returned, to be put
@@ -59,7 +60,17 @@ pub(crate) struct Rules<'a> {
     /// `None`: a boundary side a point would encroach on is returned to be split. Otherwise the
     /// sides are kept whole, and this is why, where it leaves a triangle short.
     pub whole: Option<ShapeLimit>,
+    /// The parameters of a 3D point on or near the surface (within the distance given), from
+    /// the parameters given, unwrapped to them: the face's surface's closest point.
+    pub project: &'a dyn Fn(Vec3, [f64; 2], f64) -> Option<[f64; 2]>,
 }
+
+/// A point is not added nearer a node than this fraction of the longest side of the triangle it
+/// is for. The circumcentre of a triangle of the surface's Delaunay triangulation is as far as
+/// its circumradius from every node, at least half that side: a point nearer is not its
+/// circumcentre (the surface's Delaunay rule is kept only where both new triangles keep their
+/// winding in (u, v)), and adding it would make a sliver, as the next point would.
+const CROWDED: f64 = 0.25;
 
 /// How the shaping ended.
 pub(crate) enum Shaped {
@@ -417,11 +428,16 @@ pub(crate) fn shape(
         let (d11, d12, d22) = (e1.dot(e1), e1.dot(e2), e2.dot(e2));
         let det = d11 * d22 - d12 * d12;
         let (l1, l2) = ((x.dot(e1) * d22 - x.dot(e2) * d12) / det, (x.dot(e2) * d11 - x.dot(e1) * d12) / det);
-        let q = [qa[0] + l1 * (qb[0] - qa[0]) + l2 * (qc[0] - qa[0]), qa[1] + l1 * (qb[1] - qa[1]) + l2 * (qc[1] - qa[1])];
-        if !(q[0].is_finite() && q[1].is_finite()) {
+        let near = [qa[0] + l1 * (qb[0] - qa[0]) + l2 * (qc[0] - qa[0]), qa[1] + l1 * (qb[1] - qa[1]) + l2 * (qc[1] - qa[1])];
+        // The circumcentre on the surface: its closest point, from the parameters the
+        // triangle's map gives it.
+        let centre = a + x;
+        let q = if near[0].is_finite() && near[1].is_finite() { (rules.project)(centre, near, x.len() + rules.tol) } else { None };
+        let Some(q) = q.filter(|q| q[0].is_finite() && q[1].is_finite()) else {
             give_up(&mut m, ti, None, &mut limits);
             continue;
-        }
+        };
+        let longest = a.dist(b).max(b.dist(c)).max(c.dist(a));
         let located = m.locate(ti, q);
         let p = match located {
             Located::Inside(_) | Located::OnSide(..) => point(q),
@@ -496,6 +512,24 @@ pub(crate) fn shape(
             give_up(&mut m, ti, None, &mut limits);
             continue;
         };
+        // Not a sliver's worth from a node of the triangle it lands in or of its neighbours.
+        let landed = match located {
+            Located::Inside(tj) | Located::OnSide(tj, ..) => Some(tj),
+            Located::Beyond(..) | Located::Lost => None,
+        };
+        let crowded = landed.and_then(|tj| m.tris.get(tj as usize).copied().map(|tri| (tj, tri))).is_some_and(|(tj, tri)| {
+            let mut around: Vec<[u32; 3]> = vec![tri];
+            for k in 0..3 {
+                let [x, y, _] = super::rot3(tri, k);
+                around.extend(m.across(x, y, tj).and_then(|o| m.tris.get(o as usize).copied()));
+            }
+            around.iter().flatten().filter_map(|&v| m.node(v)).any(|(o, _)| o.dist(p) < CROWDED * longest)
+        });
+        if crowded {
+            dead.insert(sorted(t));
+            give_up(&mut m, ti, Some(ShapeLimit::Crowded), &mut limits);
+            continue;
+        }
         let Some((made, facing)) = m.insert(located, q, p) else {
             give_up(&mut m, ti, None, &mut limits);
             continue;

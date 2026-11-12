@@ -1818,6 +1818,13 @@ fn plan_face(
             pos.push(s.derivs(q[0], q[1]).map(|d| d.0).ok_or_else(|| fail(&format!("the surface does not evaluate at {q:?}")))?);
         }
         let point = |q: [f64; 2]| s.derivs(q[0], q[1]).map(|d| d.0);
+        // A 3D point's parameters on the surface, by the kernel's closest point, unwrapped to
+        // the parameters it is looked for from.
+        let dom = uv::domain(s);
+        let project = |p: Vec3, from: [f64; 2], accept: f64| -> Option<[f64; 2]> {
+            let q = solidcore::eval::plan::uv::project(s, &dom, p, Some(from), accept)?;
+            Some([uv::unwrap(q[0], from[0], dom.period[0]), uv::unwrap(q[1], from[1], dom.period[1])])
+        };
         let whole_sides = match shape.sides {
             Sides::Split => None,
             Sides::Kept => Some(crate::ShapeLimit::SidesOnNoEdge),
@@ -1830,6 +1837,7 @@ fn plan_face(
             size_at: shape.size_at,
             budget: MAX_MESH_REFINE.saturating_sub(meshed.extra.len()),
             whole: whole_sides,
+            project: &project,
         };
         // Shaped whole: the fans kept as they are, the rings split in the face where they must,
         // the face's own boundary sides on their edges.
