@@ -59,7 +59,7 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     let FeatureKind::FrameMember { body_name, names, corner, flip, corners, fit_ends, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre } = layout(doc, vals, f, st)?;
+    let Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, up } = layout(doc, vals, f, st)?;
     if corners.iter().flat_map(|c| &c.members).any(|m| m.feature.as_ref().is_some_and(|n| *n != f.name)) {
         return Err(DocError::Invalid("not supported yet: a corner with a member of another frame".into()));
     }
@@ -94,7 +94,7 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     // Each member's Rotate turn (#15070), by its line: a piece of a turned line turns with it.
     let own: Vec<f64> = lines.iter().map(|l| turns.get(l).copied().unwrap_or(0.0)).collect();
     let ats: Vec<Vec2> = own.iter().map(|t| turned_at(at, centre, *t)).collect();
-    let (axes, plain) = section_axes(&segments, &planes, plan.as_ref(), turn, &own)?;
+    let (axes, plain) = section_axes(&segments, &planes, plan.as_ref(), turn, &own, up)?;
     let (placed, unreversed) = (placer(&axes, &ats), unreversed_placer(&plain, &ats));
     // Fit Ends to Earlier Frames (None never fits): the earlier Frame Members' tubes and their copies, as cutting
     // tools, and this frame's own tubes laid before each free end (ruling A14), whether or not an earlier one exists.
@@ -1191,7 +1191,7 @@ fn later_pieces(pieces: &[frame_layout::Piece], segments: &[(String, Vec3, Vec3)
 /// ([`member_section`]) all place it alike. Under Auto (`plan`) sections line up (#4003 Goal 7): a member in a sketch
 /// plane takes the sketch's normal as up and runs the way its group lays it, an outer member round the outline
 /// ([`frame_layout::Rank`]); members in no sketch plane chained in one plane take that plane's normal, pointing up
-/// ([`chain_ups`]). Any other member, and every member of a frame that isn't Auto, keeps [`frame::member_axes`].
+/// ([`chain_ups`]). Any other member, and every member of a frame that isn't Auto, keeps [`frame::member_axes`] with `frame_up`.
 /// Also, for each member Auto runs against its line, its axes running the way the line is drawn, to name its faces
 /// by ([`member_body`]).
 fn section_axes(
@@ -1200,6 +1200,7 @@ fn section_axes(
     plan: Option<&Plan>,
     turn: f64,
     own: &[f64],
+    frame_up: frame::UpAxis,
 ) -> Result<(Vec<Axes>, Vec<Option<Axes>>)> {
     let mut ups: Vec<Option<Vec3>> = vec![None; segments.len()];
     let mut reverse = vec![false; segments.len()];
@@ -1224,7 +1225,9 @@ fn section_axes(
         let turn = turn + own.get(m).copied().unwrap_or(0.0).rem_euclid(TAU);
         let lined = up.and_then(|up| frame::group_axes(if reversed { *a - *b } else { *b - *a }, up, turn));
         plain.push(up.filter(|_| reversed && lined.is_some()).and_then(|up| frame::group_axes(*b - *a, up, turn)));
-        axes.push(lined.or_else(|| frame::member_axes(*b - *a, turn)).ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?);
+        axes.push(
+            lined.or_else(|| frame::member_axes(*b - *a, turn, frame_up)).ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?,
+        );
     }
     Ok((axes, plain))
 }
@@ -1778,7 +1781,7 @@ fn fit_to_earlier(
 /// axis (`None`: a 3D sketch, or no sketch), each member's place in the drawing order, each
 /// member's sketch plane ([`segments`]), each line's further turn (radians) from the Rotate steps after the feature
 /// ([`member_turns`]: a step whose angle fails is passed over) and the profile point those turn about (the centre of
-/// its bounding box).
+/// its bounding box), and the axis the profile takes as up.
 struct Layout {
     segments: Vec<(String, Vec3, Vec3)>,
     regions: Vec<Region2>,
@@ -1790,10 +1793,11 @@ struct Layout {
     planes: Vec<MemberPlane>,
     turns: BTreeMap<String, f64>,
     centre: Vec2,
+    up: frame::UpAxis,
 }
 
 fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
-    let FeatureKind::FrameMember { profile, anchor, locate, angle, mirror, corner, .. } = &f.kind else {
+    let FeatureKind::FrameMember { profile, anchor, locate, angle, mirror, corner, up, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
     let (segments, sketch_x, drawn, planes) = segments(doc, vals, f, st)?;
@@ -1830,7 +1834,7 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     }
     let turns = member_turns(doc, vals, FeatureId(f.id)).into_iter().map(|(line, (_, a))| (line, a)).collect();
     let centre = frame::anchor_point(&regions, frame::Anchor::Center);
-    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre })
+    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, up: *up })
 }
 
 /// The profile point on the line of a member a Rotate step turns `t` (radians) further (#15070): the profile turns
@@ -1928,7 +1932,7 @@ pub(crate) fn member_section(
     let FeatureKind::FrameMember { corner, corners, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { segments, regions, at, turn, sketch_x, drawn, planes, turns, centre, .. } = layout(doc, vals, f, st)?;
+    let Layout { segments, regions, at, turn, sketch_x, drawn, planes, turns, centre, up, .. } = layout(doc, vals, f, st)?;
     let gap = gap_value(vals, gap.as_ref(), "`gap`")?;
     let corners = &overrides(*corner, (&segments, &planes, &drawn, sketch_x), corners, Some((vals, gap)))?;
     let (plan, crossing) = plans(*corner, &segments, &planes, corners, &drawn)?;
@@ -1946,7 +1950,7 @@ pub(crate) fn member_section(
         None => (overlap_parent(&ids, line).and_then(|l| ids.iter().position(|id| id == l)), true),
     };
     let m = m.ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
-    let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), turn, &own)?;
+    let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), turn, &own, up)?;
     let (x, y) = axes.get(m).copied().ok_or_else(|| DocError::Invalid(format!("line `{line}` has no length")))?;
     let (a, b) = segments.get(m).map(|s| (s.1, s.2)).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
     let placed = placer(&axes, &ats);
@@ -1977,14 +1981,14 @@ pub(crate) fn member_pivot(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
     let FeatureKind::FrameMember { corner, corners, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { segments, at, turn, sketch_x, drawn, planes, centre, .. } = layout(doc, vals, f, st)?;
+    let Layout { segments, at, turn, sketch_x, drawn, planes, centre, up, .. } = layout(doc, vals, f, st)?;
     let gap = gap_value(vals, gap.as_ref(), "`gap`")?;
     let corners = &overrides(*corner, (&segments, &planes, &drawn, sketch_x), corners, Some((vals, gap)))?;
     let (plan, crossing) = plans(*corner, &segments, &planes, corners, &drawn)?;
     let (segments, planes, _) = pieced(segments, planes, drawn, plan.as_ref().or(crossing.as_ref()))?;
     let unknown = || DocError::Unknown(format!("line `{line}` of the member feature"));
     let m = segments.iter().position(|s| s.0 == line).ok_or_else(unknown)?;
-    let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), turn, &vec![0.0; segments.len()])?;
+    let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), turn, &vec![0.0; segments.len()], up)?;
     let (x, y) = axes.get(m).copied().ok_or_else(|| DocError::Invalid(format!("line `{line}` has no length")))?;
     let (a, b) = segments.get(m).map(|s| (s.1, s.2)).ok_or_else(unknown)?;
     Ok(a + x * (centre.x - at.x) + y * (centre.y - at.y) + (b - a) * 0.5)

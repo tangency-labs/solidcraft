@@ -1361,6 +1361,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
         locate,
         angle,
         mirror,
+        up,
         body_name,
         corner,
         flip,
@@ -1471,6 +1472,10 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     }
     if !missing.is_empty() {
         extra.insert("corners".into(), json!(missing));
+    }
+    // The dialog has no field for the up axis either: an edit keeps the member's own.
+    if !up.is_z() {
+        extra.insert("up".into(), json!(up));
     }
     Some((Kind::Frame(m), inputs, extra))
 }
