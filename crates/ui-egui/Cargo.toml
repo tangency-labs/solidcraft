@@ -66,7 +66,6 @@ winreg = "0.56"
 # The kit's test fixtures for SolidCraft's tests of the kit with its data.
 solidcraft-ui-kit = { workspace = true, features = ["test-support"] }
 solidcraft-engine = { workspace = true, features = ["bundled-render-library", "profile"] }
-solidcraft-mcp = { workspace = true }
 # Parse the source guard structurally, including code after inline test modules.
 syn = { workspace = true, features = ["visit"] }
 # The catalog guard reads every UI source file as Rust tokens; already in the tree through
