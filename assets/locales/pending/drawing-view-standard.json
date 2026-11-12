@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_view_standard": "Standard Views"
+  },
+  "ar": {
+    "cmd.drawing_view_standard": "العروض القياسية"
+  },
+  "de": {
+    "cmd.drawing_view_standard": "Standardansichten"
+  },
+  "he": {
+    "cmd.drawing_view_standard": "תצוגות סטנדרטיות"
+  },
+  "ja": {
+    "cmd.drawing_view_standard": "標準ビュー"
+  },
+  "ko": {
+    "cmd.drawing_view_standard": "표준 뷰"
+  },
+  "vi": {
+    "cmd.drawing_view_standard": "Các chế độ xem tiêu chuẩn"
+  },
+  "zh": {
+    "cmd.drawing_view_standard": "标准视图"
+  }
+}
