@@ -57,7 +57,8 @@
 //!   on the executive, as the fork's `Refuse` returns `SM_ERR`. A put-back the fillet
 //!   executive fails for a reason other than room also records
 //!   [`OffsetFacesRefusal::NotPutBack`] (the fork returns the status untyped), keeping
-//!   the fillet's status.
+//!   the fillet's status; so does a put-back whose stitched result leaves a closed solid
+//!   open (WR-212, as the public edge-fillet wrappers refuse it).
 //! - **Closed walls (opt-in).** 9504880's removal of the edges between a moved face and
 //!   one that stayed on one surface runs only with
 //!   `Kernel::fixes.local_operation_closes_walls_to_nothing` (WR-566 addendum); a face is
@@ -151,7 +152,7 @@ pub enum OffsetFacesRefusal {
     /// blends were taken off and the faces moved, but putting the blends back failed in
     /// the fillet executive for a reason other than room (a corner or a rollover it
     /// cannot build, #2020). The reason carries the fillet's error comment; the status is
-    /// the fillet's.
+    /// the fillet's. Also a put-back that left a closed solid open (`SM_ERR`, WR-212).
     NotPutBack,
 }
 
@@ -999,14 +1000,18 @@ impl OffsetFacesExecutive {
     /// `OffsetFaces` step 5: the sharp edges each followed blend became ([`MARK_SHARP`]),
     /// where they still lie between its two faces, blended again in one fillet executive
     /// call at each blend's size and of its kind (circular sections), then
-    /// `StitchAndOrient`. Every face is marked [`MARK_BEFORE`] first, for step 6.
+    /// `StitchAndOrient`. Every face is marked [`MARK_BEFORE`] first, for step 6. A closed
+    /// and manifold body whose stitched result is not is refused (not in the fork, WR-212,
+    /// as the public edge-fillet wrappers refuse it).
     ///
     /// # Errors
     ///
     /// `SM_ERR` with [`OffsetFacesRefusal::NoRoom`] when a blend's edge is gone or the
-    /// executive reports no room (its comment as the reason's detail); the executive's
-    /// and the stitch's own errors.
+    /// executive reports no room (its comment as the reason's detail); `SM_ERR` with
+    /// [`OffsetFacesRefusal::NotPutBack`] when the blends put back leave a solid open; the
+    /// executive's and the stitch's own errors.
     pub fn reblend(&mut self, k: &mut Kernel, b: &mut Brep, blends: &[Followed]) -> Result<()> {
+        let closed = crate::topology::brep::p2::is_closed_manifold(b)?;
         let mut edges = Vec::new();
         let mut sections = Vec::new();
         let mut solvers = Vec::new();
@@ -1080,7 +1085,15 @@ impl OffsetFacesExecutive {
             };
             return Err(e);
         }
-        stitch_and_orient(k, b, &StitchAndOrientOptions::default())
+        stitch_and_orient(k, b, &StitchAndOrientOptions::default())?;
+        if closed && !crate::topology::brep::p2::is_closed_manifold(b)? {
+            return Err(self.refuse(
+                OffsetFacesRefusal::NotPutBack,
+                "putting back the blends that follow the moved faces left no closed solid",
+                None,
+            ));
+        }
+        Ok(())
     }
 }
 

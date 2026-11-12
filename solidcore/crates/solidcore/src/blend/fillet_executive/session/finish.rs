@@ -20,8 +20,10 @@
 //! face and edge merges carry the dying objects' attributes to the survivors
 //! (`SM_NO_MERGE_IN_BREP`); afterwards the attributes of target edges they deleted are
 //! cleared from the session store. `do_fillet` returns the filleting's status, as
-//! upstream: whether a solid stayed one is decided on the stitched body by the public
-//! wrappers (`api`, WR-212).
+//! upstream: whether a solid stayed one is decided on the stitched body by the three
+//! public edge-list wrappers (`fillet_edges`, `fillet_edges_per_edge`,
+//! `variable_radius_fillet` in `api`) and by the offset's put-back of its blends
+//! (`OffsetFacesExecutive::reblend`), WR-212.
 //! After the in-place merge (also on error) the geometry bound to the target's
 //! edges, edge uses and faces under the session's kernel identities is rebound to the
 //! target's naming, as the piecewise merge does (owners are pointers upstream;

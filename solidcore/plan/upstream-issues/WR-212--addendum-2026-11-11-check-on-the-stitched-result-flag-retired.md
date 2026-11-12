@@ -4,19 +4,26 @@ Updates: WR-212
 
 - `UpstreamFixes::fillet_refuse_non_manifold_result` is retired. The public edge fillets
   (`fillet_edges`, `fillet_edges_per_edge` and `variable_radius_fillet` in
-  `crates/solidcore/src/blend/fillet_executive/api.rs`) refuse a result that is not a
-  closed manifold solid (`is_manifold_solid`) when the body was one, and put the body back.
-  The refusal is a typed blend failure (`BlendFailure::Failed`, status 1001) naming no
-  entity. Upstream returns success with the open body.
+  `crates/solidcore/src/blend/fillet_executive/api.rs`) refuse a result that is not
+  closed and manifold (`is_closed_manifold`: no shell vertices, every edge manifold,
+  whatever the regions say) when the body was, and put the body back. The refusal is a
+  typed blend failure (`BlendFailure::Failed`, status 1001) naming no entity; a cancel
+  during the fillet stays `Cancelled`. The executive's error info no longer records it
+  (the wrappers drop their session). Upstream returns success with the open body.
+  `circular_fillet` and `chamfer_fillet` never had the check and still do not.
 - **Where the check runs.** On the body after `StitchAndOrient`, no longer at the end of
   `DoFillet`. Before the stitch it refused `Fillet/box_diff_cyl_big_rad.smb` edge 12 at
   r 28, which the stitch closes (2026-10-26 addendum). `FilletSession::do_fillet` and the
   generic `FilletExecutive::do_fillet` return the filleting's status, as upstream; a caller
   that drives a session checks its own result, as the ops layer's result contract does.
-- **Which bodies.** Only a closed manifold solid must stay one. A sheet, or solids that
+  The offset's put-back of its blends (`OffsetFacesExecutive::reblend` in
+  `crates/solidcore/src/offset/offset_faces.rs`) drives a session and stitches; it makes
+  the same check after its stitch and refuses as `OffsetFacesRefusal::NotPutBack`, as it
+  did with the flag, which SolidCraft's preset turned on.
+- **Which bodies.** Only a closed and manifold body must stay one. A sheet, or solids that
   touch along an edge (the bore tangent to a cube's face in
-  `crates/solidcore/tests/issue_453_bore_rim_smooth_end.rs`), is not a closed manifold
-  solid before the fillet and is not checked. The opt-in check tested every edge of the
+  `crates/solidcore/tests/issue_453_bore_rim_smooth_end.rs`), is not closed and manifold
+  before the fillet and is not checked. The opt-in check tested every edge of the
   result, so it refused every fillet of such a body.
 - **Trigger with the default kernel:** the four vertical edges of a 14 x 6 x 10 post
   rounded r 3.5 (`crates/solidcore/tests/issue_1073_opposite_rounds_cross.rs`): the two

@@ -24,7 +24,7 @@
 //! panic, every body they were given is put back as it was before the call, where
 //! upstream keeps the edits made before the failure. [`fillet_edges`],
 //! [`fillet_edges_per_edge`] and [`variable_radius_fillet`] refuse a stitched result that
-//! is not a closed manifold solid when the body they were given was one, where upstream
+//! is not closed and manifold when the body they were given was, where upstream
 //! returns success with it (WR-212). Upstream destroys its executive (and the executive's
 //! fillet-edge attribute) after `StitchAndOrient`; here the session, which holds the
 //! only borrow of `brep`, is dropped first. Attributes carry no geometry, so the
@@ -75,7 +75,7 @@ use crate::kernel::Kernel;
 use crate::math::PI;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p1;
-use crate::topology::brep::p2::is_manifold_solid;
+use crate::topology::brep::p2::is_closed_manifold;
 use crate::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
@@ -113,22 +113,26 @@ fn failing_as_a_whole(
     result
 }
 
-/// [`failing_as_a_whole`] for a fillet that keeps a closed manifold solid one (not
-/// upstream, WR-212): when `brep` is a closed manifold solid ([`is_manifold_solid`]) and
-/// `fillet`'s stitched result is not, the call fails and the body is put back. Upstream's
-/// `DoFilleting` ignores the `bMaybeNotSolid` that `OrientTrimmedSurfaces` reports and
-/// returns success with that body. The refusal names no entity: the result's edges are
-/// gone with it. A body that was no closed manifold solid (a sheet, or solids touching
-/// along an edge) is not checked: nothing it was can be lost.
+/// [`failing_as_a_whole`] for a fillet that keeps a closed manifold body one (not
+/// upstream, WR-212): when `brep` is closed and manifold ([`is_closed_manifold`]: no shell
+/// vertices and every edge manifold, whatever the regions say, as the offset and shell
+/// gates ask) and `fillet`'s stitched result is not, the call fails and the body is put
+/// back. Upstream's `DoFilleting` ignores the `bMaybeNotSolid` that
+/// `OrientTrimmedSurfaces` reports and returns success with that body. The refusal names
+/// no entity: the result's edges are gone with it. A body that was not closed and
+/// manifold (a sheet, or solids touching along an edge) is not checked: nothing it was can
+/// be lost. A cancel that fired during `fillet` ends the call as `Cancelled` before the
+/// result is checked.
 fn keeping_a_solid_closed(
     k: &mut Kernel,
     brep: &mut Brep,
     fillet: impl FnOnce(&mut Kernel, &mut Brep) -> Result<()>,
 ) -> Result<()> {
-    let solid = is_manifold_solid(brep)?;
+    let closed = is_closed_manifold(brep)?;
     failing_as_a_whole(k, brep, |k, brep| {
         fillet(k, brep)?;
-        if solid && !is_manifold_solid(brep)? {
+        k.check_cancelled(OP)?;
+        if closed && !is_closed_manifold(brep)? {
             return Err(SolidError::blend_failed(
                 OP,
                 "the result is not a closed manifold solid",
@@ -160,8 +164,8 @@ fn invalid_input() -> SolidError {
 /// # Errors
 /// `SM_ERR_INVALID_INPUT` for an empty edge list or a radius below 8 times the
 /// B-rep tolerance ([`is_radius_supported`]); the fillet executive's errors, and a
-/// failure for a closed manifold solid whose result is not one (WR-212), with the body as
-/// it was before the call (not upstream, which keeps the edits made before the failure
+/// failure for a closed and manifold body whose result is not (WR-212),
+/// with the body as it was before the call (not upstream, which keeps the edits made before the failure
 /// and returns success with a result that is not closed).
 pub fn fillet_edges(
     k: &mut Kernel,
@@ -203,8 +207,8 @@ pub fn fillet_edges(
 /// `SM_ERR_INVALID_INPUT` for an empty edge list, when `radii` or `xsect_types`
 /// does not hold one entry per edge, or for a radius below 8 times the B-rep
 /// tolerance ([`is_radius_supported`]); the fillet executive's errors, and a failure for
-/// a closed manifold solid whose result is not one (WR-212), with the body as it was
-/// before the call (not upstream).
+/// a closed and manifold body whose result is not (WR-212), with the body
+/// as it was before the call (not upstream).
 pub fn fillet_edges_per_edge(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -254,8 +258,8 @@ pub fn fillet_edges_per_edge(
 /// # Errors
 /// `SM_ERR_INVALID_INPUT` for an empty edge list or a start or end radius below 8
 /// times the B-rep tolerance ([`is_radius_supported`]); the fillet executive's errors,
-/// and a failure for a closed manifold solid whose result is not one (WR-212), with the
-/// body as it was before the call (not upstream).
+/// and a failure for a closed and manifold body whose result is not
+/// (WR-212), with the body as it was before the call (not upstream).
 pub fn variable_radius_fillet(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -688,6 +692,7 @@ mod tests {
     use crate::error::SM_ERR_INVALID_INPUT;
     use crate::math::Vec3;
     use crate::topology::brep::p1;
+    use crate::topology::brep::p2::is_manifold_solid;
 
     fn boxed(k: &mut Kernel) -> Brep {
         crate::primitive::api_primitives::create_box(k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap()
@@ -750,10 +755,11 @@ mod tests {
         assert_ne!(shape(&body), before);
     }
 
-    /// WR-212: a fillet of a closed manifold solid whose result is none (an edge left with
-    /// two edge uses) fails with the executive's failure status, naming no entity, and the
-    /// solid is put back; a result that stays one is kept, and a body that was none to
-    /// begin with is not checked.
+    /// WR-212: a fillet of a closed and manifold body whose result is not
+    /// (an edge left with two edge uses) fails with the executive's failure status, naming
+    /// no entity, and the solid is put back; a cancel during the fillet stays `Cancelled`;
+    /// a result that stays one is kept, and a body that was none to begin with is not
+    /// checked.
     #[test]
     fn a_solid_is_kept_closed() {
         let mut k = Kernel::default();
@@ -786,6 +792,18 @@ mod tests {
         assert_eq!(refused.entity(), None);
         assert!(is_manifold_solid(&body).unwrap());
         assert_eq!(shape(&body), before);
+
+        // a cancel that fires during the fillet wins over the check of its result
+        let token = crate::kernel::CancelToken::new();
+        k.set_cancel_token(token.clone());
+        let cancelled = keeping_a_solid_closed(&mut k, &mut body, |_, b| {
+            open(b)?;
+            token.cancel();
+            Ok(())
+        });
+        assert!(matches!(cancelled, Err(SolidError::Cancelled { .. })));
+        assert_eq!(shape(&body), before);
+        k.clear_cancel_token();
 
         keeping_a_solid_closed(&mut k, &mut body, |_, b| widen(b)).unwrap();
         assert!(is_manifold_solid(&body).unwrap());

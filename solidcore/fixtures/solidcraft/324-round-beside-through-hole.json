@@ -172,7 +172,7 @@
     "step": "result",
     "error": "blend::fillet_executive::session::keep_features: upstream status 1001"
    },
-   "note": "#324's own request: an R4 round that runs into the hole and contours it, i.e. the block less the hole and the round's corner. Not fixed on truck, which refuses it; SMLib returns a body that is not a closed manifold solid (tangency-labs/solidcore#422). Keep features is the default since #2426: with every fix on it builds this volume, and with the case's fixes alone keep features refuses it.",
+   "note": "#324's own request: an R4 round that runs into the hole and contours it, i.e. the block less the hole and the round's corner. Not fixed on truck, which refuses it; SMLib returns a body that is not a closed manifold solid (tangency-labs/solidcore#422). Keep features is the default since #2426: with every fix on it builds this volume, and the default kernel's keep features refuses it.",
    "steps": [
     {
      "op": "box",
