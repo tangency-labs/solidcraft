@@ -118,7 +118,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_chamfer_cone_on_arc",
     "fillet_chamfer_cone_stored_as_cone",
     "fillet_cleanup_keeps_target_faces",
-    "fillet_cleanup_removes_input_slits",
     "fillet_cliff_overflow",
     "fillet_corner_ball_center_from_axes",
     "fillet_corner_ball_patch",

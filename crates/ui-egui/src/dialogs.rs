@@ -4336,6 +4336,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 Err(error) => d.refuse(app, error),
             }
         }
+        // Not computing again: the computation ended, applied or refused (saying why).
+        if app.applying.is_none() {
+            let outcome = match &d.error {
+                Some(why) if !applied => crate::operations::Outcome::Failed(why.clone()),
+                _ => crate::operations::Outcome::Done,
+            };
+            crate::operations::ended(app, "apply", outcome);
+        }
     }
     if applied && apply_again {
         for input in &mut d.inputs {
@@ -4350,9 +4358,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if applied && d.editing.is_none() {
         remember(app, &d);
     }
-    // Cancel while computing: the result goes (its worker runs on to its end).
-    if cancel && !applied {
-        app.applying = None;
+    // Cancel while computing: the result goes (its worker stops at its next feature).
+    if cancel && !applied && app.applying.take().is_some() {
+        crate::operations::ended(app, "apply", crate::operations::Outcome::Cancelled);
     }
     if !keep || cancel {
         app.session.feature_edit_sketch = None;
@@ -4634,7 +4642,9 @@ pub fn cancel(app: &mut SolveApp) {
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();
     }
-    app.applying = None;
+    if app.applying.take().is_some() {
+        crate::operations::ended(app, "apply", crate::operations::Outcome::Cancelled);
+    }
     if let Some(mut d) = app.dialog.take() {
         crate::dialogs_motion::closed(app, &mut d, false);
         if let Kind::Text(k) = &mut d.kind {
@@ -7442,7 +7452,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Box { corner, length, width, height, operation } => {
+        FeatureKind::Box { corner, length, width, height, operation, centred } => {
             let mut d = start("solid.box")?;
             d.kind = Kind::Primitive {
                 cmd: "solid.box",
@@ -7451,7 +7461,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 at: None,
                 refs: Default::default(),
             };
-            d.extra.insert("corner".into(), pt_expr(corner));
+            // A box placed by its centre is edited by that centre, so it stays centred (#14487).
+            d.extra.insert(if *centred { "center" } else { "corner" }.into(), pt_expr(corner));
             d
         }
         FeatureKind::Cylinder { base, axis, radius, height, operation, references } => {

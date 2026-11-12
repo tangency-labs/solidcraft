@@ -1,8 +1,12 @@
 //! Versioned design packages. Entries are never extracted to filesystem paths. The optional
 //! model cache is only read back by the build that wrote it, for the exact document it was
 //! written with.
-use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+#[cfg(test)]
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+#[cfg(test)]
+use std::io::Write;
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::sync::Arc;
 
 mod drawing;
@@ -13,8 +17,8 @@ pub use native_cache::read_design_geometry;
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 use solidcraft_doc::{Document, FeatureKind, MeshData};
+use solidcraft_format::container::{Limits, Reader, Writer, digest};
 
 use crate::{IoError, Result, design_metadata::replace};
 
@@ -60,35 +64,58 @@ pub struct DesignPreview {
 }
 
 /// Fast favors interactive file operations; Compact trades CPU time for space.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum DesignCompression {
-    #[default]
-    Fast,
-    Compact,
-}
+pub use solidcraft_format::container::Compression as DesignCompression;
 
 fn invalid(message: impl std::fmt::Display) -> IoError {
     IoError::Invalid(format!("design container: {message}"))
 }
 
+/// The shared container's refusals are a design container's.
+impl From<solidcraft_format::FormatError> for IoError {
+    fn from(e: solidcraft_format::FormatError) -> Self {
+        invalid(e)
+    }
+}
+
 /// Detect the package signature independently of the file name.
 pub fn is_design_container(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"PK\x03\x04")
+    solidcraft_format::container::is_container(bytes)
 }
 
 fn fields(pairs: impl IntoIterator<Item = (&'static str, Value)>) -> Map<String, Value> {
     pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()
 }
 
-fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+/// A design container's budgets ([`crate::limits`]).
+const LIMITS: Limits = Limits {
+    max_entries: MAX_ENTRIES,
+    max_expanded,
+    part_limit,
+    level: part_level,
+    check_size: |length| crate::limits::check(crate::limits::Kind::Design, length),
+};
+
+/// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
+/// limit: level 1 of a large payload leaves more on disk, and that part exists only because
+/// compression is what makes it fit. Everything else is level 1.
+fn part_level(name: &str, length: usize) -> i64 {
+    if name.ends_with(".step") || (name.ends_with(".mesh") && length > max_part()) { STEP_LEVEL } else { 1 }
 }
 
-struct PackageWriter {
-    zip: zip::ZipWriter<Cursor<Vec<u8>>>,
-    names: BTreeSet<String>,
-    expanded: usize,
-    resolved: usize,
+/// A design container being written, within [`LIMITS`].
+struct PackageWriter(Writer);
+
+impl std::ops::Deref for PackageWriter {
+    type Target = Writer;
+    fn deref(&self) -> &Writer {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for PackageWriter {
+    fn deref_mut(&mut self) -> &mut Writer {
+        &mut self.0
+    }
 }
 
 /// The uncompressed size a part may have. STEP and mesh blobs may be larger than the
@@ -105,55 +132,10 @@ fn part_limit(name: &str) -> usize {
 
 impl PackageWriter {
     fn new() -> PackageWriter {
-        PackageWriter { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0 }
+        PackageWriter(Writer::new(LIMITS))
     }
     fn finish(self) -> Result<Vec<u8>> {
-        Ok(self.zip.finish().map_err(invalid)?.into_inner())
-    }
-    fn part(&mut self, name: &str, bytes: &[u8], compressed: bool) -> Result<()> {
-        if bytes.len() > part_limit(name) {
-            return Err(invalid("part too large"));
-        }
-        if !self.names.insert(name.to_owned()) {
-            return Ok(());
-        }
-        self.expanded = self.expanded.checked_add(bytes.len()).ok_or_else(|| invalid("expanded size overflow"))?;
-        if self.expanded > max_expanded() || self.names.len() > MAX_ENTRIES {
-            return Err(invalid("package too large"));
-        }
-        let method = if compressed { zip::CompressionMethod::Deflated } else { zip::CompressionMethod::Stored };
-        // A mesh past the file limit uses the STEP level: level 1 of a large payload leaves
-        // more on disk, and this part exists only because compression is what makes it fit.
-        let level = if name.ends_with(".step") || (name.ends_with(".mesh") && bytes.len() > max_part()) { STEP_LEVEL } else { 1 };
-        // A part of 4 GiB or more (only with a raised file limit, #4086) needs a ZIP64 entry.
-        let options = zip::write::SimpleFileOptions::default()
-            .compression_method(method)
-            .compression_level(compressed.then_some(level))
-            .large_file(bytes.len() as u64 >= u64::from(u32::MAX));
-        self.zip.start_file(name, options).map_err(invalid)?;
-        self.zip.write_all(bytes).map_err(invalid)
-    }
-    /// Would `entries` more optional parts of `extra` bytes, stored uncompressed, still keep
-    /// the file within `budget` and its expanded size within the reader's budget?
-    fn room(&self, entries: usize, extra: usize, budget: usize) -> bool {
-        self.names.len().saturating_add(entries) <= MAX_ENTRIES && extra <= self.space(entries, budget)
-    }
-    /// The bytes `entries` more optional parts may hold together ([`PackageWriter::room`]).
-    fn space(&self, entries: usize, budget: usize) -> usize {
-        if self.names.len().saturating_add(entries) > MAX_ENTRIES {
-            return 0;
-        }
-        // The bytes written so far, plus what the open compressed part may still hold back.
-        let written = self.zip.get_ref().map_or(usize::MAX, |c| c.get_ref().len()).saturating_add(1 << 20);
-        let directory = self.names.len().saturating_add(entries).saturating_mul(256).saturating_add(65_536);
-        budget.saturating_sub(written.saturating_add(directory)).min(max_expanded().saturating_sub(self.expanded))
-    }
-    fn blob(&mut self, bytes: &[u8], extension: &str, compressed: bool) -> Result<Value> {
-        self.resolved =
-            self.resolved.checked_add(bytes.len()).filter(|&n| n <= max_expanded()).ok_or_else(|| invalid("resolved payloads too large"))?;
-        let name = format!("blobs/{}.{extension}", digest(bytes));
-        self.part(&name, bytes, compressed)?;
-        Ok(Value::String(name))
+        Ok(self.0.finish()?)
     }
 }
 
@@ -498,120 +480,25 @@ fn decode_cloud(bytes: &[u8], cloud: &mut solidcraft_doc::point_cloud::PointClou
     cloud.check().map_err(invalid)
 }
 
-struct PackageReader<R: Read + Seek> {
-    zip: zip::ZipArchive<R>,
-    blobs: BTreeMap<String, Vec<u8>>,
-    hydrated: usize,
-    document: Option<Arc<[u8]>>,
+/// A design container being read, within [`LIMITS`].
+struct PackageReader<R: Read + Seek>(Reader<R>);
+
+impl<R: Read + Seek> std::ops::Deref for PackageReader<R> {
+    type Target = Reader<R>;
+    fn deref(&self) -> &Reader<R> {
+        &self.0
+    }
+}
+
+impl<R: Read + Seek> std::ops::DerefMut for PackageReader<R> {
+    fn deref_mut(&mut self) -> &mut Reader<R> {
+        &mut self.0
+    }
 }
 
 impl<R: Read + Seek> PackageReader<R> {
-    fn new(mut source: R) -> Result<Self> {
-        let length = source.seek(SeekFrom::End(0)).map_err(invalid)?;
-        crate::limits::check(crate::limits::Kind::Design, length).map_err(invalid)?;
-        let tail_length = length.min(65_557) as usize;
-        source.seek(SeekFrom::Start(length - tail_length as u64)).map_err(invalid)?;
-        let mut tail = vec![0; tail_length];
-        source.read_exact(&mut tail).map_err(invalid)?;
-        // zip's name index can coalesce duplicate central-directory entries. Our
-        // bounded format does not need ZIP64/multiple disks: verify the declared
-        // entry count as well so duplicate names cannot silently select a payload.
-        let eocd = tail.windows(4).rposition(|v| v == b"PK\x05\x06").ok_or_else(|| invalid("missing ZIP directory"))?;
-        let end = tail.get(eocd..).filter(|v| v.len() >= 22).ok_or_else(|| invalid("truncated ZIP directory"))?;
-        let u16_at = |offset| -> Result<u16> {
-            let array: [u8; 2] = end.get(offset..offset + 2).ok_or_else(|| invalid("truncated ZIP directory"))?.try_into().map_err(invalid)?;
-            Ok(u16::from_le_bytes(array))
-        };
-        let declared = u16_at(10)? as usize;
-        if declared > MAX_ENTRIES || u16_at(4)? != 0 || u16_at(6)? != 0 || u16_at(8)? as usize != declared || end.len() != 22 + u16_at(20)? as usize {
-            return Err(invalid("too many entries or unsupported ZIP directory"));
-        }
-        // A design file is a ZIP with nothing in front of it. Saying so skips zip's search for a
-        // prefix, which reads back through the stored parts and would load a large embedded
-        // source before the preview can be shown.
-        let config = zip::read::Config { archive_offset: zip::read::ArchiveOffset::Known(0) };
-        let mut zip = zip::ZipArchive::with_config(config, source).map_err(invalid)?;
-        if u16_at(4)? != 0
-            || u16_at(6)? != 0
-            || u16_at(8)? as usize != zip.len()
-            || u16_at(10)? as usize != zip.len()
-            || end.len() != 22 + u16_at(20)? as usize
-        {
-            return Err(invalid("duplicate entries or unsupported ZIP directory"));
-        }
-        let mut names = BTreeSet::new();
-        let mut total = 0u64;
-        for i in 0..zip.len() {
-            let part = zip.by_index_raw(i).map_err(invalid)?;
-            let name = part.name().map_err(invalid)?.into_owned();
-            if name.is_empty()
-                || name.contains('\\')
-                || name.split('/').any(|c| c.is_empty() || c == "." || c == "..")
-                || !names.insert(name.to_owned())
-            {
-                return Err(invalid("duplicate or invalid archive entry"));
-            }
-            total = total.checked_add(part.size()).ok_or_else(|| invalid("expanded size overflow"))?;
-            let limit = part_limit(&name);
-            if part.size() > limit as u64 || total > max_expanded() as u64 {
-                return Err(invalid("expanded package too large"));
-            }
-        }
-        Ok(Self { zip, blobs: BTreeMap::new(), hydrated: 0, document: None })
-    }
-    // Bind provisional caches and authoritative reconstruction to identical metadata,
-    // even if another process overwrites the open file in place. Blobs remain hash-checked.
-    fn document(&mut self, limit: usize) -> Result<Arc<[u8]>> {
-        if self.document.is_none() {
-            self.document = Some(self.limited_part("document.json", limit)?.into());
-        }
-        self.document.as_ref().filter(|d| d.len() <= limit).cloned().ok_or_else(|| invalid("metadata budget"))
-    }
-    fn has_part(&self, name: &str) -> bool {
-        self.zip.index_for_name(name).is_some()
-    }
-    fn limited_part(&mut self, name: &str, limit: usize) -> Result<Vec<u8>> {
-        let part = self.zip.by_name(name).map_err(|e| invalid(format!("required part `{name}`: {e}")))?;
-        let expected = part.size();
-        if expected > limit as u64 {
-            return Err(invalid("part too large"));
-        }
-        let mut bytes = Vec::new();
-        bytes.try_reserve_exact(expected as usize).map_err(|_| invalid("could not reserve required part"))?;
-        // A compressed part may expand beyond its declared size (a decompression bomb): stop
-        // one byte past it instead of at the limit.
-        part.take(expected + 1).read_to_end(&mut bytes).map_err(invalid)?;
-        if bytes.len() > limit || bytes.len() as u64 != expected {
-            return Err(invalid("part too large or length mismatch"));
-        }
-        Ok(bytes)
-    }
-    fn blob(&mut self, value: &Value, field: &str, extension: &str) -> Result<&[u8]> {
-        self.limited_blob(value, field, extension, part_limit(&format!("blob.{extension}")))
-    }
-    fn limited_blob(&mut self, value: &Value, field: &str, extension: &str, limit: usize) -> Result<&[u8]> {
-        let name = value.get(field).and_then(Value::as_str).ok_or_else(|| invalid(format!("missing `{field}` reference")))?;
-        let hash = name
-            .strip_prefix("blobs/")
-            .and_then(|n| n.strip_suffix(&format!(".{extension}")))
-            .filter(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
-            .ok_or_else(|| invalid("invalid blob reference"))?;
-        if !self.blobs.contains_key(name) {
-            let bytes = self.limited_part(name, limit)?;
-            if digest(&bytes) != hash {
-                return Err(invalid(format!("blob hash mismatch: {name}")));
-            }
-            self.blobs.insert(name.to_owned(), bytes);
-        }
-        let bytes = self.blobs.get(name).ok_or_else(|| invalid("missing blob"))?;
-        if bytes.len() > limit {
-            return Err(invalid("blob exceeds its resource budget"));
-        }
-        // Count repeated references too: a tiny archive must not expand into unbounded
-        // owned document strings/arrays when the same blob is referenced repeatedly.
-        self.hydrated =
-            self.hydrated.checked_add(bytes.len()).filter(|&n| n <= max_expanded()).ok_or_else(|| invalid("resolved payloads too large"))?;
-        Ok(bytes)
+    fn new(source: R) -> Result<Self> {
+        Ok(Self(Reader::new(source, LIMITS)?))
     }
 }
 
@@ -845,7 +732,7 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let Some(value) = metadata.get("features").and_then(|v| v.get(index)) else { continue };
         let readable = match &mut feature.kind {
-            FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()),
+            FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()).map_err(IoError::from),
             FeatureKind::MeshImport { meshes, .. } => {
                 let mut check = meshes.clone();
                 check.iter_mut().enumerate().try_for_each(|(i, mesh)| {
@@ -885,8 +772,7 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
         file.container = Some(container);
     }
     // A blob a typed record uses comes back from that record; others only for what is kept.
-    let names: Vec<String> = reader.zip.file_names().filter_map(|name| name.ok().map(|name| name.into_owned())).collect();
-    for name in names {
+    for name in reader.part_names() {
         let ours = matches!(name.as_str(), "document.json" | "container.json") || name.starts_with("cache/");
         let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
         if !ours && !unused_blob {
@@ -978,8 +864,11 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     if newer_container && doc.newer_file.is_none() {
         let current = solidcraft_doc::format::FORMAT;
         let says = container.get("format").and_then(Value::as_str).unwrap_or("a later container").to_string();
-        let mut file = solidcraft_doc::newer_file::NewerFile::default();
-        (file.format, file.reads_up_to, file.unknown_changes) = (current, current, vec![says]);
+        let file = solidcraft_doc::newer_file::newer_file(&solidcraft_doc::format::Newer {
+            format: current,
+            reads_up_to: current,
+            unknown_changes: vec![says],
+        });
         doc.newer_file = Some(Arc::new(file));
     }
     if doc.newer_file.is_some() {

@@ -1467,6 +1467,7 @@ impl EiffelTowerCrossSectionFsg {
                 d1.as_ref().map(SurfOfExtrusion::base),
             ]),
             degree: 3,
+            section_params: None,
         };
         BSplineSurface::create_skinned_surface(k, &cross_sections, opts)
     }

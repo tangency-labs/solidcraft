@@ -335,6 +335,12 @@ impl Documents {
         self.active_tab
     }
 
+    /// Whether the tab numbered `tab` is still open: the one shown, or one behind it. A file
+    /// operation bound to a tab that is gone has nothing left to land in.
+    pub(crate) fn tab_open(&self, tab: u64) -> bool {
+        self.active_tab == tab || self.slots.iter().flatten().any(|slot| slot.tab == tab)
+    }
+
     /// Number of open designs (at least the active one).
     pub fn count(&self) -> usize {
         self.slots.len().max(1)
@@ -456,6 +462,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // So does the host's pre-command check: every tab is held to it.
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
+    crate::print_face_ui::sync(&mut app.session, &app.preferences);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     app.session.invalidate_view(out_rev);
@@ -730,6 +737,11 @@ pub fn import(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     let mut doc = solidcraft_engine::io::read_design(text.as_bytes()).map_err(|e| e.to_string())?;
     if let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
         doc.name = name.to_string();
+    }
+    // Like a design opened from a file, it comes in without its print faces unless they are kept
+    // (#11512); dropped before the session starts, so it still opens saved with nothing to undo.
+    if !app.preferences.keep_print_faces {
+        doc.print_faces.clear();
     }
     let replaced = app.docs.active;
     open_tab(app, Session::opened(doc, None))?;

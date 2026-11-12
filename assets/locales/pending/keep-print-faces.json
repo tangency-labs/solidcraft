@@ -1,0 +1,42 @@
+{
+  "en": {
+    "prefs.keep_print_faces": "Keep print faces",
+    "prefs.keep_print_faces_tip": "On: the print face of each body is tinted in the view at all times and saved in the design. Off: it is tinted only while Send to Slicer is open, and designs are saved and opened without print faces."
+  },
+  "ar": {
+    "prefs.keep_print_faces": "الاحتفاظ بأوجه الطباعة",
+    "prefs.keep_print_faces_tip": "تشغيل: يُلوَّن وجه الطباعة لكل جسم في العرض دائمًا ويُحفظ في التصميم. إيقاف: يُلوَّن فقط أثناء فتح نافذة إرسال إلى برنامج التقطيع، وتُحفظ التصاميم وتُفتح بدون أوجه الطباعة."
+  },
+  "de": {
+    "prefs.keep_print_faces": "Auflageflächen behalten",
+    "prefs.keep_print_faces_tip": "Ein: Die Auflagefläche jedes Körpers wird in der Ansicht immer eingefärbt und in der Konstruktion gespeichert. Aus: Sie wird nur eingefärbt, solange An Slicer senden geöffnet ist, und Konstruktionen werden ohne Auflageflächen gespeichert und geöffnet."
+  },
+  "es": {
+    "prefs.keep_print_faces": "Conservar caras de impresión",
+    "prefs.keep_print_faces_tip": "Activado: la cara de impresión de cada cuerpo se tiñe siempre en la vista y se guarda en el diseño. Desactivado: solo se tiñe mientras Enviar al laminador está abierto, y los diseños se guardan y se abren sin caras de impresión."
+  },
+  "fr": {
+    "prefs.keep_print_faces": "Conserver les faces d’impression",
+    "prefs.keep_print_faces_tip": "Activé : la face d’impression de chaque corps est toujours teintée dans la vue et enregistrée dans la conception. Désactivé : elle n'est teintée que tant qu'Envoyer au slicer est ouvert, et les conceptions sont enregistrées et ouvertes sans faces d’impression."
+  },
+  "he": {
+    "prefs.keep_print_faces": "שמירת פאות הדפסה",
+    "prefs.keep_print_faces_tip": "מופעל: פאת ההדפסה של כל גוף נצבעת בתצוגה תמיד ונשמרת בתכנון. כבוי: היא נצבעת רק כל עוד חלון שליחה לסלייסר פתוח, ותכנונים נשמרים ונפתחים ללא פאות הדפסה."
+  },
+  "ja": {
+    "prefs.keep_print_faces": "造形面を保持",
+    "prefs.keep_print_faces_tip": "オン: 各ボディの造形面をビューで常に色付けし、デザインに保存します。オフ: 「スライサーに送る」が開いている間だけ色付けし、デザインは造形面なしで保存・オープンされます。"
+  },
+  "ko": {
+    "prefs.keep_print_faces": "출력 바닥면 유지",
+    "prefs.keep_print_faces_tip": "켜기: 각 바디의 출력 바닥면을 뷰에 항상 색으로 표시하고 디자인에 저장합니다. 끄기: 슬라이서로 보내기가 열려 있는 동안만 표시하며, 디자인은 출력 바닥면 없이 저장되고 열립니다."
+  },
+  "vi": {
+    "prefs.keep_print_faces": "Giữ mặt in",
+    "prefs.keep_print_faces_tip": "Bật: mặt in của mỗi khối luôn được tô màu trong khung nhìn và được lưu trong thiết kế. Tắt: mặt in chỉ được tô màu khi cửa sổ Gửi sang phần mềm cắt lớp (Slicer) đang mở, và thiết kế được lưu và mở mà không có mặt in."
+  },
+  "zh": {
+    "prefs.keep_print_faces": "保留打印底面",
+    "prefs.keep_print_faces_tip": "开启：每个实体的打印底面始终在视图中着色，并保存在设计中。关闭：仅在“发送到切片软件”打开时着色，设计保存和打开时不含打印底面。"
+  }
+}
