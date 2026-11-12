@@ -774,7 +774,11 @@ fn toast_stays_in_free_content_above_history_and_navigation() {
                     }
                     h.app.status = Some(("Viewport message".into(), crate::now_ms(), false));
                     h.frames(3);
-                    let layout = h.app.viewport.layout.as_ref().unwrap();
+                    let Some(layout) = h.app.viewport.layout.as_ref() else {
+                        assert_eq!((width, height), (1, 1), "only a window without a viewport skips notices");
+                        assert!(crate::scenario::rect_of("toast").is_none());
+                        continue;
+                    };
                     let content = crate::shell::content_rect(&h.app, layout.viewport);
                     let mut obstacles = crate::shell::covered_rects(&h.app);
                     obstacles.extend([layout.navigation, layout.axis_view]);
@@ -793,6 +797,7 @@ fn toast_stays_in_free_content_above_history_and_navigation() {
                     }
                 }
             }
+            h.call("ui.resize", json!({"width":900,"height":720}));
             h.app.status = Some(("Expired".into(), crate::now_ms() - 6001.0, true));
             h.frame();
             assert!(h.app.status.is_none());

@@ -1198,6 +1198,9 @@ impl crate::SolveApp {
             let mut scene = ui.new_child(egui::UiBuilder::new().id_salt("universal_panel_viewport").max_rect(render_domain));
             scene.set_clip_rect(scene.clip_rect().intersect(render_domain));
             self.show_workspace(&mut scene);
+        } else {
+            self.viewport.rect = None;
+            self.viewport.layout = None;
         }
         // Chrome paints and receives input above the full-domain scene. Its
         // measured rectangles affect usable space, never the camera projection.

@@ -1324,6 +1324,7 @@ impl FramePanelContent for ProductionFrame<'_> {
         if !matches!(slot, ContentSlot::Body | ContentSlot::Inline) {
             return Ok(());
         }
+        let _catalog_labels = solidcraft_ui_text::catalog_labels();
         context.validate()?;
         let product = Product::from_instance(&context.instance)?;
         let owner = ContentOwner::Document(DocumentId::new(self.app.session.document_id.clone())?);

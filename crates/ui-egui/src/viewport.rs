@@ -10548,8 +10548,9 @@ mod tests {
                     let values = format!("{:?}", h.app.dialog.as_ref().unwrap().kind);
                     h.call("ui.move", json!({"x":600,"y":350}));
                     let before = h.app.cam;
-                    let centre = orbit_centre(&h);
                     h.call("ui.move", json!({"x":600,"y":350,"alt":alt,"shift":!alt}));
+                    assert_eq!(h.app.cam, before, "starting the gesture without moving keeps the camera still");
+                    let centre = orbit_centre(&h);
                     h.call("ui.move", json!({"x":660,"y":390,"alt":alt,"shift":!alt}));
                     if alt {
                         assert!((h.app.cam.yaw - before.yaw - 0.48).abs() < 1e-6, "{command}, canvas={canvas}: a focused field must allow orbit");
