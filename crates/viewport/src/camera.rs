@@ -464,6 +464,27 @@ impl Camera {
         self.yaw = (self.yaw + turn) % std::f64::consts::TAU;
         self.rotate_in_view(Vec3::new(-dy * 0.008, 0.0, 0.0));
     }
+    /// [`Camera::orbit_unlimited`] with the pointer's motion taken through the view's roll
+    /// (#12458): the part of it across the world's up axis as the screen shows it turns about
+    /// that axis, the part along it tilts about the level axis across the screen. The model
+    /// follows the cursor upright, upside down or rolled on its side, and the roll is kept.
+    /// Upright and upside down it is the same as [`Camera::orbit_unlimited`]; looking straight
+    /// along the up axis, the screen's own axes are used.
+    pub fn orbit_unlimited_through_roll(&mut self, dx: f64, dy: f64) {
+        if !self.is_valid() || !dx.is_finite() || !dy.is_finite() {
+            return;
+        }
+        let (right, up, _) = self.basis();
+        let world_up = self.up_dir();
+        // The world's up axis on screen (y down).
+        let (ux, uy) = (world_up.dot(right), -world_up.dot(up));
+        let len = ux.hypot(uy);
+        let (ux, uy) = if len > 1e-6 { (ux / len, uy / len) } else { (0.0, -1.0) };
+        let turn = (dy * ux - dx * uy) * 0.008;
+        let along = dx * ux + dy * uy;
+        self.yaw = (self.yaw + turn) % std::f64::consts::TAU;
+        self.rotate_in_view(Vec3::new(-along * uy * 0.008, -along * ux * 0.008, 0.0));
+    }
     pub fn set_view(&mut self, v: StandardView) {
         let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
         let (y, p) = v.angles();
