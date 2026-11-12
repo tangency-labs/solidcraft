@@ -442,3 +442,40 @@ fn a_shaded_exploded_view_from_a_file_draws_no_lines_and_no_picture() {
     assert!(!built.scene.groups.iter().any(|g| g.object == id), "nothing drawn for it: {:?}", built.scene.groups);
     assert!(!ViewPictures::new(&s, &d, sheet).unwrap().has(id), "no picture of the parts as the design places them");
 }
+
+/// A view's picture lists only the bodies it draws, each by its place among the design's bodies and
+/// with its role: B hidden leaves A and C; C as a reference part with lines only that hides the model
+/// hides without painting; C shaded under the model is a picture of its own, left out of the model's.
+#[test]
+fn a_views_picture_keeps_only_the_bodies_it_draws() {
+    use solidcraft_render::job::BodyRole::{DepthOnly, Painted};
+    let (mut s, sheet, id, [b, c]) = three_parts();
+    let shown = crate::drawing_view::shown(&s).unwrap();
+    let place = |occurrence: &Value| {
+        let occurrence = occurrence.as_u64().unwrap();
+        shown.bodies.iter().find(|body| body.path == [occurrence]).unwrap().index
+    };
+    let (b_at, c_at) = (place(&b), place(&c));
+    assert_eq!(shown.bodies.len(), 3);
+    let a_at = (0..3).find(|at| ![b_at, c_at].contains(at)).unwrap();
+    assert!(a_at < b_at && b_at < c_at, "B lies between A and C among the bodies: {a_at} {b_at} {c_at}");
+    let bodies = |s: &Session, source: u64| {
+        let d = s.drawing("test").unwrap().clone();
+        ViewPictures::new(s, &d, sheet).unwrap().pictures.get(&source).map(|picture| picture.bodies.clone())
+    };
+    let edit = |s: &mut Session, set: Value| run(s, "drawing.view.edit", json!({"view": ids::encode(id), "set": set}));
+
+    edit(&mut s, json!({"hide": [[b]]}));
+    assert_eq!(bodies(&s, id), Some(vec![(a_at, Painted), (c_at, Painted)]), "B hidden");
+
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": c, "bom_type": "reference"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    edit(&mut s, json!({"hide": null, "reference_style": "visible", "reference_hides_model": true}));
+    assert_eq!(bodies(&s, id), Some(vec![(a_at, Painted), (b_at, Painted), (c_at, DepthOnly)]), "C hides with its lines only");
+
+    edit(&mut s, json!({"reference_style": "shaded", "reference_hides_model": false}));
+    assert_eq!(bodies(&s, id ^ UNDER), Some(vec![(c_at, Painted)]), "C's own picture, under the model's");
+    assert_eq!(bodies(&s, id), Some(vec![(a_at, Painted), (b_at, Painted)]), "the model's, without C");
+}
