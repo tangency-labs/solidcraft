@@ -3,7 +3,6 @@
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_geom::Aabb3;
 use solidcraft_geom::prelude::*;
 
 use crate::foundation_tests::*;
@@ -41,13 +40,6 @@ fn nearest_to_axis(a: Vec3, b: Vec3) -> f64 {
     let d = q - p;
     let t = if d.len2() > 0.0 { (-p.dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
     p.lerp(q, t).len()
-}
-
-/// The distance from `p` to `surface`, or `cap` when that is nearer.
-fn distance_within(surface: &Surface, p: Vec3, cap: f64) -> f64 {
-    let best = std::cell::Cell::new(cap);
-    surface.visit(|b: &Aabb3| p.dist(p.max(b.min).min(b.max)) < best.get(), |_, t| best.set(best.get().min(p.dist(nearest_on_triangle(p, t)))));
-    best.get()
 }
 
 #[test]
@@ -677,7 +669,7 @@ fn a_ring_beside_a_shoulder_runs_round_at_one_radius() {
     // Never more than the tessellation error into the mesh, measured from the ball's centre.
     for q in path.poses() {
         let centre = q.tip + q.axis * 2.0;
-        let d = distance_within(&s, centre, 2.0);
+        let d = crate::sim::distance_within(&s, centre, 2.0);
         assert!(d >= 2.0 - chord - 1e-6, "{q:?}: the ball is {} mm into the part", 2.0 - d);
     }
 }

@@ -772,7 +772,7 @@ impl Domain for Clear<'_> {
 
 /// A heightfield of what earlier cuts left: cell `(i, j)` is the column over the square of
 /// side `dx` by `dy` about `(x0 + (i + ½)·dx, y0 + (j + ½)·dy)`, its top at `heights[j·nx + i]`
-/// (a stock-removal simulation's height field gives one).
+/// (the simulation's [`crate::sim::StockGrid::Heights`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HeightMap {
     pub x0: f64,

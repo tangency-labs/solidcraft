@@ -64,6 +64,12 @@
 //! and stops for the operator. A [`setup_sheet`] tells the operator how to set the job up and
 //! run it, as a self-contained HTML page or as Markdown.
 //!
+//! The stock-removal simulation ([`sim`]) is an independent check of a written program: it
+//! reads the G-code as the controller runs it, sweeps the tool through a heightfield of the
+//! stock along every block, and holds what is left against the part. It reports cuts into the
+//! part (gouges, measured in 3D), material left where the program cut, rapids that cut, and
+//! cuts at the tool's full width.
+//!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
 //! retract to the machine's top, the tool length offset on the first Z move, modal motion
@@ -106,6 +112,7 @@ mod readback;
 pub mod readback5;
 pub mod rotary;
 pub mod setup_sheet;
+pub mod sim;
 pub mod stock;
 pub mod stop;
 mod surface;
@@ -200,6 +207,8 @@ mod rapids_tests;
 mod rotary_tests;
 #[cfg(test)]
 mod setup_sheet_tests;
+#[cfg(test)]
+mod sim_tests;
 #[cfg(test)]
 mod stock_tests;
 #[cfg(test)]
