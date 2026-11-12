@@ -2847,7 +2847,11 @@ fn a_converted_meshs_face_revolved_on_a_fixed_plane_joins_that_body() {
     let [name] = names.as_slice() else { panic!("{names:?}") };
     run(&mut s, "mesh.convert", json!({"body": name}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "Other"}));
-    run(&mut s, "solid.revolve", json!({"face": [10, 10, 10], "fixed": true, "axis": {"origin": [0, 0, 10], "dir": [1, 0, 0]}, "angle": "90 deg", "operation": "join"}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [10, 10, 10], "fixed": true, "axis": {"origin": [0, 0, 10], "dir": [1, 0, 0]}, "angle": "90 deg", "operation": "join"}),
+    );
     let Some(solidcraft_doc::Feature { kind: solidcraft_doc::FeatureKind::Revolve { targets, .. }, .. }) = s.doc.features.last() else {
         panic!("a revolve")
     };
