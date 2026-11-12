@@ -313,7 +313,7 @@ pub fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], columns: usiz
     let widths: Vec<f32> = items
         .iter()
         .map(|(label, _)| {
-            let translated = crate::i18n::tr_label(label);
+            let translated = solidcraft_ui_text::tr_label(label);
             let text = if translated == "Tangent Chain" { "Tangent chain" } else { translated };
             ui.painter().layout_no_wrap(text.to_string(), font.clone(), t.form_ink).size().x
         })
