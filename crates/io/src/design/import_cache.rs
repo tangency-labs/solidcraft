@@ -1,6 +1,7 @@
 //! Local copies of untouched imports, using the saved-design model cache and its trust rules.
 //! This is disposable application data, not a design-format extension.
 use super::*;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const BINDING: &str = "cache/import.json";
