@@ -12317,10 +12317,10 @@ mod tests {
     }
 
     /// The point the default orbit (Orbit around: the view's centre) turns about with the camera as
-    /// it is now: the point under the middle of the part of the view the panels leave free
-    /// (#14651), or the camera's target when that middle is the view's centre.
+    /// it is now: the point under where Home puts the model's middle (#14651), or the camera's
+    /// target when that point is the view's centre.
     fn orbit_centre(h: &crate::scenario::Harness) -> Vec3 {
-        h.app.viewport.rect.and_then(|rect| crate::navigation::view_middle(&h.app, rect)).unwrap_or(h.app.cam.target)
+        h.app.viewport.rect.and_then(|rect| crate::navigation::view_middle(&h.app, rect).0).unwrap_or(h.app.cam.target)
     }
 
     /// From `a` to `b` the view turned about `centre`: the point kept its place in the camera's

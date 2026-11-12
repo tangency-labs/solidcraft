@@ -1450,35 +1450,40 @@ fn view_middle_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
 
 /// [`view_middle`] for an orbit under way, and the point on screen it was chosen under: the pivot
 /// it began with while that pivot is still there (turning about it keeps it there, and the camera
-/// target always is), else the one under [`home_middle`] now, as after a pan or a zoom in the same
-/// gesture. The point Home would use moves as the view turns, so it is chosen once.
+/// target, chosen under the window's centre, stays there), else the one under [`home_middle`] now,
+/// as after a pan or a zoom in the same gesture. The point Home would use moves as the view
+/// turns, so it is chosen once.
 fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>, at: Option<Pos2>) -> (Option<Vec3>, Option<Pos2>) {
+    let still = |p: Vec3, at: Pos2| projection(app, rect).to_screen(p).is_some_and(|s| s.distance(at) < 0.5);
     if let Some(at) = at
-        && kept.is_none_or(|p| projection(app, rect).to_screen(p).is_some_and(|s| s.distance(at) < 0.5))
+        && kept.map_or(at.distance(rect.center()) < 0.5, |p| still(p, at))
     {
         return (kept, Some(at));
     }
-    let at = home_middle(app, rect);
-    (at.and_then(|at| at_target_depth(app, rect, at)), at)
+    view_middle(app, rect)
 }
 
-/// What orbit around the view's centre turns about: the point at the camera target's depth under
+/// What orbit around the view's centre turns about, and the point on screen it lies under: the
+/// point at the camera target's depth under
 /// [`home_middle`], where Home puts the model's middle, so that the model turns in place straight
-/// after Home. With the Browser open, turning about the window's centre swung the model off to
-/// one side, and turning about the middle of the free view moved it as well, as Home keeps it
-/// clear of the navigation bar (#14651). `None`, so that the camera turns about its target, when
-/// that point is within half a point of the window's centre, before the view is first laid out,
-/// in the Render workspace, and when the camera gives no finite point.
-pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
-    at_target_depth(app, rect, home_middle(app, rect)?)
+/// after Home (and after Fit, which frames the same way unless the navigators' Fit is on). With
+/// the Browser open, turning about the window's centre swung the model off to one side, and
+/// turning about the middle of the free view moved it as well, as Home keeps it clear of the
+/// navigation bar (#14651). No pivot, so that the camera turns about its target, when that point
+/// is within half a point of the window's centre, when [`home_middle`] is `None`, and when the
+/// camera gives no finite point.
+pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> (Option<Vec3>, Option<Pos2>) {
+    let at = home_middle(app, rect);
+    (at.and_then(|at| at_target_depth(app, rect, at)), at)
 }
 
 /// Where Home puts the middle of what is shown, with the view turned as it is now: the point on
 /// screen where the camera from [`SolveApp::home_fitted`] draws it. Home keeps the model clear of
 /// the compass and the navigation bar, so this can lie above or beside the middle of the part of
-/// the view the panels leave free (`Layout::middle`), the point used when nothing is shown.
-/// `None` before the view is first laid out and in the Render workspace (which frames its own
-/// picture).
+/// the view the panels leave free (`Layout::middle`), the point used when nothing is shown. When
+/// the layout can't frame the model, Home leaves the camera as it is, and this is where the
+/// model's middle is now. `None` before the view is first laid out, in the Render workspace
+/// (which frames its own picture), and when the middle is behind the camera or not finite.
 fn home_middle(app: &SolveApp, rect: Rect) -> Option<Pos2> {
     if crate::render_workspace::active(app) {
         return None;

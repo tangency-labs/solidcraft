@@ -3034,7 +3034,7 @@ impl SolveApp {
         let shared = self.preferences.navigator_fit;
         self.pending_fit = Some((self.cam, bounds, false, shared));
         self.fit_waits = 0;
-        self.cam = if shared { self.navigator_fitted(self.cam) } else { self.fitted(self.cam) };
+        self.cam = self.home_fitted(self.cam);
     }
 
     /// Frame `bounds` at once, keeping the view direction (programmatic use).
@@ -3233,7 +3233,7 @@ impl SolveApp {
     pub fn animate_to_fitted(&mut self, to: Camera) {
         let Ok(bounds) = solidcraft_engine::view::bounds(&self.session) else { return };
         let shared = self.preferences.navigator_fit;
-        let framed = if shared { self.navigator_fitted(to) } else { self.fitted(to) };
+        let framed = self.home_fitted(to);
         self.animate_to(framed);
         self.pending_fit = Some((to, bounds, true, shared));
     }
