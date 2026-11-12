@@ -1,0 +1,8 @@
+{
+  "en": { "ui.search_combo_empty": "No matches" },
+  "de": { "ui.search_combo_empty": "Keine Treffer" },
+  "es": { "ui.search_combo_empty": "Sin coincidencias" },
+  "fr": { "ui.search_combo_empty": "Aucun résultat" },
+  "ja": { "ui.search_combo_empty": "一致する項目はありません" },
+  "zh": { "ui.search_combo_empty": "没有匹配项" }
+}

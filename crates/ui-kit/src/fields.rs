@@ -822,7 +822,7 @@ fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Respon
 }
 
 /// A `search_picker` row: as `list_picker`, but read from the left, as a list of ids is.
-fn search_row(ui: &mut Ui, text: &str, selected: bool) -> Response {
+pub(super) fn search_row(ui: &mut Ui, text: &str, selected: bool) -> Response {
     ui.add_sized(vec2(dimension(ui.available_width()), row_height()), egui::Button::selectable(selected, (text, egui::Atom::grow())))
 }
 
@@ -855,7 +855,7 @@ fn search_popup_width(ui: &Ui, p: &SearchPicker<'_>) -> f32 {
 }
 
 /// `text` cut to `max_chars`, with an ellipsis if anything was left out.
-fn compact(text: &str, max_chars: usize) -> String {
+pub(super) fn compact(text: &str, max_chars: usize) -> String {
     let mut chars = text.chars();
     let short: String = chars.by_ref().take(max_chars).collect();
     if chars.next().is_some() { format!("{short}…") } else { short }
@@ -907,7 +907,7 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
 }
 
 /// The one dropdown arrow every kit dropdown draws (the kit chevron, dimmed), instead of egui's triangle.
-fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisuals, _open: bool) {
+pub(super) fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisuals, _open: bool) {
     super::dropdown_indicator(ui.painter(), rect, Tokens::get().text_dim);
 }
 

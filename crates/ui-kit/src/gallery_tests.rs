@@ -1771,6 +1771,11 @@ pub const ELEMENTS: &[Element] = &[
             );
         });
     }),
+    element!("search_combo", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            SearchCombo::new("gallery_search_combo", "One", &["One", "Two"][..]).selected(Some(0)).show(ui);
+        });
+    }),
     element!("text_emphasis", "dialog:row:Gallery", Some("dialog:Bold"), |ui, s| {
         row(ui, "Gallery", |ui| {
             text_emphasis(ui, &mut s.checked, &mut false, true, &SAMPLE_EMPHASIS);

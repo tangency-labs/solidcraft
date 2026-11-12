@@ -18,6 +18,7 @@ The UI is thin: it reads engine state and acts through `app.run(id, params)` or 
 - Colours, typography, dimensions and spacing come from `theme::Tokens` (`crates/ui-egui/src/theme.rs`). No literal colours in feature code.
 - Sliders only through `ui_kit::slider`. Form rows use `row`, `expr_row`, `text_row`, `choice_row` and `count_row` from `crate::ui_kit` (`crates/ui-kit/src/`).
 - Confirmations use `ui_kit::Confirm`; the old `Prompt` element is gone.
+- Options that can grow without limit (bodies, parameters, features, materials, fonts, files, presets…) use `ui_kit::SearchCombo`; a plain dropdown for one fails review. Small fixed sets stay dropdowns or segments.
 
 ## One set of camera controls
 Every page or canvas with a camera (viewport, Render preview, a flat pattern or drawing page) calls `navigation::handle` (`crates/ui-egui/src/navigation.rs`) with its `NavCaps` (orbit off for flat 2D pages). Never hand-roll camera input from drags, the wheel or pinch; `hand_rolled_camera_input_is_rejected` fails if a page does.

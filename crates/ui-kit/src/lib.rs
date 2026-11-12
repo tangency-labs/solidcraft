@@ -70,6 +70,7 @@ pub mod recent_colors;
 mod reports;
 mod review;
 mod search;
+mod search_combo;
 pub mod settings_search;
 mod shortcuts;
 mod sphere;
@@ -141,6 +142,7 @@ pub use radial::{RADIAL_RADIUS, radial_menu};
 pub use reports::*;
 pub use review::ReviewAndApply;
 pub use search::{CommandSearch, SearchBadge, SearchFieldGeometry};
+pub use search_combo::{ComboFn, ComboSource, SearchCombo, combo_filter, combo_matches, combo_step};
 pub use shortcuts::*;
 #[cfg(any(test, feature = "test-support"))]
 pub use sphere::sphere_preview;
