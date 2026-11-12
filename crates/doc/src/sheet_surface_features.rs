@@ -209,7 +209,7 @@ impl SurfaceSheet {
         let places = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?.places;
         let place = |i: usize| places.get(i).copied().flatten();
         let plane = |i: usize| matches!(self.sheet.panels.get(i).map(|x| &x.surface), Some(Surface::Plane));
-        let size = self.sheet.panels.iter().map(|x| x.region.outer.polyline(1e-3).bounds().size().len()).fold(1.0, f64::max);
+        let size = self.sheet.panels.iter().map(|x| crate::sheet_surface_cuts::loop_box(&x.region.outer).size().len()).fold(1.0, f64::max);
         let tol = size * 1e-7;
         let mut cuts = Vec::new();
         for &j in made {
@@ -258,7 +258,7 @@ impl SurfaceSheet {
                 };
                 let height = self.sheet.panels.get(f).map_or(0.0, |x| reach_from(&x.region, (on_f.origin, -on_f.dir.perp())));
                 let mid_f = pf.point((on_f.origin + on_f.dir * (nb.length / 2.0) - on_f.dir.perp() * (height / 2.0)).extend(0.0));
-                let q_box = self.sheet.panels.get(q).map(|x| x.region.outer.polyline(1e-3).bounds());
+                let q_box = self.sheet.panels.get(q).map(|x| crate::sheet_surface_cuts::loop_box(&x.region.outer));
                 let Some(mid_q) = q_box.map(|b| pq.point(((b.min + b.max) * 0.5).extend(0.0))) else { continue };
                 // Only a flange on the other panel's side of its own runs into it.
                 let (sp, sq) = (
@@ -1050,7 +1050,7 @@ impl SurfaceSheet {
         } else {
             // What the line does not reach stays with the fixed side, its zone too.
             let big = {
-                let bb = region.outer.polyline(1e-3).bounds();
+                let bb = crate::sheet_surface_cuts::loop_box(&region.outer);
                 (bb.size().len() + bb.min.len() + bb.max.len() + 1.0) * 4.0
             };
             let boxes: Vec<Region2> = moves
@@ -1494,11 +1494,11 @@ impl SurfaceSheet {
         let mut panels = Vec::new();
         let mut boxes = Vec::new();
         let slab = |frame: &Rigid3, r: &Region2| {
+            // Each face of the slab is the outline placed by the frame, an affine map: its box
+            // holds it (see [`crate::sheet_surface_cuts::loop_box_in`]).
             let mut b = solidcraft_geom::Aabb3::EMPTY;
-            for p in &r.outer.polyline(1e-3) {
-                for z in [0.0, t] {
-                    b.add(frame.point(Vec3::new(p.x, p.y, z)));
-                }
+            for z in [0.0, t] {
+                b = b.union(&crate::sheet_surface_cuts::loop_box_in(&r.outer, |p| frame.point(Vec3::new(p.x, p.y, z))));
             }
             b
         };
@@ -2127,7 +2127,7 @@ struct FoldSetup {
 
 /// What of `region` lies between the lines `x · n = from` and `x · n = to` (`n` a unit vector).
 fn band(region: &Region2, n: Vec2, from: f64, to: f64) -> Result<Vec<Region2>> {
-    let b = region.outer.polyline(1e-3).bounds();
+    let b = crate::sheet_surface_cuts::loop_box(&region.outer);
     let big = (b.size().len() + b.min.len() + b.max.len() + 1.0) * 4.0;
     let d = n.perp();
     let corners = [n * from - d * big, n * from + d * big, n * to + d * big, n * to - d * big];
@@ -2136,9 +2136,13 @@ fn band(region: &Region2, n: Vec2, from: f64, to: f64) -> Result<Vec<Region2>> {
     Ok(solidcraft_kernel::planar_regions_boolean(std::slice::from_ref(region), std::slice::from_ref(&strip), BoolOp::Intersect, tol)?)
 }
 
-/// The least and the greatest of `x · w` over a region's outline (on its chords, 1e-4 mm in).
+/// The least and the greatest of `x · w` over a region's outline, read off the points of its
+/// curves furthest along `w` and against it (see [`crate::sheet_surface_cuts::extremes`]): the
+/// outline's own where it is made of lines and arcs, and reaching at least as far where it has
+/// any other curve.
 fn extent(r: &Region2, w: Vec2) -> (f64, f64) {
-    (&r.outer.polyline(1e-4)).into_iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.dot(w)), hi.max(q.dot(w))))
+    let pts = r.outer.segs.iter().flat_map(|s| crate::sheet_surface_cuts::extremes(s, &[w]));
+    pts.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.dot(w)), hi.max(q.dot(w))))
 }
 
 /// Where the straight edges of a region's outline run along the line `x · n = level`, within
@@ -2343,7 +2347,7 @@ fn bent_max(bent: &solidcraft_develop::Bent, f: &dyn Fn(Vec3) -> f64, (p, q): (V
 /// The point where two lines, each a point and a direction, cross.
 /// What of `region` lies along `n` from the line `x . n = from` (n a unit vector).
 fn half(region: &Region2, n: Vec2, from: f64) -> Result<Vec<Region2>> {
-    let b = region.outer.polyline(1e-3).bounds();
+    let b = crate::sheet_surface_cuts::loop_box(&region.outer);
     let big = (b.size().len() + b.min.len() + b.max.len() + 1.0) * 4.0;
     let (o, d) = (n * from, n.perp());
     let box_ = [o - d * big, o + d * big, o + d * big + n * big, o - d * big + n * big];
@@ -2562,9 +2566,11 @@ fn less(a: &[(f64, f64)], b: &[(f64, f64)]) -> Vec<(f64, f64)> {
     out
 }
 
-/// How far a region reaches from the line through `o`, along its normal `n`.
+/// How far a region reaches from the line through `o`, along its normal `n`: read off the points
+/// of its outline's curves furthest along `n` (see [`crate::sheet_surface_cuts::extremes`]).
 fn reach_from(region: &Region2, (o, n): (Vec2, Vec2)) -> f64 {
-    (&region.outer.polyline(1e-4)).into_iter().map(|p| (*p - o).dot(n)).fold(0.0, f64::max)
+    let pts = region.outer.segs.iter().flat_map(|s| crate::sheet_surface_cuts::extremes(s, &[n]));
+    pts.map(|p| (p - o).dot(n)).fold(0.0, f64::max)
 }
 
 /// `region` with the bites a relief took out of its corners near `at` put back (Convert, #6748):
@@ -2649,7 +2655,7 @@ fn to_line(region: &Region2, an: &Anchor, side: f64, end: f64, at: f64, m: Vec2)
     let into = |p: Vec2| Vec2::new((p - o).dot(d), (p - o).dot(n));
     let segs = &region.outer.segs;
     let count = segs.len();
-    let size = region.outer.polyline(1e-3).bounds().size().len().max(1.0);
+    let size = crate::sheet_surface_cuts::loop_box(&region.outer).size().len().max(1.0);
     let tol = size * 1e-9;
     let on_anchor = |s: &Seg2| matches!(*s, Seg2::Line { a, b } if into(a).y.abs() <= tol && into(b).y.abs() <= tol);
     let corner = o + d * end;

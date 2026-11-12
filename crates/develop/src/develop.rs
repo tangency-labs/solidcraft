@@ -2,7 +2,7 @@
 
 use solidcraft_geom::prelude::*;
 use std::collections::VecDeque;
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb2;
@@ -425,10 +425,45 @@ fn piece_bounds(sheet: &Sheet, piece: &[usize], placements: &[Option<Rigid2>]) -
         if panel.region.outer.segs.is_empty() {
             continue;
         }
-        let pb = place.loop2(&panel.region.outer).polyline(REACH_TOL).bounds();
+        let pb = loop_box(&place.loop2(&panel.region.outer));
         b = Some(b.map_or(pb, |b| b.union(&pb)));
     }
     b
+}
+
+/// The points of segment `s` that reach furthest along each of `ways` and against it: a line's
+/// ends; an arc's ends and each point of its circle furthest along a way or against it that lies
+/// within its sweep; a Bézier's or a conic's control points, which hold the curve (a conic's
+/// weight is above 0) but may lie off it. Read along any of `ways`, the least and the greatest of
+/// them are the segment's own for a line and an arc, and reach at least as far as the segment
+/// does for any other curve.
+pub(crate) fn extremes(s: &Seg2, ways: &[Vec2]) -> Vec<Vec2> {
+    match *s {
+        Seg2::Line { a, b } => vec![a, b],
+        Seg2::Arc { center, radius, start, sweep } => {
+            // The way `d` from the center lies within the arc where it is at most the sweep round
+            // from the start, the way the arc turns.
+            let within = |d: Vec2| sweep.abs() >= TAU || ((d.y.atan2(d.x) - start) * sweep.signum()).rem_euclid(TAU) <= sweep.abs();
+            let mut pts = vec![s.start(), s.end()];
+            // Any way of some length, however small: along one of none, the ends answer.
+            for w in ways.iter().filter(|w| w.len() > 0.0).map(|w| *w / w.len()) {
+                pts.extend([w, -w].into_iter().filter(|d| within(*d)).map(|d| center + d * radius));
+            }
+            pts
+        }
+        Seg2::Cubic { p0, p1, p2, p3 } => vec![p0, p1, p2, p3],
+        Seg2::Conic { a, apex, b, .. } => vec![a, apex, b],
+        Seg2::Bezier { n, p } => p.iter().take(usize::from(n) + 1).copied().collect(),
+    }
+}
+
+/// The box of loop `l`: each of its segments' points furthest along x and along y and against
+/// them (see [`extremes`]). The loop's own box where it is made of lines and arcs (an arc's ends
+/// and each of its circle's four points center ± radius along x and along y that lies within its
+/// sweep); a sure box that holds it where it has any other curve, whose control points' box it
+/// takes. Empty for a loop of no segments.
+pub(crate) fn loop_box(l: &Loop2) -> Aabb2 {
+    l.segs.iter().flat_map(|s| extremes(s, &[Vec2::X, Vec2::Y])).collect()
 }
 
 fn check_joint(sheet: &Sheet, j: usize, joint: &Joint) -> Result<(), DevelopError> {
@@ -1292,7 +1327,10 @@ fn panel_across(sheet: &Sheet, panel: usize, at: &Anchor) -> Result<f64, Develop
     if p.surface != Surface::Plane || p.region.outer.segs.is_empty() {
         return Ok(0.0);
     }
-    Ok((&p.region.outer.polyline(REACH_TOL)).into_iter().map(|q| (*q - at.origin).cross(at.dir).abs()).fold(0.0, f64::max))
+    // Across the joint is square to the anchor: the outline's points furthest that way and
+    // against it (see [`extremes`]).
+    let pts = p.region.outer.segs.iter().flat_map(|s| extremes(s, &[at.dir.perp()]));
+    Ok(pts.map(|q| (q - at.origin).cross(at.dir).abs()).fold(0.0, f64::max))
 }
 
 /// How far a panel's material reaches: the diagonal of its region's bounding box, which bounds
@@ -1302,5 +1340,5 @@ fn panel_reach(sheet: &Sheet, panel: usize) -> Result<f64, DevelopError> {
     if region.outer.segs.is_empty() {
         return Ok(0.0);
     }
-    Ok(region.outer.polyline(REACH_TOL).bounds().size().len())
+    Ok(loop_box(&region.outer).size().len())
 }

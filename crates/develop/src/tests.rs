@@ -19,7 +19,7 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region2 {
 }
 
 fn bounds(r: &Region2) -> Aabb2 {
-    r.outer.polyline(1e-6).bounds()
+    crate::develop::loop_box(&r.outer)
 }
 
 fn near(a: Vec2, b: Vec2) -> bool {

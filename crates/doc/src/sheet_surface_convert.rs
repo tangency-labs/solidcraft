@@ -539,7 +539,7 @@ fn to_sharp(r: &Region2, (a, z): (Vec2, Vec2), by: f64, tol: f64) -> std::result
     let (ua, uz) = (along(&segs[k], a).unwrap_or(0.0), along(&segs[k], z).unwrap_or(0.0));
     let (p, q) = if ua <= uz { (a, z) } else { (z, a) };
     let d = (q - p).normalized().ok_or("meets a modelled bend along an edge with no length")?;
-    let extent = r.outer.polyline(1e-3).bounds().size().len().max(1e-9);
+    let extent = crate::sheet_surface_cuts::loop_box(&r.outer).size().len().max(1e-9);
     let out = if r.contains(p.lerp(q, 0.5) + d.perp() * (extent * 1e-4)) { -d.perp() } else { d.perp() };
     // Where the edge ends at an end of the line, the line before or after it may carry on.
     let (p_end, q_end) = (p.dist(segs[k].start()) <= near, q.dist(segs[k].end()) <= near);
@@ -572,9 +572,8 @@ fn roll_lines(sheet: &Sheet, fold: &Fold, regions: &[Region2]) -> Vec<RollLine> 
         if matches!(p.surface, Surface::Plane | Surface::Spline(_)) {
             continue;
         }
-        let pts = p.region.outer.polyline(1e-3);
-        let (lo, hi) = (&pts).into_iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| (l.min(q.y), h.max(q.y)));
-        let left = (&pts).into_iter().fold(f64::INFINITY, |l, q| l.min(q.x));
+        let bounds = crate::sheet_surface_cuts::loop_box(&p.region.outer);
+        let (lo, hi, left) = (bounds.min.y, bounds.max.y, bounds.min.x);
         if !(hi > lo && left.is_finite()) {
             continue;
         }
@@ -1878,7 +1877,7 @@ fn read_surfaces(
                 let k = n / 2;
                 (pa[k - 1], pa[k + 1], pa[k])
             };
-            let extent = ra.outer.polyline(1e-3).bounds().size().len().max(1e-9);
+            let extent = crate::sheet_surface_cuts::loop_box(&ra.outer).size().len().max(1e-9);
             (q1 - q0).normalized().is_some_and(|d| ra.contains(at_k + d.perp() * (extent * 1e-4)))
         };
         if !left {
@@ -1902,9 +1901,13 @@ fn read_surfaces(
             let theta = na.dot(*nb).clamp(-1.0, 1.0).acos();
             // The bend turns toward the material where `b` rises behind `a`'s face.
             let lift = panels.get(ib).map_or(0.0, |p| {
-                let pts = p.region.outer.polyline(1e-3);
                 let Shape::Plane { plane, .. } = sb else { return 0.0 };
-                (&pts).into_iter().map(|q| (plane.to_world(*q) - from).dot(*na)).fold(0.0, |m: f64, h| if h.abs() > m.abs() { h } else { m })
+                // The height off `a`'s face rises along one way in `b`'s plane: the outline's
+                // points furthest that way and against it (see
+                // [`crate::sheet_surface_cuts::extremes`]).
+                let way = Vec2::new(plane.x.dot(*na), plane.y.dot(*na));
+                let pts = p.region.outer.segs.iter().flat_map(|s| crate::sheet_surface_cuts::extremes(s, &[way]));
+                pts.map(|q| (plane.to_world(q) - from).dot(*na)).fold(0.0, |m: f64, h| if h.abs() > m.abs() { h } else { m })
             });
             let len = a0.dist(a1);
             let mut bend = Bend {
@@ -1992,7 +1995,7 @@ fn read_surfaces(
         // of the cylinder runs along it (a cut-out across the bend may leave none at its middle).
         let (mut s0, mut s1) = m.sharp;
         let (c0, c1) = (pa.to_local(s0), pa.to_local(s1));
-        let extent = ra.outer.polyline(1e-3).bounds().size().len().max(1e-9);
+        let extent = crate::sheet_surface_cuts::loop_box(&ra.outer).size().len().max(1e-9);
         let on_sharp = |p: Vec3| {
             let d = s1 - s0;
             s0 + d * ((p - s0).dot(d) / d.dot(d).max(1e-300))
@@ -2007,8 +2010,11 @@ fn read_surfaces(
         let (Some(da), Some(db)) = ((a1 - a0).normalized(), (b1 - b0).normalized()) else { continue };
         // The bend turns toward the material where `b` rises behind `a`'s face.
         let lift = panels.get(ib).map_or(0.0, |p| {
-            let pts = p.region.outer.polyline(1e-3);
-            (&pts).into_iter().map(|q| (pb.to_world(*q) - s0).dot(*na)).fold(0.0, |m: f64, h| if h.abs() > m.abs() { h } else { m })
+            // The height off `a`'s face rises along one way in `b`'s plane: the outline's points
+            // furthest that way and against it (see [`crate::sheet_surface_cuts::extremes`]).
+            let way = Vec2::new(pb.x.dot(*na), pb.y.dot(*na));
+            let pts = p.region.outer.segs.iter().flat_map(|s| crate::sheet_surface_cuts::extremes(s, &[way]));
+            pts.map(|q| (pb.to_world(q) - s0).dot(*na)).fold(0.0, |m: f64, h| if h.abs() > m.abs() { h } else { m })
         });
         let len = s0.dist(s1);
         let bend = Bend {
@@ -2884,7 +2890,7 @@ const IN_FLAT: f64 = 1e-9;
 pub(crate) fn flat_anchors(sheet: &Sheet, places: &[Option<Rigid3>], flat: &Rigid3) -> Vec<(usize, Rigid2)> {
     let back = flat.inverse();
     // How far the sheet reaches, read only for a panel square to the flat.
-    let reach = || sheet.panels.iter().map(|p| p.region.outer.polyline(1e-3).bounds().size().len()).fold(1.0, f64::max);
+    let reach = || sheet.panels.iter().map(|p| crate::sheet_surface_cuts::loop_box(&p.region.outer).size().len()).fold(1.0, f64::max);
     sheet
         .panels
         .iter()
@@ -2956,7 +2962,7 @@ pub(crate) fn fold_onto(sheet: &Sheet, dev: &Development, places: &[Option<Rigid
         }
         folded = fold(sheet, dev, &roots).map_err(|e| DocError::Invalid(e.to_string()))?;
     }
-    let reach = dev.panels.iter().flatten().map(|p| p.region.outer.polyline(1e-3).bounds().size().len()).fold(1.0, f64::max);
+    let reach = dev.panels.iter().flatten().map(|p| crate::sheet_surface_cuts::loop_box(&p.region.outer).size().len()).fold(1.0, f64::max);
     for (i, (got, own)) in folded.places.iter().zip(places).enumerate() {
         let (Some(got), Some(own)) = (got, own) else { continue };
         let off = got.shift.dist(own.shift) + reach * (got.x.dist(own.x) + got.y.dist(own.y) + got.z.dist(own.z));
@@ -3780,8 +3786,8 @@ impl SurfaceSheet {
             let length = along.iter().copied().fold(f64::NEG_INFINITY, f64::max) - along.iter().copied().fold(f64::INFINITY, f64::min);
             let across = |kind: RollEdge| lines(kind).next().map(|l| l.start.lerp(l.end, 0.5).dot(d.perp()));
             let (Some(a), Some(b)) = (across(RollEdge::Start), across(RollEdge::End)) else { continue };
-            let pts = p.region.outer.polyline(1e-3);
-            let (lo, hi) = (&pts).into_iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| (l.min(q.y), h.max(q.y)));
+            let bounds = crate::sheet_surface_cuts::loop_box(&p.region.outer);
+            let (lo, hi) = (bounds.min.y, bounds.max.y);
             out.push(RollInfo { index: out.len() + 1, panel: i, radius, angle_deg: (hi - lo).to_degrees(), length, width: (a - b).abs() });
         }
         out
@@ -3967,7 +3973,7 @@ impl SurfaceSheet {
         let folded = fold_onto(&self.sheet, dev, &self.places)?;
         let places: Vec<Rigid3> =
             folded.places.iter().copied().collect::<Option<_>>().ok_or_else(|| DocError::Invalid("a panel of the sheet has no place".into()))?;
-        let reach = dev.panels.iter().flatten().map(|p| p.region.outer.polyline(1e-3).bounds().size().len()).fold(1.0, f64::max);
+        let reach = dev.panels.iter().flatten().map(|p| crate::sheet_surface_cuts::loop_box(&p.region.outer).size().len()).fold(1.0, f64::max);
         let own = self.corner_reliefs.clone();
         // The bend whose feature comes later in the timeline overrides (never the joints' order,
         // which is when they were made); two bends of one feature ask for the same relief.

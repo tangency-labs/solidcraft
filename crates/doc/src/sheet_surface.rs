@@ -12,7 +12,7 @@ use solidcraft_kernel::BoolOp;
 
 use crate::sheet::{FlatWork, SheetBody, SheetFlange, material_boolean, material_union};
 use crate::sheet_flat_lineage::{self, Resolution};
-use crate::sheet_surface_cuts::{holds, near_each_other, seg_box};
+use crate::sheet_surface_cuts::{holds, near_each_other};
 use crate::{DocError, Result};
 
 /// Bends closer to a half turn than this (radians) have no usable sharp: they are anchored at
@@ -293,14 +293,16 @@ pub(crate) fn holds_clear(region: &Region2, cut: &Region2) -> bool {
     // that and `CLEAR` are clear of each other.
     let sag = 1e-4;
     let ring = cut.outer.polyline(sag);
-    let reach = ring.bounds().inflated(2.0 * sag + CLEAR);
+    // Boxes that hold the loops' curves (see [`loop_box`]): a loop whose box stays farther than
+    // `CLEAR` from the cut's is clear of it.
+    let reach = loop_box(&cut.outer);
     let near = |b: &Aabb2| b.min.x <= reach.max.x && reach.min.x <= b.max.x && b.min.y <= reach.max.y && reach.min.y <= b.max.y;
     let gap = |a: &Ring<Vec2>, b: &Ring<Vec2>| {
         a.iter().map(|p| b.edges().map(|(q0, q1)| segment_distance(*p, *q0, *q1)).fold(f64::INFINITY, f64::min)).fold(f64::INFINITY, f64::min)
     };
     std::iter::once(&region.outer).chain(&region.holes).all(|l| {
         let other = l.polyline(sag);
-        !near(&other.bounds())
+        !near(&crate::sheet_surface_cuts::loop_box(l))
             || (l.segs.first().is_none_or(|s| !cut.outer.contains(s.start()))
                 && crossings(&cut.outer.segs, &l.segs).is_empty()
                 && gap(&ring, &other).min(gap(&other, &ring)) > 2.0 * sag + CLEAR)
@@ -380,9 +382,10 @@ pub(crate) fn join_pieces(pieces: &[(Piece, Region2)], work: &mut FlatWork) -> R
     stage("joining the sheet's pieces", put_back(joined, carried))
 }
 
-/// A loop's box, out by [`CLEAR`]: the boxes that hold its segments (see [`seg_box`]).
+/// A loop's box, out by [`CLEAR`]: the box that holds its segments (see
+/// [`crate::sheet_surface_cuts::loop_box`]).
 fn loop_box(l: &Loop2) -> Aabb2 {
-    l.segs.iter().map(seg_box).fold(Aabb2::EMPTY, |b, (min, max)| b.union(&Aabb2 { min, max })).inflated(CLEAR)
+    crate::sheet_surface_cuts::loop_box(l).inflated(CLEAR)
 }
 
 /// Whether box `b` meets none of `of`.

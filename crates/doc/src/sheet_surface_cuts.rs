@@ -304,12 +304,15 @@ fn union(regions: Vec<Region2>, tol: f64) -> Result<Vec<Region2>> {
     Ok(planar_regions_boolean(&[first], &rest, BoolOp::Union, tol)?)
 }
 
-/// Whether no two of `regions` come within `tol` of each other by their boxes: each pair's
-/// outlines' boxes are apart, or one lies inside the box of a hole of the other.
+/// Whether no two of `regions` come within `tol` of each other by their boxes (see [`loop_box`]):
+/// each pair's outlines' boxes are apart, or one lies inside the box of a hole of the other made
+/// of lines and arcs. A hole with any other curve has a box that may reach past it, which says
+/// nothing of what lies inside the hole.
 fn apart(regions: &[Region2], tol: f64) -> bool {
-    let bounds = |l: &Loop2| l.polyline(1e-3).bounds().inflated(tol);
+    let bounds = |l: &Loop2| loop_box(l).inflated(tol);
+    let hole = |l: &Loop2| l.segs.iter().all(|s| matches!(s, Seg2::Line { .. } | Seg2::Arc { .. })).then(|| bounds(l));
     let boxes: Vec<(solidcraft_geom::Aabb2, Vec<solidcraft_geom::Aabb2>)> =
-        regions.iter().map(|r| (bounds(&r.outer), r.holes.iter().map(bounds).collect())).collect();
+        regions.iter().map(|r| (bounds(&r.outer), r.holes.iter().filter_map(hole).collect())).collect();
     let clear =
         |a: &solidcraft_geom::Aabb2, b: &solidcraft_geom::Aabb2| a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y;
     let within =
@@ -495,19 +498,63 @@ fn kind(s: &Seg2) -> String {
     }
 }
 
-/// A box round `s`: its ends', an arc's circle's, a Bézier's or a conic's control points', which
-/// hold the curve (a conic's weight is above 0).
-pub(crate) fn seg_box(s: &Seg2) -> (Vec2, Vec2) {
-    let pts: Vec<Vec2> = match *s {
+/// The points of segment `s` that reach furthest along each of `ways` and against it: a line's
+/// ends; an arc's ends and each point of its circle furthest along a way or against it that lies
+/// within its sweep (see [`on_arc`]); a Bézier's or a conic's control points, which hold the curve
+/// (a conic's weight is above 0) but may lie off it. Read along any of `ways`, the least and the
+/// greatest of them are the segment's own for a line and an arc, and reach at least as far as the
+/// segment does for any other curve.
+pub(crate) fn extremes(s: &Seg2, ways: &[Vec2]) -> Vec<Vec2> {
+    match *s {
         Seg2::Line { a, b } => vec![a, b],
-        Seg2::Arc { center, radius, .. } => vec![center - Vec2::new(radius, radius), center + Vec2::new(radius, radius)],
+        Seg2::Arc { center, radius, start, sweep } => {
+            let mut pts = vec![s.start(), s.end()];
+            // Any way of some length, however small: along one of none, the ends answer.
+            for w in ways.iter().filter(|w| w.len() > 0.0).map(|w| *w / w.len()) {
+                pts.extend([w, -w].into_iter().filter(|d| on_arc(*d, start, sweep)).map(|d| center + d * radius));
+            }
+            pts
+        }
         Seg2::Cubic { p0, p1, p2, p3 } => vec![p0, p1, p2, p3],
         Seg2::Conic { a, apex, b, .. } => vec![a, apex, b],
         Seg2::Bezier { n, p } => p.iter().take(usize::from(n) + 1).copied().collect(),
-    };
+    }
+}
+
+/// A box round `s` that holds it: a line's and an arc's own, exactly (an arc's ends and each of
+/// its circle's four points center ± radius along x and along y that lies within its sweep, see
+/// [`extremes`]); for a cubic, a conic or a Bézier the box of its control points, a sure box that
+/// holds the curve and may reach past it.
+pub(crate) fn seg_box(s: &Seg2) -> (Vec2, Vec2) {
+    let pts = extremes(s, &[Vec2::X, Vec2::Y]);
     let lo = pts.iter().fold(Vec2::new(f64::INFINITY, f64::INFINITY), |m, q| Vec2::new(m.x.min(q.x), m.y.min(q.y)));
     let hi = pts.iter().fold(Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, q| Vec2::new(m.x.max(q.x), m.y.max(q.y)));
     (lo, hi)
+}
+
+/// The box of loop `l`, its segments' boxes joined (see [`seg_box`]): the loop's own where it is
+/// made of lines and arcs, and a sure box that holds it where it has any other curve. Empty for a
+/// loop of no segments.
+pub(crate) fn loop_box(l: &Loop2) -> solidcraft_geom::Aabb2 {
+    l.segs.iter().map(seg_box).fold(solidcraft_geom::Aabb2::EMPTY, |b, (min, max)| b.union(&solidcraft_geom::Aabb2 { min, max }))
+}
+
+/// The box of loop `l` carried into space by `to`, an affine map of its plane (a plane's or a
+/// frame's placing, say): each segment's points furthest along each axis of space and against it
+/// (see [`extremes`]), carried. The carried loop's own box where it is made of lines and arcs; a
+/// sure box where it has any other curve, whose control points an affine map carries onto the
+/// carried curve's.
+pub(crate) fn loop_box_in(l: &Loop2, to: impl Fn(Vec2) -> Vec3) -> solidcraft_geom::Aabb3 {
+    let o = to(Vec2::ZERO);
+    let (x, y) = (to(Vec2::X) - o, to(Vec2::Y) - o);
+    // Along each axis of space a carried point moves its x times that axis's share of `x`, and
+    // its y times its share of `y`.
+    let ways = [Vec2::new(x.x, y.x), Vec2::new(x.y, y.y), Vec2::new(x.z, y.z)];
+    let mut b = solidcraft_geom::Aabb3::EMPTY;
+    for p in l.segs.iter().flat_map(|s| extremes(s, &ways)) {
+        b.add(to(p));
+    }
+    b
 }
 
 /// Whether segments `x` and `y` come within `near` of each other, exactly: a line with any curve
@@ -1518,7 +1565,7 @@ fn held(
     let across = Vec2::new(-d.y, d.x);
     let outward = if (c - a).dot(across) > 0.0 { across * -1.0 } else { across };
     // Far enough that the region below holds all of the panel's pieces on that side.
-    let bounds = std::iter::once(zr).chain(&kept).map(|r| r.outer.polyline(1e-3).bounds()).reduce(|x, y| x.union(&y));
+    let bounds = std::iter::once(zr).chain(&kept).map(|r| loop_box(&r.outer)).reduce(|x, y| x.union(&y));
     let reach = bounds.map_or(0.0, |x| x.size().len()) + (b - a).len() + (c - a).len() + 1.0;
     let side = Region2 {
         outer: Loop2::polygon(&[a - d * reach, b + d * reach, b + d * reach + outward * reach, a - d * reach + outward * reach]).ccw(),
@@ -1538,10 +1585,12 @@ fn held(
 /// than one panel, of the flat's `pieces`: a cut across a joint.
 fn spans_joint(pieces: &[(Piece, Region2)], g: &Region2, tol: f64) -> std::result::Result<bool, String> {
     let slack = tol * 10.0 * perimeter(std::slice::from_ref(g)).max(1.0);
-    let gb = g.outer.polyline(1e-3).bounds();
+    // Boxes that hold the loops (see [`loop_box`]): a pair whose boxes are apart has nothing in
+    // common.
+    let gb = loop_box(&g.outer);
     let mut panels = BTreeSet::new();
     for (piece, region) in pieces {
-        let b = region.outer.polyline(1e-3).bounds();
+        let b = loop_box(&region.outer);
         if b.max.x < gb.min.x || gb.max.x < b.min.x || b.max.y < gb.min.y || gb.max.y < b.min.y {
             continue;
         }
@@ -1652,10 +1701,10 @@ fn bounded(q: &Query, frame: &Rigid3, group: &[usize], gone: &[Region2], near: f
 mod tests {
     use std::f64::consts::{PI, SQRT_2};
 
-    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
     use solidcraft_geom::prelude::*;
 
-    use super::{holds, reaches};
+    use super::{holds, loop_box_in, reaches, seg_box};
 
     /// How near points are one, as a body reads them.
     const NEAR: f64 = 1e-6;
@@ -1758,5 +1807,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// An arc's box is its own: its ends, and each of its circle's points center ± radius along x
+    /// and along y that it passes. Round (1, 1), radius 1, a quarter turn clockwise from 0 runs
+    /// from (2, 1) to (1, 0) past neither (1, 2) nor (0, 1): x 1..2, y 0..1, a quarter of its
+    /// circle's box (x 0..2, y 0..2, what the box was before). Round the origin, radius 2, a
+    /// quarter turn counter-clockwise from −π/4 runs from (√2, −√2) to (√2, √2) past (2, 0):
+    /// x √2..2, y −√2..√2. A line's box is its ends' (3, −1) and (−2, 4): x −2..3, y −1..4. A
+    /// cubic's is its control points' (0, 0), (0, 3), (4, 3), (4, 0): x 0..4, y 0..3, which holds
+    /// the curve, whose top is 9 t (1 − t) = 2.25 at t = ½.
+    #[test]
+    fn a_segments_box_is_its_own_for_a_line_or_an_arc_and_holds_any_other_curve() {
+        let near = |a: Vec2, b: Vec2| a.dist(b) < 1e-12;
+        let quarter = Seg2::Arc { center: Vec2::new(1.0, 1.0), radius: 1.0, start: 0.0, sweep: -PI / 2.0 };
+        let (lo, hi) = seg_box(&quarter);
+        assert!(near(lo, Vec2::new(1.0, 0.0)) && near(hi, Vec2::new(2.0, 1.0)), "{lo:?} {hi:?}");
+        let across = Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: -PI / 4.0, sweep: PI / 2.0 };
+        let (lo, hi) = seg_box(&across);
+        assert!(near(lo, Vec2::new(SQRT_2, -SQRT_2)) && near(hi, Vec2::new(2.0, SQRT_2)), "{lo:?} {hi:?}");
+        let line = Seg2::Line { a: Vec2::new(3.0, -1.0), b: Vec2::new(-2.0, 4.0) };
+        assert_eq!(seg_box(&line), (Vec2::new(-2.0, -1.0), Vec2::new(3.0, 4.0)));
+        let cubic = Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(0.0, 3.0), p2: Vec2::new(4.0, 3.0), p3: Vec2::new(4.0, 0.0) };
+        assert_eq!(seg_box(&cubic), (Vec2::ZERO, Vec2::new(4.0, 3.0)));
+    }
+
+    /// A circle of radius 1 round the origin, as two halves, carried into space with its x along
+    /// (√3/2, 0, ½) (tilted 30° about y), its y along y, and moved 5 along x. Its box in space is
+    /// the tilted circle's own: x 5 ± √3/2 (4.1340…, 5.8660…), y −1..1, z −½..½. Its chords'
+    /// box would be smaller wherever no chord ends at those points.
+    #[test]
+    fn a_loops_box_in_space_is_the_carried_loops_own() {
+        let half = 3f64.sqrt() / 2.0;
+        let arc = |start: f64| Seg2::Arc { center: Vec2::ZERO, radius: 1.0, start, sweep: PI };
+        let circle = Loop2 { segs: vec![arc(0.0), arc(PI)] };
+        let b = loop_box_in(&circle, |q| Vec3::new(5.0 + q.x * half, q.y, q.x * 0.5));
+        let near = |a: Vec3, b: Vec3| a.dist(b) < 1e-12;
+        assert!(near(b.min, Vec3::new(5.0 - half, -1.0, -0.5)) && near(b.max, Vec3::new(5.0 + half, 1.0, 0.5)), "{b:?}");
     }
 }

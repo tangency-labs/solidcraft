@@ -118,7 +118,8 @@ impl Flatten {
     pub(crate) fn region(&self, r: &Region2) -> Result<(Region2, Vec<Vec<usize>>), &'static str> {
         if let Flatten::Cone { shift, .. } = *self {
             for lp in std::iter::once(&r.outer).chain(&r.holes) {
-                if (&lp.polyline(CHORD_TOL)).into_iter().any(|p| !(p.x + shift > 0.0)) {
+                // Its least x by a box that holds it (see [`crate::develop::loop_box`]).
+                if !(crate::develop::loop_box(lp).min.x + shift > 0.0) {
                     return Err("the cone's neutral surface would pass its apex inside the panel");
                 }
             }

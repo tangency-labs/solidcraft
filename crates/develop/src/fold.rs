@@ -207,7 +207,7 @@ pub fn fold(sheet: &Sheet, dev: &Development, roots: &[Rigid3]) -> Result<Fold, 
         middle.push(if panel.region.outer.segs.is_empty() {
             0.0
         } else {
-            let b = panel.region.outer.polyline(1e-3).bounds();
+            let b = crate::develop::loop_box(&panel.region.outer);
             (b.min.y + b.max.y) / 2.0
         });
     }

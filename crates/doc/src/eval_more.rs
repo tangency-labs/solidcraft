@@ -1427,12 +1427,14 @@ pub(super) fn surface_prism_cut(
         .into_iter()
         .map(|(plane, region)| {
             let mut b = Aabb3::EMPTY;
-            for q in &region.outer.polyline(1e-3) {
-                let w = plane.to_world(*q);
-                let off = (w - cut.plane.origin).dot(n);
-                for s in [lo, hi] {
-                    b.add(w + n * (s - off));
-                }
+            for s in [lo, hi] {
+                // The footprint carried along the normal onto the level `s`, an affine map: its box
+                // there holds it (see [`crate::sheet_surface_cuts::loop_box_in`]).
+                let onto = |q: Vec2| {
+                    let w = plane.to_world(q);
+                    w + n * (s - (w - cut.plane.origin).dot(n))
+                };
+                b = b.union(&crate::sheet_surface_cuts::loop_box_in(&region.outer, onto));
             }
             (lo, hi, plane, region, Some(b.inflated(1e-6)))
         })
@@ -1502,7 +1504,7 @@ pub(super) fn surface_prism_cut(
                 return Ok(Vec::new());
             }
             let near = |r: &Region2| {
-                let (a, b) = (r.outer.polyline(1e-3).bounds(), mapped.outer.polyline(1e-3).bounds());
+                let (a, b) = (crate::sheet_surface_cuts::loop_box(&r.outer), crate::sheet_surface_cuts::loop_box(&mapped.outer));
                 !(a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y)
             };
             if out.recesses.iter().any(|r| r.panel == p && near(&r.region))
