@@ -14,10 +14,10 @@ use std::sync::OnceLock;
 
 use egui::{Pos2, Rect, pos2};
 use solidcore_record::Vec3;
-use solidcraft_engine::render::Camera;
+use solidcraft_viewport::Camera;
 
 use crate::space_mouse::DeviceMotion;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 const DATA: &[u8] = include_bytes!("../../../assets/models/test_boat.bin");
 

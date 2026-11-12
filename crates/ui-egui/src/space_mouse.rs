@@ -195,11 +195,11 @@ pub fn default_button_jobs(device: &str) -> std::collections::BTreeMap<u8, Butto
 fn buttons_active(app: &SolveApp, ctx: &egui::Context, focused: bool) -> bool {
     app.preferences.space_mouse_enabled
         && focused
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && app.space_mouse.calibrating.is_none()
         && !app.home.open
         && !app.file_picker_busy()
-        && !app.file_load.busy()
+        && !app.file_load_holds()
         // The keyboard shortcuts wait for a report draft too (`SolveApp::logic`).
         && app.issue_report.draft.is_none()
         && !crate::keymap::capturing(app)
@@ -493,7 +493,7 @@ pub(crate) fn stories(language: &str, mapping: Option<DriverMapping>, source: [u
         let row = source.iter().position(|&s| s == motion);
         motion_story(mapping, source, motion)
             .zip(row)
-            .map(|(label, row)| crate::i18n::Locale::for_language(language).format(label, &[("n", &(row + 1).to_string())]))
+            .map(|(label, row)| solidcraft_ui_text::Locale::for_language(language).format(label, &[("n", &(row + 1).to_string())]))
             .unwrap_or_default()
     })
 }
@@ -690,7 +690,7 @@ mod tests {
     use crate::Services;
     use solidcraft_engine::Session;
     use solidcraft_engine::geom::prelude::*;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_viewport::Camera;
 
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps
     /// the orientation, as editing a sketch does.
@@ -819,12 +819,12 @@ mod tests {
         assert!(!shifted());
         // Menu (button 1) opens Preferences; there, buttons only light up their rows.
         press(&mut app, &ctx, 1, vec![]);
-        assert!(app.prefs_window.open);
+        assert!(app.prefs_window.shell.open);
         press(&mut app, &ctx, 0, vec![]);
         assert_eq!(escapes(&press(&mut app, &ctx, ESC, vec![])), 0);
         assert_eq!(app.space_mouse.seen & ESC, ESC);
         // A job the user set replaces the defaults.
-        app.prefs_window.open = false;
+        app.prefs_window.shell.open = false;
         press(&mut app, &ctx, 0, vec![]);
         app.preferences.space_mouse_buttons.insert("hid 046d:c62b".into(), [(23, ButtonJob::Key(ButtonKey::Alt))].into());
         let raw = press(&mut app, &ctx, ESC, vec![]);
@@ -877,14 +877,14 @@ mod tests {
         let raw = press(&mut app, &ctx, 0b11111, vec![]);
         assert_eq!(app.session.doc.metadata.author(), Some("Jane"), "the mapped Undo did not run");
         assert_eq!(escapes(&raw), 0, "no Esc");
-        assert!(!app.prefs_window.open, "no Preferences");
+        assert!(!app.prefs_window.shell.open, "no Preferences");
         assert!(!ctx.input(|i| i.modifiers.shift), "no held Shift");
         assert_eq!((app.cam, app.session.undo.len(), app.dialog.is_some()), (cam, undo, dialog));
         // Once the draft is closed the same buttons work again (a fresh press).
         app.issue_report.draft = None;
         press(&mut app, &ctx, 0, vec![]);
         press(&mut app, &ctx, 0b11111, vec![]);
-        assert!(app.prefs_window.open);
+        assert!(app.prefs_window.shell.open);
         assert_eq!(app.session.doc.metadata.author(), None, "and the mapped Undo runs");
     }
 
@@ -1038,10 +1038,10 @@ mod tests {
         let ctx = window(true);
         press(&mut app, &ctx, SHIFT, vec![]);
         assert!(ctx.input(|i| i.modifiers.shift));
-        app.prefs_window.open = true;
+        app.prefs_window.shell.open = true;
         press(&mut app, &ctx, SHIFT, vec![]);
         assert!(!ctx.input(|i| i.modifiers.shift), "Preferences open");
-        app.prefs_window.open = false;
+        app.prefs_window.shell.open = false;
         press(&mut app, &ctx, SHIFT, vec![]);
         assert!(ctx.input(|i| i.modifiers.shift));
         crate::space_mouse_calibration::start(&mut app);
@@ -1533,7 +1533,7 @@ mod tests {
         assert_eq!(app.space_mouse.raw, PUSH);
         assert!(app.space_mouse.calibrating.as_ref().is_some_and(|(_, wizard)| wizard.progress() > 0.0));
         // Closing Preferences ends it, so the cap moves the view again.
-        app.prefs_window.open = false;
+        app.prefs_window.shell.open = false;
         crate::prefs::show(&mut app, &ctx);
         assert!(app.space_mouse.calibrating.is_none());
         assert!(frame(&mut app, &ctx, DriverMapping::default(), PUSH, 0.02));
@@ -1838,7 +1838,7 @@ mod tests {
         app.preferences.look_at_anim = false;
         assert!(bridge(&mut app, &ctx, BridgeMotion::default(), &["top"]));
         let mut top = Camera::default();
-        top.set_view(solidcraft_engine::render::StandardView::Top);
+        top.set_view(solidcraft_viewport::StandardView::Top);
         let target = app.cam_anim.map_or(app.cam, |a| a.to);
         assert_eq!((target.yaw, target.pitch), (top.yaw, top.pitch));
         // Names it doesn't know are no view.

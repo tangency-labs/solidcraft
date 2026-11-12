@@ -1,0 +1,668 @@
+{
+ "cases": [
+  {
+   "name": "copy_raw_gap1.5e-12_owner0",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:105 (copy constructor shares m_pCurve unless the owner flag owns it (1, 3); an owned curve is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "op": "copy",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.1,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.3,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.5,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.4,
+         0.6,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.7,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.6,
+         0.8,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.8,
+         0.9,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.3,
+        0.5,
+        0.5000000000015,
+        0.7,
+        1,
+        1,
+        1,
+        1
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 0
+    }
+   }
+  },
+  {
+   "name": "copy_raw_gap1.5e-12_owner1",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:105 (copy constructor shares m_pCurve unless the owner flag owns it (1, 3); an owned curve is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "op": "copy",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.1,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.3,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.5,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.4,
+         0.6,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.7,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.6,
+         0.8,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.8,
+         0.9,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.3,
+        0.5,
+        0.5000000000015,
+        0.7,
+        1,
+        1,
+        1,
+        1
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "copy_raw_gap1.5e-12_owner2",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:105 (copy constructor shares m_pCurve unless the owner flag owns it (1, 3); an owned curve is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "op": "copy",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.1,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.3,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.5,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.4,
+         0.6,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.7,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.6,
+         0.8,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.8,
+         0.9,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.3,
+        0.5,
+        0.5000000000015,
+        0.7,
+        1,
+        1,
+        1,
+        1
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 2
+    }
+   }
+  },
+  {
+   "name": "copy_raw_gap1.5e-12_owner3",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:105 (copy constructor shares m_pCurve unless the owner flag owns it (1, 3); an owned curve is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "op": "copy",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.1,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.3,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.5,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.4,
+         0.6,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.7,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.6,
+         0.8,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.8,
+         0.9,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.3,
+        0.5,
+        0.5000000000015,
+        0.7,
+        1,
+        1,
+        1,
+        1
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 3
+    }
+   }
+  },
+  {
+   "name": "copy_raw_gap1.9e-12_owner0",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:105 (copy constructor shares m_pCurve unless the owner flag owns it (1, 3); an owned curve is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "op": "copy",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.1,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.3,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.5,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.4,
+         0.6,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.7,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.6,
+         0.8,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.8,
+         0.9,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.3,
+        0.4999999999981,
+        0.5,
+        0.7,
+        1,
+        1,
+        1,
+        1
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 0
+    }
+   }
+  },
+  {
+   "name": "copy_raw_gap1.9e-12_owner1",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:105 (copy constructor shares m_pCurve unless the owner flag owns it (1, 3); an owned curve is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "op": "copy",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.1,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.3,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.5,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.4,
+         0.6,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.7,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.6,
+         0.8,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.8,
+         0.9,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.3,
+        0.4999999999981,
+        0.5,
+        0.7,
+        1,
+        1,
+        1,
+        1
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    }
+   }
+  },
+  {
+   "name": "copy_raw_gap1.9e-12_owner2",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:105 (copy constructor shares m_pCurve unless the owner flag owns it (1, 3); an owned curve is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "op": "copy",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.1,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.3,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.5,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.4,
+         0.6,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.7,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.6,
+         0.8,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.8,
+         0.9,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.3,
+        0.4999999999981,
+        0.5,
+        0.7,
+        1,
+        1,
+        1,
+        1
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 2
+    }
+   }
+  },
+  {
+   "name": "copy_raw_gap1.9e-12_owner3",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:105 (copy constructor shares m_pCurve unless the owner flag owns it (1, 3); an owned curve is Copy()'d, whose knot fix-up merges knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "op": "copy",
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.1,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.3,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.3,
+         0.2,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.5,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0.4,
+         0.6,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.7,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.6,
+         0.8,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.8,
+         0.9,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        0.3,
+        0.4999999999981,
+        0.5,
+        0.7,
+        1,
+        1,
+        1,
+        1
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 3
+    }
+   }
+  }
+ ]
+}

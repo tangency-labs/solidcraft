@@ -9,7 +9,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InterferenceParams>(), &["bodies", "budget_s"]);
+    assert_keys(input_schema_for::<InterferenceParams>(), &["bodies", "budget_s", "exclude_pairs"]);
 }
 
 /// #12874: calls that fail today get the same message in strict: `string_list`'s for `bodies`
@@ -90,6 +90,7 @@ fn interference_replies_with_its_schema() {
         "pairs_cleared",
         "pairs_intersected",
         "pairs_not_checked",
+        "pairs_excluded",
         "budget_s",
         "budget_exceeded",
         "threads",
@@ -107,7 +108,7 @@ fn interference_replies_with_its_schema() {
     let r = s.execute("inspect.interference", &json!({"bodies": ["C1", "C2"]})).unwrap_or_default();
     let hit = &r["interferences"][0];
     assert_eq!((&r["count"], &hit["a"], &hit["b"]), (&json!(1), &json!("C1"), &json!("C2")), "{r}");
-    assert_eq!(keys(hit), BTreeSet::from(["a", "b", "volume_mm3", "area_mm2", "bbox", "center"]), "{r}");
+    assert_eq!(keys(hit), BTreeSet::from(["a", "a_part", "b", "b_part", "volume_mm3", "area_mm2", "bbox", "center"]), "{r}");
     assert!(hit["volume_mm3"].as_f64().is_some_and(|v| v > 0.0) && keys(&hit["bbox"]) == BTreeSet::from(["min", "max"]), "{r}");
     let slowest = &r["slowest"][0];
     assert_eq!(keys(slowest), BTreeSet::from(["a", "b", "ms", "boolean_ms", "tessellate_ms"]), "{r}");

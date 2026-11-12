@@ -1,5 +1,6 @@
 //! Built-in authored resources and explicit runtime projections. The source catalogs
 //! retain their original authoring status; unsupported concepts never become fake presets.
+use solidcraft_geom::MeshGeom;
 use std::{
     collections::BTreeMap,
     sync::{Arc, OnceLock},
@@ -401,7 +402,7 @@ pub(super) fn apply_appearance(s: &mut Session, params: &Value) -> Result<Value>
         let value = item("surfaces", &input.id, command)?;
         let lo = triple(&value["base_linear_low"], command)?;
         let hi = triple(&value["base_linear_high"], command)?;
-        let color = std::array::from_fn::<_, 3, _>(|i| crate::geom::srgb::encode8((lo[i] + hi[i]) * 0.5));
+        let color = std::array::from_fn::<_, 3, _>(|i| solidcraft_color::srgb::encode8((lo[i] + hi[i]) * 0.5));
         (
             value,
             LibraryLook {

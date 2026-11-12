@@ -18,14 +18,20 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "sketch", app.tr("prefs.sketch.snapping_guides"), |ui| {
         let available = ui.available_width();
         let figure_width = t.space_24 * 5.0;
-        let labels_width = ["prefs.sketch.tracking_guides", "prefs.sketch.tracking_points", "prefs.sketch.recent_snap", "prefs.sketch.align_points"]
-            .into_iter()
-            .map(|id| check_width(ui, app.tr(id), true))
-            .fold(0.0, f32::max);
+        let labels_width = [
+            "prefs.sketch.tracking_guides",
+            "prefs.sketch.tracking_points",
+            "prefs.sketch.recent_snap",
+            "prefs.sketch.align_points",
+            "prefs.sketch.snap_to_visible_grid",
+        ]
+        .into_iter()
+        .map(|id| check_width(ui, app.tr(id), true))
+        .fold(0.0, f32::max);
         let controls_width = if available >= figure_width + t.space_14 + labels_width { available - figure_width - t.space_14 } else { available };
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
             ui.spacing_mut().item_spacing.x = t.space_14;
-            if !crate::prefs_search::suppress_chrome(ui) {
+            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(figure_width.min(available), t.space_24 * 2.0 + t.space_16), egui::Sense::hover());
                 ui_kit::paint_sketch_guides(&ui.painter_at(rect), rect);
             }
@@ -60,6 +66,13 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.sketch.align_points_note"),
                     &mut app.preferences.sketch_align_points,
                 );
+                check(
+                    ui,
+                    "sketch_snap_to_visible_grid",
+                    "prefs.sketch.snap_to_visible_grid",
+                    Some("prefs.sketch_snap_to_visible_grid_note"),
+                    &mut app.preferences.sketch_snap_to_visible_grid,
+                );
             });
         });
         let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.hold_stop_snapping"));
@@ -74,7 +87,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                     })
-                    .backing_on_hover_text(crate::i18n::tr("prefs.snap_drawing_note"));
+                    .backing_on_hover_text(solidcraft_ui_text::tr("prefs.snap_drawing_note"));
                     crate::scenario::publish_target("prefs:suppress_sketch_snap", response.rect);
                 });
             });
@@ -95,17 +108,34 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
             "ui.first_dimension_scales",
+            "ui.first_dimension_scales_about_origin",
         ];
-        let right_labels =
-            ["prefs.sketch.shortcut_cycles_modes", "prefs.ribbon_click_ends_tool", "ui.project_face_edges_sketch", "prefs.sketch.project_options"];
+        let right_labels = [
+            "prefs.sketch.shortcut_cycles_modes",
+            "prefs.ribbon_click_ends_tool",
+            "ui.project_face_edges_sketch",
+            "ui.project_references_construction",
+            "prefs.sketch.project_options",
+            "prefs.sketch.cursor_coordinates",
+        ];
         let natural = [left_labels.as_slice(), right_labels.as_slice()]
             .map(|labels| labels.iter().map(|id| check_width(ui, app.tr(id), true)).fold(0.0, f32::max));
         let available = ui.available_width();
         let gap = t.space_24 + t.space_8;
-        let two_columns = available >= t.space_24 * 20.0 + gap && !crate::prefs_search::suppress_chrome(ui);
+        let two_columns = available >= t.space_24 * 20.0 + gap && !crate::ui_kit::settings_search::suppress_chrome(ui);
         let left = if two_columns { (available - gap) * natural[0] / (natural[0] + natural[1]).max(1.0) } else { available };
         let right = if two_columns { available - gap - left } else { available };
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
+        // While searching, the columns keep their space only when one of their checkboxes matched:
+        // a hidden row still leaves its spacing, which stacked into a gap above a match further down
+        // (Window steps).
+        let before = crate::ui_kit::settings_search::hits(ui);
+        let mut detached = crate::ui_kit::settings_search::querying(ui)
+            .then(|| crate::ui_kit::settings_search::detached_child(ui, "prefs-sketch-drawing-columns", false));
+        let columns = match detached.as_mut() {
+            Some(child) => child,
+            None => &mut *ui,
+        };
+        columns.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
             ui.spacing_mut().item_spacing.x = gap;
             ui.allocate_ui_with_layout(egui::vec2(left, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                 check(
@@ -155,6 +185,15 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("ui.first_dimension_scales_tip"),
                     &mut app.preferences.first_dimension_scales,
                 );
+                ui.add_enabled_ui(app.preferences.first_dimension_scales, |ui| {
+                    check(
+                        ui,
+                        "first_dimension_scales_about_origin",
+                        "ui.first_dimension_scales_about_origin",
+                        Some("ui.first_dimension_scales_about_origin_tip"),
+                        &mut app.preferences.first_dimension_scales_about_origin,
+                    );
+                });
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                 check(
@@ -177,6 +216,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 check(
                     ui,
+                    "project_construction",
+                    "ui.project_references_construction",
+                    Some("ui.project_references_construction_note"),
+                    &mut app.session.project_construction,
+                );
+                check(
+                    ui,
                     "project_options_dialog",
                     "prefs.sketch.project_options",
                     Some("prefs.project_options_dialog_note"),
@@ -189,9 +235,42 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.sketch_move_classic_note"),
                     &mut app.preferences.sketch_move_classic,
                 );
+                check(
+                    ui,
+                    "sketch_cursor_coordinates",
+                    "prefs.sketch.cursor_coordinates",
+                    Some("prefs.sketch.cursor_coordinates_note"),
+                    &mut app.preferences.sketch_cursor_coordinates,
+                );
             });
         });
+        if let Some(child) = detached {
+            crate::ui_kit::settings_search::commit_search_child(ui, &child, before);
+        }
         dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
+        sketch_size(app, ui, t.space_24 * 8.0 + t.space_8);
+    });
+}
+
+/// The most points or curves one sketch holds (#10874): a dense SVG or DXF drawing needs more
+/// than the default.
+fn sketch_size(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
+    let label = app.tr("prefs.sketch.max_points").to_string();
+    let unit = app.tr("prefs.sketch.max_points_unit").to_string();
+    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.sketch.max_points_note"), label_width, |ui| {
+        ui.horizontal(|ui| {
+            let t = Tokens::get();
+            ui.spacing_mut().item_spacing.x = t.space_4;
+            let field = ui
+                .scope(|ui| {
+                    ui.spacing_mut().interact_size.x = t.space_24 * 3.0;
+                    ui_kit::number_field(ui, &mut app.preferences.max_sketch_points, DEFAULT_POINTS..=CEILING_POINTS, 100.0, "")
+                })
+                .inner;
+            crate::scenario::publish_rect("prefs:max_sketch_points", field.rect);
+            ui_kit::settings_inline_note(ui, &unit);
+        });
     });
 }
 
@@ -221,8 +300,8 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         picture_group(ui, app.tr("prefs.sketch_exit_view"), |ui| {
             let label = app.tr("prefs.sketch_exit_view");
-            let mut indexed = crate::prefs_search::texts_hit(ui, &[label]);
-            if !crate::prefs_search::suppress_chrome(ui) {
+            let mut indexed = crate::ui_kit::settings_search::texts_hit(ui, &[label]);
+            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 ui_kit::section_heading(ui, label);
             }
             let cards = ui.horizontal_wrapped(|ui| {
@@ -267,19 +346,19 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("dialog:When a sketch ends", response.rect);
                     }
                     let option = app.tr(label_id);
-                    if !indexed && crate::prefs_search::texts_hit(ui, &[option]) {
-                        crate::prefs_search::remember(ui, option, response.rect);
+                    if !indexed && crate::ui_kit::settings_search::texts_hit(ui, &[option]) {
+                        crate::ui_kit::settings_search::remember(ui, option, response.rect);
                         indexed = true;
                     }
-                    crate::prefs_search::follow(ui, option, response.rect);
+                    crate::ui_kit::settings_search::follow(ui, option, response.rect);
                     if response.clicked() {
                         app.preferences.sketch_exit_view = choice;
                     }
                 }
             });
             crate::scenario::publish_rect("prefs:sketch_exit_view:choices", cards.response.rect);
-            crate::prefs_search::remember(ui, label, cards.response.rect);
-            crate::prefs_search::follow(ui, label, cards.response.rect);
+            crate::ui_kit::settings_search::remember(ui, label, cards.response.rect);
+            crate::ui_kit::settings_search::follow(ui, label, cards.response.rect);
         });
     });
 }
@@ -323,7 +402,7 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = ui_kit::toggle_tile(
                     ui,
                     &ui_kit::Card {
-                        label: crate::i18n::tr(label),
+                        label: solidcraft_ui_text::tr(label),
                         sub: None,
                         selected: *value,
                         enabled: true,
@@ -334,12 +413,17 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                     width,
                 )
-                .backing_on_hover_text(crate::i18n::tr(help));
+                .backing_on_hover_text(solidcraft_ui_text::tr(help));
                 targets(key, &response);
                 if response.clicked() {
                     *value = !*value;
                 }
             }
+        });
+        // Larger constraint glyphs, readable at any zoom (#10794).
+        let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.constraint_glyph_size"));
+        ui_kit::settings_form(ui, label_width, |ui| {
+            setting::constraint_glyph_scale(app, ui).backing_on_hover_text(app.tr("prefs.constraint_glyph_size_note"));
         });
     });
 }
@@ -349,8 +433,8 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "selection", app.tr("prefs.selecting"), |ui| {
         picture_group(ui, app.tr("prefs.sketch.click_selects"), |ui| {
             let label = app.tr("prefs.sketch.click_selects");
-            let mut indexed = crate::prefs_search::texts_hit(ui, &[label]);
-            if !crate::prefs_search::suppress_chrome(ui) {
+            let mut indexed = crate::ui_kit::settings_search::texts_hit(ui, &[label]);
+            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                 ui_kit::section_heading(ui, label);
             }
             let cards = ui.horizontal_wrapped(|ui| {
@@ -380,19 +464,19 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("dialog:Click selects whole bodies", response.rect);
                     }
                     let option = app.tr(label);
-                    if !indexed && crate::prefs_search::texts_hit(ui, &[option]) {
-                        crate::prefs_search::remember(ui, option, response.rect);
+                    if !indexed && crate::ui_kit::settings_search::texts_hit(ui, &[option]) {
+                        crate::ui_kit::settings_search::remember(ui, option, response.rect);
                         indexed = true;
                     }
-                    crate::prefs_search::follow(ui, option, response.rect);
+                    crate::ui_kit::settings_search::follow(ui, option, response.rect);
                     if response.clicked() {
                         app.ui.pick_bodies = bodies;
                     }
                 }
             });
             crate::scenario::publish_rect("prefs:pick_bodies:choices", cards.response.rect);
-            crate::prefs_search::remember(ui, label, cards.response.rect);
-            crate::prefs_search::follow(ui, label, cards.response.rect);
+            crate::ui_kit::settings_search::remember(ui, label, cards.response.rect);
+            crate::ui_kit::settings_search::follow(ui, label, cards.response.rect);
         });
         check(
             ui,
@@ -424,6 +508,13 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         check(
             ui,
+            "select_3d_curve_points",
+            "prefs.sketch.select_3d_curve_points",
+            Some("prefs.sketch.select_3d_curve_points_help"),
+            &mut app.preferences.select_3d_curve_points,
+        );
+        check(
+            ui,
             "select_other_hidden",
             "prefs.sketch.select_other_hidden",
             Some("prefs.select_other_hidden_help"),
@@ -441,8 +532,8 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// Natural-height picture groups own their search entries without allocating a form label column.
 fn picture_group(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
-    let gate = crate::prefs_search::block_gate(ui, label, None);
-    let before = crate::prefs_search::hits(ui);
+    let gate = crate::ui_kit::settings_search::block_gate(ui, label, None);
+    let before = crate::ui_kit::settings_search::hits(ui);
     let show = gate.as_ref().is_none_or(|gate| gate.show);
     let content = |ui: &mut egui::Ui| {
         let group = ui.scope(|ui| ui_kit::named_control(ui, label, add));
@@ -451,10 +542,10 @@ fn picture_group(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)
     if show {
         content(ui);
     } else {
-        crate::prefs_search::run_hidden(ui, label, content);
+        crate::ui_kit::settings_search::run_hidden(ui, label, content);
     }
     if let Some(gate) = &gate {
-        crate::prefs_search::block_finish(ui, gate, show, before);
+        crate::ui_kit::settings_search::block_finish(ui, gate, show, before);
     }
 }
 
@@ -465,19 +556,19 @@ fn check_width(ui: &egui::Ui, label: &str, help: bool) -> f32 {
 
 /// Standard checkbox, its hover help, and its existing field target.
 fn check(ui: &mut egui::Ui, key: &str, label: &str, help: Option<&str>, value: &mut bool) -> egui::Response {
-    let help = help.map(crate::i18n::tr);
+    let help = help.map(solidcraft_ui_text::tr);
     ui.horizontal_top(|ui| {
         let t = Tokens::get();
-        let show_help = help.is_some() && !crate::prefs_search::suppress_chrome(ui);
+        let show_help = help.is_some() && !crate::ui_kit::settings_search::suppress_chrome(ui);
         let width = (ui.available_width() - if show_help { t.space_8 + t.space_12 + 1.0 } else { 0.0 }).max(0.0).min(check_width(
             ui,
-            crate::i18n::tr(label),
+            solidcraft_ui_text::tr(label),
             false,
         ));
         ui.spacing_mut().item_spacing.x = t.space_8;
         let response = ui
             .allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui_kit::checkbox(ui, crate::i18n::tr(label), value)
+                ui_kit::checkbox(ui, solidcraft_ui_text::tr(label), value)
             })
             .inner;
         targets(key, &response);
@@ -537,11 +628,11 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     let p = &mut app.preferences;
                     ui_kit::bounded_length_field(ui, &mut p.dimension_step_mm, &units, decimals, DIMENSION_STEP_MM, 0.1)
-                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_length"));
+                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_length"));
                 });
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     ui_kit::number_field(ui, &mut app.preferences.dimension_step_deg, DIMENSION_STEP_DEG, 0.1, "°")
-                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_angle"));
+                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_angle"));
                 });
             });
         });

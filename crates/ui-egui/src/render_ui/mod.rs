@@ -2,10 +2,10 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::{
     SolveApp,
-    theme::Tokens,
     ui_kit::{self, Container, Edge},
 };
 use egui::{Rect, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn reset_shell(app: &mut SolveApp) {
     app.shell.workspace_panels.retain(|id, _| !id.starts_with("render:"));
@@ -17,11 +17,14 @@ pub(crate) fn focused(app: &SolveApp) -> bool {
 }
 
 pub(crate) fn compact(app: &SolveApp, width: f32) -> bool {
-    width < 1100.0 || app.ui.layout == crate::shell::LayoutMode::Docked
+    width < 1100.0 || app.ui.layout == crate::ui_kit::LayoutMode::Docked
 }
 
 pub(crate) fn focus_shortcut(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if crate::render_workspace::active(app) && !ui.ctx().text_edit_focused() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+    if crate::render_workspace::active(app)
+        && !ui.ctx().text_edit_focused()
+        && (!crate::panel_runtime::production_active(app) || !ui.ctx().egui_wants_keyboard_input())
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
     {
         ui.ctx().memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
         app.start("view.render_focus");
@@ -231,6 +234,10 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !focused(app) {
         shots_pill(app, ui, free);
     }
+    // The Design viewport is not drawn here: its frame-rate readout's anchor is from another
+    // workspace (or none), so the panel would stack on nothing in this one.
+    app.frame_rate.top = None;
+    crate::operations::show(app, ui, crate::shell::bottom_overlay_rect(app, viewport));
     crate::viewport::transient_messages(app, ui, viewport, None);
 }
 
@@ -267,8 +274,8 @@ fn shots_pill(app: &mut SolveApp, ui: &mut egui::Ui, free: Rect) {
         free.left_bottom() + vec2(Tokens::get().space_8, -Tokens::get().space_8),
         egui::Align2::LEFT_BOTTOM,
         |ui| {
-            let response =
-                ui_kit::strip_toggle(ui, false, crate::i18n::tr_label("Shots")).backing_on_hover_text(crate::i18n::tr_label("Show Shots strip"));
+            let response = ui_kit::strip_toggle(ui, false, solidcraft_ui_text::tr_label("Shots"))
+                .backing_on_hover_text(solidcraft_ui_text::tr_label("Show Shots strip"));
             crate::scenario::publish_target("render:shots:show", response.rect);
             if response.clicked() {
                 let _ = app.run("view.shots_strip", serde_json::json!({"visible":true}));

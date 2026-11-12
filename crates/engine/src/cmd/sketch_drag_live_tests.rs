@@ -73,7 +73,7 @@ fn extruded() -> (Session, u64) {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     let extrude = s.doc.features.last().map(|f| f.id).expect("the extrude");
-    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1", "restore_marker": false}));
     (s, extrude)
 }
 
@@ -314,7 +314,7 @@ fn a_live_frame_swaps_only_the_dragged_sketch() {
     run(&mut s, "sketch.create", json!({"plane": "XZ"}));
     run(&mut s, "sketch.circle.center", json!({"center": [50, 50], "radius": 4}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1", "restore_marker": false}));
     let id = s.active_sketch.expect("sketch mode");
     let other = |s: &Session| s.model.state().sketches.iter().find(|x| x.feature != id).cloned().expect("the other sketch");
     let before = other(&s);

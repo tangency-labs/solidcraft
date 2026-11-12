@@ -6,7 +6,8 @@ use solidcraft_engine::doc::physical_material::{
 };
 use solidcraft_engine::doc::{Document, UserMaterial, appearance::Look};
 
-use crate::{SolveApp, i18n::tr, ui_kit};
+use crate::{SolveApp, ui_kit};
+use solidcraft_ui_text::tr;
 
 const KINDS: [&str; 9] = [
     "density",
@@ -116,7 +117,7 @@ impl Draft {
         let user = source.and_then(|name| doc.user_material(name)).cloned();
         let original = (!duplicate).then(|| user.clone()).flatten();
         let name = match source {
-            Some(name) if duplicate => crate::i18n::format("material.editor.copy_name", &[("name", name)]),
+            Some(name) if duplicate => solidcraft_ui_text::format("material.editor.copy_name", &[("name", name)]),
             Some(name) => name.to_string(),
             None => String::new(),
         };
@@ -313,7 +314,7 @@ impl PropertyDraft {
 }
 
 fn number(value: &str, field: &str) -> Result<f64, String> {
-    crate::prefs::parse_number(value).ok_or_else(|| format!("{field}: {}", tr("material.editor.number_required")))
+    crate::ui_kit::parse_number(value).ok_or_else(|| format!("{field}: {}", tr("material.editor.number_required")))
 }
 
 fn field(ui: &mut egui::Ui, label: &str, id: &str, value: &mut String, unit: &str) {
@@ -416,7 +417,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
                 optional_text(ui, tr("ui.design_properties.license"), &format!("source:{i}:license"), &mut source.license);
                 optional_text(ui, tr("material.editor.reference"), &format!("source:{i}:reference"), &mut source.reference);
                 let used = card.properties.iter().any(|p| p.source_id == source.id);
-                if ui_kit::button(ui, tr("Remove"), ui_kit::Button::Enabled(!used)).clicked() {
+                if ui_kit::button(ui, tr("material.editor.remove"), ui_kit::Button::Enabled(!used)).clicked() {
                     remove = Some(i);
                 }
             });
@@ -434,7 +435,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
         let label = format!("ui.material_review.{}", property.kind);
         ui_kit::section(ui, format!("physical:property:{}", property.kind), tr(&label), false, |ui| {
             property_rows(ui, property, &card.sources);
-            if ui_kit::button(ui, tr("Remove"), ui_kit::Button::Normal).clicked() {
+            if ui_kit::button(ui, tr("material.editor.remove"), ui_kit::Button::Normal).clicked() {
                 remove = Some(i);
             }
         });

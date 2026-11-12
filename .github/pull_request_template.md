@@ -6,9 +6,12 @@ Start with what this is, in plain words someone new to the project would underst
 
 Changes a default: no
 
-<!-- Required line, replace "no" if this changes what a user gets out of the box (a default value, key binding, setting, tool behaviour):
+<!-- Required line, replace "no" if this changes what a user gets out of the box (a default value, key binding, setting, tool behaviour; a UX default only, a kernel result change is 'no'):
 Changes a default: yes — <what>, old behaviour kept behind preference <name>
 Docs-only and bot PRs are exempt. -->
+
+<!-- A kernel change (solidcore/, crates/smlib/) that changes or deletes lines of an existing test or golden expectation needs a line saying why the old test was wrong (adding tests needs nothing):
+Test change: <reason> -->
 
 ## Validation
 

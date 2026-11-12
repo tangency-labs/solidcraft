@@ -18,7 +18,7 @@ Each group is a 120x64 figure at the left of its checkboxes, with a group name u
 | Extrude: Choose the operation automatically | Checkbox | `Prefs.auto_operation` | `true` | "Join, New Body or Cut, from what the material touches." | `tool-extrude` | |
 | Extrude: Turn the view to isometric when Extrude opens | Checkbox | `Prefs.extrude_view_isometric` | `false` | none | `tool-extrude` | Retained newer control, directly after automatic operation in the same group. |
 | Extrude: Go back to the earlier view when Extrude closes | Checkbox | `Prefs.extrude_view_return` | `false` | none | `tool-extrude` | Directly after isometric; disabled unless isometric is on. |
-| Rest, Boss, Snap Fit: Placement handles | Checkbox | `Prefs.placement_handles` | `false` | "A marker to drag the feature across the model and a ring to turn it." | `tool-placement` | |
+| Placed features: Placement handles | Checkbox | `Prefs.placement_handles` | `false` | "A marker to drag the feature across the model and, where the feature can turn, a ring to turn it." | `tool-placement` | |
 
 ## Assembly Move
 

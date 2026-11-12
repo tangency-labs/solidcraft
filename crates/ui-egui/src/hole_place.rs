@@ -10,19 +10,20 @@
 //!
 //! Create Hole › Move holes by clicking or dragging (`hole_moves`): every placed hole has a handle at its
 //! centre that drags it across the model (snapping as a pick would) and takes it out when
-//! clicked, and a pick elsewhere on a face that already has a hole moves the hole there.
+//! clicked, and a pick elsewhere on a face that already has a hole moves the hole there. The handle
+//! is the shared placement marker (`place_gizmo`, one per hole through `place_gizmo/hole.rs`, #6818);
+//! this file keeps what is the hole's: its snaps, and the moves of its face places.
 //!
 //! Create Hole › Several holes on one face (`hole_several`): a pick elsewhere on a face that already
 //! has a hole adds another hole there (rather than moving it), and a pick on a hole takes it out.
 //! Create Hole › Group holes made together (`hole_group`): the holes one Hole dialog makes, two or
 //! more, go into a feature folder in History, closed at first.
 
-use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use egui::{Pos2, vec2};
+use egui::Pos2;
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
@@ -33,15 +34,13 @@ use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_assembly::SnapKind;
 use crate::selection::same_item;
-use crate::theme::Tokens;
 use crate::viewport::{Hit, Proj};
+use solidcraft_theme::Tokens;
 
 /// How near (screen points) a pick must come to a snap point to take it.
 pub(crate) const POINT_REACH: f32 = 10.0;
 /// How near a pick must come to a round edge to take its centre.
 pub(crate) const RIM_REACH: f32 = 6.0;
-/// How far (screen points) from a hole's centre a press takes its handle.
-const HANDLE_REACH: f32 = 9.0;
 /// The most triangles of one face looked through for its snaps.
 const MAX_TRIANGLES: usize = 1 << 18;
 
@@ -209,7 +208,7 @@ fn snap_under(app: &SolveApp, body: &str, index: usize, point: Vec3) -> (Arc<Vec
 
 /// The holes placed so far: the index of each one's face place, and where it is. A round face
 /// split at its seam is picked as both halves, the one picked first where the hole goes.
-fn places(s: &Session, d: &Dialog) -> Vec<(usize, Vec3)> {
+pub(crate) fn places(s: &Session, d: &Dialog) -> Vec<(usize, Vec3)> {
     let Some(inp) = d.inputs.first() else { return Vec::new() };
     let mut taken: Vec<Sel> = Vec::new();
     let mut out = Vec::new();
@@ -246,24 +245,49 @@ pub(crate) fn move_place(d: &mut Dialog, s: &Session, i: usize, to: Sel) -> bool
     true
 }
 
+/// What a pick on a face with a hole did to that hole (see [`pick_moves`]).
+pub(crate) enum PickMove {
+    /// Not a move: the pick goes to the dialog as any pick does.
+    No,
+    Moved,
+    /// Spent, the hole left where it is (the dialog already says why, if anything does).
+    Spent,
+    /// Spent, the hole left where it is, and why.
+    Refused(&'static str),
+}
+
+/// Why a pick did not move a hole one reference edge holds: its line leaves the face first.
+pub(crate) const HELD_OFF_ITS_LINE: &str = "The reference edge holds this hole on a line that leaves the face before the picked point. Pick where the line crosses the face, or take the edge out to move the hole freely.";
+
 /// A Single hole's face place picked on a face that already has a hole moves that hole there
 /// (true), when holes move by clicking. A pick on the hole itself (within its radius) is left to
-/// take it out, as before.
-pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> bool {
-    let Kind::Hole { opts, diameter, .. } = &d.kind else { return false };
-    let Sel::Face { point, .. } = sel else { return false };
+/// take it out, as before. A hole held along one reference edge goes along it only, and the pick
+/// is spent either way (it never takes the hole out instead): when the line leaves the face before
+/// the pick, it is refused with why.
+pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> PickMove {
+    let Kind::Hole { opts, diameter, .. } = &d.kind else { return PickMove::No };
+    let Sel::Face { point, .. } = sel else { return PickMove::No };
     if opts.multiple || d.active != 0 {
-        return false;
+        return PickMove::No;
     }
     let radius = s.doc.eval(diameter, ValueKind::Length).ok().filter(|v| v.is_finite() && *v > 0.0).map_or(0.0, |v| v / 2.0);
     let group = crate::viewport::grouped_selection(s, sel);
-    let Some(inp) = d.inputs.first() else { return false };
-    let Some(i) = inp.items.iter().position(|x| group.iter().any(|g| same_item(x, g))) else { return false };
-    let Some(Sel::Face { point: was, .. }) = inp.items.get(i) else { return false };
+    let Some(inp) = d.inputs.first() else { return PickMove::No };
+    let Some(i) = inp.items.iter().position(|x| group.iter().any(|g| same_item(x, g))) else { return PickMove::No };
+    let Some(Sel::Face { point: was, .. }) = inp.items.get(i) else { return PickMove::No };
     if was.dist(*point) <= radius {
-        return false;
+        return PickMove::No;
     }
-    move_place(d, s, i, sel.clone())
+    match crate::hole_refs::freedom(s, d, i) {
+        crate::place_gizmo::Freedom::Plane if move_place(d, s, i, sel.clone()) => PickMove::Moved,
+        crate::place_gizmo::Freedom::Plane => PickMove::No,
+        crate::place_gizmo::Freedom::Line(_) => match crate::hole_refs::drag_to(s, d, i, *point) {
+            Ok(()) => PickMove::Moved,
+            Err(crate::hole_refs::Stuck::OffFace) => PickMove::Refused(HELD_OFF_ITS_LINE),
+            // A distance that does not evaluate shows its own error.
+            Err(crate::hole_refs::Stuck::Not) => PickMove::Spent,
+        },
+    }
 }
 
 /// Whether this dialog's faces take several Single holes (Preferences): a new Hole in Single
@@ -327,6 +351,16 @@ fn several_change(s: &Session, d: &mut Dialog, n: usize, to: Option<Sel>) {
     set_places(s, d, places);
 }
 
+/// Move the hole placed by item `i` of the face input to `to`, or take it out, when a face takes
+/// several: the placement marker names a hole by its item (see `place_gizmo/hole.rs`). False when
+/// item `i` places no hole.
+pub(crate) fn several_change_item(s: &Session, d: &mut Dialog, i: usize, to: Option<Sel>) -> bool {
+    let items = d.inputs.first().map(|inp| inp.items.as_slice()).unwrap_or_default();
+    let Some(n) = several_places(s, items).iter().position(|&k| k == i) else { return false };
+    several_change(s, d, n, to);
+    true
+}
+
 /// When a face takes several Single holes (Preferences), a face pick adds a hole there, or takes
 /// out the hole it lands on (within its radius). True when the pick was taken so.
 pub(crate) fn pick_several(app: &SolveApp, d: &mut Dialog, sel: &Sel) -> bool {
@@ -387,86 +421,9 @@ pub(crate) fn group_made(app: &mut SolveApp, d: &Dialog, made: Vec<u64>) {
     }
 }
 
-/// The hovered face's snap marks, and the face places' handles when holes move by dragging.
-/// Called after the canvas draws the dialog's arrows, so a press on a hole's centre takes the
-/// hole, not the depth arrow.
-pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
-    let Some(d) = app.dialog.as_ref() else { return };
-    if !matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple) || app.applying.is_some() {
-        return;
-    }
-    marks(app, painter, proj);
-    if !app.preferences.hole_moves {
-        return;
-    }
-    let several = several(app, d);
-    let places = if several {
-        several_list(&app.session, d)
-            .into_iter()
-            .enumerate()
-            .filter_map(|(n, x)| if let Sel::Face { point, .. } = x { Some((n, point)) } else { None })
-            .collect()
-    } else {
-        places(&app.session, d)
-    };
-    let mut moved: Option<(usize, Sel)> = None;
-    let mut removed: Option<usize> = None;
-    for (n, (i, at)) in places.into_iter().enumerate() {
-        let Some(mut c) = proj.to_screen(at) else { continue };
-        let id = egui::Id::unique(("sc_hole_place", i));
-        let r = ui.interact(egui::Rect::from_center_size(c, vec2(2.0 * HANDLE_REACH, 2.0 * HANDLE_REACH)), id, egui::Sense::click_and_drag());
-        // A click on the hole takes it out, as a pick of a picked face does.
-        if r.clicked() {
-            removed = Some(i);
-        }
-        if r.dragged()
-            && let Some(p) = r.interact_pointer_pos()
-        {
-            // Where a click under the pointer would place a hole: on a face, snapped.
-            let hits = crate::viewport::pick(app, proj, p);
-            if let Some((_, to @ Sel::Face { .. })) = crate::viewport::candidate(app, &hits) {
-                if let Sel::Face { point, .. } = &to
-                    && let Some(q) = proj.to_screen(*point)
-                {
-                    c = q;
-                }
-                moved = Some((i, to));
-            }
-        }
-        let hot = r.hovered() || r.dragged();
-        if hot {
-            ui.ctx().set_cursor_icon(if r.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
-        }
-        crate::place_gizmo::marker(ui, painter, id, c, r.hovered(), r.dragged());
-        crate::scenario::publish_handle(&format!("hole:{n}"), c);
-        if !r.dragged() {
-            r.backing_on_hover_text(crate::i18n::tr_label("Drag to move the hole; click to remove it"));
-        }
-    }
-    // With several holes on a face, `i` counts the holes rather than the input's items.
-    if let Some((i, to)) = moved
-        && let Some(d) = app.dialog.as_mut()
-    {
-        if several {
-            several_change(&app.session, d, i, Some(to));
-        } else {
-            move_place(d, &app.session, i, to);
-        }
-    }
-    if let Some(i) = removed
-        && let Some(d) = app.dialog.as_mut()
-    {
-        if several {
-            several_change(&app.session, d, i, None);
-        } else {
-            remove_place(d, &app.session, i);
-        }
-    }
-}
-
 /// Take out the hole placed by item `i` of the face input (with the other half of a round face
 /// split at its seam).
-fn remove_place(d: &mut Dialog, s: &Session, i: usize) {
+pub(crate) fn remove_place(d: &mut Dialog, s: &Session, i: usize) {
     let Some(inp) = d.inputs.first_mut() else { return };
     let Some(old) = inp.items.get(i).cloned() else { return };
     let own = crate::viewport::grouped_selection(s, &old);
@@ -475,8 +432,8 @@ fn remove_place(d: &mut Dialog, s: &Session, i: usize) {
 }
 
 /// The snap points of the face under the cursor while a Single hole is placed, and the one a
-/// pick there takes, named.
-fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+/// pick there takes, named. Called by the canvas after the placement handles.
+pub(crate) fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if !snapping(app) {
         return;
     }
@@ -486,7 +443,7 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     for s in snaps.iter() {
         let Some(c) = proj.to_screen(s.at) else { continue };
         if on.as_ref().is_some_and(|o| o.at == s.at) {
-            let name = crate::i18n::tr_label(crate::dialogs_assembly::snap_name(s.kind));
+            let name = solidcraft_ui_text::tr_label(crate::dialogs_assembly::snap_name(s.kind));
             crate::icons::markers::snap(painter, c, None, s.kind, t.hover_profile_edge, Some(name));
         } else {
             crate::icons::markers::snap_hint(painter, c, s.kind, t.manipulator);

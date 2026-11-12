@@ -1,0 +1,1497 @@
+{
+ "cases": [
+  {
+   "name": "eye59_issue_repro",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_off_1e-09",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      1e-09,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_off_1e-06",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      1e-06,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_off_0.0001",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0.0001,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_off_0.001",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0.001,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_off_0.01",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0.01,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_off_0.1",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0.1,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_off_1",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      1.0,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_off_15",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      15.0,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_off_-1",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      -1.0,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_inplane_5_-3",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      5,
+      -3
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_inplane_0_0.5",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0.5
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_inplane_-2_0.5",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "ellipse": {
+      "c": [
+       1,
+       -2,
+       0.5
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radii": [
+       4,
+       2.5
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     360
+    ],
+    "c2": {
+     "line": {
+      "p": [
+       10,
+       0,
+       0.5
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       -5,
+       5
+      ]
+     }
+    },
+    "ivl2": [
+     -5,
+     5
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      -2,
+      0.5
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_rect_eyez_30",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      -5
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      2,
+      1,
+      30
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_rect_eyez_1",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      -5
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      2,
+      1,
+      1
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_rect_eyez_0.001",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      -5
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      2,
+      1,
+      0.001
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_rect_eyez_0",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      -5
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      2,
+      1,
+      0
+     ]
+    ],
+    "requested": 1
+   }
+  },
+  {
+   "name": "eye59_rect_eyez_-5",
+   "upstream_ref": "solidcore#59: perspective eye on or near the view plane",
+   "inputs": {
+    "op": "gcs",
+    "c1": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl1": [
+     0,
+     1
+    ],
+    "c2": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl2": [
+     0,
+     1
+    ],
+    "sop": 18,
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [
+     [
+      0,
+      0,
+      -5
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      2,
+      1,
+      -5
+     ]
+    ],
+    "requested": 1
+   }
+  }
+ ]
+}
