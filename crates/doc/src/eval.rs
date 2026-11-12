@@ -728,8 +728,6 @@ pub struct ModelState {
     /// evaluation, so without these a design that is evaluated again hands such a name to the next
     /// body.
     pub reserved_body_names: std::collections::BTreeSet<String>,
-    /// Sheet metal bodies (by body name) and their flat patterns.
-    pub sheets: Vec<crate::sheet::SheetBody>,
     /// Bodies converted to sheet metal (#6748): their flat patterns. Such a
     /// body is the folded sheet.
     pub surface_sheets: Vec<crate::SurfaceSheet>,
@@ -861,7 +859,6 @@ impl ModelState {
             }
         }
         serde_json::to_string(&self.threads).unwrap_or_default().hash(&mut h);
-        serde_json::to_string(&self.sheets).unwrap_or_default().hash(&mut h);
         serde_json::to_string(&self.surface_sheets).unwrap_or_default().hash(&mut h);
         // Construction axes, planes and points so far: features find them here by name, and a
         // result taken from the cache brings back the ones it was made with, so one moved past
@@ -879,8 +876,7 @@ impl ModelState {
     fn stamp(&mut self, doc: &Document, before: &Arc<ModelState>, f: &Feature, key: u64, mats: Vec<Mat>) {
         let feature = f.id;
         let depth = before.bodies.iter().filter_map(|b| b.names.depth()).max().unwrap_or(0) + 1;
-        let sheets = if f.kind.is_sheet() { self.sheets.clone() } else { Vec::new() };
-        let origin = Arc::new(crate::naming::NamingOrigin { feature: f.clone(), before: before.clone(), depth, mats, sheets });
+        let origin = Arc::new(crate::naming::NamingOrigin { feature: f.clone(), before: before.clone(), depth, mats });
         // Pieces a cut left are named after their faces, not the kernel's shell order (unless
         // the feature was saved when they were named in that order).
         if !f.shell_piece_order {
@@ -1236,7 +1232,7 @@ impl ModelState {
     pub fn retained_bytes(&self) -> usize {
         let bodies: usize = self.bodies.iter().map(|b| if b.bytes > 0 { b.bytes } else { b.body.retained_bytes() }).sum();
         let sketches: usize = self.sketches.iter().map(|s| s.retained_bytes()).sum();
-        bodies + sketches + self.sheets.len() * 4096 + self.threads.len() * 192 + self.construct.len() * 192
+        bodies + sketches + self.threads.len() * 192 + self.construct.len() * 192
     }
 
     /// [`ModelState::retained_bytes`] of what this state holds that `before` does not: bodies
@@ -1260,7 +1256,7 @@ impl ModelState {
             .sum();
         let kept: std::collections::HashSet<*const SolvedSketch> = before.sketches.iter().map(Arc::as_ptr).collect();
         let sketches: usize = self.sketches.iter().filter(|s| !kept.contains(&Arc::as_ptr(s))).map(|s| s.retained_bytes()).sum();
-        bodies + sketches + self.sheets.len() * 4096 + self.threads.len() * 192 + self.construct.len() * 192
+        bodies + sketches + self.threads.len() * 192 + self.construct.len() * 192
     }
 
     pub fn body(&self, name: &str) -> Option<&ModelBody> {
@@ -2253,15 +2249,15 @@ impl Feature {
     /// name), an extrude or revolve from a sketch of its component on the bodies it names or its
     /// component's bodies (no To / From Object, through all or taper), a fillet or chamfer of
     /// the body its edges lie on (#6183). Construction geometry it names is in its key already
-    /// ([`construct_digest`]). Never with a face picked by name, an edge picked by name outside
-    /// a fillet or chamfer, or sheet metal around; everything else may read anything (faces, To
-    /// Object, `*` for every body).
+    /// ([`construct_digest`]). Never with a face picked by name, or an edge picked by name outside
+    /// a fillet or chamfer; everything else may read anything (faces, To Object, `*` for every
+    /// body).
     fn reads(&self, doc: &Document, st: &ModelState) -> Option<Reads> {
         let by_name = |f: &Feature| f.face_names.iter().all(String::is_empty) && f.edge_names.iter().all(String::is_empty) && f.edge_refs.is_empty();
         let blend = matches!(self.kind, FeatureKind::Fillet { .. } | FeatureKind::Chamfer { .. });
         // A fillet or chamfer finds its edges by name on its own body alone.
         let faces_by_name = self.face_names.iter().any(|n| !n.is_empty());
-        if !st.sheets.is_empty() || faces_by_name || (!blend && !by_name(self)) {
+        if faces_by_name || (!blend && !by_name(self)) {
             return None;
         }
         let named = |names: &[String]| -> Option<Vec<usize>> {
@@ -2388,8 +2384,7 @@ impl ModelState {
             _ => (self.sketches.as_slice(), None),
         };
         let others = before.sketches.iter().filter(|s| s.feature != feature);
-        let same_rest = self.sheets.is_empty()
-            && kept.len() == others.clone().count()
+        let same_rest = kept.len() == others.clone().count()
             && kept.iter().zip(others).all(|(a, b)| Arc::ptr_eq(a, b))
             && (sketch.is_some() || kept.len() == before.sketches.len())
             && self.sketch_keys == before.sketch_keys
@@ -2547,7 +2542,6 @@ fn pose_moved(old: Option<&FeatureResult>, f: &Feature, fp: u64, state: &ModelSt
     let same = names(&before) == names(&after)
         && old.state.bodies.len() == state.bodies.len()
         && old.state.threads.len() == state.threads.len()
-        && old.state.sheets.len() == state.sheets.len()
         && old.state.construct.len() == state.construct.len();
     same.then_some(after)
 }
@@ -3697,7 +3691,6 @@ impl Model {
         let quoted = self.results.iter().skip(at).any(|r| [&r.error, &r.warning].into_iter().flatten().any(|m| m.contains(old)));
         let named_elsewhere = self.results.iter().any(|r| {
             r.state.body(new).is_some()
-                || r.state.sheets.iter().any(|x| x.body == old)
                 || r.state.surface_sheets.iter().any(|x| x.body == old)
                 || r.state.threads.iter().any(|t| t.body == old)
         });
@@ -9152,45 +9145,13 @@ fn smooth_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<Vec3> {
     out
 }
 
-/// `plane` with the sheet face it names (see `sheet::plane_sheet_face`) replaced by that face's current
-/// plane in the frame of component `comp`, or an error when the face is gone: a lost
-/// attachment is reported, never moved to the nearest face.
-pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u64, plane: &PlaneRef) -> Result<PlaneRef> {
-    Ok(match plane {
-        PlaneRef::Face { name: Some(name), anchor: None, .. } if crate::sheet::plane_sheet_face(plane).is_some() => {
-            let lost = || DocError::Invalid(format!("lost face attachment: the sheet face `{name}` no longer exists; reattach the sketch to a face"));
-            let (body, face) = crate::sheet::sheet_face_plane(st, name).ok_or_else(lost)?;
-            if doc.occurrences.is_empty() && doc.body_offsets.is_empty() {
-                return Ok(PlaneRef::Custom { plane: face });
-            }
-            // The body's own coordinates into the component's frame, as `state_in_frame` places its bodies.
-            let source = st.body(&body).ok_or_else(lost)?;
-            let inverse = crate::mat_inverse(&doc.component_transform(comp)).ok_or_else(lost)?;
-            let m = crate::mat_mul(&inverse, &doc.component_transform(doc.model_body_component(source)));
-            let m = doc.model_body_offset(source).map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m);
-            let placed = Plane::new(crate::apply_point(&m, face.origin), crate::apply_vector(&m, face.x), crate::apply_vector(&m, face.y));
-            PlaneRef::Custom { plane: placed.ok_or_else(lost)? }
-        }
-        PlaneRef::Offset { base, distance } => {
-            PlaneRef::Offset { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), distance: distance.clone() }
-        }
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => PlaneRef::AtAngle {
-            base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?),
-            axis_origin: *axis_origin,
-            axis_dir: *axis_dir,
-            angle: angle.clone(),
-            line: line.clone(),
-            direction_only: *direction_only,
-            pivot: pivot.clone(),
-        },
-        PlaneRef::Flipped { base, about_y } => {
-            PlaneRef::Flipped { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), about_y: *about_y }
-        }
-        PlaneRef::ThroughPoint { base, point } => {
-            PlaneRef::ThroughPoint { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), point: point.clone() }
-        }
-        other => other.clone(),
-    })
+/// Why `plane` finds no face when it is attached to a sheet face by the sheet's name for it (see
+/// `sheet::plane_sheet_face`, also beneath an offset or a rotation): no sheet names a face so now
+/// (see [`crate::sheet::sheet_face_name`]), so the face is gone. A lost attachment is reported,
+/// never moved to the nearest face.
+pub(crate) fn lost_sheet_face(plane: &PlaneRef) -> DocError {
+    let name = crate::sheet::plane_sheet_face(plane).unwrap_or_default();
+    DocError::Invalid(format!("lost face attachment: the sheet face `{name}` no longer exists; reattach the sketch to a face"))
 }
 
 /// The plane of the body face a sketch sits on, found again: the face its stored `name` finds,
@@ -9633,11 +9594,8 @@ fn eval_feature(
                     }
                     pl
                 }
-                // On a flat face of a sheet: that panel's plane as it is now, as a sketch on the
-                // face finds it (the stored plane is only where the face was picked).
-                None if crate::sheet::plane_sheet_face(plane).is_some() => {
-                    doc.resolve_plane_in(vals, &sheet_face_plane_in_frame(doc, st, f.component, plane)?, 0, f.component, Some(st))?
-                }
+                // On a flat face of a sheet by the sheet's name for it: no such face now.
+                None if crate::sheet::plane_sheet_face(plane).is_some() => return Err(lost_sheet_face(plane)),
                 // A plane of numbers alone reads no body: placing them all is the design's size.
                 None if plane_is_fixed(plane) => doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?,
                 // Picks on bodies of other (moved) components are where those bodies are shown.
@@ -10294,10 +10252,8 @@ fn eval_sketch(
     };
     let (plane, face_warning) = match (anchor, plane) {
         (Some(_), plane) => doc.resolve_attached_plane_noted(vals, plane, f.component, st, &fst)?,
-        // A flat face of a sheet: the panel's exact plane, from its flat region and fold.
-        (None, plane) if crate::sheet::plane_sheet_face(plane).is_some() => {
-            (doc.resolve_plane_in(vals, &sheet_face_plane_in_frame(doc, st, f.component, plane)?, 0, f.component, Some(&fst))?, None)
-        }
+        // A flat face of a sheet by the sheet's name for it: no such face now.
+        (None, plane) if crate::sheet::plane_sheet_face(plane).is_some() => return Err(lost_sheet_face(plane)),
         (None, PlaneRef::Face { plane: picked, at, name, anchor: None }) => face_plane(&fst, picked, *at, name.as_deref())?,
         (None, other) => {
             (doc.resolve_plane_in(vals, &*construction_planes_in_frame(doc, st, f.component, other)?, 0, f.component, Some(&fst))?, None)

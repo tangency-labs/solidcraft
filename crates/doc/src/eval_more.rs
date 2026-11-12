@@ -634,7 +634,6 @@ fn convert_to_sheet(
     if let Some(b) = st.bodies.iter_mut().find(|b| b.name == *body) {
         replace_traced_sheet_body(b, solid, lineage, &sheet.frames);
     }
-    st.sheets.retain(|s| s.body != sheet.body);
     st.surface_sheets.retain(|s| s.body != sheet.body);
     st.surface_sheets.push(sheet);
     Ok(())
@@ -1615,7 +1614,7 @@ pub(super) fn surface_prism_cut(
 }
 
 /// Refuses a tapered extrude cut (or intersect) that changes a sheet made from surfaces it targets
-/// (#6748) where the sheet can't keep it, as the flat model refuses it:
+/// (#6748) where the sheet can't keep it:
 ///
 /// - a cut that stops inside a flat panel's thickness: a cap of the extrude (an end of the
 ///   interval `constructor` says it was drawn over) lies strictly between the faces of a flat

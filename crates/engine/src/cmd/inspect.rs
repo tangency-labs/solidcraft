@@ -187,22 +187,14 @@ pub(super) fn measure_body(
     definitions: Option<&solidcraft_doc::ModelState>,
 ) -> Result<solidcraft_kernel::BodyMeasure> {
     let mut measured = b.measure()?;
-    if let Some(state) = definitions
-        && let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
-    {
-        let definition = state.body(b.definition_name()).ok_or_else(|| EngineError::Other(format!("missing sheet body `{}`", sheet.body)))?;
-        // A body transfer moves the geometry and sheet metadata together. Apply only
-        // the placement relative to the current definition, so holes move once.
-        let inverse = solidcraft_doc::mat_inverse(&definition.source_transform)
-            .ok_or_else(|| EngineError::Other(format!("invalid sheet placement for `{}`", sheet.body)))?;
-        let placement = solidcraft_doc::mat_mul(&b.source_transform, &inverse);
-        sheet.correct_perforation_properties(&mut measured, &placement)?;
-    }
-    // A sheet made from surfaces (#6748): its perforation fields' holes the same way.
+    // A sheet's perforation fields (#732): their holes, which the body does not have, come off
+    // what it measures.
     if let Some(state) = definitions
         && let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
     {
         let definition = state.body(b.definition_name()).ok_or_else(|| EngineError::Other(format!("missing sheet body `{}`", sheet.body)))?;
+        // A body transfer moves the geometry and sheet metadata together. Apply only
+        // the placement relative to the current definition, so holes move once.
         let inverse = solidcraft_doc::mat_inverse(&definition.source_transform)
             .ok_or_else(|| EngineError::Other(format!("invalid sheet placement for `{}`", sheet.body)))?;
         let placement = solidcraft_doc::mat_mul(&b.source_transform, &inverse);
@@ -295,21 +287,8 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b.density_g_cm3 = Some(rho);
             b.mass_g = Some(v * rho / 1000.0);
         }
-        // Only Measure exposes sheet boundary counts; document.inspect keeps kernel counts.
-        if let Some(sheet) = definitions.sheets.iter().find(|sheet| sheet.body == source) {
-            let (df, de, dv) = sheet.round_hole_correction();
-            match &mut b.measurement.outcome {
-                BodyOutcome::Measured(f) => {
-                    f.faces = count(f.kernel.faces) + df;
-                    f.edges = count(f.kernel.edges) + de;
-                    f.vertices = count(f.kernel.vertices) + dv;
-                }
-                BodyOutcome::Failed(x) => (x.faces, x.edges, x.vertices) = (Some(df), Some(de), Some(dv)),
-            }
-            b.sheet_metal = Some(true);
-        }
-        // A sheet made from surfaces (#6748) is sheet metal too: its perforation fields' holes
-        // are taken off where each body is measured (`measure_body`).
+        // A sheet made from surfaces (#6748) is sheet metal: its perforation fields' holes are
+        // taken off where each body is measured (`measure_body`).
         if definitions.surface_sheets.iter().any(|sk| sk.body == source) {
             b.sheet_metal = Some(true);
         }

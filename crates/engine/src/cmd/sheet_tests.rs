@@ -7261,7 +7261,7 @@ fn flat_exports(s: &mut Session) -> Vec<std::result::Result<Value, String>> {
 /// A sheet metal body mirrored, or patterned, into new bodies makes sheet metal bodies (#3353):
 /// each copy has a flat pattern and a bend table, and a sheet metal feature on a copy rebuilds it
 /// from its moved model where it is. A mirrored copy's model is its source's mirrored in the
-/// flat (x → −x) with the same thickness side (`SheetBody::copied`, d9d6af51c, as
+/// flat (x → −x) with the same thickness side (`SurfaceSheet::copied`, as
 /// `a_mirrored_sheet_copy_is_the_opposite_hand_with_the_mirror_image_flat_pattern` has it): the
 /// opposite hand's blank, each bend turning the same way, its pocket on the same face.
 #[test]

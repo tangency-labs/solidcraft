@@ -600,7 +600,6 @@ impl SavedModel {
                     .and_then(Json::as_array)
                     .map(|a| a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect())
                     .unwrap_or_default(),
-                sheets: Vec::new(),
                 surface_sheets: match s.get("surface_sheets") {
                     Some(v) => v
                         .as_array()

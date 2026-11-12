@@ -87,7 +87,6 @@ pub mod render_settings;
 pub mod render_surface;
 pub mod render_texture_resources;
 pub mod sheet;
-mod sheet_flat_lineage;
 mod sheet_surface;
 mod sheet_surface_convert;
 mod sheet_surface_cuts;

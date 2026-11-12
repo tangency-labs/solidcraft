@@ -632,7 +632,7 @@ impl FlangeEdge {
 
 /// One segment of an edge flange's edge: a stretch of the edge as fractions of the stretch the
 /// sheet still has (`from`, `to`, 0…1), with its own angle, height and side where given (the
-/// edge's, then the feature's, where left out). See `sheet::SheetBody::add_flanges_each`.
+/// edge's, then the feature's, where left out). See `eval_more::segment_runs`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(deny_unknown_fields)]
 pub struct FlangeSegment {
@@ -1488,7 +1488,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Bend radius")]
         radius: Option<Expr>,
-        /// inside | outside | middle | material_outside | tangent (`sheet::SheetBody::add_flanges_each`).
+        /// inside | outside | middle | material_outside | tangent (`SurfaceSheet::flange_on`).
         #[serde(default = "inside_str")]
         position: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
