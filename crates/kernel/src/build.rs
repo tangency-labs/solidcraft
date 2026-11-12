@@ -1153,20 +1153,9 @@ pub(crate) fn loft_reversed(sections: &[(Plane, Loop2)]) -> Result<bool> {
 }
 
 /// The loft's sections as the walls are built through them: in canonical order (`reversed`
-/// turns them round), each oriented the same way, cut to the same number of segments and started
-/// at the segment that joins the first segment of the section before it.
-///
-/// Each section winds the way the section before it does about the normal they share (its
-/// plane's normal, turned over where it faces back from the one before), so sections whose planes
-/// turn on round the loft (a bar bent half a turn) keep one winding. Each section that is not a
-/// full circle is paired with the one before it ([`crate::loft_pairing::correspond`]): a vertex
-/// either pairs with a vertex of the other or cuts the other's segment where it lands, so both
-/// gain the vertices only the other had, and every section before takes the same cuts. A section
-/// can so end up with more vertices than any section has on its own (two hood profiles, each
-/// with a vertex on a straight side that the other lacks). A full circle has no corners of its
-/// own: it is split at the directions of the section before it (the first section after it when
-/// it comes first, or the one with the most segments when every section is a circle) and started
-/// where its vertices line up best with that section's.
+/// turns them round), each wound the way the one before it is, cut to the vertices it shares
+/// with the others and started at the segment that joins the first segment of the section before
+/// it, by solidcore's matching ([`solidcore_ops::sweep::match_loft_sections`]).
 pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: bool) -> Result<Vec<(Plane, NumberedLoop)>> {
     let most = sections.iter().map(|(_, l)| l.lp.segs.len()).max().unwrap_or(0);
     if most == 0 || most > MAX_SEGS {
@@ -1177,110 +1166,12 @@ pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: 
     if reversed {
         ordered.reverse();
     }
-    let first_normal = ordered.first().map(|(p, _)| p.normal()).ok_or_else(|| KernelError::Invalid("no sections".into()))?;
-    // Each section wound as the one before it, and the frame the pairing compares sections in:
-    // the first plane's axes, carried from each plane to the next by the least rotation that
-    // takes one normal onto the other.
-    let (mut normal, mut axis) = (first_normal, ordered.first().map(|(p, _)| p.x).unwrap_or(Vec3::X));
-    let mut wound: Vec<(Plane, NumberedLoop, bool, crate::loft_pairing::Frame)> = Vec::with_capacity(ordered.len());
-    for (p, l) in &ordered {
-        let back = p.normal().dot(normal) < 0.0;
-        let n = if back { p.normal() * -1.0 } else { p.normal() };
-        axis = carried(axis, normal, n);
-        normal = n;
-        let side = n.cross(axis);
-        let l = l.oriented(back);
-        let frame = crate::loft_pairing::Frame::new(Vec2::new(axis.dot(p.x), axis.dot(p.y)), Vec2::new(side.dot(p.x), side.dot(p.y)), &l.lp);
-        wound.push((*p, l, back, frame));
-    }
-    let failed = || KernelError::Failed("loft sections could not be paired".into());
-    // The sections that are not circles, paired one after the other; each pairing cuts every
-    // section paired before it the same way, so their segments stay matched one to one.
-    let mut done: Vec<Option<NumberedLoop>> = vec![None; wound.len()];
-    let mut paired: Vec<usize> = Vec::new();
-    for (k, (_, l, _, frame)) in wound.iter().enumerate() {
-        if l.is_circle() {
-            continue;
-        }
-        let Some(&last) = paired.last() else {
-            *done.get_mut(k).ok_or_else(failed)? = Some(l.clone());
-            paired.push(k);
-            continue;
-        };
-        let (Some(Some(prev)), Some((_, _, _, fa))) = (done.get(last), wound.get(last)) else { return Err(failed()) };
-        let c = crate::loft_pairing::correspond(prev, *fa, l, *frame)?;
-        for &q in &paired {
-            if let Some(r) = done.get_mut(q).and_then(Option::as_mut) {
-                *r = r.cut(&c.a_cuts).ok_or_else(failed)?;
-            }
-        }
-        let mut next = l.cut(&c.b_cuts).ok_or_else(failed)?;
-        next.rotate_left(c.b_start);
-        if next.lp.segs.len() > MAX_SEGS {
-            return Err(KernelError::Invalid("matching loft sections would create too many segments".into()));
-        }
-        *done.get_mut(k).ok_or_else(failed)? = Some(next);
-        paired.push(k);
-    }
-    let corners = |p: &Plane, l: &NumberedLoop| -> Vec<Vec3> {
-        let c = p.to_world(l.lp.centroid());
-        l.lp.segs.iter().map(|s| p.to_world(s.start()) - c).collect()
-    };
-    // The share of a loop's perimeter before each of its vertices: where a circle section breaks
-    // when the directions it follows do not go round in order.
-    let shares_of = |l: &NumberedLoop| -> Vec<f64> {
-        let len: f64 = l.lp.segs.iter().map(Seg2::length).sum();
-        l.lp.segs
-            .iter()
-            .scan(0.0, |before, s| {
-                let f = *before / len;
-                *before += s.length();
-                Some(f)
-            })
-            .collect()
-    };
-    // What the first section follows when it is a circle: the first section that is not, or with
-    // circles only, the one with the most segments, wound as the first.
-    let lead = match paired.first() {
-        Some(&f) => wound.get(f).map(|w| w.0).zip(done.get(f).cloned().flatten()),
-        None => wound.iter().max_by_key(|w| w.1.lp.segs.len()).map(|(p, l, _, _)| (*p, l.oriented(p.normal().dot(first_normal) < 0.0))),
-    };
-    let mut out: Vec<(Plane, NumberedLoop)> = Vec::with_capacity(wound.len());
-    for (k, (p, l, back, _)) in wound.iter().enumerate() {
-        if let Some(Some(r)) = done.get(k) {
-            out.push((*p, r.clone()));
-            continue;
-        }
-        let (fp, fl) = out.last().cloned().or_else(|| lead.clone()).ok_or_else(failed)?;
-        // Break angles: the followed corners seen in this plane. A re-split circle runs counter-
-        // clockwise in its plane; wound the other way when the plane faces back.
-        let local: Vec<Vec2> = corners(&fp, &fl).iter().map(|d| Vec2::new(d.dot(p.x), d.dot(p.y))).collect();
-        let angles: Vec<f64> = local.iter().map(|d| d.angle()).collect();
-        let mut r = l.circle_resampled(fl.lp.segs.len(), &angles, &shares_of(&fl), false).ok_or_else(failed)?.oriented(*back);
-        // Start where every vertex lines up best with the followed one of the same number (the
-        // largest sum of dot products of their directions from the centroids).
-        let c = r.lp.centroid();
-        let m = r.lp.segs.len();
-        let fit =
-            |k: usize| -> f64 { local.iter().enumerate().filter_map(|(i, d)| r.lp.segs.get((i + k) % m).map(|s| (s.start() - c).dot(*d))).sum() };
-        if let Some(k) = (0..m).min_by(|a, b| fit(*b).total_cmp(&fit(*a))) {
-            r.rotate_left(k);
-        }
-        out.push((*p, r));
-    }
-    Ok(out)
-}
-
-/// `axis` (perpendicular to the unit normal `from`) carried onto the plane of the unit normal `to`
-/// by the least rotation taking `from` onto `to`.
-fn carried(axis: Vec3, from: Vec3, to: Vec3) -> Vec3 {
-    let k = from.cross(to);
-    let (sin, cos) = (k.len(), from.dot(to));
-    let turned = match k.normalized() {
-        Some(k) if sin > 1e-12 => axis * cos + k.cross(axis) * sin + k * (k.dot(axis) * (1.0 - cos)),
-        _ => axis,
-    };
-    (turned - to * to.dot(turned)).normalized().unwrap_or_else(|| to.any_perp())
+    let given: Vec<_> = ordered.iter().map(|(p, l)| solidcore_ops::sweep::LoftSection { plane: *p, segs: l.lp.segs.clone() }).collect();
+    let matched = solidcore_ops::sweep::match_loft_sections(&given, MAX_SEGS).map_err(|e| match e {
+        solidcore_ops::Error::Argument => KernelError::Invalid("these loft sections cannot be matched (no length, or too many segments)".into()),
+        e => KernelError::Failed(format!("loft sections could not be paired: {e}")),
+    })?;
+    Ok(ordered.iter().zip(matched).map(|((p, l), m)| (*p, l.matched(m.segs, &m.from))).collect())
 }
 
 /// A 3D path segment for sweeps.

@@ -223,6 +223,23 @@ fn sections_of_an_arc_and_a_line_take_rails() {
     assert!(m.bbox.max.y > 15.0 - 1e-2 && m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 40.0).abs() < 1e-9, "{:?}", m.bbox);
 }
 
+/// A square lofted to the same square with a vertex in the middle of its top side, along a
+/// straight rail up that vertex (scaled to fit): the vertex splits the first square's top side
+/// where it lines up, so every station is the square and the loft is the 20 x 20 x 40 box. (When
+/// the square's first side was halved instead, the bottom's middle joined the top's and the walls
+/// twisted.)
+#[test]
+fn a_vertex_only_one_section_has_takes_a_straight_rail() {
+    let square = Loop2::polygon(&[Vec2::new(-10.0, -10.0), Vec2::new(10.0, -10.0), Vec2::new(10.0, 10.0), Vec2::new(-10.0, 10.0)]);
+    let marked =
+        Loop2::polygon(&[Vec2::new(-10.0, -10.0), Vec2::new(10.0, -10.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0), Vec2::new(-10.0, 10.0)]);
+    let r = straight(Vec2::new(0.0, 10.0), 40.0);
+    let b = loft_with_rails(&[(at(0.0), square), (at(40.0), marked)], std::slice::from_ref(&r), RailFit::Scale).unwrap();
+    assert!(close(volume(&b), 16_000.0, 1e-9), "volume {}", volume(&b));
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-6, "the rail is {worst} mm off the loft");
+}
+
 /// Arcs of different turns (one piece against two, different weights) pair up too: a quarter pie
 /// to a third-of-a-turn pie along a straight rail up their shared centre corner is the plain
 /// loft to a tenth of a percent (the stations between two arcs of different weights are not

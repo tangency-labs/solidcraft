@@ -2816,6 +2816,31 @@ fn loft_through_three_sections_pairs_each_with_the_next() {
     assert!((m.centroid.x - 50.0).abs() < 1e-6, "centre of mass {:?}", m.centroid);
 }
 
+/// A corner drawn twice (a segment of no length) is left out of the matching: the loft is the
+/// box it was before the matching paired the sections' vertices.
+#[test]
+fn loft_builds_through_a_section_with_a_segment_of_no_length() {
+    let poly = |p: &[(f64, f64)]| Loop2::polygon(&p.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>());
+    let mut twice = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+    twice.segs.insert(1, Seg2::Line { a: Vec2::new(40.0, 0.0), b: Vec2::new(40.0, 0.0) });
+    let plain = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+    let m = measure(&loft(&[(Plane::XY, twice), (Plane::XY.offset(10.0), plain)]).unwrap()).unwrap();
+    assert!(rel(m.volume, 8000.0) < 1e-9, "{}", m.volume);
+    assert_eq!(m.faces, 6, "four walls and two caps");
+    assert!(m.bbox.min.dist(Vec3::ZERO) < 1e-9 && m.bbox.max.dist(Vec3::new(40.0, 20.0, 10.0)) < 1e-9, "{:?}", m.bbox);
+}
+
+/// Two 5000-gons (a grid of their pairing would be past its bound): matched as lofts were
+/// before the pairing, the loft builds, the regular prism to 1e-9.
+#[test]
+fn loft_through_sections_too_large_to_pair_builds() {
+    let n = 5000;
+    let gon = |r: f64| Loop2::polygon(&(0..n).map(|k| Vec2::from_angle(k as f64 * std::f64::consts::TAU / n as f64) * r).collect::<Vec<_>>());
+    let m = measure(&loft(&[(Plane::XY, gon(10.0)), (Plane::XY.offset(10.0), gon(10.0))]).unwrap()).unwrap();
+    let area = n as f64 / 2.0 * 100.0 * (std::f64::consts::TAU / n as f64).sin();
+    assert!(rel(m.volume, area * 10.0) < 1e-9, "{} vs {}", m.volume, area * 10.0);
+}
+
 /// A plate 3 m long and 2 mm thick with ten holes of radius `r` along a diagonal, turned by
 /// `tilt` about the X axis and read back from STEP (each rim is then two half circles).
 fn long_plate_with_small_holes(r: f64, tilt: f64) -> (Body, Vec<Vec3>) {
