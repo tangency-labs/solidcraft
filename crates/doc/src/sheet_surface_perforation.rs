@@ -365,14 +365,13 @@ impl Sum {
 
 /// Whether the disk of radius `r` round `c` and `region` overlap. A loop of the region nearer `c`
 /// than `r`, found on its curves, runs through the disk. Otherwise the disk lies on one side of
-/// every loop, and the side `c` is on is read from chords within `r / 2` of the curves, which can't
-/// pass a point `r` away. (Touching is not overlapping.)
+/// every loop, the side `c` is on, read from the curves themselves. (Touching is not overlapping.)
 fn overlaps(region: &Region2, c: Vec2, r: f64) -> bool {
     let loops = || std::iter::once(&region.outer).chain(&region.holes);
     if loops().flat_map(|l| &l.segs).any(|s| s.point_at(s.closest_param(c)).dist(c) < r) {
         return true;
     }
-    let inside = |l: &Loop2| l.polyline(r / 2.0).contains(c);
+    let inside = |l: &Loop2| crate::sheet_surface_cuts::holds(l, c);
     inside(&region.outer) && !region.holes.iter().any(inside)
 }
 
