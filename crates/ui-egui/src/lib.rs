@@ -3732,7 +3732,11 @@ impl SolveApp {
                     viewport_ui.disable();
                 }
                 self.show_workspace(&mut viewport_ui);
-                shell::paint_top_corners(ui.painter(), full, solidcraft_theme::Tokens::get().app_bar);
+                // Only paint the top corners when rounding is enabled. Defaults to true
+                // to preserve the previous appearance.
+                if self.preferences.floating_titlebar_rounded {
+                    shell::paint_top_corners(ui.painter(), full, solidcraft_theme::Tokens::get().app_bar);
+                }
                 toolbar::toolbar(self, ui);
                 self.publish_tab_accent(ui.ctx());
             }
