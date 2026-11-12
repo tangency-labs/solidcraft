@@ -36,7 +36,7 @@
 //! Foundation: [`math`], [`error`], [`kernel`], [`limits`], [`topology`], [`geom`]. Algorithm layers (filled
 //! in as units are ported, see `plan/modules.toml`): [`nurbs`], [`curve`],
 //! [`surface`], [`intersect`], [`boolean`], [`blend`], [`offset`], [`heal`], [`mass`],
-//! [`query`], [`sweep`], [`primitive`].
+//! [`query`], [`sweep`], [`primitive`], [`prism`], [`layout`].
 #![forbid(unsafe_code)]
 
 pub mod error;
@@ -53,6 +53,7 @@ pub mod eval;
 pub mod geom;
 pub mod heal;
 pub mod intersect;
+pub mod layout;
 pub mod mass;
 pub mod nurbs;
 pub mod offset;

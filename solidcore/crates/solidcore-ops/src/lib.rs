@@ -22,8 +22,9 @@
 //!
 //! The families: [`measure`] (mass properties, area, box, point class, gap samples, the picks'
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
-//! [`boolean`], [`stitch`], [`prism`] (planar region booleans and extrusion, prism sections),
-//! [`cell_grid`] (the cells of a grid over a profile).
+//! [`boolean`], [`stitch`], [`prism`] (planar region booleans and extrusion, prism sections, a
+//! view's points in its plane and points along a line), [`cell_grid`] (the cells of a grid over a
+//! profile), [`layout`] (labels spaced along a line).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -51,6 +52,7 @@ pub mod extend;
 pub mod face_surface;
 pub mod file;
 pub mod label;
+pub mod layout;
 pub mod measure;
 pub mod network;
 pub mod offset;

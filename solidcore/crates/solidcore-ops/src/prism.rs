@@ -1,5 +1,6 @@
 //! Planar prisms: booleans of planar regions, the extrusion of planar material, whether a body
-//! is a uniform prism (its section) or the same prism as another, and edges read in a plane.
+//! is a uniform prism (its section) or the same prism as another, edges read in a plane, and a
+//! view's points in its plane and points along a line on it, as a drawing reads them.
 //!
 //! Each is a recipe of kernel calls (`solidcore::prism`): the kernel checks the profiles, splits
 //! their loops, makes their curves, reads sheets back as regions, extrudes a region and proves a
@@ -21,7 +22,7 @@ use solidcore::primitive::primitive_creation::Boolean2d;
 use solidcore::prism::{extrude, measure, profile as kp, read, sheet};
 use solidcore::Brep;
 use solidcore_convert as convert;
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
@@ -392,4 +393,45 @@ pub fn region_area(region: &Region2) -> Result<kp::Area> {
 #[must_use]
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
+}
+
+/// The view `plane`'s coordinates of each of `points`, in their order: one projection for every
+/// point a drawing reads on a view ([`kp::to_local_all`]).
+///
+/// # Errors
+/// [`Error::Argument`] for a plane not finite or not orthonormal to within
+/// [`kp::VIEW_FRAME_TOL`], more than [`kp::MAX_SEGMENTS`] points, or a point not finite.
+pub fn to_local_all(plane: &Plane, points: &[Vec3]) -> Result<Vec<Vec2>> {
+    let points: Vec<solidcore::Vec3> = points.iter().map(|q| convert::vec3(*q)).collect();
+    let read = kp::to_local_all(&convert::plane(plane), &points).map_err(|_| Error::Argument)?;
+    Ok(read.into_iter().map(convert::record_vec2).collect())
+}
+
+/// A line on a plane as [`kp::line_coords_2d`] reads it: its unit, its normal (the unit turned a
+/// quarter counter-clockwise), and each point as `(along, across)`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineCoords {
+    /// The line's unit direction.
+    pub unit: Vec2,
+    /// `unit` turned a quarter counter-clockwise.
+    pub normal: Vec2,
+    /// Each point as `(along, across)` the line, in their order.
+    pub coords: Vec<Vec2>,
+}
+
+/// The line through `origin` along `direction`, and `points` in its coordinates
+/// ([`kp::line_coords_2d`]); with no points, the line's unit and normal alone.
+///
+/// # Errors
+/// [`Error::Argument`] for an origin or a point not finite, a direction not finite or of length
+/// at or below [`kp::MIN_DIRECTION`], or more than [`kp::MAX_SEGMENTS`] points.
+pub fn line_coords_2d(origin: Vec2, direction: Vec2, points: &[Vec2]) -> Result<LineCoords> {
+    let points: Vec<solidcore::math::Vec2> = points.iter().map(|q| convert::vec2(*q)).collect();
+    let read = kp::line_coords_2d(convert::vec2(origin), convert::vec2(direction), &points)
+        .map_err(|_| Error::Argument)?;
+    Ok(LineCoords {
+        unit: convert::record_vec2(read.unit),
+        normal: convert::record_vec2(read.normal),
+        coords: read.coords.into_iter().map(convert::record_vec2).collect(),
+    })
 }

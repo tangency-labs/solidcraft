@@ -15,7 +15,8 @@ use super::extrude::extrude_region;
 use super::measure::{equivalent, section};
 use super::profile::rational_curve;
 use super::profile::{
-    check_regions, curve_on_frame, tapered_flange_ends, Loop2, ProfileRefusal, Region2, Seg2,
+    check_regions, curve_on_frame, line_coords_2d, tapered_flange_ends, to_local, to_local_all,
+    Loop2, ProfileRefusal, Region2, Seg2, MAX_SEGMENTS, MIN_DIRECTION, VIEW_FRAME_TOL,
 };
 use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
 use super::sheet::{region_loops, sheet_regions};
@@ -23,6 +24,7 @@ use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::eval::Frame;
 use crate::geom::extent1d::Extent1d;
+use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec2};
 use crate::primitive::api_trim_ops::create_planar_faces;
@@ -39,6 +41,12 @@ fn xy() -> Frame {
 
 fn p(x: f64, y: f64) -> Point2 {
     Vec2::new(x, y)
+}
+
+/// Whether `r` is a refusal whose message names `size`, the size that fits, as §7 of
+/// `docs/definitions-and-certificates.md` asks of a refusal.
+fn says<T, E: std::fmt::Display>(r: Result<T, E>, size: &str) -> bool {
+    r.is_err_and(|e| e.to_string().contains(size))
 }
 
 fn polygon(pts: &[Point2]) -> Loop2 {
@@ -744,4 +752,145 @@ fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
     assert!(((toe + root) / 2.0 - 14.2).abs() < 1e-12);
     // A non-finite input gives a non-finite answer, never a panic.
     assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
+}
+
+// ---- A view's points in its frame, and points along a line on it ----
+
+fn tilted() -> Frame {
+    // x along (0.6, 0.8, 0) and y along +z: exactly unit and square, so the closed forms are exact.
+    Frame {
+        origin: [1.0, 2.0, 3.0],
+        x_axis: [0.6, 0.8, 0.0],
+        y_axis: [0.0, 0.0, 1.0],
+    }
+}
+
+/// Each point reads as `to_local` reads it, in its order: the closed forms on a tilted frame.
+#[test]
+fn to_local_all_reads_each_point_as_to_local_does() {
+    let f = tilted();
+    let points = [
+        Point3::new(1.6, 2.8, 3.0),
+        Point3::new(1.0, 2.0, 5.0),
+        Point3::new(-2.0, -2.0, 0.0),
+    ];
+    let got = to_local_all(&f, &points).unwrap();
+    assert_eq!(got.len(), 3);
+    for (g, q) in got.iter().zip(&points) {
+        assert_eq!(*g, to_local(&f, *q));
+    }
+    assert!((got[0].x - 1.0).abs() < 1e-15 && got[0].y.abs() < 1e-15);
+    assert!(got[1].x.abs() < 1e-15 && (got[1].y - 2.0).abs() < 1e-15);
+    assert!((got[2].x + 5.0).abs() < 1e-14 && (got[2].y + 3.0).abs() < 1e-14);
+    assert!(to_local_all(&f, &[]).unwrap().is_empty());
+}
+
+/// A frame as close to orthonormal as SolidCraft accepts a view's is read; one further off, or
+/// not finite, is refused, and so are points not finite and too many points. A refusal of a size
+/// names the size that fits.
+#[test]
+fn to_local_all_takes_a_views_frame_and_refuses_the_rest() {
+    let off = |dx: f64| Frame {
+        x_axis: [1.0 + dx, 0.0, 0.0],
+        ..xy()
+    };
+    let q = [Point3::new(1.0, 1.0, 0.0)];
+    assert!(to_local_all(&off(1e-10), &q).is_ok());
+    assert!(to_local_all(&off(0.5 * VIEW_FRAME_TOL), &q).is_ok());
+    assert!(says(
+        to_local_all(&off(2.0 * VIEW_FRAME_TOL), &q),
+        &format!("{VIEW_FRAME_TOL:e}")
+    ));
+    assert!(to_local_all(
+        &Frame {
+            origin: [f64::NAN, 0.0, 0.0],
+            ..xy()
+        },
+        &q
+    )
+    .is_err());
+    assert!(to_local_all(&xy(), &[Point3::new(f64::NAN, 0.0, 0.0)]).is_err());
+    assert!(to_local_all(&xy(), &[Point3::new(f64::INFINITY, 0.0, 0.0)]).is_err());
+    // Finite points 1e12 out read finitely.
+    assert!(to_local_all(&xy(), &[Point3::new(1e12, -1e12, 1e12)]).is_ok());
+    let many = vec![Point3::new(0.0, 0.0, 0.0); MAX_SEGMENTS + 1];
+    assert!(says(
+        to_local_all(&xy(), &many),
+        &format!("at most {MAX_SEGMENTS}")
+    ));
+    assert!(to_local_all(&xy(), &many[..MAX_SEGMENTS]).is_ok());
+}
+
+/// Along and across a 45° line, by hand; the unit and the normal it turns to; no points gives the
+/// line's unit and normal alone; the other way along the line flips both readings.
+#[test]
+fn line_coords_2d_reads_along_and_across_a_line() {
+    let h = FRAC_1_SQRT_2;
+    let got = line_coords_2d(
+        p(1.0, 1.0),
+        Vec2::new(2.0, 2.0),
+        &[p(3.0, 1.0), p(1.0, 1.0), p(0.0, 2.0)],
+    )
+    .unwrap();
+    assert!((got.unit.x - h).abs() < 1e-15 && (got.unit.y - h).abs() < 1e-15);
+    assert!((got.normal.x + h).abs() < 1e-15 && (got.normal.y - h).abs() < 1e-15);
+    let want = [
+        (2f64.sqrt(), -(2f64.sqrt())),
+        (0.0, 0.0),
+        (0.0, 2f64.sqrt()),
+    ];
+    for (g, (along, across)) in got.coords.iter().zip(want) {
+        assert!(
+            (g.x - along).abs() < 1e-14 && (g.y - across).abs() < 1e-14,
+            "{g:?}"
+        );
+    }
+    let back = line_coords_2d(p(1.0, 1.0), Vec2::new(-2.0, -2.0), &[p(3.0, 1.0)]).unwrap();
+    assert!((back.coords[0].x + got.coords[0].x).abs() < 1e-15);
+    assert!((back.coords[0].y + got.coords[0].y).abs() < 1e-15);
+    let alone = line_coords_2d(p(0.0, 0.0), Vec2::new(0.0, -3.0), &[]).unwrap();
+    assert_eq!(
+        (alone.unit, alone.normal),
+        (Vec2::new(0.0, -1.0), Vec2::new(1.0, 0.0))
+    );
+    assert!(alone.coords.is_empty());
+}
+
+/// The direction's length decides at `MIN_DIRECTION` exactly, and huge and tiny directions give
+/// the right unit or a refusal, never a zero "unit": the length is scaled before it is squared.
+#[test]
+fn line_coords_2d_takes_its_unit_at_the_thresholds() {
+    let unit = |d: Vec2| line_coords_2d(p(0.0, 0.0), d, &[]).map(|l| l.unit);
+    assert!(unit(Vec2::new(0.0, 0.0)).is_err());
+    assert!(says(
+        unit(Vec2::new(MIN_DIRECTION, 0.0)),
+        &format!("{MIN_DIRECTION:e}")
+    ));
+    assert_eq!(
+        unit(Vec2::new(1.000_000_1 * MIN_DIRECTION, 0.0)).unwrap(),
+        Vec2::new(1.0, 0.0)
+    );
+    let big = unit(Vec2::new(1e200, 1e200)).unwrap();
+    assert!((big.x - FRAC_1_SQRT_2).abs() < 1e-15 && (big.y - FRAC_1_SQRT_2).abs() < 1e-15);
+    let huge = unit(Vec2::new(-f64::MAX, f64::MAX)).unwrap();
+    assert!((huge.x + FRAC_1_SQRT_2).abs() < 1e-15 && (huge.y - FRAC_1_SQRT_2).abs() < 1e-15);
+    assert!(unit(Vec2::new(1e-300, 1e-300)).is_err());
+    assert!(unit(Vec2::new(f64::NAN, 1.0)).is_err());
+    assert!(unit(Vec2::new(f64::INFINITY, 0.0)).is_err());
+}
+
+/// What a line can't read is refused: an origin or a point not finite, readings that overflow,
+/// too many points.
+#[test]
+fn line_coords_2d_refuses_what_it_cannot_read() {
+    let d = Vec2::new(1.0, 0.0);
+    assert!(line_coords_2d(p(f64::NAN, 0.0), d, &[]).is_err());
+    assert!(line_coords_2d(p(0.0, 0.0), d, &[p(0.0, f64::INFINITY)]).is_err());
+    assert!(line_coords_2d(p(-f64::MAX, 0.0), d, &[p(f64::MAX, 0.0)]).is_err());
+    let many = vec![p(0.0, 0.0); MAX_SEGMENTS + 1];
+    assert!(says(
+        line_coords_2d(p(0.0, 0.0), d, &many),
+        &format!("at most {MAX_SEGMENTS}")
+    ));
+    assert!(line_coords_2d(p(0.0, 0.0), d, &many[..MAX_SEGMENTS]).is_ok());
 }

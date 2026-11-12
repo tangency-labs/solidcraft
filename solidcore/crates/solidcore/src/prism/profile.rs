@@ -809,6 +809,59 @@ pub fn frame_is_orthonormal(frame: &Frame) -> bool {
         && x.dot(y).abs() <= 1e-12
 }
 
+/// The least length a direction may have and still give a unit: a length at or below it is
+/// refused, as SolidCraft's drawings refuse it.
+pub const MIN_DIRECTION: f64 = 1e-9;
+
+/// How far a view's frame may be from orthonormal and still be read: SolidCraft checks a view's
+/// basis to this, so a frame it accepts is never refused here.
+pub const VIEW_FRAME_TOL: f64 = 1e-8;
+
+const OP_LOCAL_ALL: &str = "prism::profile::to_local_all";
+const OP_LINE: &str = "prism::profile::line_coords_2d";
+
+/// Each of `points` in `frame`'s coordinates, as [`to_local`] gives one.
+///
+/// # Errors
+///
+/// `InvalidInput` for a frame not finite or further than [`VIEW_FRAME_TOL`] from orthonormal,
+/// more than [`MAX_SEGMENTS`] points, or a point (or a coordinate it gives) not finite.
+pub fn to_local_all(frame: &Frame, points: &[Point3]) -> Result<Vec<Point2>> {
+    let _ = (frame, points);
+    Err(SolidError::Unsupported {
+        operation: OP_LOCAL_ALL,
+        reason: "not built yet",
+    })
+}
+
+/// A line through a point on a plane, read as a unit along it and the unit a quarter turn
+/// counter-clockwise from it, with points in its coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineCoords {
+    /// The line's unit direction.
+    pub unit: Vec2,
+    /// `unit` turned a quarter counter-clockwise.
+    pub normal: Vec2,
+    /// Each point as `(along, across)`: `((p - origin)·unit, (p - origin)·normal)`.
+    pub coords: Vec<Point2>,
+}
+
+/// The line through `origin` running along `direction`, and `points` in its coordinates. With
+/// no points, the line's unit and normal only.
+///
+/// # Errors
+///
+/// `InvalidInput` for an origin not finite, a direction not finite or of length at or below
+/// [`MIN_DIRECTION`], more than [`MAX_SEGMENTS`] points, or a point (or a coordinate it gives)
+/// not finite.
+pub fn line_coords_2d(origin: Point2, direction: Vec2, points: &[Point2]) -> Result<LineCoords> {
+    let _ = (origin, direction, points);
+    Err(SolidError::Unsupported {
+        operation: OP_LINE,
+        reason: "not built yet",
+    })
+}
+
 /// `seg` as the kernel's curve on `frame` at `level`, in the direction it runs: a line segment,
 /// a circular arc (the kernel's circle on the frame over the arc's angles; its net is proved on the arc where it is read back, [`super::read::planar_pieces`]; a clockwise arc
 /// on the frame mirrored, so it runs as the segment does), a conic or Bézier as its exact NURBS.
