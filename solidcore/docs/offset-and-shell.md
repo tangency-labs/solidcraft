@@ -306,6 +306,13 @@ the plane is extended past its edge. An edge mated next to such a tangent edge, 
 mated, ends at its new vertex (a lamina edge still ends at its vertex's image); where that vertex
 is not on the edge's curve, the mate is refused (`OffsetFailure::TangentEndOffCurve`).
 
+**A given surface's side.** A face's new surface is turned to face the way its old one did by
+comparing the two normals. Upstream reads the new normal at the middle of the new surface's
+domain; for a full cylinder given to a round that point is across the axis, where the normal
+opposes the old round's though both face out, and the round came back inside out. The new normal
+is read where the new surface passes nearest the old face's middle (the domain middle when that
+drop fails).
+
 **Moving faces** (`offset/offset_faces.rs`, `OffsetFacesExecutive`): the tangent blends on the
 named faces are taken off, the faces moved by a local operation onto their offset surfaces, and the
 blends put back (`take_off`, `move_faces`, `reblend`); refusals are `OffsetFacesRefusal`. "Moved no

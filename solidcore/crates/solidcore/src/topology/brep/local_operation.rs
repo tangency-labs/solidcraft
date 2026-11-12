@@ -33,7 +33,9 @@
 //! pointwise normal translation the move is, instead of turning the boundary by the
 //! given plane's frame. This holds for bare surfaces only (neither carries a procedural
 //! definition): a definition's net alone does not prove its plane, and moving the net
-//! would leave the definition behind.
+//! would leave the definition behind. (not upstream, WR-776) A given surface is turned by
+//! its normal where it passes nearest the old face's middle, not at its own domain's
+//! middle, which for a full cylinder given to a round lies across the axis.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -53,6 +55,8 @@ use crate::offset::offset_executive::p2::OffsetNotifications;
 use crate::query::brep::{calculate_bounding_box, BoundingBoxOptions};
 use crate::surface::implicit::{self, AnalyticSupport};
 use crate::surface::plane::Plane;
+use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::surface::surface::SurfaceKind;
 use crate::topology::brep::p1 as bp1;
@@ -208,16 +212,25 @@ fn local_operation_on(
                 }
             }
             let domain = new.natural_uv_domain_if_built();
-            // (`EvaluateNormal(uv, TRUE, TRUE, ..)`: from the left)
-            let new_normal =
-                new.evaluate_normal(k, domain.evaluate(0.5, 0.5), Side::Left, Side::Left)?;
             let old = own;
-            let old_normal = old.evaluate_normal(
+            let old_uv = b.face(face)?.uv_domain.evaluate(0.5, 0.5);
+            // (not upstream, which takes the middle of the new surface's domain) the new
+            // normal where the new surface passes nearest the old face's middle: a full
+            // cylinder's domain middle is across the axis from a round's middle, so the
+            // two normals there oppose though the surfaces face the same way
+            let at = match new.drop_point::<NoObject>(
                 k,
-                b.face(face)?.uv_domain.evaluate(0.5, 0.5),
-                Side::Left,
-                Side::Left,
-            )?;
+                old.evaluate_point(k, old_uv)?,
+                &domain,
+                &DropPointOptions::default(),
+            ) {
+                Ok(dropped) if dropped.success => dropped.result_uv,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                _ => domain.evaluate(0.5, 0.5),
+            };
+            // (`EvaluateNormal(uv, TRUE, TRUE, ..)`: from the left)
+            let new_normal = new.evaluate_normal(k, at, Side::Left, Side::Left)?;
+            let old_normal = old.evaluate_normal(k, old_uv, Side::Left, Side::Left)?;
             // when surface normals oppose - reverse the input surface's orientation
             if old_normal.dot(new_normal) < 0.0 {
                 new.reverse(k, SurfParamType::U)?;
