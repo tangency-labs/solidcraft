@@ -1371,3 +1371,179 @@ fn editing_a_placed_body_move_preserves_its_world_transform() {
     let after = app.session.world_state().unwrap().body("B").unwrap().mesh().bounds();
     assert!(before.min.dist(after.min) < 1e-6 && before.max.dist(after.max) < 1e-6, "{before:?} -> {after:?}");
 }
+
+/// The rings stay on the world axes, so a turn dragged on one goes about the axis it shows, on
+/// top of the turns already made. It went about that axis as the earlier turn had left it, when
+/// the angles always applied about X, then Y, then Z. The body's centre stays where it is.
+#[test]
+fn a_ring_turns_about_the_axis_it_shows_after_another_turn() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+    let centre = Vec3::new(10.0, 15.0, 5.0);
+    h.app.cam = h.app.cam.looking_from(Vec3::X);
+    h.app.cam.target = centre;
+    h.app.cam.distance = 180.0;
+    h.app.run("select.set", json!({"items": [Sel::Body { name: "Body1".into() }]})).unwrap();
+    h.app.start("solid.move");
+    if let Some(Kind::Move { ry, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *ry = "40 deg".into();
+    }
+    h.frames(3);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let radius = gizmo::ring_radius(&proj, centre).unwrap();
+    // The scenario handle sits 60 degrees round the ring: turn it on by 35.
+    let th = 95_f64.to_radians();
+    let target = centre + (Vec3::Y * th.cos() + Vec3::Z * th.sin()) * radius;
+    h.step(&json!({"drag": [{"handle": "move_rx"}, {"world": [target.x, target.y, target.z]}], "steps": 12})).unwrap();
+    let want = gizmo::mul(&gizmo::rotation(Vec3::X, 35_f64.to_radians()), &gizmo::rotation(Vec3::Y, 40_f64.to_radians()));
+    let mut d = h.app.dialog.clone().unwrap();
+    assert_eq!(d.primary().map(|p| p.0), Some("X Angle"));
+    let p = params(&h.app, &d).unwrap();
+    let m = transform(&h.app, &p).unwrap();
+    assert_turn(&m, &want);
+    assert!((apply_point(&m, centre) - centre).len() < 1e-4, "{p}");
+}
+
+/// A Move dialog on the 20 × 30 × 10 box, seen from a corner so every ring has width on screen.
+fn turning_box() -> (crate::scenario::Harness, Vec3) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+    let centre = Vec3::new(10.0, 15.0, 5.0);
+    h.app.cam = h.app.cam.looking_from(Vec3::new(1.0, 0.8, 0.6));
+    h.app.cam.target = centre;
+    h.app.cam.distance = 220.0;
+    h.app.run("select.set", json!({"items": [Sel::Body { name: "Body1".into() }]})).unwrap();
+    h.app.start("solid.move");
+    h.frames(3);
+    (h, centre)
+}
+
+/// Drag ring `ring` (0 to 2) of the triad on by `by` degrees.
+fn turn_ring(h: &mut crate::scenario::Harness, ring: usize, by: f64) {
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let t = triad(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let grip = gizmo::ring_grip(&proj, &t, ring).unwrap();
+    let [start, end] = [grip, grip + by].map(|a| gizmo::handle_point(["rx", "ry", "rz"][ring], Vec3::ZERO, a).unwrap());
+    h.step(&json!({"drag": [{"world": [start.x, start.y, start.z]}, {"world": [end.x, end.y, end.z]}], "steps": 12})).unwrap();
+    h.frames(2);
+}
+
+/// Type the three Free Move angles into the open dialog.
+fn set_angles(h: &mut crate::scenario::Harness, a: [&str; 3]) {
+    if let Some(Kind::Move { rx, ry, rz, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        [*rx, *ry, *rz] = a.map(String::from);
+    }
+    h.frames(3);
+}
+
+/// The three angles the open Move dialog shows.
+fn shown_angles(h: &crate::scenario::Harness) -> [String; 3] {
+    let Kind::Move { rx, ry, rz, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not a move") };
+    [rx.clone(), ry.clone(), rz.clone()]
+}
+
+/// The whole move the dialog makes, in the world.
+fn whole_move(h: &crate::scenario::Harness) -> Mat {
+    let p = params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    transform(&h.app, &p).unwrap()
+}
+
+/// Assert that `m` turns as `want` does (its rotation part only).
+fn assert_turn(m: &Mat, want: &[[f64; 3]; 3]) {
+    let rows = [0, 1, 2].map(|r| [m[0][r], m[1][r], m[2][r]]);
+    for (got, want) in rows.iter().flatten().zip(want.iter().flatten()) {
+        assert!((got - want).abs() < 1e-5, "{rows:?} != {want:?}");
+    }
+}
+
+/// After a turn, the next ring's box reads what was dragged and the first angle stays. It read
+/// "Y Angle 0 deg" while one set of angles in a fixed order described the combined turn: after a
+/// quarter turn about Z, a turn about Y is all X in that form.
+#[test]
+fn the_second_angle_reads_what_was_dragged() {
+    let rot = |a: Vec3, th: f64| gizmo::rotation(a, th.to_radians());
+    let (mut h, centre) = turning_box();
+    set_angles(&mut h, ["0 deg", "0 deg", "90 deg"]);
+    turn_ring(&mut h, 1, 35.0);
+    assert_eq!(shown_angles(&h), ["0 deg", "35 deg", "90 deg"]);
+    let mut d = h.app.dialog.clone().unwrap();
+    assert_eq!(d.primary().map(|p| (p.0, p.2.clone())), Some(("Y Angle", "35 deg".to_string())));
+    let m = whole_move(&h);
+    assert_turn(&m, &gizmo::mul(&rot(Vec3::Y, 35.0), &rot(Vec3::Z, 90.0)));
+    assert!((apply_point(&m, centre) - centre).len() < 1e-4, "the body turns on the spot");
+}
+
+/// Going back to an angle with a later turn on top keeps every turn made and counts that angle
+/// from zero, because no sum of angles makes the turn.
+#[test]
+fn going_back_to_an_earlier_ring_starts_its_angle_over_and_keeps_the_turns() {
+    let rot = |a: Vec3, th: f64| gizmo::rotation(a, th.to_radians());
+    let (mut h, centre) = turning_box();
+    set_angles(&mut h, ["30 deg", "0 deg", "0 deg"]);
+    turn_ring(&mut h, 1, 20.0);
+    assert_eq!(shown_angles(&h), ["30 deg", "20 deg", "0 deg"]);
+    turn_ring(&mut h, 0, 10.0);
+    assert_eq!(shown_angles(&h), ["10 deg", "0 deg", "0 deg"]);
+    let m = whole_move(&h);
+    assert_turn(&m, &gizmo::mul(&gizmo::mul(&rot(Vec3::X, 10.0), &rot(Vec3::Y, 20.0)), &rot(Vec3::X, 30.0)));
+    assert!((apply_point(&m, centre) - centre).len() < 1e-4);
+}
+
+/// A dragged angle stays within one turn: a full turn is back at 0, not 360 (or -580).
+#[test]
+fn a_dragged_angle_stays_within_one_turn() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let app = SolveApp::new(s, Services::default());
+    for (from, by, want) in [
+        ("0 deg", 360.0, "0 deg"),
+        ("355 deg", 5.0, "0 deg"),
+        ("0 deg", -360.0, "0 deg"),
+        ("0 deg", 380.0, "20 deg"),
+        ("-220 deg", -360.0, "-220 deg"),
+        ("-300 deg", -280.0, "-220 deg"),
+        ("0 deg", 355.0, "355 deg"),
+    ] {
+        let mut d = move_dialog(FREE);
+        if let Kind::Move { rx, .. } = &mut d.kind {
+            *rx = from.into();
+        }
+        let change = Change::Rotate { axis: 0, angle: f64::to_radians(by) };
+        drag(&app, &mut d, crate::gizmo::Drag { handle: crate::gizmo::Handle::Ring(0), change, started: true, done: true });
+        let Kind::Move { rx, .. } = &d.kind else { panic!("not a move") };
+        assert_eq!(rx, want, "{from} turned by {by}");
+    }
+}
+
+/// A ring dragged out and back to where it started is back at its angle: the snapped angle
+/// reaches exactly zero on the way back. A click on a ring changes nothing.
+#[test]
+fn a_ring_dragged_back_to_its_start_is_back_at_its_angle() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let app = SolveApp::new(s, Services::default());
+    let rx_of = |d: &Dialog| match &d.kind {
+        Kind::Move { rx, .. } => rx.clone(),
+        _ => panic!("not a move"),
+    };
+    let ring = |d: &mut Dialog, by: f64, started: bool, done: bool| {
+        let change = Change::Rotate { axis: 0, angle: f64::to_radians(by) };
+        drag(&app, d, crate::gizmo::Drag { handle: crate::gizmo::Handle::Ring(0), change, started, done });
+    };
+    let mut d = move_dialog(FREE);
+    if let Kind::Move { rx, .. } = &mut d.kind {
+        *rx = "12 deg".into();
+    }
+    ring(&mut d, 10.0, true, false);
+    assert_eq!(rx_of(&d), "22 deg");
+    ring(&mut d, 5.0, false, false);
+    assert_eq!(rx_of(&d), "17 deg");
+    ring(&mut d, 0.0, false, true);
+    assert_eq!(rx_of(&d), "12 deg", "back where the drag began");
+
+    if let Kind::Move { rx, .. } = &mut d.kind {
+        *rx = "12.50 deg".into();
+    }
+    ring(&mut d, 0.0, true, true);
+    assert_eq!(rx_of(&d), "12.50 deg", "a click leaves the typed angle as it is");
+}

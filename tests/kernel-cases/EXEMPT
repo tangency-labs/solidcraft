@@ -118,6 +118,7 @@ material.properties.validate      materials and their properties
 model.body_features               a listing of the model's timeline per body; crates/engine/src/schema/inspect_tests.rs
 model.edges                       a listing of the model's topology
 model.faces                       a listing of the model's topology
+model.mesh                        a plugin's bounded copy of a body's display mesh; crates/engine/src/plugin/tests.rs
 model.threads                     a listing of the model's topology
 motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
@@ -164,6 +165,9 @@ parameters.move                   parameter bookkeeping; a value change that reb
 parameters.rename                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.users                  parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parts.library                     a listing of the parts library
+plugin.inspect                    plugins: a package's manifest and entries, no geometry; crates/engine/src/plugin/tests.rs
+plugin.list                       plugins: the installed plugins and their declared inputs; crates/engine/src/plugin/tests.rs
+plugin.run                        plugins: runs a sandboxed plugin's entry through the engine's own commands; crates/engine/src/plugin/tests.rs
 pointcloud.delete                 point clouds: points drawn, never a body
 pointcloud.edit                   point clouds: points drawn, never a body
 pointcloud.insert                 point clouds: points drawn, never a body

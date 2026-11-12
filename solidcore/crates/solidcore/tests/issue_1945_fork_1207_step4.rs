@@ -100,7 +100,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.iso_curve_sliver_domain_is_degenerate = true;
-    k.fixes.topology_failed_evaluations_propagate = true;
     k.fixes.heal_stage3_failures_propagate = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;

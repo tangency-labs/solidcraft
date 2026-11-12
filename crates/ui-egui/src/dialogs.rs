@@ -1802,9 +1802,10 @@ impl Dialog {
     }
 
     /// A sketch clicked in the Browser or the History while Extrude, Revolve or Emboss is open
-    /// (#6106): Profiles takes every profile of the sketch, as when the sketch is selected before
-    /// the command starts. The island inside another profile's hole is left out, or it would fill
-    /// the hole. False when the click is not one of those (the caller selects it as usual).
+    /// (#6106): Profiles takes every profile of what was drawn (`drawn_profiles`), as when the
+    /// sketch is selected before the command starts. The island inside another profile's hole is
+    /// left out, or it would fill the hole. False when the click is not one of those (the caller
+    /// selects it as usual).
     pub fn pick_sketch(&mut self, s: &Session, id: u64) -> bool {
         if self.refuse_sketch(s, id) {
             return true;
@@ -1818,7 +1819,7 @@ impl Dialog {
         }
         let profiles: Vec<Sel> = crate::open_meshing::session_world(s)
             .sketch(id)
-            .map(|ss| outermost_profiles(&ss.profiles).map(|index| Sel::Profile { sketch: id, index }).collect())
+            .map(|ss| drawn_profiles(ss).into_iter().map(|index| Sel::Profile { sketch: id, index }).collect())
             .unwrap_or_default();
         let Some(input) = self.inputs.first_mut() else { return false };
         if profiles.is_empty() {
@@ -2233,6 +2234,28 @@ fn outermost_profiles(profiles: &[solidcraft_engine::sketch::Profile]) -> impl I
     };
     let holes: Vec<Vec<String>> = profiles.iter().flat_map(|p| p.hole_curves.iter().map(|h| key(h))).collect();
     (0..profiles.len()).filter(move |&i| profiles.get(i).is_some_and(|p| !holes.contains(&key(&p.outer_curves))))
+}
+
+/// The profiles of `ss` that make up what was drawn, as `profiles: "all"` takes it (#15521):
+/// projected reference geometry (a face's auto-projected edges) only counts when the drawn curves
+/// alone make no profile. Drawn profiles are found without the references, so they are not
+/// entries of `ss.profiles`; a profile of `ss` is taken when it lies in one of them, which also
+/// takes every piece of a drawn region that a projected edge cuts in two.
+fn drawn_profiles(ss: &solidcraft_engine::doc::SolvedSketch) -> Vec<usize> {
+    let drawn = solidcraft_engine::sketch::find_drawn_profiles(&ss.sketch);
+    if drawn.is_empty() {
+        return outermost_profiles(&ss.profiles).collect();
+    }
+    let outermost: Vec<&solidcraft_engine::sketch::Profile> = outermost_profiles(&drawn).filter_map(|i| drawn.get(i)).collect();
+    ss.profiles
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| {
+            let probe = p.region.interior_point();
+            outermost.iter().any(|d| d.contains(probe))
+        })
+        .map(|(i, _)| i)
+        .collect()
 }
 
 /// Profiles of the sketch a feature would use, when there is just one: the active sketch's, else

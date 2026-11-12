@@ -93,6 +93,7 @@ mod metadata;
 pub(crate) mod motion;
 mod notes;
 mod parts;
+mod plugin;
 mod point_cloud;
 mod script;
 mod section;
@@ -184,6 +185,8 @@ pub struct CommandSpec {
     pub enabled: Enabled,
     pub run: Run,
     pub undoable: bool,
+    /// Command authority, independent of undo history. New commands require edit authority.
+    pub effect: craft_plugin::Effect,
     /// What runs instead of `run` when the command is given `live: true` (a frame of an
     /// interactive gesture, see [`Session::execute`]).
     pub live: Option<LiveRun>,
@@ -212,6 +215,7 @@ impl CommandSpec {
             enabled: always,
             run,
             undoable: true,
+            effect: craft_plugin::Effect::Edit,
             live: None,
             reads_model: true,
             planned: None,
@@ -263,6 +267,11 @@ impl CommandSpec {
     }
     pub const fn enabled(mut self, e: Enabled) -> Self {
         self.enabled = e;
+        self
+    }
+    /// Explicitly reviewed to leave the design and authoring state unchanged.
+    pub const fn read_only(mut self) -> Self {
+        self.effect = craft_plugin::Effect::Read;
         self
     }
     pub const fn noundo(mut self) -> Self {
@@ -358,6 +367,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(features_more::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
+    v.extend(plugin::COMMANDS.iter());
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());

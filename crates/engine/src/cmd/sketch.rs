@@ -372,13 +372,13 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("sketch.chain", "Chain", crate::checked!("sketch.chain", chain_cmd)).icon("chain")
         .enabled(in_sketch)
-        .noundo()
+        .noundo().read_only()
         .contract(&CHAIN_CONTRACT)
         .output(output_schema_for::<ChainResult>)
         .params("curve: id: the curves joined to it end to end (what a double-click selects)"),
     CommandSpec::new("sketch.solve", "Solve Sketch", crate::checked!("sketch.solve", solve_cmd)).icon("compute")
         .enabled(in_sketch)
-        .noundo()
+        .noundo().read_only()
         .contract(&SOLVE_CONTRACT)
         .output(output_schema_for::<SolveResult>)
         .params("reports the solver status and degrees of freedom"),
