@@ -892,7 +892,14 @@ fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcra
     }
     let bodies: Vec<String> = features.iter().flat_map(|feature| created_bodies(s, *feature)).collect();
     let mut out = json!({"path": path, "board_path": board_path, "feature": id, "name": feature_name, "bodies": bodies, "created_bodies": bodies, "warnings": feature.warnings});
-    placed.report(&mut out);
+    // The component the board was placed in, as the other imports report theirs.
+    out["component"] = json!(placed.component);
+    out["component_name"] = json!(placed.name);
+    out["occurrence"] = json!(placed.occurrence);
+    if placed.components > 0 {
+        out["subcomponents"] = json!(placed.components);
+        out["rigid_joints"] = json!(placed.joints.len());
+    }
     if features.len() > 1 {
         out["board_solid"] = json!(true);
     }

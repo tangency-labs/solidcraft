@@ -955,7 +955,8 @@ fn model_face_colours_become_one_mesh_each() {
     let body = solidcraft_kernel::extrude(&Plane::XY, &[region], 0.0, 1.0).expect("box").into_iter().next().expect("one body");
     let painted = body.with_paint(Some(solidcraft_kernel::Paint {
         opacity: 1.0,
-        faces: vec![solidcraft_kernel::FacePaint { face: 0, color: [0.0, 0.0, 1.0], opacity: 1.0 }],
+        faces: vec![solidcraft_kernel::FacePaint { face: 0, color: [0.0, 0.0, 1.0], opacity: 1.0, name: None }],
+        name: None,
     }));
     let meshes = model_body_meshes("part", &painted, Some([1.0, 0.0, 0.0])).expect("model meshes");
     assert_eq!(meshes.len(), 2, "{:?}", meshes.iter().map(|m| m.color).collect::<Vec<_>>());
