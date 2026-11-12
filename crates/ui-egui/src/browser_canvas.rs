@@ -32,7 +32,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         "browser.edit_canvas_title"
     };
     let title = solidcraft_ui_text::format(title_id, &[("name", &c.name)]);
-    let at = panel_pos(app);
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx).unwrap_or_else(|| (egui::Align2::LEFT_TOP, panel_pos(app)));
     let (picks, straighten, name) = (m.picks_points(), m.straighten, c.id);
     let (ok, cancel) = if straighten {
         (solidcraft_ui_text::tr("ui.straighten"), solidcraft_ui_text::tr("ui.cancel"))
@@ -42,7 +42,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         ("", solidcraft_ui_text::tr("ui.close"))
     };
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_canvas_panel"), "canvas", &title)
-        .placed(egui::Align2::LEFT_TOP, at)
+        .placed(pivot, at)
         .fields()
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {

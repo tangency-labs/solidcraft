@@ -330,7 +330,10 @@ fn read_curve(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<BSpli
             Ok(b)
         }
         // "a curve of its definition is not a B-spline"
-        _ => Err(SolidError::sm_err(OP_READ)),
+        _ => Err(SolidError::surface_failed(
+            OP_READ,
+            "a curve of the definition is not a B-spline",
+        )),
     }
 }
 
@@ -856,7 +859,7 @@ impl ProceduralBlend {
         let (order, swapped, has_law, values) = if ascii {
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
             let order = st.extract_ulong();
             let swapped = st.extract_int();
             let has_law = st.extract_int();
@@ -864,7 +867,7 @@ impl ProceduralBlend {
             let mut values = [0.0_f64; 10];
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
             let mut read = true;
             for v in &mut values {
                 match st.extract_double() {
@@ -877,7 +880,12 @@ impl ProceduralBlend {
             match (order, swapped, has_law) {
                 (Some(o), Some(s), Some(h)) if read && !failed => (o, s != 0, h != 0, values),
                 // "its definition could not be read"
-                _ => return Err(SolidError::sm_err(OP_READ)),
+                _ => {
+                    return Err(SolidError::surface_failed(
+                        OP_READ,
+                        "the definition could not be read",
+                    ))
+                }
             }
         } else {
             let order = db.read_long()?;
@@ -901,7 +909,7 @@ impl ProceduralBlend {
             let (kind, sizes) = if ascii {
                 let st = db
                     .in_stream_mut()
-                    .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                    .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
                 let kind = st.extract_int();
                 let mut sizes = [0.0_f64; 3];
                 let mut read = true;
@@ -916,7 +924,12 @@ impl ProceduralBlend {
                 match kind {
                     Some(kd) if read && !failed => (i64::from(kd), sizes),
                     // "its definition could not be read"
-                    _ => return Err(SolidError::sm_err(OP_READ)),
+                    _ => {
+                        return Err(SolidError::surface_failed(
+                            OP_READ,
+                            "the definition could not be read",
+                        ))
+                    }
                 }
             } else {
                 let kind = db.read_long()?;
@@ -981,7 +994,10 @@ impl ProceduralBlend {
             seeds.first(),
             seeds.get(1),
         ) else {
-            return Err(SolidError::sm_err(OP_READ));
+            return Err(SolidError::surface_failed(
+                OP_READ,
+                "the definition has fewer than two supports or seeds",
+            ));
         };
         let input = BlendDefinitionInput {
             supports: [s0, s1],
@@ -1375,7 +1391,10 @@ impl ProceduralBlend {
         if let Some(sc) = scale {
             #[allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-refusing test
             if !are_same(sc.x, sc.y) || !are_same(sc.x, sc.z) || !(sc.x > EFF_ZERO) {
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::surface_failed(
+                    OP_TRANSFORM,
+                    "the scale is not uniform and positive",
+                ));
             }
             factor = sc.x;
         }
@@ -1421,11 +1440,13 @@ pub fn recertify_faces(k: &Kernel, b: &crate::topology::Brep) -> Result<()> {
                 if e.is_cancelled() {
                     return e;
                 }
-                SolidError::Upstream {
-                    operation: OP_RECERTIFY,
-                    code: crate::error::SM_ERR,
-                    entity: Some(crate::error::EntityRef::Face(f)),
-                }
+                SolidError::surface_at(
+                    OP_RECERTIFY,
+                    crate::error::surface::SurfaceFailure::Failed(
+                        "the face's net is not proved within its bound of its definition",
+                    ),
+                    crate::error::EntityRef::Face(f),
+                )
             })?;
         }
     }

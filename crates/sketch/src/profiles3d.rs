@@ -232,6 +232,7 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
                 centerline: false,
                 fixed: false,
                 infinite: false,
+                spline_handle_of: None,
             });
         }
         if bad {

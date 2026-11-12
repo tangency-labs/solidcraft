@@ -15,7 +15,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
-use solidcraft_doc::config::{MAX_COLUMNS, MAX_RULES};
+use solidcraft_doc::config::{MAX_COLUMNS, MAX_RULES, RowKey};
 
 use super::check::whole;
 use crate::params::{self, MAX_STRING_LIST, json_brief};
@@ -32,17 +32,44 @@ pub struct ConfigTableParams {}
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigRowParams {
-    /// The row, by name.
+    /// The row, by name or by id.
     #[serde(deserialize_with = "row")]
-    pub row: String,
+    pub row: RowRef,
 }
 
-/// The row's name, with the handler's message for anything that isn't text.
-fn row<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    match Value::deserialize(d)? {
-        Value::String(s) => Ok(s),
-        _ => Err(D::Error::custom(whole("`row` is required"))),
+/// A configuration row, as the commands name one: its name (text) or its fixed id (a whole
+/// number, as `config.table` lists it). A row named `"17"` is not row 17.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RowRef {
+    Name(String),
+    Id(u64),
+}
+
+impl RowRef {
+    /// As the handlers read it: [`RowKey::read`], the one rule.
+    fn read(v: &Value) -> Option<Self> {
+        RowKey::read(v).map(|key| match key {
+            RowKey::Id(id) => RowRef::Id(id),
+            RowKey::Name(name) => RowRef::Name(name.to_string()),
+        })
     }
+}
+
+impl JsonSchema for RowRef {
+    fn schema_name() -> Cow<'static, str> {
+        "RowRef".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A configuration row: its name, or its id as `config.table` lists it.",
+            "anyOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]
+        })
+    }
+}
+
+/// The row, by name or id, with the handler's message for anything else.
+fn row<'de, D: Deserializer<'de>>(d: D) -> Result<RowRef, D::Error> {
+    RowRef::read(&Value::deserialize(d)?).ok_or_else(|| D::Error::custom(whole("`row` is required")))
 }
 
 /// Add columns to the configuration table: parameters, feature suppressions, and bodies' and
@@ -119,15 +146,16 @@ pub struct ConfigColumnParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigRowEditParams {
-    /// The row, by name: 1 to 128 bytes once spaces at either end are dropped. A name the table
-    /// doesn't have adds a row (at most 2000).
+    /// The row, by name (1 to 128 bytes once spaces at either end are dropped) or by id. A name the
+    /// table doesn't have adds a row (at most 2000); an id must be one of its rows.
     #[serde(deserialize_with = "row_name")]
-    #[schemars(length(min = 1, max = 128))]
-    pub name: String,
-    /// A row to copy the cells of, by name. Default: the row's own cells, or the design's current
-    /// values for a new row.
-    #[serde(default)]
-    pub from: Option<String>,
+    #[schemars(schema_with = "row_name_schema")]
+    pub name: RowRef,
+    /// A row to copy the cells of, by name or id. Default: the row's own cells, or the design's
+    /// current values for a new row.
+    #[serde(default, deserialize_with = "from_row", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<RowRef>")]
+    pub from: Option<RowRef>,
     #[serde(default, deserialize_with = "row_values", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "row_values_schema")]
     pub values: Option<Map<String, Value>>,
@@ -349,12 +377,28 @@ fn exactly_one_target(schema: &mut Schema) {
     schema.insert("oneOf".into(), Value::Array(one));
 }
 
-/// A row's name as `config.row` reads `name`: text that, without spaces at either end, is 1 to
+/// A row as `config.row` reads `name`: an id, or text that, without spaces at either end, is 1 to
 /// 128 bytes, with the handler's message for anything else.
-fn row_name<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+fn row_name<'de, D: Deserializer<'de>>(d: D) -> Result<RowRef, D::Error> {
+    match RowRef::read(&Value::deserialize(d)?) {
+        Some(RowRef::Name(name)) if !is_row_name(&name) => Err(D::Error::custom(whole("`name` is required"))),
+        Some(row) => Ok(row),
+        None => Err(D::Error::custom(whole("`name` is required"))),
+    }
+}
+
+fn row_name_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "A row: its name, or its id as `config.table` lists it.",
+        "anyOf": [{"type": "string", "minLength": 1, "maxLength": 128}, {"type": "integer", "minimum": 0}]
+    })
+}
+
+/// `from`: a row by name or id; `null` is left out, as the handler reads it.
+fn from_row<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RowRef>, D::Error> {
     match Value::deserialize(d)? {
-        Value::String(name) if is_row_name(&name) => Ok(name),
-        _ => Err(D::Error::custom(whole("`name` is required"))),
+        Value::Null => Ok(None),
+        v => RowRef::read(&v).map(Some).ok_or_else(|| D::Error::custom(whole("`from` must be a row's name or id"))),
     }
 }
 
@@ -534,6 +578,8 @@ pub struct ConfigTarget {
 /// One row of the table.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ConfigTableRow {
+    /// Its fixed id: a rename keeps it.
+    pub id: u64,
     pub name: String,
     /// Its cell for each column, by column key.
     pub values: BTreeMap<String, String>,

@@ -303,16 +303,13 @@ fn write_issue_1818_operand() {
 fn solidcraft_fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_retry_radius_as_first = true;
-    f.fillet_rail_rim_on_face = true;
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
-    f.fillet_torus_center_on_axis = true;
     f.offset_excess_faces_after_merge = true;
     f.offset_clip_right_side_out = true;
-    f.revolution_offset_axis_both_sides = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
@@ -337,15 +334,12 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_nx1_end_rib_global_merge = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
-    f.cone_parallel_line_midpoint = true;
-    f.cone_parallel_line_domains = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
     f.slice_coincident_faces_sheet_side = true;
     f.boolean_outer_shell_first = true;
     f.edge_reversal_keeps_failed_edge = true;
     f.topology_failed_evaluations_propagate = true;
     f.heal_stage3_failures_propagate = true;
-    f.sweep_frame_on_planar_path_normal = true;
     f.cover_refuses_folded_continuation = true;
     f.boolean_vertex_by_best_crossing = true;
     f.boolean_cleanup_removes_slits = true;
@@ -354,9 +348,7 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
     f.torus_signed_gen_curve_interval = true;
-    f.sheet_sweep_joins_profile_wires = true;
     f.point_solve_keeps_triangle_guess = true;
-    f.imprint_trims_edge_to_proto_vertex = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;

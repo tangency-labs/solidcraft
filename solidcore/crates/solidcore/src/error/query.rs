@@ -14,11 +14,9 @@
 //! | [`QueryFailure::InvalidValue`] | `SM_ERR_INVALID_INPUT`   |
 //!
 //! Deviations: not upstream. A failure says in a phrase what went wrong; the failure's
-//! `operation` path says which routine. No failure names an entity: the sites they
-//! replace named none. The failures that are checks of a caller's arguments stay
-//! [`crate::SolidError::InvalidInput`]. `query/api_queries.rs` and `query/brep.rs` do not
-//! use these yet, and `query/face/p2.rs` keeps one bare status (the point classification's
-//! seam failure, which names its face).
+//! `operation` path says which routine. A failure names an entity only where the site
+//! it replaces did (the point classification's seam failure, at its face). The failures
+//! that are checks of a caller's arguments stay [`crate::SolidError::InvalidInput`].
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER};
 
@@ -112,7 +110,7 @@ impl crate::SolidError {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::SolidError;
 
@@ -164,54 +162,17 @@ mod tests {
     }
 
     /// The query routines describe their failures: their library code builds no bare
-    /// `Upstream` status (the count is the bare sites a file may still hold while a site
-    /// waits on other work).
+    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
+    /// whose conversion waits on other open work.
     #[test]
     fn the_query_routines_build_no_bare_statuses() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![root.join("query.rs")];
-        let mut dirs = vec![root.join("query")];
-        while let Some(dir) = dirs.pop() {
-            for entry in std::fs::read_dir(dir).expect("read dir") {
-                let path = entry.expect("entry").path();
-                if path.is_dir() {
-                    dirs.push(path);
-                } else if path.extension().is_some_and(|x| x == "rs") {
-                    files.push(path);
-                }
-            }
-        }
-        files.sort();
-        assert!(files.len() > 20, "{files:?}");
-        // files that still hold bare statuses, and how many
-        let held = [
-            // open work on these files elsewhere
-            ("api_queries.rs", 26),
-            ("brep.rs", 2),
-            // the point classification's seam failure names its face
-            ("face/p2.rs", 1),
-        ];
-        for path in files {
-            let text = std::fs::read_to_string(&path)
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("\n#[cfg(test)]\nmod ")
-                .map_or(text.as_str(), |at| &text[..at]);
-            let bare: usize = [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-            ]
-            .iter()
-            .map(|needle| library.matches(needle).count())
-            .sum();
-            let rel = path.strip_prefix(root.join("query")).unwrap_or(&path);
-            let want = held
-                .iter()
-                .find(|(name, _)| rel == std::path::Path::new(name))
-                .map_or(0, |(_, n)| *n);
-            assert_eq!(bare, want, "bare statuses in {}", path.display());
-        }
+        assert_eq!(bare_statuses_in("query", 20), Vec::<(String, usize)>::new());
+    }
+
+    /// The files under `src/<area>` (and `src/<area>.rs`) whose library code builds bare
+    /// statuses, with the number each builds, sorted by path; at least `least` files are
+    /// read. Kept for the ratchets that call it; the scan is [`super::super::bare_scan`].
+    pub(in crate::error) fn bare_statuses_in(area: &str, least: usize) -> Vec<(String, usize)> {
+        super::super::bare_scan::bare_statuses_in(area, least)
     }
 }

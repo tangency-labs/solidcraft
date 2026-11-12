@@ -300,7 +300,9 @@ impl Surface {
                 reason: "the surface has no exact B-spline form",
             },
         )?;
-        let net = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+        let net = form
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
         let degree = if side.is_u() { net.p() } else { net.q() };
         let local = Local::of(net, side);
         let fixed = side.at(dom);
@@ -409,7 +411,9 @@ impl Surface {
                 "the extension is not a B-spline",
             ));
         };
-        let out = b.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+        let out = b
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
         let regraded = if side.is_u() {
             out.q() != net.q()
         } else {
