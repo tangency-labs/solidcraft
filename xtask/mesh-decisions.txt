@@ -8,7 +8,6 @@ crates/doc/src/appearance.rs:nearest_face picks the face nearest a point by the 
 crates/doc/src/config_styles.rs:Document::configuration_face_indices checks a configuration's named faces against the display mesh
 crates/doc/src/construct.rs:GeoRef::name_picks names picked faces and edges through the display mesh
 crates/doc/src/construct.rs:named_vertex finds where named edges meet through the display mesh
-crates/doc/src/document.rs:MeshData::eq compares imported mesh payloads by their triangles
 crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
 crates/doc/src/eval.rs:body_at picks the body whose surface is nearest a point by the display mesh
 crates/doc/src/eval.rs:edge_refs turns edge picks into references through the display mesh
@@ -78,7 +77,6 @@ crates/doc/src/naming.rs:mesh_adjacency finds neighbouring faces from mesh edges
 crates/doc/src/naming.rs:normals takes face normals from mesh triangles
 crates/doc/src/naming.rs:roomiest takes a sample point per face from mesh triangles
 crates/doc/src/naming.rs:samples_up_to takes sample points per face from mesh triangles
-crates/doc/src/placement_reuse.rs:same_feature compares imported mesh payloads by their triangles
 crates/doc/src/project.rs:body_mesh finds a projection's body nearest a point by the display mesh
 crates/doc/src/project.rs:cache_key keys projections by the display mesh
 crates/doc/src/project.rs:exact_edges finds the picked edges by the display mesh
