@@ -1595,6 +1595,38 @@ fn create_offset_surface(
     s.create_offset_surface(k, signed_distance, approx_tol_3d)
 }
 
+/// The use of edge `parent` on original face `face` that takes part in the offset, and the
+/// one offset face related to its faceuse. Face construction relates only its
+/// participating use; the opposite use intentionally has no edge/face relation, and the
+/// parent edge itself need not have been mapped uniquely yet.
+fn participating_target<O: Copy + PartialEq>(
+    brep: &impl OffsetBrep<O>,
+    executive: &impl OffsetExecutive<O>,
+    parent: O,
+    face: O,
+) -> Result<(O, O)> {
+    let mut participating = None;
+    for eu in brep.edge_edgeuses(parent)? {
+        if brep.edgeuse_face(eu)? != Some(face) {
+            continue;
+        }
+        let fu = brep
+            .edgeuse_faceuse(eu)?
+            .ok_or(dangling("parent seam without faceuse"))?;
+        let targets = executive.offset_faces(fu);
+        if targets.is_empty() {
+            continue;
+        }
+        let [target] = targets.as_slice() else {
+            return Err(dangling("parent face has no unique target"));
+        };
+        if participating.replace((eu, *target)).is_some() {
+            return Err(dangling("parent face has multiple participating uses"));
+        }
+    }
+    participating.ok_or(dangling("parent face has no participating target"))
+}
+
 /// `IsArc(samples, tol, ..)` of a plain B-spline curve (a rail or an arc this module
 /// built).
 fn is_arc(k: &Kernel, c: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Option<ArcData>> {
@@ -4129,15 +4161,29 @@ impl OffsetGeometryCreation {
         let last = brep
             .edge_other_vertex(edge, first)?
             .ok_or(dangling("seam without last vertex"))?;
+        // The seam's own two faces; the others round an endpoint are where it ends.
+        let seam_faces = [
+            brep.edgeuse_face(edgeuse)?
+                .ok_or(dangling("seam without face"))?,
+            brep.edgeuse_face(other)?
+                .ok_or(dangling("seam without face"))?,
+        ];
         let mut radii = Vec::new();
         for vertex in [first, last] {
             let mut count = 0_usize;
             let mut radius: Option<super::procedural_screw::seam::CylinderCorner> = None;
+            // the faces round the endpoint other than the seam's, each with an edge there
+            let mut beside: Vec<(O, O)> = Vec::new();
             for parent in brep.vertex_edges(vertex)? {
                 if parent == edge {
                     continue;
                 }
                 let faces = brep.edge_faces(parent)?;
+                for &face in &faces {
+                    if !seam_faces.contains(&face) && !beside.iter().any(|&(f, _)| f == face) {
+                        beside.push((face, parent));
+                    }
+                }
                 if faces.len() != 2 {
                     continue;
                 }
@@ -4165,32 +4211,8 @@ impl OffsetGeometryCreation {
                     brep.edge_interval(parent)?,
                     parent_tol,
                 )?;
-                let parent_uses = brep.edge_edgeuses(parent)?;
                 for face in faces {
-                    // Face construction relates only its participating use. The
-                    // opposite use intentionally has no edge/face relation; the
-                    // parent edge itself need not have been mapped uniquely yet.
-                    let mut participating = None;
-                    for &eu in &parent_uses {
-                        if brep.edgeuse_face(eu)? != Some(face) {
-                            continue;
-                        }
-                        let fu = brep
-                            .edgeuse_faceuse(eu)?
-                            .ok_or(dangling("parent seam without faceuse"))?;
-                        let targets = executive.offset_faces(fu);
-                        if targets.is_empty() {
-                            continue;
-                        }
-                        let [target] = targets.as_slice() else {
-                            return Err(dangling("parent face has no unique target"));
-                        };
-                        if participating.replace((eu, *target)).is_some() {
-                            return Err(dangling("parent face has multiple participating uses"));
-                        }
-                    }
-                    let (eu, target) =
-                        participating.ok_or(dangling("parent face has no participating target"))?;
+                    let (eu, target) = participating_target(brep, &*executive, parent, face)?;
                     let surf = surface_handle(brep, eu)?;
                     let uv = brep
                         .edgeuse_uv_trim_curve(eu)?
@@ -4214,10 +4236,32 @@ impl OffsetGeometryCreation {
                     radius = Some(radius.map_or(current, |prior| prior.hull(current)));
                 }
             }
+            // No edge of a cylinder at the endpoint: the seam ends inside the one face
+            // beside it, which must be a proved coaxial cylinder (the meridian cuts it in
+            // one ruling wherever its angular range lies).
+            if count == 0 {
+                if let [(face, parent)] = beside.as_slice() {
+                    let surf = brep
+                        .face_surface(*face)?
+                        .ok_or(dangling("parent face without surface"))?;
+                    if separator.is_coaxial_cylinder(surface_of(brep, surf)?)? {
+                        let (_, target) = participating_target(brep, &*executive, *parent, *face)?;
+                        separator.certify_cylinder_face(k, surface_of(brep, surf)?)?;
+                        let target = brep
+                            .face_surface(target)?
+                            .ok_or(dangling("parent target without surface"))?;
+                        let (extended, _) =
+                            executive.get_create_extended_surface(k, brep, target)?;
+                        radius =
+                            Some(separator.certify_cylinder_face(k, surface_of(brep, extended)?)?);
+                        count = 1;
+                    }
+                }
+            }
             if count != 1 {
                 return Err(SolidError::invalid_input(
                     OP_EXTEND,
-                    "retained seam needs one cylinder separator at each endpoint",
+                    "retained seam needs one cylinder separator or one cylinder face at each endpoint",
                 ));
             }
             radii.push(radius.ok_or(dangling("missing target seam cylinder radius"))?);

@@ -410,6 +410,33 @@ impl Separator {
         })
     }
 
+    /// The corner where a seam ends inside one literal coaxial cylinder face, with no edge
+    /// of the cylinder at its endpoint (a thread's crest on stock whose own seam lies at
+    /// another angle): the meridian half-plane cuts the cylinder in one ruling at its
+    /// radius, wherever the face's angular range lies, so the seam meets it there and no
+    /// parent edge has to be certified in the half-plane. The cylinder's evaluated points
+    /// lie within its checked runtime allowance of the literal one, so its radius
+    /// enclosure is widened by that allowance; with no parent edge there is no meridian
+    /// discrepancy.
+    pub fn certify_cylinder_face(&self, k: &Kernel, surface: &Surface) -> Result<CylinderCorner> {
+        let SurfaceKind::Cone(cone) = surface.kind() else {
+            return Err(bad("seam endpoint has no cylinder parent"));
+        };
+        let radius = cone
+            .coaxial_radius_enclosure(self.origin, self.motion.axis())?
+            .ok_or_else(|| bad("seam parent is not a proved literal coaxial cylinder"))?;
+        let cap = cone
+            .cylinder_runtime_allowance(k)?
+            .ok_or_else(|| bad("uncertified cylinder seam parent"))?;
+        if !cap.is_finite() || cap < 0.0 {
+            return Err(bad("uncertified cylinder seam parent"));
+        }
+        Ok(CylinderCorner {
+            radius: radius + Ivl::new(-cap, cap),
+            meridian_error: 0.0,
+        })
+    }
+
     fn target<'a>(
         &self,
         surface: &'a Surface,

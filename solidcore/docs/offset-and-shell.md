@@ -282,6 +282,16 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   half vertex tolerance the check allows an edge's end; the nearest point stays within the
   deviation, and every end at the corner within half the body's tolerance of the others. No
   tolerance is raised for it.
+- **A seam between two pieces of one screw wall** (a thread cut into a face per half turn)
+  is not intersected: both pieces move to the same offset, and the seam keeps its authored
+  meridian (`extend_screw_separator`, `procedural_screw/seam.rs`). Each end is a corner on a
+  coaxial cylinder, certified with the radius of that cylinder's extension: either an edge
+  between two cylinder faces lying in the meridian (a root cut at the same half turns), or,
+  with no such edge, the one cylinder face the seam ends inside (stock whose own seam is at
+  another angle), which the meridian cuts in one ruling wherever its angular range lies. The
+  cylinders are continued along their rulings keeping their parameters
+  (`Cone::extended_cylinder_keeping_parameters`), including a height map a rounding off the
+  identity, as a record gives it, kept within the cylinder's checked runtime allowance.
 - **The merge** joins the offset faces into one body. An inset keeps every finite region unless
   `offset_keep_cavity_regions` is on; then `cavity::is_cavity_region` keeps a region whose face
   has the input's face one wall behind it (a point solve along the normal). This is a local test,

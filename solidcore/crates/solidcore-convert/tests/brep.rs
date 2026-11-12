@@ -1543,6 +1543,119 @@ fn either_flank_of_a_continuous_m10_thread_moves_in() {
     }
 }
 
+/// SolidCraft #11582: the M10x1.5 thread of the test above as a design saved before its
+/// flanks were joined holds it, each flank cut into a face for every half turn, and
+/// either whole flank (all its pieces) moved in 0.05. Two seams were refused. At a seam's
+/// root end the half-turn root cylinders read back from the record have a STEP height a
+/// rounding off their native one (`[0, 1.6894999999999998]` against `[0, 1.6895]`), and
+/// their continuation kept their parameters only for the identity height map: it gave a
+/// bare B-spline, no cylinder to certify the seam's corner on. At the crest end the seam
+/// stops inside the stock cylinder, whose own seam is 35° away: no cylinder edge meets
+/// it there. The continuation now keeps a height map off the identity, and a seam ending
+/// inside one coaxial cylinder face takes its corner from that face.
+#[test]
+fn either_whole_flank_of_a_half_turn_m10_thread_moves_in() {
+    use solidcore::eval::geometry::sweep::SweepDefinitionRecord;
+    use solidcore::mass::integrator::properties::face_area;
+    use solidcore::offset::offset_faces::OffsetFacesExecutive;
+
+    let gz = format!(
+        "{}/tests/data/m10x1.5_half_turn_thread_on_6mm_shaft.record.json.gz",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let record: Record = serde_json::from_reader(flate2::read::GzDecoder::new(
+        std::fs::File::open(&gz).unwrap(),
+    ))
+    .unwrap();
+    let strict = |k: &mut Kernel, body: &mut Brep| {
+        assert!(is_manifold_solid(body).unwrap());
+        let check = check_brep(k, body, CheckLevel::Level2).unwrap();
+        assert_eq!(check.assert_valid, Some(true), "{:?}", check.reports);
+        assert_eq!(check.failures().count(), 0, "{:?}", check.reports);
+    };
+    let mut k = kernel();
+    let (mut shaft, _) = to_kernel(&mut k, &record, true).unwrap();
+    strict(&mut k, &mut shaft);
+    let before = volume(&k, &mut shaft);
+    let profile = |body: &Brep, id| {
+        let sweep = body
+            .face(id)
+            .unwrap()
+            .surface
+            .as_ref()?
+            .procedural_sweep()?;
+        let SweepDefinitionRecord::Screw { profile, .. } = sweep
+            .definition()
+            .to_record(sweep.net())
+            .unwrap()
+            .definition;
+        Some(profile)
+    };
+    // the flanks: the screw faces grouped by their profile
+    let mut flanks: Vec<Vec<solidcore::FaceId>> = Vec::new();
+    for id in shaft.faces().ids() {
+        let Some(own) = profile(&shaft, id) else {
+            continue;
+        };
+        match flanks
+            .iter_mut()
+            .find(|f| profile(&shaft, f[0]).as_ref() == Some(&own))
+        {
+            Some(flank) => flank.push(id),
+            None => flanks.push(vec![id]),
+        }
+    }
+    assert_eq!(flanks.len(), 2);
+    assert!(flanks.iter().all(|f| f.len() > 1), "a face per half turn");
+    let distance = -0.05;
+    for flank in flanks {
+        let mut body = solidcore::topology::brep::p3::brep_copy(&mut k, &shaft).unwrap();
+        OffsetFacesExecutive::new()
+            .offset_faces(&mut k, &mut body, &flank, distance)
+            .unwrap_or_else(|e| panic!("flank {flank:?}: {e:?}"));
+        strict(&mut k, &mut body);
+        // as for the continuous flank: its area times |d|, to well within 5%
+        let area: f64 = flank
+            .iter()
+            .map(|&id| face_area(&k, &mut shaft, id, 1e-9).unwrap())
+            .sum();
+        let lost = before - volume(&k, &mut body);
+        let swept = distance.abs() * area;
+        assert!(
+            (lost - swept).abs() < 0.05 * swept,
+            "flank {flank:?}: {lost} mm³ lost, {swept} mm³ swept"
+        );
+        let moved: Vec<f64> = body
+            .faces()
+            .iter()
+            .filter_map(|(_, face)| face.surface.as_ref()?.procedural_sweep())
+            .filter(|sweep| sweep.definition().is_normal_offset())
+            .map(|sweep| {
+                let SweepDefinitionRecord::Screw {
+                    offset: Some(offset),
+                    ..
+                } = sweep
+                    .definition()
+                    .to_record(sweep.net())
+                    .unwrap()
+                    .definition
+                else {
+                    panic!("a moved wall keeps its exact source");
+                };
+                offset.signed_distance
+            })
+            .collect();
+        assert_eq!(
+            moved.len(),
+            flank.len(),
+            "flank {flank:?}: every piece moved"
+        );
+        assert!(moved
+            .iter()
+            .all(|d| (d.abs() - distance.abs()).abs() < 1e-14));
+    }
+}
+
 fn boxed(k: &mut Kernel, o: [f64; 3], s: f64) -> Brep {
     primitives::create_box(k, Vec3::new(o[0], o[1], o[2]), s, s, s).unwrap()
 }
