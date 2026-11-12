@@ -45,10 +45,12 @@ const TOUCH_AREA: f64 = 1e-6;
 const FOLD_TABS_REJOIN: &str = "not supported yet: folding tabs that join again beyond the bend";
 pub const FOLD_FIXED_OFF_SHEET: &str = "the fold's fixed point is not on the sheet";
 
-/// A bend radius below this (mm), the sheet model's outline tolerance, is a sharp bend. Its inner
-/// face has collapsed to the bend's inner edge, so the folded solid has only the outer cylindrical
-/// face there, as a press brake makes it with a sharp punch: no inner cylinder.
-const SHARP_BEND: f64 = 1e-3;
+/// A bend radius at or below this (mm) is a sharp bend. Its inner face has collapsed to the bend's
+/// inner edge, so the folded solid has only the outer cylindrical face there, as a press brake
+/// makes it with a sharp punch: no inner cylinder. Half the linear tolerance, so the inner arc's
+/// chord (at most √2 · radius) is below it and the end walls' inner edge collapses too; a larger
+/// radius keeps its inner cylinder and the shell stays closed.
+const SHARP_BEND: f64 = LINEAR_TOL / 2.0;
 
 /// The most bores one sheet keeps.
 const MAX_BORES: usize = 1000;
