@@ -4101,6 +4101,49 @@ fn hovering_a_picked_row_lights_that_item_in_the_view() {
     assert_eq!(h.app.viewport.hover, None);
 }
 
+/// Hovering a picked edge keeps it lit - in the pick's own colour, one step thicker and its halo
+/// wider - instead of drawing nothing, which left the pointer resting invisibly on the pick.
+#[test]
+fn hovering_a_picked_edge_keeps_it_lit_in_the_pick_colours() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.frames(2);
+    let pick = crate::dialogs::edge_sel(&h.app.session, Vec3::new(20.0, 0.0, 20.0)).unwrap();
+    let Sel::Edge { body, index, point } = &pick else { panic!("an edge, not {pick:?}") };
+    h.app.session.selection = vec![pick.clone()];
+    h.frames(2);
+    // Every line the highlight draws, as its palette colour and its width in eighths of a pixel
+    // (a lifted line's width slot holds that; a plain line's holds `f32` bits and is not set).
+    let mut drawn = |hover: Option<crate::viewport::Hit>| -> Vec<([u8; 4], Option<u32>)> {
+        h.app.viewport.hover = hover;
+        let scene = crate::viewport::build_highlight(&h.app).merged();
+        let palette = scene.palette.entries().to_vec();
+        scene
+            .lines
+            .chunks(crate::gpu::LINE_SIZE)
+            .filter(|c| c.len() == crate::gpu::LINE_SIZE)
+            .map(|c| {
+                let idx = u32::from_le_bytes(c[24..28].try_into().unwrap());
+                let word = u32::from_le_bytes(c[28..32].try_into().unwrap());
+                let width = (word & 0x8000_0000 != 0).then_some((word >> 24) & 0x7F);
+                (palette.get(idx as usize).copied().unwrap_or([0; 4]), width)
+            })
+            .collect()
+    };
+    let t = solidcraft_theme::Tokens::get();
+    let (core, rim) = (crate::viewport::c4(t.sel_edge), crate::viewport::c4(t.sel_edge_rim));
+    let hover = crate::viewport::Hit::Edge { body: body.clone(), index: *index, mid: *point, point: *point };
+    let (picked, hovered) = (drawn(None), drawn(Some(hover)));
+    assert!(hovered.len() > picked.len(), "hovering the picked edge lights it again");
+    // The redraw stays in the pick's own colours, one step wider: core 4 px and halo 7 px,
+    // above the picked pass's 3 px and 6 px.
+    assert!(hovered.contains(&(core, Some(32))) && hovered.contains(&(rim, Some(56))), "the picked edge is redrawn thicker");
+    assert!(!picked.contains(&(core, Some(32))) && !picked.contains(&(rim, Some(56))), "the picked pass alone draws the narrower widths");
+    for (colour, _) in &hovered {
+        assert!(colour != &crate::viewport::c4(t.hover_edge) && colour != &crate::viewport::c4(t.hover_edge_halo), "no hover colour is swapped in");
+    }
+}
+
 /// #3683: a body or feature row lights what the Browser and timeline rows light: the body, or
 /// the feature's geometry; leaving it puts the view back.
 #[test]
