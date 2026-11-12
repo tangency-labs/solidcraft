@@ -278,6 +278,27 @@ fn a_revolve_from_a_turned_sub_components_face_joins_and_cuts_it_from_the_top_le
     }
 }
 
+/// A fixed face revolve keeps no attachment to the face, so the Cut's scope takes the picked
+/// face's body as the sketch would have given it (#5679, as solid.extrude does): with the top
+/// level active, the turned part's whole top face swept 180 degrees symmetric about one of its
+/// edges cuts a quarter cylinder of radius 10 out of the part, and leaves the top level's body.
+#[test]
+fn a_fixed_face_revolve_from_the_top_level_cuts_the_picked_faces_body() {
+    let (mut s, placed) = turned_part(true);
+    let at = |x: f64, y: f64, z: f64| solidcraft_doc::apply_point(&placed, solidcore_record::Vec3::new(x, y, z));
+    let (top, origin, along) = (at(5.0, 5.0, 10.0), at(0.0, 0.0, 10.0), at(1.0, 0.0, 10.0));
+    let dir = along - origin;
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [top.x, top.y, top.z], "fixed": true, "axis": {"origin": [origin.x, origin.y, origin.z], "dir": [dir.x, dir.y, dir.z]},
+               "angle": "180 deg", "direction": "symmetric", "operation": "cut"}),
+    );
+    let quarter = std::f64::consts::PI * 100.0 / 4.0 * 10.0;
+    assert!((body_volume(&s, "Stock") - (1000.0 - quarter)).abs() < 1e-3 * quarter, "Stock {}", body_volume(&s, "Stock"));
+    assert!((body_volume(&s, "Base") - 2000.0).abs() < 1e-6);
+}
+
 /// #5679 for Loft (and Sweep, through the same join target): with the top level active, a loft
 /// from a circle on the turned part's top face to one 5 mm above joins the part, in one piece.
 #[test]
