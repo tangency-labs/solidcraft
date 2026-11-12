@@ -33,7 +33,7 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 106, "Appearance system-theme slots and Maya zoom are included");
+    assert_eq!(keys.len(), 107, "Appearance system-theme slots, Maya zoom, navigation hover and large ribbon lists are included");
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -851,6 +851,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "ribbon_click_ends_tool",
         "ribbon_icon_grid",
         "ribbon_labels",
+        "ribbon_large_list_icons",
         "ribbon_menus_follow_hover",
         "ribbon_menus_skip_pinned",
         "ribbon_reveal",
@@ -906,7 +907,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 106);
+    assert_eq!(expected.len(), 107);
     assert_eq!(actual, expected);
 }
 

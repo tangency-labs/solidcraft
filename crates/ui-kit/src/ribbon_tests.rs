@@ -173,7 +173,7 @@ fn button(id: &'static str, enabled: bool) -> Button<'static> {
 fn group(key: &'static str, buttons: Vec<Button<'static>>) -> Group<'static> {
     let more = buttons
         .iter()
-        .map(|b| MoreRow { id: b.id, label: b.label, icon: b.icon, shortcut: "", enabled: b.enabled, checked: None, hint: None })
+        .map(|b| MoreRow { large: false, id: b.id, label: b.label, icon: b.icon, shortcut: "", enabled: b.enabled, checked: None, hint: None })
         .collect();
     let commands = buttons.iter().map(|b| b.id).collect();
     Group {
@@ -461,6 +461,7 @@ fn each_newly_hovered_row_waits_the_full_tip_delay() {
 
 fn menu_style() -> MenuStyle<'static> {
     MenuStyle {
+        large: false,
         pin_tip: "Pin",
         unpin_tip: "Unpin",
         accent: solidcraft_theme::TabAccent::for_ramp(&Tokens::get(), solidcraft_theme::AccentRamp::Main),
@@ -480,12 +481,13 @@ fn entry(id: &'static str, enabled: bool) -> MenuEntry<'static> {
 struct MenuRig {
     ctx: egui::Context,
     grid: bool,
+    large: bool,
     time: std::cell::Cell<f64>,
 }
 
 impl MenuRig {
     fn new(grid: bool) -> MenuRig {
-        let rig = MenuRig { ctx: crate::test_support::context(), grid, time: std::cell::Cell::new(0.0) };
+        let rig = MenuRig { ctx: crate::test_support::context(), grid, large: false, time: std::cell::Cell::new(0.0) };
         rig.frame(Vec::new(), 0.0);
         rig
     }
@@ -501,7 +503,7 @@ impl MenuRig {
             ..Default::default()
         };
         let entries = [entry("m.on", true), entry("m.off", false)];
-        let style = menu_style();
+        let style = MenuStyle { large: self.large, ..menu_style() };
         let mut chosen = Vec::new();
         crate::test_support::raw_frame(&self.ctx, input, |ui| {
             if self.grid {
@@ -536,8 +538,10 @@ impl MenuRig {
 /// a right-click, runs nothing when disabled, and pins or unpins from its pin.
 #[test]
 fn a_menu_entry_returns_what_was_chosen() {
-    for grid in [false, true] {
-        let rig = MenuRig::new(grid);
+    for (grid, large) in [(false, false), (false, true), (true, false)] {
+        let mut rig = MenuRig::new(grid);
+        rig.large = large;
+        rig.frame(Vec::new(), 0.0);
         let on = rig.at("t:entry:m.on");
         let chosen = rig.press(on, egui::PointerButton::Primary, 0.0);
         assert!(matches!(chosen.as_slice(), [(id, MenuAction::Run(rect))] if id == "m.on" && rect.contains(on)), "grid {grid}: {chosen:?}");

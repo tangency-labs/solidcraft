@@ -1,0 +1,26 @@
+{
+    "ar":  {
+               "prefs.menu_large_list":  "قائمة بأيقونات كبيرة"
+           },
+    "de":  {
+               "prefs.menu_large_list":  "Liste mit großen Symbolen"
+           },
+    "en":  {
+               "prefs.menu_large_list":  "List with large icons"
+           },
+    "he":  {
+               "prefs.menu_large_list":  "רשימה עם סמלים גדולים"
+           },
+    "ja":  {
+               "prefs.menu_large_list":  "大きなアイコン付きリスト"
+           },
+    "ko":  {
+               "prefs.menu_large_list":  "큰 아이콘 목록"
+           },
+    "vi":  {
+               "prefs.menu_large_list":  "Danh sách với biểu tượng lớn"
+           },
+    "zh":  {
+               "prefs.menu_large_list":  "大图标列表"
+           }
+}
