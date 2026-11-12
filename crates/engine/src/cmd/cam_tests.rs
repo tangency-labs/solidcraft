@@ -3819,3 +3819,165 @@ fn pictures_of_the_simulation_view() {
     let png = solidcraft_viewport::render_png(&sc, &cam, 1280, 900).unwrap();
     std::fs::write(out.join("pocket-50.png"), png).unwrap();
 }
+
+// Pictures and extents for agents.
+
+fn near_rgb(a: [u8; 3], b: [u8; 3], within: i32) -> bool {
+    a.iter().zip(b).all(|(x, y)| (i32::from(*x) - i32::from(y)).abs() <= within)
+}
+
+/// A PNG `path` decoded: its size and its RGB pixels, rows top to bottom.
+fn png_pixels(path: &str) -> (u32, u32, Vec<[u8; 3]>) {
+    let img = image::open(path).unwrap_or_else(|e| panic!("{path}: {e}")).to_rgb8();
+    let (w, h) = img.dimensions();
+    (w, h, img.pixels().map(|p| p.0).collect())
+}
+
+/// Where the camera of an `images` reply puts the design point `p` on a `w` × `h` picture.
+fn projected(images: &Value, p: [f64; 3], w: u32, h: u32) -> (f64, f64) {
+    let c = &images["camera"];
+    let at = |v: &Value| v.as_f64().unwrap();
+    let cam = solidcraft_viewport::Camera {
+        target: Vec3::new(at(&c["target"][0]), at(&c["target"][1]), at(&c["target"][2])),
+        yaw: at(&c["yaw"]),
+        pitch: at(&c["pitch"]),
+        distance: at(&c["distance"]),
+        fov: at(&c["fov"]),
+        ..solidcraft_viewport::Camera::default()
+    };
+    let (x, y, _) = cam.to_screen(Vec3::new(p[0], p[1], p[2]), f64::from(w), f64::from(h), 1.0e4).unwrap();
+    (x, y)
+}
+
+/// `cam.job {image, images_dir}`: a picture an agent can look at, drawn headless (no GPU needed),
+/// the operation's colour where its toolpath projects, written only inside the agent's folders;
+/// and the toolpath's extents in work coordinates in the reply.
+#[test]
+fn a_dry_run_draws_the_toolpaths_in_their_colours_inside_the_agents_folders() {
+    let mut s = top_pocket();
+    let dir = Dir::new("image");
+    let root = dir.0.join("allowed");
+    std::fs::create_dir_all(&root).unwrap();
+    let picture = root.join("pocket.png").to_string_lossy().into_owned();
+    let pictures = root.join("ops").to_string_lossy().into_owned();
+    let scope = Some(solidcraft_io::vfs::PathScope::new([root.clone()]));
+    let r = solidcraft_io::vfs::scoped(scope.clone(), || {
+        run(&mut s, "cam.job", json!({"job": pocket_job(), "dry_run": true, "image": picture, "images_dir": pictures, "width": 320, "height": 200}))
+    });
+    assert_clean(&r);
+    let images = &r["images"];
+    assert_eq!((images["view"].as_str(), images["width"].as_u64(), images["height"].as_u64()), (Some("iso"), Some(320), Some(200)), "{r}");
+    assert_eq!(images["image"], picture.as_str(), "{r}");
+    assert_eq!(images["legend"][0], json!({"operation": "top pocket", "colour": "orange", "rgb": "#f07800"}), "{r}");
+    assert!(images["key"].as_array().is_some_and(|k| k.len() >= 6), "{r}");
+    let one = root.join("ops").join("01-top-pocket.png");
+    assert_eq!(images["images"], json!([one.to_string_lossy()]), "{r}");
+    // A dry run writes the pictures, never a program.
+    assert!(r["outputs"]["gcode"].is_null(), "{r}");
+    for path in [picture.clone(), one.to_string_lossy().into_owned()] {
+        let (w, h, px) = png_pixels(&path);
+        assert_eq!((w, h), (320, 200), "{path}");
+        let colours: std::collections::BTreeSet<[u8; 3]> = px.iter().copied().collect();
+        assert!(colours.len() > 50, "{path}: a picture, not a blank: {} colours", colours.len());
+        // The pocket is orange where its toolpath projects: inside the box its extents span.
+        let e = &r["operations"][0]["extents"]["all"];
+        let (mut x0, mut x1, mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        for k in 0..8usize {
+            let c = |i: usize| e[(k >> i) & 1][i].as_f64().unwrap();
+            let (x, y) = projected(images, [c(0), c(1), c(2)], w, h);
+            (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
+        }
+        let orange: Vec<(u32, u32)> =
+            px.iter().enumerate().filter(|(_, c)| near_rgb(**c, [240, 120, 0], 30)).map(|(i, _)| (i as u32 % w, i as u32 / w)).collect();
+        let on_path = |x: u32, y: u32| (x0 - 6.0..=x1 + 6.0).contains(&f64::from(x)) && (y0 - 6.0..=y1 + 6.0).contains(&f64::from(y));
+        let inside = orange.iter().filter(|(x, y)| on_path(*x, *y)).count();
+        // Most of them: the legend's swatch in the corner is orange too.
+        assert!(orange.len() > 100 && inside * 10 >= orange.len() * 8, "{path}: {} orange pixels, {inside} on the path's box", orange.len());
+    }
+    // The extents, in work coordinates: every cut a tool radius inside the pocket's walls, down
+    // to its floor; the rapids up to the clearance.
+    let x = &r["operations"][0]["extents"];
+    assert_eq!(x["cut"][0], json!([-6.0, -4.0, -4.0]), "{x}");
+    assert!((x["cut"][1][0].as_f64().unwrap() - 6.0).abs() < 1e-9 && (x["cut"][1][1].as_f64().unwrap() - 4.0).abs() < 1e-9, "{x}");
+    assert_eq!(x["all"][1][2].as_f64(), Some(20.0), "rapids up to the clearance: {x}");
+    assert!(x["rotary"].as_array().is_some_and(Vec::is_empty) && x["summary"].as_str().is_some_and(|t| t.starts_with("cut X -6..6")), "{x}");
+    // Outside the folders nothing is computed or written.
+    let outside = dir.file("pocket.png");
+    let e = solidcraft_io::vfs::scoped(scope.clone(), || {
+        s.execute("cam.job", &json!({"job": pocket_job(), "dry_run": true, "image": outside})).unwrap_err()
+    });
+    assert!(e.to_string().contains("outside the folders this agent may use"), "{e}");
+    let e =
+        solidcraft_io::vfs::scoped(scope.clone(), || s.execute("cam.view", &json!({"job": pocket_job(), "path": dir.file("view.png")})).unwrap_err());
+    assert!(e.to_string().contains("outside the folders this agent may use"), "{e}");
+    assert!(!PathBuf::from(&outside).exists() && !dir.0.join("view.png").exists());
+    // Every refusal says what to change.
+    for (p, says) in [
+        (json!({"job": pocket_job(), "dry_run": true, "view": "top"}), "give `image`"),
+        (json!({"job": pocket_job(), "dry_run": true, "image": picture, "view": "sideways"}), "iso, top, bottom"),
+        (json!({"job": pocket_job(), "dry_run": true, "image": picture, "width": 5}), "16 to 4096"),
+        (json!({"job": pocket_job(), "dry_run": true, "image": ""}), "must not be empty"),
+        (json!({"job": pocket_job(), "output": picture, "image": picture}), "a file of its own"),
+    ] {
+        let e = solidcraft_io::vfs::scoped(scope.clone(), || s.execute("cam.job", &p).unwrap_err());
+        assert!(e.to_string().contains(says), "{p}: {e}");
+    }
+}
+
+/// `cam.view` on a 4th-axis job looks from the front (from -Y, the A axis level across the
+/// picture) and draws the A axis; one operation is drawn alone, and an unknown one is refused
+/// with the job's operation names.
+#[test]
+fn a_4axis_view_looks_along_the_a_axis_and_draws_one_operation() {
+    let mut s = top_pocket();
+    let dir = Dir::new("view");
+    let path = dir.file("block.png");
+    let mut job = two_tool_job();
+    job["machine"] = json!("4axis_a");
+    let r = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), || {
+        run(&mut s, "cam.view", json!({"job": job, "path": path, "op": "outline", "width": 300, "height": 200}))
+    });
+    assert_eq!(r["passed"], true, "{r}");
+    assert_eq!(r["path"], path.as_str(), "{r}");
+    let image = &r["image"];
+    assert_eq!(image["view"], "front", "{r}");
+    assert_eq!((image["camera"]["yaw"].as_f64(), image["camera"]["pitch"].as_f64()), (Some(0.0), Some(0.0)), "{r}");
+    assert!(image["key"].as_array().unwrap().iter().any(|k| k.as_str().is_some_and(|k| k.contains("rotary table's axis"))), "{r}");
+    let (w, h, px) = png_pixels(&path);
+    assert_eq!((w, h), (300, 200));
+    // The A axis runs level across the picture through work zero.
+    let (_, y) = projected(image, [0.0, 0.0, 0.0], w, h);
+    let row = y.round() as u32;
+    let dark = (0..w)
+        .filter(|x| (row.saturating_sub(1)..=row + 1).any(|y| px.get((y * w + x) as usize).is_some_and(|c| near_rgb(*c, [35, 35, 45], 30))))
+        .count();
+    assert!(dark > 20, "{dark} pixels of the A axis on row {row}");
+    // The outline is drawn in its own colour (the second, purple); the pocket is not drawn.
+    assert!(px.iter().filter(|c| near_rgb(**c, [140, 60, 200], 30)).count() > 50, "the outline is drawn");
+    assert_eq!(px.iter().filter(|c| near_rgb(**c, [240, 120, 0], 20)).count(), 0, "the pocket is left out");
+    let ops = r["operations"].as_array().unwrap();
+    assert_eq!((ops[0]["name"].as_str(), ops[0]["drawn"].as_bool()), (Some("top pocket"), Some(false)), "{r}");
+    assert_eq!((ops[1]["name"].as_str(), ops[1]["drawn"].as_bool()), (Some("outline"), Some(true)), "{r}");
+    // A held at zero: the extents give A 0..0, as the written program turns it.
+    let a = &ops[1]["extents"]["rotary"][0];
+    assert_eq!((a["letter"].as_str(), a["min_deg"].as_f64(), a["max_deg"].as_f64()), (Some("A"), Some(0.0), Some(0.0)), "{r}");
+    assert!(ops[1]["extents"]["summary"].as_str().is_some_and(|t| t.contains("; A ")), "{r}");
+    // A refusal names what there is.
+    let e = s.execute("cam.view", &json!({"job": job, "path": path, "op": "nope"})).unwrap_err();
+    assert!(e.to_string().contains("no operation `nope`") && e.to_string().contains("`outline`"), "{e}");
+    for p in [
+        json!({}),
+        json!({"path": ""}),
+        json!({"job": job}),
+        json!({"job": job, "path": path, "width": 0}),
+        json!({"job": job, "path": path, "view": 7}),
+        json!({"job": job, "path": path, "dry_run": true}),
+        json!({"job": job, "job_path": "x.json", "path": path}),
+    ] {
+        match s.execute("cam.view", &p) {
+            Err(EngineError::Internal(_, msg)) => panic!("{p}: panicked: {msg}"),
+            Err(_) => {}
+            Ok(v) => panic!("{p}: accepted: {v}"),
+        }
+    }
+}

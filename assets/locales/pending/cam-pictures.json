@@ -1,0 +1,10 @@
+{
+  "en": { "cmd.cam.view": "CAM View" },
+  "ar": { "cmd.cam.view": "عرض مسارات CAM" },
+  "de": { "cmd.cam.view": "CAM-Ansicht" },
+  "fr": { "cmd.cam.view": "Vue FAO" },
+  "he": { "cmd.cam.view": "תצוגת CAM" },
+  "ja": { "cmd.cam.view": "CAMビュー" },
+  "vi": { "cmd.cam.view": "Xem CAM" },
+  "zh": { "cmd.cam.view": "CAM 视图" }
+}

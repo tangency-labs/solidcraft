@@ -12,6 +12,7 @@ commands work with jobs, from scripts, the CLI and MCP alike:
 | `cam.gcode.check` | Reads a G-code file and reports lengths, time, the rotary range, inverse-time blocks and the first line it cannot read |
 | `cam.simulate` | Runs a written program through a model of the stock and holds what it leaves against the part: gouges, rapids through material, material left |
 | `cam.view.*` | The simulation view: a job's program played move by move on the simulated stock (see [Simulation view](#simulation-view)) |
+| `cam.view` | A PNG of the part with the job's toolpaths drawn over it, for an agent to look at (see [Pictures and extents for agents](#pictures-and-extents-for-agents)) |
 
 Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`, …).
 
@@ -32,6 +33,7 @@ Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`,
 | `allow_unsafe` | Write the program even when a check fails. Its first line (the program's name, as a comment) then ends `WRITTEN WITH FAILED CHECKS`, so the file says so; no line moves. |
 | `split_by_tool` | Write one program per tool instead of one program: each run of operations with one tool is a program of its own, named after `output` with its place and tool (`bracket-2-T6.ngc`). Each is complete on its own (the post's safe start, the same work offset, the tool change and the tool's length offset on its first Z), with a header naming its place in the order, the tool (`THIS PROGRAM USES T6 - ...`, not a line a checker reads as a tool table entry), its stickout and the length offset to set; each is read back on its own. The reply's `programs` and `outputs.programs` list them in the order to run them, and the setup sheet does too. An older program of every tool under `output`'s name left beside them is a warning. For a machine that ignores tool changes (`tool_change: ignored`, below). |
 | `simulate` | Also run the program as written through the stock-removal simulation (below): a gouge or a rapid through material fails the job like the other checks, material left on the part is a warning, and the reply carries `simulation`. |
+| `image`, `images_dir`, `view`, `width`, `height` | Pictures of the toolpaths for an agent: see [Pictures and extents for agents](#pictures-and-extents-for-agents). |
 | `simulate_resolution` | With `simulate`: the simulation's cell size in mm, as `cam.simulate`'s `resolution`. Default: five times the tolerance, coarser where the stock or the program is too large for that. |
 
 Every file is read and written through the session's file access, so an MCP server's
@@ -89,7 +91,7 @@ message. With `dry_run`, the reply carries `passed: false` and `failures`.
 
 `name`, `machine`, `post`, `operations` (each with `name`, `kind`, `tool`, `moves`,
 `cut_length`, `cut_minutes`, `rewinds`, `max_tilt_deg`, `a_deg` (indexed ones), `gouge`, `gouge_at`
-(when it gouges), `holder_collisions`, `adaptive` (an adaptive operation's engagement), `warnings`), `program_lines`, `program_head` (the first lines),
+(when it gouges), `holder_collisions`, `adaptive` (an adaptive operation's engagement), `warnings` and `extents`), `program_lines`, `program_head` (the first lines),
 `readback` (`max_tip_deviation`, `max_axis_deviation_deg`, `allowed_tip`, `allowed_axis_deg`,
 `cut_minutes`, `pass`), `rapids` (`checked`, `hits`, `worst`, `pass`, `from_unknown`, `first`),
 `travel` (`checked`, `violation`, `pass`; `null` without `linear_limits`), `stock` (as checked
@@ -102,7 +104,7 @@ feed: as the machine runs it with the job's `machine_rates`, otherwise as writte
 `programs`), `notes` (a post that writes no work offset, an output extension other than the
 post's, what the machine's rates say about the program, in a dry run too), `simulation` (with
 `simulate`, as [`cam.simulate`](#stock-removal-simulation) replies), `summary` (the setup
-sheet's tables, see [Setup sheet](#setup-sheet)), `warnings` (what to look at that does not fail
+sheet's tables, see [Setup sheet](#setup-sheet)), `images` (with `image` or `images_dir`), `warnings` (what to look at that does not fail
 the job) and, with `split_by_tool`, `programs` (`order`, `path`, `tool`, `stickout`,
 `operations`, `lines`, `cut_minutes`). The operations' minutes add up to
 `readback.cut_minutes`, the program's as the controller times it.
@@ -1196,3 +1198,67 @@ cannot read). Arcs are measured round in their own plane: `G17` with `I J`, `G18
 absolute-coordinate G-code SolidCraft's posts write; programs from elsewhere are read on a
 best-effort basis and stop at the first block it cannot follow (incremental coordinates, for
 one).
+
+## Pictures and extents for agents
+
+An agent driving SolidCraft over MCP cannot open the HTML preview, but it can look at a PNG and
+read numbers. Two things let it check a toolpath before it writes G-code.
+
+**Extents in every reply.** Each operation of a `cam.job` reply carries `extents`, in work
+coordinates (the design less `origin`): `all` (the tool tip's lowest and highest X, Y, Z over
+every move, rapids included), `cut` (over the feed moves only, each from where it starts, so a
+plunge from the retract height counts), `rotary` (each rotary axis's lowest and highest angle in
+degrees as the written program turns it in that operation: read back from the program, so it
+agrees with what `cam.gcode.check` reads from the file) and `summary`, the same in one line:
+
+```text
+cut X -6..6 Y -4..4 Z -4..1; all moves X -6..6 Y -4..4 Z -4..20
+```
+
+A cut below the part's floor or rapids lower than the clearance show here without a picture.
+
+**Pictures from `cam.job`.**
+
+| Key | Meaning |
+| --- | --- |
+| `image` | A PNG of the part with every toolpath drawn over it. Written in a dry run too (it is not the program); never when the checks refuse the call. |
+| `images_dir` | A folder (made if missing) for one PNG per operation: `01-<name>.png`, `02-<name>.png`, … in program order. |
+| `view` | `iso`, `top`, `bottom`, `front`, `back`, `left` or `right`. Default: `iso`; on a machine with a rotary axis, `front` (from -Y, the A axis level across the picture). |
+| `width`, `height` | 16 to 4096 pixels (default 960 × 600). |
+
+`view`, `width` and `height` without `image` or `images_dir` are refused. The paths are checked
+against the session's folders before anything is computed, like `output`, and `image` must be a
+file of its own.
+
+The part is the design as the MCP `screenshot` tool draws it (without the ground grid and the
+origin's axes), by the renderer the host installed or, headless without one, the CPU rasterizer:
+no GPU is needed. Drawn over it, with the same camera:
+
+- cutting moves as solid lines, one colour per operation (orange, purple, teal, magenta, ochre,
+  brown, pink, gold, then round again);
+- rapids dashed and lighter, plunges (feeding down the tool axis) darker and thicker;
+- entries, where a cut starts after a rapid, as ringed dots;
+- every stretch the part hides from the camera faint (a ray towards the eye meets the part's
+  bodies tessellated within a quarter of the job's tolerance: what the picture shows, not a
+  model decision), so the far side of a path shows without hiding the near side;
+- the tool, grey, where the first operation drawn starts its first cut;
+- work zero's X, Y and Z as red, green and blue arrows;
+- each rotary table's axis as a dark dash-dot line with a ring whose arrow turns as a positive
+  angle turns the part (a reversed axis's the other way);
+- a legend in the top-left corner: the job's name and view, and each operation with its number,
+  type and tool.
+
+The reply's `images` says how it was drawn: `view`, `width`, `height`, `renderer` (what drew the
+part), `camera` (in design coordinates, as `view.apply {camera}` and the `screenshot` tool's
+`camera` take it, to see the same view of the design alone), `image`, `images`, `legend` (each
+operation's colour by name and as `#rrggbb`) and `key` (how to read the picture, in words).
+
+**`cam.view`.** `cam.view {job | job_path, path, op?, view?, width?, height?}` plans and checks
+the job as `cam.job {dry_run: true}` does, writes no G-code, and draws one picture to `path`: the
+whole job, or with `op` the operation of that name alone (an unknown name is refused with the
+job's operation names). It returns `path`, `image` (as above), `operations` (each `name`,
+`kind`, `drawn` and `extents`), `passed`, `failures` and `notes`.
+
+```json
+{"cmd": "cam.view", "params": {"job_path": "C:/parts/bracket.cam.json", "path": "C:/parts/bracket.png", "op": "outline"}}
+```

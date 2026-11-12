@@ -2,7 +2,8 @@
 //! for a design's profiles and surfaces and G-code for a machine, through the `solidcraft-cam`
 //! crate. The job (machine, post, tools, operations) is a JSON file next to the design, never part
 //! of it, so nothing new is saved in a design (docs/cam-jobs.md). The simulation view's commands
-//! (`cam.view.*`) are in `cam_view.rs`.
+//! (`cam.view.*`) are in `cam_view.rs`, and the pictures of the toolpaths (`cam.view`, and
+//! `cam.job`'s `image` and `images_dir`) in `cam_image.rs`.
 //!
 //! `cam.job` plans every operation in work coordinates (the design less the job's origin): the
 //! 2D ones on profiles, the 3D ones on the part's bodies tessellated from their exact surfaces
@@ -72,6 +73,7 @@ const POST_LIST_CONTRACT: TypedContract<CamPostListParams> = TypedContract::new(
 const POST_GET_CONTRACT: TypedContract<CamPostGetParams> = TypedContract::new();
 const GCODE_CHECK_CONTRACT: TypedContract<CamGcodeCheckParams> = TypedContract::new();
 
+pub(crate) use pictures::COMMANDS as PICTURE_COMMANDS;
 pub(crate) use view::COMMANDS as VIEW_COMMANDS;
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -114,9 +116,11 @@ pub static COMMANDS: &[CommandSpec] = &[
              operator's sheet: work zero, A convention, tools with Z min, operations, checks, warnings); dry_run?: plan and check, write \
              nothing; allow_unsafe?: write even when a check fails (its first line then says so); split_by_tool?: one program \
              per tool, named after output (part-2-T6.ngc), each complete on its own; simulate?: also run the written program through \
-             cam.simulate's stock model (a gouge or a rapid in material fails); simulate_resolution?: its cell mm → name, machine, post, operations: [{name, \
+             cam.simulate's stock model (a gouge or a rapid in material fails); simulate_resolution?: its cell mm; image?: PNG path (the \
+             part with every toolpath drawn over it, written in a dry run too); images_dir?: one PNG per operation; view?: iso | top | \
+             bottom | front | back | left | right; width?, height?: 16-4096 px → name, machine, post, operations: [{name, \
              kind, tool, moves, cut_length, cut_minutes, rewinds, max_tilt_deg, a_deg?, gouge, gouge_at?, holder_collisions, adaptive? (the engagement measured \
-             along its path: max_engagement_deg, full_slot_share, levels, helices, …, pocket?: the plain pocket compared), warnings}], program_lines, program_head, readback: {max_tip_deviation, \
+             along its path: max_engagement_deg, full_slot_share, levels, helices, …, pocket?: the plain pocket compared), warnings, extents: {all, cut?, rotary, summary}}], program_lines, program_head, readback: {max_tip_deviation, \
              max_axis_deviation_deg, allowed_tip, allowed_axis_deg, cut_minutes, pass}, gouge: {worst, tolerance, tessellation, \
              allowed, hits, at?: {operation, move_index, line?, xyz}, skipped, pass}, holder_collisions, rapids: {checked, hits, \
              worst, pass, from_unknown, first: [{line, operation?, kind, depth, at}]}, travel: {checked, violation?, pass} | null, \
@@ -1533,11 +1537,12 @@ fn plan_job(cmd: &str, s: &Session, job: &CamJob, base: Option<&Path>) -> Result
 fn job(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "cam.job";
     let params: CamJobParams = parse(cmd, p, "")?;
-    let reply = run_job(s, cmd, p, params)?;
+    let reply = run_job(s, cmd, p, params, None)?;
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Result<CamJobReply> {
+/// `cam.job`, or a dry run that draws only operation `only` (`cam.view`).
+fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams, only: Option<&str>) -> Result<CamJobReply> {
     let dry_run = params.dry_run.unwrap_or(false);
     let allow_unsafe = params.allow_unsafe.unwrap_or(false);
 
@@ -1548,6 +1553,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         (None, false) => return Err(bad(cmd, "give `output` (the G-code file to write) or `dry_run: true`")),
     };
     let sheet_format = sheet::format_of(cmd, params.setup_sheet.as_deref())?;
+    let wanted = pictures::Request::of(cmd, &params, only)?;
     if !dry_run {
         for path in output.iter().chain(&params.preview).chain(&params.setup_sheet) {
             if path.trim().is_empty() {
@@ -1798,6 +1804,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     {
         notes.push(format!("post `{post_name}` writes .{} files; this one is .{ext}", post.base.extension));
     }
+    pictures::extents(&machine, &post, &program, &mut planned);
     // One program per tool, and what the machine does at a tool change.
     let split_by_tool = params.split_by_tool.unwrap_or(false);
     let parts = if split_by_tool { programs::split(cmd, &program, &planned, &post, &machine, output.as_deref())? } else { Vec::new() };
@@ -1873,6 +1880,16 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
             outputs.setup_sheet = Some(path.clone());
         }
     }
+    // The pictures an agent asked for, in a dry run too; the part hides what is behind it.
+    let images = if wanted.wanted() {
+        let setting = pictures::Setting { machine: &machine, origin: place.origin, surface: &surfaces.part, tol, name: &name };
+        pictures::write(cmd, s, &wanted, &setting, &planned).map_err(|e| match (e, &outputs.gcode) {
+            (EngineError::Other(m), Some(g)) => EngineError::Other(format!("{m} (the G-code was written to {g})")),
+            (e, _) => e,
+        })?
+    } else {
+        None
+    };
     let cut_minutes = machine_time.as_ref().map_or(readback.cut_minutes, |t| t.cut_minutes);
     let rapid_minutes = machine_time.as_ref().map(|t| t.rapid_minutes);
     Ok(CamJobReply {
@@ -1899,6 +1916,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         notes,
         simulation,
         summary,
+        images,
         warnings,
         programs: parts.into_iter().map(|w| w.part).collect(),
         param_warnings: Vec::new(),
@@ -2472,6 +2490,8 @@ fn gcode_check(_: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+#[path = "cam_image.rs"]
+mod pictures;
 #[path = "cam_programs.rs"]
 mod programs;
 #[path = "cam_rates.rs"]

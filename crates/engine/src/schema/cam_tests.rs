@@ -18,7 +18,23 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<CamJobParams>(),
-        &["allow_unsafe", "dry_run", "job", "job_path", "output", "preview", "setup_sheet", "simulate", "simulate_resolution", "split_by_tool"],
+        &[
+            "allow_unsafe",
+            "dry_run",
+            "height",
+            "image",
+            "images_dir",
+            "job",
+            "job_path",
+            "output",
+            "preview",
+            "setup_sheet",
+            "simulate",
+            "simulate_resolution",
+            "split_by_tool",
+            "view",
+            "width",
+        ],
     );
     assert_keys(input_schema_for::<CamPostListParams>(), &[]);
     assert_keys(input_schema_for::<CamPostGetParams>(), &["name"]);

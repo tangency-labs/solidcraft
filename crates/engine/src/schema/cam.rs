@@ -72,6 +72,24 @@ pub struct CamJobParams {
     /// the tolerance, coarser where the stock or the program is too large for that.
     #[serde(default)]
     pub simulate_resolution: Option<f64>,
+    /// Where to write a PNG of the part with every toolpath drawn over it, for an agent to look
+    /// at; written in a dry run too. Default: none.
+    #[serde(default)]
+    pub image: Option<String>,
+    /// A folder to write one PNG per operation into (`01-<name>.png`, ...); written in a dry
+    /// run too. Default: none.
+    #[serde(default)]
+    pub images_dir: Option<String>,
+    /// The view of `image` and `images_dir`: `iso`, `top`, `bottom`, `front`, `back`, `left` or
+    /// `right`. Default: `iso`, or `front` (from -Y, the A axis level) with a rotary axis.
+    #[serde(default)]
+    pub view: Option<String>,
+    /// Width of the pictures in pixels, 16 to 4096. Default: 960.
+    #[serde(default)]
+    pub width: Option<u32>,
+    /// Height of the pictures in pixels, 16 to 4096. Default: 600.
+    #[serde(default)]
+    pub height: Option<u32>,
 }
 
 /// What the machine does at a tool change (`T.. M6`): a job's `tool_change`.
@@ -891,6 +909,9 @@ pub struct CamJobReply {
     pub simulation: Option<super::cam_sim::CamSimulateReply>,
     /// What the operator sets up: the setup sheet's tables in compact form.
     pub summary: super::cam_sheet::SetupSummary,
+    /// The pictures drawn (`image`, `images_dir`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<super::cam_image::ImagesReport>,
     /// What to look at that does not fail the job (a program of several tools for a machine that
     /// ignores tool changes).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -938,6 +959,8 @@ pub struct OperationReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub adaptive: Option<AdaptiveReport>,
     pub warnings: Vec<String>,
+    /// Where its toolpath goes, in work coordinates.
+    pub extents: super::cam_image::ToolpathExtents,
 }
 
 /// The program as written against its toolpaths.
