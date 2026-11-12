@@ -183,7 +183,7 @@ pub use continuity::{
 };
 pub use continuity_order::{Construction, Continuity};
 pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
-pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, iso_comb};
+pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, iso_comb};
 pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, body_distance};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
