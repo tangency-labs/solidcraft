@@ -33,7 +33,7 @@
 //! pointwise normal translation the move is, instead of turning the boundary by the
 //! given plane's frame. This holds for bare surfaces only (neither carries a procedural
 //! definition): a definition's net alone does not prove its plane, and moving the net
-//! would leave the definition behind. (not upstream, WR-776) A given surface is turned by
+//! would leave the definition behind. (not upstream, WR-777) A given surface is turned by
 //! its normal where it passes nearest the old face's middle, not at its own domain's
 //! middle, which for a full cylinder given to a round lies across the axis.
 
@@ -217,19 +217,27 @@ fn local_operation_on(
             // (not upstream, which takes the middle of the new surface's domain) the new
             // normal where the new surface passes nearest the old face's middle: a full
             // cylinder's domain middle is across the axis from a round's middle, so the
-            // two normals there oppose though the surfaces face the same way
-            let at = match new.drop_point::<NoObject>(
+            // two normals there oppose though the surfaces face the same way. Where there
+            // is no nearest point, or no normal at it (a cone's apex), upstream's point is
+            // kept: the new rule only replaces it where it applies.
+            // (`EvaluateNormal(uv, TRUE, TRUE, ..)`: from the left)
+            let nearest = match new.drop_point::<NoObject>(
                 k,
                 old.evaluate_point(k, old_uv)?,
                 &domain,
                 &DropPointOptions::default(),
             ) {
-                Ok(dropped) if dropped.success => dropped.result_uv,
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                _ => domain.evaluate(0.5, 0.5),
+                Ok(dropped) if dropped.success => {
+                    Some(new.evaluate_normal(k, dropped.result_uv, Side::Left, Side::Left))
+                }
+                Ok(_) => None,
+                Err(e) => Some(Err(e)),
             };
-            // (`EvaluateNormal(uv, TRUE, TRUE, ..)`: from the left)
-            let new_normal = new.evaluate_normal(k, at, Side::Left, Side::Left)?;
+            let new_normal = match nearest {
+                Some(Ok(n)) => n,
+                Some(Err(e)) if e.is_unported_or_cancelled() => return Err(e),
+                _ => new.evaluate_normal(k, domain.evaluate(0.5, 0.5), Side::Left, Side::Left)?,
+            };
             let old_normal = old.evaluate_normal(k, old_uv, Side::Left, Side::Left)?;
             // when surface normals oppose - reverse the input surface's orientation
             if old_normal.dot(new_normal) < 0.0 {
@@ -3019,10 +3027,10 @@ mod tests {
     /// `A` the part of the corner square [15, 20]² inside the circle.
     #[test]
     fn tangent_edges_a_round_moved_out_has_its_closed_form_volume() {
-        for fixes in tangent_edge_fixes() {
+        for (set, fixes) in tangent_edge_fixes().into_iter().enumerate() {
             let mut k = Kernel::default();
             let (mut b, why) = round_moved_out(&mut k, fixes);
-            assert_eq!(why, None);
+            assert_eq!(why, None, "fix set {set}");
             let r = 5.1_f64;
             let w = (r * r - 25.0).sqrt();
             let p = Point3::new;
@@ -3031,7 +3039,10 @@ mod tests {
             let inside = 5.0 * w + quarter_disc_area(r, 5.0) - quarter_disc_area(r, w);
             let want = 20.0 * (375.0 + inside);
             let (v, manifold) = volume_and_manifold(&k, &mut b);
-            assert!(manifold && (v - want).abs() <= 1e-6 * want, "{v} vs {want}");
+            assert!(
+                manifold && (v - want).abs() <= 1e-6 * want,
+                "fix set {set}: {v} vs {want}"
+            );
         }
     }
 
@@ -3041,15 +3052,18 @@ mod tests {
     /// `20 (19.9 · 20 − 4.9 · 5 + ∫₀^4.9 √(25 − u²) du)`.
     #[test]
     fn tangent_edges_a_side_moved_into_its_round_has_its_closed_form_volume() {
-        for fixes in tangent_edge_fixes() {
+        for (set, fixes) in tangent_edge_fixes().into_iter().enumerate() {
             let mut k = Kernel::default();
             let (mut b, why) = side_moved_into_its_round(&mut k, fixes);
-            assert_eq!(why, None);
+            assert_eq!(why, None, "fix set {set}");
             let y = 15.0 + 0.99_f64.sqrt();
             assert_vertices_at(&b, &[0.0, 20.0].map(|z| Point3::new(19.9, y, z)));
             let want = 20.0 * (19.9 * 20.0 - 4.9 * 5.0 + quarter_disc_area(5.0, 4.9));
             let (v, manifold) = volume_and_manifold(&k, &mut b);
-            assert!(manifold && (v - want).abs() <= 1e-6 * want, "{v} vs {want}");
+            assert!(
+                manifold && (v - want).abs() <= 1e-6 * want,
+                "fix set {set}: {v} vs {want}"
+            );
         }
     }
 

@@ -311,7 +311,7 @@ comparing the two normals. Upstream reads the new normal at the middle of the ne
 domain; for a full cylinder given to a round that point is across the axis, where the normal
 opposes the old round's though both face out, and the round came back inside out. The new normal
 is read where the new surface passes nearest the old face's middle (the domain middle when that
-drop fails).
+drop fails or there is no normal at the nearest point, as at a cone's apex).
 
 **Moving faces** (`offset/offset_faces.rs`, `OffsetFacesExecutive`): the tangent blends on the
 named faces are taken off, the faces moved by a local operation onto their offset surfaces, and the

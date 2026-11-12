@@ -1,4 +1,4 @@
-#### WR-776. LocalOperation turns a full cylinder given to a round inside out
+#### WR-777. LocalOperation turns a full cylinder given to a round inside out
 - **Severity:** Wrong result
 - **Area:** Offset
 - **Location:** `source/SMLib/src/SmBrep.cpp:11982`, `SmBrep::LocalOperation` (def. `:11945`).
