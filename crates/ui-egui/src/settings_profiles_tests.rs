@@ -33,7 +33,7 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 107, "Appearance system-theme slots and Maya zoom are included");
+    assert_eq!(keys.len(), 96, "Appearance system-theme slots and Maya zoom are included");
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -87,7 +87,7 @@ fn profile_panel_layout_is_checked_separately_from_ordinary_preferences() {
 
     let h = Harness::new();
     let mut doc = capture(&h.app, "Layout");
-    assert!(doc.get("panel_layout").is_none(), "Classic does not acquire an opt-in layout through profile capture");
+    assert_eq!(doc["panel_layout"]["version"], 2, "Classic captures the shared workspace layout");
     let envelope = LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()));
     let bytes = encode(&envelope, &PanelRegistry::default()).unwrap();
     let layout = json!({"version":1,"envelope":String::from_utf8(bytes).unwrap()});
@@ -896,7 +896,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 107);
+    assert_eq!(expected.len(), 96);
     assert_eq!(actual, expected);
 }
 

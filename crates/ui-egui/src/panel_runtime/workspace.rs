@@ -2418,6 +2418,12 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         }
                         _ => {}
                     });
+                    if let HostPointerTarget::HeaderAction { instance, action } = target
+                        && instance.0 == "history"
+                        && response.interact_rect.is_positive()
+                    {
+                        crate::scenario::publish_target(&format!("history:{}", action.0), response.interact_rect);
+                    }
                     let clicked = response.clicked();
                     let secondary = response.secondary_clicked();
                     if let Some(status) = data.and_then(|value| value.status.as_deref()) {

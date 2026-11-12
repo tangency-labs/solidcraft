@@ -128,9 +128,25 @@ pub(crate) fn tool_drag_rect(app: &SolveApp, placement: Rect) -> Rect {
     bounds
 }
 
+/// Keep a newly opened editor beside the visible Sketch Options panel.
+pub(crate) fn editor_space(app: &SolveApp, mut viewport: Rect) -> Rect {
+    if let Some(palette) = app.viewport.palette_rect
+        && palette.intersects(viewport)
+        && palette.center().x >= viewport.center().x
+    {
+        let gap = Container::for_layout(app.ui.layout, Surface::Feature).gap();
+        let right = palette.left() - gap;
+        if right > viewport.center().x {
+            viewport.max.x = viewport.right().min(right);
+        }
+    }
+    viewport
+}
+
 /// Initial placement for floating editor windows in the shared-panel workspace.
 pub(crate) fn floating_editor_anchor(app: &SolveApp, ctx: &egui::Context) -> (egui::Align2, egui::Pos2) {
     let viewport = crate::agent_chat::tool_space(app, content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
+    let viewport = editor_space(app, viewport);
     let side = crate::frame::Side::Right;
     (egui::Align2::RIGHT_TOP, pos2(side.anchor_x(viewport), panel_top(app, viewport, viewport.bottom(), side)))
 }

@@ -2949,8 +2949,6 @@
   "prefs.select_other_hidden": "Zaznaczaj ukrytą geometrię poleceniem Wybierz inny",
   "prefs.select_other_hidden_help": "Włączone: uwzględnia ukryte bryły, szkice i zasłonięte krawędzie w pobliżu wskaźnika. Wyłączone: używa pierwotnej listy widocznej geometrii pod wskaźnikiem.",
   "prefs.selecting": "Zaznaczanie",
-  "prefs.shared_panel_layout": "Używaj wspólnego układu paneli",
-  "prefs.shared_panel_layout_help": "Pokazuje istniejące panele Przeglądarka, Historia i Asystent jako przesuwalne panele. Zmiana działa po zastosowaniu preferencji.",
   "prefs.shift": "Shift",
   "prefs.shift_add_ctrl_toggle": "Shift tylko dodaje; Ctrl / Cmd przełącza",
   "prefs.shift_add_note": "Włączone: Shift dodaje, Ctrl / Cmd przełącza. Wyłączone (domyślnie): oba przełączają.",

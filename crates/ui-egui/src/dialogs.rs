@@ -4074,8 +4074,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Physical materials: the library's, then the design's own (material.create).
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
+    let placement = crate::shell::editor_space(app, vp);
     let side = crate::frame::Side::Right;
-    let top = crate::shell::panel_top(app, vp, vp.bottom(), side);
+    let top = crate::shell::panel_top(app, placement, placement.bottom(), side);
     // Empty/hostile viewport geometry cannot provide a safe window rectangle.
     if !vp.is_finite() || !vp.is_positive() {
         app.dialog = Some(d);
@@ -4083,7 +4084,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let drag_key = side.dialog_offset_key();
     let moved = crate::frame::dock_offset(ctx, drag_key);
-    let docked = egui::pos2(side.anchor_x(vp), top);
+    let docked = egui::pos2(side.anchor_x(placement), top);
     let drag_bounds = crate::shell::tool_drag_rect(app, vp);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let mut keep = true;
