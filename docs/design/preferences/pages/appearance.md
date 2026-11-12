@@ -56,12 +56,6 @@ Source: `Settings_Interface.dc.html` (section "Scale and text").
 | Font | Dropdown "IBM Plex Sans (built in)" (aria "Interface font"), "Choose font file..." button, "Reset" | `Prefs.ui_font` (path; empty = built-in) | empty | none | none | |
 | The quick brown fox . O12.50 mm . 45.0 deg . 0123456789 | Sample line | none | n/a | none | none | Placeholder sample text. |
 
-## Window title
-
-| Label | Control | Edits | Default | Hover | Notes |
-|---|---|---|---|---|---|
-| Show design in window title | Checkbox | `Prefs.design_window_title` | `false` | "Shows the active design's name and marks unsaved changes in the operating system's window title. Turn off to restore the fixed SolidCraft title." | Applies immediately; Appearance (also accessible as Interface) Restore Defaults disables it. Cancel restores the opening or last applied value. Does not change the custom title bar. |
-
 ## Colour vision
 
 | Label | Control | Edits | Default | Hover | Figure | Notes |

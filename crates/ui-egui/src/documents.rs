@@ -1000,7 +1000,7 @@ pub(crate) fn sync_window_title(app: &mut SolveApp, ctx: &egui::Context) {
     // The start page can overlay existing designs; only its untouched launch/last-close
     // session represents no open design. Documents::count includes that placeholder.
     let no_design = app.home.open && app.docs.count() == 1 && active_is_blank(app);
-    let name = (app.preferences.design_window_title && !no_design).then_some(app.session.doc.name.as_str());
+    let name = (!no_design).then_some(app.session.doc.name.as_str());
     if let Some(title) = app.window_title.update(name, app.session.is_dirty(), &app.preferences.language) {
         ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(title));
     }
@@ -1610,7 +1610,6 @@ mod tests {
     #[test]
     fn window_title_tracks_live_design_save_rename_switch_and_open() {
         let mut a = app();
-        a.preferences.design_window_title = true;
         a.home.open = false;
         let initial = a.session.doc.name.clone();
         assert_eq!(title_commands(&mut a), [format!("{initial} — SolidCraft")]);
@@ -1648,21 +1647,16 @@ mod tests {
     }
 
     #[test]
-    fn window_title_respects_home_preference_and_embedded_hosts() {
+    fn window_title_respects_home_and_embedded_hosts() {
         let mut a = app();
         a.home.open = true;
         assert_eq!(title_commands(&mut a), ["SolidCraft"]);
         assert!(title_commands(&mut a).is_empty());
         a.home.open = false;
-        assert!(title_commands(&mut a).is_empty(), "legacy title stays fixed");
-        a.preferences.design_window_title = true;
         let name = a.session.doc.name.clone();
         assert_eq!(title_commands(&mut a), [format!("{name} — SolidCraft")]);
-        a.preferences.design_window_title = false;
-        assert_eq!(title_commands(&mut a), ["SolidCraft"]);
         for editor in [false, true] {
             let mut embedded = app();
-            embedded.preferences.design_window_title = true;
             embedded.home.open = false;
             embedded.embedded = !editor;
             embedded.embed_editor = editor;
@@ -1673,7 +1667,6 @@ mod tests {
     #[test]
     fn window_title_keeps_existing_design_when_start_page_is_shown() {
         let mut a = app();
-        a.preferences.design_window_title = true;
         a.home.open = false;
         a.session.execute("component.rename", &json!({"component": 0, "name": "Bracket"})).unwrap();
         assert_eq!(title_commands(&mut a), ["Bracket * — SolidCraft"]);

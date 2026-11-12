@@ -177,10 +177,6 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 ui.scope(|ui| ui_kit::font_specimen(ui, app.tr("prefs.font_sample"))).response.backing_on_hover_text(app.tr("prefs.font_fallback"));
             }
         });
-        ui_kit::settings_section(ui, "window_title", app.tr("prefs.window_title"), |ui| {
-            let response = setting::design_window_title(app, ui);
-            crate::scenario::publish_target("prefs:design_window_title", response.rect);
-        });
         ui_kit::settings_section(ui, "colour_vision", app.tr("ui.colour_vision"), |ui| {
             let mode = app.preferences.color_vision;
             ui_kit::settings_form(ui, t.form_label_width, |ui| {
