@@ -45,6 +45,7 @@ use crate::blend::fillet_executive::p3::{
     ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
 };
 use crate::blend::fillet_geom::p1::FilletErrorType;
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::object::NotifyOperation;
 use crate::geom::tol::approx_tol3d;
@@ -103,13 +104,9 @@ fn refusable(error: &SolidError) -> Option<(&'static str, i32, Option<EntityRef>
         .map(|code| (error.operation(), code, error.entity()))
 }
 
-/// `FILEXEC_ERR`: the executive's generic failure status.
-fn failure() -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code: 1001,
-        entity: None,
-    }
+/// `FILEXEC_ERR` (`SM_ERR`): the executive's generic failure status, as the phrase says.
+fn failure(what: &'static str) -> SolidError {
+    SolidError::blend_failed(OP, what)
 }
 
 /// Ordinary statuses become `None`; deferrals propagate.
@@ -591,11 +588,11 @@ impl FilletSession<'_> {
             ));
             self.executive.error.comment =
                 "Fillet Merge Failure: Result Is Not A Closed Manifold Solid".into();
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: 1001,
-                entity: Some(EntityRef::Edge(edge)),
-            });
+            return Err(SolidError::blend_at(
+                OP,
+                BlendFailure::Failed("the result is not a closed manifold solid"),
+                EntityRef::Edge(edge),
+            ));
         }
         Ok(())
     }
@@ -737,7 +734,7 @@ impl FilletSession<'_> {
                 reason: None,
                 comment: crate::blend::blend_corner::setback::SETBACK_NOT_BUILT,
             });
-            return Err(failure());
+            return Err(failure("an asked setback is not built"));
         }
         // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
         // the setback set on it is first read: the Setback where it is one
@@ -782,7 +779,7 @@ impl FilletSession<'_> {
                 if let Some(output) = error_out.as_deref_mut() {
                     output.assign(&session.executive.error);
                 }
-                return Err(failure());
+                return Err(failure("the fillet body is not built"));
             }
             let faces = session
                 .objects
@@ -797,7 +794,7 @@ impl FilletSession<'_> {
                 if let Some(output) = error_out {
                     output.assign(&session.executive.error);
                 }
-                return Err(failure());
+                return Err(failure("the fillet body has no faces"));
             }
             session.shrink_fillet_faces(k)?;
             // The fork's NoteRadiusCornerSurfaces (6eecf04): the fillet surfaces that turn at
@@ -1112,6 +1109,22 @@ mod ball_fit_tests {
         let (code, result) = end_round(2.0);
         result.unwrap();
         assert_ne!(code, NO_ROOM);
+    }
+
+    /// The executive's generic failure (`FILEXEC_ERR`) is a typed failure with the status,
+    /// operation and (no) entity of the bare status it replaced (#13790).
+    #[test]
+    fn the_generic_failure_is_typed_with_its_status() {
+        let e = failure("the fillet body is not built");
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::Failed("the fillet body is not built"))
+        );
+        assert_eq!(e.upstream_status(), Some(1001));
+        assert_eq!(e.operation(), OP);
+        assert_eq!(e.entity(), None);
+        assert!(!is_non_manifold_refusal(&e));
+        assert_eq!(refusable(&e), Some((OP, 1001, None)));
     }
 
     /// #13790: the executive's decisions on a bare `Upstream` (the WR-696 refusal with a fit

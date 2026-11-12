@@ -74,9 +74,9 @@ fn null(what: &'static str) -> SolidError {
     SolidError::invalid_input(OP, what)
 }
 
-/// `NER(p)`: a `NULL` pointer is `SM_ERR_NULL_POINTER`.
-fn ner<T>(v: Option<T>) -> Result<T> {
-    v.ok_or_else(|| SolidError::null_pointer(OP))
+/// `NER(p)`: a `NULL` pointer (`what`) is `SM_ERR_NULL_POINTER`.
+fn ner<T>(v: Option<T>, what: &'static str) -> Result<T> {
+    v.ok_or_else(|| SolidError::blend_missing(OP, what))
 }
 
 /// Element `i` of an evaluation array.
@@ -393,7 +393,10 @@ pub fn test_for_fillet_surface_u_or_v(
     // 1. Check that min/max naturalDomain isoParmeter curves have fillet crossSection shapes
 
     // Construct temporary naturalDomain Iso boundaries for this direction: rib curves.
-    let (rib_min, rib_max) = ner(s.create_iso_boundaries(k, which_dir, EFF_ZERO)?)?;
+    let (rib_min, rib_max) = ner(
+        s.create_iso_boundaries(k, which_dir, EFF_ZERO)?,
+        "the surface's iso boundaries",
+    )?;
 
     // skip min isoParameter curves that don't have a known filletCrossSection shape
     let t = test_for_fillet_cross_section(k, &rib_min, tol3d)?;
@@ -643,7 +646,10 @@ pub fn find_fillet_min_max_radii(
     radii.init();
 
     let rib_dir = other_dir(rail_dir);
-    let (rail1, rail2) = ner(s.create_iso_boundaries(k, rib_dir, tol)?)?;
+    let (rail1, rail2) = ner(
+        s.create_iso_boundaries(k, rib_dir, tol)?,
+        "the surface's iso boundaries",
+    )?;
 
     let domain = rail1.natural_interval();
 
@@ -823,7 +829,10 @@ pub fn identify_fillet_u_or_v(
 
     // This will return the presumed rail curves:
     let rail_iso_dir = other_dir(rail_dir);
-    let (min_rail, max_rail) = ner(surface.create_iso_boundaries(k, rail_iso_dir, tol3d)?)?;
+    let (min_rail, max_rail) = ner(
+        surface.create_iso_boundaries(k, rail_iso_dir, tol3d)?,
+        "the surface's iso boundaries",
+    )?;
 
     // We will be using these:
     let min_rail_domain = min_rail.natural_interval();
@@ -1005,7 +1014,7 @@ pub fn identify_fillet(
             }
         } else {
             // (status ignored; the size is then unset upstream)
-            let s = ner(face::p2::surface(b, f)?)?;
+            let s = ner(face::p2::surface(b, f)?, "the face's surface")?;
             let sizes = ignored(s.approximate_size(k, None))?.unwrap_or(Vec2::new(0.0, 0.0));
             if sizes.x > sizes.y {
                 SurfParamType::U
@@ -1038,6 +1047,22 @@ pub fn identify_fillet(
 mod tests {
     #![allow(clippy::unwrap_used, clippy::float_cmp)]
     use super::*;
+
+    /// #13790: a missing object the identification needs is a typed blend failure that
+    /// keeps the `SM_ERR_NULL_POINTER` status of the bare `Upstream` it replaced.
+    #[test]
+    fn a_missing_object_is_a_typed_failure() {
+        let error = ner::<()>(None, "the face's surface").unwrap_err();
+        assert_eq!(
+            error.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the face's surface"
+            ))
+        );
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(error.upstream_status(), error.sm_status());
+        assert_eq!(error.operation(), OP);
+    }
 
     /// `F(t) = t^3 - 2t + 2`: Newton from 0 cycles between two values, with no root
     /// between them, so `SolveIt` falls back on `SolveOscillating`.

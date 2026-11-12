@@ -34,8 +34,8 @@ use solidcore_record::brep::Brep as Record;
 
 use solidcore_ops::{
     blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
-    make_cylinder, tangent_chain, Blend, Body, ChamferSecond, CheckLevel, Corners, Error, FitKind,
-    Order, SetBack, Turn, Unblendable,
+    make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
+    Error, FitKind, Order, SetBack, Turn, Unblendable,
 };
 
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
@@ -199,7 +199,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
             &[1.0],
             &[],
             Corners::Filled,
-            turn,
+            BlendOptions {
+                turn,
+                ..BlendOptions::default()
+            },
         )
         .unwrap();
         assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{turn:?}");
@@ -233,7 +236,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
             sizes,
             &[],
             Corners::Filled,
-            Turn::Swept,
+            BlendOptions {
+                turn: Turn::Swept,
+                ..BlendOptions::default()
+            },
         )
         .err()
     };
@@ -258,7 +264,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
         &[1.0],
         &[],
         Corners::Filled,
-        Turn::Mitre,
+        BlendOptions {
+            turn: Turn::Mitre,
+            ..BlendOptions::default()
+        },
     )
     .unwrap();
     let v = p.volume(1e-10).unwrap();
@@ -1018,11 +1027,13 @@ fn slot() -> Body {
 /// The slot's top outline is one tangent chain: from its front straight, all four top edges;
 /// a box edge runs on into nothing. Indices are checked before the kernel.
 #[test]
-fn the_tangent_chain_is_the_kernels() {
+fn the_tangent_chain_runs_round_the_slot() {
     all_fixes();
     let b = slot();
     let front = edge_at(&b, [5.0, 0.0, 2.0]);
-    let chain = tangent_chain(&b, &[front], HALF_DEGREE).unwrap();
+    let chain = tangent_chain(&b, None, &[front], &[], HALF_DEGREE).unwrap();
+    assert!(chain.undecided.is_empty(), "{chain:?}");
+    let chain = chain.members;
     assert_eq!(chain.len(), 4, "{chain:?}");
     assert_eq!(chain[0], front);
     for p in [[5.0, 4.0, 2.0], [12.0, 2.0, 2.0], [-2.0, 2.0, 2.0]] {
@@ -1030,10 +1041,11 @@ fn the_tangent_chain_is_the_kernels() {
     }
     let bx = block();
     let e = top_front(&bx);
-    assert_eq!(tangent_chain(&bx, &[e], HALF_DEGREE).unwrap(), vec![e]);
-    assert_eq!(tangent_chain(&bx, &[99], 0.01), Err(Error::Argument));
-    assert_eq!(tangent_chain(&bx, &[e], 0.0), Err(Error::Argument));
-    assert_eq!(tangent_chain(&bx, &[], 0.01), Err(Error::Argument));
+    let chain = |edges: &[usize], angle: f64| tangent_chain(&bx, None, edges, &[], angle);
+    assert_eq!(chain(&[e], HALF_DEGREE).unwrap().members, vec![e]);
+    assert_eq!(chain(&[99], 0.01), Err(Error::Argument));
+    assert_eq!(chain(&[e], 0.0), Err(Error::Argument));
+    assert_eq!(chain(&[], 0.01), Err(Error::Argument));
 }
 
 /// The slot's seam, where its straight side runs into its round end, has no blend: its faces
@@ -1226,15 +1238,19 @@ fn a_setback_too_long_at_a_corner_is_refused_by_the_kernel() {
 }
 
 /// Cancel stops a long fillet promptly (solidcore#3247): a 2 mm round along one helical edge of
-/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Cancelled
-/// from another thread a second in, the call returns `Cancelled` within 500 ms (about 5 ms
-/// measured on a desktop; the bound leaves room for shared CI runners). nextest runs each test
-/// in a process of its own, so no other test's call holds the session's kernel meanwhile.
+/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Measured in
+/// the token's polls, not in time: a token cancelled from its `m`-th poll
+/// (`CancelToken::after_polls`) stops the fillet there. It returns `Cancelled`, which also shows
+/// the fillet was still running at poll `m`, and the token is polled exactly once after the poll
+/// that cancelled it: by the session as the call returns, asking whether it was cancelled
+/// (`session::run_with`, or `with_body` deciding whether to keep its edit). Any further poll
+/// would be work done after the cancel. `m` is a quarter of the 15,473 polls the fillet made in
+/// its first second, measured on SolidCraft 9a342278 (cancel-timing round 1). Should the fillet
+/// get fast enough to finish before `m`, this fails with `Ok`: then pick a longer case.
 #[test]
 fn a_cancelled_long_fillet_stops_promptly() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    use std::time::{Duration, Instant};
     all_fixes();
     let corners = [
         [19.0, 0.0, 0.0],
@@ -1272,24 +1288,78 @@ fn a_cancelled_long_fillet_stops_promptly() {
             d(a).total_cmp(&d(b))
         })
         .unwrap();
-    let chain = tangent_chain(&coil, &[edge], 0.1).unwrap();
-    let token = CancelToken::new();
-    let watched = token.clone();
-    let worker = std::thread::spawn(move || {
-        let r = within(&watched, || {
-            blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
-        });
-        (r.map(|_| ()), Instant::now())
+    let chain = tangent_chain(&coil, None, &[edge], &[], 0.1)
+        .unwrap()
+        .members;
+    let m: u64 = 15_473 / 4;
+    let token = CancelToken::after_polls(m);
+    let r = within(&token, || {
+        blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
     });
-    std::thread::sleep(Duration::from_secs(1));
-    let cancelled = Instant::now();
-    token.cancel();
-    let (r, returned) = worker.join().unwrap();
-    let took = returned.saturating_duration_since(cancelled);
-    eprintln!("the fillet returned {took:?} after Cancel");
-    assert_eq!(r, Err(Error::Cancelled));
-    assert!(
-        took < Duration::from_millis(500),
-        "returned {took:?} after Cancel"
-    );
+    eprintln!("the fillet cancelled at {m}, polled {:?}", token.polls());
+    assert_eq!(r.map(|_| ()), Err(Error::Cancelled));
+    assert_eq!(token.polls(), Some(m + 1));
+}
+
+/// A failure the kernel types as not supported, after the session noted no room with a fit
+/// (or an unsupported vertex), is its own cause: [`solidcore_ops::blend::session_refusal`]
+/// gives it back rather than sizing it from the earlier note (SolidCraft's own mapping made it
+/// `TooLarge` before it took ops'). The note is real: a 20 cube's three corner edges rounded
+/// 20, refused naming 19.99 (the case of SolidCraft's `a_cliff_overflow_the_fork_refuses_has_no_room`).
+#[test]
+fn a_kernel_unsupported_after_a_no_room_note_is_its_own_cause() {
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+    use solidcore::kernel::UpstreamFixes;
+    use solidcore::SolidError;
+    use solidcore_ops::blend::{session_refusal, Refusal, SessionCall};
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let mut b = create_box(&mut k, Vec3::ZERO, 20.0, 20.0, 20.0).unwrap();
+    let at = [
+        Vec3::new(10.0, 0.0, 0.0),
+        Vec3::new(0.0, 10.0, 0.0),
+        Vec3::new(0.0, 0.0, 10.0),
+    ];
+    let edges: Vec<EdgeId> = at
+        .iter()
+        .map(|&q| {
+            b.edges()
+                .ids()
+                .min_by(|&x, &y| {
+                    let d = |e| edge_closest_point(&k, &b, e, q).unwrap().closest.distance;
+                    d(x).total_cmp(&d(y))
+                })
+                .unwrap()
+        })
+        .collect();
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    let circular = [FilletSurfaceGeneratorType::Circular];
+    s.prepare_per_edge_constant_radius(&mut k, &edges, &[20.0; 3], &circular, 1, 1.0)
+        .unwrap();
+    s.create_corners(&k, None).unwrap();
+    let refused = s.do_filleting(&mut k, None).unwrap_err();
+    // the note: no room, with the fit
+    let sized = session_refusal(&s, refused, SessionCall::default()).unwrap();
+    let Refusal::TooLarge { size, .. } = sized.on(&k, s.target()).unwrap() else {
+        panic!("not sized")
+    };
+    assert!((size - 19.99).abs() < 1e-9, "{size}");
+    let unsupported = SolidError::Unsupported {
+        operation: "test",
+        reason: "a construction the kernel does not build",
+    };
+    for corner in [false, true] {
+        let call = SessionCall {
+            corner,
+            ..SessionCall::default()
+        };
+        assert_eq!(
+            session_refusal(&s, unsupported.clone(), call).map(|_| ()),
+            Err(unsupported.clone()),
+            "corner {corner}"
+        );
+    }
 }

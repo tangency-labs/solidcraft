@@ -321,6 +321,27 @@ fn shallow_loft_cut_from_the_top_face() {
     assert!((got - want).abs() < 1e-9 * want, "{got} vs {want}");
 }
 
+/// A carved top lofted through six closed spline sections from its slab's top face and joined
+/// onto the slab. The loft lies on and above that face and shares only it with the slab, so the
+/// joined top is exactly the slab plus the loft built as its own body.
+#[test]
+fn carved_top_lofted_onto_its_slab_joins() {
+    let script = include_str!("../../../examples/regressions/loft_join_carved_top_on_slab.json");
+    let joined = replay(script);
+    assert_eq!(joined.model.state().bodies.len(), 1);
+    let mut apart: Value = serde_json::from_str(script).unwrap();
+    let loft = apart["commands"].as_array_mut().unwrap().last_mut().unwrap();
+    loft["params"]["operation"] = json!("new_body");
+    loft["params"]["body_name"] = json!("Arch");
+    loft["params"].as_object_mut().unwrap().remove("targets");
+    let mut s = Session::default();
+    s.run_script(&apart).unwrap();
+    let (slab, arch) = (volume(&s, "Top"), volume(&s, "Arch"));
+    assert!(slab > 0.0 && arch > 0.0, "{slab} {arch}");
+    let got = volume(&joined, "Top");
+    assert!((got - (slab + arch)).abs() < 1e-7 * got, "{got} vs {slab} + {arch}");
+}
+
 #[test]
 fn oblique_cut_through_a_small_arc_matches_a_split() {
     let scripts = [
@@ -1666,4 +1687,63 @@ fn cut_that_leaves_a_closed_cavity_says_so() {
         .execute("solid.box", &json!({"length": 16, "width": 16, "height": 10, "center": [0, -10, 6], "operation": "cut", "targets": ["Plot"]}))
         .unwrap();
     assert!(!cup["warning"].as_str().unwrap_or_default().contains("closed cavity"), "{cup}");
+}
+
+/// Issue #10: fuzzer seed 73. Extrude an arc-sided profile, fillet two top edges, then join a box.
+/// The join's boolean union used to be refused by solidcore's boolean check as "Bad Gap:
+/// Edge/Vertex gap across Edgeuse start larger than tol" (offset=7.7878382e-06,
+/// tolerance=7.5978919e-06). Every failing seed of the boolean fuzzer is a reproducible bug,
+/// fixed with a regression test that fails without the fix.
+/// Root cause not yet found — grows tolerances but gap may exceed platform-specific limits.
+#[ignore = "fails until the tolerance root cause for seed 73 is found (#10)"]
+#[test]
+fn fuzz_seed_73_boolean_join_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_73_boolean_join.json"));
+    let state = s.model.state();
+    // Every step ran: every body is a sound solid, and the join produced one body.
+    assert_eq!(state.bodies.len(), 1, "the join must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the joined body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the union must be a real solid: {}", m.volume);
+    println!("#10 seed 73: joined body volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 185. Box, join cylinder, cut cylinder, then rectangular pattern on the
+/// cut cylinder. The pattern's boolean result is refused as "SMLib's result is not a closed
+/// solid". Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a
+/// regression test that fails without the fix.
+/// Root cause not yet found — pattern boolean result tolerance, topologically different from
+/// seed 73's "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the pattern boolean root cause for seed 185 is found (#10)"]
+#[test]
+fn fuzz_seed_185_pattern_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_185_pattern.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the pattern must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the pattern result must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the pattern result must be a real solid: {}", m.volume);
+    println!("#10 seed 185: pattern result volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 178. Box, fillet, cut cylinder, cut box, shell, rectangular pattern,
+/// then fillet. The final fillet is refused as "SMLib fillet: SMLib's check refuses the result:
+/// Tolerance: Edge tolerance relative to brep tolerance (offset=0.083186985, tolerance=0.01)".
+/// Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test
+/// that fails without the fix.
+/// Root cause not yet found — fillet result tolerance, topologically different from seed 73's
+/// "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the fillet tolerance root cause for seed 178 is found (#10)"]
+#[test]
+fn fuzz_seed_178_fillet_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_178_fillet.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the fillet must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the filleted body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the fillet result must be a real solid: {}", m.volume);
+    println!("#10 seed 178: filleted body volume {volume:.2} mm³", volume = m.volume);
 }

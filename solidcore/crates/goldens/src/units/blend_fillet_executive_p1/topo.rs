@@ -10,7 +10,6 @@ use serde_json::Value;
 use solidcore::blend::fillet_executive::p1::remove_topo_edges;
 use solidcore::kernel::Kernel;
 use solidcore::topology::EdgeId;
-use solidcore::SolidError;
 
 use super::super::topology_vertexuse::{self as shared, BrepIn};
 use super::super::{topology_brep_p10, topology_brep_p4 as p4};
@@ -76,7 +75,9 @@ pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                SolidError::Upstream { code, .. } => f64::from(code),
+                e if solidcore::error::upstream_status(&e).is_some() => {
+                    f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1))
+                }
                 other => return Err(err(&format!("rust: {other}"))),
             }
         }

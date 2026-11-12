@@ -71,6 +71,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::crv_adv::p1::CurveEnd;
 use crate::nurbs::knots::Side as KnotSide;
+use crate::query::edge_turn::{leaving_tangent, Leaving};
 use crate::surface::procedural_blend::corner::CornerDefinition;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
@@ -104,12 +105,22 @@ fn of2m<T>(a: &mut [T; 2], i: usize) -> &mut T {
 
 /// `v[i]`, or `SM_ERR` for `op` past its end.
 fn nth<'a, T>(v: &'a [T], i: usize, op: &'static str) -> Result<&'a T> {
-    v.get(i).ok_or_else(|| SolidError::sm_err(op))
+    v.get(i).ok_or_else(|| {
+        SolidError::blend_failed(
+            op,
+            "an index past the end of a list the mixed corner builds",
+        )
+    })
 }
 
 /// `v[i]` mutably, or `SM_ERR` for `op` past its end.
 fn nth_mut<'a, T>(v: &'a mut [T], i: usize, op: &'static str) -> Result<&'a mut T> {
-    v.get_mut(i).ok_or_else(|| SolidError::sm_err(op))
+    v.get_mut(i).ok_or_else(|| {
+        SolidError::blend_failed(
+            op,
+            "an index past the end of a list the mixed corner builds",
+        )
+    })
 }
 
 /// `SmMixedRing`: the Mixed corner's parts at its vertex, read off the ring: the convex
@@ -199,7 +210,12 @@ pub(crate) fn mixed_ring<S: Copy>(
     all_eus: &[EdgeuseId],
     solver_of: &dyn Fn(EdgeuseId) -> Option<S>,
 ) -> Result<Option<(MixedRing, [S; 2])>> {
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_CLASSIFY,
+            "topology or a solver the mixed corner's ring is found from",
+        )
+    };
     let &[eu0, eu1_] = solver_eus else {
         return Ok(None);
     };
@@ -232,7 +248,8 @@ pub(crate) fn mixed_ring<S: Copy>(
 
 /// The face of `eu`'s sector other than `not`, where the sector holds `not`.
 fn other_face(b: &Brep, eu: EdgeuseId, not: FaceId) -> Result<Option<FaceId>> {
-    let radial = eu1::radial(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+    let radial = eu1::radial(b, eu)?
+        .ok_or_else(|| SolidError::blend_missing(OP_CLASSIFY, "the edge use's radial"))?;
     let faces = [eu1::face(b, eu)?, eu1::face(b, radial)?];
     Ok(match faces {
         [Some(f), Some(g)] if f == not => Some(g),
@@ -342,7 +359,12 @@ pub fn classify_mixed<'s>(
     let Some((ring, [fs0, fs1])) = mixed_ring(k, b, solver_eus, all_eus, solver_of)? else {
         return Ok(false);
     };
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_CLASSIFY,
+            "topology or a solver the mixed corner's classification reads",
+        )
+    };
     let convex_e = eu1::edge(b, ring.convex)?.ok_or_else(nul)?;
     let concave_e = eu1::edge(b, ring.concave)?.ok_or_else(nul)?;
     if !test_g1_continuity(
@@ -471,31 +493,32 @@ impl SolutionObject for MxObject {
 /// its end, where it is turned. Inside the edge means one-sided: from the interval above
 /// the start (`from_left` true) and from the interval below the end (`from_left` false);
 /// [`edge::end_tangent`] takes both from above, which at the end reads past the edge. A
-/// closed edge leaves its vertex at its start (fork b785227).
+/// closed edge leaves its vertex at its start (fork b785227). The evaluation is
+/// [`crate::query::edge_turn::leaving_derivative`]'s ([`crate::query::edge_turn::leaving_tangent`]);
+/// this adds the closed edge's start and
+/// this module's errors (a vertex the edge does not meet, no curve, a tangent of no length).
 fn leaving(k: &Kernel, b: &Brep, e: EdgeId, vertex: VertexId, op: &'static str) -> Result<Vec3> {
     let at_start = edge::start_vertex(b, e)? == Some(vertex);
     if !at_start && edge::end_vertex(b, e)? != Some(vertex) {
         // the edge does not meet the vertex
-        return Err(SolidError::sm_err(op));
+        return Err(SolidError::blend_failed(
+            op,
+            "the edge does not meet the vertex",
+        ));
     }
-    let curve = edge::curve(b, e)?.ok_or_else(|| SolidError::null_pointer(op))?;
-    let ivl = edge::interval(b, e)?;
-    let pv = curve.evaluate(
-        k,
-        if at_start { ivl.min() } else { ivl.max() },
-        1,
-        at_start,
-        true,
-    )?;
-    let mut d = pv
-        .get(1)
-        .copied()
-        .ok_or_else(|| SolidError::sm_err(op))?
-        .unitize()?;
-    if !at_start {
-        d = -d;
-    }
-    Ok(d)
+    // the one evaluation, inside the edge and turned away from the vertex; each case keeps
+    // this module's typed refusal
+    let d = match leaving_tangent(k, b, e, at_start)? {
+        Leaving::NoCurve => return Err(SolidError::blend_missing(op, "the edge's curve")),
+        Leaving::NoTangent => {
+            return Err(SolidError::blend_failed(
+                op,
+                "the curve's first derivative at the vertex is not there",
+            ))
+        }
+        Leaving::Tangent(d) => d,
+    };
+    d.unitize()
 }
 
 /// `sm_MixedParam`: the parameter of the point of `curve` nearest `pnt`.
@@ -514,7 +537,9 @@ fn param_of(k: &Kernel, curve: &Curve, pnt: Point3, tol: f64, op: &'static str) 
             ..Default::default()
         },
     )?;
-    let first = sols.get(0).ok_or_else(|| SolidError::sm_err(op))?;
+    let first = sols.get(0).ok_or_else(|| {
+        SolidError::blend_failed(op, "the point has no nearest point on the curve")
+    })?;
     first.start.param(0)
 }
 
@@ -540,7 +565,9 @@ fn curve_surface(
     let mut best = BIG_DOUBLE;
     let mut out = None;
     for i in 0..sols.len() {
-        let sol = sols.get(i).ok_or_else(|| SolidError::sm_err(op))?;
+        let sol = sols
+            .get(i)
+            .ok_or_else(|| SolidError::blend_failed(op, "an intersection past the list found"))?;
         let pnt = curve.evaluate_point(k, sol.start.param(0)?)?;
         if pnt.distance(near) < best {
             best = pnt.distance(near);
@@ -548,24 +575,27 @@ fn curve_surface(
         }
     }
     // Mixed corner: a rail does not meet the other blend's rail surface
-    out.ok_or_else(|| SolidError::sm_err(op))
+    out.ok_or_else(|| {
+        SolidError::blend_failed(op, "the rail does not meet the other blend's rail surface")
+    })
 }
 
 /// `sm_MixedRailWall`: the surface swept by a rail on the plane T along T's normal,
 /// reaching `reach` either side; the rail first continued past both ends as itself (its
 /// end spans' own polynomials) by a quarter of `reach`.
 fn rail_wall(rail: &Curve, normal: Vec3, reach: f64, op: &'static str) -> Result<Surface> {
-    let b0 = bspline_curve(rail).ok_or_else(|| SolidError::null_pointer(op))?;
+    let b0 = bspline_curve(rail)
+        .ok_or_else(|| SolidError::blend_missing(op, "the rail's B-spline curve"))?;
     let b1 = b0
         .create_extended_curve_by_distance(
             0.25 * reach,
             CurveEnd::Start,
             ContinuityType::CInfinity,
         )?
-        .ok_or_else(|| SolidError::null_pointer(op))?;
+        .ok_or_else(|| SolidError::blend_missing(op, "the rail extended at its start"))?;
     let mut bb = b1
         .create_extended_curve_by_distance(0.25 * reach, CurveEnd::End, ContinuityType::CInfinity)?
-        .ok_or_else(|| SolidError::null_pointer(op))?;
+        .ok_or_else(|| SolidError::blend_missing(op, "the rail extended at its end"))?;
     let shift = normal * (-reach);
     bb.transform(
         &Axis2Placement::new(
@@ -593,7 +623,7 @@ fn rails(
     solvers: [&FilletSolver; 2],
     op: &'static str,
 ) -> Result<Rails> {
-    let nul = || SolidError::null_pointer(op);
+    let nul = || SolidError::blend_missing(op, "a solver's rail or surface");
     let walls = [mixed.ring.f1, mixed.ring.f2];
     let mut on_t = Vec::new();
     let mut on_wall = Vec::new();
@@ -623,10 +653,10 @@ fn plane_of_t(k: &Kernel, target: &Brep, t: FaceId, tol: f64, op: &'static str) 
         .face(t)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(op))?;
+        .ok_or_else(|| SolidError::blend_missing(op, "the face's surface"))?;
     let planar = s.is_planar(k, tol)?;
     if !planar.is_planar {
-        return Err(SolidError::sm_err(op));
+        return Err(SolidError::blend_failed(op, "the face is not planar"));
     }
     planar.normal.unitize()
 }
@@ -650,7 +680,8 @@ pub fn calc_mixed_vert_geom(
     corner: &FilletCorner,
     solvers: &dyn SweptSolvers,
 ) -> Result<()> {
-    let err = || SolidError::sm_err(OP_VERT);
+    let err =
+        || SolidError::blend_failed(OP_VERT, "the mixed corner's vertices could not be placed");
     let mixed = corner.mixed.as_ref().ok_or_else(err)?;
     let &[x, a, p, v, q, bv] = corner.vertices.as_slice() else {
         return Err(err());
@@ -690,11 +721,11 @@ pub fn calc_mixed_vert_geom(
     }
 
     // P: B1's wall rail crosses the seam; Q: B2's wall rail crosses the seam's line past V
-    let seam_e =
-        eu1::edge(target, mixed.ring.seam)?.ok_or_else(|| SolidError::null_pointer(OP_VERT))?;
+    let seam_e = eu1::edge(target, mixed.ring.seam)?
+        .ok_or_else(|| SolidError::blend_missing(OP_VERT, "the seam's edge"))?;
     let vertex = corner
         .vertex
-        .ok_or_else(|| SolidError::null_pointer(OP_VERT))?;
+        .ok_or_else(|| SolidError::blend_missing(OP_VERT, "the corner's vertex"))?;
     let along = leaving(k, target, seam_e, vertex, OP_VERT)?;
     let line = Curve::from(BSplineCurve::create_line_segment(
         3,
@@ -775,7 +806,7 @@ fn normal_at(
         .face(face)?
         .surface
         .clone()
-        .ok_or_else(|| SolidError::null_pointer(op))?;
+        .ok_or_else(|| SolidError::blend_missing(op, "the face's surface"))?;
     let dom = surface.natural_uv_domain_with_nurb(k)?;
     let mut test_on: Option<bool> = None;
     let mut classify = |k: &Kernel, uv: Point2, src_tol: f64| -> Result<bool> {
@@ -799,7 +830,9 @@ fn normal_at(
         SolutionRequested::Single,
         Some(&mut classify),
     )?;
-    let sol = sols.get(0).ok_or_else(|| SolidError::sm_err(op))?;
+    let sol = sols.get(0).ok_or_else(|| {
+        SolidError::blend_failed(op, "the point has no nearest point on the face")
+    })?;
     surface.evaluate_normal(
         k,
         Point2::new(sol.start.param(0)?, sol.start.param(1)?),
@@ -833,8 +866,13 @@ pub fn calc_mixed_edge_geom(
     corner: &mut FilletCorner,
     solvers: &dyn SweptSolvers,
 ) -> Result<()> {
-    let err = || SolidError::sm_err(OP_EDGE);
-    let nul = || SolidError::null_pointer(OP_EDGE);
+    let err = || SolidError::blend_failed(OP_EDGE, "the mixed corner's edges could not be built");
+    let nul = || {
+        SolidError::blend_missing(
+            OP_EDGE,
+            "topology or geometry the mixed corner's edges are built from",
+        )
+    };
     let mixed = corner.mixed.clone().ok_or_else(err)?;
     let ring = mixed.ring;
     for &v in &corner.vertices {
@@ -1512,7 +1550,7 @@ pub fn create_mixed_patches(
     corner: &mut FilletCorner,
     env: &mut CornerPatchEnv<'_, '_>,
 ) -> Result<()> {
-    let nul = || SolidError::null_pointer(OP_PATCH);
+    let nul = || SolidError::blend_missing(OP_PATCH, "the mixed corner's event or topology");
     for f in 0..2 {
         let mixed = corner.mixed.as_mut().ok_or_else(nul)?;
         let surface = of2m(&mut mixed.surfaces, f).take().ok_or_else(nul)?;
@@ -1602,5 +1640,25 @@ mod tests {
         assert_eq!(at_start, (p1 - p0).unitize().unwrap());
         // an edge that does not meet the vertex is an error
         assert!(leaving(&k, &b, e, off, "test").is_err());
+    }
+
+    /// An edge that does not meet the vertex is a typed `Failed` of the caller's operation,
+    /// with the `SM_ERR` status the bare status had.
+    #[test]
+    fn an_edge_off_the_vertex_is_a_typed_failure() {
+        let k = Kernel::default();
+        let (b, e, _, _, off) = kinked_edge();
+        let err = leaving(&k, &b, e, off, OP_VERT).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Failed(
+                "the edge does not meet the vertex"
+            ))
+        );
+        assert_eq!(err.operation(), OP_VERT);
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
     }
 }

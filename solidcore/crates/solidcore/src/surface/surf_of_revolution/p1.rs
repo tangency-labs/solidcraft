@@ -341,6 +341,9 @@ pub struct IsoCircles {
     pub common_line_point: Option<Point3>,
     /// Its unit direction (`rCommonLineVec`).
     pub common_line_vec: Option<Vec3>,
+    /// Not upstream (#15039): the conditioning of the first iso curve's end angle, as
+    /// [`end_angle_conditioning`] gives it; `None` where it could not be read.
+    pub end_conditioning: Option<f64>,
 }
 
 // ---- the surface -----------------------------------------------------------------------
@@ -1880,6 +1883,70 @@ pub(crate) fn first(v: &[Vec3]) -> Result<Vec3> {
 
 // ---- sm_TestForIsoCircles --------------------------------------------------------------
 
+/// Not upstream (#15039): how far `IsArc`'s end angle moves, in radians times the radius,
+/// per unit each of its four points moves, summed over the points: `S` with `|δθ| <= S δ /
+/// r` when every point is within `δ` of its exact place. `IsArc` (`is_arc_base`) fits the
+/// circle through its samples at `0`, `0.45` and `0.9` of `curve`'s interval and reads the
+/// end point's angle from the first sample, so with the samples at angles `α_1 = 0`, `α_2`,
+/// `α_3` and the end at `T` on the circle of radius `r` (read off `frame`, the fit's):
+/// a sample moved along its normal `n_i` moves the centre and radius by `M⁻¹`, `M` the rows
+/// `(cos α_i, sin α_i, 1)` (the circumcircle `n_i · (δp_i - δc) = δr`); a move along a
+/// tangent does not move the centre. The angle `θ = ∠(p_e - c) - ∠(p_1 - c)` moves by
+/// `(t_e · δp_e - t_1 · δp_1 + (t_1 - t_e) · δc) / r`, so with `w = (t_1 - t_e)ᵀ M⁻¹` (its
+/// first two rows) `S = 1 + sqrt(1 + w_1²) + |w_2| + |w_3|`. A move out of the circle's
+/// plane moves `θ` only to second order. This is the first-order sensitivity; it is 6.02
+/// for a half turn sampled uniformly, 5.98 for one of two rational quarter turns, and grows
+/// without bound as two samples close in, so it is read from the fit, not assumed.
+///
+/// `None` where a sample cannot be evaluated or `M` is singular.
+pub(crate) fn end_angle_conditioning(
+    curve: &BSplineCurve,
+    frame: &Axis2Placement,
+    end_ang_deg: f64,
+) -> Option<f64> {
+    let interval = curve.natural_interval();
+    let (c, x, y) = (frame.origin(), frame.x_axis(), frame.y_axis());
+    let mut alpha = [0.0_f64; 3];
+    for (a, at) in alpha.iter_mut().zip([0.0, 0.45, 0.9]) {
+        let d = curve.evaluate_point(interval.evaluate(at)).ok()? - c;
+        *a = y.dot(d).atan2(x.dot(d));
+    }
+    let [a1, a2, a3] = alpha;
+    let end = end_ang_deg.to_radians();
+    // M⁻¹ by its cofactors: M = [[cos a_i, sin a_i, 1]] (rows i)
+    let rows = [
+        [a1.cos(), a1.sin(), 1.0],
+        [a2.cos(), a2.sin(), 1.0],
+        [a3.cos(), a3.sin(), 1.0],
+    ];
+    let [[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]] = rows;
+    let det = m00 * (m11 * m22 - m12 * m21) - m01 * (m10 * m22 - m12 * m20)
+        + m02 * (m10 * m21 - m11 * m20);
+    if det.abs().partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+        return None;
+    }
+    // the first two rows of M⁻¹ (columns i are the samples)
+    let inv0 = [
+        (m11 * m22 - m12 * m21) / det,
+        (m02 * m21 - m01 * m22) / det,
+        (m01 * m12 - m02 * m11) / det,
+    ];
+    let inv1 = [
+        (m12 * m20 - m10 * m22) / det,
+        (m00 * m22 - m02 * m20) / det,
+        (m02 * m10 - m00 * m12) / det,
+    ];
+    // t_1 - t_e, tangents at the first sample and the end
+    let (g0, g1) = (-a1.sin() + end.sin(), a1.cos() - end.cos());
+    let mut w = [0.0; 3];
+    for ((wi, a), b) in w.iter_mut().zip(inv0).zip(inv1) {
+        *wi = g0 * a + g1 * b;
+    }
+    let [w1, w2, w3] = w;
+    let s = 1.0 + (1.0 + w1 * w1).sqrt() + w2.abs() + w3.abs();
+    s.is_finite().then_some(s)
+}
+
 /// Tests whether the iso curves of `surface` in `surf_param`'s direction are circular
 /// arcs sharing a frame (`sm_TestForIsoCircles`): at every knot and two points in each
 /// knot span, the non-degenerate (within `tol_3d`) iso curves must be arcs; the first
@@ -1912,6 +1979,7 @@ pub fn test_for_iso_circles(
         reference_frame: None,
         common_line_point: None,
         common_line_vec: None,
+        end_conditioning: None,
     };
 
     // locals
@@ -1963,6 +2031,8 @@ pub fn test_for_iso_circles(
         }
 
         // when isoParameterCurve is not a circular Arc
+        // (not upstream: the first curve's end angle's conditioning is read off it, #15039)
+        let samples = first_curve.then(|| iso.clone());
         let Some((this_ref_frame, rad, start_ang_deg, end_ang_deg)) =
             Curve::from(iso).is_arc(k, 5, tol_3d)?
         else {
@@ -1972,6 +2042,8 @@ pub fn test_for_iso_circles(
 
         // The first time through get output reference frame, radius and angle extent
         if first_curve {
+            out.end_conditioning =
+                samples.and_then(|c| end_angle_conditioning(&c, &this_ref_frame, end_ang_deg));
             first_curve = false;
             second = true;
             out.radius = Some(rad);

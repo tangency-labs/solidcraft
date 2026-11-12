@@ -201,11 +201,16 @@ pub(super) fn ball_extended_sides(
 
 /// The box of `s`'s knots (its B-spline form's ends).
 pub(super) fn knot_box(s: &BSplineSurface) -> Result<Extent2d> {
-    let net = s.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let net = s
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     let (u, v) = (net.u_knots(), net.v_knots());
     match (u.first(), u.last(), v.first(), v.last()) {
         (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) => Ok(Extent2d::from_bounds(u0, v0, u1, v1)),
-        _ => Err(SolidError::sm_err(OP)),
+        _ => Err(SolidError::surface_failed(
+            OP,
+            "the B-spline surface has an empty knot vector",
+        )),
     }
 }
 
@@ -261,7 +266,9 @@ fn extend_side(
     cap: Cap,
     distance: f64,
 ) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
-    let net = cur.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let net = cur
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     let source = Local::of(net, side)?;
     let dom = knot_box(cur)?;
     let middle = side.point(&dom, 0.5);
@@ -302,7 +309,10 @@ fn extend_side(
         let n = (x_half - x_far).cross(x_side - x_half);
         let len = n.length();
         if len.is_nan() || len <= 0.0 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::surface_failed(
+                OP,
+                "the side's normal has no direction",
+            ));
         }
         n * (1.0 / len)
     };
@@ -376,7 +386,12 @@ fn extend_side(
             let at_turn = match solve(&|e| value(e, true), turn, range, least)? {
                 Reach::At(e_turn) => Some((
                     e_turn,
-                    value(e_turn, false)?.ok_or_else(|| SolidError::sm_err(OP))?,
+                    value(e_turn, false)?.ok_or_else(|| {
+                        SolidError::surface_failed(
+                            OP,
+                            "the extension at the turn could not be made",
+                        )
+                    })?,
                 )),
                 Reach::Short(_) => None,
             };
@@ -391,7 +406,12 @@ fn extend_side(
             }
         }
     };
-    let (grown, bound) = made(e)?.ok_or_else(|| SolidError::sm_err(OP))?;
+    let (grown, bound) = made(e)?.ok_or_else(|| {
+        SolidError::surface_failed(
+            OP,
+            "the extension at the reached distance could not be made",
+        )
+    })?;
     let across = across_of(&grown, bound)?;
     // a length solved for is met, or the extension is refused naming a length that works
     if goal.is_some_and(|goal| !solved_length_met(&across, bound, goal, e <= least)) {
@@ -524,7 +544,9 @@ fn bisect(
         if !(m > lo && m < hi) {
             break;
         }
-        let v = f(m)?.ok_or_else(|| SolidError::sm_err(OP))?;
+        let v = f(m)?.ok_or_else(|| {
+            SolidError::surface_failed(OP, "the extension could not be measured inside the bracket")
+        })?;
         if (v - target).abs() <= MEET * target {
             return Ok(m);
         }
@@ -548,7 +570,9 @@ fn certify_circle(
     c: Vec3,
     size: f64,
 ) -> Result<()> {
-    let net = s.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let net = s
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     // the iso along the side's across direction: a u-curve across a u side
     let (t, dir) = if side.is_u() {
         (middle.y, Direction::U)
@@ -565,10 +589,10 @@ fn certify_circle(
     }
     let n = rows.len();
     let (Some(&r0), Some(&rm), Some(&rl)) = (rows.first(), rows.get(n / 2), rows.last()) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
     };
     let (Some(&m0), Some(&mm), Some(&ml)) = (mags.first(), mags.get(n / 2), mags.last()) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
     };
     let g = |row: [f64; 4], x: usize| row.get(x).copied().unwrap_or(0.0);
     // the 3 x 3 minor of the three spread rows on columns i, j, l

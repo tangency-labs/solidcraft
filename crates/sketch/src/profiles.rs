@@ -1551,6 +1551,31 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             }
         }
     }
+    // A piece no longer than the end join tolerance that runs beside another piece between the
+    // same two nodes is a point: its ends become one node. A split next to where a line touches
+    // an arc leaves such pairs, and the hairline face they close hides the profile around them
+    // (#14512). A short piece with no such partner is a gap the sketch keeps open, so it stays.
+    let mut between = std::collections::HashMap::<(usize, usize), usize>::new();
+    for e in &edges {
+        *between.entry((e.u.min(e.v), e.u.max(e.v))).or_default() += 1;
+    }
+    let mut short: Vec<usize> = (0..nodes.len()).collect();
+    edges.retain(|e| {
+        let length = match e.seg {
+            Seg2::Line { a, b } => a.dist(b),
+            Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
+            _ => f64::INFINITY,
+        };
+        if length > ENDPOINT_JOIN_TOL || e.u == e.v || between[&(e.u.min(e.v), e.u.max(e.v))] < 2 {
+            return true;
+        }
+        union(&mut short, e.u, e.v);
+        false
+    });
+    for e in &mut edges {
+        e.u = find(&mut short, e.u);
+        e.v = find(&mut short, e.v);
+    }
     let n = nodes.len();
     // One edge where pieces overlap, then prune dangling edges.
     let mut alive = without_overlaps(&edges, tol);
@@ -1795,6 +1820,13 @@ fn assemble(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
             v.push(k);
         }
     }
+    // A loop drawn twice on top of itself is one hole of the loop around it, not two (#10521):
+    // of kids with the same boundary only the first stays.
+    for kids in &mut kids_of {
+        if kids.len() > 1 {
+            *kids = without_repeated_loops(kids, |k| loops.get(k).map(|(l, ..)| *l), |k| areas.get(k).copied().unwrap_or(0.0));
+        }
+    }
     let out: Vec<Profile> = loops
         .iter()
         .enumerate()
@@ -1828,6 +1860,33 @@ fn assemble(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
     keyed.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.area.total_cmp(&a.1.area)));
     let out: Vec<Profile> = keyed.into_iter().map(|x| x.1).collect();
     out
+}
+
+/// `kids` (indices, in order) with each whose loop repeats an earlier one's boundary left out.
+/// Only loops of nearly equal area are compared, so a long list stays cheap.
+fn without_repeated_loops<'a>(kids: &[usize], loop_of: impl Fn(usize) -> Option<&'a Loop2>, area_of: impl Fn(usize) -> f64) -> Vec<usize> {
+    let mut by_area: Vec<usize> = kids.to_vec();
+    by_area.sort_by(|&a, &b| area_of(a).total_cmp(&area_of(b)));
+    let mut dropped = std::collections::HashSet::new();
+    for (n, &k) in by_area.iter().enumerate() {
+        let Some(lk) = loop_of(k) else { continue };
+        let size: f64 = lk.segs.iter().map(Seg2::length).sum();
+        let tol = 1e-7 * (1.0 + size);
+        // The loops just before this one in area order that are as large within the tolerance.
+        for &j in by_area[..n].iter().rev().take_while(|&&j| (area_of(k) - area_of(j)).abs() <= tol * (1.0 + size)) {
+            if dropped.contains(&j) {
+                continue;
+            }
+            let Some(lj) = loop_of(j) else { continue };
+            let one = |l: &Loop2| Region2 { outer: l.ccw(), holes: Vec::new() };
+            if same_region(&one(lk), &one(lj), tol) {
+                // The one listed first stays.
+                dropped.insert(k.max(j));
+                break;
+            }
+        }
+    }
+    kids.iter().copied().filter(|k| !dropped.contains(k)).collect()
 }
 
 /// Why no single profile is bounded by a list of curves.
@@ -2349,7 +2408,8 @@ mod tests {
         let ring = [(20.0, 0.0), (10.0, 17.0), (-10.0, 17.0), (-20.0, 0.0), (-10.0, -17.0), (10.0, -17.0)];
         let mut pts: Vec<usize> = ring.iter().map(|(x, y)| sk.add_point(Vec2::new(*x, *y), None).unwrap()).collect();
         pts.push(pts[0]);
-        let outline = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
+        let outline =
+            sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None).unwrap();
         let pieces = sk.exact_pieces(outline);
         assert!(pieces.len() >= 2, "{pieces:?}");
         // The point of a piece furthest out from the middle chord of its polyline.
@@ -2366,7 +2426,9 @@ mod tests {
         // Bulging out past the fit point the two pieces share.
         let corner = pieces[0].end() * 1.15;
         let bulge: Vec<usize> = [start, corner, end].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-        let bulge = sk.add_curve(CurveKind::Spline { pts: bulge, control: false, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+        let bulge = sk
+            .add_curve(CurveKind::Spline { pts: bulge, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)
+            .unwrap();
         islands_match_whole(&sk);
         let profiles = find_profiles(&sk);
         assert_eq!(profiles.len(), 2, "the inside and the bulge: {profiles:?}");

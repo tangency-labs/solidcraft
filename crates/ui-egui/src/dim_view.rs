@@ -883,12 +883,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
             DimFrame::Angular { vertex, .. } => vertex,
         };
-        // Millimetres per pixel at the dimension.
-        let (Some(a), Some(b)) = (to(anchor), to(anchor + Vec2::X)) else { continue };
-        let px = 1.0 / f64::from(a.distance(b)).max(1e-9);
-        if !px.is_finite() {
-            continue;
-        }
+        let Some(px) = mm_per_pixel(to, anchor) else { continue };
         let display_doc =
             if is_draft { draft.as_ref().map(|(_, d)| d.preview_doc.as_ref()).unwrap_or(app.session.doc.as_ref()) } else { app.session.doc.as_ref() };
         let expr = c.param.as_ref().and_then(|p| display_doc.param(p)).map(|p| p.expr.as_str());
@@ -973,6 +968,18 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     DRAWN.with(|d| *d.borrow_mut() = drawn);
     window::paint(app, painter, proj);
     edit_box(app, ui.ctx());
+}
+
+/// Millimetres per pixel at the sketch point `at`, along whichever of the sketch's x and y
+/// directions looks longer on screen (`to`: sketch to screen). Seen nearly edge-on, one of them
+/// points at the eye and looks a pixel long or less: sized from it alone, a dimension's text and
+/// gaps grew so large that its lines ran across the window (#14826). Face-on both are the same.
+/// A direction that does not project leaves the other to size it; with neither, there is no size.
+pub(crate) fn mm_per_pixel(to: impl Fn(Vec2) -> Option<Pos2>, at: Vec2) -> Option<f64> {
+    let a = to(at)?;
+    let longest = [Vec2::X, Vec2::Y].into_iter().filter_map(|d| to(at + d)).map(|p| a.distance(p)).reduce(f32::max)?;
+    let px = 1.0 / f64::from(longest).max(1e-9);
+    px.is_finite().then_some(px)
 }
 
 /// A point a dimension measures (for the shape it belongs to).
