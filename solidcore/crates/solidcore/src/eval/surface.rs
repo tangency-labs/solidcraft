@@ -486,9 +486,23 @@ impl SurfaceEval {
         // The circle along u of radius `r`, rounded within `err`; v moves the point along a
         // straight line or a circle of radius `along_v` (a cylinder's and cone's generator never
         // stands still; a torus's tube does when its radius is zero).
+        //
+        // A direction is collapsed within the reach only where the surface narrows to a pole
+        // there: where its circles are nowhere wider than the reach (a 0.05 mm round, a 0.05 mm
+        // ball, in a file of 0.1 mm uncertainty) the surface is thin, not collapsed, and only an
+        // exact pole is one. Taken as one everywhere, every point of such a face was on a pole,
+        // its box bounded nothing and the face was lost ("a face whose boundary does not lie on
+        // its surface").
+        let within = |widest: f64| {
+            if 2.0 * widest.abs() > reach {
+                reach
+            } else {
+                0.0
+            }
+        };
         let (u_flag, v_flag) = match self {
             SurfaceEval::Eval(e, _) => return super::collapse::collapse(e, uv, reach),
-            SurfaceEval::Cylinder { radius, .. } => (circle(*radius, 0.0, reach)?, false),
+            SurfaceEval::Cylinder { radius, .. } => (circle(*radius, 0.0, within(*radius))?, false),
             SurfaceEval::Cone {
                 radius_at_origin,
                 slope,
@@ -503,8 +517,8 @@ impl SurfaceEval {
                 // float: the parameter given for it is off by up to its rounding.
                 let err = radius.abs() * (g(3) + 2.0 * unit * v.abs());
                 (
-                    circle(radius * v.cos(), err, reach)?,
-                    circle(*radius, 0.0, reach)?,
+                    circle(radius * v.cos(), err, within(*radius))?,
+                    circle(*radius, 0.0, within(*radius))?,
                 )
             }
             SurfaceEval::Torus {
@@ -513,7 +527,10 @@ impl SurfaceEval {
                 let w = v + tube;
                 let ring = major + minor * w.cos();
                 let err = g(4) * (major.abs() + minor.abs()) + minor.abs() * 2.0 * unit * w.abs();
-                (circle(ring, err, reach)?, circle(*minor, 0.0, reach)?)
+                (
+                    circle(ring, err, within(major.abs() + minor.abs()))?,
+                    circle(*minor, 0.0, within(*minor))?,
+                )
             }
         };
         Ok(Collapse::of([u_flag, v_flag]))

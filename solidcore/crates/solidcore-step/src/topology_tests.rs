@@ -356,6 +356,40 @@ fn side(w: &mut W, c: &Cyl, outward: bool) -> u64 {
     w.face(&[bound], c.surface, outward)
 }
 
+/// A quarter round of radius 0.05 mm, 1 mm long, in a file of 0.1 mm uncertainty (a
+/// connector's pin edges): the cylinder is thinner than the tolerance, but it has no pole. Read
+/// as collapsed within the tolerance everywhere, every point of its boundary was on a pole, its
+/// box bounded nothing, and the face was refused as "a face whose boundary does not lie on its
+/// surface".
+#[test]
+fn a_round_thinner_than_the_tolerance_reads() {
+    let r = 0.05;
+    let mut w = W::default();
+    let (p0, p1, p2, p3) = ([r, 0.0, 0.0], [r, 1.0, 0.0], [0.0, 1.0, r], [0.0, 0.0, r]);
+    let (v0, v1, v2, v3) = (w.vertex(p0), w.vertex(p1), w.vertex(p2), w.vertex(p3));
+    // The cylinder's frame: axis -y, angle 0 on +x, a quarter turn on +z.
+    let (axis, x) = ([0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+    let along = w.line_edge((v0, p0), (v1, p1), true, 1.0);
+    let k1 = w.circle([0.0, 1.0, 0.0], axis, x, r);
+    let far = w.add(format!("EDGE_CURVE('',#{v1},#{v2},#{k1},.T.)"));
+    let back = w.line_edge((v2, p2), (v3, p3), true, 1.0);
+    let k0 = w.circle([0.0; 3], axis, x, r);
+    let near = w.add(format!("EDGE_CURVE('',#{v0},#{v3},#{k0},.T.)"));
+    let a = w.axis([0.0; 3], axis, x);
+    let cylinder = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    let uses = [w.oe(along, true), w.oe(far, true), w.oe(back, true), w.oe(near, false)];
+    let bound = w.bound(&uses, true, true);
+    let face = w.face(&[bound], cylinder, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('pin round',(#{open}))"));
+    let s = one_solid(&w.file_with_uncertainty(&[model], 0.1));
+    assert!(s.sheet);
+    assert_eq!(counts(&s.brep), [1, 1, 1, 4, 4]);
+    // The face's box: a quarter turn by the 1 mm length.
+    let d = s.brep.faces[0].domain;
+    assert!((d[1][1] - d[1][0] - 1.0).abs() < 1e-9 || (d[0][1] - d[0][0] - 1.0).abs() < 1e-9, "{d:?}");
+}
+
 #[test]
 fn a_cylinder_has_a_seam_used_twice_by_its_side() {
     let mut w = W::default();
