@@ -2486,6 +2486,53 @@ mod face_snap_tests {
         assert!((again.0.z - 50.0).abs() < 1e-9, "{again:?}");
     }
 
+    /// Hovering the faces of a body while New Sketch waits for a plane does not tessellate the
+    /// body once per face: planes and flat B-spline faces are planar by their surfaces, curved
+    /// ones are not. Before, each face not among the last 8 looked up meshed the whole body,
+    /// seconds a face for a large imported body with many B-spline faces. Every face the mesh
+    /// takes as planar is still taken, with the same normal.
+    #[test]
+    fn hovering_many_faces_for_a_sketch_plane_does_not_tessellate_per_face() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, z, [x, y]) in [("S0", 0, [10, 6]), ("S1", 10, [8, 5]), ("S2", 20, [6, 4])] {
+            h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0": [-x, -y], "p1": [x, y]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("solid.loft", json!({"sections": [{"sketch": "S0"}, {"sketch": "S1"}, {"sketch": "S2"}], "body_name": "L3"})).unwrap();
+        h.app.run("solid.cylinder", json!({"base": [0, 0, 20], "radius": 2, "height": 5, "operation": "join"})).unwrap();
+        h.app.run("solid.cylinder", json!({"base": [4, 0, -1], "radius": 1, "height": 30, "operation": "cut"})).unwrap();
+        let faces = h.app.session.world_state().unwrap().body("L3").unwrap().body.faces(1e-3).unwrap();
+        assert!(faces.len() > 8, "more faces than the old cache held: {}", faces.len());
+        let curved = faces.iter().filter(|f| f.plane_normal.is_none()).count();
+        assert_eq!(curved, 2, "the boss's wall and the hole's wall");
+
+        h.app.start("sketch.create");
+        take_snap_work();
+        let d = h.app.dialog.as_ref().unwrap();
+        for _ in 0..2 {
+            for f in &faces {
+                let hit = Hit::Face { body: "L3".into(), index: f.index, point: f.centroid };
+                let picked = d.candidate_on(&h.app.session, &hit, None);
+                assert_eq!(picked.is_some(), f.plane_normal.is_some(), "face {} ({:?})", f.index, f.centroid);
+            }
+        }
+        let tessellations = take_snap_work().0;
+        assert!(tessellations <= 1, "{tessellations} tessellations for {} faces hovered twice", faces.len());
+
+        for f in &faces {
+            let exact = planar_face(&h.app.session, "L3", f.index);
+            match (f.plane_normal, exact) {
+                (Some(mesh), Some((origin, normal))) => {
+                    assert!(normal.dot(mesh) > 1.0 - 1e-9, "face {}: {normal:?} vs the mesh's {mesh:?}", f.index);
+                    assert!((f.centroid - origin).dot(normal).abs() < 1e-6, "face {}: the centroid is on its plane", f.index);
+                }
+                (None, None) => {}
+                (mesh, exact) => panic!("face {}: the mesh says {mesh:?}, the lookup {exact:?}", f.index),
+            }
+        }
+    }
+
     #[test]
     fn a_point_more_than_a_micrometre_off_a_sliver_is_off_the_face() {
         // A triangle with half-micrometre legs. Points 2 µm below its lower side and 1.6 µm past
