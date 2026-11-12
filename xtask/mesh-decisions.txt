@@ -80,7 +80,6 @@ crates/doc/src/naming.rs:normals takes face normals from mesh triangles
 crates/doc/src/naming.rs:roomiest takes a sample point per face from mesh triangles
 crates/doc/src/naming.rs:samples_up_to takes sample points per face from mesh triangles
 crates/doc/src/placement_reuse.rs:same_feature compares imported mesh payloads by their triangles
-crates/doc/src/print_face.rs:Document::locate_print_face finds a print face by the display mesh
 crates/doc/src/project.rs:body_mesh finds a projection's body nearest a point by the display mesh
 crates/doc/src/project.rs:cache_key keys projections by the display mesh
 crates/doc/src/project.rs:exact_edges finds the picked edges by the display mesh
