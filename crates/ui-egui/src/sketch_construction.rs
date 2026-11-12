@@ -18,8 +18,9 @@ fn references(mode: &str) -> usize {
     }
 }
 
-/// The one-click methods whose Length box shows from the start (#10258). Without a length they
-/// still draw an infinite line in one click; with one, a second click picks the side it runs to.
+/// The one-click methods (#10258): an infinite line takes one click; a segment takes a second,
+/// which picks the side it runs to. Before the first click they show the pointer's coordinates,
+/// as the Line tool does, and the Offset box where they have one (#15618).
 pub(crate) fn length_box_at_start(mode: &str) -> bool {
     matches!(mode, "horizontal" | "vertical" | "parallel" | "perpendicular")
 }
@@ -29,10 +30,10 @@ pub(crate) fn typed_length(t: &Tool) -> Option<&str> {
     crate::sketch_dims::locked_expression(t, "Length").map(str::trim).filter(|text| !text.is_empty())
 }
 
-/// A digit typed while a one-click tool's Length box waits gives that box the keyboard, so the
-/// digit is its first character. Horizontal, vertical and parallel keep that: two clicks then
-/// draw a dimensioned segment. The Offset box is opt-in and takes a digit only after it already
-/// has the keyboard. A letter still reaches the shortcuts.
+/// A digit typed before a one-click tool's first click gives its first value box the keyboard, so
+/// the digit is its first character: a coordinate of a horizontal or vertical line, the distance
+/// of a parallel one (#15618). The length is typed after the first click, as the Line tool's is.
+/// A letter still reaches the shortcuts.
 pub fn claim_typed_length(app: &SolveApp, ctx: &egui::Context) {
     let Some(t) = app.tool.as_ref() else { return };
     if !construction_line_mode(t.cmd).is_some_and(length_box_at_start) || !t.pts.is_empty() || t.hover.is_none() {
@@ -41,7 +42,8 @@ pub fn claim_typed_length(app: &SolveApp, ctx: &egui::Context) {
     if ctx.memory(|m| m.focused().is_some()) {
         return;
     }
-    let Some(index) = t.dims.iter().position(|b| b.label == "Length") else { return };
+    // The first box: X, Y order for a horizontal or vertical line, the distance for a parallel one.
+    let Some(index) = (!t.dims.is_empty()).then_some(0) else { return };
     let digit = ctx.input(|i| {
         !i.modifiers.command
             && !i.modifiers.alt
@@ -113,6 +115,17 @@ pub(crate) fn shown_line_type(t: &Tool) -> u8 {
     if t.line_type == 3 && typed_length(t).is_some() { 1 } else { t.line_type }
 }
 
+thread_local! {
+    /// The line type last chosen in the Sketch Palette for a construction line tool: the next one
+    /// started, another method included, begins at it (#15618).
+    static LAST_LINE_TYPE: std::cell::Cell<u8> = const { std::cell::Cell::new(3) };
+}
+
+/// The line type a construction line tool starts at: the one last chosen, else Infinite.
+pub(crate) fn last_line_type() -> u8 {
+    LAST_LINE_TYPE.with(std::cell::Cell::get)
+}
+
 /// A click on the Sketch Palette's Line Type icon `kind` (0 normal, 1 construction,
 /// 2 centerline, 3 infinite) while a construction line tool taking a length runs (#15066). The
 /// icons stay in the palette, so they hold still while the pointer moves; beside the Length box
@@ -122,6 +135,7 @@ pub(crate) fn shown_line_type(t: &Tool) -> u8 {
 /// The palette's drawing line type (X) is left as it is.
 pub(crate) fn choose_line_type(ctx: &egui::Context, t: &mut Tool, kind: u8) {
     t.line_type = kind;
+    LAST_LINE_TYPE.with(|last| last.set(kind));
     if kind == 3 {
         // A segment's start is no part of an infinite line: the next click places that line.
         // The angle method's first click is where its line passes, so it keeps it.
@@ -145,6 +159,19 @@ pub(crate) fn pointer_segment_length(app: &SolveApp, t: &Tool, pointer: &(Vec2, 
         return None;
     }
     params(app, t, &crate::sketch_dims::placed(app, t, pointer), true)?.get("length")?.as_f64()
+}
+
+/// Where the segment being drawn ends with the pointer at `pointer`: at the typed length on the
+/// pointer's side, or where the pointer is.
+pub(crate) fn segment_end(app: &SolveApp, t: &Tool, pointer: Vec2) -> Option<Vec2> {
+    let mode = construction_line_mode(t.cmd)?;
+    let p = params(app, t, &(pointer, None), true)?;
+    let length = p.get("length")?.as_f64()?;
+    let state = crate::open_meshing::session_world(&app.session);
+    let ss = app.session.active_sketch.and_then(|sid| state.sketch(sid))?;
+    let lines = construction_line_solutions(&ss.sketch, &p, mode).ok()?;
+    let line = *lines.get(construction_line_choice(&lines, &p).ok()?)?;
+    Some(construction_segment(line, length, Some(pointer)).1)
 }
 
 /// How far along the line the pointer is from its start: the length of a segment with no typed
@@ -190,10 +217,12 @@ fn params(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>), preview: b
         return None;
     }
     let first = t.pts.first();
+    // Before the first click the preview goes where typed values put the click.
+    let typed = (preview && first.is_none()).then(|| (crate::sketch_dims::effective(app, t, pointer.0), None));
     let at = match mode {
         "free" | "angle" => first?,
         // A line with a length starts where the first click was; the pointer picks its side.
-        _ => first.unwrap_or(pointer),
+        _ => first.or(typed.as_ref()).unwrap_or(pointer),
     };
     let mut p = json!({"mode": mode, "at": arg(at, preview), "near": [pointer.0.x, pointer.0.y]});
     if let Some(id) = t.picks.first() {
@@ -209,10 +238,12 @@ fn params(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>), preview: b
         let angle = crate::sketch_dims::locked_value(app, t, "Angle").unwrap_or_else(|| (pointer.0 - at.0).angle());
         p["angle"] = json!(angle.to_degrees());
     }
+    // A horizontal or vertical line's typed coordinate can be negative or zero: the distance is
+    // its size, and `at` (moved to the coordinate) gives the side. Zero is the axis itself.
     if matches!(mode, "parallel" | "horizontal" | "vertical")
-        && let Some(offset) = crate::sketch_dims::locked_value(app, t, "Offset")
+        && let Some(offset) = crate::sketch_dims::locked_value(app, t, "Offset").filter(|offset| *offset != 0.0)
     {
-        p["offset"] = json!(offset);
+        p["offset"] = json!(offset.abs());
     }
     if let Some(expression) = typed_length(t) {
         p["length"] = if preview { json!(crate::sketch_dims::locked_value(app, t, "Length")?) } else { json!(expression) };
@@ -228,7 +259,9 @@ fn params(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>), preview: b
         {
             p["angle"] = json!(expression);
         }
+        // Only a positive coordinate is its own distance: a negative one's distance is its size.
         if matches!(mode, "parallel" | "horizontal" | "vertical")
+            && crate::sketch_dims::locked_value(app, t, "Offset").is_some_and(|offset| offset > 0.0)
             && let Some(expression) = crate::sketch_dims::locked_expression(t, "Offset").filter(|text| !text.trim().is_empty())
         {
             p["offset"] = json!(expression);
@@ -323,6 +356,18 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     // Where a click there puts the point: a typed angle moves the end off the pointer.
     let Some(pointer) = &t.hover.as_ref().map(|hover| crate::sketch_dims::placed(app, t, hover)) else { return };
     let Some(mode) = construction_line_mode(t.cmd) else { return };
+    // Before the first click, the pointer's coordinates in grey beside it, as the Line tool shows
+    // them (#15618); not while a typed value draws the sketch at it. Horizontal and vertical lines
+    // show theirs with their value boxes (`sketch_dims`), as they can be typed.
+    if t.pts.is_empty()
+        && !matches!(mode, "horizontal" | "vertical")
+        && crate::dim_view::preview_world(app).is_none()
+        && let Some(sketch) =
+            app.session.active_sketch.and_then(|sid| crate::open_meshing::session_world(&app.session).sketch(sid).map(|ss| ss.plane))
+        && let Some(at) = proj.to_screen(sketch.to_world(pointer.0))
+    {
+        readout(app, painter, proj, at, pointer.0);
+    }
     let Some(p) = params(app, t, pointer, true) else { return };
     let state = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|sid| state.sketch(sid)) else { return };
@@ -360,6 +405,15 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
             Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { tokens.preview_new } else { tokens.sketch_accent.gamma_multiply(0.35) });
         crate::tools::paint_sketch_path(&points, if selected { style } else { 3 }, painter, proj, stroke);
     }
+    // After a segment's first click, its end's coordinates in grey beside the pointer, as the Line
+    // tool shows them (#15618).
+    if !t.pts.is_empty()
+        && let Some(&end) = ends.get(1)
+        && crate::dim_view::preview_world(app).is_none()
+        && let Some(at) = proj.to_screen(ss.plane.to_world(pointer.0))
+    {
+        readout(app, painter, proj, at, end);
+    }
     // The segment's two ends, and before its first click the point that click puts down.
     for end in ends {
         if let Some(at) = proj.to_screen(ss.plane.to_world(end)) {
@@ -377,6 +431,19 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     {
         painter.circle_stroke(p, 4.0, Stroke::new(1.5, tokens.sketch_accent));
     }
+}
+
+/// `point`'s sketch coordinates in grey below and right of the pointer at `at`, where the Line
+/// tool shows them.
+fn readout(app: &SolveApp, painter: &egui::Painter, proj: &Proj, at: egui::Pos2, point: Vec2) {
+    let shown = painter.text(
+        crate::tool_cursor::readout_at(painter, proj.rect, at),
+        egui::Align2::LEFT_TOP,
+        crate::sketch_cursor_readout::text(app, point),
+        egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small),
+        solidcraft_theme::Tokens::view().text_dim,
+    );
+    crate::scenario::publish_rect("viewport:readout", shown);
 }
 
 #[cfg(test)]
