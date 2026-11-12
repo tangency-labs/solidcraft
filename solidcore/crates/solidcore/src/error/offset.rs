@@ -40,6 +40,11 @@ use super::{
 use crate::topology::{EdgeId, FaceId};
 
 /// Why an offset, shell, thicken or local operation is refused.
+///
+/// A caller outside the crate matches it with a wildcard: a reason it does not name yet still
+/// has its class ([`OffsetFailure::kind`]) and says whether it is a phrase
+/// ([`OffsetFailure::is_phrase`]) or a defect ([`OffsetFailure::is_defect`]), which every reason
+/// must answer here.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum OffsetFailure {
@@ -287,6 +292,62 @@ impl OffsetFailure {
             self,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_)
         )
+    }
+
+    /// True for a phrase cause ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
+    /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]): a routine's failure
+    /// not yet given a cause of its own, told apart only by its words. Its class is its status's
+    /// kind; each moves to a cause of its own, as the blend's phrase causes do
+    /// ([`crate::error::blend::BlendFailure`]).
+    #[must_use]
+    pub const fn is_phrase(&self) -> bool {
+        match self {
+            Self::Folds { .. }
+            | Self::NotCertified { .. }
+            | Self::Collapses { .. }
+            | Self::WallsTouch { .. }
+            | Self::LoopsCross { .. }
+            | Self::EdgeVanishes { .. }
+            | Self::DistanceUnresolved { .. }
+            | Self::ToleranceUnresolved { .. }
+            | Self::SeamOpened { .. }
+            | Self::ExactCurveUncut
+            | Self::FacesApart { .. }
+            | Self::ReachUncertified { .. }
+            | Self::LoopGapUncertified { .. }
+            | Self::Unsound { .. } => false,
+            Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
+                true
+            }
+        }
+    }
+
+    /// True for a failure that is the kernel's fault, not a fact of the input: a consistency
+    /// check of a routine's own data that did not hold ([`OffsetFailure::Inconsistent`]).
+    /// Report it. Said per cause, as its class ([`ErrorKind::Failed`]) does not say it, until
+    /// offset failures move onto a class of their own.
+    #[must_use]
+    pub const fn is_defect(&self) -> bool {
+        match self {
+            Self::Inconsistent(_) => true,
+            Self::Folds { .. }
+            | Self::NotCertified { .. }
+            | Self::Collapses { .. }
+            | Self::WallsTouch { .. }
+            | Self::LoopsCross { .. }
+            | Self::EdgeVanishes { .. }
+            | Self::DistanceUnresolved { .. }
+            | Self::ToleranceUnresolved { .. }
+            | Self::SeamOpened { .. }
+            | Self::ExactCurveUncut
+            | Self::FacesApart { .. }
+            | Self::ReachUncertified { .. }
+            | Self::LoopGapUncertified { .. }
+            | Self::Unsound { .. }
+            | Self::Failed(_)
+            | Self::Missing(_)
+            | Self::InvalidValue(_) => false,
+        }
     }
 
     /// The status the C++ reports for the refusal (difftest's comparison detail).
@@ -657,6 +718,149 @@ mod tests {
         );
         assert_eq!(folds.upstream_status(), None);
         assert_eq!(SolidError::sm_err("offset::op").offset_failure(), None);
+    }
+
+    /// Every offset failure's class, and whether it is a phrase (a routine's failure not yet
+    /// given a cause of its own) or a defect of the kernel, pinned. A new reason must answer
+    /// all three (`kind`, `is_phrase` and `is_defect` match exhaustively) and adds its arm to
+    /// `row` and its row here, so a caller outside the crate, which has to match with a
+    /// wildcard, still gets its class and never only its text (#15035).
+    #[test]
+    fn every_offset_failure_keeps_its_class() {
+        use OffsetFailure as O;
+        let face = FaceId::from_index(1);
+        // (the failure, its class, a phrase, a defect)
+        let pinned = [
+            (
+                O::Folds {
+                    face,
+                    distance: 2.0,
+                    largest: 1.0,
+                },
+                ErrorKind::OffsetFolds,
+                false,
+                false,
+            ),
+            (
+                O::NotCertified {
+                    face,
+                    distance: 2.0,
+                },
+                ErrorKind::OffsetFolds,
+                false,
+                false,
+            ),
+            (
+                O::Collapses {
+                    face,
+                    distance: -5.0,
+                    radius: 5.0,
+                },
+                ErrorKind::OffsetCollapses,
+                false,
+                false,
+            ),
+            (
+                O::WallsTouch {
+                    face: None,
+                    contact: WallContact::Touch,
+                },
+                ErrorKind::OffsetWallsTouch,
+                false,
+                false,
+            ),
+            (
+                O::LoopsCross {
+                    face: None,
+                    crossing: LoopCrossing::SharesEdge,
+                },
+                ErrorKind::OffsetLoopsCross,
+                false,
+                false,
+            ),
+            (
+                O::EdgeVanishes {
+                    edge: None,
+                    face: None,
+                },
+                ErrorKind::OffsetEdgeVanishes,
+                false,
+                false,
+            ),
+            (
+                O::DistanceUnresolved {
+                    distance: 1e-9,
+                    resolution: 1e-6,
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+            ),
+            (
+                O::ToleranceUnresolved { tolerance: 1e-13 },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+            ),
+            (O::SeamOpened { face }, ErrorKind::Unsupported, false, false),
+            (O::ExactCurveUncut, ErrorKind::Unsupported, false, false),
+            (O::FacesApart { face }, ErrorKind::Unsupported, false, false),
+            (
+                O::ReachUncertified { face },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (
+                O::LoopGapUncertified { face: None },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (
+                O::Unsound {
+                    what: Unsoundness::NotManifoldSolid,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (O::Failed("x"), ErrorKind::Failed, true, false),
+            (O::Missing("x"), ErrorKind::Missing, true, false),
+            (O::InvalidValue("x"), ErrorKind::InvalidInput, true, false),
+            // a consistency check of the kernel's own data that did not hold: its fault
+            (O::Inconsistent("x"), ErrorKind::Failed, true, true),
+        ];
+        let row = |o: &O| -> usize {
+            match o {
+                O::Folds { .. } => 0,
+                O::NotCertified { .. } => 1,
+                O::Collapses { .. } => 2,
+                O::WallsTouch { .. } => 3,
+                O::LoopsCross { .. } => 4,
+                O::EdgeVanishes { .. } => 5,
+                O::DistanceUnresolved { .. } => 6,
+                O::ToleranceUnresolved { .. } => 7,
+                O::SeamOpened { .. } => 8,
+                O::ExactCurveUncut => 9,
+                O::FacesApart { .. } => 10,
+                O::ReachUncertified { .. } => 11,
+                O::LoopGapUncertified { .. } => 12,
+                O::Unsound { .. } => 13,
+                O::Failed(_) => 14,
+                O::Missing(_) => 15,
+                O::InvalidValue(_) => 16,
+                O::Inconsistent(_) => 17,
+            }
+        };
+        for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
+            assert_eq!(row(o), i, "{o:?} is listed once, in order");
+            assert_eq!(o.kind(), *class, "{o:?}");
+            assert_eq!(o.is_phrase(), *phrase, "{o:?}");
+            assert_eq!(o.is_defect(), *defect, "{o:?}");
+            // a phrase is what replaced a bare status, and only a phrase
+            assert_eq!(o.replaces_upstream_status(), *phrase, "{o:?}");
+        }
     }
 
     /// The offset routines describe their failures: their library code builds no bare

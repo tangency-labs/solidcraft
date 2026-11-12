@@ -278,8 +278,9 @@ pub enum Error {
 }
 
 /// Why the kernel refuses an offset or a draft ([`Error::OffsetRefused`]), as its
-/// `OffsetFailure` names it.
+/// `OffsetFailure` names it. More reasons get names of their own, so match it with a wildcard.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum OffsetRefusal {
     /// The face's offset by `distance` is not proved regular, and no wall size would help:
     /// the face bends towards that side nowhere the kernel's sizing looked, so no radius of
@@ -336,10 +337,18 @@ pub enum OffsetRefusal {
         /// What the built body fails.
         what: solidcore::error::offset::Unsoundness,
     },
-    /// A reason this version of ops does not name yet: the kernel's own statement of it.
-    Other {
-        /// The kernel's statement of its reason.
-        message: String,
+    /// A failure the kernel states only in words so far: a routine's own failure (its phrase
+    /// causes `Failed`, `Missing`, `InvalidValue` and `Inconsistent`), or a reason this version
+    /// of ops does not name yet. Transitional: each gets a variant of its own here once the
+    /// kernel gives it a cause of its own.
+    Phrase {
+        /// The kernel's class of the failure.
+        class: solidcore::error::ErrorKind,
+        /// True when the failure is the kernel's fault, not a fact of the input (a consistency
+        /// check of its own that did not hold): a bug to report, not a refusal.
+        defect: bool,
+        /// The kernel's statement of it.
+        phrase: String,
     },
 }
 
@@ -389,7 +398,7 @@ impl std::fmt::Display for OffsetRefusal {
                 )
             }
             OffsetRefusal::Unsound { what } => write!(f, "the body built is unsound ({what:?})"),
-            OffsetRefusal::Other { message } => write!(f, "{message}"),
+            OffsetRefusal::Phrase { phrase, .. } => f.write_str(phrase),
         }
     }
 }
