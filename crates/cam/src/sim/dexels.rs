@@ -409,6 +409,10 @@ impl SideDexels {
         self.sets.iter().map(|s| s.unmodelled).sum()
     }
 
+    pub(super) fn bytes(&self) -> usize {
+        self.sets.iter().map(|s| s.lines.iter().map(|l| 24 + l.len() * 16).sum::<usize>()).sum()
+    }
+
     /// What the lines leave under the part's own material both from above and from below along
     /// Z (no setup along Z reaches it), as [`PartLeft`] pieces (each set's half of the volume),
     /// and what they cut into the part there, as a gouge (the worst, where, and how many pieces).
@@ -513,7 +517,7 @@ impl SideDexels {
 
 /// Whether `part` has faces under its own material along Z over `grid`'s footprint: a vertical
 /// ray every so often (about [`HIDDEN_PROBES`] each way) that meets more than one stretch of it.
-pub(super) fn hides_faces(part: &Surface, grid: &Grid) -> bool {
+pub(crate) fn hides_faces(part: &Surface, grid: &Grid) -> bool {
     let Grid::Heights { x0, y0, dx, dy, nx, ny, bottom, top } = *grid else { return false };
     if part.is_empty() {
         return false;

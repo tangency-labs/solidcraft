@@ -139,6 +139,11 @@ impl GapStore {
     pub(super) fn iter(&self) -> impl Iterator<Item = (usize, &Gaps)> {
         self.slot.iter().enumerate().filter_map(|(c, &s)| if s == NO_GAPS { None } else { self.lists.get(s as usize).map(|g| (c, g)) })
     }
+
+    /// Bytes held.
+    pub(super) fn bytes(&self) -> usize {
+        self.slot.len() * 4 + self.lists.iter().map(|l| 24 + l.capacity() * 16).sum::<usize>()
+    }
 }
 
 /// Whether radius `v` is in the air of `gaps`.

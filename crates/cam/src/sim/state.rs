@@ -74,6 +74,15 @@ impl Model {
             Model::Radii(r) => &r.tiles,
         }
     }
+
+    pub(super) fn bytes(&self) -> usize {
+        let t = self.tiles();
+        let gaps = match self {
+            Model::Heights(_) => 0,
+            Model::Radii(r) => r.gaps.bytes(),
+        };
+        self.values().len() * 9 + t.max.len() * 13 + gaps
+    }
 }
 
 /// Cuts the part of `step` from fraction `f0` to `f1` of the way along through one band.
@@ -473,6 +482,20 @@ impl SimState {
         self.band_of(j).and_then(|(m, jj)| m.last().get(jj * nx + i).copied()).unwrap_or(UNCUT)
     }
 
+    /// The stock as it is now.
+    pub fn grid(&self, plan: &SimPlan) -> StockGrid {
+        let mut values = Vec::with_capacity(plan.cells());
+        let mut gaps = Vec::new();
+        for b in &self.bands {
+            values.extend_from_slice(b.values());
+            if let Model::Radii(r) = b {
+                let base = r.k0 * r.nx;
+                gaps.extend(r.gaps.iter().map(|(c, g)| (base + c, g.clone())));
+            }
+        }
+        super::report::stock_grid(&plan.grid, values, gaps)
+    }
+
     /// The version of tile `(ti, tj)`: it changes whenever a cell of the tile is cut.
     pub fn tile_version(&self, ti: usize, tj: usize) -> u32 {
         let Some((m, jj)) = self.band_of(tj * TILE) else { return 0 };
@@ -502,8 +525,33 @@ impl SimState {
         m
     }
 
+    /// Material higher than `z` inside `fp` (3-axis stock; `None` on a 4th axis): a point on its
+    /// top. Exact over the cells' centres; tiles whose highest cell is below `z` are skipped.
+    pub fn material_above(&mut self, fp: Footprint, z: f64) -> Option<Vec3> {
+        let (x0, x1, y0, y1) = fp.bounds();
+        if ![x0, x1, y0, y1, z].iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let inside = |x: f64, y: f64| fp.contains(x, y);
+        for b in &mut self.bands {
+            if let Model::Heights(h) = b
+                && let Some(p) = h.above((x0, x1), (y0, y1), z, &inside)
+            {
+                return Some(p);
+            }
+        }
+        None
+    }
+
     /// Whether `p` (work coordinates) is inside the stock.
     pub fn contains(&self, p: Vec3) -> bool {
         self.bands.iter().find_map(|b| b.owns(p)).unwrap_or(false)
+    }
+
+    /// The memory the stock takes, about (bytes).
+    pub fn bytes(&self) -> usize {
+        self.bands.iter().map(Model::bytes).sum::<usize>()
+            + self.removed.len() * (std::mem::size_of::<Removed>() + 1)
+            + self.side.as_ref().map_or(0, |s| s.bytes())
     }
 }

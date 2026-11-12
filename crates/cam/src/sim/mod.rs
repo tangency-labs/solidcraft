@@ -128,6 +128,7 @@ pub(crate) use self::compare::column_depth;
 #[cfg(test)]
 pub(crate) use self::compare::distance_within;
 pub use self::dexels::SideLines;
+pub(crate) use self::dexels::hides_faces;
 pub use self::heights::Removed;
 pub use self::left::{LeftPiece, PartLeft, SPOT_APART, SPOTS};
 pub use self::params::{DEFAULT_CELL_TOLERANCES, DEFAULT_CELLS, Footprint, Grid, MAX_CELLS, SimParams, StockShape, stock_around};

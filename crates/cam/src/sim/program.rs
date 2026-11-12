@@ -224,7 +224,8 @@ pub(super) struct Step {
     pub(super) flute: f64,
     /// The spindle's speed (0: stopped), when the program has said.
     pub(super) rpm: Option<f64>,
-    /// The axes at its start, when known.
+    /// The axes at its end, and at its start when known.
+    pub(super) to: Joints,
     pub(super) from: Option<Joints>,
     /// The distance the tool travels (mm; with the rotaries' sweep on a 4th axis).
     pub(super) travel: f64,
@@ -243,6 +244,17 @@ impl Step {
             }
             How::Arc { from, to, center, sweep, rotary, .. } => pose_at(machine, arc_linear(*from, *to, *center, *sweep, t), rotary),
             How::Tilted { arc, rotary, .. } => pose_at(machine, arc.at(t), rotary),
+        }
+    }
+
+    /// The axes a fraction `t` of the way along (a block from an unknown position: its end's,
+    /// shifted with the tip).
+    pub(super) fn joints_frac(&self, machine: &Machine, t: f64) -> Joints {
+        match &self.how {
+            How::Joint { from, to } => from.lerp(to, t),
+            How::Arc { from, to, center, sweep, rotary, .. } => Joints { linear: arc_linear(*from, *to, *center, *sweep, t), rotary: rotary.clone() },
+            How::Tilted { arc, rotary, .. } => Joints { linear: arc.at(t), rotary: rotary.clone() },
+            How::Straight => Joints { linear: self.to.linear + (self.pose_frac(machine, t).tip - self.end.tip), rotary: self.to.rotary.clone() },
         }
     }
 
@@ -337,6 +349,32 @@ impl SimPlan {
             known: s.from.is_some(),
             travel: s.travel,
         })
+    }
+
+    /// The tool's pose a fraction `f` (0 to 1) along step `k`.
+    pub fn pose(&self, k: usize, f: f64) -> Option<Pose> {
+        let f = if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.0 };
+        self.steps.get(k).map(|s| s.pose_frac(&self.machine, f))
+    }
+
+    /// The axes a fraction `f` along step `k`.
+    pub fn joints(&self, k: usize, f: f64) -> Option<Joints> {
+        let f = if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.0 };
+        self.steps.get(k).map(|s| s.joints_frac(&self.machine, f))
+    }
+
+    /// Poses along step `k` at most `spacing` mm of its travel apart (its start and end
+    /// included; at most `max` + 1; a straight move of a 3-axis machine is its two ends).
+    pub fn samples(&self, k: usize, spacing: f64, max: usize) -> Vec<Pose> {
+        let Some(s) = self.steps.get(k) else { return Vec::new() };
+        let spacing = if spacing.is_finite() && spacing > 1e-6 { spacing } else { 1.0 };
+        let straight = match &s.how {
+            How::Straight => true,
+            How::Joint { from, to } => from.rotary == to.rotary,
+            _ => false,
+        };
+        let n = if straight { 1 } else { ((s.travel / spacing).ceil() as usize).clamp(1, max.max(1)) };
+        (0..=n).map(|i| s.pose_frac(&self.machine, i as f64 / n as f64)).collect()
     }
 
     pub fn grid(&self) -> &Grid {
@@ -606,6 +644,7 @@ pub fn plan_sim(text: &str, machine: &Machine, tools: &[Tool], stock: &StockShap
         let d = 2.0 * profile.radius;
         let cost = if kind == Kind::Rotary { points as f64 * (d * d / area + 1.0) } else { (travel.min(reach * 4.0) + d) * d / area + 1.0 };
         let from_joints = from.as_ref().map(|f| Joints { linear: f.linear, rotary: f.rotary.clone() });
+        let to_joints = Joints { linear: to.linear, rotary: to.rotary.clone() };
         steps.push(Step {
             profile,
             start,
@@ -618,6 +657,7 @@ pub fn plan_sim(text: &str, machine: &Machine, tools: &[Tool], stock: &StockShap
             slot: u8::try_from(slot).unwrap_or(UNCUT - 1).min(UNCUT - 1),
             flute,
             rpm: scan.rpm_at(line),
+            to: to_joints,
             from: from_joints,
             travel,
             cost,

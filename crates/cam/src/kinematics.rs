@@ -409,6 +409,13 @@ pub fn tool_axis(machine: &Machine, rotary: &[f64]) -> Vec3 {
     table_dir_inv(machine, rotary, head_dir(machine, rotary, Vec3::Z))
 }
 
+/// The head's own X, Y and Z (machine directions with every rotary at zero) in work coordinates
+/// with the rotaries at `rotary`: how a part fixed to the spindle stands against the work. Its Z
+/// is [`tool_axis`]; on a 3-axis machine the frame is the work's own.
+pub fn head_frame(machine: &Machine, rotary: &[f64]) -> [Vec3; 3] {
+    [Vec3::X, Vec3::Y, Vec3::Z].map(|e| table_dir_inv(machine, rotary, head_dir(machine, rotary, e)))
+}
+
 /// Where a point fixed to the machine's bed (given in work coordinates with every rotary at
 /// zero: a vise, a clamp, the table) is in work coordinates with the rotaries at `rotary`.
 pub fn bed_point(machine: &Machine, rotary: &[f64], p: Vec3) -> Vec3 {

@@ -115,6 +115,7 @@ mod ops;
 mod par;
 mod path;
 mod piece;
+pub mod playback;
 mod post;
 pub mod rapids;
 mod readback;
@@ -215,6 +216,8 @@ mod leads_tests;
 mod machine_model_tests;
 #[cfg(test)]
 mod machine_time_tests;
+#[cfg(test)]
+mod playback_tests;
 #[cfg(test)]
 mod rapids_tests;
 #[cfg(test)]

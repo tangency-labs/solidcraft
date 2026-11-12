@@ -225,6 +225,28 @@ impl Heights {
         note_cut(out, old, z, self.flute, floor, self.tol, |v| Vec3::new(x, y, v));
     }
 
+    /// The highest material over the cells whose centres are within `[x0, x1] × [y0, y1]` and
+    /// satisfy `inside`, above `z`: the first such cell's top, or `None`.
+    pub(super) fn above(&mut self, (x0, x1): (f64, f64), (y0, y1): (f64, f64), z: f64, inside: &dyn Fn(f64, f64) -> bool) -> Option<Vec3> {
+        if z >= self.top {
+            return None;
+        }
+        let ((i0, i1), (j0, j1)) = (self.columns(x0, x1)?, self.rows(y0, y1)?);
+        if self.tiles.max_in(&self.h, self.nx, (i0, i1), (j0, j1)) <= z {
+            return None;
+        }
+        for j in j0..=j1 {
+            for i in i0..=i1 {
+                let Some(&h) = self.h.get(j * self.nx + i) else { continue };
+                let (x, y) = self.centre(i, j);
+                if h > z && h > self.bottom && inside(x, y) {
+                    return Some(Vec3::new(x, y, h));
+                }
+            }
+        }
+        None
+    }
+
     /// The tool swept straight from tip `a` to tip `b`.
     pub(super) fn sweep_line(&mut self, p: &Profile, a: Vec3, b: Vec3) -> Result<Removed> {
         let mut out = Removed::default();
