@@ -314,6 +314,19 @@ pub enum Error {
         /// Why.
         why: OffsetRefusal,
     },
+    /// A fillet or chamfer the kernel fails with a reason it states in words (its
+    /// `BlendFailure`, which replaced a bare status): the kernel's class of the failure, the
+    /// status it stands for, and the kernel's statement of it. Transitional, as
+    /// [`OffsetRefusal::Phrase`] is: each reason gets a type of its own once the kernel gives
+    /// it a cause of its own.
+    BlendFailed {
+        /// The kernel's class of the failure.
+        class: solidcore::error::ErrorKind,
+        /// The status the failure stands for (1001 `SM_ERR`, ...).
+        status: i32,
+        /// The kernel's statement of it.
+        phrase: String,
+    },
 }
 
 /// Why the kernel refuses an offset or a draft ([`Error::OffsetRefused`]), as its
@@ -401,9 +414,10 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "its offset by {distance} collapses (a radius of curvature {radius})"
             ),
-            OffsetRefusal::LoopsCross { crossing } => {
-                write!(f, "its offset's loops cross ({crossing:?})")
-            }
+            OffsetRefusal::LoopsCross { crossing } => write!(
+                f,
+                "its offset's loops cross in a way the offset cannot resolve: {crossing}"
+            ),
             OffsetRefusal::DistanceUnresolved {
                 distance,
                 resolution,
@@ -436,7 +450,7 @@ impl std::fmt::Display for OffsetRefusal {
                     "a gap in its offset's loops cannot be bridged within tolerance"
                 )
             }
-            OffsetRefusal::Unsound { what } => write!(f, "the body built is unsound ({what:?})"),
+            OffsetRefusal::Unsound { what } => write!(f, "{what}"),
             OffsetRefusal::Phrase { phrase, .. } => f.write_str(phrase),
         }
     }
@@ -703,6 +717,9 @@ impl std::fmt::Display for Error {
                 Some(face) => write!(f, "the offset is refused at face {face}: {why}"),
                 None => write!(f, "the offset is refused: {why}"),
             },
+            Error::BlendFailed { status, phrase, .. } => {
+                write!(f, "the blend failed (status {status}): {phrase}")
+            }
         }
     }
 }

@@ -147,6 +147,9 @@ pub struct ViewportState {
     /// greys out with it.
     pub(crate) corner_ok: bool,
     pub gpu: Option<GpuTarget>,
+    /// The view's pipelines could not be built (the thread compiling them at start failed): the
+    /// view says so where the model would be, instead of staying empty (#1210).
+    pub gpu_unavailable: bool,
     /// The GPU plan evaluation still compiling: `gpu.tess` once it is ready (#4860).
     pub(crate) tess_ready: Option<solidcraft_viewport_egui::TessReady>,
     /// What the GPU drew last frame, shared with the renderer (the frame-rate details, #2548).
@@ -5243,6 +5246,15 @@ pub(crate) fn preview_should_roll_back(app: &SolveApp, held: crate::tool_modifie
     app.dialog.as_ref().is_some_and(|d| d.previews()) && app.preview.active && crate::tool_modifiers::preview_reselect(held, manipulator_dragging)
 }
 
+/// The view has no GPU pipelines (their compile failed at start, #1210): it says so in its middle,
+/// in the theme's text colour, rather than showing an empty view.
+fn unavailable_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
+    let t = Tokens::get();
+    let galley =
+        painter.layout(app.tr("starting.view_unavailable").to_owned(), FontId::proportional(t.font_body), t.text, (rect.width() * 0.6).max(200.0));
+    painter.galley(rect.center() - galley.size() / 2.0, galley, t.text);
+}
+
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::joint_handles::sync(app);
     let t = Tokens::get();
@@ -5456,6 +5468,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.viewport.lowered_noted = true;
             app.set_status(app.tr("ui.gpu_memory_lowered"), false);
         }
+    } else if app.viewport.gpu_unavailable {
+        unavailable_note(app, &painter, rect);
     }
     let overlay_rect = crate::shell::bottom_overlay_rect(app, rect);
     crate::viewport_details::legacy_legends(app, ui, overlay_rect);
@@ -6741,27 +6755,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) && !selected_handle {
                 continue;
             }
-            let (parts, complete) = if selected_handle {
-                (
-                    solidcraft_engine::view::spline_handle_display_line(&ss.sketch, i)
-                        .map(|(a, b)| vec![to2(&[ss.plane.to_world(a), ss.plane.to_world(b)])])
-                        .unwrap_or_default(),
-                    true,
-                )
-            } else {
-                let sampled = if bx.crossing {
-                    crate::sketch_display::curve_sample(app, ss.feature, i, &ss.plane, proj)
-                } else {
-                    std::sync::Arc::new(crate::sketch_display::curve_unclipped(&ss.sketch, i, &ss.plane, proj, app.viewport.pixels_per_point()))
-                };
-                (sampled.parts.iter().map(|part| to2(part)).collect(), sampled.quality == solidcraft_engine::render::SamplingQuality::Complete)
-            };
-            let takes = if bx.crossing {
-                parts.iter().any(|part| bx.takes(part))
-            } else {
-                complete && !parts.is_empty() && parts.iter().all(|part| bx.takes(part))
-            };
-            if takes {
+            if box_takes_curve(app, ss, i, proj, &bx, selected_handle) {
                 out.push(Sel::SketchCurve { id: c.id.clone(), sketch: None });
             }
         }
@@ -6871,6 +6865,26 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             }
         }
     }
+    // Project takes the visible curves of the other sketches too (#14927): the marquee of its
+    // Geometry input reaches them as a click does, as `ExternalSketchCurve`. Only a marquee that
+    // took nothing else: one over model edges, faces or points takes what it always took.
+    if out.is_empty()
+        && app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchProject { .. }))
+        && accepts.is_some_and(|a| a & crate::selection::SKETCH_LINES != 0)
+        && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves")
+    {
+        for sid in visible_sketches(app) {
+            if app.session.active_sketch == Some(sid) {
+                continue;
+            }
+            let Some(ss) = st.sketch(sid) else { continue };
+            for (i, c) in ss.sketch.curves.iter().enumerate() {
+                if solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) && box_takes_curve(app, ss, i, proj, &bx, false) {
+                    out.push(Sel::ExternalSketchCurve { sketch: sid, id: c.id.clone() });
+                }
+            }
+        }
+    }
     let mut grouped = Vec::new();
     for item in out {
         for piece in grouped_selection(&app.session, &item) {
@@ -6887,6 +6901,29 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     }
     let items = serde_json::to_value(&out).unwrap_or_default();
     let _ = app.run("select.set", json!({"items": items, "add": add}));
+}
+
+/// Whether a marquee takes curve `i` of a sketch: a window takes it when it lies wholly inside,
+/// a crossing box when it touches it. A spline's selected tangent handle is the line it is drawn
+/// as (`selected_handle`).
+fn box_takes_curve(app: &SolveApp, ss: &solidcraft_engine::doc::SolvedSketch, i: usize, proj: &Proj, bx: &BoxSel, selected_handle: bool) -> bool {
+    let to2 = |pts: &[Vec3]| -> Vec<Pos2> { pts.iter().filter_map(|p| proj.to_screen(*p)).collect() };
+    let (parts, complete): (Vec<Vec<Pos2>>, bool) = if selected_handle {
+        (
+            solidcraft_engine::view::spline_handle_display_line(&ss.sketch, i)
+                .map(|(a, b)| vec![to2(&[ss.plane.to_world(a), ss.plane.to_world(b)])])
+                .unwrap_or_default(),
+            true,
+        )
+    } else {
+        let sampled = if bx.crossing {
+            crate::sketch_display::curve_sample(app, ss.feature, i, &ss.plane, proj)
+        } else {
+            std::sync::Arc::new(crate::sketch_display::curve_unclipped(&ss.sketch, i, &ss.plane, proj, app.viewport.pixels_per_point()))
+        };
+        (sampled.parts.iter().map(|part| to2(part)).collect(), sampled.quality == solidcraft_engine::render::SamplingQuality::Complete)
+    };
+    if bx.crossing { parts.iter().any(|part| bx.takes(part)) } else { complete && !parts.is_empty() && parts.iter().all(|part| bx.takes(part)) }
 }
 
 /// Whether the origin point is drawn (the Origin shown and its point not hidden).

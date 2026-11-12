@@ -24,6 +24,7 @@ use solidcore_record::Vec2;
 use super::check::{located, parse_issue, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
+use super::sketch_shapes::Created;
 use super::types::{AngleExpr, LengthExpr, Point2, Point3, SketchRef, not_blank_pattern, present};
 use crate::params;
 
@@ -86,6 +87,9 @@ pub struct ConstructionLineResult {
     pub curves: Vec<String>,
     pub constraints: Vec<String>,
     pub sketch: Value,
+    /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Created>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }

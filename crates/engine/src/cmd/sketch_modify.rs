@@ -609,7 +609,7 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
         doc.prune_model_params();
         Ok(out.released(released))
     })?;
-    reply(cmd, TrimResult { result: out, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, TrimResult { result: out, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 /// Source lines and their single-line offsets can have independent endpoints. Materialize
@@ -991,7 +991,7 @@ fn trim_path_reply(s: &mut Session, p: &Value) -> Result<TrimPathResult> {
         doc.prune_model_params();
         Ok((trimmed, removed, skipped))
     })?;
-    Ok(TrimPathResult { trimmed, removed, skipped, sketch: info, dry_run: None, param_warnings: Vec::new() })
+    Ok(TrimPathResult { trimmed, removed, skipped, sketch: info, dry_run: None, created: None, param_warnings: Vec::new() })
 }
 
 /// Cuts closer than this to a curve's end or to each other are one place (mm).
@@ -1077,7 +1077,7 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         tie(sk, &pieces)?;
         Ok(ids_of(sk, &pieces))
     })?;
-    reply(cmd, BreakResult { curves: out, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, BreakResult { curves: out, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 /// The end of curve `ci` at `at` that another curve also ends at or passes through: Break there
@@ -2304,7 +2304,19 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         Ok((arcs, cons, pname, kept_json(kept)))
     })?;
     let (curves, constraints, param, (virtual_corners, moved_to_virtual_corner)) = out;
-    reply(cmd, FilletResult { curves, constraints, param, virtual_corners, moved_to_virtual_corner, sketch: info, param_warnings: Vec::new() })
+    reply(
+        cmd,
+        FilletResult {
+            curves,
+            constraints,
+            param,
+            virtual_corners,
+            moved_to_virtual_corner,
+            sketch: info,
+            created: None,
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 /// The virtual corners kept and the constraints moved to them, for a response.
@@ -2519,7 +2531,7 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
         Ok((ids_of(sk, &lines), kept_json(kept)))
     })?;
     let (curves, (virtual_corners, moved_to_virtual_corner)) = out;
-    reply(cmd, ChamferResult { curves, virtual_corners, moved_to_virtual_corner, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, ChamferResult { curves, virtual_corners, moved_to_virtual_corner, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 /// Cut one corner (`point` or `a`, `b`) of two lines with a straight line, `dists` giving how
@@ -3360,7 +3372,19 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
     let warning = (ignored(&expression, &param) || expression2.as_deref().is_some_and(|e| ignored(e, &param2))).then(|| UNLINKED_OFFSET.to_string());
     reply(
         cmd,
-        OffsetResult { curves, constraints, sketch: info, sides: each, param, instances, param2, association, warning, param_warnings: Vec::new() },
+        OffsetResult {
+            curves,
+            constraints,
+            sketch: info,
+            sides: each,
+            param,
+            instances,
+            param2,
+            association,
+            warning,
+            created: None,
+            param_warnings: Vec::new(),
+        },
     )
 }
 
@@ -3725,7 +3749,7 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         let reported = made.get(..selected_count).ok_or_else(|| bad(cmd, "copied curves changed while mirroring"))?;
         Ok((ids_of(sk, reported), cons))
     })?;
-    reply(cmd, MirrorResult { curves: out.0, constraints: out.1, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, MirrorResult { curves: out.0, constraints: out.1, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn point_or_ref(sk: &Sketch, p: &Value, k: &str, cmd: &str) -> Result<Vec2> {
@@ -3938,7 +3962,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
-    reply(cmd, MoveResult { curves: out, released, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, MoveResult { curves: out, released, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 /// Scale, turn and move the entities in one step: scaled about `center`, then turned about it,

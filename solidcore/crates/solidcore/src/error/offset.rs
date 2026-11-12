@@ -16,6 +16,7 @@
 //! | [`OffsetFailure::ToleranceUnresolved`] | `SM_ERR_INVALID_INPUT` (solidcore-native, WR-749) |
 //! | [`OffsetFailure::SeamOpened`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::TangentEndOffCurve`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
@@ -140,6 +141,11 @@ pub enum OffsetFailure {
     /// ([`crate::surface::surface::SurfaceIntersection::clip_exact_curves`]; the failure's
     /// cause says why). The edge's offsets cannot be mated on it.
     ExactCurveUncut,
+    /// In a local operation, an edge's new curve ends beside an edge that was tangent in
+    /// the input and whose new surfaces cross, and that edge, already mated, has no new
+    /// vertex on the curve: the end is not where the edges meet, and no cut chosen by
+    /// distance stands in for it.
+    TangentEndOffCurve,
     /// In a local operation, the new surfaces of `face` and of its neighbour across an
     /// edge meet nowhere near the edge, so no extension of either makes them meet there
     /// and the edge cannot be found again. (The reach,
@@ -272,6 +278,7 @@ impl OffsetFailure {
                 .or_else(|| face.map(EntityRef::Face)),
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
             Self::ExactCurveUncut
+            | Self::TangentEndOffCurve
             | Self::Unsound { .. }
             | Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
@@ -312,6 +319,7 @@ impl OffsetFailure {
             | Self::ToleranceUnresolved { .. }
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
+            | Self::TangentEndOffCurve
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
@@ -340,6 +348,7 @@ impl OffsetFailure {
             | Self::ToleranceUnresolved { .. }
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
+            | Self::TangentEndOffCurve
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
@@ -360,6 +369,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
+            | Self::TangentEndOffCurve
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
             | Self::Failed(_) => SM_ERR,
@@ -388,6 +398,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
+            | Self::TangentEndOffCurve
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
@@ -438,6 +449,60 @@ fn offset_of(face: Option<FaceId>) -> String {
     )
 }
 
+impl core::fmt::Display for LoopCrossing {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            LoopCrossing::AtLoopVertex => "they cross at a loop vertex",
+            LoopCrossing::MeetAtLoopVertex => "they meet at a loop vertex",
+            LoopCrossing::RunAlong => "they run along one another",
+            LoopCrossing::SharesEdge => "the face shares an edge with another face",
+            LoopCrossing::ThreeAtOnePoint => "three loops cross at one point",
+            LoopCrossing::StretchUnclassified => {
+                "a stretch of a loop is neither inside nor outside another loop"
+            }
+            LoopCrossing::LeaveMoreThanOneWay => "the loops leave a crossing more than one way",
+            LoopCrossing::LeaveNoWay => "the loops leave a crossing no way",
+            LoopCrossing::ArriveMoreThanOneWay => {
+                "the loops arrive at a crossing more than one way"
+            }
+            LoopCrossing::ComesApartAroundHole => "the face comes apart around a hole",
+        })
+    }
+}
+
+impl core::fmt::Display for Unsoundness {
+    /// What the body built fails, without the refusal [`OffsetFailure`]'s words add.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match *self {
+            Unsoundness::Check { failures, first } => {
+                write!(
+                    f,
+                    "the local operation's body fails its check where its input did not \
+                     ({failures} failure lines more"
+                )?;
+                if let Some((reporting_type, test_index)) = first {
+                    write!(f, ", the first test #{test_index} of type {reporting_type}")?;
+                }
+                f.write_str(")")
+            }
+            Unsoundness::GeometryUnchecked => f.write_str(
+                "the local operation's body fails its pointer check, so its geometry cannot \
+                 be checked",
+            ),
+            Unsoundness::NotManifoldSolid => {
+                f.write_str("the body built is not a manifold solid, as its input was")
+            }
+            Unsoundness::VolumeNotPositive => f.write_str(
+                "the local operation's body is a manifold solid whose volume is not positive",
+            ),
+            Unsoundness::VolumeUndecided => f.write_str(
+                "the local operation's body is a manifold solid whose volume's sign could \
+                 not be proved",
+            ),
+        }
+    }
+}
+
 impl core::fmt::Display for OffsetFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self {
@@ -482,31 +547,11 @@ impl core::fmt::Display for OffsetFailure {
                     offset_of(face)
                 )
             }
-            Self::LoopsCross { face, crossing } => {
-                let how = match crossing {
-                    LoopCrossing::AtLoopVertex => "they cross at a loop vertex",
-                    LoopCrossing::MeetAtLoopVertex => "they meet at a loop vertex",
-                    LoopCrossing::RunAlong => "they run along one another",
-                    LoopCrossing::SharesEdge => "the face shares an edge with another face",
-                    LoopCrossing::ThreeAtOnePoint => "three loops cross at one point",
-                    LoopCrossing::StretchUnclassified => {
-                        "a stretch of a loop is neither inside nor outside another loop"
-                    }
-                    LoopCrossing::LeaveMoreThanOneWay => {
-                        "the loops leave a crossing more than one way"
-                    }
-                    LoopCrossing::LeaveNoWay => "the loops leave a crossing no way",
-                    LoopCrossing::ArriveMoreThanOneWay => {
-                        "the loops arrive at a crossing more than one way"
-                    }
-                    LoopCrossing::ComesApartAroundHole => "the face comes apart around a hole",
-                };
-                write!(
-                    f,
-                    "the loops of {} cross in a way the offset cannot resolve: {how}",
-                    offset_of(face)
-                )
-            }
+            Self::LoopsCross { face, crossing } => write!(
+                f,
+                "the loops of {} cross in a way the offset cannot resolve: {crossing}",
+                offset_of(face)
+            ),
             Self::EdgeVanishes { edge, face } => {
                 let which = match (edge, face) {
                     (Some(e), _) => format!("edge {}", e.index()),
@@ -548,32 +593,8 @@ impl core::fmt::Display for OffsetFailure {
                 face.index()
             ),
             Self::Unsound { what } => match what {
-                Unsoundness::Check { failures, first } => {
-                    write!(
-                        f,
-                        "the local operation's body fails its check where its input did not ({failures} \
-                         failure lines more"
-                    )?;
-                    if let Some((reporting_type, test_index)) = first {
-                        write!(f, ", the first test #{test_index} of type {reporting_type}")?;
-                    }
-                    f.write_str("): refused, the input unchanged")
-                }
-                Unsoundness::GeometryUnchecked => f.write_str(
-                    "the local operation's body fails its pointer check, so its geometry \
-                     cannot be checked: refused, the input unchanged",
-                ),
-                Unsoundness::NotManifoldSolid => {
-                    f.write_str("the body built is not a manifold solid, as its input was: refused")
-                }
-                Unsoundness::VolumeNotPositive => f.write_str(
-                    "the local operation's body is a manifold solid whose volume is not \
-                     positive: refused, the input unchanged",
-                ),
-                Unsoundness::VolumeUndecided => f.write_str(
-                    "the local operation's body is a manifold solid whose volume's sign \
-                     could not be proved: refused, the input unchanged",
-                ),
+                Unsoundness::NotManifoldSolid => write!(f, "{what}: refused"),
+                _ => write!(f, "{what}: refused, the input unchanged"),
             },
             Self::LoopGapUncertified { face } => write!(
                 f,
@@ -585,6 +606,10 @@ impl core::fmt::Display for OffsetFailure {
                 "the extended faces beside an edge meet on an exact curve that could not be \
                  cut into its pieces with their UV curves, so the edge's offsets cannot be \
                  mated",
+            ),
+            Self::TangentEndOffCurve => f.write_str(
+                "an edge ends beside a tangent edge whose new faces now cross, and that edge's new \
+                 vertex is not on the edge's new curve, so the edge cannot end there",
             ),
             Self::ToleranceUnresolved { tolerance } => write!(
                 f,
@@ -804,6 +829,7 @@ mod tests {
             ),
             (O::SeamOpened { face }, ErrorKind::Unsupported, false, false),
             (O::ExactCurveUncut, ErrorKind::Unsupported, false, false),
+            (O::TangentEndOffCurve, ErrorKind::Unsupported, false, false),
             (O::FacesApart { face }, ErrorKind::Unsupported, false, false),
             (
                 O::ReachUncertified { face },
@@ -843,14 +869,15 @@ mod tests {
                 O::ToleranceUnresolved { .. } => 7,
                 O::SeamOpened { .. } => 8,
                 O::ExactCurveUncut => 9,
-                O::FacesApart { .. } => 10,
-                O::ReachUncertified { .. } => 11,
-                O::LoopGapUncertified { .. } => 12,
-                O::Unsound { .. } => 13,
-                O::Failed(_) => 14,
-                O::Missing(_) => 15,
-                O::InvalidValue(_) => 16,
-                O::Inconsistent(_) => 17,
+                O::TangentEndOffCurve => 10,
+                O::FacesApart { .. } => 11,
+                O::ReachUncertified { .. } => 12,
+                O::LoopGapUncertified { .. } => 13,
+                O::Unsound { .. } => 14,
+                O::Failed(_) => 15,
+                O::Missing(_) => 16,
+                O::InvalidValue(_) => 17,
+                O::Inconsistent(_) => 18,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {

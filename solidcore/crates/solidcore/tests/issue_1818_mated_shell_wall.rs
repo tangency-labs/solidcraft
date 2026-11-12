@@ -310,7 +310,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_chamfer_cone_on_arc = true;
     f.offset_excess_faces_after_merge = true;
     f.offset_clip_right_side_out = true;
-    f.revolution_offset_axis_both_sides = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
@@ -341,7 +340,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.edge_reversal_keeps_failed_edge = true;
     f.topology_failed_evaluations_propagate = true;
     f.heal_stage3_failures_propagate = true;
-    f.sweep_frame_on_planar_path_normal = true;
     f.cover_refuses_folded_continuation = true;
     f.boolean_vertex_by_best_crossing = true;
     f.boolean_cleanup_removes_slits = true;
@@ -350,7 +348,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
     f.torus_signed_gen_curve_interval = true;
-    f.sheet_sweep_joins_profile_wires = true;
     f.point_solve_keeps_triangle_guess = true;
     f.imprint_trims_edge_to_proto_vertex = true;
     f.imprint_extends_edge_to_proto_vertex = true;

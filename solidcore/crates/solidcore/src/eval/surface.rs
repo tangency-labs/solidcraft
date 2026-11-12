@@ -528,7 +528,16 @@ impl SurfaceEval {
     /// [`Self::pole`], or within `reach` mm of one: moving along a direction across its whole
     /// range moves the point no more than `reach`, certified (a boundary point that lies at a
     /// pole to within a tolerance, where its periodic parameter is free).
+    ///
+    /// A spline's parameters off its knot range (a pcurve's end fitted a little past it) are
+    /// asked at the nearest point of the range with the reach less a certified bound on the
+    /// shift that move makes ([`super::collapse::collapse_near`]); by the triangle inequality a
+    /// pole there is a pole within `reach` at `uv`. A shift not under `reach` is refused
+    /// ([`EvalError::OffRange`]), never answered.
     pub fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], EvalError> {
+        if let SurfaceEval::Eval(e, _) = self {
+            return Ok(super::collapse::collapse_near(e, uv, reach)?.flags());
+        }
         Ok(self.collapse(uv, reach)?.flags())
     }
 }

@@ -520,10 +520,6 @@ pub struct UpstreamFixes {
     pub offset_clip_right_side_out: bool,
     /// `SmOffsetExecutive::MapEdgeuses` raises each offset edge it matches to an original edge to that edge's tolerance, and the offset edge's vertices to the original edge's vertices' largest. Upstream builds the offset faces' edges and vertices afresh at the B-rep's zone tolerance, so the offset of a sheet whose edges and vertices carry their own, larger tolerances (a trimmed B-spline patch: B-rep 2.08e-5, edges 4.15e-5, vertices 8.31e-5) is checked against half the B-rep's tolerance at its vertices, and its offset by 0.75 fails `check_brep` with edge/vertex Bad Gaps of 2.4e-5 to 3.9e-5, inside the original's own tolerances (WR-671, #2111).
     pub offset_edges_keep_source_tolerance: bool,
-    /// `SmSurfOfRevolution::CreateOffsetSurface` cuts the offset generator at the axis on either side of the frame origin (WR-343, #973).
-    pub revolution_offset_axis_both_sides: bool,
-    /// `SmSurfOfRevolution::CreateCanonical` points the frame's X axis from the axis to the profile's point at its parameter origin (parameter 0, when the profile's STEP interval holds it; else its start, as upstream), the point the profile is defined from: a STEP line's `pnt`, a conic's point on its reference direction. Upstream takes the start of the STEP interval, which for an unbounded profile (`Line::create_canonical`, as STEP builds them) is `SM_INFINITE_PARAMETER` (1 234 567) away: past the axis for a line that crosses it, so the frame faces the other nappe and `STEPInversion`, which rotates a point into the frame's +X half plane, finds no generator point there and fails (`SM_ERR`) for the points of the nappe the profile's origin lies on. With the flag `STEPInversion` (and the STEP window's unbounded inversion) also turns the point onto the -X half plane, the other point where its circle about the axis meets the generator's plane, and takes the first half plane on which it lies on the generator (+X first, as upstream): a profile that crosses the axis then inverts on both sides of it, whichever way the frame faces; upstream refuses the side the frame does not face. When the point at parameter 0 is on the axis, the frame is taken from the interval's start before upstream's 45% point, so a segment through the axis whose points at 0 and at 45% are both on it has a frame; and a reference point is on the axis by its distance from the axis (`|Z x (P - O)|` below `SM_EFF_ZERO`, the bound the frame's Y axis is checked against), not by upstream's test of its direction within 1 degree of the axis, which takes a point one unit off the axis and 1000 along it for one on it (WR-738, #2628; solidcore-native, no fork commit).
-    pub revolution_frame_from_profile_origin: bool,
     /// With extended convex edges, `piecewise_merge` relates the mated offsets of a manifold edge instead of intersecting them again (WR-344, #469; the fork's tangency-labs/smlib@9c21c9a (was 85bbfaf)), except an edge whose mate failed in `EdgeuseOffset`, which is intersected even where it is a tangent sector (#1795; the fork's tangency-labs/smlib@9d8ace9). The merge then no longer refuses some broken offsets, and the difference hands back a wall that bounds nothing (#1818; the fork's `ShellBrep` returns it, its C API refuses it as `SMLIB_ERR_NOT_SOLID`); the shell's refusal of a result that is no closed manifold solid is unconditional, whatever this flag says. Needs no other flag.
     pub offset_extended_edges_mated: bool,
     /// `SmOffsetSurface::SwapUV` negates the distance once for the extended surface and
@@ -797,10 +793,6 @@ pub struct UpstreamFixes {
     pub offset_collapsed_rounds_mated: bool,
     /// `FaceuseOffset` fails on a face whose offset surface is missing without collapsing (`SmSurface::OffsetCollapses`: a cone, cylinder, sphere or torus offset onto its spine), where upstream reads any missing surface as a collapsed round (WR-464, #1072).
     pub offset_missing_surface_fails: bool,
-    /// `ApproximateSurface` raises the starter's inner knots to full multiplicity (exact knot insertion) before each round of cubic Bezier patches, which needs every inner knot of full multiplicity; and a patch that runs past the control points is `SM_ERR`. Upstream uses a starter copied from a root B-spline with simple inner knots (the offset of a fitted bicubic patch) as it is, its patches run past its control points, and it returns success with no surface, so exporting an offset B-spline sheet as B-splines fails (1001) (WR-573, #1501; the fork's tangency-labs/smlib@eae96cb).
-    pub approximate_surface_bezier_starter: bool,
-    /// `ApproximateSurface` rejects a pass of cubic Bezier patches when any row (or column) of patches has a sample outside the tolerance, so the next subdivision runs, and fails (`SM_ERR`) when the last allowed one is still outside it: an approximation it returns is within the tolerance it was asked for. Upstream starts the failed flag over with every row and has the break after a failed row commented out, so a pass is accepted when its last row is within the tolerance and returns `SM_SUCCESS` with an achieved tolerance above the requested one (WR-726, #2507; the offset wave of #2476 with `approximate_surface_bezier_starter`: 1.12e-5 for 5e-6).
-    pub approximate_surface_checks_every_row: bool,
     /// A surface of revolution whose generatrix is one circular arc (a fillet's round along a circular edge, a torus in all but its type) collapses when an offset runs towards the arc's centre by its radius or more: `Surface::offset_collapses` says so, as a torus's does, and `create_offset_surface` builds no surface, where upstream says it never collapses and builds the generatrix's offset past the arc's centre as the arc turned inside out, so an inward shell thicker than the round fails with 1001 or leaves a wrong volume (WR-567; the fork's tangency-labs/smlib@8b2090f, smlib#64; SolidCraft `shell_of_a_disc_rounded_smaller_than_the_wall`, solidcraft#319). The faces either side are mated across it with `offset_collapsed_rounds_mated`.
     pub revolution_round_offset_collapses: bool,
     /// At an Nx1 corner whose end rib cannot be built because a rail missed a side edge ending within the fillet's width, the rib is deleted and the global merge cuts the round off (WR-303, #841).
@@ -963,8 +955,6 @@ pub struct UpstreamFixes {
     pub topology_failed_evaluations_propagate: bool,
     /// `SetProps_Stage3` returns a failed `ClassifyLoops` status before reading its outputs, and a failed stage drops its in-progress marker so a retry reruns it (WR-268, WR-266, #521).
     pub heal_stage3_failures_propagate: bool,
-    /// `CreateCurveSweep` starts a planar path's sweep frame with its z on the plane's normal, not on `MakeUnitOrthoVectors` of the start tangent, so a flat cap stays flat to the rounding (WR-407, #434; SolidCraft change, tangency-labs/smlib e960ca1 (was 1b6f5fa)).
-    pub sweep_frame_on_planar_path_normal: bool,
     /// `SmDatabaseIO::ReadBoolean` ([`crate::topology::database_io::DatabaseReader::read_boolean`]
     /// on a reader configured via [`crate::topology::database_io::DatabaseReader::with_fixes`] or
     /// [`crate::topology::database_io::DatabaseReader::set_fixes`]) byte-swaps a 4-byte binary
@@ -1022,17 +1012,6 @@ pub struct UpstreamFixes {
     pub internal_pole_row_through_knot: bool,
     /// `SmSurfOfExtrusion::AssertValid` test 8 point-solves the origin on the generating curve with an unscaled `SM_EFF_ZERO`, so an origin evaluated on the curve at coordinates of about 10 (a text outline's quadratic Bezier) resolves to a few 1e-12 and is reported missing; with this fix that solve uses the issue's coordinate-aware zero `SM_EFF_ZERO * (1.0 + origin.max_dimension())`, its own factor rather than the factor 100 of the neighbouring point tests (WR-511, #1508; tangency-labs/smlib#31).
     pub extrusion_origin_scaled_zero: bool,
-    /// `SmSurfOfExtrusion::EvaluateSTEP` and `EvaluateSTEPPoint` evaluate the clamped
-    /// copy of the STEP parameters ("clamp input point to surface domain"), not the
-    /// caller's unclamped `crUV`: with out-of-bounds evaluation off, a parameter
-    /// outside `m_vAnalUVDomain` no longer extrapolates along the extrusion or past
-    /// the generator's own domain (WR-61; see
-    /// `plan/upstream-issues/WR-61--addendum-2026-10-31-step-evaluators-use-clamped-uv.md`).
-    /// Off by default for pinned C++ parity. The guard is `ContainsPoint2d` with its
-    /// default `tol = 0`, so a NaN coordinate (never "outside" by that comparison)
-    /// stays unclamped, and both bodies clamp in the analytic domain, as upstream does
-    /// (neither reads `SwapUV`).
-    pub extrusion_step_uses_clamped_uv: bool,
     /// `SmBSplineVolume::CalculateContinuitiesSimple` with `bCalcGeometric == FALSE`
     /// sets both end knots (`0` and `knot_cnt - 1`) to `SM_CT_DISCONTINUOUS` (matching
     /// its `SmBSplineVolume.h` contract, the `bCalcGeometric == TRUE` branch, and
@@ -1047,8 +1026,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-49--addendum-2026-10-31-representational-end-continuities.md`).
     /// Off by default for pinned C++ parity.
     pub volume_representational_end_continuities: bool,
-    /// A sheet sweep's open-profile wires are glued where the curves meet (WR-409, #1113).
-    pub sheet_sweep_joins_profile_wires: bool,
     /// `FindPolygonGuess` keeps a suspicious control-net triangle guess as a candidate against the nearest control point's, and returns the nearer one on the surface, so a rational surface whose control points are farther apart than its neighbouring parts does not lose a good guess (WR-444, #1164).
     pub point_solve_keeps_triangle_guess: bool,
     /// `SmFilletCorner::MakeAnalyticCornerSurface`'s `SER` / `NER` exits return their failing status as an `SmBoolean`, which `SmFilletCorner::CreateCornerPatch` reads as `TRUE` (an analytic surface was made, though none was added) and so skips the Coons patch. With this fix those exits read as `FALSE` and the caller builds the patch. Only the exits that return an upstream status (`SM_ERR` 1001 / `SM_ERR_NULL_POINTER` 1006) change; the port's `Unported`, `InvalidInput` and `PortInvariant` still propagate (WR-254, `plan/upstream-issues/WR-254--smfilletcorner-makeanalyticcornersurface-reports-its-ser-ner--dup2.md`; off by default for pinned C++ parity).

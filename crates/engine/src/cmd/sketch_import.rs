@@ -358,6 +358,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             texts: n_text,
             fixed: fixed.then_some(n_fixed),
             info,
+            created: None,
             param_warnings: Vec::new(),
         },
     )
