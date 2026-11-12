@@ -122,3 +122,57 @@ fn four_top_edges_round() {
         "removed {removed}, one round alone {one}"
     );
 }
+
+/// The four top edges of `four_top_edges_round`, rounded 0.5 -> 2 along their own
+/// directions (the law `r(s) = 0.5 + 0.15 s`, `s` the coordinate along the edge). At each
+/// corner the two rounds' rails meet on the top face at the common foot of two law balls,
+/// one of each round, at their own positions. In closed form:
+/// - (10, 10, 10), both rounds at `r = 2`: `x = 10 - r(y)`, `y = 10 - r(x)`, so
+///   `x = y = 9.5 / 1.15 = 190/23`;
+/// - (0, 10, 10), one round at 0.5 and one at 2: `x = r(y)`, `y = 10 - r(x)`, so
+///   `x = 1.925 / 1.0225 = 770/409`, `y = 3770/409`: the foot of the ball of the round along
+///   `x = 0` centred (770/409, 3770/409, 3320/409), radius `r(3770/409) = 770/409`, and of
+///   the ball of the round along `y = 10` centred (770/409, 3770/409, 3770/409), radius
+///   `r(770/409) = 320/409`;
+/// - (10, 0, 10), its mirror: (3770/409, 770/409);
+/// - (0, 0, 10), both at 0.5: `x = r(y)`, `y = r(x)`, so `x = y = 0.5 / 0.85 = 10/17`.
+///
+/// Each point is a vertex of the result to 1e-12. Upstream's hold puts them at the end
+/// radii instead: (8, 8, 10), (2, 9.5, 10), (9.5, 2, 10), (0.5, 0.5, 10).
+#[test]
+fn four_top_edges_meet_at_the_laws_closed_forms() {
+    let mut k = kernel();
+    let mut b = create_box(&mut k, Vec3::ZERO, 10.0, 10.0, 10.0).unwrap();
+    let p = |x: f64, y: f64| Point3::new(x, y, 10.0);
+    let edges = [
+        edge_from_to(&k, &b, p(10.0, 0.0), p(10.0, 10.0)),
+        edge_from_to(&k, &b, p(0.0, 10.0), p(10.0, 10.0)),
+        edge_from_to(&k, &b, p(0.0, 0.0), p(0.0, 10.0)),
+        edge_from_to(&k, &b, p(0.0, 0.0), p(10.0, 0.0)),
+    ];
+    variable_radius_fillet(&mut k, &mut b, &edges, 0.5, 2.0, 1, 1).unwrap();
+    let both_two = 190.0 / 23.0;
+    let (lo, hi) = (770.0 / 409.0, 3770.0 / 409.0);
+    let both_half = 10.0 / 17.0;
+    let expected = [
+        p(both_two, both_two),
+        p(lo, hi),
+        p(hi, lo),
+        p(both_half, both_half),
+    ];
+    let points: Vec<Point3> = b
+        .vertices()
+        .ids()
+        .map(|v| vertex::point(&b, v).unwrap())
+        .collect();
+    for e in expected {
+        let nearest = points
+            .iter()
+            .map(|q| q.distance(e))
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            nearest < 1e-12,
+            "no vertex at {e:?} (nearest {nearest}); vertices {points:?}"
+        );
+    }
+}

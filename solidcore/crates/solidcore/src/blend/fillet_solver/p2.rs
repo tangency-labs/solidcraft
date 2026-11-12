@@ -2320,8 +2320,9 @@ impl FilletSolver {
         // Temporarily replace the variable-radius functions with a constant. [Reg Iter:306]
         // `SmTemporaryRadiusChange::SetUp` does nothing unless the solver is an
         // `SmVariableRadiusFS` (`SM_CAST_PTR`), first for this solver, then the other.
-        // WR-300 (the fork's tangency-labs/smlib@465b62b): only where `hold_end_radii` (a corner calculated as constant radius, as the
-        // callers decide); `SmTemporaryRadiusChange(NULL, ..)` does nothing.
+        // WR-300 (the fork's tangency-labs/smlib@465b62b): only where `hold_end_radii`
+        // (a corner calculated as constant radius, as the callers decide);
+        // `SmTemporaryRadiusChange(NULL, ..)` does nothing.
         let other_side_eu = other.solver().edgeuse(other_rail_index)?;
         let this_side_eu = ops.solver().edgeuse(rail_index)?;
         let temp_this = match (ops.variable_radius_mut(), other_side_eu) {
