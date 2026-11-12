@@ -3426,6 +3426,11 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Construction planes drawn at a size of their own (dragged by their edges and corners):
+    /// by feature id, the rectangle `[x0, y0, x1, y1]` in the plane's own coordinates, mm. A
+    /// plane not listed is drawn at its automatic size (grown past the bodies it passes through). Display only.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub plane_extents: std::collections::BTreeMap<u64, [f64; 4]>,
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
@@ -3728,6 +3733,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
         }
@@ -4437,6 +4443,8 @@ impl Document {
         for group in &mut self.timeline_groups {
             group.features.retain(|feature| !gone.contains(feature));
         }
+        // A deleted plane's size goes with it: a plane added later under its id is not drawn at it.
+        self.plane_extents.retain(|id, _| !gone.contains(id));
         // Configuration columns of deleted features go with them.
         let keep: Vec<bool> = self
             .configs

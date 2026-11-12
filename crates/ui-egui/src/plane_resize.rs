@@ -1,0 +1,270 @@
+//! Construction planes resized in the view. A selected construction plane shows handles at its
+//! corners and the middles of its edges; dragging one moves that corner or edge across the
+//! plane, and letting go keeps the size (`view.plane_size`, one undo step). A plane never
+//! resized is drawn at the size that follows the zoom and the bodies it passes through
+//! ([`crate::viewport::construction_quads`]).
+
+use std::cell::RefCell;
+
+use egui::{CursorIcon, Painter, Pos2, Rect, Stroke, StrokeKind, vec2};
+use serde_json::json;
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_theme::Tokens;
+
+use crate::SolveApp;
+use crate::viewport::Proj;
+
+/// How near the pointer must be to a handle to take it (screen points).
+const GRAB_PX: f32 = 8.0;
+/// The smallest a plane is dragged to, mm.
+const MIN_SIDE: f64 = 1.0;
+
+/// A handle: which side it moves in x and y (-1 the low side, 1 the high side, 0 neither).
+type Side = (i8, i8);
+
+const HANDLES: [Side; 8] = [(-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)];
+
+#[derive(Clone, Debug)]
+struct Drag {
+    id: u64,
+    name: String,
+    plane: Plane,
+    side: Side,
+    start: [f64; 4],
+    /// Where the pointer took the handle, from the handle (plane coordinates).
+    offset: Vec2,
+    live: [f64; 4],
+}
+
+thread_local! {
+    static DRAG: RefCell<Option<Drag>> = const { RefCell::new(None) };
+}
+
+/// The rectangle plane `id` is drawn as, `[x0, y0, x1, y1]` in its own coordinates: while its
+/// handle is dragged, where the drag has it; else the size it was given; else `auto` (the size
+/// that follows the zoom and the bodies).
+pub(crate) fn extent(app: &SolveApp, id: u64, auto: [f64; 4]) -> [f64; 4] {
+    if let Some(live) = DRAG.with(|d| d.borrow().as_ref().filter(|d| d.id == id).map(|d| d.live)) {
+        return live;
+    }
+    app.session.doc.plane_extents.get(&id).copied().unwrap_or(auto)
+}
+
+/// The plane being dragged and where the drag has it, for the highlight's key: the highlight
+/// draws the plane at [`extent`], so it is built again as the handle moves.
+pub(crate) fn live_key() -> Option<(u64, [u64; 4])> {
+    DRAG.with(|d| d.borrow().as_ref().map(|d| (d.id, d.live.map(f64::to_bits))))
+}
+
+/// The construction plane to show handles on: the only thing selected, with nothing else going
+/// on (no dialog, tool or sketch being edited).
+fn target(app: &SolveApp) -> Option<(u64, String, Plane)> {
+    if app.dialog.is_some() || app.tool.is_some() || app.session.active_sketch.is_some() {
+        return None;
+    }
+    let [Sel::Plane { name }] = app.session.selection.as_slice() else { return None };
+    if !app.session.construction_visible(name) {
+        return None;
+    }
+    solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name)
+}
+
+/// The point of `e` a handle sits at, in plane coordinates.
+fn handle_at(e: [f64; 4], (sx, sy): Side) -> Vec2 {
+    let pick = |s: i8, lo: f64, hi: f64| match s {
+        -1 => lo,
+        1 => hi,
+        _ => (lo + hi) * 0.5,
+    };
+    Vec2::new(pick(sx, e[0], e[2]), pick(sy, e[1], e[3]))
+}
+
+fn world(plane: &Plane, p: Vec2) -> Vec3 {
+    plane.to_world(p)
+}
+
+/// The handles on screen: (side, screen point).
+fn handles(app: &SolveApp, proj: &Proj) -> Option<(u64, String, Plane, [f64; 4], Vec<(Side, Pos2)>)> {
+    let (id, name, plane) = target(app)?;
+    let e = extent(app, id, crate::viewport::plane_auto_extent(app, &plane));
+    let at = HANDLES.iter().filter_map(|s| proj.to_screen(world(&plane, handle_at(e, *s))).map(|p| (*s, p))).collect();
+    Some((id, name, plane, e, at))
+}
+
+fn hit(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Side> {
+    let (_, _, _, _, at) = handles(app, proj)?;
+    at.into_iter().filter(|(_, p)| p.distance(pos) <= GRAB_PX).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos))).map(|(s, _)| s)
+}
+
+/// Is a handle under the pointer? (A click there does not change the selection.)
+pub(crate) fn over(app: &SolveApp, proj: &Proj, pos: Pos2) -> bool {
+    hit(app, proj, pos).is_some()
+}
+
+fn on_plane(plane: &Plane, proj: &Proj, pos: Pos2) -> Option<Vec2> {
+    let (o, d) = proj.ray(pos);
+    plane.intersect_ray(o, d).map(|w| plane.to_local(w))
+}
+
+/// A drag starting on a handle (true: the handles took it).
+pub(crate) fn drag_start(app: &SolveApp, proj: &Proj, press: Pos2) -> bool {
+    let Some(side) = hit(app, proj, press) else { return false };
+    let Some((id, name, plane, e, _)) = handles(app, proj) else { return false };
+    let Some(at) = on_plane(&plane, proj, press) else { return false };
+    let offset = at - handle_at(e, side);
+    DRAG.with(|d| *d.borrow_mut() = Some(Drag { id, name, plane, side, start: e, offset, live: e }));
+    true
+}
+
+/// Is a handle being dragged?
+pub(crate) fn dragging() -> bool {
+    DRAG.with(|d| d.borrow().is_some())
+}
+
+/// `e` with the sides `side` moves brought to `to`, never smaller than [`MIN_SIDE`]. With
+/// `symmetric` the opposite side moves the other way too (the middle stays).
+fn follow(e: [f64; 4], (sx, sy): Side, to: Vec2, symmetric: bool) -> [f64; 4] {
+    let mut out = e;
+    let mut axis = |s: i8, lo: usize, hi: usize, v: f64| {
+        let mid = (e[lo] + e[hi]) * 0.5;
+        match s {
+            -1 => {
+                out[lo] = v.min(e[hi] - MIN_SIDE);
+                if symmetric {
+                    out[lo] = v.min(mid - MIN_SIDE * 0.5);
+                    out[hi] = 2.0 * mid - out[lo];
+                }
+            }
+            1 => {
+                out[hi] = v.max(e[lo] + MIN_SIDE);
+                if symmetric {
+                    out[hi] = v.max(mid + MIN_SIDE * 0.5);
+                    out[lo] = 2.0 * mid - out[hi];
+                }
+            }
+            _ => {}
+        }
+    };
+    axis(sx, 0, 2, to.x);
+    axis(sy, 1, 3, to.y);
+    out
+}
+
+/// Follow the pointer (shown at once; kept when the drag ends). Shift resizes about the middle.
+pub(crate) fn drag_to(proj: &Proj, pos: Pos2, symmetric: bool) {
+    DRAG.with(|d| {
+        let mut d = d.borrow_mut();
+        let Some(d) = d.as_mut() else { return };
+        let Some(at) = on_plane(&d.plane, proj, pos) else { return };
+        d.live = follow(d.start, d.side, at - d.offset, symmetric);
+    });
+}
+
+/// The drag is over: the plane keeps the size it was dragged to, as one undo step.
+pub(crate) fn drag_end(app: &mut SolveApp) {
+    let Some(d) = DRAG.with(|d| d.borrow_mut().take()) else { return };
+    if d.live != d.start {
+        let _ = app.run("view.plane_size", json!({"plane": d.name, "extent": d.live}));
+    }
+}
+
+/// A drag given up (the selection or the mode changed under it): the plane goes back.
+pub(crate) fn cancel() {
+    DRAG.with(|d| *d.borrow_mut() = None);
+}
+
+/// Draw the handles of the selected construction plane.
+pub(crate) fn show(app: &SolveApp, ui: &egui::Ui, painter: &Painter, proj: &Proj, hover: Option<Pos2>) {
+    let Some((_, _, _, _, at)) = handles(app, proj) else {
+        if dragging() {
+            cancel();
+        }
+        return;
+    };
+    let tk = Tokens::get();
+    let drag = DRAG.with(|d| d.borrow().as_ref().map(|d| d.side));
+    let under = hover.and_then(|p| hit(app, proj, p));
+    for (side, p) in &at {
+        let lit = drag == Some(*side) || (drag.is_none() && under == Some(*side));
+        let r = Rect::from_center_size(*p, vec2(8.0, 8.0));
+        painter.rect_filled(r, 1.0, if lit { tk.accent } else { tk.panel });
+        painter.rect_stroke(r, 1.0, Stroke::new(1.5, tk.accent), StrokeKind::Middle);
+        crate::scenario::publish_handle(&format!("plane_size_{}_{}", side.0, side.1), *p);
+    }
+    if let Some(side) = drag.or(under) {
+        ui.ctx().set_cursor_icon(match side {
+            (0, _) => CursorIcon::ResizeVertical,
+            (_, 0) => CursorIcon::ResizeHorizontal,
+            _ => CursorIcon::Move,
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_handle_moves_its_sides_and_keeps_a_least_size() {
+        let e = [-10.0, -10.0, 10.0, 10.0];
+        assert_eq!(follow(e, (1, 0), Vec2::new(25.0, 99.0), false), [-10.0, -10.0, 25.0, 10.0]);
+        assert_eq!(follow(e, (-1, 1), Vec2::new(-30.0, 40.0), false), [-30.0, -10.0, 10.0, 40.0]);
+        // Past the opposite side: it stops short of it.
+        assert_eq!(follow(e, (0, -1), Vec2::new(0.0, 50.0), false), [-10.0, 10.0 - MIN_SIDE, 10.0, 10.0]);
+        // Shift: about the middle.
+        assert_eq!(follow(e, (1, 1), Vec2::new(20.0, 15.0), true), [-20.0, -15.0, 20.0, 15.0]);
+    }
+
+    /// A handle let go in the same frame as its last move keeps the size it was let go at, the
+    /// same as when the release comes a frame later (#8265).
+    #[test]
+    fn a_release_in_the_frame_of_the_last_move_keeps_where_it_was_let_go() {
+        let drag = |one_frame: bool| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Lid"})).unwrap();
+            h.app.session.selection = vec![Sel::Plane { name: "Lid".into() }];
+            h.frames(3);
+            let at = h.at(&json!({"handle": "plane_size_1_0"})).unwrap();
+            let pos = |dx: f64| egui::pos2((at[0] + dx) as f32, at[1] as f32);
+            let button = |dx: f64, pressed: bool| egui::Event::PointerButton {
+                pos: pos(dx),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            h.frame_with(vec![egui::Event::PointerMoved(pos(0.0))]);
+            h.frame_with(vec![button(0.0, true)]);
+            h.frame_with(vec![egui::Event::PointerMoved(pos(20.0))]);
+            if one_frame {
+                h.frame_with(vec![egui::Event::PointerMoved(pos(60.0)), button(60.0, false)]);
+            } else {
+                h.frame_with(vec![egui::Event::PointerMoved(pos(60.0))]);
+                h.frame_with(vec![button(60.0, false)]);
+            }
+            h.frames(2);
+            let id = h.app.session.doc.find_feature("Lid").unwrap().id;
+            h.app.session.doc.plane_extents.get(&id).copied()
+        };
+        let apart = drag(false).expect("the drag gives the plane a size");
+        assert_eq!(drag(true), Some(apart), "let go in the frame of the last move");
+    }
+
+    /// The highlight follows a handle as it is dragged: its key changes with the live size.
+    #[test]
+    fn the_highlight_key_follows_a_dragged_handle() {
+        let h = crate::scenario::Harness::new();
+        let start = [-10.0, -10.0, 10.0, 10.0];
+        let drag = |live| Drag { id: 7, name: "Plane1".into(), plane: Plane::XY, side: (1, 0), start, offset: Vec2::new(0.0, 0.0), live };
+        let idle = crate::viewport::highlight_key(&h.app);
+        DRAG.with(|d| *d.borrow_mut() = Some(drag(start)));
+        let at_start = crate::viewport::highlight_key(&h.app);
+        assert_ne!(at_start, idle, "a drag is part of the key");
+        DRAG.with(|d| *d.borrow_mut() = Some(drag([-10.0, -10.0, 25.0, 10.0])));
+        assert_ne!(crate::viewport::highlight_key(&h.app), at_start, "the side moved");
+        assert_eq!(extent(&h.app, 7, [-10.0, -10.0, 10.0, 10.0]), [-10.0, -10.0, 25.0, 10.0], "the plane is drawn where the drag has it");
+        cancel();
+        assert_eq!(crate::viewport::highlight_key(&h.app), idle, "back once the drag is given up");
+    }
+}
