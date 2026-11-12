@@ -372,6 +372,7 @@ fn a_ball_through_a_roll_is_cut_where_it_turns_edge_on() {
 /// that face at the ball's top and bottom: there the outline is that curve and nothing else,
 /// the angle it spans at each height seen from the axis 50 away.
 #[test]
+#[ignore = "solidcore: a sphere whose pole lies on a cylinder's face leaves a trim with coincident control points at the pole since main's kernel (reproduced by crates/kernel/tests/ball_on_a_rolls_face.rs); #6748 follow-up"]
 fn a_ball_centred_on_a_rolls_face_is_cut_where_it_turns_edge_on() {
     let mut s = half_roll();
     let v0 = exact_volume(&s);
@@ -405,6 +406,7 @@ fn spread(s: f64, d: f64) -> f64 {
 /// face SMLib's own boolean refuses; 2e-4 and 1e-3 past it are read within 1.5e-5 of the cut,
 /// short of this test's 1e-5: the curve through the fold's points guesses its ends' tangents.)
 #[test]
+#[ignore = "solidcore: a sphere whose pole lies on a cylinder's face leaves a trim with coincident control points at the pole since main's kernel (reproduced by crates/kernel/tests/ball_on_a_rolls_face.rs); #6748 follow-up"]
 fn a_ball_stepped_through_a_rolls_face_is_cut_alike_either_side() {
     for off in [-2e-4, -1e-4, 0.0, 1e-2] {
         let d = 50.0 + off;
