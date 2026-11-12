@@ -2684,7 +2684,11 @@ mod tests {
             Point2::new(0.5, 3.0),
         ] {
             let at = Vec3::new(uv.x, 0.0, uv.y);
-            assert_eq!(s.evaluate_step_point(&k, uv).unwrap(), at, "point at {uv:?}");
+            assert_eq!(
+                s.evaluate_step_point(&k, uv).unwrap(),
+                at,
+                "point at {uv:?}"
+            );
             let d = s.evaluate_step(&k, uv, 2, 2).unwrap();
             assert_eq!(d[0], at, "matrix at {uv:?}");
             assert_eq!(d[1], Vec3::Z, "matrix at {uv:?}");

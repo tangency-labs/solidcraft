@@ -2556,8 +2556,9 @@ mod tests {
                 ..BoundedLineOptions::default()
             },
         );
-        let s = SurfOfRevolution::create_canonical(&k, Curve::from(line), Vec3::ZERO, Vec3::Z, false)
-            .unwrap();
+        let s =
+            SurfOfRevolution::create_canonical(&k, Curve::from(line), Vec3::ZERO, Vec3::Z, false)
+                .unwrap();
         assert_eq!(s.position().x_axis(), -Vec3::X);
         assert_inverts(&k, &s, Vec3::new(-5.0, 0.0, -5.0), Point2::new(0.0, -5.0));
         // the other side of the axis (item 7)

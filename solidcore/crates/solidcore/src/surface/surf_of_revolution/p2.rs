@@ -879,7 +879,8 @@ impl SurfOfRevolution {
                     let low_mid = off_curve.evaluate_point(k, 0.5 * (domain.min() + param))?;
                     let high_mid = off_curve.evaluate_point(k, 0.5 * (param + domain.max()))?;
                     let x_axis = self.position.x_axis();
-                    let keep_high = (high_mid - origin).dot(x_axis) > (low_mid - origin).dot(x_axis);
+                    let keep_high =
+                        (high_mid - origin).dot(x_axis) > (low_mid - origin).dot(x_axis);
                     if keep_high {
                         let _ = domain.set_min(param);
                     } else {
