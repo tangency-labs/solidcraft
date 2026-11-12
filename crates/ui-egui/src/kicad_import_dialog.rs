@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::io::KicadCopper;
 
 use crate::SolveApp;
+use crate::ui_kit;
 
 /// The open KiCad import window.
 #[derive(Clone, Debug, PartialEq)]
@@ -71,33 +72,38 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (closed, action) = crate::ui_kit::Window::new(egui::Id::unique("sc_kicad_import"), "import", solidcraft_ui_text::tr_label("Open KiCad PCB"))
         .cards(2.0)
         .fields()
-        .actions(solidcraft_ui_text::tr("Open"), solidcraft_ui_text::tr("Cancel"), None)
+        .actions(solidcraft_ui_text::tr("ui.open"), solidcraft_ui_text::tr("ui.cancel"), None)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, dialog.problem().is_none(), |ui| {
             ui.label(solidcraft_ui_text::tr_label("Import options"));
             ui.add_space(6.0);
             egui::Grid::new("kicad_import_grid").num_columns(2).min_col_width(200.0).spacing([12.0, 6.0]).show(ui, |ui| {
-                let r = ui.checkbox(&mut dialog.components, solidcraft_ui_text::tr_label("Include components"));
+                let r = ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Include components"), &mut dialog.components);
                 crate::scenario::publish_handle("kicad:components", r.rect.center());
                 ui.end_row();
 
                 let copper_label = ui.label(solidcraft_ui_text::tr_label("Copper (traces, vias, zones, pads)"));
                 crate::scenario::publish_rect("kicad:copper_label", copper_label.rect);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    for (mode, label) in
-                        [(KicadCopper::None, "None"), (KicadCopper::Overlay, "Overlay on the board"), (KicadCopper::Mesh, "Modelled")]
-                    {
-                        let r = ui.radio(dialog.copper == mode, solidcraft_ui_text::tr_label(label));
-                        crate::scenario::publish_handle(&format!("kicad:copper:{}", mode.as_str()), r.rect.center());
-                        if r.clicked() {
-                            dialog.copper = mode;
-                        }
-                    }
-                });
+                let modes = [(KicadCopper::None, "None"), (KicadCopper::Overlay, "Overlay on the board"), (KicadCopper::Mesh, "Modelled")];
+                let labels: Vec<&str> = modes.iter().map(|(_, label)| *label).collect();
+                let states: Vec<bool> = modes.iter().map(|(mode, _)| dialog.copper == *mode).collect();
+                let targets: Vec<String> = modes.iter().map(|(mode, _)| format!("kicad:copper:{}", mode.as_str())).collect();
+                let targets: Vec<&str> = targets.iter().map(String::as_str).collect();
+                // The kit's segmented choice: one row, the same control as every other exclusive
+                // choice in the app, and each option keeps its own scenario target.
+                let mut chosen = usize::MAX;
+                let clicked = ui_kit::segmented(
+                    ui,
+                    &mut chosen,
+                    &labels,
+                    ui_kit::Segments { targets: &targets, states: &states, intrinsic: true, ..Default::default() },
+                );
+                if clicked && let Some((mode, _)) = modes.get(chosen) {
+                    dialog.copper = *mode;
+                }
                 ui.end_row();
 
-                let r = ui.checkbox(&mut dialog.silkscreen, solidcraft_ui_text::tr_label("Include silkscreen"));
+                let r = ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Include silkscreen"), &mut dialog.silkscreen);
                 crate::scenario::publish_handle("kicad:silkscreen", r.rect.center());
                 ui.end_row();
 
@@ -107,7 +113,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.end_row();
 
                 ui.label(solidcraft_ui_text::tr_label("Board thickness"));
-                let t = ui.add(egui::DragValue::new(&mut dialog.thickness).speed(0.1).range(0.01..=1000.0).suffix(" mm").max_decimals(3));
+                let t = ui_kit::number_field(ui, &mut dialog.thickness, 0.01..=1000.0, 0.1, " mm");
                 crate::scenario::publish_handle("kicad:thickness", t.rect.center());
                 ui.end_row();
             });
