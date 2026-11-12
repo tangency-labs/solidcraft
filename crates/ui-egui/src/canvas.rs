@@ -2246,6 +2246,10 @@ mod tests {
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), 12.0), "12 mm");
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), -2.5), "-2.5 mm");
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), -0.0001), "-0.0001 mm");
+        // A free drag or a variable radius writes no binary noise into the field (#15195).
+        assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), 2.8000000000000003), "2.8 mm");
+        assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), 0.1 + 0.2), "0.3 mm");
+        assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), 123456.78912), "123456.78912 mm");
         // Snapped drag residue and Length decimals (#9035, #9036).
         let noisy = (1.2_f64 / 0.2).round() * 0.2;
         assert_ne!(format!("{noisy}"), "1.2");
