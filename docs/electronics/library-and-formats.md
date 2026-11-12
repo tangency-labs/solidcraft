@@ -39,8 +39,10 @@ Part {
 Rules:
 
 - **Immutable revisions.** Editing a part creates a revision; existing designs keep the old one.
-- **Embedded snapshots.** Symbol, footprint and model bytes are copied into the design. The source
-  identity stays for inspection and an explicit update.
+- **Embedded snapshots.** Symbol, footprint and parametric model bytes are copied into the design.
+  The source identity stays for inspection and an explicit update. A vendor STEP model that exceeds
+  the design budget may stay linked; the part then records that the model is external, and moving
+  the design without that file loses it until it is relinked.
 - **Explicit updates.** `library.part.update` shows pin/pad/net changes and refuses to apply a change
   that would silently disconnect a net.
 - **Validation is a command.** Pin/pad numbering, duplicate pads, courtyard, pad-to-pin mapping,
@@ -88,7 +90,7 @@ with real files supplied by users, not a vague "supports KiCad".
 Loss reports are mandatory in both directions: preserved, approximated, dropped, with locations.
 
 Altium and Allegro binary formats are not direct targets. Their users reach SolidCraft through
-IPC-2581, ODB++ or STEP export from those tools.
+IPC-2581 or STEP export from those tools.
 
 ## 5. Fabrication formats and profiles
 

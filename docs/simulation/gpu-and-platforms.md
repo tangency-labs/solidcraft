@@ -133,7 +133,7 @@ device-loss handling, progress/cancel. No solver-specific policy leaks into `fea
 Two different things, deliberately separated:
 
 **A. Job-level parallelism (v1).** One problem per device. Independent studies, parameter sweeps,
-topology iterations and flow cases run concurrently across adapters. This is the useful multi-GPU
+independent topology studies or candidates, and flow cases run concurrently across adapters. This is the useful multi-GPU
 feature for normal users, scales near-linearly across independent work, and needs no halo exchange.
 The engine's queue assigns a device per job, respects per-device memory budgets and merges results
 by study id. A laptop with an iGPU and a dGPU can use both.
@@ -144,10 +144,11 @@ unified memory it is cheaper but still a copy. Expect 1.3–1.8× on two GPUs, n
 preference, off by default, and only offer it when one device cannot hold the problem. Do not
 promise linear scaling.
 
-**Shared compute with the viewport.** The simulation device is separate from the window's device
-even on the same adapter, so a long solve cannot stall a frame. Submissions are chunked and the UI
-polls between chunks. On integrated GPUs, a "pause heavy solve while interacting" preference keeps
-navigation smooth.
+**Shared compute with the viewport.** The simulation device is separate from the window's device,
+which keeps the solve out of the viewport's command stream. On the same adapter it still competes for
+execution and memory bandwidth, so frames can be delayed; chunked submissions reduce the impact but do
+not guarantee isolation. The scheduling policy is validated by contention tests. On integrated GPUs,
+a "pause heavy solve while interacting" preference keeps navigation smooth.
 
 ## 8. Watchdogs, cancellation and progress
 
@@ -180,7 +181,7 @@ navigation smooth.
 | Software adapters (llvmpipe, lavapipe, WARP) exist | Use them for shader/correctness tests, never as the default |
 | Some adapters report `IntegratedGpu` but use system memory | Detect via limits and calibration, not the device type name |
 | Laptop thermal throttling | Long runs report sustained throughput; avoid time-based assertions in tests |
-| Multiple adapters can be the same physical GPU | De-duplicate by name + backend + driver in `sim.devices` |
+| Multiple adapters can be the same physical GPU | Use a stable adapter index or PCI bus id when available; never collapse two adapters that share a name, backend and driver |
 
 ## 11. Accepting a GPU path
 

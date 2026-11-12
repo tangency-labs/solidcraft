@@ -43,13 +43,13 @@ a golden file.
 | Case | Reference | Tolerance | Checks |
 |---|---|---|---|
 | Patch test | Constant strain reproduced exactly | 1e-10 relative (f64) | Element completeness |
-| Rigid-body motion | Zero strain energy and stress | 1e-12 relative | No spurious stiffness |
+| Rigid-body motion | Zero strain energy and stress | 1e-12 of a characteristic `E·V` or `F·L` scale (not relative to zero) | No spurious stiffness |
 | Cantilever, end load | Euler–Bernoulli / Timoshenko tip deflection | 2% with documented mesh | Bending, shear |
 | Plate with hole | Kirsch stress concentration (with finite-width note) | 3% at the hole | Stress recovery |
 | Pressurised thick cylinder | Lamé solution | 2% through thickness | Curved geometry, radial stress |
 | Curved beam | Curved-beam theory | 3% | Non-prismatic geometry |
 | L-bracket | No closed form: refinement only | Change < 5% between two refinements | Convergence, singularity warning |
-| Reaction equilibrium | Sum of reactions = applied load | 1e-8 relative | Assembly, load transfer |
+| Reaction equilibrium | Vector sum of reactions and applied loads = 0 | 1e-8 relative to the applied load | Assembly, load transfer |
 | Superposition | Two loads = sum of separate solves | 1e-8 relative | Linearity |
 | Unit scaling | Same model in mm and m (scaled) | 1e-8 relative | SI boundary |
 | Mesh permutation | Same mesh, reordered nodes/elements | 1e-10 relative | Determinism, ordering |
@@ -58,8 +58,8 @@ a golden file.
 
 | Case | Reference | Tolerance |
 |---|---|---|
-| Cantilever frequencies | `1.875²`, `4.694²`, … | 2% |
-| Free–free | Six rigid-body modes at zero | 1e-8 relative |
+| Cantilever frequencies | `βₙ² = 1.875², 4.694², …`; `f = βₙ²/(2πL²)·√(EI/ρA)` | 2% |
+| Free–free | Six rigid-body modes at zero | 1e-8 of the first elastic frequency (not relative to zero) |
 | Simply supported plate | Plate theory | 3% |
 | Euler column | `π²EI/(KL)²` | 2% |
 | Mode orthogonality | `φᵢᵀMφⱼ = δᵢⱼ` | 1e-8 |

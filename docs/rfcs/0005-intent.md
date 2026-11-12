@@ -64,8 +64,8 @@ completion requirement.
 | I2 Requirements | Must/should/could, statement, acceptance test, owner, links | A must requirement has an acceptance test |
 | I3 Success criteria | Metric, target, unit, measurement method, linked requirement | Every criterion has a unit |
 | I4 Budgets | Mass, power, cost, size, time, environment; target, tolerance, unit | Every budget has a unit and a target |
-| I5 Risks | Description, likelihood, impact, mitigation, owner, trigger, cheap check | A high risk has a mitigation |
-| I6 Compliance screen | Mains, battery, RF, laser, heat, medical, toy, vehicle, outdoor, waste | A triggered topic has a note |
+| I5 Risks | Description, likelihood, impact, mitigation, owner, trigger, cheap check | Readiness hint: a high risk should have a mitigation |
+| I6 Compliance screen | Mains, battery, RF, laser, heat, medical, toy, vehicle, outdoor, waste | Readiness hint: a triggered topic should have a note |
 | I7 Decisions | Date, options, choice, reason, revisit condition | A decision has a reason |
 | I8 Feasibility plan | Unknown, method, prototype, exit criterion, order | An item has a next step |
 | I9 Help and templates | Guided fields, examples, product templates | Every field has help text |

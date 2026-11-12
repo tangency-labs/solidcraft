@@ -57,8 +57,9 @@ Slices:
 7. Fuzz corpus: degenerate, self-intersecting, open shells, zero-thickness, imported STEP junk.
 
 **Exit:** cube, cylinder, plate with hole, L-bracket and a simple imported STEP bracket mesh with
-documented quality; hostile cases refuse; same input gives the same mesh. **Gate:** if 3D quality
-on real parts is not there, ship the planar/shell path first and say so in the UI and roadmap.
+documented quality; hostile cases refuse; same input gives the same mesh. **Gate:** if 3D quality on
+real parts is not there, ship planar meshing only first and say so in the UI and roadmap; shell
+analysis waits for the M4 shell elements and loads.
 
 ## M2 — Linear static
 

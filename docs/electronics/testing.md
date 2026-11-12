@@ -58,7 +58,7 @@ Each case has a fixture and an expected severity/location:
 | Duplicate reference designator | Error |
 | Bus member not defined | Error |
 | Label on a wire that resolves to two nets | Error |
-| Pin type conflict (input vs power output) | Error |
+| Output driven by two output pins | Error |
 | Alternate pin function in use | Report, not error |
 
 ## 4. DRC matrix
@@ -87,13 +87,15 @@ DRC ordering and messages are deterministic; the same board and rules produce th
 - **Gerber X2:** file functions and attributes present; apertures match the board; polarity correct;
   no zero-area or self-intersecting flashes; drill alignment checked against Excellon.
 - **Independent check:** open the output in at least one independent Gerber viewer, and parse it with
-  the app's reader; compare layer count, apertures and object counts.
+  the app's reader; compare independently parsed geometry and connectivity (pads, tracks, vias and
+  zones) with the source board, not only layer count, apertures and object counts.
 - **IPC-2581:** schema-valid, round-trips the netlist, layers and stackup.
 - **BOM/CPL:** quantities, refdes sets, DNP/variant state, rotation conventions and side match the
   board and the fab profile.
 - **DFM:** the selected profile's rules pass; a known-bad board produces the expected violations.
-- **Real fab:** at least one board per milestone is ordered and accepted without manual Gerber edits.
-  The order confirmation and fab DFM result are the evidence.
+- **Real fab:** in each milestone that ships fabrication output (E3 onward), at least one board is
+  ordered and accepted without manual Gerber edits. The order confirmation and fab DFM result are the
+  evidence.
 - **Panel:** rails, fiducials, mouse-bites and V-grooves are present and within the profile.
 
 A Gerber that "looks right" is not evidence. Parsed geometry and a fab acceptance are.

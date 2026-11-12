@@ -34,5 +34,5 @@ CI with a non-zero exit on an open must requirement.
 
 ## Readiness (optional)
 
-A third party could build the product from the release. Hard stop while a must requirement has no
-result or a recorded note.
+A third party could build the product from the release. Release stays available without a result or
+a note; missing evidence is listed, never enforced as a stop.

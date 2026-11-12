@@ -75,8 +75,9 @@ measurements, not guessed twice.
   dependence is out of v1.
 - **SIM-R-033** Each boundary condition shall show its magnitude, units and a glyph in the viewport
   that can be shown/hidden and filtered.
-- **SIM-R-034** A study with no fixture, or with fixtures insufficient to remove rigid-body motion,
-  shall refuse to run and explain which motion is unconstrained.
+- **SIM-R-034** A structural study (SIM-R-040, SIM-R-042, SIM-R-044) with no fixture, or with
+  fixtures insufficient to remove rigid-body motion, shall refuse to run and explain which motion is
+  unconstrained.
 - **SIM-R-035** A study whose net load is unbalanced (for a static case) shall warn with the
   imbalance magnitude and direction.
 - **SIM-R-036** Units shall be explicit at input and output: mm, N, MPa, N·mm, K, W, W/(m·K).

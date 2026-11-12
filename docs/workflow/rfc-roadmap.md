@@ -217,4 +217,5 @@ should not become an ERP.
 | 9 | 0013 Release | A shippable product | to write |
 | 10 | 0014 Produce | Handoff | to write |
 
-Parallel work is allowed only where dependencies allow and the earlier phase's gaps are waived.
+Parallel work is allowed whenever the technical dependencies allow it. There is no phase gate and no
+waiver to obtain; a missing earlier-phase tool is listed, not enforced.

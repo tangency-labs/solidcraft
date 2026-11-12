@@ -96,12 +96,15 @@ inputs_hash = H(
 ```
 
 A result whose hash differs from the current study is shown as **out of date**, never silently
-reused. Per-body fingerprints come from the record hash when available, else exact bounds, volume,
-area and the sorted face/edge name set.
+reused. Per-body fingerprints use the exact geometry record hash. When no exact fingerprint is
+available, the result is marked out of date rather than compared through coarse proxies such as
+bounds, volume, area or names: those can collide when, for example, an enclosed cavity moves.
 
 ### 2.4 Result cache
 
-Engine-owned `HashMap<StudyId, RunResult>` with an LRU bound by estimated memory. Results survive
+Engine-owned `HashMap<RunId, RunResult>` with a per-study index `HashMap<StudyId, Vec<RunId>>` and an
+LRU bound by estimated memory. Each study keeps at most three runs; when an evicted run is requested,
+`sim.compare` reports it as unavailable instead of comparing the wrong run. Results survive
 undo/redo of unrelated edits; they do not survive a save/reopen (recomputed on demand). This keeps
 `.sc` files small and avoids stale-file class bugs.
 
