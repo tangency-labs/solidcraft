@@ -24,6 +24,23 @@ impl Drop for Folder {
     }
 }
 
+/// Shared W23 assembly fixture (#11773): run the same command script for BOM,
+/// balloon, drawing-view and table tests. Each `as` name maps to the occurrence
+/// returned by that step, so all four suites use one set of names and results.
+pub(crate) fn w23_assembly_sheet() -> (Session, std::collections::BTreeMap<String, u64>) {
+    let script: Value = serde_json::from_str(include_str!("../../../tests/fixtures/w23-assembly-sheet/assembly.json")).unwrap();
+    let mut session = Session::default();
+    let results = session.run_script(&script).unwrap();
+    let mut occurrences = std::collections::BTreeMap::new();
+    for (command, reply) in script["commands"].as_array().unwrap().iter().zip(results.iter()) {
+        if let Some(name) = command["as"].as_str() {
+            let id = reply["occurrence"].as_u64().unwrap_or_else(|| panic!("assembly step {name} did not return an occurrence"));
+            assert!(occurrences.insert(name.to_owned(), id).is_none(), "duplicate assembly fixture name: {name}");
+        }
+    }
+    (session, occurrences)
+}
+
 mod mesh_convert;
 
 /// Counts the copies `Session::doc_mut` makes of a shared document.
