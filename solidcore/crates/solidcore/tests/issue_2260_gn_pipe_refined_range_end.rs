@@ -170,7 +170,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "internal_pole_row_through_knot",
     "iso_curve_sliver_domain_is_degenerate",
     "iso_curve_uv_line_both_params",
-    "is_topological_vertex_rejects_cusps_and_tangent_errors",
     "join_touching_loops",
     "keep_operand_uv_trims",
     "knot_vector_valid_requires_span",

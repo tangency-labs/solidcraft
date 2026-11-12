@@ -58,14 +58,13 @@
 //!   returns `Ok(false)` when `AngleBetween` fails). `IsTopologicalVertex` also returns
 //!   the failed status of `GetEndTangent` at an edge's start (`SER`) as its `SmBoolean`,
 //!   which is true, and accepts `180°` cusps (`|angle_rad ± PI| <= ang_limit_rad`)
-//!   because it compares unoriented curve tangents; with
-//!   [`crate::kernel::UpstreamFixes::is_topological_vertex_rejects_cusps_and_tangent_errors`],
-//!   a failed start-tangent evaluation propagates `Err` and tangents are oriented
-//!   through the vertex so cusps return `Ok(false)` (WR-92).
-//! - **Other uses.** `IsTopologicalVertex` counts only the vertex's edges, so a vertex
-//!   that also is a vertex loop in another face (a point contact inside an edge) is
-//!   removable; with [`crate::kernel::UpstreamFixes::topological_vertex_has_only_edge_uses`]
-//!   a vertex with any use that is not an edge use is not (WR-727).
+//!   because it compares unoriented curve tangents; the port propagates a failed
+//!   start-tangent evaluation as `Err` and orients the tangents through the vertex, so
+//!   cusps return `Ok(false)` (WR-92).
+//! - **Other uses.** `IsTopologicalVertex` counts only the vertex's edges, so upstream a
+//!   vertex that also is a vertex loop in another face (a point contact inside an edge)
+//!   is removable; in the port a vertex with any use that is not an edge use is not
+//!   (WR-727).
 //! - **Curve identity.** Each edge owns its curve, so `pCurve1 != pCurve2` in
 //!   `IsTopologicalVertex` is false only when neither edge has a curve (upstream two
 //!   edges may share one curve object; the difftest rejects such B-reps).
@@ -851,28 +850,21 @@ pub fn is_on_pole(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
 /// `IsTopologicalVertex`: whether the vertex could be removed without changing the
 /// B-rep's shape: it joins exactly two different edges, is not on a pole, the edges'
 /// curves meet at the same parameter (unless both are lines) and leave the vertex
-/// tangent (or cusped by default) within `SM_CONTINUITY_ANGLE`.
+/// tangent within `SM_CONTINUITY_ANGLE`.
 ///
-/// With [`crate::kernel::UpstreamFixes::is_topological_vertex_rejects_cusps_and_tangent_errors`],
-/// edge tangents are oriented along traversal through `v` so `180°` cusps return
+/// Edge tangents are oriented along traversal through `v`, so `180°` cusps return
 /// `Ok(false)`, and a failed start-tangent evaluation (`GetEndTangent(true)`) propagates
-/// its [`SolidError`] instead of returning `Ok(true)` (WR-92). With
-/// [`crate::kernel::UpstreamFixes::topological_vertex_has_only_edge_uses`], a vertex
-/// with a use that is not an edge use (a vertex loop in another face) is not
-/// topological (WR-727).
+/// its [`SolidError`] instead of returning `Ok(true)` (WR-92). A vertex with a use that
+/// is not an edge use (a vertex loop in another face) is not topological (WR-727).
 ///
 /// # Errors
 ///
 /// Those of [`edges`], [`is_on_pole`], `SmCurve::IsLine` and [`edge_start_vertex`];
-/// [`SolidError::InvalidInput`] for one edge without curve whose tangent is needed; and,
-/// when [`crate::kernel::UpstreamFixes::is_topological_vertex_rejects_cusps_and_tangent_errors`]
-/// is enabled, any curve evaluation error from [`edge_end_tangent`] at an edge's start.
-/// A tangent neither `IsLine` nor `GetEndTangent` wrote is the `SmVector3d` default
+/// [`SolidError::InvalidInput`] for one edge without curve whose tangent is needed; and
+/// any curve evaluation error from [`edge_end_tangent`] at an edge's start. A tangent
+/// neither `IsLine` nor `GetEndTangent` wrote is the `SmVector3d` default
 /// ([`Vec3::UNDEF`]), as upstream.
 pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
-    let reject_cusps_and_errors = k
-        .fixes
-        .is_topological_vertex_rejects_cusps_and_tangent_errors;
     let sedges = edges(b, v, None)?;
 
     // only edges connected to exactly 2 edges are Topological
@@ -888,11 +880,9 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
 
     // WR-727: joining the two edges removes every use of the vertex, so a use that is
     // not one of theirs (a vertex loop in another face, a shell vertex) keeps it
-    if k.fixes.topological_vertex_has_only_edge_uses {
-        for vu in vertexuses(b, v)? {
-            if !vertexuse::is_edge_vertexuse(b, vu)? {
-                return Ok(false);
-            }
+    for vu in vertexuses(b, v)? {
+        if !vertexuse::is_edge_vertexuse(b, vu)? {
+            return Ok(false);
         }
     }
 
@@ -906,8 +896,7 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
         let r = b.edge(e)?;
         match &r.curve {
             Some(c) => {
-                let inside_out_line = reject_cusps_and_errors
-                    && matches!(c.kind(), CurveKind::Line(l) if l.inside_out());
+                let inside_out_line = matches!(c.kind(), CurveKind::Line(l) if l.inside_out());
                 Ok(c.is_line(k, IS_LINE_SAMPLES, r.tolerance / 1000.0)?
                     .map(|(_, t)| if inside_out_line { -t } else { t }))
             }
@@ -948,23 +937,9 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
             for (e, at_start, tan) in [(edge1, at_start1, &mut tan1), (edge2, at_start2, &mut tan2)]
             {
                 if at_start {
-                    // SER: a failed status is returned as the SmBoolean result (TRUE)
-                    // unless WR-92 propagates it.
-                    match edge_end_tangent(k, b, e, true) {
-                        Ok(t) => *tan = Some(t),
-                        Err(err)
-                            if reject_cusps_and_errors
-                                || matches!(
-                                    err,
-                                    SolidError::Unported { .. }
-                                        | SolidError::InvalidInput { .. }
-                                        | SolidError::NotFound { .. }
-                                ) =>
-                        {
-                            return Err(err);
-                        }
-                        Err(_) => return Ok(true),
-                    }
+                    // SER: upstream returns a failed status as the SmBoolean result
+                    // (TRUE); WR-92 propagates it.
+                    *tan = Some(edge_end_tangent(k, b, e, true)?);
                 } else if let Some(t) = end_tangent_ignoring_status(k, b, e, false)? {
                     // SE: a failed evaluation leaves the tangent as it was
                     *tan = Some(t);
@@ -980,25 +955,24 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
         // a tangent nothing wrote is the default SmVector3d (SM_UNDEF_DOUBLE)
         let mut t1 = tan1.unwrap_or(Vec3::UNDEF);
         let mut t2 = tan2.unwrap_or(Vec3::UNDEF);
-        if reject_cusps_and_errors {
-            let (at_start1, at_start2) = if let Some(ends) = ends_at_start {
-                ends
-            } else {
-                (
-                    edge_start_vertex(b, edge1)? == Some(v),
-                    edge_start_vertex(b, edge2)? == Some(v),
-                )
-            };
-            if at_start1 {
-                t1 = -t1;
-            }
-            if !at_start2 {
-                t2 = -t2;
-            }
+        // WR-92: orient both along traversal through `v`, so a cusp is 180° apart
+        let (at_start1, at_start2) = if let Some(ends) = ends_at_start {
+            ends
+        } else {
+            (
+                edge_start_vertex(b, edge1)? == Some(v),
+                edge_start_vertex(b, edge2)? == Some(v),
+            )
+        };
+        if at_start1 {
+            t1 = -t1;
         }
-        // AngleBetween sets the angle to 0 on failure (status ignored); with the opt-in
-        // fix the curves are not shown to meet G1 without it, so the vertex stays
-        // (tangency-labs/smlib 7a35f33)
+        if !at_start2 {
+            t2 = -t2;
+        }
+        // AngleBetween sets the angle to 0 on failure (status ignored); with
+        // `query_statuses_pass_on` the curves are not shown to meet G1 without it, so the
+        // vertex stays (tangency-labs/smlib 7a35f33)
         match t1.angle_between(t2) {
             Err(_) if k.fixes.query_statuses_pass_on => return Ok(false),
             r => r.unwrap_or(0.0),
@@ -1007,12 +981,9 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
         0.0
     };
 
-    // when lines are not G1 - Vertex is not topological
-    if angle_rad.abs() > ang_limit_rad
-        && (reject_cusps_and_errors
-            || ((angle_rad - PI).abs() > ang_limit_rad // gwc: is this a bug? it counts cusps
-                && (angle_rad + PI).abs() > ang_limit_rad))
-    {
+    // when lines are not G1 - Vertex is not topological (upstream also let cusps pass:
+    // "gwc: is this a bug? it counts cusps"; WR-92)
+    if angle_rad.abs() > ang_limit_rad {
         return Ok(false);
     }
 
@@ -1998,26 +1969,6 @@ mod tests {
             .unwrap()
             .vertex_edge_gap
             .is_init());
-    }
-
-    #[test]
-    fn wr92_flag_lookup_and_default() {
-        use crate::kernel::UpstreamFixes;
-
-        let mut fixes = UpstreamFixes::default();
-        assert!(!fixes.is_topological_vertex_rejects_cusps_and_tangent_errors);
-        assert!(UpstreamFixes::NAMES
-            .contains(&"is_topological_vertex_rejects_cusps_and_tangent_errors"));
-        let slot = fixes
-            .flag_mut("is_topological_vertex_rejects_cusps_and_tangent_errors")
-            .unwrap();
-        assert!(!*slot);
-        *slot = true;
-        assert!(fixes.is_topological_vertex_rejects_cusps_and_tangent_errors);
-        *fixes
-            .flag_mut("is_topological_vertex_rejects_cusps_and_tangent_errors")
-            .unwrap() = false;
-        assert!(!fixes.is_topological_vertex_rejects_cusps_and_tangent_errors);
     }
 
     #[test]

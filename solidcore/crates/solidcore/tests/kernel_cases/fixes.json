@@ -165,7 +165,6 @@
   "fillet_point_step_per_point",
   "analytic_copy_keeps_parameterization",
   "precise_properties_body_length_scale",
-  "is_topological_vertex_rejects_cusps_and_tangent_errors",
   "offset_extension_from_base",
   "offset_extension_as_itself",
   "corner_blend_stays_inside_neighbours",
