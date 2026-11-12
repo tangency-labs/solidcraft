@@ -1,0 +1,10 @@
+{
+  "en": { "cmd.cam.job": "CAM Job", "cmd.cam.post.list": "List CAM Posts", "cmd.cam.post.get": "Get CAM Post", "cmd.cam.gcode.check": "Check G-code" },
+  "ar": { "cmd.cam.job": "مهمة تصنيع CAM", "cmd.cam.post.list": "عرض معالجات CAM اللاحقة", "cmd.cam.post.get": "جلب معالج CAM لاحق", "cmd.cam.gcode.check": "فحص G-code" },
+  "de": { "cmd.cam.job": "CAM-Auftrag", "cmd.cam.post.list": "CAM-Postprozessoren auflisten", "cmd.cam.post.get": "CAM-Postprozessor abrufen", "cmd.cam.gcode.check": "G-Code prüfen" },
+  "fr": { "cmd.cam.job": "Travail FAO", "cmd.cam.post.list": "Lister les post-processeurs FAO", "cmd.cam.post.get": "Obtenir un post-processeur FAO", "cmd.cam.gcode.check": "Vérifier le G-code" },
+  "he": { "cmd.cam.job": "משימת CAM", "cmd.cam.post.list": "רשימת מעבדי פוסט של CAM", "cmd.cam.post.get": "קבלת מעבד פוסט של CAM", "cmd.cam.gcode.check": "בדיקת G-code" },
+  "ja": { "cmd.cam.job": "CAMジョブ", "cmd.cam.post.list": "CAMポストプロセッサの一覧", "cmd.cam.post.get": "CAMポストプロセッサを取得", "cmd.cam.gcode.check": "Gコードを確認" },
+  "vi": { "cmd.cam.job": "Công việc CAM", "cmd.cam.post.list": "Liệt kê bộ hậu xử lý CAM", "cmd.cam.post.get": "Lấy bộ hậu xử lý CAM", "cmd.cam.gcode.check": "Kiểm tra G-code" },
+  "zh": { "cmd.cam.job": "CAM 作业", "cmd.cam.post.list": "列出 CAM 后处理器", "cmd.cam.post.get": "获取 CAM 后处理器", "cmd.cam.gcode.check": "检查 G 代码" }
+}

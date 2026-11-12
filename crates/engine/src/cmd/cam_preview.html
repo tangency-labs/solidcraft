@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SolidCraft CAM toolpaths</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --text:#e6e8ee; --muted:#9aa3b2; --accent:#5aa9ff; --line:#2a2f3a; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f4f5f7; --panel:#ffffff; --text:#1b1f27; --muted:#5d6675; --accent:#1f6fd1; --line:#dde1e7; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; background:var(--bg); color:var(--text); display:flex; height:100vh; }
+  aside { width: 330px; background:var(--panel); border-right:1px solid var(--line); padding:16px; overflow:auto; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
+  .scene { padding:8px 10px; border-radius:8px; cursor:pointer; margin-bottom:4px; border:1px solid transparent; }
+  .scene:hover { border-color:var(--line); }
+  .scene.on { background:color-mix(in srgb, var(--accent) 16%, transparent); border-color:var(--accent); }
+  .scene b { display:block; font-size:13px; }
+  .scene span { color:var(--muted); font-size:12px; }
+  .tag { display:inline-block; font-size:10px; padding:1px 6px; border-radius:10px; border:1px solid var(--line); color:var(--muted); margin-left:6px; vertical-align:1px; }
+  main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #bar { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  #bar label { color:var(--muted); font-size:12px; display:flex; gap:6px; align-items:center; }
+  #stats { margin-left:auto; color:var(--muted); font-size:12px; }
+  #wrap { flex:1; position:relative; min-height:0; }
+  canvas { width:100%; height:100%; display:block; cursor:grab; }
+  #desc { position:absolute; left:16px; bottom:14px; max-width:560px; background:color-mix(in srgb, var(--panel) 88%, transparent); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:12.5px; }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px; font-size:11px; max-height:220px; overflow:auto; white-space:pre; }
+  .legend i { display:inline-block; width:18px; height:3px; vertical-align:middle; margin:0 4px 0 10px; }
+</style>
+</head>
+<body>
+<aside>
+  <h1>SolidCraft CAM</h1>
+  <div class="sub">The toolpaths of a CAM job, in work coordinates. Drag to orbit, scroll to zoom; the slider plays the moves.</div>
+  <div id="list"></div>
+  <h3 style="font-size:13px;margin:16px 0 6px">G-code (first lines)</h3>
+  <pre id="gcode"></pre>
+</aside>
+<main>
+  <div id="bar">
+    <label><input type="checkbox" id="showSurf" checked> part</label>
+    <label><input type="checkbox" id="showRapid" checked> rapids</label>
+    <label><input type="checkbox" id="showAxes" checked> tool axes</label>
+    <label>play <input type="range" id="play" min="0" max="1000" value="1000" style="width:220px"></label>
+    <span class="legend"><i style="background:#3fb6ff"></i>cut<i style="background:#ff6b6b"></i>rapid<i style="background:#ffc24b"></i>axis</span>
+    <span id="stats"></span>
+  </div>
+  <div id="wrap"><canvas id="c"></canvas><div id="desc"></div></div>
+</main>
+<script>
+const DATA = /*DATA*/null;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scene = 0, yaw = -0.7, pitch = 0.55, zoom = 1, drag = null;
+function fit() { const r = cv.getBoundingClientRect(); cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio; draw(); }
+function list() {
+  const el = document.getElementById('list'); el.innerHTML = '';
+  DATA.scenes.forEach((s, i) => {
+    const d = document.createElement('div'); d.className = 'scene' + (i === scene ? ' on' : '');
+    d.innerHTML = `<b>${s.name}<span class="tag">${s.axes}</span></b><span>${s.short}</span>`;
+    d.onclick = () => { scene = i; list(); load(); }; el.appendChild(d);
+  });
+}
+let cache = null;
+function load() {
+  const s = DATA.scenes[scene];
+  let lo = [1e9,1e9,1e9], hi = [-1e9,-1e9,-1e9];
+  const grow = (x,y,z) => { lo=[Math.min(lo[0],x),Math.min(lo[1],y),Math.min(lo[2],z)]; hi=[Math.max(hi[0],x),Math.max(hi[1],y),Math.max(hi[2],z)]; };
+  for (let i = 0; i < s.tris.length; i += 3) grow(s.tris[i], s.tris[i+1], s.tris[i+2]);
+  for (const p of s.poses) grow(p[0], p[1], p[2]);
+  const c = [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
+  const size = Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) || 1;
+  cache = { c, size };
+  document.getElementById('desc').innerHTML = s.desc;
+  document.getElementById('gcode').textContent = s.gcode || '(no program for this scene)';
+  document.getElementById('stats').textContent = s.stats || '';
+  draw();
+}
+function proj() {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const k = Math.min(cv.width, cv.height) / cache.size * 0.8 * zoom, ox = cv.width / 2, oy = cv.height / 2, c = cache.c;
+  return (x, y, z) => {
+    x -= c[0]; y -= c[1]; z -= c[2];
+    const x1 = cy * x - sy * y, y1 = sy * x + cy * y;
+    const y2 = cp * y1 - sp * z, z2 = sp * y1 + cp * z;
+    return [ox + k * x1, oy - k * z2, y2];
+  };
+}
+function draw() {
+  if (!cache) return;
+  const s = DATA.scenes[scene], P = proj();
+  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg'); ctx.fillRect(0, 0, cv.width, cv.height);
+  const light = [0.35, -0.45, 0.82];
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  if (document.getElementById('showSurf').checked) {
+    const t = s.tris, faces = [];
+    for (let i = 0; i < t.length; i += 9) {
+      const a = P(t[i],t[i+1],t[i+2]), b = P(t[i+3],t[i+4],t[i+5]), c = P(t[i+6],t[i+7],t[i+8]);
+      const ux=t[i+3]-t[i],uy=t[i+4]-t[i+1],uz=t[i+5]-t[i+2],vx=t[i+6]-t[i],vy=t[i+7]-t[i+1],vz=t[i+8]-t[i+2];
+      let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx; const l=Math.hypot(nx,ny,nz)||1; nx/=l;ny/=l;nz/=l;
+      // depth-facing test in view space
+      const vyv = cp * (sy*nx + cy*ny) - sp*nz;
+      const shade = Math.abs(nx*light[0]+ny*light[1]+nz*light[2]);
+      faces.push([(a[2]+b[2]+c[2])/3, a, b, c, 0.25 + 0.6*shade, vyv > 0]);
+    }
+    faces.sort((p, q) => q[0] - p[0]);
+    for (const f of faces) {
+      const g = Math.round(110 + 110 * f[4]);
+      ctx.fillStyle = `rgba(${g},${g},${Math.min(255,g+12)},${f[5] ? 0.55 : 0.8})`;
+      ctx.beginPath(); ctx.moveTo(f[1][0], f[1][1]); ctx.lineTo(f[2][0], f[2][1]); ctx.lineTo(f[3][0], f[3][1]); ctx.closePath(); ctx.fill();
+    }
+  }
+  const n = s.poses.length, upto = Math.round(n * document.getElementById('play').value / 1000);
+  const showRapid = document.getElementById('showRapid').checked;
+  ctx.lineWidth = 1.3 * devicePixelRatio;
+  for (let i = 1; i < upto; i++) {
+    const p = s.poses[i], q = s.poses[i-1], cut = p[6] === 1;
+    if (!cut && !showRapid) continue;
+    const a = P(q[0],q[1],q[2]), b = P(p[0],p[1],p[2]);
+    ctx.strokeStyle = cut ? '#3fb6ff' : 'rgba(255,107,107,0.8)';
+    ctx.setLineDash(cut ? [] : [4*devicePixelRatio, 4*devicePixelRatio]);
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  if (document.getElementById('showAxes').checked) {
+    const every = Math.max(1, Math.floor(n / 160)), L = cache.size * 0.06;
+    ctx.strokeStyle = 'rgba(255,194,75,0.85)';
+    for (let i = 0; i < upto; i += every) {
+      const p = s.poses[i]; if (p[6] !== 1) continue;
+      const a = P(p[0],p[1],p[2]), b = P(p[0]+p[3]*L, p[1]+p[4]*L, p[2]+p[5]*L);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    }
+  }
+  if (upto > 0 && upto < n) {
+    const p = s.poses[upto-1], r = s.tool_radius || 2, L = s.tool_length || 25;
+    const a = P(p[0],p[1],p[2]), b = P(p[0]+p[3]*L, p[1]+p[4]*L, p[2]+p[5]*L);
+    ctx.strokeStyle = 'rgba(255,194,75,1)'; ctx.lineWidth = Math.max(3, 2*r*Math.min(cv.width,cv.height)/cache.size*0.8*zoom);
+    ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.lineCap = 'butt';
+  }
+}
+cv.onmousedown = e => { drag = [e.clientX, e.clientY, yaw, pitch]; cv.style.cursor = 'grabbing'; };
+window.onmouseup = () => { drag = null; cv.style.cursor = 'grab'; };
+window.onmousemove = e => { if (!drag) return; yaw = drag[2] + (e.clientX - drag[0]) * 0.01; pitch = Math.max(-1.5, Math.min(1.5, drag[3] + (e.clientY - drag[1]) * 0.01)); draw(); };
+cv.onwheel = e => { e.preventDefault(); zoom *= Math.exp(-e.deltaY * 0.0015); draw(); };
+for (const id of ['showSurf','showRapid','showAxes','play']) document.getElementById(id).oninput = draw;
+window.onresize = fit;
+list(); load(); fit();
+</script>
+</body>
+</html>
