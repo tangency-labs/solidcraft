@@ -1183,6 +1183,64 @@ fn allocation_repeated_column_previews_do_not_drift_proposed_section_or_column_i
 }
 
 #[test]
+fn live_drag_keeps_the_receiving_tab_active_and_stacks_in_the_lower_third() {
+    for direction in [Direction::Ltr, Direction::Rtl] {
+        let mut service = fixture_service(false).unwrap();
+        apply_fixture(
+            &mut service,
+            vec![
+                fixture_open("fixture.log", "target", "target", Zone::Left, 0).unwrap(),
+                fixture_open("fixture.log", "moving", "moving", Zone::Floating, 1).unwrap(),
+            ],
+        );
+        let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, direction, &fixture_metric_policy(&service));
+        let mut interaction = HostInteraction::default();
+        interaction.set_live_drag(true);
+        fixture_press(&service, &host, &mut interaction, HostPointerTarget::Header { instance: id("moving") });
+        let receiver = host.sections.iter().find(|card| card.instance == id("target")).unwrap();
+        let below = Point {
+            x: receiver.outer.origin.x + if direction == Direction::Ltr { receiver.outer.size.width - 4.0 } else { 4.0 },
+            y: receiver.outer.origin.y + receiver.outer.size.height * 0.7,
+        };
+        let preview = fixture_move(&service, &host, &mut interaction, below);
+        assert!(matches!(preview.destination, Some(Destination::Relative { placement: RelativePlacement::Below, .. })), "{preview:?}");
+        let at = middle(receiver.outer);
+        let preview = fixture_move(&service, &host, &mut interaction, at);
+        assert!(matches!(preview.destination, Some(Destination::JoinTab { .. })), "{preview:?}");
+        assert!(preview.tab_marker.is_some());
+        assert_eq!(preview.projected.unwrap().sections[0].instance, id("target"));
+        let release = interaction.update(&service, &fixture_scope(&service), &host, HostPointerEvent::Release { at });
+        let candidate = release.candidate.unwrap();
+        assert_eq!(candidate.prepared().layout().section(&section("target")).unwrap().active, id("target"));
+        fixture_commit(&mut service, &host, candidate);
+        assert_eq!(service.layout().section(&section("target")).unwrap().tabs, [id("target"), id("moving")]);
+    }
+}
+
+#[test]
+fn detached_drag_preview_reflows_panels_without_committing_a_close() {
+    let content = host_logs(2, Zone::Left);
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.frame(Vec::new(), false);
+    let frame = raw.host.frame().unwrap();
+    let service = raw.content.runtime.layout();
+    let before = service.inspect();
+    let instance = id("log-0");
+    let scope = fixture_scope(service);
+    let detached = super::interaction::detached_drag_layout(service, &scope, &frame.layout, &instance).unwrap();
+    let closed = prepare_host_layout(
+        service,
+        &scope,
+        &frame.layout,
+        LayoutAction::Apply { expected_revision: Some(before.revision), mutations: vec![Mutation::Close { instance }] },
+    )
+    .unwrap();
+    assert_eq!(detached.sections, closed.layout().sections);
+    assert_eq!(detached.sections.len(), 1);
+    assert_eq!(service.inspect(), before);
+}
+
+#[test]
 fn allocation_invisible_physical_edges_and_measured_tab_halves_preserve_rtl_and_detached_indices() {
     for zone in [Zone::Left, Zone::Right] {
         for direction in [Direction::Ltr, Direction::Rtl] {

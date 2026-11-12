@@ -1155,6 +1155,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            host.set_live_drag(app.preferences.live_panel_drag_preview);
         }
         let result = (|| {
             #[cfg(not(target_arch = "wasm32"))]
