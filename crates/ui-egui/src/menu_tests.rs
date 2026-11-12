@@ -2316,6 +2316,47 @@ fn a_menu_taller_than_the_window_scrolls_to_its_last_entries() {
     assert!(h.app.viewport.context_menu.is_some(), "scrolling leaves the menu open");
 }
 
+/// Choosing a row with the arrow keys scrolls a tall menu so that row is in view, so Enter never
+/// runs a row the user cannot see.
+#[test]
+fn a_row_chosen_with_the_keys_in_a_tall_menu_is_scrolled_into_view() {
+    use crate::scenario::{Harness, rect_of};
+    let mut h = Harness::new();
+    h.app = sample_app();
+    h.app.preferences.radial_context_menu = false;
+    let height = 360.0;
+    h.call("ui.resize", json!({"width":1200,"height":height}));
+    h.frames(3);
+    let target = Target::Body { name: body(&h.app) };
+    let rows = context_menu::items(&h.app, &target);
+    let last = rows.iter().rposition(|i| i.enabled && !i.is_sep() && !i.is_heading()).expect("the body's menu has entries");
+    let handle = format!("menu:{}", rows[last].id);
+    context_menu::open_for(&mut h.app, pos2(400.0, 120.0), target);
+    h.frames(3);
+    assert!(rect_of(&handle).is_some_and(|r| r.bottom() > height), "the menu must be taller than the window for this test");
+    for _ in 0..rows.len() + 2 {
+        if h.app.menu.key_row == Some(last) {
+            break;
+        }
+        h.step(&json!({"key":"ArrowDown"})).unwrap();
+    }
+    assert_eq!(h.app.menu.key_row, Some(last), "the keys reach the last entry");
+    h.frames(5);
+    let shown = rect_of(&handle).unwrap();
+    assert!(shown.top() >= 0.0 && shown.bottom() <= height, "the chosen `{}` is scrolled into the window: {shown:?}", rows[last].label);
+    // Back up to the first entry: the menu scrolls back with it.
+    let first = rows.iter().position(|i| i.enabled && !i.is_sep() && !i.is_heading()).unwrap();
+    for _ in 0..rows.len() + 2 {
+        if h.app.menu.key_row == Some(first) {
+            break;
+        }
+        h.step(&json!({"key":"ArrowUp"})).unwrap();
+    }
+    h.frames(5);
+    let top = rect_of(&format!("menu:{}", rows[first].id)).unwrap();
+    assert!(top.top() >= 0.0 && top.bottom() <= height, "the chosen `{}` is scrolled back into the window: {top:?}", rows[first].label);
+}
+
 #[test]
 fn narrow_overflow_submenu_keeps_opening_click_and_accepts_the_next_click() {
     use crate::scenario::Harness;

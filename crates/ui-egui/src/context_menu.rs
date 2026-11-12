@@ -2729,6 +2729,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // flyout, Enter runs anything else and Left closes the innermost flyout.
     let open = open_levels(&list, &app.menu.submenu).len() - 1;
     app.menu.submenu.truncate(open);
+    let keys_before = (app.menu.key_row, app.menu.submenu_key);
     if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) && open > 0 {
         let back = app.menu.submenu.pop();
         if open > 1 {
@@ -2757,6 +2758,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let levels = open_levels(&list, &path);
     let leaving = app.menu.submenu_leave.map(|(depth, _)| depth);
     let key_row = app.menu.key_row;
+    // A row the keys just chose is scrolled into view; the wheel alone leaves the rows where it put them.
+    let reveal_row = key_row.is_some() && key_row != keys_before.0;
+    let reveal_sub = app.menu.submenu_key.is_some() && app.menu.submenu_key != keys_before.1;
     let mut seen: Vec<Seen> = Vec::new();
     // A menu taller than the window scrolls instead of running past its bottom edge (#15145). A
     // menu that has just opened starts at its top.
@@ -2784,8 +2788,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     if just_opened {
                         rows = rows.vertical_scroll_offset(0.0);
                     }
-                    let shown =
-                        rows.show(ui, |ui| seen.push(level_rows(ui, &list, 0, key_row, path.first().copied(), leaving == Some(0), &mut picked)));
+                    let shown = rows.show(ui, |ui| {
+                        seen.push(level_rows(ui, &list, 0, key_row, reveal_row, path.first().copied(), leaving == Some(0), &mut picked))
+                    });
                     // The rows' whole height plus the frame, as `list_height` counts it.
                     let whole = shown.content_size.y + 14.0;
                     if whole.is_finite() {
@@ -2805,7 +2810,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let sub = crate::ui_kit::Menu::submenu(ctx, id, row, list_height(rows), leftward, |ui| {
             egui::ScrollArea::vertical()
                 .max_height((screen.height() - 28.0).max(30.0))
-                .show(ui, |ui| level_rows(ui, rows, depth, cursor, path.get(depth).copied(), leaving == Some(depth), &mut picked))
+                .show(ui, |ui| level_rows(ui, rows, depth, cursor, reveal_sub, path.get(depth).copied(), leaving == Some(depth), &mut picked))
                 .inner
         });
         inside |= sub.response.contains_pointer() || pointer.is_some_and(|p| sub.response.rect.contains(p));
@@ -2889,13 +2894,16 @@ struct Seen {
     other_row: bool,
 }
 
-/// Draw one level's rows: `cursor` is the row chosen with the keys, `open` the row whose flyout
-/// is open and `leaving` that the pointer is about to close it.
+/// Draw one level's rows: `cursor` is the row chosen with the keys (`reveal`: just chosen, so
+/// scroll it into view), `open` the row whose flyout is open and `leaving` that the pointer is
+/// about to close it.
+#[allow(clippy::too_many_arguments)]
 fn level_rows(
     ui: &mut egui::Ui,
     rows: &[Item],
     depth: usize,
     cursor: Option<usize>,
+    reveal: bool,
     open: Option<usize>,
     leaving: bool,
     picked: &mut Option<Item>,
@@ -2913,6 +2921,9 @@ fn level_rows(
             kit.id = &handle;
         }
         let row = kit.show(ui);
+        if reveal && cursor == Some(k) {
+            row.scroll_to_me(None);
+        }
         let row = match &item.tip {
             Some(tip) => row.backing_on_hover_text(tip.as_str()),
             None => row,
