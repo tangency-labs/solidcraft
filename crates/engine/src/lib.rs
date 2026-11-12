@@ -801,14 +801,21 @@ impl Session {
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
-        let doc = Arc::new(doc);
+        let mut doc = Arc::new(doc);
         // A model saved under another check mode holds that mode's results: evaluated again.
-        let model = Self::saved_model(&doc, saved).filter(|model| model.validation() == validation).unwrap_or_else(|| {
-            let mut model = Model::new();
-            model.set_validation(validation);
-            model.evaluate_shared(&doc);
-            model
-        });
+        let model = match Self::saved_model(&doc, saved).filter(|model| model.validation() == validation) {
+            Some(model) => model,
+            None => {
+                // Stored body names follow the numbering of the STEP reader that inserted each
+                // file; this version's reader may number the bodies otherwise (#13382). The
+                // reads are held so the evaluation doesn't read the files again.
+                let _reads = cmd::realign_imports(Arc::make_mut(&mut doc));
+                let mut model = Model::new();
+                model.set_validation(validation);
+                model.evaluate_shared(&doc);
+                model
+            }
+        };
         Self::with_model(doc, visibility, model)
     }
 
