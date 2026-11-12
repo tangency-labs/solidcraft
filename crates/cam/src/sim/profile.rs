@@ -4,7 +4,7 @@
 use super::*;
 
 /// Iterations of the bisections (each halves the interval).
-const BISECTIONS: usize = 60;
+pub(super) const BISECTIONS: usize = 60;
 /// A slope taken as vertical (a tool's flank at its rim).
 const STEEP: f64 = 1.0e12;
 
@@ -77,6 +77,36 @@ impl Profile {
         }
     }
 
+    /// The tool's radius at height `h` above its tip (its endless cylinder above included):
+    /// the farthest from the axis [`Profile::height`] is at most `h`; `None` below the tip.
+    pub(crate) fn section(&self, h: f64) -> Option<f64> {
+        if !(h >= 0.0) {
+            return None;
+        }
+        let r = self.radius;
+        Some(match self.shape {
+            Shape::Flat => r,
+            Shape::Cone(k) => {
+                if k > 0.0 {
+                    (h / k).min(r)
+                } else {
+                    r
+                }
+            }
+            Shape::Taper { slope, tip } => {
+                if slope > 0.0 {
+                    (tip + h / slope).min(r)
+                } else {
+                    r
+                }
+            }
+            Shape::Ball | Shape::Bull => {
+                let c = self.corner;
+                if h >= c { r } else { r - c + (c * c - (c - h) * (c - h)).max(0.0).sqrt() }
+            }
+        })
+    }
+
     /// The slope of [`Profile::height`] at `d`, [`STEEP`] at the rim.
     pub(super) fn slope(&self, d: f64) -> f64 {
         match self.shape {
@@ -98,6 +128,17 @@ impl Profile {
                 if q <= 0.0 { STEEP } else { (e / q.sqrt()).min(STEEP) }
             }
         }
+    }
+
+    /// Largest distance between tool positions on a 4th axis that leaves cusps of at most half
+    /// of `tol` (module documentation).
+    pub(crate) fn step(&self, tol: f64) -> f64 {
+        let s = match self.shape {
+            Shape::Flat => (4.0 * self.radius * tol).sqrt(),
+            Shape::Ball | Shape::Bull => (4.0 * self.corner * tol).sqrt(),
+            Shape::Cone(k) | Shape::Taper { slope: k, .. } => tol / k.max(1e-9),
+        };
+        s.clamp(1e-3, self.radius.max(1e-3))
     }
 
     /// The least height of the tool's lower envelope over a cell as the tip moves straight from

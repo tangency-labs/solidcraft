@@ -16,14 +16,17 @@ pub(super) const MAX_COORD: f64 = 1.0e6;
 /// The stock before the program runs, in work coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum StockShape {
-    /// A box (3-axis).
+    /// A box (3-axis, or a bar on a 4th axis that the axis runs through).
     Box { min: Vec3, max: Vec3 },
+    /// A cylinder about work X from `x_min` to `x_max` (a 4th axis about X).
+    Cylinder { x_min: f64, x_max: f64, radius: f64 },
 }
 
 /// How finely and how strictly to simulate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SimParams {
-    /// Depths up to this count as touching the part (mm, 0.0001 to 1).
+    /// Depths up to this count as touching the part, and the cusps the 4th-axis sampling may
+    /// leave are half of it (mm, 0.0001 to 1).
     pub tolerance: f64,
     /// The cell size (mm); `None`: [`DEFAULT_CELL_TOLERANCES`] times the tolerance, coarser
     /// when that would be more than [`DEFAULT_CELLS`] cells.
@@ -34,6 +37,7 @@ pub struct SimParams {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Kind {
     Three,
+    Rotary,
 }
 
 impl Kind {
@@ -41,19 +45,37 @@ impl Kind {
         machine.validate()?;
         match machine.rotaries.as_slice() {
             [] => Ok(Kind::Three),
-            _ => Err(CamError::Unsupported("the simulation handles 3-axis machines".into())),
+            [r] => {
+                let dir = r.direction.normalized().unwrap_or(Vec3::ZERO);
+                let at = r.center - machine.work_origin;
+                if dir.x.abs() < 1.0 - 1e-9 {
+                    return Err(CamError::Unsupported("the simulation handles a 4th axis about X only".into()));
+                }
+                if at.y.abs() > 1e-9 || at.z.abs() > 1e-9 {
+                    return Err(CamError::Unsupported("the simulation needs the rotary axis through work zero".into()));
+                }
+                Ok(Kind::Rotary)
+            }
+            _ => Err(CamError::Unsupported("the simulation handles 3-axis machines and a 4th axis about X".into())),
         }
     }
 }
 
-/// The stock to start from when none is given: the part's box.
+/// The stock to start from when none is given: the part's box (3-axis), or the cylinder about
+/// work X through the part's farthest point from the axis over the part's extent along X (a
+/// 4th axis about X).
 pub fn stock_around(part: &Surface, machine: &Machine) -> Result<StockShape> {
     if part.is_empty() {
         return invalid("the part has no surface");
     }
     let b = part.bounds();
-    Kind::of(machine)?;
-    Ok(StockShape::Box { min: b.min, max: b.max })
+    match Kind::of(machine)? {
+        Kind::Three => Ok(StockShape::Box { min: b.min, max: b.max }),
+        Kind::Rotary => {
+            let radius = part.triangles().iter().flatten().map(|p| p.y.hypot(p.z)).fold(0.0, f64::max);
+            Ok(StockShape::Cylinder { x_min: b.min.x, x_max: b.max.x, radius })
+        }
+    }
 }
 
 /// The cell size for a stock whose grid spans `area` mm².
@@ -82,28 +104,49 @@ pub(super) fn too_many(n: usize) -> CamError {
 }
 
 /// The stock's grid before it is split into bands: a heightfield over XY (cell `(i, j)` centred
-/// at `(x0 + (i + ½)·dx, y0 + (j + ½)·dy)`, its top `top` to start with).
+/// at `(x0 + (i + ½)·dx, y0 + (j + ½)·dy)`, its top `top` to start with), or radii over (x, θ)
+/// (cell `(i, k)` at `x0 + (i + ½)·dx`, `θ = (k + ½)·2π / nt`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Grid {
-    Heights { x0: f64, y0: f64, dx: f64, dy: f64, nx: usize, ny: usize, bottom: f64, top: f64 },
+    Heights {
+        x0: f64,
+        y0: f64,
+        dx: f64,
+        dy: f64,
+        nx: usize,
+        ny: usize,
+        bottom: f64,
+        top: f64,
+    },
+    /// `radius` is the farthest the stock reaches from the axis; `section`, a box bar's
+    /// `[y0, y1, z0, z1]` round the axis (each ray starting where it leaves that rectangle).
+    Radii {
+        x0: f64,
+        dx: f64,
+        nx: usize,
+        nt: usize,
+        radius: f64,
+        section: Option<[f64; 4]>,
+    },
 }
 
 impl Grid {
-    /// Rows the grid is split along.
+    /// Rows (angles) the grid is split along.
     pub(super) fn lines(&self) -> usize {
         match *self {
             Grid::Heights { ny, .. } => ny,
+            Grid::Radii { nt, .. } => nt,
         }
     }
 
     /// Cells along a row (along X).
     pub fn columns(&self) -> usize {
         match *self {
-            Grid::Heights { nx, .. } => nx,
+            Grid::Heights { nx, .. } | Grid::Radii { nx, .. } => nx,
         }
     }
 
-    /// Rows.
+    /// Rows (angles round).
     pub fn rows(&self) -> usize {
         self.lines()
     }
@@ -113,21 +156,26 @@ impl Grid {
         (self.columns().div_ceil(TILE).max(1), self.lines().div_ceil(TILE).max(1))
     }
 
-    /// The point at height `v` over the centre of cell `(i, j)`, in work coordinates.
+    /// The point at height (radius) `v` over the centre of cell `(i, j)`, in work coordinates.
     pub fn point(&self, i: usize, j: usize, v: f64) -> Vec3 {
         match *self {
             Grid::Heights { x0, y0, dx, dy, .. } => Vec3::new(x0 + (i as f64 + 0.5) * dx, y0 + (j as f64 + 0.5) * dy, v),
+            Grid::Radii { x0, dx, nt, .. } => {
+                let (s, c) = ((j as f64 + 0.5) * TAU / nt.max(1) as f64).sin_cos();
+                Vec3::new(x0 + (i as f64 + 0.5) * dx, v * s, v * c)
+            }
         }
     }
 
-    /// The value every cell starts at: the stock's top.
+    /// The value every cell starts at: the stock's top, or its radius.
     pub fn initial(&self) -> f64 {
         match *self {
             Grid::Heights { top, .. } => top,
+            Grid::Radii { radius, .. } => radius,
         }
     }
 
-    /// Rows `from..to` of the stock as it starts.
+    /// Rows (angles) `from..to` of the stock as it starts.
     pub(super) fn band(&self, from: usize, to: usize, visits: &Arc<AtomicU64>, tol: f64) -> Model {
         let n = to.saturating_sub(from);
         match *self {
@@ -151,13 +199,58 @@ impl Grid {
                 slot: 0,
                 flute: 0.0,
             }),
+            Grid::Radii { x0, dx, nx, nt, radius, section } => {
+                let dt = TAU / nt as f64;
+                let (sin, cos): (Vec<f64>, Vec<f64>) = (from..to).map(|k| ((k as f64 + 0.5) * dt).sin_cos()).unzip();
+                let start: Vec<f64> =
+                    sin.iter().zip(&cos).map(|(&s, &c)| section.map_or(radius, |sec| section_reach(sec, s, c).min(radius))).collect();
+                let rho = start.iter().flat_map(|&r| std::iter::repeat_n(r, nx)).collect();
+                Model::Radii(Radii {
+                    x0,
+                    dx,
+                    nx,
+                    k0: from,
+                    nt: n,
+                    nt_all: nt,
+                    radius,
+                    rho,
+                    gaps: GapStore::new(nt * nx),
+                    gap_entries: 0,
+                    start,
+                    sin,
+                    cos,
+                    visits: Arc::clone(visits),
+                    tol,
+                    unmodelled: 0,
+                    tiles: Tiles::new(nx, n, radius),
+                    last: vec![UNCUT; nx * n],
+                    floor: None,
+                    slot: 0,
+                    flute: 0.0,
+                })
+            }
         }
     }
 }
 
-pub(super) fn grid_for(stock: &StockShape, params: &SimParams) -> Result<(Grid, f64)> {
+pub(super) fn grid_for(stock: &StockShape, kind: Kind, params: &SimParams) -> Result<(Grid, f64)> {
     let finite = |v: f64| v.is_finite() && v.abs() <= MAX_COORD;
     match *stock {
+        StockShape::Box { min, max } if kind == Kind::Rotary => {
+            if ![min.x, min.y, min.z, max.x, max.y, max.z].into_iter().all(finite) {
+                return invalid("the stock's box must be finite numbers within 1000 m");
+            }
+            if !(max.x > min.x && min.y < 0.0 && max.y > 0.0 && min.z < 0.0 && max.z > 0.0) {
+                return invalid("a box stock on a 4th axis must have a length and the A axis inside it");
+            }
+            let radius = min.y.abs().max(max.y.abs()).hypot(min.z.abs().max(max.z.abs()));
+            let (x_min, x_max) = (min.x, max.x);
+            let cell = cell_size((x_max - x_min) * TAU * radius, params)?;
+            let (nx, nt) = (cells_for(x_max - x_min, cell)?, cells_for(TAU * radius, cell)?.max(8));
+            nx.checked_mul(nt).filter(|n| *n <= MAX_CELLS).ok_or_else(|| too_many(nx.saturating_mul(nt)))?;
+            let section = Some([min.y, max.y, min.z, max.z]);
+            Ok((Grid::Radii { x0: x_min, dx: (x_max - x_min) / nx as f64, nx, nt, radius, section }, cell))
+        }
         StockShape::Box { min, max } => {
             if ![min.x, min.y, min.z, max.x, max.y, max.z].into_iter().all(finite) {
                 return invalid("the stock's box must be finite numbers within 1000 m");
@@ -179,6 +272,18 @@ pub(super) fn grid_for(stock: &StockShape, params: &SimParams) -> Result<(Grid, 
                 top: max.z,
             };
             Ok((grid, cell))
+        }
+        StockShape::Cylinder { x_min, x_max, radius } => {
+            if ![x_min, x_max, radius].into_iter().all(finite) {
+                return invalid("the stock's cylinder must be finite numbers within 1000 m");
+            }
+            if !(x_max > x_min && radius > 0.0) {
+                return invalid("the stock's cylinder must have a length and a radius");
+            }
+            let cell = cell_size((x_max - x_min) * TAU * radius, params)?;
+            let (nx, nt) = (cells_for(x_max - x_min, cell)?, cells_for(TAU * radius, cell)?.max(8));
+            nx.checked_mul(nt).filter(|n| *n <= MAX_CELLS).ok_or_else(|| too_many(nx.saturating_mul(nt)))?;
+            Ok((Grid::Radii { x0: x_min, dx: (x_max - x_min) / nx as f64, nx, nt, radius, section: None }, cell))
         }
     }
 }

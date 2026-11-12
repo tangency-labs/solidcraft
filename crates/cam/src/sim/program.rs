@@ -101,11 +101,11 @@ pub(super) enum How {
     /// Straight in the work frame from the start pose to the end (down the tool axis from
     /// above, when the position was not known).
     Straight,
-    /// Every axis evenly from the block's start to its end.
-    Joint,
-    /// Round an arc of the linear axes about `work_center` (in work coordinates), turning
-    /// `sweep`.
-    Arc { work_center: Vec2, sweep: f64 },
+    /// Every axis evenly from `from` to `to`.
+    Joint { from: Joints, to: Joints },
+    /// Round an arc of the linear axes (rotaries held) about `center`, turning `sweep`;
+    /// `work_center` is the centre in work coordinates (3-axis).
+    Arc { from: Vec3, to: Vec3, center: Vec2, work_center: Vec2, sweep: f64, rotary: Vec<f64> },
     /// An arc in the XZ (`G18`) or YZ (`G19`) plane, the rotaries held, as `chords` chords on a
     /// 3-axis machine.
     Tilted { arc: PlaneArc, chords: usize, rotary: Vec<f64> },
@@ -212,6 +212,8 @@ pub(super) struct Step {
     pub(super) start: Pose,
     pub(super) end: Pose,
     pub(super) how: How,
+    /// Tool positions along it on a 4th axis.
+    pub(super) points: usize,
     /// Where the material must be for a cut at the tool's full width: under the tool and at
     /// both sides of it, halfway along.
     pub(super) probes: Option<[Vec3; 3]>,
@@ -224,10 +226,34 @@ pub(super) struct Step {
     pub(super) rpm: Option<f64>,
     /// The axes at its start, when known.
     pub(super) from: Option<Joints>,
-    /// The distance the tool travels (mm).
+    /// The distance the tool travels (mm; with the rotaries' sweep on a 4th axis).
     pub(super) travel: f64,
     /// About how many cells it visits.
     pub(super) cost: f64,
+}
+
+impl Step {
+    /// The pose a fraction `t` of the way along, as the 4th axis's tool positions are placed.
+    pub(super) fn pose_frac(&self, machine: &Machine, t: f64) -> Pose {
+        match &self.how {
+            How::Straight => Pose { tip: self.start.tip.lerp(self.end.tip, t), axis: self.end.axis },
+            How::Joint { from, to } => {
+                let j = from.lerp(to, t);
+                pose_at(machine, j.linear, &j.rotary)
+            }
+            How::Arc { from, to, center, sweep, rotary, .. } => pose_at(machine, arc_linear(*from, *to, *center, *sweep, t), rotary),
+            How::Tilted { arc, rotary, .. } => pose_at(machine, arc.at(t), rotary),
+        }
+    }
+
+    /// The 4th axis's tool positions: indices `first..=last` of [`Step::pose_frac`] at `k / n`.
+    pub(super) fn pose_range(&self) -> (usize, usize) {
+        let n = self.points.max(1);
+        match self.how {
+            How::Straight => (0, n),
+            _ => (1, n),
+        }
+    }
 }
 
 /// The linear axes a fraction `t` round an arc of them from `from` to `to` about `center`.
@@ -354,36 +380,49 @@ impl SimPlan {
         self.steps.get(k).map_or(0.0, |s| s.cost)
     }
 
-    /// The part's height over every cell where a ray from above first meets it; NaN where none
-    /// does. For gouges found as the stock is cut ([`SimState::set_floor`]), and for a stock an
-    /// earlier setup left held up to the part ([`SimState::hold_part`]).
+    /// The part's height over every cell (its radius along every ray on a 4th axis) where a
+    /// ray from above (from outside) first meets it; NaN where none does. For gouges found as
+    /// the stock is cut ([`SimState::set_floor`]), and for a stock an earlier setup left held up
+    /// to the part ([`SimState::hold_part`]).
     pub fn part_floor(&self, part: &Surface) -> PartFloor {
         let (nu, nv) = (self.grid.columns(), self.grid.rows());
         let grid = self.grid;
         let threaded = !part.is_empty() && nu.saturating_mul(nv) > 100_000;
         let rows = each_threaded(self.bands.clone(), threaded, |(from, to)| {
             let mut out = Vec::with_capacity(nu * to.saturating_sub(from));
+            let mut more = Vec::new();
             for j in from..to {
                 for i in 0..nu {
                     if part.is_empty() {
                         out.push(f64::NAN);
                         continue;
                     }
-                    out.push(floor_at(&grid, part, i, j));
+                    match grid {
+                        Grid::Heights { .. } => out.push(floor_at(&grid, part, i, j)),
+                        Grid::Radii { x0, dx, nt, radius, .. } => {
+                            let (s, c) = ((j as f64 + 0.5) * TAU / nt.max(1) as f64).sin_cos();
+                            let (outer, list) = ray_stretches(part, x0 + (i as f64 + 0.5) * dx, s, c, radius + 1.0);
+                            out.push(outer);
+                            if let Some(list) = list {
+                                more.push((j * nu + i, list));
+                            }
+                        }
+                    }
                 }
             }
-            Ok(out)
+            Ok((out, more))
         });
-        let mut floor = PartFloor { outer: Vec::with_capacity(nu * nv) };
-        for r in rows.unwrap_or_default() {
+        let mut floor = PartFloor { outer: Vec::with_capacity(nu * nv), stretches: HashMap::new() };
+        for (r, more) in rows.unwrap_or_default() {
             floor.outer.extend(r);
+            floor.stretches.extend(more);
         }
         floor.outer.resize(nu * nv, f64::NAN);
         floor
     }
 }
 
-/// The part's height over cell `(i, j)` of `grid`, NaN when the ray misses it.
+/// The part's height (radius) over cell `(i, j)` of `grid`, NaN when the ray misses it.
 pub(super) fn floor_at(grid: &Grid, part: &Surface, i: usize, j: usize) -> f64 {
     match *grid {
         Grid::Heights { top, bottom, .. } => {
@@ -391,14 +430,23 @@ pub(super) fn floor_at(grid: &Grid, part: &Surface, i: usize, j: usize) -> f64 {
             let p = grid.point(i, j, top + 1.0);
             part.raycast(p, Vec3::new(0.0, 0.0, -span)).map_or(f64::NAN, |(t, _)| top + 1.0 - t * span)
         }
+        Grid::Radii { radius, .. } => {
+            let out = radius + 1.0;
+            let p = grid.point(i, j, out);
+            part.raycast(p, Vec3::new(p.x, 0.0, 0.0) - p).map_or(f64::NAN, |(t, _)| out * (1.0 - t))
+        }
     }
 }
 
-/// The part along each cell's column of a grid: where a ray from above first meets the part
-/// (NaN: never). From [`SimPlan::part_floor`].
+/// The part along each cell's column of a grid (each ray from outside towards the axis, on a 4th
+/// axis): where it first meets the part (NaN: never; a height, or a radius) and, for the rays
+/// that pass through the part more than once (by a cross hole, a pocket in the side), every
+/// stretch of the part along them, from the axis out (a stretch from `-∞` runs through the
+/// axis). From [`SimPlan::part_floor`], for gouges found as the stock is cut.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PartFloor {
     pub outer: Vec<f64>,
+    pub stretches: HashMap<usize, Vec<[f64; 2]>>,
 }
 
 /// Reads `text` (G-code for `machine`, in absolute coordinates) into the steps that cut `stock`
@@ -408,7 +456,11 @@ pub fn plan_sim(text: &str, machine: &Machine, tools: &[Tool], stock: &StockShap
     if !(1e-4..=1.0).contains(&tol) {
         return invalid("the tolerance must be from 0.0001 to 1 mm");
     }
-    Kind::of(machine)?;
+    let kind = Kind::of(machine)?;
+    match (kind, stock) {
+        (Kind::Three, StockShape::Box { .. }) | (Kind::Rotary, StockShape::Cylinder { .. } | StockShape::Box { .. }) => {}
+        (Kind::Three, _) => return invalid("a 3-axis machine's stock is a box"),
+    }
     if tools.is_empty() {
         return invalid("the simulation needs the program's tools");
     }
@@ -421,18 +473,22 @@ pub fn plan_sim(text: &str, machine: &Machine, tools: &[Tool], stock: &StockShap
     }
     let blocks = parse5(text, &machine.letters())?;
     let scan = Scan::of(text)?;
-    let (grid, cell) = grid_for(stock, params)?;
-    let (reach, initial) = match *stock {
-        StockShape::Box { min, max } => ((max - min).len(), max.z),
+    let (grid, cell) = grid_for(stock, kind, params)?;
+    let (reach, initial) = match (*stock, grid) {
+        (StockShape::Box { min, max }, Grid::Radii { radius, .. }) => ((max.x - min.x).hypot(2.0 * radius), radius),
+        (StockShape::Box { min, max }, _) => ((max - min).len(), max.z),
+        (StockShape::Cylinder { x_min, x_max, radius }, _) => ((x_max - x_min).hypot(2.0 * radius), radius),
     };
     let lever_extra = machine.work_origin.len() + machine.rotaries.iter().map(|r| r.center.len()).sum::<f64>();
     let area = match grid {
         Grid::Heights { dx, dy, .. } => dx * dy,
+        Grid::Radii { dx, nt, radius, .. } => dx * (TAU * radius / nt.max(1) as f64),
     };
 
     // The blocks as steps, in order.
     let mut steps: Vec<Step> = Vec::with_capacity(blocks.len());
     let (mut minutes, mut feed_length, mut rapid_length) = (0.0, 0.0, 0.0);
+    let mut stamps = 0usize;
     let mut state: Option<State> = None;
     for b in &blocks {
         let (line, linear, rotary, rapid) = match b {
@@ -491,7 +547,7 @@ pub fn plan_sim(text: &str, machine: &Machine, tools: &[Tool], stock: &StockShap
                 let arc = PlaneArc::new(f0.linear, to.linear, *center, plane, *ccw);
                 let travel = arc.length();
                 minutes += travel / (f * mm_per_unit);
-                let chords = arc.chords(tol * 0.25)?;
+                let chords = if kind == Kind::Three { arc.chords(tol * 0.25)? } else { 0 };
                 (How::Tilted { arc, chords, rotary: to.rotary.clone() }, travel)
             }
             (JointWords::Arc { center, ccw, f, mm_per_unit, .. }, Some(f0)) => {
@@ -500,7 +556,15 @@ pub fn plan_sim(text: &str, machine: &Machine, tools: &[Tool], stock: &StockShap
                 let travel = (st.len() * sweep).hypot(to.linear.z - f0.linear.z);
                 minutes += travel / (f * mm_per_unit);
                 let offset = end.tip - to.linear;
-                (How::Arc { work_center: *center + Vec2::new(offset.x, offset.y), sweep }, travel)
+                let how = How::Arc {
+                    from: f0.linear,
+                    to: to.linear,
+                    center: *center,
+                    work_center: *center + Vec2::new(offset.x, offset.y),
+                    sweep,
+                    rotary: to.rotary.clone(),
+                };
+                (how, travel)
             }
             (JointWords::Arc { .. } | JointWords::PlaneArc { .. }, None) => {
                 return Err(CamError::Parse(line, "an arc right after the position was lost".into()));
@@ -510,12 +574,24 @@ pub fn plan_sim(text: &str, machine: &Machine, tools: &[Tool], stock: &StockShap
                 let lin = a.linear.dist(c.linear);
                 let lever = start.tip.len().max(end.tip.len()) + lin + lever_extra + profile.radius;
                 let travel = length.max(lin) + a.rotary_change(&c) * lever;
-                (How::Joint, travel)
+                (How::Joint { from: a, to: c }, travel)
             }
             (_, None) => (How::Straight, length),
         };
+        // Tool positions along the block: only the 4th axis's model places the tool at points
+        // (a heightfield sweeps each block exactly), so only it is limited by them.
+        let points = if kind == Kind::Rotary {
+            let n = points(travel / profile.step(tol))?;
+            stamps = stamps.saturating_add(n);
+            if stamps > MAX_STAMPS {
+                return Err(CamError::TooLarge("the program needs too many tool positions to simulate: give a larger tolerance".into()));
+            }
+            n
+        } else {
+            0
+        };
         // Where the material must be for a cut at the tool's full width.
-        let probes = (!rapid && matches!(how, How::Joint)).then(|| {
+        let probes = (!rapid && matches!(how, How::Joint { .. })).then(|| {
             let mid = Pose { tip: start.tip.lerp(end.tip, 0.5), axis: (start.axis + end.axis).normalized().unwrap_or(end.axis) };
             let along = end.tip - start.tip;
             let along = along - mid.axis * along.dot(mid.axis);
@@ -528,13 +604,14 @@ pub fn plan_sim(text: &str, machine: &Machine, tools: &[Tool], stock: &StockShap
             })
         });
         let d = 2.0 * profile.radius;
-        let cost = (travel.min(reach * 4.0) + d) * d / area + 1.0;
+        let cost = if kind == Kind::Rotary { points as f64 * (d * d / area + 1.0) } else { (travel.min(reach * 4.0) + d) * d / area + 1.0 };
         let from_joints = from.as_ref().map(|f| Joints { linear: f.linear, rotary: f.rotary.clone() });
         steps.push(Step {
             profile,
             start,
             end,
             how,
+            points,
             probes: probes.flatten(),
             line,
             rapid,

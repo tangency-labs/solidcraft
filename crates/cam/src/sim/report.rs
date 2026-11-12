@@ -12,6 +12,10 @@ pub enum StockGrid {
     /// Heights over the box's XY: cell `(i, j)` has its centre at `(x0 + (i + ½)·dx, y0 + (j + ½)·dy)`
     /// and its height at `heights[j·nx + i]`.
     Heights { x0: f64, y0: f64, dx: f64, dy: f64, nx: usize, ny: usize, bottom: f64, top: f64, heights: Vec<f64> },
+    /// Radii over (x, θ): cell `(i, k)` has its centre at `x = x0 + (i + ½)·dx`, `θ = (k + ½)·dθ`
+    /// (`dθ = 2π / nt`) and its radius at `radii[k·nx + i]`; `gaps`, by cell `k·nx + i` in order,
+    /// the stretches of air inside the material of the rays that have some.
+    Radii { x0: f64, dx: f64, nx: usize, nt: usize, radius: f64, radii: Vec<f64>, gaps: Vec<(usize, Gaps)> },
 }
 
 /// One motion block as simulated.
@@ -22,7 +26,7 @@ pub struct BlockRemoval {
     pub rapid: bool,
     /// Material it removed (mm³).
     pub volume: f64,
-    /// The deepest it cut into the stock as it was (mm, along Z).
+    /// The deepest it cut into the stock as it was (mm, along Z or the radius).
     pub depth: f64,
     /// A cut at the tool's full width (a slot): material on both sides of the tool and under
     /// it ahead, halfway along the move.
@@ -32,13 +36,13 @@ pub struct BlockRemoval {
 /// What the simulation found.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SimReport {
-    /// The cell size used (mm).
+    /// The cell size used (mm; on a 4th axis, along X and round the stock's surface).
     pub cell: f64,
     pub cells: usize,
     /// The stock as the program leaves it.
     pub stock: StockGrid,
-    /// Motion blocks simulated (0: the program has none whose position is known, so nothing
-    /// was checked).
+    /// Motion blocks simulated (0: the program has none whose position is known, as when a 4th
+    /// axis is never written, so nothing was checked).
     pub moves: usize,
     /// Every motion block that removed material, in program order.
     pub removals: Vec<BlockRemoval>,
@@ -63,6 +67,11 @@ pub struct SimReport {
     pub feed_length: f64,
     pub rapid_length: f64,
     pub warnings: Vec<String>,
+    /// The stock along X and Y as the program leaves it, when the simulation kept it beside the
+    /// height map ([`SimState::track_sides`]), or as it stood when it was given up (holding no
+    /// less than the material left); empty otherwise. A next setup turned onto its side
+    /// reads the material that runs under other material from them.
+    pub sides: Vec<SideLines>,
 }
 
 impl SimState {
@@ -72,7 +81,12 @@ impl SimState {
         let refine = (MAX_REFINED / self.bands.len().max(1)).max(1);
         let threaded = self.bands.len() > 1 && plan.cells() > 100_000;
         let models: Vec<&Model> = self.bands.iter().collect();
-        let cmps = each_threaded(models, threaded, |m| Ok(compare(m, part, tol, initial, refine))).unwrap_or_default();
+        // How far the part reaches from the A axis along X, once for every band.
+        let reach = match plan.grid {
+            Grid::Radii { x0, dx, nx, .. } => column_reach(part, x0, dx, nx),
+            Grid::Heights { .. } => Vec::new(),
+        };
+        let cmps = each_threaded(models, threaded, |m| Ok(compare(m, part, tol, initial, refine, &reach))).unwrap_or_default();
         let mut removals = Vec::new();
         for (k, step) in plan.steps.iter().enumerate() {
             let r = self.removed.get(k).copied().unwrap_or_default();
@@ -85,8 +99,11 @@ impl SimState {
         let removed_volume = removals.iter().map(|r| r.volume).sum();
         let mut warnings = Vec::new();
         if plan.steps.is_empty() {
-            warnings
-                .push("no move of the program was simulated: none comes after every axis of the machine is written, so nothing was checked".into());
+            warnings.push(
+                "no move of the program was simulated: none comes after every axis of the machine (its rotary included) is written, so \
+                 nothing was checked"
+                    .into(),
+            );
         }
         let slots: Vec<usize> = removals.iter().filter(|r| r.slot).map(|r| r.line).collect();
         if !slots.is_empty() {
@@ -102,8 +119,35 @@ impl SimState {
         for c in &cmps {
             cmp.add(c);
         }
+        if self.side_dropped {
+            warnings.push(
+                "the stock along X and Y (kept for a part with faces under its own material along Z) took too long to cut and was given \
+                 up: what is cut under the part's own material is not checked"
+                    .into(),
+            );
+        }
+        if let Some(side) = &self.side {
+            let (worst, worst_at, gouged) = side.compare(part, tol);
+            cmp.add(&Comparison { worst, worst_at, gouged, ..Comparison::default() });
+            let unmodelled = side.unmodelled();
+            if unmodelled > 0 {
+                warnings.push(format!(
+                    "{unmodelled} times the tool cut a line of the stock along X or Y that already holds {MAX_SIDE_PIECES} stretches of \
+                     material: the stock model leaves those cuts out of it there, so under the part's own material they are not checked \
+                     here (the job's gouge check covers them)"
+                ));
+            }
+        }
         if cmp.unrefined > 0 {
-            warnings.push(format!("{} gouged cells were measured along Z only: too many to measure in 3D", cmp.unrefined));
+            warnings.push(format!("{} gouged cells were measured along Z (or the radius) only: too many to measure in 3D", cmp.unrefined));
+        }
+        let unmodelled: u64 = self.bands.iter().map(|b| if let Model::Radii(m) = b { m.unmodelled } else { 0 }).sum();
+        if unmodelled > 0 {
+            warnings.push(format!(
+                "{unmodelled} times the tool cut beside a ray from the A axis where the ray already holds {MAX_GAPS} stretches of air (or the \
+                 stock holds too many): the stock model leaves those cuts out, so they are not checked here (the job's gouge check covers \
+                 them)"
+            ));
         }
         let (mut air_moves, mut air_length) = (0usize, 0.0);
         for (k, step) in plan.steps.iter().enumerate() {
@@ -113,6 +157,7 @@ impl SimState {
             }
         }
         let mut values = Vec::with_capacity(plan.cells());
+        let mut gaps = Vec::new();
         for b in self.bands {
             match b {
                 Model::Heights(h) => {
@@ -126,13 +171,21 @@ impl SimState {
                         _ => z,
                     }));
                 }
+                Model::Radii(r) => {
+                    let base = r.k0 * r.nx;
+                    gaps.extend(r.gaps.iter().map(|(c, g)| (base + c, g.clone())));
+                    values.extend(r.rho);
+                }
             }
         }
-        let stock = stock_grid(&plan.grid, values);
+        let stock = stock_grid(&plan.grid, values, gaps);
+        let kept = self.side.as_ref().or(self.given_up.as_ref());
+        let sides = kept.map(|s| s.sets.iter().map(SideLines::of).collect()).unwrap_or_default();
         SimReport {
             cell: plan.cell,
             cells: match &stock {
                 StockGrid::Heights { heights, .. } => heights.len(),
+                StockGrid::Radii { radii, .. } => radii.len(),
             },
             stock,
             moves: plan.steps.len(),
@@ -152,22 +205,27 @@ impl SimState {
             feed_length: plan.feed_length,
             rapid_length: plan.rapid_length,
             warnings,
+            sides,
         }
     }
 }
 
-pub(super) fn stock_grid(grid: &Grid, values: Vec<f64>) -> StockGrid {
+pub(super) fn stock_grid(grid: &Grid, values: Vec<f64>, mut gaps: Vec<(usize, Gaps)>) -> StockGrid {
     match *grid {
         Grid::Heights { x0, y0, dx, dy, nx, ny, bottom, top } => StockGrid::Heights { x0, y0, dx, dy, nx, ny, bottom, top, heights: values },
+        Grid::Radii { x0, dx, nx, nt, radius, .. } => {
+            gaps.sort_by_key(|(c, _)| *c);
+            StockGrid::Radii { x0, dx, nx, nt, radius, radii: values, gaps }
+        }
     }
 }
 
 impl StockGrid {
     /// The highest the stock is left over the cells whose centres are within `radius` of
     /// `center` (work XY), with that cell's centre: what stands in a round hole cut down Z. `None`
-    /// with no cell centre in the circle.
+    /// on a 4th axis's stock, or with no cell centre in the circle.
     pub fn highest_in_circle(&self, center: Vec2, radius: f64) -> Option<(f64, Vec2)> {
-        let StockGrid::Heights { x0, y0, dx, dy, nx, ny, heights, .. } = self;
+        let StockGrid::Heights { x0, y0, dx, dy, nx, ny, heights, .. } = self else { return None };
         if !(radius > 0.0 && radius.is_finite() && center.x.is_finite() && center.y.is_finite() && *dx > 0.0 && *dy > 0.0) {
             return None;
         }

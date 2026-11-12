@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// Most threads one simulation runs on, and the fewest rows each one takes.
+/// Most threads one simulation runs on, and the fewest rows (angles) each one takes.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const MAX_THREADS: usize = 16;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -14,55 +14,64 @@ const THREADED_VISITS: f64 = 250_000.0;
 #[derive(Clone)]
 pub(super) enum Model {
     Heights(Heights),
+    Radii(Radii),
 }
 
 impl Model {
     pub(super) fn owns(&self, p: Vec3) -> Option<bool> {
         match self {
             Model::Heights(h) => h.owns(p),
+            Model::Radii(r) => r.owns(p),
         }
     }
 
     pub(super) fn set_visits(&mut self, v: &Arc<AtomicU64>) {
         match self {
             Model::Heights(h) => h.visits = Arc::clone(v),
+            Model::Radii(r) => r.visits = Arc::clone(v),
         }
     }
 
     pub(super) fn set_floor(&mut self, f: &Arc<PartFloor>) {
         match self {
             Model::Heights(h) => h.floor = Some(Arc::clone(f)),
+            Model::Radii(r) => r.floor = Some(Arc::clone(f)),
         }
     }
 
     pub(super) fn set_tool(&mut self, slot: u8, flute: f64) {
         match self {
             Model::Heights(h) => (h.slot, h.flute) = (slot, flute),
+            Model::Radii(r) => (r.slot, r.flute) = (slot, flute),
         }
     }
 
-    /// The band's first row and its rows.
+    /// The band's first row (angle) and its rows (angles).
     pub(super) fn span(&self) -> (usize, usize) {
         match self {
             Model::Heights(h) => (h.j0, h.ny),
+            Model::Radii(r) => (r.k0, r.nt),
         }
     }
 
     pub(super) fn values(&self) -> &[f64] {
         match self {
             Model::Heights(h) => &h.h,
+            Model::Radii(r) => &r.rho,
         }
     }
 
     pub(super) fn last(&self) -> &[u8] {
         match self {
             Model::Heights(h) => &h.last,
+            Model::Radii(r) => &r.last,
         }
     }
 
     pub(super) fn tiles(&self) -> &Tiles {
         match self {
             Model::Heights(h) => &h.tiles,
+            Model::Radii(r) => &r.tiles,
         }
     }
 }
@@ -100,6 +109,19 @@ pub(super) fn cut(model: &mut Model, step: &Step, machine: &Machine, f0: f64, f1
                 h.sweep_line(&step.profile, a, b)?
             }
         },
+        Model::Radii(r) => {
+            let (first, last) = step.pose_range();
+            let total = last + 1 - first;
+            let (d0, d1) = (done(total, f0), done(total, f1));
+            let mut out = Removed::default();
+            if d1 > d0 {
+                each_pose(machine, step, first + d0..=first + d1 - 1, |pose| {
+                    out.add(r.stamp(&step.profile, pose)?);
+                    Ok(())
+                })?;
+            }
+            out
+        }
     })
 }
 
@@ -191,6 +213,15 @@ pub struct SimState {
     pub(super) frac: f64,
     pub(super) visits: Arc<AtomicU64>,
     pub(super) failed: bool,
+    /// The stock along X and Y beside the height map, for a part with faces under its own
+    /// material along Z ([`SideDexels`]); `None` for every other part (no cost on them).
+    pub(super) side: Option<Box<SideDexels>>,
+    /// The side lines were given up part way: cutting them would have taken too long.
+    pub(super) side_dropped: bool,
+    /// The side lines as they stood when they were given up: what they hold is no less than the
+    /// material left (a side line only ever loses material), so a next setup still reads from
+    /// them what an earlier one cut under other material ([`SimReport::sides`]).
+    pub(super) given_up: Option<Box<SideDexels>>,
 }
 
 impl Clone for SimState {
@@ -200,7 +231,18 @@ impl Clone for SimState {
         for b in &mut bands {
             b.set_visits(&visits);
         }
-        SimState { bands, removed: self.removed.clone(), probes: self.probes.clone(), next: self.next, frac: self.frac, visits, failed: self.failed }
+        SimState {
+            bands,
+            removed: self.removed.clone(),
+            probes: self.probes.clone(),
+            next: self.next,
+            frac: self.frac,
+            visits,
+            failed: self.failed,
+            side: self.side.clone(),
+            side_dropped: self.side_dropped,
+            given_up: self.given_up.clone(),
+        }
     }
 }
 
@@ -209,16 +251,28 @@ impl SimState {
     pub fn new(plan: &SimPlan) -> SimState {
         let visits = Arc::new(AtomicU64::new(0));
         let bands = plan.bands.iter().map(|&(from, to)| plan.grid.band(from, to, &visits, plan.tol)).collect();
-        SimState { bands, removed: Vec::new(), probes: Vec::new(), next: 0, frac: 0.0, visits, failed: false }
+        SimState {
+            bands,
+            removed: Vec::new(),
+            probes: Vec::new(),
+            next: 0,
+            frac: 0.0,
+            visits,
+            failed: false,
+            side: None,
+            side_dropped: false,
+            given_up: None,
+        }
     }
 
     /// The stock as an earlier setup left it: every cell of a height grid no higher than the
     /// highest `start` has anywhere over the cell (a cell off `start` keeps the stock's top), so a
     /// map written on other cells never claims air where the earlier setup left material (the
-    /// wall of its cut across a cell is not taken for a cut into the part).
+    /// wall of its cut across a cell is not taken for a cut into the part). A bar's radii are kept
+    /// as they are.
     pub fn lower_to(&mut self, start: &crate::adaptive::HeightMap) {
         for b in &mut self.bands {
-            let Model::Heights(h) = b;
+            let Model::Heights(h) = b else { continue };
             for j in 0..h.ny {
                 for i in 0..h.nx {
                     let (x, y) = h.centre(i, j);
@@ -232,6 +286,7 @@ impl SimState {
                 }
             }
         }
+        self.retrack();
     }
 
     /// The stock an earlier setup left ([`SimState::lower_to`]) held up to the part: every cell
@@ -242,8 +297,9 @@ impl SimState {
     /// into the part), so what this program cuts into the part is measured against the part,
     /// not against a carried surface inside it.
     pub fn hold_part(&mut self, floor: &PartFloor) {
+        let mut raised = false;
         for b in &mut self.bands {
-            let Model::Heights(h) = b;
+            let Model::Heights(h) = b else { continue };
             for j in 0..h.ny {
                 for i in 0..h.nx {
                     let Some(&f) = floor.outer.get((h.j0 + j) * h.nx + i) else { continue };
@@ -253,9 +309,13 @@ impl SimState {
                     {
                         *v = f.min(h.top);
                         h.tiles.mark(i, j);
+                        raised = true;
                     }
                 }
             }
+        }
+        if raised {
+            self.retrack();
         }
     }
 
@@ -265,7 +325,7 @@ impl SimState {
     /// the stock's bottom. The part left is measured over each cell's material only.
     pub fn raise_under(&mut self, under: &crate::adaptive::HeightMap) {
         for b in &mut self.bands {
-            let Model::Heights(h) = b;
+            let Model::Heights(h) = b else { continue };
             let mut lows = Vec::with_capacity(h.nx * h.ny);
             for j in 0..h.ny {
                 for i in 0..h.nx {
@@ -275,6 +335,7 @@ impl SimState {
             }
             h.under = lows;
         }
+        self.retrack();
     }
 
     /// Watches for cuts below `floor` (from [`SimPlan::part_floor`]) as the stock is cut: each
@@ -328,10 +389,36 @@ impl SimState {
         if work.is_empty() {
             return Ok(());
         }
+        // The side lines beside the bands, each step no higher than the height map holds material
+        // round it before this advance (a line holds material only where the column over it does).
+        let tops: Vec<f64> = if self.side.is_some() {
+            work.iter().map(|&(k, _, _)| plan.steps.get(k).map_or(f64::INFINITY, |st| self.top_round(plan, st))).collect()
+        } else {
+            Vec::new()
+        };
+        let cut_sides = |side: &mut SideDexels| {
+            work.iter()
+                .zip(&tops)
+                .all(|(&(k, f0, f1), &top)| plan.steps.get(k).is_none_or(|st| side.cut_step(st, &plan.machine, (f0, f1), plan.tol, top).is_ok()))
+        };
         self.visits.store(0, Ordering::Relaxed);
         let threaded = plan.cost(&work) > THREADED_VISITS;
         let bands: Vec<&mut Model> = self.bands.iter_mut().collect();
-        let results = each_threaded(bands, threaded, |m| band_advance(m, plan, &work));
+        let (results, sides_cut) =
+            beside(self.side.as_deref_mut(), threaded, cut_sides, || each_threaded(bands, threaded, |m| band_advance(m, plan, &work)));
+        if !sides_cut {
+            self.given_up = self.side.take();
+            self.side_dropped = true;
+        }
+        if self.side.is_some() {
+            // A view draws what the side lines hold over each tile: a tile they may have cut is
+            // drawn again, whether its heights changed or not.
+            for &(k, _, _) in &work {
+                if let Some(cells) = plan.steps.get(k).and_then(|st| step_cells(&plan.grid, st)) {
+                    self.touch_tiles(cells);
+                }
+            }
+        }
         let results = match results {
             Ok(r) => r,
             Err(e) => {
@@ -359,7 +446,7 @@ impl SimState {
         Ok(())
     }
 
-    /// The band holding row `j`, and the row within it.
+    /// The band holding row (angle) `j`, and the row within it.
     pub(super) fn band_of(&self, j: usize) -> Option<(&Model, usize)> {
         let b = self.bands.partition_point(|m| m.span().0 <= j).checked_sub(1)?;
         let m = self.bands.get(b)?;
@@ -367,7 +454,7 @@ impl SimState {
         (j < j0 + n).then_some((m, j - j0))
     }
 
-    /// The height of cell `(i, j)` of the whole grid.
+    /// The height (radius) of cell `(i, j)` of the whole grid.
     pub fn value(&self, plan: &SimPlan, i: usize, j: usize) -> Option<f64> {
         let nx = plan.grid.columns();
         if i >= nx {
@@ -408,6 +495,7 @@ impl SimState {
             }
             let (values, tiles) = match b {
                 Model::Heights(h) => (&h.h, &mut h.tiles),
+                Model::Radii(r) => (&r.rho, &mut r.tiles),
             };
             m = m.max(tiles.max_in(values, nx, (i0, i1.min(nx - 1)), (lo - b0, hi - b0)));
         }

@@ -1,6 +1,7 @@
 //! Tests of the stock-removal simulation: the tool's swept envelope against closed forms and
-//! brute force, a pocket's floor and walls, gouges and rapids caught, the limits, how long a
-//! 50 × 50 mm part takes, and the simulation advanced a part at a time.
+//! brute force, a pocket's floor and walls, gouges and rapids caught, a rotary finish, indexed
+//! work on a bar, the side lines under an undercut, the limits, how long a 50 × 50 mm part
+//! takes, and the simulation advanced a part at a time.
 
 use std::time::Instant;
 
@@ -10,8 +11,11 @@ use crate::adaptive::HeightMap;
 use crate::foundation_tests::*;
 use crate::gcode5::{Post5, emit5};
 use crate::kinematics::Machine;
-use crate::sim::{Profile, SimParams, SimReport, SimState, StockGrid, StockShape, TILE, plan_sim, simulate, simulate_watched, stock_around};
+use crate::sim::{
+    Carried, Profile, SimParams, SimReport, SimState, StockGrid, StockShape, TILE, plan_sim, simulate, simulate_from, simulate_watched, stock_around,
+};
 use crate::*;
+use solidcraft_geom::prelude::*;
 
 fn flat(d: f64) -> Tool {
     Tool::new(1, ToolKind::FlatEndmill, d, 20.0)
@@ -49,14 +53,14 @@ fn run(text: &str, tool: &Tool, part: &Surface, resolution: f64) -> SimReport {
 
 /// The height of the cell whose centre is nearest `(x, y)`.
 fn height_at(r: &SimReport, x: f64, y: f64) -> f64 {
-    let StockGrid::Heights { x0, y0, dx, dy, nx, heights, .. } = &r.stock;
+    let StockGrid::Heights { x0, y0, dx, dy, nx, heights, .. } = &r.stock else { panic!("not a heightfield") };
     let (i, j) = (((x - x0) / dx).floor() as usize, ((y - y0) / dy).floor() as usize);
     heights[j * nx + i]
 }
 
 /// Every cell centre and its height.
 fn cells(r: &SimReport) -> Vec<(f64, f64, f64)> {
-    let StockGrid::Heights { x0, y0, dx, dy, nx, heights, .. } = &r.stock;
+    let StockGrid::Heights { x0, y0, dx, dy, nx, heights, .. } = &r.stock else { panic!("not a heightfield") };
     heights.iter().enumerate().map(|(c, h)| (x0 + ((c % nx) as f64 + 0.5) * dx, y0 + ((c / nx) as f64 + 0.5) * dy, *h)).collect()
 }
 
@@ -93,6 +97,45 @@ fn the_swept_envelope_is_exact_along_a_line() {
                     (e, b) => {
                         assert!((u.hypot(v) - 3.0).abs() < 1e-3 || ((u - len).hypot(v) - 3.0).abs() < 1e-3 || (v - 3.0).abs() < 1e-3, "{e:?} {b:?}")
                     }
+                }
+            }
+        }
+    }
+}
+
+/// The first point of the ray `(x, ρ s, ρ c)` inside the tool, by brute force.
+fn brute_ray(p: &Profile, dx: f64, y: f64, z: f64, s: f64, c: f64, cap: f64) -> Option<f64> {
+    let n = 400_000;
+    (0..=n).map(|k| cap * k as f64 / n as f64).find(|&rho| {
+        let d = dx.hypot(rho * s - y);
+        d <= p.radius && rho * c >= z + p.height(d)
+    })
+}
+
+#[test]
+fn rays_enter_the_tool_where_brute_force_finds_it() {
+    for tool in [flat(6.0), ball(6.0), bull(6.0, 1.5), drill(6.0)] {
+        let p = Profile::of(&tool).unwrap();
+        for k in 0..80 {
+            let dx = -3.5 + 7.0 * ((k * 13) % 80) as f64 / 80.0;
+            let y = -4.0 + 8.0 * ((k * 29) % 80) as f64 / 80.0;
+            let z = 5.0 + 10.0 * ((k * 7) % 80) as f64 / 80.0;
+            let phi = -0.6 + 1.2 * ((k * 53) % 80) as f64 / 80.0;
+            let (s, c) = phi.sin_cos();
+            let cap = 30.0;
+            let exact = p.ray_entry(dx, y, z, s, c, cap);
+            let brute = brute_ray(&p, dx, y, z, s, c, cap);
+            match (exact, brute) {
+                (Some(e), Some(b)) => {
+                    assert!(e <= b + 1e-9, "{:?}: {e} after {b}", tool.kind);
+                    assert!(b - e < 1e-3, "{:?}: {e} well before {b}", tool.kind);
+                }
+                (None, None) => {}
+                (e, b) => {
+                    // Only grazing rays may disagree.
+                    let touch = e.or(b).unwrap_or(0.0);
+                    let d = dx.hypot(touch * s - y);
+                    assert!((d - 3.0).abs() < 1e-2 || (touch - cap).abs() < 1e-2, "{:?}: {e:?} against {b:?}", tool.kind);
                 }
             }
         }
@@ -140,6 +183,128 @@ fn a_pocket_has_its_floor_and_walls_exactly() {
     // The first pass round is a slot, the passes across the middle are not.
     assert!(r.removals.iter().any(|m| m.slot && m.line == 11), "{:?}", r.removals);
     assert!(!r.warnings.is_empty());
+}
+
+/// The 20 × 20 mm pocket program of [`a_pocket_has_its_floor_and_walls_exactly`], 3 deep.
+fn square_pocket_moves() -> String {
+    let mut moves = String::from(
+        "G0 X13. Y13.
+G0 Z1.
+G1 Z-3. F200
+G1 X27. F800
+Y27.
+X13.
+Y13.
+",
+    );
+    let mut y = 13.0;
+    while y < 27.0 {
+        moves.push_str(&format!(
+            "G1 Y{y:.3}
+X27.
+G1 Y{:.3}
+X13.
+",
+            y + 2.0
+        ));
+        y += 4.0;
+    }
+    moves.push_str(
+        "G0 Z10.
+",
+    );
+    moves
+}
+
+/// A box's triangles, facing out.
+fn box_triangles(lo: Vec3, hi: Vec3) -> Vec<[Vec3; 3]> {
+    let p = |i: usize| Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z });
+    let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+    quads.iter().flat_map(|q| [[p(q[0]), p(q[1]), p(q[2])], [p(q[0]), p(q[2]), p(q[3])]]).collect()
+}
+
+#[test]
+fn an_undercut_a_vertical_tool_cannot_reach_is_left_open_on_the_side_lines() {
+    // A slab with a plate over half of it, 2 mm of air between (an undercut under the plate, open
+    // at the plate's edge): a 6 mm end mill clears the open half down to the slab, and cannot
+    // reach under the plate.
+    let mut tris = box_triangles(Vec3::new(0.0, 0.0, -10.0), Vec3::new(40.0, 40.0, -6.0));
+    tris.extend(box_triangles(Vec3::new(0.0, 0.0, -4.0), Vec3::new(40.0, 20.0, 0.0)));
+    let part = Surface::new(tris).unwrap();
+    let mut moves = String::from(
+        "G0 X-5. Y23.
+G0 Z1.
+G1 Z-6. F200
+",
+    );
+    let mut y = 23.0;
+    let mut forth = true;
+    while y <= 43.0 {
+        moves.push_str(&format!(
+            "G1 Y{y:.3} F800
+G1 X{}
+",
+            if forth { "45." } else { "-5." }
+        ));
+        forth = !forth;
+        y += 4.0;
+    }
+    moves.push_str(
+        "G0 Z10.
+",
+    );
+    let text = program(&moves);
+    let machine = Machine::three_axis();
+    let plan = plan_sim(&text, &machine, &[flat(6.0)], &stock(), &params(0.01, 0.1)).unwrap();
+    let mut state = SimState::new(&plan);
+    assert!(state.track_sides(&plan));
+    state.advance(&plan, plan.moves(), 0.0).unwrap();
+    // The side lines hold the cut: along X under the plate, all of it; along Y in the air under
+    // the plate's height, up to the plate's edge.
+    let line = state.side_line(0, Vec3::new(20.0, 10.0, -5.0)).unwrap();
+    assert_eq!(line.len(), 1);
+    close(line[0][0], 0.0, 1e-9);
+    close(line[0][1], 40.0, 1e-9);
+    let line = state.side_line(1, Vec3::new(20.0, 10.0, -5.0)).unwrap();
+    assert_eq!(line.len(), 1);
+    close(line[0][0], 0.0, 1e-9);
+    close(line[0][1], 20.0, 0.01);
+    let r = state.finish(&plan, &part);
+    assert_eq!(r.gouge_cells, 0, "{:?}", r.gouge_at);
+    // `simulate` keeps the side lines for such a part by itself, and hands them on.
+    let auto = simulate(&text, &machine, &[flat(6.0)], &stock(), &part, &params(0.01, 0.1)).unwrap();
+    assert_eq!(auto.sides.len(), 2);
+    assert_eq!(auto.gouge_cells, 0);
+}
+
+#[test]
+fn a_plain_pocket_simulates_the_same_with_or_without_side_lines() {
+    let text = program(&square_pocket_moves());
+    let part = block(Vec3::new(0.0, 0.0, -10.0), Vec3::new(40.0, 40.0, -3.0));
+    let machine = Machine::three_axis();
+    let plan = plan_sim(&text, &machine, &[flat(6.0)], &stock(), &params(0.01, 0.1)).unwrap();
+    let mut off = SimState::new(&plan);
+    off.advance(&plan, plan.moves(), 0.0).unwrap();
+    let mut on = SimState::new(&plan);
+    assert!(on.track_sides(&plan));
+    on.advance(&plan, plan.moves(), 0.0).unwrap();
+    // The side lines cut as the height map does: along X through the pocket at mid depth, the
+    // pocket (13 to 27 with the tool's 3 mm radius) is out of the line.
+    let line = on.side_line(0, Vec3::new(20.0, 20.0, -1.5)).unwrap();
+    assert_eq!(line.len(), 2, "{line:?}");
+    close(line[0][1], 10.0, 0.01);
+    close(line[1][0], 30.0, 0.01);
+    assert!(!off.tracks_sides());
+    let off = off.finish(&plan, &part);
+    // A part with no faces under its own material: `simulate` keeps no side lines, and keeping
+    // them changes nothing.
+    assert_eq!(simulate(&text, &machine, &[flat(6.0)], &stock(), &part, &params(0.01, 0.1)).unwrap(), off);
+    // Keeping them changes nothing but the side lines the report hands on to a next setup.
+    let mut on = on.finish(&plan, &part);
+    assert_eq!(on.sides.len(), 2);
+    assert!(off.sides.is_empty());
+    on.sides.clear();
+    assert_eq!(on, off);
 }
 
 /// Simulates `text` with a 6 mm flat end mill from the stock an earlier setup left: the stock's
@@ -226,6 +391,118 @@ G0 Z5.",
     );
     let r = from_earlier(&plunge, &start, None, &part, 0.1);
     assert!(r.gouge_cells > 0 && (r.gouge_worst - 1.0).abs() < 0.05, "{} cells, {} mm", r.gouge_cells, r.gouge_worst);
+}
+
+/// The stock an earlier setup left, read a hair inside the part (a map on cells of its own, a
+/// carried view that takes a millimetre of the part for air), starts held up to the part: a
+/// program that never touches the part cuts nothing into it, and one that does is still
+/// measured against the part.
+#[test]
+fn a_carried_stock_inside_the_part_starts_held_up_to_it() {
+    let part = block(Vec3::new(0.0, 0.0, -10.0), Vec3::new(40.0, 40.0, -3.0));
+    let machine = Machine::three_axis();
+    let start = crate::adaptive::HeightMap { x0: 0.0, y0: 0.0, dx: 0.5, dy: 0.5, nx: 80, ny: 80, heights: vec![-3.03; 6400] };
+    let carried = |p: Vec3| p.z < -4.0;
+    let air = program("G0 X20. Y20.\nG0 Z5.");
+    for c in [None, Some(&carried as &Carried)] {
+        let (r, cuts) = simulate_from(&air, &machine, &[flat(6.0)], &stock(), Some(&start), None, c, None, &part, &params(0.01, 0.1), true).unwrap();
+        assert_eq!((r.gouge_cells, r.gouge_worst), (0, 0.0), "carried: {}", c.is_some());
+        assert!(cuts.is_empty(), "{cuts:?}");
+    }
+    // A plunge 1 mm into the part's top is a gouge of 1 mm.
+    let plunge = program("G0 X20. Y20.\nG0 Z1.\nG1 Z-4. F200\nG0 Z5.");
+    let (r, _) =
+        simulate_from(&plunge, &machine, &[flat(6.0)], &stock(), Some(&start), None, Some(&carried), None, &part, &params(0.01, 0.1), true).unwrap();
+    assert!(r.gouge_cells > 0 && (r.gouge_worst - 1.0).abs() < 0.05, "{} cells, {} mm", r.gouge_cells, r.gouge_worst);
+}
+
+/// The stock an earlier setup left, cut down beside a wall of the part on cells of its own (the
+/// cell straddling the wall cut, its centre off the part), starts held up to the part along X as
+/// well: the side lines hold the part's material out to its wall, and a program that never
+/// touches the part cuts nothing into it. (Each line ended at the last cell whose centre is in
+/// the part, short of the wall, and the whole wall read as a gouge of the program.)
+#[test]
+fn a_carried_stock_cut_beside_a_wall_starts_held_up_to_it_along_its_lines() {
+    let wall = 20.23;
+    let part = block(Vec3::new(0.0, 0.0, -10.0), Vec3::new(wall, 40.0, -3.0));
+    let machine = Machine::three_axis();
+    let heights = (0..6400).map(|c| if (c % 80) as f64 * 0.5 + 0.25 < wall { -3.0 } else { -10.0 }).collect();
+    let start = crate::adaptive::HeightMap { x0: 0.0, y0: 0.0, dx: 0.5, dy: 0.5, nx: 80, ny: 80, heights };
+    let carried = |p: Vec3| p.x < 20.5 || p.z < -10.0;
+    let air = program(
+        "G0 X10. Y20.
+G0 Z5.",
+    );
+    let (r, cuts) =
+        simulate_from(&air, &machine, &[flat(6.0)], &stock(), Some(&start), None, Some(&carried), None, &part, &params(0.01, 0.1), true).unwrap();
+    assert_eq!((r.gouge_cells, r.gouge_worst), (0, 0.0));
+    assert!(cuts.is_empty(), "{cuts:?}");
+    // A cut 0.1 mm into the wall is still a gouge of about that.
+    let into = program(
+        "G0 X30. Y20.
+G0 Z-5.
+G1 X23.13 F200
+G1 Y10.
+G0 Z5.",
+    );
+    let (r, _) =
+        simulate_from(&into, &machine, &[flat(6.0)], &stock(), Some(&start), None, Some(&carried), None, &part, &params(0.01, 0.1), true).unwrap();
+    assert!(r.gouge_cells > 0 && (r.gouge_worst - 0.1).abs() < 0.05, "{} cells, {} mm", r.gouge_cells, r.gouge_worst);
+}
+
+/// A round boss of radius `r` about `(cx, cy)` from `z0` to `z1`, `n` facets round, closed at
+/// both ends, wound outwards.
+fn boss_z(cx: f64, cy: f64, r: f64, z0: f64, z1: f64, n: usize) -> Surface {
+    let at = |k: usize, z: f64| {
+        let a = std::f64::consts::TAU * k as f64 / n as f64;
+        Vec3::new(cx + r * a.cos(), cy + r * a.sin(), z)
+    };
+    let mut tris = Vec::new();
+    for k in 0..n {
+        let a = std::f64::consts::TAU * (k as f64 + 0.5) / n as f64;
+        let out = Vec3::new(a.cos(), a.sin(), 0.0);
+        let (p, q, s, t) = (at(k, z0), at(k + 1, z0), at(k + 1, z1), at(k, z1));
+        tris.push(facing([p, q, s], out));
+        tris.push(facing([p, s, t], out));
+        tris.push(facing([Vec3::new(cx, cy, z1), at(k, z1), at(k + 1, z1)], Vec3::new(0.0, 0.0, 1.0)));
+        tris.push(facing([Vec3::new(cx, cy, z0), at(k, z0), at(k + 1, z0)], Vec3::new(0.0, 0.0, -1.0)));
+    }
+    Surface::new(tris).unwrap()
+}
+
+/// A carried stock cut beside a curved wall (a round boss; the R5 corner of a turned-over
+/// block): each side line along X and along Y meets the wall at its own slant, and the cell
+/// straddling the wall on the earlier setup's cells is cut, so a line built from that stock ends
+/// inside the part by a share of a cell. Held up to the part, a program that never touches the
+/// part cuts nothing into it, and one that cuts 0.1 mm into the wall is still a gouge of about
+/// that.
+#[test]
+fn a_carried_stock_cut_round_a_curved_wall_starts_held_up_to_it_along_its_lines() {
+    let (cx, cy, r) = (20.0, 20.0, 12.37);
+    let part = boss_z(cx, cy, r, -10.0, -3.0, 720);
+    let machine = Machine::three_axis();
+    let inside = |x: f64, y: f64| (x - cx).hypot(y - cy) < r;
+    let heights = (0..6400).map(|c| if inside((c % 80) as f64 * 0.5 + 0.25, (c / 80) as f64 * 0.5 + 0.25) { -3.0 } else { -10.0 }).collect();
+    let start = crate::adaptive::HeightMap { x0: 0.0, y0: 0.0, dx: 0.5, dy: 0.5, nx: 80, ny: 80, heights };
+    let carried = move |p: Vec3| (p.x - cx).hypot(p.y - cy) < r + 0.27 || p.z < -10.0;
+    let air = program(
+        "G0 X20. Y20.
+G0 Z5.",
+    );
+    let (r0, cuts) =
+        simulate_from(&air, &machine, &[flat(6.0)], &stock(), Some(&start), None, Some(&carried), None, &part, &params(0.01, 0.1), true).unwrap();
+    assert_eq!((r0.gouge_cells, r0.gouge_worst), (0, 0.0), "at {:?}", r0.gouge_at);
+    assert!(cuts.is_empty(), "{cuts:?}");
+    let into = program(&format!(
+        "G0 X40. Y20.
+G0 Z-5.
+G1 X{:.3} F200
+G0 Z5.",
+        cx + r + 3.0 - 0.1
+    ));
+    let (r1, _) =
+        simulate_from(&into, &machine, &[flat(6.0)], &stock(), Some(&start), None, Some(&carried), None, &part, &params(0.01, 0.1), true).unwrap();
+    assert!(r1.gouge_cells > 0 && (r1.gouge_worst - 0.1).abs() < 0.05, "{} cells, {} mm", r1.gouge_cells, r1.gouge_worst);
 }
 
 #[test]
@@ -383,16 +660,117 @@ fn tools_are_taken_from_the_tool_changes() {
 }
 
 #[test]
+fn a_rotary_finish_on_a_cylinder_leaves_less_than_the_tolerance() {
+    let part = cylinder_x(10.0, -15.0, 15.0, 256);
+    let tool = ball(6.0);
+    let p = RotaryParams {
+        pattern: RotaryPattern::Lines { angle_step: 1f64.to_radians(), zigzag: true },
+        clearance: 30.0,
+        retract: 14.0,
+        floor: 0.0,
+        feeds: Feeds { cut: 600.0, plunge: 150.0 },
+        range: Some([-8.0, 8.0]),
+        step: 1.0,
+        tolerance: 0.002,
+        stock_to_leave: 0.0,
+        max_angle_step: DEFAULT_MAX_ANGLE_STEP,
+    };
+    let path = rotary_finish(&part, &tool, &p).unwrap();
+    let program = Program5 {
+        name: "barrel".into(),
+        operations: vec![Operation5 { name: "finish".into(), tool: tool.clone(), spindle_rpm: 12000.0, coolant: false, path, plunge_feed: None }],
+        work_offset: None,
+    };
+    let machine = Machine::four_axis_a();
+    let text = emit5(&program, &Post5::linuxcnc_4axis(), &machine).unwrap();
+    let stock = StockShape::Cylinder { x_min: -8.0, x_max: 8.0, radius: 10.3 };
+    let started = Instant::now();
+    let r = simulate(&text, &machine, std::slice::from_ref(&tool), &stock, &part, &SimParams { tolerance: 0.01, resolution: None }).unwrap();
+    eprintln!(
+        "rotary finish: {} cells at {} mm, {:.2} s, leftover max {} mean {}",
+        r.cells,
+        r.cell,
+        started.elapsed().as_secs_f64(),
+        r.leftover_max,
+        r.leftover_mean
+    );
+    assert_eq!(r.gouge_cells, 0, "{}", r.gouge_worst);
+    assert!(r.rapids_in_material.is_empty(), "{:?}", r.rapids_in_material);
+    assert!(r.machined_cells > r.cells / 2, "{} of {}", r.machined_cells, r.cells);
+    assert!(r.leftover_max < 0.01, "{}", r.leftover_max);
+    close(r.removed_volume, (10.3f64.powi(2) - 10.0f64.powi(2)) * std::f64::consts::PI * 16.0, 6.0);
+    // The same program against a fatter part is a gouge, about as deep as the difference.
+    let fat = cylinder_x(10.2, -15.0, 15.0, 256);
+    let g = simulate(&text, &machine, std::slice::from_ref(&tool), &stock, &fat, &SimParams { tolerance: 0.01, resolution: None }).unwrap();
+    assert!(g.gouge_cells > r.cells / 2, "{}", g.gouge_cells);
+    close(g.gouge_worst, 0.2, 0.02);
+    // The derived stock is the part's cylinder.
+    match stock_around(&part, &machine).unwrap() {
+        StockShape::Cylinder { x_min, x_max, radius } => {
+            close(x_min, -15.0, 1e-9);
+            close(x_max, 15.0, 1e-9);
+            close(radius, 10.0, 1e-9);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_rapid_into_round_stock_is_caught() {
+    let part = cylinder_x(10.0, -15.0, 15.0, 128);
+    let machine = Machine::four_axis_a();
+    let stock = StockShape::Cylinder { x_min: -10.0, x_max: 10.0, radius: 12.0 };
+    let text = "G21\nT1 M6\nG0 X0. Y0. Z30. A0.\nG0 Z11.\nG0 A90.\nG0 Z30.\n";
+    let r = simulate(text, &machine, &[ball(6.0)], &stock, &part, &params(0.01, 0.1)).unwrap();
+    let lines: Vec<usize> = r.rapids_in_material.iter().map(|m| m.line).collect();
+    assert_eq!(lines, vec![4, 5], "{:?}", r.rapids_in_material);
+    // Down to 11 at A0 cuts a dimple 1 mm deep at the top: no gouge, the part is at 10.
+    assert_eq!(r.gouge_cells, 0);
+    // Turning at 9.5 is a gouge, half a millimetre deep.
+    let text = "G21\nT1 M6\nG0 X0. Y0. Z30. A0.\nG1 Z9.5 F100\nG1 A90. F2000\nG0 Z30.\n";
+    let r = simulate(text, &machine, &[ball(6.0)], &stock, &part, &params(0.01, 0.1)).unwrap();
+    assert!(r.rapids_in_material.is_empty());
+    close(r.gouge_worst, 0.5, 0.02);
+}
+
+/// A square bar on a 4th axis is modelled as the square it is: a rapid across just above a
+/// flat side (inside the circle through its corners) cuts nothing, one into it or one turning
+/// a corner up into the tool does.
+#[test]
+fn a_square_bar_on_a_fourth_axis_is_square() {
+    let part = block(Vec3::new(-10.0, -10.0, -10.0), Vec3::new(10.0, 10.0, 10.0));
+    let machine = Machine::four_axis_a();
+    let stock = StockShape::Box { min: Vec3::new(-20.0, -15.0, -15.0), max: Vec3::new(20.0, 15.0, 15.0) };
+    let text = "G21\nT1 M6\nG0 X-15. Y0. Z30. A0.\nG0 Z18.\nG0 X15.\nG0 Z30.\n";
+    let r = simulate(text, &machine, &[flat(6.0)], &stock, &part, &params(0.01, 0.2)).unwrap();
+    assert!(r.rapids_in_material.is_empty(), "{:?}", r.rapids_in_material);
+    assert_eq!(r.removed_volume, 0.0);
+    // Down into the side, or a corner (21.2 mm out) turned up into the tool at Z 18.
+    let text = "G21\nT1 M6\nG0 X-5. Y0. Z30. A0.\nG0 Z14.\nG0 Z18.\nG0 A45.\nG0 Z30.\n";
+    let r = simulate(text, &machine, &[flat(6.0)], &stock, &part, &params(0.01, 0.2)).unwrap();
+    let lines: Vec<usize> = r.rapids_in_material.iter().map(|m| m.line).collect();
+    assert_eq!(lines, vec![4, 6], "{:?}", r.rapids_in_material);
+    // The cells it did not cut (over the part) are not counted as machined.
+    assert!(r.machined_cells > 0 && r.machined_cells < r.cells / 4, "{} of {}", r.machined_cells, r.cells);
+    // A box the axis does not run through is refused.
+    let off = StockShape::Box { min: Vec3::new(-20.0, -15.0, 1.0), max: Vec3::new(20.0, 15.0, 15.0) };
+    assert!(simulate(text, &machine, &[flat(6.0)], &off, &part, &params(0.01, 0.2)).is_err());
+}
+
+#[test]
 fn derived_stock_and_hostile_input() {
     let part = block(Vec3::new(0.0, 0.0, -10.0), Vec3::new(40.0, 40.0, -5.0));
-    let StockShape::Box { min, max } = stock_around(&part, &Machine::three_axis()).unwrap();
-    close3(min, Vec3::new(0.0, 0.0, -10.0), 1e-12);
-    close3(max, Vec3::new(40.0, 40.0, -5.0), 1e-12);
+    match stock_around(&part, &Machine::three_axis()).unwrap() {
+        StockShape::Box { min, max } => {
+            close3(min, Vec3::new(0.0, 0.0, -10.0), 1e-12);
+            close3(max, Vec3::new(40.0, 40.0, -5.0), 1e-12);
+        }
+        other => panic!("{other:?}"),
+    }
     let m = Machine::three_axis();
     let text = program("G1 X10. F100");
     let t = [flat(6.0)];
-    // Too many cells, bad tolerances and resolutions, a stock without extent, a machine with a
-    // rotary axis.
+    // Too many cells, bad tolerances and resolutions, a stock without extent, the wrong stock.
     assert!(matches!(simulate(&text, &m, &t, &stock(), &part, &params(0.01, 0.001)), Err(CamError::TooLarge(_))));
     for p in [params(0.0, 0.1), params(f64::NAN, 0.1), params(0.01, 0.0), params(0.01, f64::INFINITY), params(2.0, 0.1)] {
         assert!(simulate(&text, &m, &t, &stock(), &part, &p).is_err(), "{p:?}");
@@ -401,6 +779,8 @@ fn derived_stock_and_hostile_input() {
     assert!(simulate(&text, &m, &t, &flat_box, &part, &params(0.01, 0.1)).is_err());
     let nan_box = StockShape::Box { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::new(1.0, 10.0, 1.0) };
     assert!(simulate(&text, &m, &t, &nan_box, &part, &params(0.01, 0.1)).is_err());
+    let cyl = StockShape::Cylinder { x_min: 0.0, x_max: 1.0, radius: 1.0 };
+    assert!(simulate(&text, &m, &t, &cyl, &part, &params(0.01, 0.1)).is_err());
     assert!(simulate(&text, &Machine::four_axis_a(), &t, &stock(), &part, &params(0.01, 0.1)).is_err());
     assert!(simulate(&text, &Machine::table_table_ac(), &t, &stock(), &part, &params(0.01, 0.1)).is_err());
     assert!(simulate(&text, &m, &[], &stock(), &part, &params(0.01, 0.1)).is_err());
@@ -419,6 +799,17 @@ fn derived_stock_and_hostile_input() {
         "M6",
     ] {
         let _ = simulate(&program(moves), &m, &t, &stock(), &part, &params(0.01, 0.2));
+    }
+    let rotary = Machine::four_axis_a();
+    let round = StockShape::Cylinder { x_min: -10.0, x_max: 10.0, radius: 12.0 };
+    for moves in [
+        "G0 X0 Y0 Z20 A0\nG1 A99999. F100",
+        "G0 X0 Y0 Z20 A0\nG1 X1. Y0. Z-60. A5. F100",
+        "G0 X0 Y0 Z20 A0\nG2 X0 Y0.001 I-5 J0 F100",
+        "G0 X0 Y0 Z20 A0\nG18 G2 X0 Z20 I999999 K0 F100",
+        "G0 X0 Y0 Z20 A0\nG19 G3 Y0 Z20 J-5 K0 F100",
+    ] {
+        let _ = simulate(&format!("T1 M6\n{moves}\n"), &rotary, &t, &round, &cylinder_x(10.0, -15.0, 15.0, 64), &params(0.01, 0.2));
     }
 }
 
@@ -546,6 +937,23 @@ fn a_long_three_axis_move_is_not_refused_for_a_fine_tolerance() {
     assert!(r.removed_volume > 0.0);
 }
 
+#[test]
+fn a_program_that_never_writes_the_rotary_is_not_taken_as_checked() {
+    // On a 4th axis a program without an A word has no block whose position is known: the
+    // report says nothing was simulated rather than looking like a clean pass.
+    let part = cylinder_x(10.0, -15.0, 15.0, 64);
+    let stock = StockShape::Cylinder { x_min: -10.0, x_max: 10.0, radius: 12.0 };
+    let text = "G21\nT1 M6\nG0 X0. Y0. Z30.\nG0 Z5.\nG1 X5. F100\nG0 Z30.\n";
+    let r = simulate(text, &Machine::four_axis_a(), &[ball(6.0)], &stock, &part, &params(0.01, 0.2)).unwrap();
+    assert_eq!(r.moves, 0);
+    assert!(r.warnings.iter().any(|w| w.contains("no move")), "{:?}", r.warnings);
+    // With the A written the same program is simulated, and its plunge to 5 is a gouge.
+    let text = "G21\nT1 M6\nG0 X0. Y0. Z30. A0.\nG0 Z5.\nG1 X5. F100\nG0 Z30.\n";
+    let r = simulate(text, &Machine::four_axis_a(), &[ball(6.0)], &stock, &part, &params(0.01, 0.2)).unwrap();
+    assert_eq!(r.moves, 4);
+    assert!(r.gouge_worst > 4.0, "{}", r.gouge_worst);
+}
+
 /// Every kind of tool has a shape in the simulation: a chamfer mill is its flat tip then its
 /// cone, a face mill a flat or bull nose by its inserts' corners, a thread mill its whole
 /// radius (as the gouge check takes it) and a drill its own point angle.
@@ -671,10 +1079,29 @@ G0 Z10.",
             assert_eq!(chunked(text, &three, std::slice::from_ref(tool), &stock(), &part, &p, seed, false), whole);
             // Parts of steps: the same stock, to rounding.
             let parts = chunked(text, &three, std::slice::from_ref(tool), &stock(), &part, &p, seed, true);
-            let (StockGrid::Heights { heights: a, .. }, StockGrid::Heights { heights: b, .. }) = (&parts.stock, &whole.stock);
+            let (StockGrid::Heights { heights: a, .. }, StockGrid::Heights { heights: b, .. }) = (&parts.stock, &whole.stock) else { panic!() };
             assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9), "seed {seed}");
             close(parts.removed_volume, whole.removed_volume, 1e-6 * whole.removed_volume.max(1.0));
         }
+    }
+    // On a 4th axis too.
+    let machine = Machine::four_axis_a();
+    let round = cylinder_x(10.0, -15.0, 15.0, 64);
+    let bar = StockShape::Cylinder { x_min: -10.0, x_max: 10.0, radius: 12.0 };
+    let text = "G21
+T1 M6
+G0 X0. Y0. Z30. A0.
+G1 Z10.5 F100
+G1 X4. A200. F2000
+G1 X-4. A0.
+G0 Z30.
+";
+    let p = params(0.01, 0.2);
+    let whole = simulate(text, &machine, &[ball(6.0)], &bar, &round, &p).unwrap();
+    for seed in [3, 9] {
+        assert_eq!(chunked(text, &machine, &[ball(6.0)], &bar, &round, &p, seed, false), whole);
+        // Tool positions along a step are whole pieces of work: exact even part way.
+        assert_eq!(chunked(text, &machine, &[ball(6.0)], &bar, &round, &p, seed, true).stock, whole.stock);
     }
 }
 
@@ -792,6 +1219,214 @@ fn a_gouge_is_found_in_a_part_whose_triangles_face_inwards() {
     close(deep.gouge_worst, 1.0, 1e-6);
 }
 
+/// The last point of the ray `(x, ρ s, ρ c)` inside the tool, by brute force.
+fn brute_exit(p: &Profile, dx: f64, y: f64, z: f64, s: f64, c: f64, cap: f64) -> Option<f64> {
+    let n = 400_000;
+    (0..=n).rev().map(|k| cap * k as f64 / n as f64).find(|&rho| {
+        let d = dx.hypot(rho * s - y);
+        d <= p.radius && rho * c >= z + p.height(d)
+    })
+}
+
+/// A ray leaves the tool (through its side, or its end along the ray) where brute force finds
+/// it: the stretch inside the tool is what a cut beside the ray removes.
+#[test]
+fn rays_leave_the_tool_where_brute_force_finds_it() {
+    for tool in [flat(6.0), ball(6.0), bull(6.0, 1.5), drill(6.0)] {
+        let p = Profile::of(&tool).unwrap();
+        for k in 0..80 {
+            let dx = -3.5 + 7.0 * ((k * 13) % 80) as f64 / 80.0;
+            let y = -4.0 + 8.0 * ((k * 29) % 80) as f64 / 80.0;
+            let z = 5.0 + 10.0 * ((k * 7) % 80) as f64 / 80.0;
+            let phi = -1.3 + 2.6 * ((k * 53) % 80) as f64 / 80.0;
+            let (s, c) = phi.sin_cos();
+            let cap = 30.0;
+            let exact = p.ray_span(dx, y, z, s, c, cap);
+            let brute = brute_exit(&p, dx, y, z, s, c, cap);
+            match (exact, brute) {
+                (Some((a, e)), Some(b)) => {
+                    assert!(a <= e + 1e-12, "{:?}: enters at {a} after it leaves at {e}", tool.kind);
+                    assert!(e >= b - 1e-9, "{:?}: leaves at {e} before {b}", tool.kind);
+                    assert!(e - b < 1e-3, "{:?}: leaves at {e} well after {b}", tool.kind);
+                }
+                (None, None) => {}
+                (e, b) => {
+                    let touch = e.map(|(_, e)| e).or(b).unwrap_or(0.0);
+                    let d = dx.hypot(touch * s - y);
+                    assert!((d - 3.0).abs() < 1e-2 || (touch - cap).abs() < 1e-2, "{:?}: {e:?} against {b:?}", tool.kind);
+                }
+            }
+        }
+    }
+}
+
+/// Passes of a Ø6 flat end mill along X from `x_from` to `x_to` at heights `z` (one per pass)
+/// and sideways places `ys`, from Z20 and back up after each: the moves of an indexed operation
+/// (the machine's X, Y and Z are the index frame's).
+fn passes(ys: &[f64], zs: &[f64], ends: &[(f64, f64)]) -> String {
+    let mut t = String::new();
+    for ((y, z), (a, b)) in ys.iter().zip(zs).zip(ends) {
+        t += &format!("G0 X{a} Y{y}\nG1 Z{z} F300\nG1 X{b} F600\nG0 Z20\n");
+    }
+    t
+}
+
+/// 3+1: an indexed flat on a round bar is modelled in the part's frame. The flat cut right
+/// leaves nothing; one pass 0.2 mm too deep is found with its depth and place, by the move
+/// watched as it cuts and in what is left; a pass cut short leaves the flat's corner, found
+/// with its height and place.
+#[test]
+fn an_indexed_flat_on_a_round_bar_is_checked() {
+    let machine = Machine::four_axis_a();
+    let part = flatted_bar(12.0, 9.0, -15.0, 15.0);
+    let tool = flat(6.0);
+    let params = params(0.01, 0.1);
+    let ys = [-6.0, -2.0, 2.0, 6.0];
+    // Down into the bar in the middle (beside the rays at a slant through it), then the passes.
+    let head = "G21\nT1 M6\nG0 X0 Y0 Z20 A90\nG0 A0\nG1 Z9 F100\nG0 Z20\n";
+    let right = format!("{head}{}", passes(&ys, &[9.0; 4], &[(-20.0, 20.0); 4]));
+    let stock = StockShape::Cylinder { x_min: -15.0, x_max: 15.0, radius: 12.0 };
+    let r = simulate(&right, &machine, std::slice::from_ref(&tool), &stock, &part, &params).unwrap();
+    assert_eq!(r.gouge_cells, 0, "{} at {:?}", r.gouge_worst, r.gouge_at);
+    assert!(r.leftover_max < 0.02, "{} at {:?}", r.leftover_max, r.leftover_at);
+    assert!(r.warnings.iter().all(|w| !w.contains("beside a ray")), "{:?}", r.warnings);
+    // The flat's volume: the segment's area (r² (2α − sin 2α) / 2, α its half angle) times 30.
+    let alpha = (9.0f64 / 12.0).acos();
+    close(r.removed_volume, 144.0 * (2.0 * alpha - (2.0 * alpha).sin()) / 2.0 * 30.0, 30.0);
+    // A pass 0.2 mm deep at Y2: found where it is, by the move that cut it.
+    let deep = format!("{head}{}", passes(&ys, &[9.0, 9.0, 8.8, 9.0], &[(-20.0, 20.0); 4]));
+    let (g, cuts) = crate::sim::simulate_watched(&deep, &machine, std::slice::from_ref(&tool), &stock, &part, &params).unwrap();
+    close(g.gouge_worst, 0.2, 0.02);
+    let at = g.gouge_at.unwrap();
+    assert!((-1.1..=5.1).contains(&at.y) && (at.z - 8.8).abs() < 0.05, "{at:?}");
+    assert!(!cuts.is_empty(), "no move was seen cutting into the part");
+    let deep_line = deep.lines().enumerate().filter(|(_, l)| l.starts_with("G1 Z8.8")).map(|(n, _)| n + 2).next().unwrap();
+    assert!(cuts.iter().all(|(l, _)| *l == deep_line), "{cuts:?} (the deep pass is line {deep_line})");
+    close(cuts[0].1, 0.2, 0.02);
+    // The last pass cut short at X4: the flat's corner from X7 on, Y5 to its edge, is left.
+    let turned = StockShape::Cylinder { x_min: -15.0, x_max: 15.0, radius: 12.5 };
+    // Turned to 12 first (a Ø6 flat end mill at Z12, a turn at every 4 mm along X).
+    let mut turn = String::from("G21\nT1 M6\nG0 X-12 Y0 Z20 A0\nG1 Z12 F300\n");
+    for (k, x) in [-12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0].iter().enumerate() {
+        turn += &format!("G1 X{x} F600\nG1 A{} F3000\n", if k % 2 == 0 { 360 } else { 0 });
+    }
+    turn += "G0 Z20\nG0 A0\n";
+    let both = format!("{turn}{}", passes(&ys, &[9.0; 4], &[(-20.0, 20.0), (-20.0, 20.0), (-20.0, 20.0), (-20.0, 4.0)]));
+    let left = simulate(&both, &machine, std::slice::from_ref(&tool), &turned, &part, &params).unwrap();
+    assert_eq!(left.gouge_cells, 0, "{}", left.gouge_worst);
+    let at = left.leftover_at.unwrap();
+    assert!(left.leftover_max > 1.0, "{}", left.leftover_max);
+    assert!(at.x > 6.9 && at.y > 4.9 && at.z > 9.0, "{at:?}");
+    // Not short, the same turned bar is left as the part.
+    let whole = format!("{turn}{}", passes(&ys, &[9.0; 4], &[(-20.0, 20.0); 4]));
+    let fine = simulate(&whole, &machine, std::slice::from_ref(&tool), &turned, &part, &params).unwrap();
+    assert!(fine.leftover_max < 0.02, "{} at {:?}", fine.leftover_max, fine.leftover_at);
+}
+
+/// 3+1: a slot cut in the side of a square bar (A at 90°, the machine's X, Y and Z those of the
+/// index frame) is left as the same slot cut on a 3-axis machine leaves it: the floor's 0.1 mm
+/// of stock and nothing on the walls, with the same volume removed, and no gouge.
+#[test]
+fn an_indexed_side_slot_simulates_like_the_same_slot_on_three_axes() {
+    let tool = flat(6.0);
+    let params = params(0.01, 0.1);
+    let slot = passes(&[-2.0, 0.0, 2.0], &[15.1; 3], &[(-25.0, 25.0), (25.0, -25.0), (-25.0, 25.0)]);
+    let part3 = slotted_bar(-20.0, 20.0);
+    let box3 = StockShape::Box { min: Vec3::new(-20.0, -20.0, -20.0), max: Vec3::new(20.0, 20.0, 20.0) };
+    let three =
+        simulate(&format!("G21\nT1 M6\nG0 X-25 Y-2 Z30\n{slot}"), &Machine::three_axis(), std::slice::from_ref(&tool), &box3, &part3, &params)
+            .unwrap();
+    let machine = Machine::four_axis_a();
+    let frame = crate::indexed::frame_for_index(&machine, &[90f64.to_radians()]).unwrap();
+    let part4 = Surface::new(part3.triangles().iter().map(|t| t.map(|p| frame.to_world(p))).collect()).unwrap();
+    let started = Instant::now();
+    let four = simulate(&format!("G21\nT1 M6\nG0 X-25 Y-2 Z30 A90\n{slot}"), &machine, std::slice::from_ref(&tool), &box3, &part4, &params).unwrap();
+    eprintln!(
+        "slot: 3-axis leftover {:.4} at {:?}, volume {:.1}; 4th axis leftover {:.4} at {:?}, volume {:.1}, {} cells, {:.2} s",
+        three.leftover_max,
+        three.leftover_at,
+        three.removed_volume,
+        four.leftover_max,
+        four.leftover_at,
+        four.removed_volume,
+        four.cells,
+        started.elapsed().as_secs_f64()
+    );
+    assert_eq!(three.gouge_cells, 0);
+    assert_eq!(four.gouge_cells, 0, "{} at {:?}", four.gouge_worst, four.gouge_at);
+    close(three.leftover_max, 0.1, 0.01);
+    assert!((four.leftover_max - three.leftover_max).abs() <= 0.05, "{} against {}", four.leftover_max, three.leftover_max);
+    close(four.removed_volume, three.removed_volume, 0.02 * three.removed_volume);
+    assert!(four.rapids_in_material.is_empty(), "{:?}", four.rapids_in_material);
+    // The slot is in the stock as the view and the checks see it: air in it, material beside it.
+    let fp = |p: Vec3| frame.to_world(p);
+    let StockGrid::Radii { gaps, .. } = &four.stock else { panic!("not radial") };
+    assert!(!gaps.is_empty());
+    let plan = plan_sim(&format!("G21\nT1 M6\nG0 X-25 Y-2 Z30 A90\n{slot}"), &machine, std::slice::from_ref(&tool), &box3, &params).unwrap();
+    let mut state = SimState::new(&plan);
+    state.advance(&plan, plan.moves(), 0.0).unwrap();
+    assert!(!state.contains(fp(Vec3::new(0.0, 4.0, 16.0))), "air in the slot, beside its wall");
+    assert!(state.contains(fp(Vec3::new(0.0, 6.0, 16.0))), "material beyond its wall");
+    assert!(state.contains(fp(Vec3::new(0.0, 4.0, 14.9))), "material under its floor");
+    // A pass 0.3 mm deeper, 0.2 mm into the floor, is a gouge, found where it is.
+    let deep = passes(&[-2.0, 0.0, 2.0], &[15.1, 14.8, 15.1], &[(-25.0, 25.0), (25.0, -25.0), (-25.0, 25.0)]);
+    let g = simulate(&format!("G21\nT1 M6\nG0 X-25 Y-2 Z30 A90\n{deep}"), &machine, std::slice::from_ref(&tool), &box3, &part4, &params).unwrap();
+    close(g.gouge_worst, 0.2, 0.02);
+    let at = g.gouge_at.unwrap();
+    let local = Vec3::new((at - frame.origin).dot(frame.x), (at - frame.origin).dot(frame.y), (at - frame.origin).dot(frame.z));
+    assert!(local.y.abs() <= 3.1 && (local.z - 14.8).abs() < 0.05, "{local:?}");
+}
+
+/// 3+1: a rapid back along a slot just cut in the side of a square bar, at the slot's depth, runs
+/// in the air the slot left (only the scallops between the cut's tool positions are left to it,
+/// less than the tolerance thick), as on a 3-axis machine: it is no rapid in material. A rapid
+/// sideways into the slot's wall is.
+#[test]
+fn a_rapid_back_along_an_indexed_slot_is_in_air() {
+    let tool = flat(6.0);
+    let params = params(0.01, 0.1);
+    let mut slot = String::new();
+    for y in [-2.0, 0.0, 2.0] {
+        slot += &format!("G0 X-25 Y{y}\nG1 Z15.1 F300\nG1 X25 F600\nG0 X-25\nG0 Z30\n");
+    }
+    let part3 = slotted_bar(-20.0, 20.0);
+    let box3 = StockShape::Box { min: Vec3::new(-20.0, -20.0, -20.0), max: Vec3::new(20.0, 20.0, 20.0) };
+    let three =
+        simulate(&format!("G21\nT1 M6\nG0 X-25 Y-2 Z30\n{slot}"), &Machine::three_axis(), std::slice::from_ref(&tool), &box3, &part3, &params)
+            .unwrap();
+    assert!(three.rapids_in_material.is_empty(), "3-axis: {:?}", three.rapids_in_material);
+    let machine = Machine::four_axis_a();
+    let frame = crate::indexed::frame_for_index(&machine, &[90f64.to_radians()]).unwrap();
+    let part4 = Surface::new(part3.triangles().iter().map(|t| t.map(|p| frame.to_world(p))).collect()).unwrap();
+    let four = simulate(&format!("G21\nT1 M6\nG0 X-25 Y-2 Z30 A90\n{slot}"), &machine, std::slice::from_ref(&tool), &box3, &part4, &params).unwrap();
+    assert!(four.rapids_in_material.is_empty(), "4th axis: {:?}", four.rapids_in_material);
+    let wall = format!("G21\nT1 M6\nG0 X-25 Y-2 Z30 A90\n{slot}G0 X0 Y0\nG0 Z16\nG0 Y4\n");
+    let into = simulate(&wall, &machine, std::slice::from_ref(&tool), &box3, &part4, &params).unwrap();
+    assert!(!into.rapids_in_material.is_empty(), "a rapid into the slot's wall was not found");
+}
+
+/// On a 4th axis the stock left along a ray is measured down to the part along that ray, and
+/// no further than the axis: a ray that meets no part before the axis (down a hole across the
+/// bar not drilled yet, or past the axis to a part on the far side) has at most its own material
+/// left, never more than the bar's radius (it read 24 mm on a 16 mm bar, from the far side of
+/// a cross hole).
+#[test]
+fn leftover_on_a_ray_is_no_more_than_its_material() {
+    let machine = Machine::four_axis_a();
+    let tool = flat(6.0);
+    // The part lies below the axis only: the rays that point up meet it past the axis.
+    let part = block(Vec3::new(-15.0, -12.0, -12.0), Vec3::new(15.0, 12.0, -6.0));
+    let stock = StockShape::Cylinder { x_min: -15.0, x_max: 15.0, radius: 12.0 };
+    let mut turn = String::from("G21\nT1 M6\nG0 X-12 Y0 Z20 A0\nG1 Z11.5 F300\n");
+    for (k, x) in [-12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0].iter().enumerate() {
+        turn += &format!("G1 X{x} F600\nG1 A{} F3000\n", if k % 2 == 0 { 360 } else { 0 });
+    }
+    turn += "G0 Z20\n";
+    let r = simulate(&turn, &machine, std::slice::from_ref(&tool), &stock, &part, &params(0.01, 0.1)).unwrap();
+    assert!(r.leftover_max <= 11.5 + 0.05, "{} mm left at {:?} on a bar turned to 11.5", r.leftover_max, r.leftover_at);
+    assert!(r.leftover_max > 11.0, "{}: the rays that meet no part keep all their material", r.leftover_max);
+}
+
 /// A sliver left along a steep wall (the finish 0.06 mm short of it, a little more than half a
 /// cell) is as thin as it is: the cells beside the wall that kept their material are measured
 /// in 3D from the part, not as the wall's full height. It was reported as 3 mm left on the
@@ -832,6 +1467,28 @@ fn a_sliver_along_a_wall_is_reported_as_thin_as_it_is() {
     assert!(r.leftover_max > 0.03 && r.leftover_max < 0.1, "{} at {:?}", r.leftover_max, r.leftover_at);
     let at = r.leftover_at.unwrap();
     assert!((at.x - 10.05).abs() < 0.06 || (at.x - 29.95).abs() < 0.06, "{at:?}");
+}
+
+/// How far the part reaches from the A axis per column (what lets the comparison pass over the
+/// rays the program never cut that end beyond the part): no less than the part there, nothing
+/// where it is not.
+#[test]
+fn the_part_reach_per_column_bounds_the_part() {
+    let part = cylinder_x(10.0, -15.0, 15.0, 64);
+    // Columns 1 mm wide from X -20: centres -19.5 to 19.5.
+    let reach = crate::sim::column_reach(&part, -20.0, 1.0, 40);
+    for (i, r) in reach.iter().enumerate() {
+        let x = -19.5 + i as f64;
+        if x.abs() < 15.0 {
+            assert!(*r >= 10.0 - 1e-9 && *r < 10.1, "{x}: {r}");
+        } else {
+            assert_eq!(*r, 0.0, "{x}");
+        }
+    }
+    // Hostile sizes give nothing, never a panic.
+    assert!(crate::sim::column_reach(&part, -20.0, 0.0, 40).iter().all(|r| *r == 0.0));
+    assert!(crate::sim::column_reach(&part, -20.0, f64::NAN, 40).iter().all(|r| *r == 0.0));
+    assert!(crate::sim::column_reach(&part, -20.0, 1.0, 0).is_empty());
 }
 
 /// Stock left standing in a through hole is leftover: a column whose ray from above meets no

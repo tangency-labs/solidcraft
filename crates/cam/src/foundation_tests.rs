@@ -115,6 +115,23 @@ pub(crate) fn flatted_bar(r: f64, h: f64, x0: f64, x1: f64) -> Surface {
     Surface::new(tris).unwrap()
 }
 
+/// A square bar from -20 to 20 in Y and Z, `x0` to `x1` along X, with a slot 10 wide and 5 deep
+/// along its whole length in its +Z face, wound outwards (its ends open: no ray of a simulation
+/// reaches them).
+pub(crate) fn slotted_bar(x0: f64, x1: f64) -> Surface {
+    let section = [(-20.0, -20.0), (20.0, -20.0), (20.0, 20.0), (5.0, 20.0), (5.0, 15.0), (-5.0, 15.0), (-5.0, 20.0), (-20.0, 20.0)];
+    let mut tris = Vec::new();
+    for k in 0..section.len() {
+        let ((y0, z0), (y1, z1)) = (section[k], section[(k + 1) % section.len()]);
+        // The section runs counter-clockwise seen from +X: outwards is to the right of each edge.
+        let out = Vec3::new(0.0, z1 - z0, -(y1 - y0));
+        let (p, q, r, s) = (Vec3::new(x0, y0, z0), Vec3::new(x1, y0, z0), Vec3::new(x1, y1, z1), Vec3::new(x0, y1, z1));
+        tris.push(facing([p, q, r], out));
+        tris.push(facing([p, r, s], out));
+    }
+    Surface::new(tris).unwrap()
+}
+
 /// A closed box from `lo` to `hi`, wound outwards.
 pub(crate) fn block(lo: Vec3, hi: Vec3) -> Surface {
     let p = |i: usize| Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z });

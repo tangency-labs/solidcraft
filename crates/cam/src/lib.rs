@@ -65,10 +65,12 @@
 //! run it, as a self-contained HTML page or as Markdown.
 //!
 //! The stock-removal simulation ([`sim`]) is an independent check of a written program: it
-//! reads the G-code as the controller runs it, sweeps the tool through a heightfield of the
-//! stock along every block, and holds what is left against the part. It reports cuts into the
-//! part (gouges, measured in 3D), material left where the program cut, rapids that cut, and
-//! cuts at the tool's full width.
+//! reads the G-code as the controller runs it, sweeps the tool through a model of the stock
+//! along every block, and holds what is left against the part. It reports cuts into the part
+//! (gouges, measured in 3D), material left where the program cut, rapids that cut, and cuts at
+//! the tool's full width. A 3-axis stock is a heightfield, with lines along X and Y beside it
+//! for a part with faces under its own material; a 4th axis's stock is rays from the axis, with
+//! the air an indexed cut leaves inside them.
 //!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe

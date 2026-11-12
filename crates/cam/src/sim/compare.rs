@@ -63,7 +63,7 @@ pub(crate) fn distance_within(surface: &Surface, p: Vec3, cap: f64) -> f64 {
 }
 
 /// Most crossings of the part's surface followed along one column when measuring a gouge.
-const MAX_CROSSINGS: usize = 64;
+pub(super) const MAX_CROSSINGS: usize = 64;
 
 /// How deep a cut along the straight column from `from` (outside the part) to `to` (where the
 /// cut ends) goes into the part, at most `cap`. The part's material along the column is found
@@ -148,13 +148,15 @@ pub(super) fn through_hole_floor(part: &Surface, x: f64, y: f64, z: f64, bottom:
 }
 
 /// The stock left in `model` (a band) against the part; cells the program cut are those below
-/// `initial` (the stock's top). At most `refine` gouged cells are measured in 3D.
-pub(super) fn compare(model: &Model, part: &Surface, tol: f64, initial: f64, refine: usize) -> Comparison {
+/// `initial` (the stock's top or radius). At most `refine` gouged cells are measured in 3D. On a
+/// 4th axis `reach` is how far the part reaches from the axis at each column ([`column_reach`]).
+pub(super) fn compare(model: &Model, part: &Surface, tol: f64, initial: f64, refine: usize, reach: &[f64]) -> Comparison {
     let mut cmp = Comparison::default();
     let (mut refined, mut unrefined, mut measured) = (0usize, 0usize, 0usize);
-    // The depth into the part of a column cut from `point(outer)` (outside the part) in to `at`,
-    // `gap` deep below the part's surface along it: `point(v)` is the column's point at height
-    // `v`. Measured in 3D over the material the column runs through ([`column_depth`]).
+    // The depth into the part of a column cut from `point(outer)` (outside the part, or inside
+    // it for air inside a ray's material) in to `at`, `gap` deep below the part's surface along
+    // it: `point(v)` is the column's point at height (or radius) `v`. Measured in 3D over the
+    // material the column runs through ([`column_depth`]).
     let mut depth = |gap: f64, at: f64, outer: f64, point: &dyn Fn(f64) -> Vec3| -> f64 {
         if refined >= refine {
             unrefined += 1;
@@ -236,6 +238,128 @@ pub(super) fn compare(model: &Model, part: &Surface, tol: f64, initial: f64, ref
                             thickness(&mut measured, (z - base).max(0.0), cmp.leftover_max, Vec3::new(x, y, z), Vec3::new(x, y, 0.5 * (z + base)));
                         leftover(&mut cmp, left, Vec3::new(x, y, z));
                     }
+                }
+            }
+        }
+        Model::Radii(r) => {
+            let out = r.radius + 1.0;
+            for k in 0..r.nt {
+                let (Some(&s), Some(&c)) = (r.sin.get(k), r.cos.get(k)) else { continue };
+                let dir = Vec3::new(0.0, s, c);
+                let start = r.start.get(k).copied().unwrap_or(initial);
+                for i in 0..r.nx {
+                    let cell = k * r.nx + i;
+                    let Some(&rho) = r.rho.get(cell) else { continue };
+                    let x = r.x0 + (i as f64 + 0.5) * r.dx;
+                    let point = |v: f64| Vec3::new(x, 0.0, 0.0) + dir * v;
+                    let Some(gaps) = r.gaps.get(cell) else {
+                        // A ray the program never cut, ending beyond all of the part there.
+                        if rho >= start - 1e-9 && reach.get(i).is_some_and(|&most| most <= rho + tol) {
+                            continue;
+                        }
+                        // One stretch of material, from the axis out to `rho`: held against
+                        // where the part starts along the ray, from outside. A part met only past
+                        // the axis (down a hole across the bar, or on the far side) is not under
+                        // this ray: its material is left down to the axis, no further.
+                        let Some((t, _)) = part.raycast(point(out), dir * -out) else { continue };
+                        let surface = (out * (1.0 - t)).max(0.0);
+                        let gap = rho - surface;
+                        if gap < -tol {
+                            let d = depth(-gap, rho, out, &point);
+                            gouge(&mut cmp, d, point(rho));
+                        }
+                        if rho < start - 1e-9 {
+                            let left = thickness(&mut measured, gap.max(0.0), cmp.leftover_max, point(rho), point(0.5 * (rho + surface)));
+                            leftover(&mut cmp, left, point(rho));
+                        }
+                        continue;
+                    };
+                    // Air inside the material: the part's stretches along the ray, each
+                    // held against the stock's.
+                    let (first, list) = ray_stretches(part, x, s, c, out);
+                    let stretches = match list {
+                        Some(l) => l,
+                        None if first.is_finite() => vec![[f64::NEG_INFINITY, first]],
+                        None => Vec::new(),
+                    };
+                    let into = |a: f64, b: f64| {
+                        stretches
+                            .iter()
+                            .map(|p| {
+                                let (o0, o1) = (a.max(p[0]), b.min(p[1]));
+                                if !(o0 < o1) {
+                                    0.0
+                                } else if p[0] == f64::NEG_INFINITY {
+                                    p[1] - o0
+                                } else {
+                                    let q = (0.5 * (p[0] + p[1])).clamp(o0, o1);
+                                    (q - p[0]).min(p[1] - q)
+                                }
+                            })
+                            .fold(0.0, f64::max)
+                    };
+                    // Cut into the part: beyond the stock's end, and in its air.
+                    let outer_cut = into(rho, out);
+                    if outer_cut > tol {
+                        let d = depth(outer_cut, rho, out, &point);
+                        gouge(&mut cmp, d, point(rho));
+                    }
+                    let mut worst_air = (0.0, 0.0);
+                    for g in gaps {
+                        let along = into(g[0], g[1]);
+                        if along > tol {
+                            let d = depth(along, g[0], g[1], &point);
+                            if d > worst_air.0 {
+                                worst_air = (d, g[0]);
+                            }
+                        }
+                    }
+                    if worst_air.0 > tol {
+                        gouge(&mut cmp, worst_air.0, point(worst_air.1));
+                    }
+                    // Material left outside the part: each piece of the stock beyond the part's
+                    // stretches, measured in 3D (its far end and its middle from the part's
+                    // surface: a sliver along a wall the ray runs beside is as thin as it is
+                    // there, however long along the ray) when it could be the most so far.
+                    let mut pieces: Vec<[f64; 2]> = Vec::with_capacity(gaps.len() + 1);
+                    let mut from = 0.0f64;
+                    for g in gaps {
+                        if g[0] > from {
+                            pieces.push([from, g[0]]);
+                        }
+                        from = from.max(g[1]);
+                    }
+                    if rho > from {
+                        pieces.push([from, rho]);
+                    }
+                    let (mut left, mut left_at) = (0.0f64, rho);
+                    for piece in pieces {
+                        let mut a = piece[0];
+                        let mut outside: Vec<[f64; 2]> = Vec::new();
+                        for p in stretches.iter().filter(|p| p[1] > piece[0] && p[0] < piece[1]) {
+                            if p[0] > a {
+                                outside.push([a, p[0].min(piece[1])]);
+                            }
+                            a = a.max(p[1]);
+                        }
+                        if piece[1] > a {
+                            outside.push([a, piece[1]]);
+                        }
+                        for o in outside {
+                            let len = o[1] - o[0];
+                            let thick = if len > tol && len > left.max(cmp.leftover_max) && measured < refine {
+                                measured += 1;
+                                let far = distance_within(part, point(o[1]), len);
+                                far.max(distance_within(part, point(0.5 * (o[0] + o[1])), len))
+                            } else {
+                                len
+                            };
+                            if thick > left {
+                                (left, left_at) = (thick, o[1]);
+                            }
+                        }
+                    }
+                    leftover(&mut cmp, left, point(left_at));
                 }
             }
         }
