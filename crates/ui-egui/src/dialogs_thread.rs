@@ -7,8 +7,8 @@
 use serde_json::{Value, json};
 use solidcraft_engine::doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
 use solidcraft_engine::doc::{
-    Document, Expr, FeatureKind, TappedThread, TappedThreadFamily, ThreadLimit, ThreadRunout, parse_metric_thread,
-    parse_tapped_thread, tapped_thread_sizes,
+    Document, Expr, FeatureKind, TappedThread, TappedThreadFamily, ThreadLimit, ThreadRunout, parse_metric_thread, parse_tapped_thread,
+    tapped_thread_sizes,
 };
 use solidcraft_engine::{Sel, Session};
 
