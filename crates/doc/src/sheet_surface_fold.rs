@@ -199,7 +199,11 @@ fn solid_of(
             let mid = run_at(run, 0.5);
             let along = run_at(run, 0.51) - run_at(run, 0.49);
             let pm = f.at(c.piece, mid, t / 2.0)?;
-            let outward = f.at(c.piece, mid + Vec2::new(along.y, -along.x).normalized().unwrap_or_default() * 1e-3, t / 2.0)? - pm;
+            // The way out of the piece, taken from a point a hair inside it: a free-form panel's
+            // flat map holds only its own domain, whose edges are the piece's, and puts no point
+            // past them on the folded sheet.
+            let within = mid - Vec2::new(along.y, -along.x).normalized().unwrap_or_default() * 1e-3;
+            let outward = pm - f.at(c.piece, within, t / 2.0)?;
             faces.push(FaceSpec { loops: vec![vec![bottom.clone(), up_b, top.reversed(), down_a]], surface, probe: Some((pm, outward)) });
             names.push(name(c.piece, FaceRole::Wall { a, b, mid }));
         }
