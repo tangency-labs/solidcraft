@@ -2769,6 +2769,7 @@ struct LevelAcc {
     uv4_old: [f64; 2],
     uv4_fork_old: [f64; 2],
     m4_lo: [[f64; MAX_E + 1]; 2],
+    uv4_lo: [f64; 2],
     uv4_lo_fork: [f64; 2],
     m4_floor: [[f64; MAX_E + 1]; 2],
     uv4_floor: [f64; 2],
@@ -2814,6 +2815,7 @@ impl LevelAcc {
             uv4_old: [0.0_f64; 2],
             uv4_fork_old: [0.0_f64; 2],
             m4_lo: [[0.0_f64; MAX_E + 1]; 2],
+            uv4_lo: [0.0_f64; 2],
             uv4_lo_fork: [0.0_f64; 2],
             m4_floor: [[0.0_f64; MAX_E + 1]; 2],
             uv4_floor: [0.0_f64; 2],
@@ -3089,12 +3091,15 @@ fn absorb_piece(
         &p.fourth,
         ctx.l_jets,
     );
-    let (_, _, pm_lo, _, _, puv_lo_fork) = &p.fourth;
+    let (_, _, pm_lo, puv_lo, _, puv_lo_fork) = &p.fourth;
     if steer {
         for (lf, plf) in acc.m4_lo.iter_mut().zip(pm_lo) {
             for (l, &pl) in lf.iter_mut().zip(plf) {
                 *l = cmax(*l, pl);
             }
+        }
+        for (l, &pl) in acc.uv4_lo.iter_mut().zip(puv_lo) {
+            *l = cmax(*l, pl);
         }
         for (l, &pl) in acc.uv4_lo_fork.iter_mut().zip(puv_lo_fork) {
             *l = cmax(*l, pl);
@@ -3523,10 +3528,18 @@ fn close_level(
     let bound = round_up(level_bound(&acc.m4_old, &acc.rows_old, &acc.uv4_old) * (1.0 + 1.0e-12));
     // the bound no finer level goes under: over the target, no level certifies the span
     // (the jets' least terms only where the bound takes the jets' sum, not with
-    // varying rows, whose own least terms are not ported: the fork's f916a8d)
+    // varying rows, whose own least terms are not ported: the fork's f916a8d). Steering,
+    // the uv curves' least term is the fork's form, as the levels are the fork's; to the
+    // target, it is each parameter's own (#2690), the form the certified bound takes: the
+    // fork's is not under that bound, and stopped a re-certificate a level short of the
+    // bound its construction proved on the span's halves (#15010)
     let k4 = h * h * h * h / 384.0;
+    let uv_lo = match ctx.halving {
+        Halving::Steers => &acc.uv4_lo_fork,
+        Halving::Ignored => &acc.uv4_lo,
+    };
     let mut lower = 0.0_f64;
-    for (m4lf, &uvl) in acc.m4_lo.iter().zip(&acc.uv4_lo_fork) {
+    for (m4lf, &uvl) in acc.m4_lo.iter().zip(uv_lo) {
         let mut sum = 0.0_f64;
         for &m in m4lf.iter().take(l_jets + 1) {
             sum += k4 * m;
@@ -3608,8 +3621,9 @@ pub struct SpanReuse<'a> {
     /// In: go on to a finer level while the bound is over the target, not only where the
     /// last level halved it (a target proved before, which a re-certificate must reach: the
     /// halving is a guess at the cost of the next level, and on bounds that differ in
-    /// their rounding it stops one run a level before the other). The least value still
-    /// stops the levels: past it no level certifies the span.
+    /// their rounding it stops one run a level before the other). The least value of the
+    /// certified bound (its uv curves' term in each parameter's own form, not the fork's
+    /// that steers the levels) still stops them: past it no level certifies the span.
     pub to_target: bool,
 }
 
