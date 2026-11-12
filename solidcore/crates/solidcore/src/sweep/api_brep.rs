@@ -1401,8 +1401,9 @@ mod tests {
 
     #[test]
     fn a_whole_turn_of_a_profile_gives_each_curve_its_analytic_face() {
-        // Not upstream (WR-448, #545, `fixes.revolve_analytic_profile_faces`): upstream
-        // makes an SmSurfOfRevolution of every curve of a profile longer than one curve
+        // Not upstream (WR-448, #545; the only path since tangency-labs/solidcraft#14425):
+        // upstream makes an SmSurfOfRevolution of every curve of a profile longer than one
+        // curve
         let mut k = Kernel::default();
         let seg =
             |a: Vec3, b: Vec3| Curve::from(BSplineCurve::create_line_segment(3, a, b).unwrap());
@@ -1428,23 +1429,16 @@ mod tests {
         // a torus from two half circles
         let outer = arc(Vec3::new(5.0, 0.0, 0.0), -Vec3::Z, Vec3::X, 1.0, 0.0, 180.0);
         let inner = arc(Vec3::new(5.0, 0.0, 0.0), Vec3::Z, -Vec3::X, 1.0, 0.0, 180.0);
-        // by default (the fix off), upstream's surfaces of revolution
-        for (fix, expected) in [
-            (false, ["revolution", "revolution"]),
-            (true, ["cylinder", "cone"]),
-        ] {
-            k.fixes.revolve_analytic_profile_faces = fix;
-            let b = create_rotational_sweep(
-                &mut k,
-                &[Some(&wall), Some(&point)],
-                Vec3::ZERO,
-                Vec3::Z,
-                360.0,
-                false,
-            )
-            .unwrap();
-            assert_eq!(face_kinds(&b), expected);
-        }
+        let b = create_rotational_sweep(
+            &mut k,
+            &[Some(&wall), Some(&point)],
+            Vec3::ZERO,
+            Vec3::Z,
+            360.0,
+            false,
+        )
+        .unwrap();
+        assert_eq!(face_kinds(&b), ["cylinder", "cone"]);
         for (curves, expected) in [
             ([Some(&dome), Some(&rim)], ["sphere", "plane"]),
             ([Some(&outer), Some(&inner)], ["torus", "torus"]),
@@ -1461,7 +1455,6 @@ mod tests {
     /// centre (c, 0, c), c = 1.28e-6, is off the axis by far less than the B-rep
     /// tolerance (SolidCraft rig shell/4847, #1123).
     fn rounded_quarter_disc(k: &mut Kernel) -> Brep {
-        k.fixes.revolve_analytic_profile_faces = true;
         let (c, r, a0) = (
             1.2846627950203038e-06,
             19.99999871533725,
@@ -1576,7 +1569,6 @@ mod tests {
     /// turn.
     fn wr471_whole_sphere() -> (Kernel, Brep) {
         let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = true;
         let off = 3e-7;
         let half = Curve::from(
             BSplineCurve::create_circle_segment(

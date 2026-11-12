@@ -1,7 +1,8 @@
 //! Regression tests for tangency-labs/solidcore#1490: a revolve's torus is built inside
 //! out, and its flag is lost (`SmSurfOfRevolution` Test #11 `"InsideOut GenCurve"`).
 //!
-//! - With `fixes.revolve_analytic_profile_faces`, `analytic_revolution` made an arc
+//! - The revolve's analytic faces (WR-448, the default since
+//!   tangency-labs/solidcraft#14425): `analytic_revolution` made an arc
 //!   falling round its minor circle an inside-out torus (and a falling meridian an
 //!   inside-out sphere). Fork tangency-labs/smlib 9853e54 builds them with
 //!   `CreateCanonical(.., FALSE, FALSE, ..)`, never inside out.
@@ -138,7 +139,6 @@ fn horn_torus(k: &mut Kernel, down: bool) -> solidcore::Brep {
 fn issue_1490_revolved_torus_is_never_inside_out() {
     for down in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = true;
         let mut b = horn_torus(&mut k, down);
         let tori: Vec<Torus> = b
             .face_list()
@@ -180,7 +180,6 @@ fn issue_1490_revolved_sphere_is_never_inside_out() {
     // a quarter disc of radius 3 (rim, arc, axis), wound either way, turned 270 degrees
     for down in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = true;
         let (o, rim, pole) = (
             Vec3::ZERO,
             Vec3::new(3.0, 0.0, 0.0),

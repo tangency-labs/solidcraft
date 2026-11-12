@@ -357,11 +357,9 @@ fn circle_round_the_bend(circle: &[Curve]) -> Vec<String> {
 
 /// The kernel's analytic circle round the bend: the bend's wall is a torus, the straight wall
 /// before it a cylinder (the kernel files a cylinder as its `Cone` class:
-/// `surface/cone.rs`, "Cones and cylinders"). Known gap: the rotational sweep classes an
-/// analytic circle's wall as a `Torus` only for a whole turn; a part turn (the bend's quarter)
-/// is a `SurfOfRevolution` (measured: 360 degrees a `Torus`, 90 a `SurfOfRevolution`).
+/// `surface/cone.rs`, "Cones and cylinders"). A part turn of the rotational sweep is the
+/// torus too (tangency-labs/solidcraft#14425).
 #[test]
-#[ignore = "known gap: a part turn of the rotational sweep is no Torus (tangency-labs/solidcraft#14425)"]
 fn an_analytic_circle_round_a_bend_and_a_corner_turns_a_torus() {
     let k = Kernel::default();
     let kinds = circle_round_the_bend(&analytic_circle(&k, 2.0));
@@ -369,14 +367,19 @@ fn an_analytic_circle_round_a_bend_and_a_corner_turns_a_torus() {
     assert_eq!((count("Torus("), count("Cone(")), (1, 1), "{kinds:?}");
 }
 
-/// A B-spline circle (`create_circle`) round the bend, a separate case: its bend's wall is the
-/// circle's exact surface of revolution, not recognised as a torus.
+/// A B-spline circle (`create_circle`) round the bend, a separate case: the sweep recognises
+/// the circle in its B-spline form, so the bend's wall is the torus too
+/// (tangency-labs/solidcraft#14425).
 #[test]
-fn a_b_spline_circle_round_a_bend_turns_an_exact_surface_of_revolution() {
+fn a_b_spline_circle_round_a_bend_turns_a_torus() {
     let circle = vec![Curve::from(create_circle(Point3::ZERO, 2.0).unwrap())];
     let kinds = circle_round_the_bend(&circle);
     let count = |name: &str| kinds.iter().filter(|s| s.starts_with(name)).count();
-    assert_eq!(count("SurfOfRevolution("), 1, "{kinds:?}");
+    assert_eq!(
+        (count("Torus("), count("SurfOfRevolution(")),
+        (1, 0),
+        "{kinds:?}"
+    );
 }
 
 /// A corner straight after a bend, and a helix, are refused by name.

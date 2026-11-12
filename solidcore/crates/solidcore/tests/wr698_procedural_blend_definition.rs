@@ -954,7 +954,8 @@ fn a_revolved_label_needs_the_form_s_parametrisation() {
         rounded,
     ];
     let mut checked = 0;
-    for b in &bodies {
+    let mut refused = 0;
+    for (index, b) in bodies.iter().enumerate() {
         for f in b.faces().ids() {
             let s = face::surface(b, f).unwrap().unwrap();
             let Some(a) = AnalyticSupport::of(s) else {
@@ -964,6 +965,25 @@ fn a_revolved_label_needs_the_form_s_parametrisation() {
                 continue;
             }
             let form = as_b_spline(&k, s).unwrap().unwrap().into_owned();
+            if index == 7 {
+                // the partial torus, a Torus since #14425: on this kernel its derived
+                // support is refused (tangency-labs/solidcraft#15314)
+                assert_eq!(a.kind(), SupportKind::Torus);
+                let derived = AnalyticSupport::derive(&k, a.kind(), &form)
+                    .and_then(|d| d.build(&k, form.copy()));
+                assert!(
+                    matches!(
+                        derived,
+                        Err(solidcore::error::SolidError::InvalidInput {
+                            operation: "surface::implicit::AnalyticSupport::build",
+                            reason: "a support's analytic kind disagrees with its NURBS form",
+                        })
+                    ),
+                    "{derived:?}"
+                );
+                refused += 1;
+                continue;
+            }
             let back = AnalyticSupport::derive(&k, a.kind(), &form)
                 .and_then(|d| d.build(&k, form.copy()))
                 .unwrap();
@@ -988,8 +1008,8 @@ fn a_revolved_label_needs_the_form_s_parametrisation() {
             checked += 1;
         }
     }
-    // (the partial torus is a surface of revolution, no support label)
-    assert_eq!(checked, 8);
+    // (the partial torus's one face is refused above, tangency-labs/solidcraft#15314)
+    assert_eq!((checked, refused), (8, 1));
 
     // a quarter cylinder of radius 2 about z from height 0 to 5, its quarter circle the
     // rational quadratic arc with end weights 1 and c^2 (c = 1 the circle's own
@@ -1123,7 +1143,9 @@ fn a_support_builds_from_its_own_label() {
         create_partial_torus(&mut k, o, 5.0, 1.5, 30.0, 140.0).unwrap(),
     ];
     let mut faces = 0;
-    for b in &bodies {
+    let mut refused = 0;
+    let not_its_form = "a support's analytic surface is not its NURBS form's parametrisation";
+    for (index, b) in bodies.iter().enumerate() {
         for f in b.faces().ids() {
             let s = face::surface(b, f).unwrap().unwrap();
             let Some(label) = AnalyticSupport::of(s) else {
@@ -1132,12 +1154,31 @@ fn a_support_builds_from_its_own_label() {
             if label.kind() == SupportKind::Plane {
                 continue;
             }
+            if index == 7 {
+                // the partial torus, a Torus since #14425: on this kernel its own label
+                // is refused (tangency-labs/solidcraft#15314)
+                assert_eq!(label.kind(), SupportKind::Torus);
+                let form = as_b_spline(&k, s).unwrap().unwrap().into_owned();
+                let own = label.build(&k, form.copy());
+                assert!(
+                    matches!(
+                        own,
+                        Err(solidcore::error::SolidError::InvalidInput {
+                            operation: "surface::implicit::AnalyticSupport::build",
+                            reason,
+                        }) if reason == not_its_form
+                    ),
+                    "{own:?}"
+                );
+                refused += 1;
+                continue;
+            }
             builds_from_its_own_label(&k, s, label.kind());
             faces += 1;
         }
     }
-    // (the partial torus is a surface of revolution, no support label)
-    assert_eq!(faces, 7);
+    // (the partial torus's one face is refused above, tangency-labs/solidcraft#15314)
+    assert_eq!((faces, refused), (7, 1));
 
     // a label off its form is still refused: the #2554 cone's radius changed by 1e-9,
     // which is far above the rounding of the recognition the old check compared against

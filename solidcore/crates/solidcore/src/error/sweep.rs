@@ -13,6 +13,7 @@
 //! | [`SweepFailure::RailPastStationCap`]  | `SM_ERR`                 |
 //! | [`SweepFailure::Failed`]              | `SM_ERR`                 |
 //! | [`SweepFailure::Missing`]             | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::InconsistentVertexUses`] | `SM_ERR`              |
 //!
 //! Deviations: not upstream. A failure says in a phrase what went wrong; the failure's
 //! `operation` path says which routine. No failure names an entity: the sites they replace named
@@ -41,13 +42,22 @@ pub enum SweepFailure {
     /// Something a sweep routine needs is missing, as the phrase says (for example "the
     /// edge's curve").
     Missing(&'static str),
+    /// A rotational topology sweep's result has `vertex_count` vertices whose vertex uses are
+    /// not consistent (`check_brep`'s Level 0 vertex test #2): a vertex duplicated where the
+    /// sweep should have reused one, or mated edge uses running one way (#14425).
+    InconsistentVertexUses {
+        /// The vertices that fail the check.
+        vertex_count: usize,
+    },
 }
 
 impl SweepFailure {
     /// The status the C++ reports for it (a comparison detail): `SM_ERR`.
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::RailPastStationCap { .. } | Self::Failed(_) => SM_ERR,
+            Self::RailPastStationCap { .. }
+            | Self::Failed(_)
+            | Self::InconsistentVertexUses { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
         }
     }
@@ -59,7 +69,9 @@ impl SweepFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::RailPastStationCap { .. } => ErrorKind::NotWithinTolerance,
-            Self::Failed(_) | Self::Missing(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::Failed(_) | Self::Missing(_) | Self::InconsistentVertexUses { .. } => {
+                ErrorKind::of_status(self.comparison_status())
+            }
         }
     }
 
@@ -70,7 +82,7 @@ impl SweepFailure {
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
         match self {
-            Self::RailPastStationCap { .. } => false,
+            Self::RailPastStationCap { .. } | Self::InconsistentVertexUses { .. } => false,
             Self::Failed(_) | Self::Missing(_) => true,
         }
     }
@@ -81,6 +93,10 @@ impl core::fmt::Display for SweepFailure {
         match *self {
             Self::Failed(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::InconsistentVertexUses { vertex_count } => write!(
+                f,
+                "the swept body's vertex uses are not consistent at {vertex_count} vertices"
+            ),
             Self::RailPastStationCap {
                 asked,
                 reached,
@@ -191,6 +207,23 @@ mod tests {
         assert!(!cap.replaces_upstream_status());
         assert!(e.is_status_answer());
         assert!(!e.is_port_failure());
+    }
+
+    /// #14425: a rotational sweep's inconsistent vertex uses refuse with `SM_ERR`, kind
+    /// `failed`, and no upstream status (solidcore's own check, replacing none).
+    #[test]
+    fn inconsistent_vertex_uses_report_sm_err() {
+        let f = SweepFailure::InconsistentVertexUses { vertex_count: 2 };
+        let e = SolidError::sweep("sweep::topology_sweep", f);
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), ErrorKind::Failed);
+        assert_eq!(e.upstream_status(), None);
+        assert!(!f.replaces_upstream_status());
+        assert_eq!(e.sweep_failure(), Some(&f));
+        assert_eq!(
+            e.to_string(),
+            "sweep::topology_sweep: the swept body's vertex uses are not consistent at 2 vertices"
+        );
     }
 
     /// The sweep routines describe their failures: their library code builds no bare

@@ -73,7 +73,6 @@
   "crv_in_volume_mults_by_break_index",
   "curve_bounded_surface_read_uv_type_and_implicit_outer",
   "planar_path_profile_placement_statuses",
-  "revolve_analytic_profile_faces",
   "taper_tangent_corner_planes",
   "revolve_nested_shells_as_cavities",
   "revolve_holed_profile_void",

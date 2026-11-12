@@ -108,6 +108,12 @@ the predicate matched each within `2e-7` relative. Over 1,500 random cones and t
 (origins up to `1e6`, turns from `1e-10` to 359 degrees and negative ones) every freed
 read was rejected, and the guard accepts 195 cones and 250 tori the earlier guards
 rejected (`ub215_exact_guard_accepted.json` compares 30 of them and hand-picked edges).
+Since #14425 a revolved line's face is the analytic cylinder or cone, whose height
+parameter spans the line's length (`|Sv| = 1`), so `IsDegenerateCurve` no longer refuses a
+side line shorter than `1e-6`: `ub215_degenerate_face_side_line_5e-7` and `_9.9e-7` and
+`ub215b_cone_random_refused_5`, `_6` and `_7` refuse later, with `1006` (the topology
+sweep's missing entity), not `1007`. Both are refusals; the test's dependence on the
+parametrisation is tangency-labs/solidcraft#15350.
 It still refuses some inputs that run: faces within the margin, a short line behind a
 face refused earlier in the sweep, and tori whose face build fails (`SM_ERR`) before the
 read, which is most minor radii from about `6.3e-7` up to the zone tolerance (not
