@@ -516,3 +516,107 @@ fn a_bore_minus_its_copy_is_empty_when_the_sector_steps_off() {
         assert_eq!(faces_left_by_own_copy(&mut k, b), 0, "r {r}");
     }
 }
+
+// ---- a box edge cutting a small sphere's circle just inside its tangent ---------------
+
+/// `|sphere(0, r) ∩ {y <= -delta} ∩ {z >= zmin}|`, by the midpoint rule over slices in y
+/// (each slice a disc less the segment below `zmin`); its error is far below the test's.
+fn sphere_box_corner_volume(r: f64, delta: f64, zmin: f64) -> f64 {
+    let n = 200_000;
+    let h = (r - delta) / f64::from(n);
+    let d = -zmin;
+    let slice = |y: f64| {
+        let s2 = (r * r - y * y).max(0.0);
+        let s = s2.sqrt();
+        let below = if d < s {
+            s2 * (d / s).acos() - d * (s2 - d * d).sqrt()
+        } else {
+            0.0
+        };
+        PI * s2 - below
+    };
+    (0..n)
+        .map(|i| slice(-r + (f64::from(i) + 0.5) * h))
+        .sum::<f64>()
+        * h
+}
+
+/// An r = 0.3 mm sphere and a box whose bottom face cuts a cap 1.2e-5 to 1.5e-5 high off
+/// it (about one tolerance, 1e-5) and whose side face y = -delta passes near the centre,
+/// away from the sphere's seam. The box's bottom edge crosses each of the two circles the
+/// faces cut from the sphere twice, the two crossings 1.2e-4 to 1.6e-4 apart. The
+/// circle/line intersector looks for a line within ten intersection tolerances (2e-4) of
+/// the circle and also merged two crossings closer than that into one point mid-chord, off
+/// the circle, so no crossing was found, the box edge was not split, and the boolean gave
+/// nothing, the sphere alone (57 % off) or "no radial sector" (`gen0150` of the golden unit
+/// `boolean.api_brep` is this case with the sphere's seam close to the side face). The
+/// crossings are now merged only within the intersection tolerance: union, intersection
+/// and difference integrate to the exact volume and check clean at Level2. The volume
+/// tolerance (1e-3 relative) allows for tolerance-wide slivers at a 0.3 mm scale
+/// (measured: below 1e-5).
+#[test]
+fn sphere_box_edge_cutting_a_shallow_cap() {
+    let r: f64 = 3e-4;
+    let sphere = 4.0 / 3.0 * PI * r.powi(3);
+    let mut failures = Vec::new();
+    for (delta, cap) in [(5e-5, 1.5e-5), (6e-5, 1.2e-5)] {
+        let zmin = -r + cap;
+        let size = [8e-4, 4e-4 - delta, 4e-4 - zmin];
+        let block = size[0] * size[1] * size[2];
+        let common = sphere_box_corner_volume(r, delta, zmin);
+        for (op, want) in [
+            (Op::Union, sphere + block - common),
+            (Op::Intersection, common),
+            (Op::Difference, sphere - common),
+        ] {
+            let name = match op {
+                Op::Union => "union",
+                Op::Intersection => "intersection",
+                Op::Difference => "difference",
+            };
+            let mut k = Kernel::default();
+            let a = api::create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), r).unwrap();
+            let b = api::create_box(
+                &mut k,
+                Point3::new(-4e-4, -4e-4, zmin),
+                size[0],
+                size[1],
+                size[2],
+            )
+            .unwrap();
+            let result = match op {
+                Op::Union => boolean_union(&mut k, a, b),
+                Op::Intersection => boolean_intersection(&mut k, a, b),
+                Op::Difference => boolean_difference(&mut k, a, b),
+            };
+            let mut brep = match result {
+                Ok(b) => b,
+                Err(e) => {
+                    failures.push(format!("delta {delta:e} cap {cap:e} {name}: {e}"));
+                    continue;
+                }
+            };
+            let store = AttributeStore::new();
+            let key_of = |_| ObjectKey(0);
+            let attrs = PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            };
+            let v = brep_volume(&k, &mut brep, 1e-9, &attrs).unwrap();
+            let rel = (v - want).abs() / want;
+            if rel > 1e-3 {
+                failures.push(format!(
+                    "delta {delta:e} cap {cap:e} {name}: volume {v:e} vs {want:e} (rel {rel:.2e})"
+                ));
+            }
+            let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
+            if !check.is_valid() {
+                failures.push(format!(
+                    "delta {delta:e} cap {cap:e} {name}: Level2 {:?}",
+                    check.lines()
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
