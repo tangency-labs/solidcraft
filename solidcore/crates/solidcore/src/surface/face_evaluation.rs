@@ -7,7 +7,10 @@
 //! The nearest point is a Newton iteration on the squared distance from the guess, each step the
 //! Newton step where the distance's Hessian is positive and the Gauss-Newton step otherwise,
 //! clamped to the face's parameter box, at most [`MAX_NEAREST_STEPS`] steps: it stops when a step
-//! moves (u, v) by no more than their rounding, and is refused (`NotConverged`) past the cap.
+//! moves (u, v) by no more than their rounding, or once a step within the square root of the
+//! rounding no longer halves the one before (Newton's quadratic steps have reached the noise of
+//! the evaluations, which dither (u, v) in their last bits), and is refused (`NotConverged`) past
+//! the cap.
 //! Nothing is sampled, and the steps are a function of the inputs alone.
 //!
 //! Not upstream. Deviations: none (no upstream counterpart). No recursion.
@@ -135,6 +138,8 @@ pub fn nearest(k: &Kernel, f: &FaceSurface, p: Point3, guess: [f64; 2]) -> Resul
     }
     let flags = EvaluateFlags::default();
     let mut uv = f.uv_domain.clamp_point(kernel_uv(f, guess));
+    // the last step's size, relative to (u, v)
+    let mut last = f64::INFINITY;
     for step in 1..=MAX_NEAREST_STEPS {
         let d = f.surface.evaluate(k, uv, 2, 2, flags)?;
         let (s, su, sv) = (
@@ -168,10 +173,13 @@ pub fn nearest(k: &Kernel, f: &FaceSurface, p: Point3, guess: [f64; 2]) -> Resul
         let du = -(c * fu - b * fv) / det;
         let dv = -(a * fv - b * fu) / det;
         let next = f.uv_domain.clamp_point(Point2::new(uv.x + du, uv.y + dv));
-        let moved = (next.x - uv.x).abs() <= 4.0 * f64::EPSILON * (1.0 + uv.x.abs())
-            && (next.y - uv.y).abs() <= 4.0 * f64::EPSILON * (1.0 + uv.y.abs());
+        let size = ((next.x - uv.x).abs() / (1.0 + uv.x.abs()))
+            .max((next.y - uv.y).abs() / (1.0 + uv.y.abs()));
+        let settled =
+            size <= 4.0 * f64::EPSILON || (size <= f64::EPSILON.sqrt() && size >= 0.5 * last);
+        last = size;
         uv = next;
-        if moved {
+        if settled {
             let point = f.surface.evaluate_point(k, uv)?;
             return Ok(Nearest {
                 uv: [uv.x / f.scale[0], uv.y / f.scale[1]],
