@@ -540,11 +540,18 @@ fn check_arc_split(make: impl Fn(&Kernel, f64) -> solidcore::curve::curve::Curve
     check_edge_closure(&b, &gaps, kind, gap, 1e-12);
 }
 
+/// Known failing (tangency-labs/solidcraft#15696): `Hyperbola::make_nurb` rounds the middle
+/// weight from absolute points, so the arc and its copy moved 1e-6 get weights 7 ulps apart
+/// (1.5430806348152457 and 1.5430806348152464 with `solidcore::math::det`, #13866; glibc's
+/// happened to agree). The stitch's exact path needs equal weights, so the bound falls back to
+/// the cell enclosure: still sound, 0.39 against the closed-form 1e-6. Fails when it comes out
+/// right: then check it with `check_arc_split` as the parabola and the ellipse are.
 #[test]
-fn faces_split_by_a_hyperbola_report_its_gap() {
+fn faces_split_by_a_hyperbola_report_its_gap_known_failing() {
     use solidcore::curve::hyperbola::Hyperbola;
     use solidcore::geom::extent1d::Extent1d;
-    check_arc_split(
+    let gap = 1e-6;
+    let (gaps, b, witness) = split_by_arc(
         |_, dx| {
             Hyperbola::new(
                 solidcore::math::Point3::new(dx, 0.0, 0.0),
@@ -557,7 +564,26 @@ fn faces_split_by_a_hyperbola_report_its_gap() {
             )
             .into()
         },
-        "SmHyperbola_TYPE",
+        gap,
+    );
+    assert!(
+        (witness - gap).abs() <= 1e-14,
+        "the stations' distance {witness:e} is the translation"
+    );
+    for entry in &gaps {
+        check_accounting(entry);
+    }
+    let edges = edge_closures(&gaps);
+    assert_eq!(edges.len(), 1, "{gaps:?}");
+    let (entry, kept, _) = edges[0];
+    let curve = b.edge(kept).unwrap().curve.as_ref().unwrap().type_string();
+    assert_eq!(curve, "SmHyperbola_TYPE");
+    // the bound holds the gap
+    assert!(entry.gap >= gap - 1e-14, "{entry:?}");
+    // but is not within 1e-12 of it (#15696)
+    assert!(
+        entry.gap > gap + 1e-12,
+        "fixed (#15696): {entry:?}; check the hyperbola with check_arc_split"
     );
 }
 

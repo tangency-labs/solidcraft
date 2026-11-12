@@ -10,7 +10,9 @@
 //! `offset_extension_as_itself` (the least set under which it shows; any one of them off and the
 //! round builds), the arc's round followed by the front edge's fails in the rollover
 //! (`SM_ERR_NULL_POINTER` from `blend::fillet_solver::p5`) and noted nothing: code 0 and no
-//! comment. It now notes `SM_FILERR_EDGE_PROBLEM` (4) with what failed.
+//! comment. It now notes `SM_FILERR_EDGE_PROBLEM` (4) with what failed. Since #13866 (one
+//! libm, `solidcore::math::det`) it fails a stage earlier, in the fillet surface computation,
+//! which notes the same code; none of these inputs reaches the rollover any more.
 //!
 //! A round that fails after it has edited the body puts the body back as it came in: two of the
 //! three join edges of two cylinders joined at an angle.
@@ -311,8 +313,11 @@ fn every_failure_notes_its_status() {
     }
 }
 
-/// With the three fixes the arc's round followed by the front edge's fails in the rollover and
-/// notes it: `SM_FILERR_EDGE_PROBLEM` with what failed, not code 0.
+/// With the three fixes the arc's round followed by the front edge's fails and notes it:
+/// `SM_FILERR_EDGE_PROBLEM` (4), not code 0. With glibc's libm it failed in the rollover,
+/// noted "Fillet Surface Computation Failure: " with what failed; the libm moves where it
+/// fails, and with `solidcore::math::det`'s (#13866) the fillet surface computation fails
+/// first, one stage earlier, with the same code and its own note.
 #[test]
 fn the_rollover_failure_notes_its_status() {
     let failed = failures(arc_top(), LONG);
@@ -321,10 +326,7 @@ fn the_rollover_failure_notes_its_status() {
         .expect("the second round fails with the three fixes");
     assert_eq!(*which, "second");
     assert_eq!(*code, 4, "{comment}");
-    assert!(
-        comment.starts_with("Fillet Surface Computation Failure: "),
-        "{comment}"
-    );
+    assert_eq!(comment, "Fillet Surface Computation Failure", "{comment}");
 }
 
 /// Every vertex's point and tolerance; every edge's tolerance, its curve's points at the start,
