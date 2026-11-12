@@ -202,6 +202,24 @@ pub(crate) fn polar_coefficients(
 /// degree, knots and controls); see [`Cone::checked_memo`].
 const KEY_SCALARS: usize = 36;
 
+/// A cylinder point that passed its check: the bits of its parameters and candidate, and
+/// the two out-of-bounds settings.
+type PassedPoint = ([u64; 5], [bool; 2]);
+
+/// Slots of the passed cylinder points ([`MemoSlots::runtime_passed`]).
+const PASSED_SLOTS: usize = 512;
+
+/// The slot of a passed point, from its bits alone (a multiplicative mix, deterministic).
+fn passed_slot((point, bounds): &PassedPoint) -> usize {
+    let h = point
+        .iter()
+        .chain(&[u64::from(bounds[0]) | (u64::from(bounds[1]) << 1)])
+        .fold(0x243f_6a88_85a3_08d3_u64, |h, &b| {
+            (h ^ b).wrapping_mul(0x9e37_79b9_7f4a_7c15).rotate_left(29)
+        });
+    usize::try_from(h >> 32).map_or(0, |slot| slot & (PASSED_SLOTS - 1))
+}
+
 /// The STEP angles whose certified sine and cosine [`CheckedMemo`] keeps.
 const ANGLES: usize = 4;
 
@@ -229,7 +247,9 @@ struct MemoSlots {
     next_angle: usize,
     /// The data, the NURB parameters and the point, and the two out-of-bounds settings
     /// of the last point [`Cone::verify_cylinder_runtime_point`] passed.
-    runtime_passed: Option<(Arc<CheckedData>, [u64; 5], [bool; 2])>,
+    /// The points [`Cone::verify_cylinder_runtime_point`] passed with the checked data
+    /// they were checked against, one per slot ([`passed_slot`]).
+    runtime_passed: Option<(Arc<CheckedData>, Vec<Option<PassedPoint>>)>,
     /// The frame, the STEP parameters and the point of the last point
     /// [`Cone::verify_cylinder_step_point`] passed.
     step_passed: Option<[u64; 15]>,
@@ -260,8 +280,18 @@ impl CheckedMemo {
 }
 
 impl Clone for CheckedMemo {
+    /// A copy keeps the derived data and angles; its passed points start empty (a copy
+    /// meets few of them, and which are kept never changes an answer), so copying a
+    /// cylinder never copies the table.
     fn clone(&self) -> Self {
-        Self(Box::new(Mutex::new(self.slots().clone())))
+        let slots = self.slots();
+        Self(Box::new(Mutex::new(MemoSlots {
+            data: slots.data.clone(),
+            angles: slots.angles,
+            next_angle: slots.next_angle,
+            runtime_passed: None,
+            step_passed: slots.step_passed,
+        })))
     }
 }
 
@@ -653,9 +683,12 @@ impl Cone {
                 self.rev().is_out_of_bounds_enabled(),
                 polar.base().is_out_of_bounds_enabled(),
             ];
+            let passed_point = (point, bounds);
+            let slot = passed_slot(&passed_point);
             let passed = |slots: &MemoSlots| {
-                slots.runtime_passed.as_ref().is_some_and(|(data, p, b)| {
-                    Arc::ptr_eq(data, &memo) && *p == point && *b == bounds
+                slots.runtime_passed.as_ref().is_some_and(|(data, table)| {
+                    Arc::ptr_eq(data, &memo)
+                        && table.get(slot).copied().flatten() == Some(passed_point)
                 })
             };
             if passed(&self.checked.slots()) {
@@ -663,7 +696,22 @@ impl Cone {
             }
             let reference = self.cylinder_point_enclosure(k, uv, Some(&memo))?;
             verify_point(reference, candidate, memo.cap)?;
-            self.checked.slots().runtime_passed = Some((memo, point, bounds));
+            let mut slots = self.checked.slots();
+            // a table checked against other data is replaced, never mixed
+            let fresh = !slots
+                .runtime_passed
+                .as_ref()
+                .is_some_and(|(data, _)| Arc::ptr_eq(data, &memo));
+            if fresh {
+                slots.runtime_passed = Some((Arc::clone(&memo), vec![None; PASSED_SLOTS]));
+            }
+            if let Some(entry) = slots
+                .runtime_passed
+                .as_mut()
+                .and_then(|(_, table)| table.get_mut(slot))
+            {
+                *entry = Some(passed_point);
+            }
             return Ok(());
         }
         let Some(cap) = self.cylinder_runtime_allowance(k)? else {
