@@ -589,6 +589,9 @@ impl SurfaceSheet {
         if runs.iter().any(|&(_, _, _, angle, _)| !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6)) {
             return err("the flange angle must be between 0 and 180°");
         }
+        if radius == 0.0 {
+            return err(crate::sheet::KNIFE_EDGE);
+        }
         let (a, b, d) = straight(&edge)?;
         let on = |l: &Loop2| l.segs.iter().any(|s| matches!(*s, Seg2::Line { a: x, b: y } if x.dist(a) <= 1e-9 && y.dist(b) <= 1e-9));
         if self.sheet.panels.get(edge.panel).is_some_and(|x| x.region.holes.iter().any(on)) {
@@ -806,6 +809,9 @@ impl SurfaceSheet {
         }
         if !(radius >= 0.0) {
             return err("the bend radius must not be negative");
+        }
+        if radius == 0.0 {
+            return err(crate::sheet::KNIFE_EDGE);
         }
         let t = self.sheet.thickness;
         let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
@@ -1727,6 +1733,10 @@ impl SurfaceSheet {
         let t = self.sheet.thickness;
         if gap < 0.0 {
             return err("the hem gap must not be negative");
+        }
+        // The hem's bend keeps an inside radius of half the gap: a gap of 0 is a knife edge.
+        if gap == 0.0 {
+            return err("the hem gap must be more than 0: the hem's bend keeps an inside radius of half the gap, and no material bends to a knife edge");
         }
         let radius = gap / 2.0;
         let leg = length - (radius + t);

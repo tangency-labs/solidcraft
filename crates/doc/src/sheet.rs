@@ -690,6 +690,13 @@ fn rule_corner_relief() -> String {
 fn rule_corner_relief_shape() -> String {
     ReliefShape::Notch.name().into()
 }
+/// Why a bend radius of 0 is refused wherever it is given (a rule, a fold, a flange): every bend
+/// keeps an inside radius. At 0 the inside fiber would close to nothing (all of its length
+/// compressed away), no press brake or forming tool makes that, and the part could not be built
+/// either: the bend's end wall would join a line on one face of the sheet to an arc on the other.
+pub(crate) const KNIFE_EDGE: &str =
+    "a bend radius of 0 can't be made: no material bends to a knife edge, so give the smallest inside radius your material and tooling form";
+
 fn rule_hem_gap() -> String {
     "0.01 mm".into()
 }
@@ -890,12 +897,15 @@ impl Document {
             angle_display: AngleDisplay::parse(&r.angle_display)
                 .ok_or_else(|| DocError::Invalid(format!("unknown bend angle display `{}` (bend or included)", r.angle_display)))?,
         };
-        // Each value named on its own: a sharp bend (radius 0) is allowed (#9625).
+        // Each value named on its own (#9625). A radius of 0 is refused (see [`KNIFE_EDGE`]).
         if !(0.0..=1.0).contains(&v.k_factor) {
             return Err(DocError::Invalid("the K-factor must be between 0 and 1".into()));
         }
         if !(v.bend_radius >= 0.0) {
             return Err(DocError::Invalid("the bend radius must not be negative".into()));
+        }
+        if v.bend_radius == 0.0 {
+            return Err(DocError::Invalid(KNIFE_EDGE.into()));
         }
         // Flanges closed at a corner with no gap would touch, as no formed part's do.
         if !(v.gap >= MIN_CORNER_GAP) {

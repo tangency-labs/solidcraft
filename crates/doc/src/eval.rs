@@ -6392,9 +6392,10 @@ fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> (f64, Ve
     (if lowest.is_finite() { top.min(lowest / 2.0) } else { top }, near)
 }
 
-/// [`hole_tools`], each with its exact geometry when it is a straight cylinder along the axis
-/// (a plain hole, a counterbore, a drill point left in the air past a through hole), so sheet
-/// metal can keep it as a flat cut-out or pocket. Each tool's faces are named by the part of the
+/// [`hole_tools`], each with its exact geometry when it drills a straight cylinder along the axis
+/// (a plain hole, a counterbore, a drill point left in the air past a through hole; its run-on
+/// above the face kept clear of material there or not), so sheet metal can keep it as a flat
+/// cut-out or pocket. Each tool's faces are named by the part of the
 /// hole it cuts (`bore`, `cbore`, `csink`: `F7:cbore:base` is a counterbore's floor).
 #[allow(clippy::too_many_arguments)]
 fn hole_tools_and_prisms(
@@ -6547,9 +6548,11 @@ fn hole_tools_and_prisms(
         return Ok(tools);
     }
     // The material above the face the run-on would reach, left out of each tool it meets; such
-    // a tool is no longer a plain cylinder.
+    // a tool is no longer a plain cylinder. Its exact geometry stays: what it drills below the
+    // face, in the material it enters, is still that cylinder, and sheet metal keeps only that
+    // (it takes a drill that meets one panel and nothing else of the sheet).
     let mut kept = Vec::with_capacity(tools.len());
-    for (mut tool, mut prism) in tools {
+    for (mut tool, prism) in tools {
         for piece in &above {
             // Best effort: where the kernel cannot answer, the tool stays as it was before.
             if !matches!(kernel::boolean(&tool.body, piece, BoolOp::Intersect), Ok(Some(_))) {
@@ -6557,7 +6560,6 @@ fn hole_tools_and_prisms(
             }
             let Ok(Some(cut)) = kernel::boolean(&tool.body, piece, BoolOp::Cut) else { continue };
             tool = Traced::step(cut, &[&tool, &Traced::unnamed(piece.clone())]);
-            prism = None;
         }
         kept.push((tool, prism));
     }

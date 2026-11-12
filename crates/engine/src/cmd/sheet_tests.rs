@@ -586,8 +586,35 @@ fn a_refused_rule_names_the_value_at_fault() {
     assert!(e.contains("the bend radius must not be negative") && !e.contains("K-factor"), "{e}");
     let e = refused(&mut s, json!({"name": "R", "thickness": 2, "k_factor": 3}));
     assert!(e.contains("the K-factor must be between 0 and 1") && !e.contains("bend radius"), "{e}");
-    // A sharp bend (radius 0) is allowed, and the message no longer says otherwise.
-    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 2, "bend_radius": 0}));
+    // A bend radius of 0 is refused: no material bends to a knife edge (see
+    // `a_bend_radius_of_0_is_refused_wherever_it_is_given`).
+    let e = refused(&mut s, json!({"name": "R", "thickness": 2, "bend_radius": 0}));
+    assert!(e.contains("a bend radius of 0 can't be made") && !e.contains("negative"), "{e}");
+}
+
+/// Every bend keeps an inside radius. At 0 the inside fiber would close to nothing (all of its
+/// length compressed away), which no press brake or forming tool makes, and the bend could not be
+/// built either: its end wall would join a line on one face of the sheet to an arc on the other.
+/// So a radius of 0 is refused wherever it is given: in a rule, on a fold, on a flange, and as a
+/// hem's gap (its bend's inside radius is half the gap). Each refusal leaves the design as it was.
+#[test]
+fn a_bend_radius_of_0_is_refused_wherever_it_is_given() {
+    let mut s = Session::default();
+    let e = s.execute("sheet.manage_rules", &json!({"name": "Sharp", "thickness": 1.2, "bend_radius": 0})).unwrap_err().to_string();
+    assert!(e.contains("a bend radius of 0 can't be made"), "{e}");
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 1.2, "bend_radius": 1.2, "active": true}));
+    base(&mut s, 100.0, 60.0);
+    for (command, p) in [
+        ("sheet.fold", json!({"points": [[80, 0, 1.2], [80, 60, 1.2]], "fixed": [10, 30, 1.2], "radius": 0})),
+        ("sheet.flange", json!({"edges": [[50, 0, 1.2]], "height": 20, "radius": 0})),
+        ("sheet.hem", json!({"edges": [[50, 0, 1.2]], "length": 8, "gap": 0})),
+    ] {
+        let before = s.doc.to_json();
+        let e = s.execute(command, &p).unwrap_err().to_string();
+        let knife = if command == "sheet.hem" { "the hem gap must be more than 0" } else { "a bend radius of 0 can't be made" };
+        assert!(e.contains(knife) && e.contains("knife edge"), "{command}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{command}");
+    }
 }
 
 /// #9623: `Thickness` in a rule's expressions is the rule's thickness, also when the design has a
