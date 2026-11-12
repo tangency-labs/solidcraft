@@ -1514,7 +1514,7 @@ fn a_tear_reaching_the_edge_inboard_of_the_junction_refuses_naming_the_segment()
         .unwrap_err()
         .to_string();
     assert!(error.contains("edges[0].segments[0].relief"), "{error}");
-    assert!(error.contains("the tear would part it"), "{error}");
+    assert!(error.contains("it would part the blank"), "{error}");
     assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
 }
 
@@ -1620,6 +1620,6 @@ fn a_tear_reaching_a_hole_that_touches_the_edge_refuses_naming_the_segment() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("edges[0].segments[0].relief"), "{error}");
-    assert!(error.contains("the tear would part it"), "{error}");
+    assert!(error.contains("it would part the blank"), "{error}");
     assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
 }

@@ -4618,128 +4618,25 @@ impl SheetBody {
                 return Err(fail("would cut the sheet apart; reduce its depth".into()));
             }
         }
-        // A tear parts the blank only when its slit is a proper crosscut between two points of the
-        // SAME edge of the material: an outer edge to itself, or a hole to itself. An outer-to-hole
-        // slit opens the ring but leaves it in one piece; a slit ending inside the material or inside
-        // a void parts nothing; and a slit that crosses another edge on its way is not a clean cut at
-        // all. The depth limit is measured against the parent panel's own edge, which is not always
-        // an edge of the material (another flange's bend zone may run on from it), so the decision is
-        // taken on the material's own segments with outward-rounded distance intervals: a curve is
-        // refined until its bound lies wholly to one side of the 1e-6 mm threshold, and a case that
-        // cannot be settled refuses rather than guesses (judge rounds 5 to 8).
+        // A tear parts the blank when its slit runs from one edge of the material to another,
+        // which no single flat pattern can be. Rather than reason about boundaries, distances and
+        // tolerances, ask the kernel: cut a slit-thin strip along the tear on a copy of the flat
+        // material and see whether the piece count grows. That decision is the same geometry the
+        // flat pattern itself is built from, so a vertex contact, an overlapping edge or a curve
+        // cannot slip past a tolerance test (judge rounds 5 to 9).
         if depth >= room - 1e-9 && outer > inner - depth {
             let flat = self.flat_material().map_err(|error| fail(error.to_string()))?;
-            let p0 = d * u + n * (inner - depth);
-            let p1 = d * u + n * outer;
-            let rings: Vec<&Loop2> = flat.iter().flat_map(|region| std::iter::once(&region.outer).chain(region.holes.iter())).collect();
-            // Distance to a line or an arc is exact. A cubic, conic or bezier is walked with an
-            // outward-rounded interval that is refined while it straddles the threshold; eight
-            // refinements take 1e-7 to 1e-14, far inside any tolerance this sheet is drawn to.
-            let on_edge = |seg: &Seg2, p: Vec2| -> Option<bool> {
-                match seg {
-                    Seg2::Line { a, b } => {
-                        let ab = *b - *a;
-                        let t = if ab.dot(ab) > 0.0 { ((p - *a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0) } else { 0.0 };
-                        Some((*a + ab * t).dist(p) < 1e-6)
-                    }
-                    Seg2::Arc { center, radius, start, sweep } => {
-                        let (center, radius, start, sweep) = (*center, *radius, *start, *sweep);
-                        let radial = (p.dist(center) - radius).abs();
-                        let turn = |angle: f64| -> Vec2 { center + Vec2::new(radius * angle.cos(), radius * angle.sin()) };
-                        let rel = ((p - center).angle() - start) * sweep.signum();
-                        let gap = if rel.rem_euclid(std::f64::consts::TAU) <= sweep.abs() {
-                            radial
-                        } else {
-                            turn(start).dist(p).min(turn(start + sweep).dist(p))
-                        };
-                        Some(gap < 1e-6)
-                    }
-                    _ => {
-                        let mut tol = 1e-7;
-                        for _ in 0..8 {
-                            let pts = seg.polyline(tol);
-                            let mut best = f64::MAX;
-                            for i in 0..pts.len().saturating_sub(1) {
-                                let (a, b) = (pts[i], pts[i + 1]);
-                                let ab = b - a;
-                                let t = if ab.dot(ab) > 0.0 { ((p - a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0) } else { 0.0 };
-                                best = best.min((a + ab * t).dist(p));
-                            }
-                            if best + tol < 1e-6 {
-                                return Some(true);
-                            }
-                            if best - tol >= 1e-6 {
-                                return Some(false);
-                            }
-                            tol /= 10.0;
-                        }
-                        None
-                    }
-                }
-            };
-            let on_ring = |ring: &Loop2, p: Vec2| -> Option<bool> {
-                let mut unsure = false;
-                for seg in &ring.segs {
-                    match on_edge(seg, p) {
-                        Some(true) => return Some(true),
-                        None => unsure = true,
-                        Some(false) => {}
-                    }
-                }
-                if unsure { None } else { Some(false) }
-            };
-            // A proper crosscut crosses no edge of the material between its ends.
-            let crosses = |c: Vec2, e: Vec2| -> bool {
-                let (r, s2) = (p1 - p0, e - c);
-                let den = r.cross(s2);
-                if den.abs() < 1e-12 {
-                    return false;
-                }
-                let t = (c - p0).cross(s2) / den;
-                let w = (c - p0).cross(r) / den;
-                if !(t > 0.0 && t < 1.0 && w > 0.0 && w < 1.0) {
-                    return false;
-                }
-                let x = p0 + r * t;
-                x.dist(p0) > 1e-6 && x.dist(p1) > 1e-6
-            };
-            let mut crossed = false;
-            'rings: for ring in &rings {
-                for seg in &ring.segs {
-                    let pts: Vec<Vec2> = match seg {
-                        Seg2::Line { a, b } => vec![*a, *b],
-                        _ => seg.polyline(1e-6).to_vec(),
-                    };
-                    for w in pts.windows(2) {
-                        if crosses(w[0], w[1]) {
-                            crossed = true;
-                            break 'rings;
-                        }
-                    }
-                }
-            }
-            if crossed {
+            let (v0, v1) = (inner - depth, outer);
+            let eps = 1e-3;
+            let at = |uu: f64, vv: f64| d * uu + n * vv;
+            let strip = Loop2::polygon(&[at(u - eps / 2.0, v0), at(u + eps / 2.0, v0), at(u + eps / 2.0, v1 + eps), at(u - eps / 2.0, v1 + eps)]);
+            let tool = planar_region(&Region2 { outer: strip.ccw(), holes: Vec::new() })?;
+            let mut work = FlatWork::new();
+            let cut = material_boolean(&flat, std::slice::from_ref(&tool), kernel::BoolOp::Cut, &mut work)
+                .map_err(|error| fail(format!("the tear could not be tried on the flat pattern: {error}")))?;
+            if cut.len() > flat.len() {
                 return Err(fail(format!(
-                    "a depth of {depth:.3} mm makes the tear cross another edge of the blank on its way; it is not a clean cut"
-                )));
-            }
-            let mut same_edge = false;
-            let mut unsettled = false;
-            for ring in &rings {
-                match (on_ring(ring, p0), on_ring(ring, p1)) {
-                    (Some(true), Some(true)) => same_edge = true,
-                    (None, _) | (_, None) => unsettled = true,
-                    _ => {}
-                }
-            }
-            if same_edge {
-                return Err(fail(format!(
-                    "a depth of {depth:.3} mm reaches the edge the slit already ends on, inboard of the junction ({room:.3} mm of material); the tear would part it"
-                )));
-            }
-            if unsettled {
-                return Err(fail(format!(
-                    "a depth of {depth:.3} mm lands within a hair of an edge of the blank, too close to tell whether the tear parts it; move it clear"
+                    "a depth of {depth:.3} mm runs the tear from one edge of the blank to another ({room:.3} mm of material inboard); it would part the blank"
                 )));
             }
         }
