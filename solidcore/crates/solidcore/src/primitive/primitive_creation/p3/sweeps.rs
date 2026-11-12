@@ -880,8 +880,9 @@ mod tests {
     }
 
     /// An open chain of two lines (out from r 6 to 8, then up 2) revolved half a turn into
-    /// a sheet joins at its meeting vertex with the opt-in (WR-409): two faces, the flat
-    /// ring sector and the cylinder, of area (8^2 - 6^2) pi / 2 + 8 pi 2.
+    /// a sheet joins at its meeting vertex (WR-409): two faces, the flat ring sector and
+    /// the cylinder, of area (8^2 - 6^2) pi / 2 + 8 pi 2. Upstream left the two wires
+    /// apart and the sweep failed.
     #[test]
     fn issue_1113_open_chain_revolves_into_a_joined_sheet() {
         use crate::mass::integrator::properties::{face_area, face_properties};
@@ -896,7 +897,6 @@ mod tests {
         let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
 
         let mut k = Kernel::default();
-        k.fixes.sheet_sweep_joins_profile_wires = true;
         let mut sheet = create_rotational_sweep(&mut k, &curves, o, z, 180.0, false).unwrap();
         let faces = crate::topology::brep::p1::faces(&sheet, None)
             .unwrap()
@@ -942,6 +942,85 @@ mod tests {
                 (got - want).abs() <= 1e-8 * want,
                 "face area {got}, want {want}"
             );
+        }
+    }
+
+    /// Goldens `sweep.api_brep` `issue1463_drilled_hole_{pz,mz}_120` (WR-409): a drilled
+    /// hole's open profile, the wall r 2 from z 5 down to 1 and the cone from there to the
+    /// axis at the origin, turned 120 degrees about +z and about -z, is a sheet of two
+    /// cone faces (the wall's of half-angle 0) meeting at the profile's middle vertex:
+    /// 5 vertices (the apex is one), 6 edges, valid at Level 2.
+    /// By Pappus the wall is 2 pi / 3 * 2 * 4 = 16 pi / 3 and the cone, slant sqrt 5
+    /// about radius 1, is 2 pi sqrt 5 / 3. Upstream left the two wires apart and both
+    /// sweeps failed (1001).
+    #[test]
+    fn issue_1463_drilled_hole_profile_revolves_part_way_into_a_joined_sheet() {
+        use crate::mass::integrator::properties::{face_area, face_properties};
+        use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+        use crate::surface::surface::SurfaceKind;
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+        use crate::topology::face::p2::PPF_AREA;
+
+        let chain = [
+            segment([2.0, 0.0, 5.0], [2.0, 0.0, 1.0]),
+            segment([2.0, 0.0, 1.0], [0.0, 0.0, 0.0]),
+        ];
+        let curves: Vec<Option<&Curve>> = chain.iter().map(Some).collect();
+        let pi = std::f64::consts::PI;
+        let want = [2.0 * pi * 5.0_f64.sqrt() / 3.0, 16.0 * pi / 3.0];
+        for z in [1.0, -1.0] {
+            let mut k = Kernel::default();
+            let (o, axis) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, z));
+            let mut sheet = create_rotational_sweep(&mut k, &curves, o, axis, 120.0, false)
+                .unwrap_or_else(|e| panic!("axis z {z}: {e}"));
+            let faces = crate::topology::brep::p1::faces(&sheet, None).unwrap();
+            assert_eq!(faces.len(), 2, "axis z {z}");
+            let edges = crate::topology::brep::p1::edges(&sheet, None).unwrap();
+            assert_eq!(edges.len(), 6, "axis z {z}");
+            let vertices = crate::topology::brep::p1::vertices(&sheet, None).unwrap();
+            assert_eq!(vertices.len(), 5, "axis z {z}");
+            // The profile's top end (2, 0, 5) turned 120 degrees the axis's way round.
+            let top = Point3::new(-1.0, z * 3.0_f64.sqrt(), 5.0);
+            let turned = vertices.iter().any(|&v| {
+                crate::topology::vertex::point(&sheet, v).is_ok_and(|p| p.distance(top) < 1e-9)
+            });
+            assert!(turned, "axis z {z}: no vertex at {top:?}");
+            let check = check_brep(&mut k, &mut sheet, CheckLevel::Level2).unwrap();
+            assert!(check.is_valid(), "axis z {z}: {:?}", check.lines());
+            let mut areas = Vec::new();
+            for &f in &faces {
+                let surface = crate::topology::face::p2::surface(&sheet, f)
+                    .unwrap()
+                    .expect("face surface");
+                assert!(
+                    matches!(surface.kind(), SurfaceKind::Cone(_)),
+                    "axis z {z}: face {f:?} is not a cone"
+                );
+                // `face_properties` at accuracy 1e-9, as in the test above.
+                let est = face_area(&k, &mut sheet, f, 1e-4).unwrap();
+                let a = face_properties(
+                    &k,
+                    &mut sheet,
+                    f,
+                    OrientType::Same,
+                    1e-9,
+                    Point3::new(0.0, 0.0, 0.0),
+                    est,
+                    0.0,
+                    PPF_AREA,
+                )
+                .unwrap()
+                .area
+                .abs();
+                areas.push(a);
+            }
+            areas.sort_by(f64::total_cmp);
+            for (got, want) in areas.iter().zip(want) {
+                assert!(
+                    (got - want).abs() <= 1e-8 * want,
+                    "axis z {z}: face area {got}, want {want}"
+                );
+            }
         }
     }
 }
