@@ -61,3 +61,19 @@ pub struct MeshResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListParams {}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ListedPlugin {
+    pub manifest: crate::plugin::Manifest,
+    pub commands: Vec<String>,
+    pub disabled: bool,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ListResult {
+    pub plugins: Vec<ListedPlugin>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

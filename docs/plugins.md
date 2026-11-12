@@ -1,3 +1,29 @@
 # Plugins
 
-Moved to [RFC 0002: Plugins](rfcs/0002-plugins.md).
+[RFC 0002: Plugins](rfcs/0002-plugins.md) defines the plugin API and phases.
+Phase 1 splits the host into two app-agnostic crates:
+
+- `crates/craft-plugin` owns the generic WIT contract, manifest, permissions,
+  entry input schemas and typed host errors. It has no wasmtime dependency.
+- `crates/craft-plugin-wasm` runs WebAssembly components against that contract
+  with fuel, memory and stack limits. Its linker exposes no network imports.
+
+An app implements `PluginHost`: it supplies command schemas, each command's
+`read` or `edit` effect, command execution, transaction begin/commit/rollback,
+and the folders that file grants may resolve to. One successful plugin call is
+one undo step; a failed call rolls back the transaction. App commands remain
+JSON data rather than app-specific WIT types. Both crates are Shared crates;
+`cargo xtask layers` forbids direct and indirect SolidCraft dependencies.
+
+SolidCraft's adapter lives in `crates/engine` and uses the same command surface
+as MCP. Entries appear as `plugin_id.function`; `plugin.list` and
+`engine.describe` expose their declared inputs. Selection and target inputs
+are lists. Entries may declare named menu or ribbon slots; each app decides
+which slots exist and draws forms from the input schemas. Plugins ship no UI
+code. SolidCraft retains approval, cancellation and plugin preferences.
+
+File access requires approved folder grants. The reserved `net` permission is
+refused with a typed error. Traps, missing permissions, failed commands, limits
+and invalid manifest fields return structured errors. Later phases add
+import/export, author tooling, installation and browser execution after the
+phase 1 design review.

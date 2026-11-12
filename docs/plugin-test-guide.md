@@ -129,12 +129,23 @@ and triangle indices, up to 8192 vertices and 16384 triangles, subject also to a
 1 MiB result cap. It contains no reconstruction or conversion algorithm. The bundled
 box sample does not request that grant.
 
-The experimental API is `solidcraft:plugin@0.1.0`. Defaults are 10 million fuel,
+The API identifier is the package declaration in the
+[shared WIT](../crates/craft-plugin/wit/plugin.wit). `craft-plugin` defines the app-independent
+manifest and `PluginHost` trait; `craft-plugin-wasm` supplies the native runtime. The SolidCraft
+engine supplies its command schemas and transaction implementation. Defaults are 10 million fuel,
 64 MiB guest memory and a 5000 ms execution deadline. Component compilation and native
 CAD work are outside the guest execution budget. Browser execution, automatic
 updates, custom panels, persistent guest storage and plugin-defined parametric
 feature types are not implemented. See [the runtime reference](plugin-runtime.md)
 for exact limits and supported commands.
+
+Entries declare read/edit effects, input schemas and optional named menu/ribbon slots. The app
+can inspect these declarations with `plugin.list` and `engine.describe`. Selection and target
+inputs are lists. A read entry cannot run an edit command. Named files permissions require
+matching app-approved folders; the guest has no ambient file access. The optional clock
+permission enables wall time; without it the clock returns a fixed epoch. Network permission
+requests are refused, and components importing sockets, HTTP or fetch are refused before
+instantiation, even when the import is unused.
 
 ## Explicitly allow a larger plugin budget
 
@@ -196,7 +207,7 @@ cargo build --locked --profile ci -p solidcraft -p solidcraft-cli
 ```
 
 Build and componentize the independent guest using its external package
-instructions and the [host WIT](../wit/solidcraft-plugin.wit). Examples and converters live
+instructions and the [host WIT](../crates/craft-plugin/wit/plugin.wit). Examples and converters live
 outside this repository, per [the plugin RFC](rfcs/0002-plugins.md). Copy the resulting component and `plugin.json`
 into a folder named `example-box`; its folder name must match the manifest id.
 Use `plugin.inspect` to obtain the actual hash rather than copying a hash from a

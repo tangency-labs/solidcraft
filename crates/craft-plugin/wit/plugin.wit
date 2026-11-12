@@ -1,0 +1,49 @@
+package solidcraft:plugin@1.0.0;
+
+// App commands and their schemas are data; this world never names app types.
+interface types {
+    type json = string;
+    record command-failure { command: string, reason: string }
+    record field-failure { field: string, reason: string }
+    variant plugin-error {
+        permission-denied(string),
+        command-failed(command-failure),
+        limit-exceeded(string),
+        invalid-manifest(field-failure),
+        invalid-input(field-failure),
+        trap(string),
+        cancelled,
+    }
+}
+interface engine {
+    use types.{json, plugin-error};
+    run: func(command: string, args: json) -> result<json, plugin-error>;
+}
+interface log {
+    enum level { debug, info, warn, error }
+    log: func(level: level, message: string);
+}
+interface control {
+    progress: func(fraction: f32, message: string);
+    cancelled: func() -> bool;
+}
+interface files {
+    use types.{plugin-error};
+    read-file: func(grant: string, path: string) -> result<list<u8>, plugin-error>;
+    write-file: func(grant: string, path: string, data: list<u8>) -> result<_, plugin-error>;
+}
+interface clock {
+    now: func() -> u64;
+}
+interface command {
+    use types.{json, plugin-error};
+    execute: func(entry: string, params: json) -> result<json, plugin-error>;
+}
+world command-plugin {
+    import engine;
+    import log;
+    import control;
+    import files;
+    import clock;
+    export command;
+}

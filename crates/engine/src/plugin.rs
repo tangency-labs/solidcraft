@@ -1,57 +1,17 @@
-//! Explicit, content-pinned one-shot plugins. The design keeps ordinary native features.
-
-use std::collections::BTreeSet;
-use std::path::Path;
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+//! SolidCraft policy and transactions for the shared Craft plugin host.
 
 use crate::{EngineError, Result, Session};
+pub use craft_plugin::{
+    API, Effect, Entry, FileGrant, HostLimits, Limits, MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest,
+    RuntimeManifest, valid_id,
+};
+use craft_plugin::{CommandSchema, HostError, PluginHost};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::path::Path;
 
-#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
-mod runtime;
-
-pub const MAX_MANIFEST_BYTES: usize = 16 * 1024;
-pub const MAX_COMPONENT_BYTES: usize = 16 * 1024 * 1024;
-pub const MAX_JSON_BYTES: usize = 1024 * 1024;
-pub const API: &str = "solidcraft:plugin@0.1.0";
-/// Memory32 can address at most 65536 pages of 64 KiB; the runtime allows one memory.
-pub const MAX_MEMORY_MIB: usize = 4096;
-
-/// User-owned ceilings, separate from a package's exact, content-approved request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
-pub struct HostLimits {
-    pub max_fuel: u64,
-    pub max_memory_mib: usize,
-}
-impl Default for HostLimits {
-    fn default() -> Self {
-        Self { max_fuel: 100_000_000_000, max_memory_mib: 128 }
-    }
-}
-impl HostLimits {
-    pub fn validate(&self) -> Result<()> {
-        if self.max_fuel == 0 || !(1..=MAX_MEMORY_MIB).contains(&self.max_memory_mib) {
-            return Err(error("host limits require positive integer max_fuel and max_memory_mib 1..4096 (Wasm32)"));
-        }
-        Ok(())
-    }
-    pub fn check(&self, requested: &Limits) -> Result<()> {
-        self.validate()?;
-        requested.validate()?;
-        if requested.fuel > self.max_fuel || requested.memory_mib > self.max_memory_mib {
-            return Err(error(format!(
-                "requested fuel {} / memory {} MiB exceeds user host limits {} / {} MiB; explicitly change the host settings and review the package before running",
-                requested.fuel, requested.memory_mib, self.max_fuel, self.max_memory_mib
-            )));
-        }
-        Ok(())
-    }
-}
 static PROCESS_HOST_LIMITS: std::sync::OnceLock<HostLimits> = std::sync::OnceLock::new();
-/// Configure trusted host startup once, before creating CLI/headless sessions. Not a guest command.
 pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
     limits.validate()?;
     PROCESS_HOST_LIMITS.set(limits).map_err(|_| error("process plugin host limits are already configured"))
@@ -59,111 +19,28 @@ pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
 pub(crate) fn default_host_limits() -> HostLimits {
     PROCESS_HOST_LIMITS.get().copied().unwrap_or_default()
 }
-
-/// Metadata is inert. A runtime declaration still needs explicit approval to execute.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Manifest {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    #[serde(default)]
-    pub description: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime: Option<RuntimeManifest>,
-}
-
-/// The initial command-plugin world: no WASI, files, network or process imports.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct RuntimeManifest {
-    pub api: String,
-    /// A single file name within the package, never an absolute or relative directory.
-    pub module: String,
-    pub entries: Vec<String>,
-    /// Exact built-in command ids. No patterns, aliases or plugin-to-plugin calls.
-    pub commands: BTreeSet<String>,
-    #[serde(default)]
-    pub limits: Limits,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Limits {
-    pub fuel: u64,
-    pub memory_mib: usize,
-    pub deadline_ms: u64,
-}
-impl Default for Limits {
-    fn default() -> Self {
-        Self { fuel: 10_000_000, memory_mib: 64, deadline_ms: 5000 }
-    }
-}
-impl Limits {
-    fn validate(&self) -> Result<()> {
-        if self.fuel == 0 || !(1..=MAX_MEMORY_MIB).contains(&self.memory_mib) || !(1..=30_000).contains(&self.deadline_ms) {
-            return Err(error("limits require positive fuel, memory 1..4096 MiB (Wasm32) and deadline 1..30000 ms"));
-        }
-        Ok(())
-    }
-}
-
-pub fn valid_id(id: &str) -> bool {
-    let b = id.as_bytes();
-    (1..=64).contains(&b.len())
-        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
-        && b.first() != Some(&b'-')
-        && b.last() != Some(&b'-')
-}
-fn plain(s: &str, max: usize) -> bool {
-    !s.trim().is_empty() && s.chars().count() <= max && !s.chars().any(char::is_control)
-}
 fn error(s: impl Into<String>) -> EngineError {
     EngineError::Other(format!("plugin: {}", s.into()))
 }
 
-pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
-    if text.len() > MAX_MANIFEST_BYTES {
-        return Err(error("manifest exceeds 16 KiB"));
-    }
-    let mut m: Manifest = serde_json::from_slice(text).map_err(|e| error(format!("invalid manifest: {e}")))?;
-    // Keep the metadata page's existing whitespace normalization.
-    m.name = m.name.trim().to_string();
-    m.version = m.version.trim().to_string();
-    m.description = m.description.trim().to_string();
-    if !valid_id(&m.id) || m.id != folder {
-        return Err(error("manifest id does not match its lowercase package folder"));
-    }
-    if !plain(&m.name, 80)
-        || !plain(&m.version, 32)
-        || !m.version.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+'))
-        || m.description.chars().count() > 240
-        || m.description.chars().any(char::is_control)
-    {
-        return Err(error("invalid name, version or description"));
-    }
-    if let Some(runtime) = &m.runtime {
-        if runtime.api != API {
-            return Err(error("unsupported plugin API"));
-        }
-        if !valid_id(runtime.module.strip_suffix(".wasm").unwrap_or("")) {
-            return Err(error("module must be one lowercase .wasm file name"));
-        }
-        if runtime.entries.is_empty()
-            || runtime.entries.len() > 32
-            || runtime.entries.iter().any(|e| !valid_id(e))
-            || runtime.entries.iter().collect::<BTreeSet<_>>().len() != runtime.entries.len()
-        {
-            return Err(error("entries must be 1..32 distinct ids"));
-        }
-        if runtime.commands.len() > 128 || runtime.commands.iter().any(|id| !allowed_command(id)) {
-            return Err(error("commands include an unavailable or forbidden built-in command"));
-        }
-        runtime.limits.validate()?;
-    }
-    Ok(m)
+/// Trusted host state, never loaded from a design or supplied by guest code.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AppState {
+    pub packages: BTreeMap<String, String>,
+    pub file_grants: Vec<FileGrant>,
 }
 
+pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
+    let manifest = craft_plugin::parse_manifest(text, folder)?;
+    if manifest.runtime.as_ref().is_some_and(|r| r.commands.iter().any(|c| !allowed_command(c))) {
+        return Err(HostError::InvalidManifest {
+            field: "runtime.commands".into(),
+            reason: "commands include an unavailable or forbidden built-in command".into(),
+        }
+        .into());
+    }
+    Ok(manifest)
+}
 /// Positive host policy, intersected with the manifest. New command families require review.
 pub fn allowed_command(id: &str) -> bool {
     let family = id.starts_with("solid.") || id.starts_with("sketch.");
@@ -215,12 +92,30 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     session.plugin_limits.check(&rt.limits)?;
-    if !rt.entries.iter().any(|e| e == entry) {
+    if !rt.entries.iter().any(|e| e.name == entry) {
         return Err(error("unknown entry"));
     }
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
-        runtime::run(session, &package, entry, params)
+        let (host, result) = craft_plugin_wasm::run(
+            SolidCraftHost { session: session.scratch(), transaction: None },
+            &package.manifest,
+            &package.component,
+            entry,
+            params,
+        );
+        let value = result?;
+        if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
+            || session.active_sketch != host.session.active_sketch
+            || session.pending_moves != host.session.pending_moves
+        {
+            session.accept_computed(host.session);
+        } else {
+            for message in host.session.log {
+                session.echo(message);
+            }
+        }
+        Ok(value)
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
@@ -231,3 +126,124 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
 
 #[cfg(test)]
 mod tests;
+
+/// The application adapter owns a scratch transaction. Wasmtime sees only PluginHost.
+pub struct SolidCraftHost {
+    pub session: Session,
+    transaction: Option<Session>,
+}
+impl PluginHost for SolidCraftHost {
+    fn command_catalog(&self) -> Vec<CommandSchema> {
+        crate::command_specs()
+            .iter()
+            .filter(|c| allowed_command(c.id))
+            .map(|c| CommandSchema {
+                name: c.id.into(),
+                input_schema: c.contract.map(|c| c.input_schema().to_value()).unwrap_or_else(|| json!({"type":"object"})),
+                output_schema: c.output.map(|f| f().to_value()).unwrap_or(json!({})),
+                effect: if c.undoable { Effect::Edit } else { Effect::Read },
+            })
+            .collect()
+    }
+    fn run_command(&mut self, name: &str, params: &Value) -> craft_plugin::Result<Value> {
+        if !allowed_command(name) {
+            return Err(HostError::PermissionDenied { permission: format!("command {name} is not granted") });
+        }
+        let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
+        let before = s.doc.clone();
+        let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
+        // Even implicit font and linked-design reads have no authority from a command grant.
+        let reply = solidcraft_io::vfs::scoped(Some(Default::default()), || s.execute(name, params))
+            .map_err(|e| HostError::CommandFailed { command: name.into(), reason: e.to_string() })?;
+        if let Some(failed) = s
+            .model
+            .results
+            .iter()
+            .find(|r| r.error.is_some() && (previous.get(&r.id) != Some(&r.error) || before.feature(r.id) != s.doc.feature(r.id)))
+        {
+            return Err(HostError::CommandFailed { command: name.into(), reason: failed.error.clone().unwrap_or_default() });
+        }
+        Ok(reply)
+    }
+    fn begin_transaction(&mut self) -> craft_plugin::Result<()> {
+        if self.transaction.is_some() {
+            return Err(HostError::InvalidInput { field: "transaction".into(), reason: "already active".into() });
+        }
+        self.transaction = Some(self.session.scratch());
+        Ok(())
+    }
+    fn commit_transaction(&mut self) -> craft_plugin::Result<()> {
+        let mut computed =
+            self.transaction.take().ok_or_else(|| HostError::InvalidInput { field: "transaction".into(), reason: "not active".into() })?;
+        computed.undo.clear();
+        computed.redo.clear();
+        // Session::execute(plugin.run) owns the one outer undo step.
+        if !std::sync::Arc::ptr_eq(&self.session.doc, &computed.doc)
+            || self.session.active_sketch != computed.active_sketch
+            || self.session.pending_moves != computed.pending_moves
+        {
+            self.session.accept_computed(computed);
+        } else {
+            for message in computed.log {
+                self.session.echo(message);
+            }
+        }
+        Ok(())
+    }
+    fn rollback_transaction(&mut self) -> craft_plugin::Result<()> {
+        self.transaction = None;
+        Ok(())
+    }
+    fn granted_folders(&self) -> Vec<FileGrant> {
+        let scope = solidcraft_io::vfs::current_scope();
+        self.session
+            .plugin_state
+            .file_grants
+            .iter()
+            .filter(|g| scope.as_ref().is_none_or(|s| s.check(&g.folder.to_string_lossy()).is_ok()))
+            .cloned()
+            .collect()
+    }
+    fn log(&mut self, message: &str) {
+        if let Some(s) = self.transaction.as_mut() {
+            s.echo(format!("plugin: {}", message.chars().filter(|c| !c.is_control()).collect::<String>()));
+        }
+    }
+    fn progress(&mut self, fraction: f32, message: &str) {
+        solidcraft_doc::progress::item(Some((message, (fraction.clamp(0., 1.) * 100.) as usize, 100)));
+    }
+    fn is_cancelled(&self) -> bool {
+        solidcraft_doc::progress::cancelled()
+    }
+}
+
+/// Resolve an inspected entry through the same approved plugin.run transaction.
+/// Unknown packages remain unknown commands; inspecting a package never approves it.
+pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Value>> {
+    let Some((package, entry)) = id.split_once('.') else { return Ok(None) };
+    let Some(path) = s.plugin_state.packages.get(package) else { return Ok(None) };
+    if crate::find_command(id).is_some() {
+        return Ok(None);
+    }
+    if !valid_id(entry) {
+        return Err(EngineError::UnknownCommand(id.into()));
+    }
+    let approval =
+        params.get("approval").and_then(Value::as_str).ok_or_else(|| crate::params::bad(id, "approval from plugin.inspect is required"))?;
+    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":params.get("params").cloned().unwrap_or(json!({}))})))
+}
+
+pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
+    if crate::find_command(id).is_some() {
+        return Ok(None);
+    }
+    let Some((package, name)) = id.split_once('.') else { return Ok(None) };
+    let Some(path) = s.plugin_state.packages.get(package) else { return Ok(None) };
+    let package = read_package(path)?;
+    let Some(runtime) = package.manifest.runtime else { return Ok(None) };
+    let Some(entry) = runtime.entries.iter().find(|e| e.name == name) else { return Ok(None) };
+    Ok(Some(json!({"id":id,"label":name,"params":"approval, params: declared entry inputs",
+        "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
+            "approval":{"type":"string"},"params":entry.input_schema}},
+        "output":{},"effect":entry.effect,"slots":entry.slots})))
+}

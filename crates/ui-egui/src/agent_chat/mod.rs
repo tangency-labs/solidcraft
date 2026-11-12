@@ -2248,6 +2248,10 @@ fn pump_tools(app: &mut SolveApp) {
         let refuse = |req: ControlRequest, e: String| {
             let _ = req.reply.send(json!({"ok": false, "error": e}));
         };
+        if let Err(error) = crate::plugins::normalize_request(&app.session, &req.method, &mut req.params) {
+            refuse(req, error);
+            continue;
+        }
         let undo_len = app.session.undo.len();
         let Some(turn) = app.agent_chat.turn.as_mut() else {
             refuse(req, "the agent chat has no message in progress".into());

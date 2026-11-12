@@ -1325,8 +1325,9 @@ fn plugin_package_for_worker_test(tag: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("solidcraft-plugin-worker-{}-{tag}", std::process::id()));
     let dir = root.join("sample");
     std::fs::create_dir_all(&dir).unwrap();
-    let wat = include_str!("plugin_fixture.wat");
-    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    let (package, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+    let wat = include_str!("plugin_fixture.wat").replace("PLUGIN_PACKAGE", package).replace("PLUGIN_VERSION", version);
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(&wat).unwrap()).unwrap();
     std::fs::write(
         dir.join("plugin.json"),
         json!({"id":"sample","name":"Worker sample","version":"1","runtime":{
@@ -1348,18 +1349,19 @@ fn plugin_execution_is_off_thread_even_with_agent_off_thread_disabled() {
     let own_level = h.app.session.param_check;
     let root = plugin_package_for_worker_test("responsive");
     let path = root.join("sample").to_string_lossy().into_owned();
-    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let inspection = ask(&tx, "engine.execute", json!({"command":"plugin.inspect","params":{"path":path}}));
+    let inspection = reply_to(&mut h, &inspection);
+    assert_eq!(inspection["ok"], true, "{inspection}");
+    let inspected = &inspection["result"];
+    assert_eq!(h.app.session.plugin_state.packages.get("sample"), Some(&path), "async inspection registers namespaced entries");
     assert_eq!(
         h.app.run("PLUGIN.RUN", json!({"path":path,"approval":inspected["approval"],"entry":"make"})).unwrap_err(),
         h.app.tr("ui.plugin_standalone")
     );
     let (release, gate) = std::sync::mpsc::channel();
     h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
-    let request = ask(
-        &tx,
-        "engine.execute",
-        json!({"command":"PLUGIN.RUN","param_check":"strict","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}),
-    );
+    let request =
+        ask(&tx, "engine.execute", json!({"command":"sample.make","param_check":"strict","params":{"approval":inspected["approval"],"params":{}}}));
     h.frames(1);
     assert!(h.app.agent_computing().is_some());
     let view = ask(&tx, "ui.inspect", json!({}));

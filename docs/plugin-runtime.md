@@ -5,12 +5,20 @@ This is the implemented one-shot native runtime. It does not implement every par
 [interface proposal #4980](https://github.com/tangency-labs/solidcraft/pull/4980), or
 [Utilities placement proposal #4933](https://github.com/tangency-labs/solidcraft/pull/4933).
 The [current plugin RFC](rfcs/0002-plugins.md), especially its Decisions section, takes
-precedence over these earlier proposals. The engine/log/store/command interface names and command world follow #4980; the initial package
+precedence over these earlier proposals. The shared command world is defined in
+[`craft-plugin`'s WIT](../crates/craft-plugin/wit/plugin.wit). The package
 manifest uses an optional `runtime` block so old metadata-only packages still work. Its manifest
 layout and explicit per-invocation approval flow are deliberately documented as experimental,
 not as a claim that the outstanding design proposals have been accepted.
 
 ## Boundary and lifecycle
+
+`craft-plugin` owns the manifest, typed errors, permissions and `PluginHost` trait.
+`craft-plugin-wasm` runs components against that trait without app dependencies.
+SolidCraft's engine implements the trait with its command schemas and transaction surface.
+The runtime takes ownership of a host and returns `(host, result)` on success and failure.
+This satisfies Wasmtime's requirement for store data without borrowed references. SolidCraft
+supplies an owned scratch session and adopts its edits only after a successful call.
 
 1. Put an independently built component beside a static `plugin.json` in its id folder.
 2. `plugin.inspect` reads bounded bytes through the caller's existing file scope and returns
@@ -21,9 +29,11 @@ not as a claim that the outstanding design proposals have been accepted.
    hash was checked are the bytes compiled and executed. Changing the files afterward cannot
    substitute different code for that invocation.
 4. The host creates a fresh Wasmtime engine/store, with fuel, epoch interruption and a resource
-   limiter, and links only the published component interfaces. No WASI is linked. Instantiation
-   and the entry share the same execution budget, including component start functions.
-5. `engine.run` reaches `Session::execute` on a scratch session, under an empty file scope.
+   limiter, and links only the published component interfaces. No WASI is linked. Reserved
+   sockets, HTTP and fetch imports are refused even if unused. Instantiation and the entry
+   share the same execution budget, including component start functions.
+5. `engine.run` reaches `PluginHost::run_command`, which SolidCraft implements with
+   `Session::execute` on a scratch session, under an empty file scope.
    Explicit paths and implicit reads during feature evaluation cannot inherit the caller's broader
    file access. Results are bounded JSON. Refused calls poison the transaction, even if guest code
    catches the error and returns success.
@@ -49,11 +59,22 @@ characters and unknown fields are refused. The manifest has a 16 KiB byte cap.
 
 | Field | Meaning |
 |---|---|
-| `api` | Exactly `solidcraft:plugin@0.1.0`; 0.x is not a stable API promise |
+| `api` | Exactly the package identifier declared in the [WIT](../crates/craft-plugin/wit/plugin.wit) |
 | `module` | One lowercase `.wasm` file name within the package; no directories |
-| `entries` | 1..32 distinct entry ids passed to `command.execute` |
+| `entries` | 1..32 distinct entries with `name`, `effect: read \| edit`, `input_schema` and optional `slots`; legacy string ids default to edit |
 | `commands` | At most 128 exact existing built-in command ids, intersected with host policy |
 | `limits` | Optional object with all of `fuel`, `memory_mib`, `deadline_ms`; omitted object uses defaults |
+| `permissions` | Optional object: `files` requests named read/write folder grants, `clock` requests wall clock; `net: true` is refused |
+
+Entry inputs are object schemas; selection and target fields are arrays. Named slots use
+`{"kind":"menu","name":"…"}` or `{"kind":"ribbon","name":"…"}`; the app decides which
+slots exist. Declaring a slot never supplies UI code. `plugin.list` and `engine.describe`
+expose the entry declarations. A read entry can call only commands marked read in the app catalog.
+
+`files.read-file` and `files.write-file` resolve paths only within matching app-approved folder
+grants with the requested access. Declaring a folder name does not itself grant access. `clock.now`
+returns a fixed epoch without the clock permission. Log, progress and cancellation checks are
+always available. There are no socket, HTTP, fetch or WASI imports.
 
 The component must be a WebAssembly **component**, not an ordinary core `.wasm` module, DLL,
 executable or script. Unsupported imports fail instantiation; the host never falls back to starting
@@ -174,20 +195,14 @@ the guest deadline prevents more commands rather than forcibly interrupting a na
 The desktop worker keeps this work off the window thread. Stop drops adoption; an already running
 worker finishes unseen. It does not synchronously kill a native compiler or kernel call.
 
-Execution errors report the root cause before the Wasm backtrace, the typed trap (for example
-`OutOfFuel`, `Interrupt`, `MemoryOutOfBounds` or `UnreachableCodeReached`), consumed and remaining
-fuel, and the configured fuel, memory and deadline limits. A host/linker/resource error can have
-`trap=none`; its complete cause chain is still reported, including a refused memory/table growth.
-`Interrupt` identifies epoch interruption; it is distinct from fuel exhaustion. These diagnostics
-do not automatically retry a component, raise its limits or adopt a failed transaction. Successful
-invocations also write consumed/remaining fuel to the existing debug logger. In the CLI, pass
-`--debug` to see these counters on stderr; normal command output and plugin result JSON stay the
-same. No model contents or package paths are included in that counter message.
+Host failures are typed data: missing permission, failed command and reason, exhausted limit,
+invalid manifest or input field and reason, trap, or cancellation. The WIT and Rust `HostError`
+describe the same cases. A failure never retries the component, raises its limits or commits
+a partial transaction.
 
 There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
 network integration, persistent store, plugin installer, signed index, custom panels or icons.
-The WIT store interface is present for command-world compatibility, but operations are denied;
-`previous-version` returns none. `manifest()` is not used.
+The WIT has no persistent store interface. `manifest()` is not used.
 
 ## Author an original plugin
 
@@ -195,7 +210,7 @@ Plugin packages, examples and converters live outside this repository, as specif
 [the plugin RFC](rfcs/0002-plugins.md). This repository contains the host, WIT and synthetic test
 fixtures. The host compiles no plugin algorithm into SolidCraft. Rust first builds a core module with WIT metadata; `wasm-tools component new`
 wraps it as a component without a WASI adapter. Other languages may use the same published
-[WIT](../wit/solidcraft-plugin.wit) if they produce compatible components without unsupported imports.
+[WIT](../crates/craft-plugin/wit/plugin.wit) if they produce compatible components without unsupported imports.
 
 ## Platforms and validation
 

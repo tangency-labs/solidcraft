@@ -1,6 +1,6 @@
 //! One-shot plugins share the engine's command surface, file scope and undo history.
 use super::CommandSpec;
-use crate::schema::plugin::{InspectParams, InspectResult, MeshParams, MeshResult, RunParams, RunResult};
+use crate::schema::plugin::{InspectParams, InspectResult, ListParams, ListResult, ListedPlugin, MeshParams, MeshResult, RunParams, RunResult};
 use crate::{
     Result, Session, checked,
     params::bad,
@@ -16,6 +16,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("plugin.inspect", "Inspect Plugin", checked!("plugin.inspect", inspect)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<InspectParams>::new()).output(output_schema_for::<InspectResult>)
         .params("path: plugin package folder; returns inert manifest and approval hash covering manifest and component; runs no plugin code"),
+    CommandSpec::new("plugin.list", "List Plugins", checked!("plugin.list", list)).icon("inspect").noundo().doc_only()
+        .contract(&TypedContract::<ListParams>::new()).output(output_schema_for::<ListResult>)
+        .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
     CommandSpec::new("plugin.run", "Run Plugin", checked!("plugin.run", run)).icon("play")
         .contract(&TypedContract::<RunParams>::new()).output(output_schema_for::<RunResult>)
         .params("path, approval: exact hash from plugin.inspect after reviewing permissions, entry, params?: JSON; explicit native Wasm component execution, one undo step; errors discard all edits"),
@@ -23,6 +26,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let p: InspectParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.inspect", e.to_string()))?;
     let package = plugin::read_package(&p.path)?;
+    s.plugin_state.packages.insert(package.manifest.id.clone(), p.path.clone());
     let limits_error = package.manifest.runtime.as_ref().and_then(|r| s.plugin_limits.check(&r.limits).err()).map(|e| e.to_string());
     serde_json::to_value(InspectResult {
         manifest: package.manifest,
@@ -65,4 +69,32 @@ fn mesh(s: &mut Session, p: &Value) -> Result<Value> {
         param_warnings: vec![],
     };
     serde_json::to_value(result).map_err(|e| bad("model.mesh", e.to_string()))
+}
+
+fn list(s: &mut Session, _p: &Value) -> Result<Value> {
+    // Discovery is inert, and uses the caller's file scope when reading each package.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(root) = crate::recovery::data_dir().map(|p| p.join("plugins"))
+        && let Ok(folders) = std::fs::read_dir(root)
+    {
+        for folder in folders.flatten().take(1024) {
+            let path = folder.path().to_string_lossy().into_owned();
+            if let Ok(package) = plugin::read_package(&path) {
+                s.plugin_state.packages.insert(package.manifest.id, path);
+            }
+        }
+    }
+    let mut plugins = Vec::new();
+    for path in s.plugin_state.packages.values() {
+        if let Ok(package) = plugin::read_package(path) {
+            let commands = package
+                .manifest
+                .runtime
+                .as_ref()
+                .map(|r| r.entries.iter().map(|e| format!("{}.{}", package.manifest.id, e.name)).collect())
+                .unwrap_or_default();
+            plugins.push(ListedPlugin { disabled: s.disabled_plugins.contains(&package.manifest.id), manifest: package.manifest, commands });
+        }
+    }
+    serde_json::to_value(ListResult { plugins, param_warnings: vec![] }).map_err(|e| bad("plugin.list", e.to_string()))
 }

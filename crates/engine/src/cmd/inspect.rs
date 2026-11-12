@@ -747,8 +747,11 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
 const DESCRIBE_CONTRACT: crate::schema::TypedContract<crate::schema::inspect::DescribeParams> = crate::schema::TypedContract::new();
 
 /// A command's prose documentation and, for converted commands, its schemas.
-fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
+fn describe(s: &mut Session, p: &Value) -> Result<Value> {
     let id = p.get("command").and_then(Value::as_str).ok_or_else(|| crate::params::bad("engine.describe", "`command` must be a command id"))?;
+    if let Some(entry) = crate::plugin::describe_entry(s, id)? {
+        return Ok(entry);
+    }
     let spec = super::find_command(id).ok_or_else(|| crate::EngineError::UnknownCommand(id.to_string()))?;
     let reply = crate::schema::inspect::DescribeResult {
         id: spec.id.to_string(),
@@ -762,7 +765,27 @@ fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
-    let list: Vec<CommandEntry> = crate::command_specs().iter().map(|c| c.info(s).into()).collect();
+    let mut list: Vec<CommandEntry> = crate::command_specs().iter().map(|c| c.info(s).into()).collect();
+    for (package_id, path) in &s.plugin_state.packages {
+        if let Ok(package) = crate::plugin::read_package(path)
+            && let Some(runtime) = package.manifest.runtime
+        {
+            for entry in runtime.entries {
+                list.push(CommandEntry {
+                    id: format!("{package_id}.{}", entry.name),
+                    label: entry.name,
+                    tab: String::new(),
+                    panel: String::new(),
+                    icon: "play".into(),
+                    shortcut: None,
+                    params: "approval, params: declared entry inputs (engine.describe)".into(),
+                    enabled: !s.disabled_plugins.contains(package_id),
+                    disabled_reason: s.disabled_plugins.contains(package_id).then(|| "plugin is disabled".into()),
+                    planned: None,
+                });
+            }
+        }
+    }
     typed_reply("engine.commands", list)
 }
 

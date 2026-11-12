@@ -605,6 +605,15 @@ impl SolveApp {
             return;
         }
         let reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
+        // Inspection runs on a scratch session. Retain its inert registration so namespaced
+        // entries resolve on the live session without loading or executing code on the window.
+        if reply["ok"] == true
+            && let Some((command, params)) = executed(&job.req.params)
+            && spec_id(command) == Some("plugin.inspect")
+            && let (Some(id), Some(path)) = (reply.pointer("/result/manifest/id").and_then(Value::as_str), params.get("path").and_then(Value::as_str))
+        {
+            self.session.plugin_state.packages.insert(id.to_owned(), path.to_owned());
+        }
         let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
         if reply["ok"] == true && export {
             let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);

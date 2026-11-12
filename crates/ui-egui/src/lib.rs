@@ -1343,7 +1343,9 @@ impl SolveApp {
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
         crate::plugins::sync_policy(self);
-        if id.eq_ignore_ascii_case("plugin.run") {
+        if id.eq_ignore_ascii_case("plugin.run")
+            || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
+        {
             let key = if cfg!(target_arch = "wasm32") { "ui.plugins_desktop" } else { "ui.plugin_standalone" };
             return Err(self.tr(key).into());
         }
@@ -3806,8 +3808,12 @@ impl SolveApp {
             let shot_waits = open_meshing::active(self) && self.control_held.front().is_some_and(|r| r.method == "ui.screenshot");
             // Held requests go first, in order, once nothing makes them wait.
             let held = if waits || shot_waits { None } else { self.control_held.pop_front() };
-            let Some(req) = held.or_else(|| rx.as_ref().and_then(|rx| rx.try_recv().ok())) else { break };
+            let Some(mut req) = held.or_else(|| rx.as_ref().and_then(|rx| rx.try_recv().ok())) else { break };
             if req.refuse_cancelled_chat() {
+                continue;
+            }
+            if let Err(error) = plugins::normalize_request(&self.session, &req.method, &mut req.params) {
+                let _ = req.reply.send(json!({"ok":false,"error":error}));
                 continue;
             }
             if shot_waits {

@@ -29,6 +29,7 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
         |m: &mut Value| m["network"] = json!(true),
         |m: &mut Value| m["permissions"] = json!(["net"]),
         |m: &mut Value| m["runtime"]["permissions"] = json!(["net"]),
+        |m: &mut Value| m["runtime"]["permissions"] = json!({"net":true}),
     ] {
         let mut m = manifest();
         mutate(&mut m);
@@ -77,11 +78,72 @@ mod native {
 
     // An original component fixture. A real canonical lift/lower crosses the host boundary.
     // $box asks for a 2 x 3 x 4 mm solid; memory at 0 is the canonical result area.
+    fn component_template() -> String {
+        let (package, version) = API.split_once('@').unwrap();
+        include_str!("fixture.wat").replace("\r\n", "\n").replace("__PACKAGE__", package).replace("__VERSION__", version)
+    }
     fn component(code: &str) -> Vec<u8> {
-        let template = include_str!("fixture.wat").replace("\r\n", "\n");
+        let template = component_template();
         let original = "      call $box\n      call $box\n";
         assert!(template.contains(original));
         wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
+    }
+    fn file_component(write: bool) -> Vec<u8> {
+        let (package, version) = API.split_once('@').unwrap();
+        let template = component_template();
+        // Keep exactly the shared WIT types, then exercise the real files interface.
+        let (types, _) = template.split_once(&format!("  (type $ty-{package}/engine@{version}")).unwrap();
+        let (operation, result, parameters, arguments) = if write {
+            ("write-file", "(result (error $error))", "(param \"data\" (list u8))", "i32.const 128 i32.const 7")
+        } else {
+            ("read-file", "(result (list u8) (error $error))", "", "")
+        };
+        let core_parameters = if write { "i32 i32 i32 i32 i32 i32 i32" } else { "i32 i32 i32 i32 i32" };
+        let source = format!(
+            r#"{types}
+  (type $files-type (instance
+    (alias outer 1 $plugin-error (type $error))
+    (export "plugin-error" (type (eq $error)))
+    (type $file-result {result})
+    (type $operation (func (param "grant" string) (param "path" string) {parameters} (result $file-result)))
+    (export "{operation}" (func (type $operation)))
+  ))
+  (import "{package}/files@{version}" (instance $files (type $files-type)))
+  (alias export $files "{operation}" (func $file))
+  (core module $allocation
+    (memory (export "memory") 1)
+    (global $heap (mut i32) i32.const 4096)
+    (func (export "realloc") (param i32 i32 i32 i32) (result i32)
+      (local $at i32)
+      global.get $heap local.tee $at local.get 3 i32.add global.set $heap local.get $at)
+  )
+  (core instance $allocation (instantiate $allocation))
+  (alias core export $allocation "memory" (core memory $memory))
+  (alias core export $allocation "realloc" (core func $realloc))
+  (core func $file (canon lower (func $file) (memory $memory) (realloc $realloc)))
+  (core instance $imports (export "file" (func $file)) (export "memory" (memory $memory)))
+  (core module $main
+    (import "host" "file" (func $file (param {core_parameters})))
+    (import "host" "memory" (memory 1))
+    (data (i32.const 64) "project")
+    (data (i32.const 96) "secret.txt")
+    (data (i32.const 128) "changed")
+    (func (export "execute") (param i32 i32 i32 i32) (result i32)
+      i32.const 64 i32.const 7 i32.const 96 i32.const 10 {arguments} i32.const 0 call $file
+      i32.const 0)
+  )
+  (core instance $main (instantiate $main (with "host" (instance $imports))))
+  (alias core export $main "execute" (core func $execute))
+  (func $execute (param "entry" string) (param "params" $json) (result (result $json (error $plugin-error)))
+    (canon lift (core func $execute) (memory $memory) (realloc $realloc)))
+  (instance $command
+    (export "json" (type $json))
+    (export "plugin-error" (type $plugin-error))
+    (export "execute" (func $execute)))
+  (export "{package}/command@{version}" (instance $command))
+)"#
+        );
+        wat::parse_str(source).unwrap()
     }
     #[test]
     fn larger_declared_budgets_need_user_ceilings_and_exact_content_approval() {
@@ -153,11 +215,44 @@ mod native {
         let saved = s.doc.to_json();
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo, "one undo removes the entire plugin edit");
         s.execute("edit.redo", &json!({})).unwrap();
         assert_eq!(s.doc.to_json(), saved);
+        assert_eq!(s.undo.len(), undo + 1);
         drop(f);
         let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
         assert_eq!(reopened.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"], 72.);
+    }
+    #[test]
+    fn component_file_reads_and_writes_need_a_host_grant_even_when_declared() {
+        for write in [false, true] {
+            for declared in [false, true] {
+                let f = Fixture::new("call $box");
+                let secret = f.0.join("sample/secret.txt");
+                std::fs::write(&secret, b"private contents").unwrap();
+                std::fs::write(f.0.join("sample/plugin.wasm"), file_component(write)).unwrap();
+                if declared {
+                    let mut m = manifest();
+                    m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":true}]});
+                    std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+                }
+                let mut s = Session::default();
+                s.execute("solid.box", &json!({"length":1,"width":2,"height":3})).unwrap();
+                let before = s.doc.to_json();
+                let history = (s.undo.len(), s.redo.len());
+                assert!(s.plugin_state.file_grants.is_empty());
+                let error = f.run(&mut s).unwrap_err();
+                let expected = if write { "files.write:project" } else { "files.read:project" };
+                assert!(
+                    matches!(&error, EngineError::Plugin(craft_plugin::HostError::PermissionDenied { permission }) if permission == expected),
+                    "write={write}, declared={declared}: {error}"
+                );
+                assert_eq!(std::fs::read(&secret).unwrap(), b"private contents");
+                assert_eq!(s.doc.to_json(), before);
+                assert_eq!((s.undo.len(), s.redo.len()), history);
+                assert_eq!(solidcraft_io::vfs::current_scope(), None);
+            }
+        }
     }
     #[test]
     fn traps_fuel_memory_and_denied_calls_leave_design_and_history_untouched() {
@@ -193,31 +288,9 @@ mod native {
         }
     }
     #[test]
-    fn epoch_interrupt_is_distinct_from_fuel_exhaustion_in_diagnostics() {
-        let mut config = wasmtime::Config::new();
-        config.consume_fuel(true).epoch_interruption(true);
-        let engine = wasmtime::Engine::new(&config).unwrap();
-        let module = wasmtime::Module::from_binary(&engine, &wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap()).unwrap();
-        let mut store = wasmtime::Store::new(&engine, ());
-        let limits = Limits { fuel: 100_000, memory_mib: 1, deadline_ms: 5000 };
-        store.set_fuel(limits.fuel).unwrap();
-        store.set_epoch_deadline(1);
-        let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
-        let run = instance.get_typed_func::<(), ()>(&mut store, "run").unwrap();
-        // Advance the engine explicitly: no sleeps or wall-clock race in this test.
-        engine.increment_epoch();
-        let failure = run.call(&mut store, ()).unwrap_err();
-        let remaining = store.get_fuel().unwrap();
-        assert!(remaining > 0);
-        let message = crate::plugin::runtime::execution_error(&failure, Some(remaining), &limits).to_string();
-        assert!(message.contains("trap=Interrupt"), "{message}");
-        assert!(!message.contains("OutOfFuel"), "{message}");
-        assert!(message.contains(&format!("fuel_remaining={remaining}")), "{message}");
-    }
-    #[test]
     fn a_granted_component_reads_only_the_evaluated_mesh_and_preserves_history() {
         let f = Fixture::new("call $box");
-        let template = include_str!("fixture.wat").replace("\r\n", "\n");
+        let template = component_template();
         let old_args = r#"{\22length\22:2,\22width\22:3,\22height\22:4}"#;
         assert!(template.contains(old_args));
         assert_eq!(template.matches("i32.const 9\n").count(), 1);
@@ -260,6 +333,85 @@ mod native {
         solidcraft_io::vfs::scoped(Some(Default::default()), || {
             assert!(s.execute("plugin.inspect", &json!({"path":f.path()})).is_err());
         });
+    }
+
+    #[test]
+    fn net_manifest_permission_is_refused_before_execution() {
+        let f = Fixture::new("call $box");
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"net":true});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        let error = f.run(&mut s).unwrap_err();
+        assert!(matches!(error, EngineError::Plugin(craft_plugin::HostError::PermissionDenied { ref permission }) if permission == "net"));
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
+    fn sockets_and_http_imports_are_absent_from_the_linker() {
+        let (package, version) = API.split_once('@').unwrap();
+        for import in [
+            "wasi:sockets/network@0.2.0".to_string(),
+            "wasi:http/outgoing-handler@0.2.0".into(),
+            format!("{package}/fetch@{version}"),
+            "fetch".into(),
+        ] {
+            let f = Fixture::new("call $box");
+            let template = component_template();
+            let (prefix, _) = template.rsplit_once(')').unwrap();
+            let wat = format!("{prefix}\n(type $network-type (instance))\n(import \"{import}\" (instance $network (type $network-type)))\n)");
+            std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+            let mut s = Session::default();
+            let before = s.doc.to_json();
+            let error = f.run(&mut s).unwrap_err();
+            assert!(matches!(error, EngineError::Plugin(craft_plugin::HostError::PermissionDenied { .. })), "{import}: {error}");
+            assert!(error.to_string().contains(&import), "{error}");
+            assert_eq!(s.doc.to_json(), before);
+            assert!(s.undo.is_empty());
+        }
+    }
+
+    #[test]
+    fn declared_entry_inputs_are_discoverable_and_namespaced_calls_share_approval() {
+        let f = Fixture::new("call $box");
+        let mut m = manifest();
+        let schema = json!({"type":"object","properties":{"targets":{"type":"array","items":{"type":"string"}}}});
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"edit","input_schema":schema,"slots":[{"kind":"menu","name":"tools"}]}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let inspection = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        let listed = s.execute("plugin.list", &json!({})).unwrap();
+        let entry = listed["plugins"].as_array().unwrap().iter().find(|p| p["manifest"]["id"] == "sample").unwrap();
+        assert_eq!(entry["commands"], json!(["sample.make"]));
+        assert_eq!(entry["manifest"]["runtime"]["entries"][0]["input_schema"], schema);
+        let description = s.execute("engine.describe", &json!({"command":"sample.make"})).unwrap();
+        assert_eq!(description["input"]["properties"]["params"], schema);
+        assert_eq!(description["effect"], "edit");
+        assert!(s.doc.features.is_empty());
+        assert!(s.execute("sample.make", &json!({"params":{}})).is_err());
+        s.execute("sample.make", &json!({"approval":inspection["approval"],"params":{"targets":[]}})).unwrap();
+        assert_eq!(s.undo.len(), 1);
+        assert_eq!(s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"], 24.);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.features.is_empty());
+    }
+
+    #[test]
+    fn read_entries_cannot_edit_even_with_an_edit_command_grant() {
+        let f = Fixture::new("call $box");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        let error = f.run(&mut s).unwrap_err();
+        assert!(
+            matches!(error, EngineError::Plugin(craft_plugin::HostError::PermissionDenied { ref permission }) if permission.contains("read entry"))
+        );
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
     }
 }
 

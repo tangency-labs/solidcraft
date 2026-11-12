@@ -13,6 +13,34 @@ use serde::Deserialize;
 use crate::SolveApp;
 use crate::ui_kit::BackingTooltipExt as _;
 
+/// Route namespaced entries through the existing approval gate and dedicated transaction worker.
+pub(crate) fn normalize_request(session: &solidcraft_engine::Session, method: &str, params: &mut serde_json::Value) -> Result<(), String> {
+    fn normalize(session: &solidcraft_engine::Session, step: &mut serde_json::Value) -> Result<(), String> {
+        let Some(command) = step.get("command").or_else(|| step.get("id")).and_then(serde_json::Value::as_str) else { return Ok(()) };
+        let inputs = step.get("params").unwrap_or(&serde_json::Value::Null);
+        let Some(resolved) = solidcraft_engine::plugin::resolve_call(session, command, inputs).map_err(|e| e.to_string())? else { return Ok(()) };
+        if let Some(step) = step.as_object_mut() {
+            step.remove("id");
+            step.insert("command".into(), "plugin.run".into());
+            step.insert("params".into(), resolved);
+        }
+        Ok(())
+    }
+    match method {
+        "engine.execute" | "command" => normalize(session, params),
+        "engine.batch" | "engine.script" => {
+            let steps = if params.is_array() { params.as_array_mut() } else { params.get_mut("commands").and_then(serde_json::Value::as_array_mut) };
+            if let Some(steps) = steps {
+                for step in steps.iter_mut().take(10_000) {
+                    normalize(session, step)?;
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// How many turned-off ids a preferences file may name.
 pub const MAX_DISABLED: usize = 256;
 /// `plugin.json` larger than this is refused.
