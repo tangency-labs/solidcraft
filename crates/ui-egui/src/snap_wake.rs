@@ -73,6 +73,9 @@ fn same_item(a: &Sel, b: &Sel) -> bool {
 /// curve itself (Move's points), so it is looked for among all the hits (`hits`), not only the
 /// hover.
 pub fn update(app: &mut SolveApp, hits: &[Hit]) {
+    if app.dialog.is_none() {
+        app.viewport.snapped.clear();
+    }
     if !wanted(app) {
         app.viewport.woken = Woken::default();
         return;
@@ -96,15 +99,21 @@ pub fn update(app: &mut SolveApp, hits: &[Hit]) {
         let rim_points = snap_points(&app.session, &in_model(app, &rim));
         let w = &mut app.viewport.woken;
         w.points = rim_points;
+        // Only the face's own points are remembered as the face's: a point the rim already
+        // shows there stays the rim's, as it is drawn and picked.
+        let mut added = Vec::new();
         for p in points {
             let tol = 1e-6 * (1.0 + p.at.x.abs().max(p.at.y.abs()).max(p.at.z.abs()));
             if !w.points.iter().any(|q| (q.at.x - p.at.x).abs() <= tol && (q.at.y - p.at.y).abs() <= tol && (q.at.z - p.at.z).abs() <= tol) {
-                w.points.push(p);
+                added.push(p);
             }
         }
-        w.face = Some(item);
+        w.points.extend(added.iter().cloned());
+        w.face = Some(item.clone());
+        remember(app, &item, &added);
         return;
     }
+    remember(app, &item, &points);
     app.viewport.woken = Woken { item: Some(item), face: None, points, revision: app.session.revision };
 }
 
@@ -138,6 +147,23 @@ pub fn shown(app: &SolveApp) -> Vec<(Vec3, &SnapPoint)> {
         return Vec::new();
     }
     app.viewport.woken.points.iter().filter(|p| p.body.is_empty() || app.body_visible(&p.body)).map(|p| (at(p), p)).collect()
+}
+
+/// How many woken points a dialog remembers (the oldest are forgotten first).
+const REMEMBERED: usize = 256;
+
+/// Remember points woken by `item`, for [`snapped`].
+fn remember(app: &mut SolveApp, item: &Sel, points: &[SnapPoint]) {
+    let seen = &mut app.viewport.snapped;
+    seen.retain(|(_, p)| !points.iter().any(|q| q.at == p.at));
+    seen.extend(points.iter().map(|p| (item.clone(), p.clone())));
+    let over = seen.len().saturating_sub(REMEMBERED);
+    seen.drain(..over);
+}
+
+/// The snap point picked at `at` while this dialog was open, and the item that woke it.
+pub fn snapped(app: &SolveApp, at: Vec3) -> Option<&(Sel, SnapPoint)> {
+    app.viewport.snapped.iter().rev().find(|(_, p)| p.at == at)
 }
 
 /// The woken points within reach of `pos`, nearest first, as vertex hits (with their distance
