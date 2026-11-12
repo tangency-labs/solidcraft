@@ -16,8 +16,6 @@
 //! and null reads) are errors. No recursion. Not upstream (tangency-labs/solidcore#3139):
 //! [`PrimitiveCreation::create_skin_primitive_traced`] also traces each side face's
 //! profile curves (`p3::skin_sources`), building the same skin.
-//! Not upstream (#15263): a capped manifold skin with negative signed volume is
-//! classified again to identify its exterior after section correspondence is fixed.
 
 use super::PrimitiveCreationAccess;
 use crate::curve::composite_curve::CompositeCurve;
@@ -449,33 +447,5 @@ fn skin_with_scratch(
     }
 
     // stitch all the faces into a solid
-    a.stitch_faces(brep, approx_tol)?;
-    if cap_ends {
-        a.with_primitive_brep(brep, |k, b| {
-            if crate::topology::brep::p2::is_manifold_solid(b)?
-                && crate::mass::integrator::properties::brep_volume_default(k, b, 1e-9)? < 0.0
-            {
-                // Stitching establishes consistent face uses, but the section's
-                // winding does not choose which side of a closed shell is outside.
-                let query = crate::query::brep::BrepQuery::of_brep(b);
-                crate::topology::brep::p5::find_and_set_infinite_region(
-                    k,
-                    b,
-                    &query,
-                    None,
-                    crate::topology::brep::p1::SetRegionVoidType::NestedSolid,
-                    None,
-                )?;
-                let volume = crate::mass::integrator::properties::brep_volume_default(k, b, 1e-9)?;
-                if !volume.is_finite() || volume <= 0.0 {
-                    return Err(SolidError::primitive_failed(
-                        OP,
-                        "the skin could not be oriented outward",
-                    ));
-                }
-            }
-            Ok(())
-        })?;
-    }
-    Ok(())
+    a.stitch_faces(brep, approx_tol)
 }

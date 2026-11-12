@@ -108,10 +108,12 @@ breaks are recorded. A polygon supplied as one closed B-spline is split at its d
 knots so its corners are also seam candidates. Every split piece keeps the original
 edge source. Already aligned parallel sections keep their original correspondence.
 
-After stitching a capped manifold skin, negative signed volume triggers the existing
-exact exterior-region classifier (`find_and_set_infinite_region`, nested-solid
-flags), followed by a positive finite volume postcondition. No cap is reversed in
-isolation. Centroid and volume integration use relative accuracy `1e-9`, independently
+No cap is reversed in isolation, and nothing re-orients the shell after stitching: an
+earlier version of this fix also classified the exterior again when a capped skin's
+signed volume came out negative, but with the correspondence fixed no test reaches that
+step (solidcore skin 11, engine loft 42 and kernel loft 39 all pass without it), so it
+was removed rather than kept as a fallback. The C++ defect is recorded as WR-778 in
+`plan/upstream-issues/`. Centroid and volume integration use relative accuracy `1e-9`, independently
 of the skin approximation tolerance (`0` requests exact section interpolation).
 The first post-change run exposed why those quantities must not share one value:
 passing zero to mass integration caused `Mass(StepControl)` in all three existing
