@@ -543,6 +543,117 @@ fn bands_and_caps_without_seams_get_one() {
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
 }
 
+/// An edge from vertex `va` counterclockwise about +z to vertex `vb` on the circle of radius `r`
+/// round the z axis at height `z`.
+fn arc_about_z(w: &mut W, (va, vb): (u64, u64), r: f64, z: f64) -> u64 {
+    let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+    w.add(format!("EDGE_CURVE('',#{va},#{vb},#{k},.T.)"))
+}
+
+/// A countersink's cone between a full circle at its rim and a loop that comes up to within
+/// 0.05 mm of it below its only vertex and drops 0.5 mm elsewhere (a chamfer's edge broken across
+/// it), in a file of 0.1 mm uncertainty. The seam from the rim's vertex straight down to the loop
+/// would be 0.07 mm long, shorter than its own tolerance (an edge smaller than its tube): the face
+/// was left out of the part with "a seam of no length". The seam goes where the band is wider.
+#[test]
+fn a_band_narrower_than_its_tolerance_at_a_vertex_gets_its_seam_where_it_is_wider() {
+    for same_sense in [false, true] {
+        let mut w = W::default();
+        // A 45 degree cone opening up +z, radius 1 at z = 0: radius 1 + z at height z.
+        let r = |z: f64| 1.0 + z;
+        let at = |z: f64, angle: f64| [r(z) * angle.cos(), r(z) * angle.sin(), z];
+        let (lo, hi, rim) = (0.5, 0.95, 1.0);
+        let t = PI / 3.0;
+        let v_rim = w.vertex(at(rim, 0.0));
+        let rim_edge = arc_about_z(&mut w, (v_rim, v_rim), r(rim), rim);
+        // The loop below: high from -60 to 60 degrees, low the rest of the way round.
+        let (p_hi0, p_hi1, p_lo1, p_lo0) = (at(hi, -t), at(hi, t), at(lo, t), at(lo, -t));
+        let (h0, h1, l1, l0) = (w.vertex(p_hi0), w.vertex(p_hi1), w.vertex(p_lo1), w.vertex(p_lo0));
+        let high = arc_about_z(&mut w, (h0, h1), r(hi), hi);
+        let down = w.line_edge((h1, p_hi1), (l1, p_lo1), true, len3(sub3(p_lo1, p_hi1)));
+        let low = arc_about_z(&mut w, (l1, l0), r(lo), lo);
+        let up = w.line_edge((l0, p_lo0), (h0, p_hi0), true, len3(sub3(p_hi0, p_lo0)));
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let cone = w.add(format!("CONICAL_SURFACE('',#{a},1.,{})", real(PI / 4.0)));
+        // The face on the material's side of the cone: towards the axis for a countersink.
+        let below: Vec<u64> = [(high, true), (down, true), (low, true), (up, true)].iter().map(|&(e, o)| w.oe(e, o == same_sense)).collect();
+        let below = if same_sense { below } else { below.into_iter().rev().collect() };
+        let ob = w.bound(&below, true, true);
+        let o = w.oe(rim_edge, !same_sense);
+        let rb = w.bound(&[o], false, true);
+        let face = w.face(&[ob, rb], cone, same_sense);
+        let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+        let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('countersink',(#{open}))"));
+        let s = one_solid(&w.file_with_uncertainty(&[model], 0.1));
+        assert!(s.sheet);
+        assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+        // Every edge is longer than its tolerance: the seam starts at a vertex of the loop below
+        // where the band is 0.45 mm high, the rim split there in two.
+        for e in &s.brep.edges {
+            let [a, b] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+            assert!(a == b || len3(sub3(a, b)) > e.tolerance, "an edge {:?} shorter than its tolerance {}", [a, b], e.tolerance);
+        }
+        assert_eq!(counts(&s.brep), [1, 1, 1, 4 + 2 + 1, 4 + 2], "same_sense {same_sense}");
+    }
+}
+
+/// A spherical band (a dome with a ring of holes round a centre one) between a circle at its foot
+/// and one round its top, both with their vertex at angle 0, and a hole straddling that angle
+/// between them. The meridian through both vertices crosses the hole, so a seam there cut it in
+/// two and the face was lost ("an edge lies 5.9 mm off the face's surface"). The seam goes where
+/// no other loop of the face reaches: both rims split there.
+#[test]
+fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
+    let radius = 5.0;
+    let ring = |w: &mut W, z: f64| {
+        let r = (radius * radius - z * z).sqrt();
+        let v = w.vertex([r, 0.0, z]);
+        let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let mut w = W::default();
+    let (foot, top) = (ring(&mut w, 0.0), ring(&mut w, 4.0));
+    // The hole: a window from 10 degrees west of +x to 10 east, between latitudes 20 and 40,
+    // bounded by two parallels and two meridians.
+    let (west, east, south, north) = (-PI / 18.0, PI / 18.0, PI / 9.0, 2.0 * PI / 9.0);
+    let on = |lat: f64, lon: f64| [radius * lat.cos() * lon.cos(), radius * lat.cos() * lon.sin(), radius * lat.sin()];
+    let (sw, se, ne, nw) = (w.vertex(on(south, west)), w.vertex(on(south, east)), w.vertex(on(north, east)), w.vertex(on(north, west)));
+    let s_edge = arc_about_z(&mut w, (sw, se), radius * south.cos(), radius * south.sin());
+    let n_edge = arc_about_z(&mut w, (nw, ne), radius * north.cos(), radius * north.sin());
+    // A meridian with its angle the latitude.
+    let meridian = |w: &mut W, lon: f64, (a, b): (u64, u64)| {
+        let k = w.circle([0.0; 3], [lon.sin(), -lon.cos(), 0.0], [lon.cos(), lon.sin(), 0.0], radius);
+        w.add(format!("EDGE_CURVE('',#{a},#{b},#{k},.T.)"))
+    };
+    let (w_edge, e_edge) = (meridian(&mut w, west, (sw, nw)), meridian(&mut w, east, (se, ne)));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},{})", real(radius)));
+    // Outward: the foot runs +u, the top -u, the hole clockwise seen from outside (north up its
+    // west side, east along its north side, back south and west).
+    let (f, t) = (w.oe(foot, true), w.oe(top, false));
+    let hole = [(w_edge, true), (n_edge, true), (e_edge, false), (s_edge, false)].map(|(e, o)| w.oe(e, o));
+    let bounds = [w.bound(&[f], true, true), w.bound(&[t], false, true), w.bound(&hole, false, true)];
+    let face = w.face(&bounds, sphere, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('dome',(#{open}))"));
+    let s = one_solid(&w.file(&[model]));
+    assert!(s.sheet);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    // The foot and the top split in two at the seam's angle, the hole whole: two loops, the
+    // merged band and the hole.
+    assert_eq!(counts(&s.brep), [1, 1, 1, 2 + 2 + 1 + 4, 2 + 2 + 4]);
+    assert_eq!(s.brep.faces[0].loops.len(), 2);
+    // The seam: the one edge from the foot to the top, clear of the hole's angles.
+    let seam = s.brep.edges.iter().find(|e| {
+        let [a, b] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+        (a[2].abs() < 1e-9 && (b[2] - 4.0).abs() < 1e-9) || (b[2].abs() < 1e-9 && (a[2] - 4.0).abs() < 1e-9)
+    });
+    let seam = seam.unwrap_or_else(|| panic!("no seam from the foot to the top: {:?}", s.brep.vertices));
+    let foot_end = seam.vertices.map(|v| s.brep.vertices[v as usize].point).into_iter().find(|p| p[2].abs() < 1e-9).unwrap();
+    let angle = foot_end[1].atan2(foot_end[0]);
+    assert!(angle.abs() > east, "the seam at {angle} rad crosses the hole");
+}
+
 /// A half torus between its rims (a fillet round a bore, `torus_ring` of the step-conformance
 /// set): its face winds around the axis between two circles about it, and gets a seam round the
 /// tube on the face's side, closing the solid with the annulus.
