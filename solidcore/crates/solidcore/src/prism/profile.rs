@@ -4,7 +4,8 @@
 //! these and copy them in at their boundary. The maths on them is here: a segment's points and
 //! its homogeneous Bézier form, a loop's signed area with a proved bound on its rounding, the
 //! even–odd hold of a point decided exactly or refused, the checks a profile must pass, the split
-//! of a loop where it passes a point twice, and a segment made the kernel's curve on a frame.
+//! of a loop where it passes a point twice, a segment made the kernel's curve on a frame, and a
+//! view's points in its frame and points along and across a line in it.
 //!
 //! Not upstream (SolidCraft's planar regions, moved into the kernel so the layers above compute
 //! no geometry, docs/layers.md §1).
@@ -12,7 +13,8 @@
 //! References: Piegl & Tiller, *The NURBS Book* (2nd ed.), §1.4 (de Casteljau), §7.3 (the
 //! rational quadratic arc, its middle weight the cosine of half its angle); Farin, *Curves and
 //! Surfaces for CAGD* (5th ed.), §5.2 (Bernstein products), §12.4 (the area of a conic arc);
-//! Higham, *Accuracy and Stability of Numerical Algorithms* (2nd ed.), §3.1 (`gamma_k`).
+//! Higham, *Accuracy and Stability of Numerical Algorithms* (2nd ed.), §3.1 (`gamma_k`), §27.8
+//! (a length scaled by its largest component before squaring, so that it can't overflow).
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
@@ -800,13 +802,19 @@ pub fn height(frame: &Frame, q: Point3) -> f64 {
 /// Whether `frame`'s axes are unit and square to each other, to within 1e-12.
 #[must_use]
 pub fn frame_is_orthonormal(frame: &Frame) -> bool {
+    frame_is_orthonormal_to(frame, 1e-12)
+}
+
+/// Whether `frame` is finite and its axes are unit and square to each other, to within `tol`.
+#[must_use]
+pub fn frame_is_orthonormal_to(frame: &Frame, tol: f64) -> bool {
     let (o, x, y, _) = axes(frame);
     [o, x, y]
         .iter()
         .all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite())
-        && (x.length() - 1.0).abs() <= 1e-12
-        && (y.length() - 1.0).abs() <= 1e-12
-        && x.dot(y).abs() <= 1e-12
+        && (x.length() - 1.0).abs() <= tol
+        && (y.length() - 1.0).abs() <= tol
+        && x.dot(y).abs() <= tol
 }
 
 /// The least length a direction may have and still give a unit: a length at or below it is
@@ -827,11 +835,54 @@ const OP_LINE: &str = "prism::profile::line_coords_2d";
 /// `InvalidInput` for a frame not finite or further than [`VIEW_FRAME_TOL`] from orthonormal,
 /// more than [`MAX_SEGMENTS`] points, or a point (or a coordinate it gives) not finite.
 pub fn to_local_all(frame: &Frame, points: &[Point3]) -> Result<Vec<Point2>> {
-    let _ = (frame, points);
-    Err(SolidError::Unsupported {
+    let refuse = |reason| SolidError::InvalidInput {
         operation: OP_LOCAL_ALL,
-        reason: "not built yet",
-    })
+        reason,
+    };
+    if !frame_is_orthonormal_to(frame, VIEW_FRAME_TOL) {
+        return Err(refuse("a frame not finite or not orthonormal within 1e-8"));
+    }
+    if points.len() > MAX_SEGMENTS {
+        return Err(refuse("more than 8192 points: at most 8192 fit"));
+    }
+    points
+        .iter()
+        .map(|q| Some(to_local(frame, *q)).filter(|p| finite2(*p)))
+        .map(|p| p.ok_or_else(|| refuse("a point, or a coordinate it gives, not finite")))
+        .collect()
+}
+
+/// `v`'s length and unit, the length scaled by its largest component before the squares are
+/// summed, so that no finite vector overflows to a zero "unit" or underflows to a length it
+/// doesn't have: `m·sqrt(Σ(v/m)²)`. `None` for a component not finite or a zero vector. `sqrt`
+/// and each division are correctly rounded, so the result is the same on every target. The
+/// length may round to infinity for a finite vector near `f64::MAX`: still a length.
+fn scaled3(v: Vec3) -> Option<(f64, Vec3)> {
+    if !(v.x.is_finite() && v.y.is_finite() && v.z.is_finite()) {
+        return None;
+    }
+    let m = v.x.abs().max(v.y.abs()).max(v.z.abs());
+    if m == 0.0 {
+        return None;
+    }
+    let (x, y, z) = (v.x / m, v.y / m, v.z / m);
+    let s = (x * x + y * y + z * z).sqrt();
+    Some((m * s, Vec3::new(x / s, y / s, z / s)))
+}
+
+/// `v`'s unit as [`scaled3`] gives it, or `None` for a length at or below [`MIN_DIRECTION`].
+fn scaled_unit3(v: Vec3) -> Option<Vec3> {
+    scaled3(v).and_then(|(len, unit)| (len > MIN_DIRECTION).then_some(unit))
+}
+
+/// `v`'s unit as [`scaled_unit3`] gives it in the plane `z = 0`.
+fn scaled_unit(v: Vec2) -> Option<Vec2> {
+    scaled_unit3(Vec3::new(v.x, v.y, 0.0)).map(|u| Vec2::new(u.x, u.y))
+}
+
+/// `u` turned a quarter counter-clockwise.
+fn left_of(u: Vec2) -> Vec2 {
+    Vec2::new(-u.y, u.x)
 }
 
 /// A line through a point on a plane, read as a unit along it and the unit a quarter turn
@@ -855,10 +906,32 @@ pub struct LineCoords {
 /// [`MIN_DIRECTION`], more than [`MAX_SEGMENTS`] points, or a point (or a coordinate it gives)
 /// not finite.
 pub fn line_coords_2d(origin: Point2, direction: Vec2, points: &[Point2]) -> Result<LineCoords> {
-    let _ = (origin, direction, points);
-    Err(SolidError::Unsupported {
+    let refuse = |reason| SolidError::InvalidInput {
         operation: OP_LINE,
-        reason: "not built yet",
+        reason,
+    };
+    if !finite2(origin) {
+        return Err(refuse("an origin not finite"));
+    }
+    let unit = scaled_unit(direction).ok_or_else(|| {
+        refuse("a direction not finite, or of length at or below 1e-9: a longer one fits")
+    })?;
+    if points.len() > MAX_SEGMENTS {
+        return Err(refuse("more than 8192 points: at most 8192 fit"));
+    }
+    let normal = left_of(unit);
+    let coords = points
+        .iter()
+        .map(|p| {
+            let d = *p - origin;
+            Some(Vec2::new(d.dot(unit), d.dot(normal))).filter(|c| finite2(*c))
+        })
+        .map(|c| c.ok_or_else(|| refuse("a point, or a coordinate it gives, not finite")))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(LineCoords {
+        unit,
+        normal,
+        coords,
     })
 }
 

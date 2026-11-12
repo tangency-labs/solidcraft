@@ -4,7 +4,8 @@
 //! Not upstream (SolidCraft's dimension layout, moved into the kernel so the layers above compute
 //! no geometry, docs/layers.md §1). Not a certified query, so it sits outside `prism`, whose
 //! queries each carry a proved bound: the order of the places is kept exactly, and consecutive
-//! places are `pitch` apart or more, less the rounding of their sums.
+//! places are `pitch` apart or more, less at most `GAP_ROUNDING` of their size; places too large
+//! for that to leave the pitch are refused.
 //!
 //! References: Best and Chakravarti, "Active set algorithms for isotonic regression; a unifying
 //! framework", *Mathematical Programming* 47 (1990), 425–439 (pool adjacent violators, and its
@@ -36,13 +37,63 @@ const GAP_ROUNDING: f64 = 4.0 * f64::EPSILON;
 /// # Errors
 ///
 /// `InvalidInput` for a pitch not finite or below zero, more than [`MAX_ITEMS`] places, a place
-/// not finite, `ideal` not in order, or a result not finite.
+/// not finite, `ideal` not in order, a result not finite, or places 2^50 pitches in size or more,
+/// where rounding could take a whole pitch from a gap.
 pub fn spread_along(ideal: &[f64], pitch: f64) -> Result<Vec<f64>> {
-    let _ = (ideal, pitch, GAP_ROUNDING);
-    Err(SolidError::Unsupported {
+    let refuse = |reason| SolidError::InvalidInput {
         operation: OP,
-        reason: "not built yet",
-    })
+        reason,
+    };
+    if !(pitch.is_finite() && pitch >= 0.0) {
+        return Err(refuse("a pitch not finite or below zero"));
+    }
+    if ideal.len() > MAX_ITEMS {
+        return Err(refuse("more than 8192 places: at most 8192 fit"));
+    }
+    if !ideal.iter().all(|x| x.is_finite()) {
+        return Err(refuse("a place not finite"));
+    }
+    if ideal.windows(2).any(|w| matches!(w, [a, b] if b < a)) {
+        return Err(refuse("places not in order"));
+    }
+    // Each block: the sum of its members' targets (places less their spacing), and their count.
+    let mut blocks: Vec<(f64, usize)> = Vec::new();
+    for (i, x) in ideal.iter().enumerate() {
+        blocks.push((x - pitch * i as f64, 1));
+        // Pool the last two blocks while the earlier one's mean is above the later one's.
+        while let [.., (a, m), (b, k)] = *blocks.as_slice() {
+            if a / m as f64 <= b / k as f64 {
+                break;
+            }
+            blocks.truncate(blocks.len().saturating_sub(2));
+            blocks.push((a + b, m + k));
+        }
+    }
+    let means: Vec<f64> = blocks
+        .into_iter()
+        .flat_map(|(sum, k)| std::iter::repeat_n(sum / k as f64, k))
+        .collect();
+    let places: Vec<f64> = means
+        .iter()
+        .enumerate()
+        .map(|(i, mean)| mean + pitch * i as f64)
+        .collect();
+    if !places.iter().all(|x| x.is_finite()) {
+        return Err(refuse("a place not finite"));
+    }
+    // Rounding takes at most `GAP_ROUNDING` of the places' size from a gap. Where that could be
+    // the whole pitch, a gap may vanish (at `f64::MAX`, adding 1 changes nothing), so it is refused.
+    let size = means
+        .iter()
+        .enumerate()
+        .map(|(i, mean)| mean.abs() + pitch * i as f64)
+        .fold(0.0, f64::max);
+    if places.len() > 1 && pitch > 0.0 && GAP_ROUNDING * size >= pitch {
+        return Err(refuse(
+            "places too large to keep a pitch apart: a pitch fits where the places are under 2^50 times it",
+        ));
+    }
+    Ok(places)
 }
 
 #[cfg(test)]
