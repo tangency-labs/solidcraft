@@ -1590,7 +1590,7 @@ fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: so
             ));
         }
     }
-    let bytes = solidcraft_io::export_glb(&s.doc, &world, bodies, &name, quality)?;
+    let bytes = solidcraft_io::export_glb(&s.doc, &s.model.state(), &world, bodies, &name, quality)?;
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{:?}", Format::Glb)}))
 }
@@ -1959,6 +1959,8 @@ mod tests {
 
     /// Each body node of a GLB with its mesh's bounds in millimetres (the POSITION accessor's),
     /// after checking the root node turns millimetres and Z up into metres and Y up.
+    /// Each mesh node's name and the bounds of its mesh where the node tree below the root puts
+    /// it (millimetres, Z up): occurrence nodes place their bodies by translation and rotation.
     fn glb_bodies(g: &Value) -> Vec<(String, [f64; 3], [f64; 3])> {
         let root = &g["nodes"][0];
         assert_eq!(g["scenes"][0]["nodes"], json!([0]));
@@ -1966,21 +1968,48 @@ mod tests {
         let half = std::f64::consts::FRAC_1_SQRT_2;
         assert_eq!(root["rotation"], json!([-half, 0.0, 0.0, half]));
         let v3 = |v: &Value| -> [f64; 3] { [0, 1, 2].map(|i| v[i].as_f64().unwrap()) };
-        let children = root["children"].as_array().unwrap();
-        children
-            .iter()
-            .map(|c| {
-                let node = &g["nodes"][c.as_u64().unwrap() as usize];
-                let mesh = &g["meshes"][node["mesh"].as_u64().unwrap() as usize];
-                let accessor = &g["accessors"][mesh["primitives"][0]["attributes"]["POSITION"].as_u64().unwrap() as usize];
-                (node["name"].as_str().unwrap().to_string(), v3(&accessor["min"]), v3(&accessor["max"]))
-            })
-            .collect()
+        // A node's placement as a matrix (`m[col][row]`) from its translation and rotation.
+        let local = |n: &Value| -> solidcraft_doc::Mat {
+            let t = n.get("translation").map_or([0.0; 3], v3);
+            let [x, y, z, w] = n.get("rotation").map_or([0.0, 0.0, 0.0, 1.0], |q| [0, 1, 2, 3].map(|i| q[i].as_f64().unwrap()));
+            [
+                [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + z * w), 2.0 * (x * z - y * w), 0.0],
+                [2.0 * (x * y - z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + x * w), 0.0],
+                [2.0 * (x * z + y * w), 2.0 * (y * z - x * w), 1.0 - 2.0 * (x * x + y * y), 0.0],
+                [t[0], t[1], t[2], 1.0],
+            ]
+        };
+        let kids = |n: &Value| -> Vec<usize> {
+            n["children"].as_array().map(|c| c.iter().map(|i| i.as_u64().unwrap() as usize).collect()).unwrap_or_default()
+        };
+        let mut stack: Vec<(usize, solidcraft_doc::Mat)> = kids(root).into_iter().map(|c| (c, solidcraft_doc::IDENTITY)).collect();
+        let mut out = Vec::new();
+        while let Some((i, above)) = stack.pop() {
+            let node = &g["nodes"][i];
+            let m = solidcraft_doc::mat_mul(&above, &local(node));
+            stack.extend(kids(node).into_iter().map(|c| (c, m)));
+            let Some(mesh) = node.get("mesh") else { continue };
+            let mesh = &g["meshes"][mesh.as_u64().unwrap() as usize];
+            let accessor = &g["accessors"][mesh["primitives"][0]["attributes"]["POSITION"].as_u64().unwrap() as usize];
+            let (lo, hi) = (v3(&accessor["min"]), v3(&accessor["max"]));
+            let (mut min, mut max) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+            for k in 0..8 {
+                let p = [0, 1, 2].map(|a| if k & (1 << a) == 0 { lo[a] } else { hi[a] });
+                let q = solidcraft_doc::apply_point(&m, solidcore_record::Vec3::new(p[0], p[1], p[2]));
+                for (a, v) in [q.x, q.y, q.z].into_iter().enumerate() {
+                    min[a] = min[a].min(v);
+                    max[a] = max[a].max(v);
+                }
+            }
+            out.push((node["name"].as_str().unwrap().to_string(), min, max));
+        }
+        out
     }
 
     /// #1553: a GLB export holds every body where the assembly places it, each a node named after
     /// the body, under one root that makes millimetres metres and Z up Y up. A component placed
-    /// twice is written twice, each copy where it stands, and `bodies` exports only those named.
+    /// twice is written twice, each copy where it stands (through its occurrence's node, #5296),
+    /// and `bodies` exports only those named.
     #[test]
     fn a_glb_export_holds_each_body_where_the_assembly_places_it() {
         let dir = std::env::temp_dir().join(format!("solidcraft-glb-placed-{}", std::process::id()));
