@@ -716,10 +716,7 @@ impl BSplineCurve {
         let end = self.evaluate_point(ivl.max())?;
 
         if start.closer_than(EFF_ZERO, end) {
-            return Err(SolidError::b_spline(
-                OP_SCALE,
-                BSplineFailure::Failed("the curve's ends coincide"),
-            ));
+            return Err(SolidError::b_spline(OP_SCALE, BSplineFailure::EndsCoincide));
         }
         let mut res = self.clone();
 
@@ -1080,7 +1077,10 @@ impl BSplineCurve {
         if pnt1.distance(pnt2) > tol {
             return Err(SolidError::b_spline(
                 OP_JOIN,
-                BSplineFailure::Failed("the ends to join are farther apart than the tolerance"),
+                BSplineFailure::EndsApart {
+                    distance: pnt1.distance(pnt2),
+                    tolerance: tol,
+                },
             ));
         }
 
@@ -1130,9 +1130,7 @@ impl BSplineCurve {
             Err(e) => {
                 return Err(crate::error::Failure::new(
                     OP_JOIN,
-                    crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::Failed(
-                        "the joined curve could not be built",
-                    )),
+                    crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::StageFailed),
                 )
                 .caused_by(e)
                 .into_error());
@@ -1162,12 +1160,7 @@ impl BSplineCurve {
 
         // check state
         if knots.len() != continuities.len() {
-            return Err(SolidError::b_spline(
-                OP_SUBDIV,
-                BSplineFailure::Failed(
-                    "the curve has a different number of knots and continuities",
-                ),
-            ));
+            return Err(SolidError::b_spline(OP_SUBDIV, BSplineFailure::StageFailed));
         }
 
         // init iter params
@@ -2220,12 +2213,17 @@ mod tests {
             &[0.0, 0.0, 1.0, 1.0],
         );
         let e = a.join_with(k, true, &mut b, false, Some(0.01)).unwrap_err();
-        assert_eq!(
-            e.nurbs_failure(),
-            Some(&crate::error::nurbs::NurbsFailure::BSpline(
-                BSplineFailure::Failed("the ends to join are farther apart than the tolerance")
-            ))
-        );
+        // the end (4, 0, 0) of `quad` and the start (9, 0, 0) of the line are 5 apart
+        match e.nurbs_failure() {
+            Some(crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::EndsApart {
+                distance,
+                tolerance,
+            })) => {
+                assert!((distance - 5.0).abs() < 1e-12, "{distance}");
+                assert_eq!(*tolerance, 0.01);
+            }
+            other => panic!("{other:?}"),
+        }
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
     }
 
@@ -2248,7 +2246,7 @@ mod tests {
         assert_eq!(
             e.nurbs_failure(),
             Some(&crate::error::nurbs::NurbsFailure::BSpline(
-                BSplineFailure::Failed("the joined curve could not be built")
+                BSplineFailure::StageFailed
             ))
         );
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));

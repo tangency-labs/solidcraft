@@ -69,7 +69,7 @@
 //!   `ContainsPeriodicPoint2d`'s periodic point) are always computed; they have no
 //!   side effects.
 //! - Status codes: `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; `SM_ERR`
-//!   is a [`crate::error::geom::GeomFailure::Failed`] (status 1001). `Intersect`
+//!   is a typed [`crate::error::geom::GeomFailure`] (status 1001). `Intersect`
 //!   leaves an `Init()` extent as the result when it fails; the Rust error carries no result.
 //!   `Inversion` may write a partial normalised point before failing; the Rust error
 //!   carries none (no in-scope caller reads it).
@@ -710,14 +710,14 @@ impl Extent2d {
     }
 
     /// Normalised coordinates of `p` (snapped to the boundary when within `tol` of
-    /// it, clamped to `[0, 1]`); a [`crate::error::geom::GeomFailure::Failed`]
+    /// it, clamped to `[0, 1]`); a [`crate::error::geom::GeomFailure::PointOutsideExtent`]
     /// (`SM_ERR`) when `p` is outside or a side is degenerate and `p` is off it
     /// (`Inversion`; upstream default `tol = SM_EFF_ZERO`).
     pub fn inversion(&self, p: Point2, tol: f64) -> Result<Point2> {
         let err = || {
-            SolidError::geom_failed(
+            SolidError::geom(
                 "geom::extent2d::Extent2d::inversion",
-                "the point does not lie in the extent",
+                crate::error::geom::GeomFailure::PointOutsideExtent { u: p.x, v: p.y },
             )
         };
         let mut pnt = p;
@@ -865,7 +865,7 @@ impl Extent2d {
 
     /// Maps `p` from this domain to `other` through normalised coordinates,
     /// swapping u and v when `switch_params`; a
-    /// [`crate::error::geom::GeomFailure::Failed`] (`SM_ERR`) when
+    /// [`crate::error::geom::GeomFailure::PointOutsideExtent`] (`SM_ERR`) when
     /// [`Extent2d::inversion`] fails (`Point2dMapToDomain`).
     pub fn point_map_to_domain(
         &self,
@@ -874,9 +874,9 @@ impl Extent2d {
         switch_params: bool,
     ) -> Result<Point2> {
         let n = self.inversion(p, EFF_ZERO).map_err(|_| {
-            SolidError::geom_failed(
+            SolidError::geom(
                 "geom::extent2d::Extent2d::point_map_to_domain",
-                "the point does not lie in the extent",
+                crate::error::geom::GeomFailure::PointOutsideExtent { u: p.x, v: p.y },
             )
         })?;
         Ok(if switch_params {
@@ -1074,9 +1074,7 @@ mod tests {
         let outside = e.inversion(p(2.0, 0.5), EFF_ZERO).unwrap_err();
         assert_eq!(
             outside.geom_failure(),
-            Some(&crate::error::geom::GeomFailure::Failed(
-                "the point does not lie in the extent"
-            ))
+            Some(&crate::error::geom::GeomFailure::PointOutsideExtent { u: 2.0, v: 0.5 })
         );
         assert_eq!(outside.upstream_status(), Some(crate::error::SM_ERR));
         let mapped = e

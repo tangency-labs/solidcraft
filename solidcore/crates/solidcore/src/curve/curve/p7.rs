@@ -119,7 +119,10 @@ fn at_most(c: ContinuityType, limit: ContinuityType) -> bool {
 /// The leaf span of `node` in `tree` (`(SmBezierSpan*)pNode->m_pData`, `NER`).
 fn leaf_span<O: Copy + PartialEq>(tree: &Tree<O>, node: &TreeNode<O>) -> Result<BezierSpan> {
     if matches!(node.data, NodeData::None) {
-        return Err(SolidError::curve_missing(OP_CCI, "the tree node's span"));
+        return Err(SolidError::curve_stage_failed(
+            OP_CCI,
+            crate::error::SM_ERR_NULL_POINTER,
+        ));
     }
     Ok(*tree.curve_span(node)?)
 }
@@ -1149,15 +1152,16 @@ impl Curve {
             Err(e) => {
                 return Err(crate::error::Failure::new(
                     OP_GPA,
-                    crate::error::curve::CurveFailure::Missing("the curve's cache"),
+                    crate::error::curve::CurveFailure::StageFailed,
                 )
+                .with_status(crate::error::SM_ERR_NULL_POINTER)
                 .caused_by(e)
                 .into_error())
             }
         };
-        let curve_tree = cache
-            .tree()
-            .ok_or_else(|| SolidError::curve_missing(OP_GPA, "the curve cache's tree"))?;
+        let curve_tree = cache.tree().ok_or_else(|| {
+            SolidError::curve_stage_failed(OP_GPA, crate::error::SM_ERR_NULL_POINTER)
+        })?;
 
         // special case SM_CP_PERPENDICULAR_TO_VECTOR
         // quit when curve is a line or when curve is in plane perp to target vector
@@ -1637,15 +1641,14 @@ mod tests {
     }
 
     #[test]
-    fn a_leaf_without_a_span_is_a_missing_span() {
+    fn a_leaf_without_a_span_is_a_stage_failure() {
         let tree: Tree<()> = Tree::from_point(Vec3::ZERO, 1.0, false);
         let e = leaf_span(&tree, &TreeNode::new()).unwrap_err();
         assert_eq!(
             e.curve_failure(),
-            Some(&crate::error::curve::CurveFailure::Missing(
-                "the tree node's span"
-            ))
+            Some(&crate::error::curve::CurveFailure::StageFailed)
         );
+        assert!(e.is_defect());
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
@@ -1747,10 +1750,9 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e.curve_failure(),
-            Some(&crate::error::curve::CurveFailure::Missing(
-                "the curve's cache"
-            ))
+            Some(&crate::error::curve::CurveFailure::StageFailed)
         );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
         assert_eq!(e.cause(), Some(&built));
     }
 }

@@ -72,7 +72,7 @@
 //!   caller), the unused context argument and the `SM_ASSERT`s.
 
 use crate::curve::curve::Curve;
-use crate::error::{ignored, passed_on, Result, SolidError};
+use crate::error::{ignored, passed_on, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::ExtentPointType;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -161,10 +161,9 @@ fn intersection_surface_caches_in<O: Copy + PartialEq>(
         } else {
             crate::error::Failure::new(
                 OP_CACHES,
-                crate::error::intersect::IntersectFailure::Missing(
-                    "the surface's cache or its tree",
-                ),
+                crate::error::intersect::IntersectFailure::StageFailed,
             )
+            .with_status(SM_ERR_NULL_POINTER)
             .caused_by(e)
             .into_error()
         }
@@ -531,7 +530,10 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
 
         // get surface caches and their decomposition trees (NER)
         if caches.is_empty() {
-            return Err(SolidError::intersect_missing(OP_DI, "the surface caches"));
+            return Err(SolidError::intersect_stage_failed(
+                OP_DI,
+                SM_ERR_NULL_POINTER,
+            ));
         }
         for c in caches.iter_mut().take(2) {
             if !(trees_ready && c.tree().is_some()) {
@@ -541,10 +543,9 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                     } else {
                         crate::error::Failure::new(
                             OP_DI,
-                            crate::error::intersect::IntersectFailure::Missing(
-                                "the surface cache's tree",
-                            ),
+                            crate::error::intersect::IntersectFailure::StageFailed,
                         )
+                        .with_status(SM_ERR_NULL_POINTER)
                         .caused_by(e)
                         .into_error()
                     }
@@ -564,15 +565,16 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             .take(2)
             .map(|c| c.patch_boundary_bounding_planes().clone())
             .collect();
-        let mut planes1 = planes.first().cloned().ok_or_else(|| {
-            SolidError::intersect_missing(OP_DI, "the patch boundary bounding planes")
-        })?;
+        let mut planes1 = planes
+            .first()
+            .cloned()
+            .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
         let mut planes2 = planes.get(1).cloned().unwrap_or_else(|| planes1.clone());
 
         let caches: &'t [SurfaceCache<O>] = caches;
         let cache1 = caches
             .first()
-            .ok_or_else(|| SolidError::intersect_missing(OP_DI, "the first surface cache"))?;
+            .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
         let cache2 = caches.get(1).unwrap_or(cache1);
         self.bind_caches(cache1, cache2)?;
 
@@ -580,7 +582,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         let root_box = |c: &SurfaceCache<O>| -> Result<Extent3d> {
             let tree = c
                 .tree()
-                .ok_or_else(|| SolidError::intersect_missing(OP_DI, "the surface cache's tree"))?;
+                .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
             let top = tree
                 .top_node()
                 .ok_or(SolidError::invalid_input(OP_DI, "tree without top node"))?;
@@ -1007,9 +1009,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::Missing(
-                "the surface caches"
-            ))
+            Some(&crate::error::intersect::IntersectFailure::StageFailed)
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         // the tolerances are set first
@@ -1141,9 +1141,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::Missing(
-                "the surface's cache or its tree"
-            ))
+            Some(&crate::error::intersect::IntersectFailure::StageFailed)
         );
         assert_eq!(
             e.cause(),
@@ -1183,9 +1181,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::Missing(
-                "the surface cache's tree"
-            ))
+            Some(&crate::error::intersect::IntersectFailure::StageFailed)
         );
         assert_eq!(e.cause(), Some(&built));
     }

@@ -2140,7 +2140,7 @@ pub fn local_extension_reach(
     let is_moved = |f: Option<FaceId>| f.is_some_and(|f| moved.iter().any(|(m, _)| *m == f));
     let uncertified = || match own_face {
         Some(face) => Failure::new(LOCAL_OP, OffsetFailure::ReachUncertified { face }).into_error(),
-        None => SolidError::offset_missing(LOCAL_OP, "the face use's face"),
+        None => SolidError::offset_stage_failed(LOCAL_OP, crate::error::SM_ERR_NULL_POINTER),
     };
     // each face's exact class, proved once
     let mut classes: Vec<(FaceId, Option<Exact>)> = Vec::new();

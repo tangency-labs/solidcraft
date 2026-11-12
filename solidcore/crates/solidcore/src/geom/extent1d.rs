@@ -65,7 +65,7 @@
 //!   `SetMinMax` rejects it and leaves the caller's extent untouched).
 //!   Optional out-params are always computed (they have no side effects).
 //! - Status codes: `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; `SM_ERR`
-//!   is a [`crate::error::geom::GeomFailure::Failed`] (status 1001). `Intersect`
+//!   is a typed [`crate::error::geom::GeomFailure`] (status 1001). `Intersect`
 //!   and the non-periodic branch of `IntersectPeriodic` leave an `Init()` interval
 //!   as the result when they fail; the Rust error carries no result (it is always [`Extent1d::new`]).
 //! - `ClampVector` keeps upstream's in/out arrays (`SetSize` keeps the existing
@@ -394,9 +394,12 @@ impl Extent1d {
     /// (`Intersect`; upstream then sets the result to `Init()`).
     pub fn intersect(&self, other: &Self) -> Result<Self> {
         if self.are_disjoint(other, 0.0) {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 "geom::extent1d::Extent1d::intersect",
-                "the intervals are disjoint",
+                crate::error::geom::GeomFailure::Disjoint {
+                    a: [self.min, self.max],
+                    b: [other.min, other.max],
+                },
             ));
         }
         Ok(Self {
@@ -1060,9 +1063,10 @@ mod tests {
         let disjoint = a.intersect(&c).unwrap_err();
         assert_eq!(
             disjoint.geom_failure(),
-            Some(&crate::error::geom::GeomFailure::Failed(
-                "the intervals are disjoint"
-            ))
+            Some(&crate::error::geom::GeomFailure::Disjoint {
+                a: [0.0, 2.0],
+                b: [5.0, 6.0]
+            })
         );
         assert_eq!(disjoint.upstream_status(), Some(crate::error::SM_ERR));
         assert!(a.are_disjoint(&c, 0.0));
