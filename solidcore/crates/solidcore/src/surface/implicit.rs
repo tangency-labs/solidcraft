@@ -1864,8 +1864,9 @@ impl AnalyticSupport {
     /// computations tilt the axis by about 1e-13 (an ulp of the origin's size), which a form
     /// far from the world origin turns into a parametrisation `build` refuses. The
     /// recogniser's frame turn, sweep, generator range and swap are kept: they are
-    /// conventions, not numbers. `None` where the form gives no such rows (fewer than two
-    /// circles, or three on-curve points in line).
+    /// conventions, not numbers. A row collapsed to one point (a cone's apex) is the axis's
+    /// point of radius 0. `None` where the form gives no such rows (fewer than two circles,
+    /// or three on-curve points in line).
     fn revolved_from_rows(
         recognised: Self,
         cylinder: bool,
@@ -1915,6 +1916,19 @@ impl AnalyticSupport {
         let circle = |r: usize| -> Option<(Vec3, f64)> {
             let point = |c: usize| if along_v { at(r, c) } else { at(c, r) };
             let (p0, p1, p2) = (point(0)?, point(1)?, point(2)?);
+            // a row collapsed to one point is a cone's apex: a point of the axis, of radius
+            // 0. Its control points are one stored point, apart only by the rounding of
+            // dividing each homogeneous point by its weight (`euclidean_net`: within
+            // `gamma_4` of its size)
+            let size = (0..len)
+                .filter_map(point)
+                .fold(0.0_f64, |a, q| a.max(q.length()));
+            let collapsed = (0..len)
+                .filter_map(point)
+                .all(|q| (q - p0).length() <= gamma(4) * size);
+            if collapsed {
+                return Some((p0, 0.0));
+            }
             let m = (p0 + p2) * 0.5;
             let to_m = m - p1;
             let mm = to_m.dot(to_m);

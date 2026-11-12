@@ -103,6 +103,19 @@ fn an_off_axis_tilted_cone_far_from_the_origin_round_trips() {
     }
 }
 
+/// A tilted quarter cone up to its apex (#15010: the fillet rig's cone that runs to its tip,
+/// `cov-fillet-exact-cone-cylinder-sharing-a-ball-r1`): the form's row at the apex is one point,
+/// the axis's point of radius 0, at the form's end or start.
+#[test]
+fn an_off_axis_tilted_cone_up_to_its_apex_round_trips() {
+    let k = Kernel::default();
+    for d in [1.0e3, 1.0e5] {
+        let origin = Vec3::new(d * 0.6, -d * 0.48, d * 0.64);
+        round_trips(&k, SupportKind::Cone, &quarter(origin, 3.0, 0.0, 4.0), d);
+        round_trips(&k, SupportKind::Cone, &quarter(origin, 0.0, 3.0, 4.0), d);
+    }
+}
+
 /// A NURBS surface form as a blend definition's record holds it: control points weighted
 /// when rational, u-major.
 #[derive(serde::Deserialize)]
