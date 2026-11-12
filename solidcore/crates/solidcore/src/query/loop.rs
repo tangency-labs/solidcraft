@@ -1033,10 +1033,14 @@ fn with_solve_slack(ivl: &Extent1d) -> Extent1d {
 /// the evaluators clamp it) lies in `[U[p], U[n]]` (`n` its number of control points),
 /// where the curve is a combination of its control points with nonnegative weights and
 /// so lies in their box (the convex hull property). Past those knots an unclamped curve
-/// extrapolates out of the box.
+/// extrapolates out of the box. A knot vector that decreases (a file can hold one) has
+/// no such range: the property is stated for nondecreasing knots.
 fn in_hull_domain(nurb: &crate::nurbs::crv_basic::Curve, ivl: &Extent1d) -> bool {
     let (p, knots) = (nurb.degree(), nurb.knots());
     let n = nurb.cpts().len();
+    if !knots.windows(2).all(|w| matches!(w, [a, b] if a <= b)) {
+        return false;
+    }
     let (Some(&first), Some(&last), Some(&lo), Some(&hi)) =
         (knots.first(), knots.last(), knots.get(p), knots.get(n))
     else {
@@ -2263,6 +2267,47 @@ mod tests {
             }
         }
         assert!(left_out > 3000, "{left_out}");
+    }
+
+    /// A circle's loop whose ellipse edge has a NURB with decreasing knots, as a file
+    /// can hold one: the convex hull property does not hold for it, so its control
+    /// points' box certifies nothing, and a point far from the box, which is left out
+    /// with the knots in order, is walked.
+    #[test]
+    fn a_loop_with_an_ellipse_edge_of_decreasing_knots_is_walked() {
+        use crate::curve::ellipse::Ellipse;
+        use crate::geom::axis2_placement::Axis2Placement;
+        let mut k = Kernel::default();
+        let frame = Axis2Placement::new(Vec3::new(3.0, -2.0, 0.0), Vec3::X, Vec3::Y);
+        let circle = Ellipse::create_canonical_circle(&k, &frame, 2.0, None, None).unwrap();
+        let mut b = crate::primitive::api_trim_ops::create_planar_faces(
+            &mut k,
+            &[Curve::from(circle.clone())],
+        )
+        .unwrap();
+        let f = b.face_list()[0];
+        let l = b.face(f).unwrap().loops[0];
+        let lu = b.loop_(l).unwrap().loopuse.unwrap();
+        let e = edge_of(&b, eu1::loopuse_edgeuses(&b, lu).unwrap()[0]).unwrap();
+        let domain = b.face(f).unwrap().uv_domain;
+        let (lo, hi) = (domain.min(), domain.max());
+        let uv = [hi.x + 10.0 * (hi.x - lo.x), hi.y + 10.0 * (hi.y - lo.y)];
+        let point = surface_of(&b, l)
+            .0
+            .evaluate_point(&k, Point2::new(uv[0], uv[1]))
+            .unwrap();
+        assert!(drop_cannot_reach(b.edge(e).unwrap(), point));
+        assert!(exclusion_at(&k, &b, l, uv).is_some_and(|x| x.excludes(&k, &b, l)));
+
+        let mut unordered = circle;
+        let knots = unordered.base_mut().nurb.as_mut().unwrap().knots_mut();
+        let i = (3..knots.len() - 4)
+            .find(|&i| knots[i] < knots[i + 1])
+            .unwrap();
+        knots.swap(i, i + 1);
+        b.edge_mut(e).unwrap().curve = Some(Curve::from(unordered));
+        assert!(!drop_cannot_reach(b.edge(e).unwrap(), point));
+        assert!(!exclusion_at(&k, &b, l, uv).is_some_and(|x| x.excludes(&k, &b, l)));
     }
 
     #[test]

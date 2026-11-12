@@ -169,7 +169,8 @@ fn plate_and_hole_curves(k: &mut Kernel, n: u32) -> (Vec<Curve>, f64) {
 /// they are not walked. Three walks a hole, where walking every hole placed before cost
 /// `N (N - 1) / 2` more: 2016 for 64 holes, 32640 for 256.
 fn plate_in_one_call_walks(n: u32) -> u64 {
-    let mut k = Kernel::default();
+    let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
+    k.memoize_curve_caches = true; // the count is the shortcut's, whatever `curve-memo-off` says
     k.fixes.boolean_skips_faces_apart = true;
     let (curves, w) = plate_and_hole_curves(&mut k, n);
     let t0 = Instant::now();
@@ -293,6 +294,7 @@ fn plate_extruded_walks(n: u32) -> u64 {
     use solidcore::prism::profile::{Loop2, Region2, Seg2};
 
     let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
+    k.memoize_curve_caches = true; // the count is the shortcut's, whatever `curve-memo-off` says
     k.fixes = UpstreamFixes::all();
     let w = PITCH * f64::from(n + 1);
     let q = Point2::new;
