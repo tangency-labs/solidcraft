@@ -21,6 +21,10 @@
 //! | [`Plane::make_new_plane_ellipse`]          | `MakeNewPlaneEllipse`                             |
 //!
 //! Deviations:
+//! - **Analytic contacts.** A clipped line or ellipse whose whole extent is below
+//!   the geometric tolerance is returned as a point curve at the interval midpoint,
+//!   including a trailing interval at the source curve's end. The extent bound
+//!   includes arithmetic rounding.
 //! - **Plane first with a torus (opt-in, not upstream).** With
 //!   `fixes.plane_first_torus_section_exact` (WR-721, #2405) `GlobalSurfaceIntersect` takes a
 //!   torus's own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV
@@ -69,12 +73,13 @@
 //!   [`SolidError::Unported`].
 
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::surface::SurfaceFailure;
 use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_WARNING};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::certified::{self, next_up};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -1148,6 +1153,37 @@ impl Plane {
             let mut new_curve = curve.copy(k)?;
             // may snap sIvl by tol to existing knots (status ignored)
             ignore_status(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+            // A full circle has coincident endpoints. Bound the whole analytic
+            // interval using its diameter and arc length, with signed sizes by magnitude.
+            // Round each computed upper bound outward, including norm underflow.
+            let extent = match new_curve.kind() {
+                CurveKind::Line(line) => {
+                    let length = certified::distance(Vec3::ZERO, line.line_vector());
+                    let length_upper = next_up(length.value + length.bound);
+                    let interval = line.step_interval();
+                    let span_upper = next_up((interval.max() - interval.min()).abs());
+                    let scaled_length_upper = next_up(length_upper * line.line_scale().abs());
+                    Some(next_up(scaled_length_upper * span_upper))
+                }
+                CurveKind::Ellipse(ellipse) => {
+                    let radius = max2(ellipse.x_radius().abs(), ellipse.y_radius().abs());
+                    let interval = ellipse.step_interval();
+                    let angle_upper = next_up((interval.max() - interval.min()).abs());
+                    let radians_per_degree_upper = next_up(next_up(PI) / 180.0);
+                    let radius_angle_upper = next_up(radius * angle_upper);
+                    let arc_length_upper = next_up(radius_angle_upper * radians_per_degree_upper);
+                    // Multiplication by two is exact when the diameter is finite.
+                    Some(min2(2.0 * radius, arc_length_upper))
+                }
+                _ => None,
+            };
+            let point_contact = tol_3d.is_finite()
+                && extent.is_some_and(|extent| extent.is_finite() && extent < tol_3d);
+            if point_contact {
+                let interval = new_curve.natural_interval();
+                let point = new_curve.evaluate_point(k, interval.mid())?;
+                new_curve = Curve::from(BSplineCurve::create_degenerate_curve(3, point)?);
+            }
             curves_3d.push(new_curve);
         }
 
@@ -1947,6 +1983,181 @@ mod tests {
         let (more, x) = stop_on_warning(r).unwrap();
         assert!(!more);
         assert_eq!(x.curves_3d.len(), 1);
+    }
+
+    #[test]
+    fn clipping_preserves_a_large_arc_on_a_short_parameter_interval() {
+        let k = Kernel::default();
+        let interval = Extent1d::from_min_max(0.999_999_999_998_075_2, 1.0);
+        let mut arc = Ellipse::new_circle(
+            &k,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_min_max(0.0, 90.0),
+            2.0,
+            &EllipseOptions::default(),
+        )
+        .unwrap();
+        arc.edit_parameterization(&k, &interval, true, None)
+            .unwrap();
+        let curve = Curve::from(arc);
+        let output = rect()
+            .trim_curve_to_plane_domain(&k, &dom(), &curve, 1e-6)
+            .unwrap();
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].natural_interval(), interval);
+        for t in [interval.min(), interval.mid(), interval.max()] {
+            assert_eq!(
+                output[0].evaluate_point(&k, t).unwrap(),
+                curve.evaluate_point(&k, t).unwrap()
+            );
+        }
+        assert!(!output[0].is_degenerate(&k, 1e-6, None).unwrap());
+    }
+
+    #[test]
+    fn clipping_keeps_the_size_of_signed_analytic_geometry() {
+        let k = Kernel::default();
+        let plane = rect();
+        for sign in [-1.0, 1.0] {
+            let circle = Curve::from(
+                Ellipse::new_circle(
+                    &k,
+                    Vec3::ZERO,
+                    Vec3::X,
+                    Vec3::Y,
+                    Extent1d::from_min_max(0.0, 360.0),
+                    sign * 2.0,
+                    &EllipseOptions::default(),
+                )
+                .unwrap(),
+            );
+            let line = Curve::from(Line::bounded(
+                Vec3::ZERO,
+                Vec3::X,
+                &Extent1d::from_min_max(-1.0, 1.0),
+                &BoundedLineOptions {
+                    scale: sign * 2.0,
+                    ..BoundedLineOptions::default()
+                },
+            ));
+            for curve in [line, circle] {
+                let result = plane
+                    .trim_curve_to_plane_domain(&k, &dom(), &curve, 1e-6)
+                    .unwrap();
+                assert_eq!(result.len(), 1);
+                let interval = result[0].natural_interval();
+                let a = result[0].evaluate_point(&k, interval.min()).unwrap();
+                let b = result[0].evaluate_point(&k, interval.mid()).unwrap();
+                assert!(a.distance(b) > 1.0, "the signed curve retains its extent");
+            }
+        }
+    }
+
+    #[test]
+    fn clipping_retains_a_curve_at_the_extent_rounding_boundary() {
+        let k = Kernel::default();
+        let tolerance = 0.91;
+        // The computed line extent is below 0.91. Its exact extent from the f64
+        // inputs exceeds 0.91, so the curve must stay when the bound is uncertain.
+        let line = Curve::from(Line::bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            &Extent1d::from_min_max(-0.3, 0.4),
+            &BoundedLineOptions {
+                scale: 1.3,
+                ..BoundedLineOptions::default()
+            },
+        ));
+        let circle = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 360.0),
+                tolerance / 2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        for curve in [line, circle] {
+            let output = rect()
+                .trim_curve_to_plane_domain(&k, &dom(), &curve, tolerance)
+                .unwrap();
+            assert_eq!(output.len(), 1);
+            assert!(matches!(
+                output[0].kind(),
+                CurveKind::Line(_) | CurveKind::Ellipse(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn clipped_sub_tolerance_tails_are_point_contacts() {
+        let k = Kernel::default();
+        let plane = rect();
+        let tolerance = 1e-6;
+        let line = Curve::from(
+            Line::create_line_segment(
+                3,
+                Vec3::new(-10.0, 0.0, 0.0),
+                Vec3::new(-5.0 + 1e-10, 0.0, 0.0),
+                None,
+            )
+            .unwrap(),
+        );
+        let arc = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::new(-5.0, 0.0, 0.0),
+                -Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 90.0 + 1e-8),
+                2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        for curve in [line, arc] {
+            let contacts = plane
+                .trim_curve_to_plane_domain(&k, &dom(), &curve, tolerance)
+                .unwrap();
+            assert_eq!(contacts.len(), 1, "keep the boundary contact");
+            let contact = &contacts[0];
+            let interval = contact.natural_interval();
+            let start = contact.evaluate_point(&k, interval.min()).unwrap();
+            let end = contact.evaluate_point(&k, interval.max()).unwrap();
+            assert_eq!(start, end, "a contact has no edge extent");
+            assert!((start.x + 5.0).abs() < tolerance);
+            assert_eq!(
+                contact
+                    .evaluate(&k, interval.evaluate(0.5), 1, false, false)
+                    .unwrap()[1],
+                Vec3::ZERO
+            );
+        }
+
+        // Endpoint coincidence alone does not make a contact: retain the full
+        // circle inside the rectangle, including its nonzero tangent.
+        let circle = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 360.0),
+                2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let curves = plane
+            .trim_curve_to_plane_domain(&k, &dom(), &circle, tolerance)
+            .unwrap();
+        assert_eq!(curves.len(), 1);
+        assert!(!curves[0].is_degenerate(&k, tolerance, None).unwrap());
     }
 
     #[test]
