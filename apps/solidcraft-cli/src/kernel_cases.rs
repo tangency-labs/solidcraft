@@ -498,7 +498,8 @@ fn surface_word(s: &solidcore_record::brep::Surface) -> &'static str {
 
 /// A B-spline face's two directions as `[degree, spans]` (spans: the distinct knot intervals of
 /// the modelled range), the lower first, so a surface parameterised the other way round reads the
-/// same. `None` for a surface that is not a B-spline.
+/// same. `None` for a surface that is not a B-spline. A blend face is read on its net, its NURBS
+/// form.
 fn spline_shape(s: &solidcore_record::brep::Surface) -> Option<[[u64; 2]; 2]> {
     use solidcore_record::brep::Surface as S;
     let (u, v, nu, nv) = match s {
@@ -816,7 +817,12 @@ fn check_case_in(
         let record = b.body.record();
         for f in &record.faces {
             kinds.insert(surface_word(&f.surface));
-            spline_faces.extend(spline_shape(&f.surface));
+            // A blend face's net is its NURBS form: the spline check reads its degrees there.
+            let net = match &f.surface {
+                solidcore_record::brep::Surface::Blend { .. } => f.nurbs.as_ref(),
+                _ => None,
+            };
+            spline_faces.extend(spline_shape(net.unwrap_or(&f.surface)));
         }
         boundary += record.edges.iter().filter(|e| e.uses.len() == 1).count() as u64;
     }
