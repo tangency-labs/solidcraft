@@ -1607,7 +1607,7 @@ fn a_tear_reaching_a_flange_panels_edge_is_cut() {
 /// cannot arise there, only a hole tangent to it.
 #[test]
 fn a_tear_reaching_a_hole_that_touches_the_edge_refuses_naming_the_segment() {
-    let mut s = plate_in(sheet_of_2mm(), &[("sketch.circle.center", json!({"center":[50,55],"radius":5}))]);
+    let mut s = plate_in(sheet_of_2mm(), &[("sketch.circle.center", json!({"center":[45,60],"radius":5}))]);
     let before = s.doc.to_json();
     let error = s
         .execute(
