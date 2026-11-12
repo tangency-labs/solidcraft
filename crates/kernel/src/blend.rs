@@ -227,7 +227,10 @@ pub(crate) fn curve_derivative(c: &Curve, t: f64) -> Option<Vec3> {
 
 /// Curvature-continuous (G2) fillets: each section is SMLib's G2 blend curve between the contact
 /// lines the round of `radius` has (zero curvature at the contacts on planar faces), not a
-/// circle. A configuration SMLib cannot blend so is refused, never given a circular round.
+/// circle. A configuration SMLib cannot blend so is refused, never given a circular round. The
+/// G2 round of a single concave edge whose contact line runs off the flat face it rolls on is
+/// built by carrying that face on ([`or_carried_on`]); a boolean of that build fails on the G2
+/// face at some radii, and the refusal stays there.
 pub fn fillet_g2(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet_g2");
     body.require_brep("G2 fillet")?;
@@ -237,8 +240,21 @@ pub fn fillet_g2(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     if edges.is_empty() || edges.len() > 1000 || edges.iter().any(|p| ![p.x, p.y, p.z].into_iter().all(f64::is_finite)) {
         return Err(KernelError::Invalid("G2 fillet needs 1 to 1000 finite edge points".into()));
     }
-    let out = crate::blend_smlib::fillet_g2(body, edges, radius)?;
-    closed(body, out)
+    let plain = crate::blend_smlib::fillet_g2(body, edges, radius).and_then(|b| closed(body, b));
+    or_carried_on(plain, body, edges, radius, |carried| crate::blend_smlib::fillet_g2(carried, edges, radius))
+}
+
+/// `plain` (a blend of `edges` as SMLib builds it), and where SMLib refuses the blend of a
+/// single edge as too large or fails it as an operation, the concave blend whose contact line
+/// runs off the flat face it rolls on, built by carrying that face on
+/// ([`concave_overflow_round`]) as [`fillet_removing`] builds such a round; where that does not
+/// apply or a step of it fails, SMLib's error. `reach` and `blend` as for
+/// [`concave_overflow_round`].
+pub(crate) fn or_carried_on(plain: Result<Body>, body: &Body, edges: &[Vec3], reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Result<Body> {
+    match (plain, edges) {
+        (Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))), [pick]) => concave_overflow_round(body, *pick, reach, blend).ok_or(e),
+        (plain, _) => plain,
+    }
 }
 
 /// A fillet's result, refused when a face's boundary crosses itself (#871): rounds that
@@ -2219,6 +2235,40 @@ mod tests {
         assert_eq!(second_face_first(0.0, 1e-12), None);
         assert_eq!(second_face_first(1e-12, 0.0), None);
         assert_eq!(second_face_first(f64::NAN, 0.0), None);
+    }
+
+    /// The chord round and the G2 round of the boss's base edge are carried on as the constant
+    /// round is. Where SMLib builds them on the face as it is (chord 7, G2 5) the carried-on
+    /// build gives its volume. Past the face (chord 8 and 10, G2 9) SMLib refuses them and
+    /// they are built: one shell, inside the body's box, growing with the size. (The G2 round
+    /// is still refused at some radii, 6 and 8 among them: a boolean of the build fails on its
+    /// face, #15417.)
+    #[test]
+    fn concave_chord_and_g2_rounds_run_on_past_where_their_face_turns_into_a_round() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap();
+        let added = |b: &Body| crate::measure(b).unwrap().volume - before.volume;
+        // one shell, inside the body's box, adding more than `least`
+        let grown = |b: &Body, least: f64, what: &str| {
+            let m = crate::measure(b).unwrap();
+            assert!(m.shells == 1 && added(b) > least, "{what}: added {}", added(b));
+            assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "{what}: {:?}", m.bbox);
+        };
+        let smlib = added(&crate::fillet_chord(&body, &[BOSS_EDGE], 7.0).unwrap());
+        let carried = concave_overflow_round(&body, BOSS_EDGE, 7.0, |c| crate::blend_smlib::fillet_chord(c, &[BOSS_EDGE], 7.0)).unwrap();
+        assert!((added(&carried) - smlib).abs() < 1e-6, "chord: carried on {}, SMLib {smlib}", added(&carried));
+        let mut last = smlib;
+        for c in [8.0, 10.0] {
+            assert!(matches!(crate::blend_smlib::fillet_chord(&body, &[BOSS_EDGE], c), Err(KernelError::TooLarge(_))), "SMLib refuses chord {c}");
+            let round = crate::fillet_chord(&body, &[BOSS_EDGE], c).unwrap_or_else(|e| panic!("chord {c}: {e}"));
+            grown(&round, last, &format!("chord {c}"));
+            last = added(&round);
+        }
+        let smlib = added(&fillet_g2(&body, &[BOSS_EDGE], 5.0).unwrap());
+        let carried = concave_overflow_round(&body, BOSS_EDGE, 5.0, |c| crate::blend_smlib::fillet_g2(c, &[BOSS_EDGE], 5.0)).unwrap();
+        assert!((added(&carried) - smlib).abs() < 1e-6, "G2: carried on {}, SMLib {smlib}", added(&carried));
+        assert!(matches!(crate::blend_smlib::fillet_g2(&body, &[BOSS_EDGE], 9.0), Err(KernelError::TooLarge(_))), "SMLib refuses G2 9");
+        grown(&fillet_g2(&body, &[BOSS_EDGE], 9.0).unwrap(), smlib, "G2 9");
     }
 
     /// A search where every candidate is refused as too large keeps the smallest size it tried
