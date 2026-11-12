@@ -723,6 +723,15 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             }
             None => v.push(sketch),
         }
+        // A construction plane under the pointer, or a construction axis or point picked, has a
+        // row in its component's Construction folder (#15355).
+        let picked = match sel.as_slice() {
+            [Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name }] => Some(name.as_str()),
+            _ => None,
+        };
+        if let Some(id) = app.menu.plane.as_deref().or(picked).and_then(|name| construction_feature(app, name)) {
+            v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "construction": id })));
+        }
         v.push(Item::sep());
         v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
         v.push(act("ui.nav", "Zoom", "zoom").with(json!({ "mode": "zoom" })));
@@ -758,6 +767,25 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.clear", "Clear Selection", "close").key("Esc"));
     }
     v
+}
+
+/// The construction plane, axis or point named `name` (a viewport pick names it so), by feature id.
+/// The origin planes and axes are not features: they have none.
+fn construction_feature(app: &SolveApp, name: &str) -> Option<u64> {
+    app.session
+        .doc
+        .features
+        .iter()
+        .find(|f| {
+            f.name == name
+                && matches!(
+                    f.kind,
+                    solidcraft_engine::doc::FeatureKind::ConstructionPlane { .. }
+                        | solidcraft_engine::doc::FeatureKind::ConstructionAxis { .. }
+                        | solidcraft_engine::doc::FeatureKind::ConstructionPoint { .. }
+                )
+        })
+        .map(|f| f.id)
 }
 
 fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
@@ -1719,6 +1747,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 // Selected first: the rows above the body stay marked until the selection changes.
                 let _ = app.run("select.set", json!({"items": [{"type": "body", "name": b}]}));
                 crate::browser::reveal_body(app, b);
+            } else if let Some(id) = id_of(&p, "construction") {
+                crate::browser::reveal_construction(app, id);
             } else if let Some(f) = id_of(&p, "feature") {
                 crate::timeline::find_in_browser(app, f);
             }
