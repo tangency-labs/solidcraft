@@ -3,9 +3,9 @@
 //! measured in the face's plane. The edges are found again by their persistent names, else by
 //! their stored points, so the hole follows them when the part changes.
 
-use solidcore_record::Vec3;
-use solidcraft_geom::Mesh;
+use solidcore_record::{Plane, Vec3};
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Mesh, Ring};
 
 use crate::{DocError, ModelBody, ModelState, Result};
 
@@ -137,13 +137,72 @@ pub fn reference_frame(st: &ModelState, at: Vec3, dir: Vec3, edges: &[(Vec3, Opt
 /// Whether `p` lies on the flat face a reference frame was made for.
 pub fn on_reference_face(st: &ModelState, frame: &ReferenceFrame, p: Vec3) -> bool {
     let Some(b) = st.bodies.iter().find(|b| b.name == frame.body) else { return false };
-    let m = b.mesh();
+    if b.body.is_mesh() {
+        return false;
+    }
     let tol = (b.body.size() * 1e-4).max(1e-6);
-    m.triangles
-        .iter()
-        .zip(&m.tri_face)
-        .filter(|(_, f)| **f as usize == frame.face)
-        .any(|(t, _)| m.tri(t).is_some_and(|[a, bb, c]| crate::appearance::closest_on_triangle(p, a, bb, c).dist(p) <= tol))
+    let plane_dist = (p - frame.origin).dot(frame.normal).abs();
+    if plane_dist > tol {
+        return false;
+    }
+    let Some(plane) = Plane::from_normal(frame.origin, frame.normal) else {
+        return false;
+    };
+    let rec = b.body.record();
+    let Some(f) = rec.faces.get(frame.face) else { return false };
+    let local = plane.to_local(p);
+    let mut loops = Vec::new();
+    for lp in &f.loops {
+        let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+        let mut ring = Vec::new();
+        for u in edges {
+            let Some(edge) = rec.edges.get(u.edge as usize) else { return false };
+            let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()) else { return false };
+            let [t0, t1] = edge.interval;
+            let n_samples = match &eval {
+                solidcraft_geom::brep::eval::CurveEval::Line { .. } => 1,
+                _ => 16,
+            };
+            for k in 0..n_samples {
+                let frac = k as f64 / n_samples as f64;
+                let t = if u.forward { t0 + (t1 - t0) * frac } else { t1 - (t1 - t0) * frac };
+                if let Some(pt) = eval.point(t) {
+                    ring.push(plane.to_local(pt));
+                }
+            }
+        }
+        if !ring.is_empty() {
+            loops.push(Ring::new(ring));
+        }
+    }
+    if loops.is_empty() {
+        return false;
+    }
+    let outer_idx = match loops.iter().enumerate().max_by(|(_, a), (_, b)| a.signed_area().abs().total_cmp(&b.signed_area().abs())) {
+        Some((i, _)) => i,
+        None => return false,
+    };
+    let outer = &loops[outer_idx];
+    let on_outer = outer.contains(local) || outer.edges().any(|(a, b)| dist_to_segment2(local, *a, *b) <= tol);
+    if !on_outer {
+        return false;
+    }
+    for (i, loop_i) in loops.iter().enumerate() {
+        if i == outer_idx {
+            continue;
+        }
+        let in_hole = loop_i.contains(local) && !loop_i.edges().any(|(a, b)| dist_to_segment2(local, *a, *b) <= tol);
+        if in_hole {
+            return false;
+        }
+    }
+    true
+}
+
+fn dist_to_segment2(x: solidcore_record::Vec2, p: solidcore_record::Vec2, q: solidcore_record::Vec2) -> f64 {
+    let d = q - p;
+    let t = if d.len2() > 0.0 { ((x - p).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+    x.dist(p + d * t)
 }
 
 /// The persistent names of the edges at `edges`, on the body the hole at `at` is drilled into
