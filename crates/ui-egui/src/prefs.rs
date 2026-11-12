@@ -1050,7 +1050,7 @@ preference_settings! {
     /// Share shading and Continuity; false preserves their independent legacy behavior.
     single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.graphics_page.single_surface_analysis");
     /// Linux: the window system the app opens with at its next start (#3083): `auto` (XWayland
-    /// whenever there is an X display, native Wayland on niri), `wayland` or `x11`.
+    /// whenever there is an X display, native Wayland on niri and Hyprland), `wayland` or `x11`.
     window_system: String = "auto".into(), PAGE_GRAPHICS;
     /// Graphics API for the next start; Automatic preserves the platform startup order.
     graphics_backend: String = "auto".into(), PAGE_GRAPHICS;
