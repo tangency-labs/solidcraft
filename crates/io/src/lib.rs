@@ -49,7 +49,7 @@ pub use dxf_out::{
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
-pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
+pub use svg::{decode_svg, read_svg, read_svg_with_fields, svg_nothing_to_import, svg_sheet};
 mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod obj;

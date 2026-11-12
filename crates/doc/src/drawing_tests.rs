@@ -48,6 +48,7 @@ pub(crate) fn plate() -> Drawing {
         documents: Some(SheetComponent { source: plate_id, component: 0 }),
         excluded: Excluded { count: false, print: true },
         line_group: None,
+        format: Default::default(),
     }));
     Arc::make_mut(&mut d.sheets[0]).documents = Some(SheetComponent { source: plate_id, component: 7 });
     Arc::make_mut(&mut d.properties).set(crate::metadata::Owner::Design, "author", json!("Jane Doe")).unwrap();

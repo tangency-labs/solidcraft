@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_template_import": "Import Drawing Template"
+  },
+  "ar": {
+    "cmd.drawing_template_import": "استيراد قالب رسم"
+  },
+  "de": {
+    "cmd.drawing_template_import": "Zeichnungsvorlage importieren"
+  },
+  "he": {
+    "cmd.drawing_template_import": "ייבוא תבנית שרטוט"
+  },
+  "ja": {
+    "cmd.drawing_template_import": "図面テンプレートのインポート"
+  },
+  "ko": {
+    "cmd.drawing_template_import": "도면 템플릿 가져오기"
+  },
+  "vi": {
+    "cmd.drawing_template_import": "Nhập mẫu bản vẽ"
+  },
+  "zh": {
+    "cmd.drawing_template_import": "导入图纸模板"
+  }
+}
