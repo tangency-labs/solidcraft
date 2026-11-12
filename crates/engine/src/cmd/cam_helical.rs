@@ -104,6 +104,7 @@ fn planned(ctx: &Ctx<'_>, c: Common<'_>, r: Resolved, kind: &str, path: Toolpath
         op: MachineOperation::Indexed(io),
         poses,
         sources,
+        feeds: r.feeds,
         gouge_check: c.gouge_check,
         band: None,
         tool: r.tool,

@@ -268,6 +268,7 @@ pub(super) fn plan_face(ctx: &Ctx<'_>, o: &FaceOp) -> Result<Planned> {
         op: MachineOperation::Indexed(io),
         poses,
         sources,
+        feeds: r.feeds,
         gouge_check: c.gouge_check,
         band: None,
         tool: r.tool,

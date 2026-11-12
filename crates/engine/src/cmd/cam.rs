@@ -42,7 +42,7 @@ use crate::params::bad;
 use crate::schema::cam::{
     BoundarySpec, CamGcodeCheckParams, CamGcodeCheckReply, CamJob, CamJobParams, CamJobReply, CamPostGetParams, CamPostGetReply, CamPostListParams,
     CamPostListReply, Common, GougeAt, GougeReport, HeightsSpec, MachineSpec, Op3Spec, OperationReport, OperationSpec, Outputs, ParseErrorReport,
-    PostEntry, ReadbackReport, RotaryRange, SideSpec,
+    PostEntry, ReadbackReport, RotaryRange, SideSpec, ToolChangeMode,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -88,7 +88,11 @@ pub static COMMANDS: &[CommandSpec] = &[
              table or rotary unit, the spindle head against the part, and the spindle against its Z travel), bodies?: [names] (the part: what 3D operations follow and every \
              cut is checked for gouges against, drawn in the preview; default every visible body), fixtures?: [names] (checked \
              against, never cut), tolerance?: mm (default 0.01; 3D operations plan on the bodies tessellated within a \
-             quarter of it), tools: [Tool JSON] | tool_library_path, operations: [{name, type: contour | pocket (sketch + profiles? | \
+             quarter of it), tools: [Tool JSON] | tool_library_path, machine_rates?: {rapid_xyz_mm_min, rapid_z_mm_min?, \
+             rapid_a_deg_min?, max_feed_mm_min?, max_feed_z_mm_min?, max_a_deg_min?, spindle_rpm?: [min, max], spindle_start_seconds?, \
+             travel_mm?: [x, y, z], home_z_mm?, …} | machine_rates_path (times the program as the machine runs it and warns about \
+             blocks the controller slows), tool_change?: auto | stop | ignored (ignored: the post stops at each change, and a program \
+             of several tools is warned about unless split_by_tool), operations: [{name, type: contour | pocket (sketch + profiles? | \
              polygon: [[x,y],…], stepdown?, side? (contour: outside | inside | on), stepover? (pocket), ramp_angle_deg?, entry?, \
              linking?, contour: lead?, vertical_lead?, tabs?, finish_passes?, finish_stepover?, spring_pass?) | drill {sketch + \
              circles?, diameter_range?, sketch_points? | points, cycle?: simple | dwell | peck | chip_break, peck?, …} | chamfer \
@@ -103,16 +107,24 @@ pub static COMMANDS: &[CommandSpec] = &[
              rotary_finish | rotary_roughing (pattern: lines | helix | rings, clearance, retract, stock_radius?) | wrap | wrap_pocket | \
              wrap_contour (radius, …), tool: number, heights: {clearance, retract, top, bottom}, climb?, stock_to_leave?, tolerance?, spindle_rpm?, \
              feeds?: {cut, plunge, descent?}, coolant?, gouge_check? (false: not against the part, still against fixtures), enabled?}]; unknown keys are refused); output: G-code path (required unless dry_run); preview?: \
-             HTML path, another file than output (the part and toolpaths, self-contained); dry_run?: plan and check, write nothing; \
-             allow_unsafe?: write even when a check fails (its first line then says so) → name, machine, post, operations: [{name, \
+             HTML path, another file than output (the part and toolpaths, self-contained); setup_sheet?: .html | .md path (the \
+             operator's sheet: work zero, A convention, tools with Z min, operations, checks, warnings); dry_run?: plan and check, write \
+             nothing; allow_unsafe?: write even when a check fails (its first line then says so); split_by_tool?: one program \
+             per tool, named after output (part-2-T6.ngc), each complete on its own → name, machine, post, operations: [{name, \
              kind, tool, moves, cut_length, cut_minutes, rewinds, max_tilt_deg, a_deg?, gouge, gouge_at?, holder_collisions, adaptive? (the engagement measured \
              along its path: max_engagement_deg, full_slot_share, levels, helices, …, pocket?: the plain pocket compared), warnings}], program_lines, program_head, readback: {max_tip_deviation, \
              max_axis_deviation_deg, allowed_tip, allowed_axis_deg, cut_minutes, pass}, gouge: {worst, tolerance, tessellation, \
              allowed, hits, at?: {operation, move_index, line?, xyz}, skipped, pass}, holder_collisions, rapids: {checked, hits, \
              worst, pass, from_unknown, first: [{line, operation?, kind, depth, at}]}, travel: {checked, violation?, pass} | null, \
              stock, workholding?: {name, holding, machine_model?, checked_moves, hits: [{code, error, tool, operation?, line, moves, \
-             at?, message, fix}], stock_above_jaws?, bar_grip?, pass, setup?, setup_warnings?}, cut_minutes, passed, failures, dry_run, outputs: \
-             {gcode?, preview?}, notes. Without dry_run or allow_unsafe a failed check refuses and nothing is written",
+             at?, message, fix}], stock_above_jaws?, bar_grip?, pass, setup?, setup_warnings?}, cut_minutes, rapid_minutes?, machine_time?: \
+             {cut_minutes, written_cut_minutes, rapid_minutes, home_returns, spindle_minutes, total_minutes, slowed_blocks, rotary_over, \
+             feed_over, peak_rotary_deg_min?, peak_feed_mm_min?, spindle_out_of_range, span_mm, warnings}, passed, failures, dry_run, \
+             outputs: {gcode?, preview?, setup_sheet?, programs?}, notes, summary: {work_zero, part_extent, work_offset, rotary, tools: \
+             [{number, kind, diameter, flute_length, stickout?, holder?, z_min?, operations}], operations: [{name, kind, tool, \
+             spindle_rpm, feed, plunge_feed, rotary?, cut_length, cut_minutes}], totals, checks, warnings}, warnings?, programs?: \
+             [{order, path?, tool, stickout?, operations, lines, cut_minutes}]. Without dry_run or allow_unsafe a failed check refuses \
+             and nothing is written",
         ),
     CommandSpec::new("cam.post.list", "List CAM Posts", crate::checked!("cam.post.list", post_list))
         .icon("list")
@@ -1243,6 +1255,8 @@ struct Planned {
     /// cone against the part less that band ([`band_gouges`]).
     band: Option<f64>,
     tool: Tool,
+    /// The cut and plunge feeds it runs at.
+    feeds: Feeds,
     report: OperationReport,
     axes: String,
 }
@@ -1281,7 +1295,7 @@ fn plan_indexed(ctx: &Ctx<'_>, op: &Op3Spec, rotary: Vec<f64>, a_deg: Option<f64
         Some(a) => format!("3+1 A{}°", num(a)),
         None => "3-axis".into(),
     };
-    Ok(Planned { op: MachineOperation::Indexed(io), poses, sources, gouge_check: c.gouge_check, band, tool: r.tool, report, axes })
+    Ok(Planned { op: MachineOperation::Indexed(io), poses, sources, gouge_check: c.gouge_check, band, tool: r.tool, feeds: r.feeds, report, axes })
 }
 
 /// One operation planned: a 3-axis one with every rotary at zero (on a 3-axis machine and a 4th
@@ -1376,8 +1390,9 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         (None, true) => None,
         (None, false) => return Err(bad(cmd, "give `output` (the G-code file to write) or `dry_run: true`")),
     };
+    let sheet_format = sheet::format_of(cmd, params.setup_sheet.as_deref())?;
     if !dry_run {
-        for path in output.iter().chain(&params.preview) {
+        for path in output.iter().chain(&params.preview).chain(&params.setup_sheet) {
             if path.trim().is_empty() {
                 return Err(bad(cmd, "a file path must not be empty"));
             }
@@ -1388,6 +1403,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         {
             return Err(bad(cmd, format!("`output` and `preview` must be different files (`{o}` and `{p}` are the same file)")));
         }
+        sheet::distinct(cmd, output.as_deref(), params.preview.as_deref(), params.setup_sheet.as_deref())?;
     }
     let (job, base) = load_job(cmd, raw, &params)?;
     let base = base.as_deref();
@@ -1412,8 +1428,11 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     if place.axes.is_some() && !machine.rotaries.is_empty() {
         return Err(bad(cmd, "`orientation` turns the part on a 3-axis machine; a 4th axis turns it with its own angles"));
     }
-    let (post_name, post) = post_of(cmd, &job, base)?;
+    let (post_name, mut post) = post_of(cmd, &job, base)?;
+    // A controller that ignores the tool change stops (`M0`) for the operator at each one.
+    post.base.stop_at_tool_change |= job.tool_change == Some(ToolChangeMode::Ignored);
     let tools = tools_of(cmd, &job, base)?;
+    let machine_rates = rates::rates_of(cmd, &job, base)?;
     let (bodies, fixtures) = job_bodies(cmd, s, &job)?;
     let mut notes = Vec::new();
     // The part and the fixtures as surfaces: what the 3D and rotary operations follow, what A
@@ -1473,6 +1492,13 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     // The program as written, read back through the machine and held against the toolpaths.
     let span = solidcraft_profile::span("cam", "job.readback");
     let rb = readback_program(&text, &program, &post, &machine).map_err(|e| cam_err(cmd, "reading the program back", e))?;
+    let machine_time = match &machine_rates {
+        Some(r) => Some(rates::time_report(cmd, &text, &machine, &post, r)?),
+        None => None,
+    };
+    if let Some(t) = &machine_time {
+        notes.extend(t.warnings.iter().cloned());
+    }
     drop(span);
     let readback = ReadbackReport {
         max_tip_deviation: rb.max_tip_deviation,
@@ -1658,12 +1684,58 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     {
         notes.push(format!("post `{post_name}` writes .{} files; this one is .{ext}", post.base.extension));
     }
+    // One program per tool, and what the machine does at a tool change.
+    let split_by_tool = params.split_by_tool.unwrap_or(false);
+    let parts = if split_by_tool { programs::split(cmd, &program, &planned, &post, &machine, output.as_deref())? } else { Vec::new() };
+    let mut warnings: Vec<String> = programs::warning(job.tool_change, &planned, split_by_tool).into_iter().collect();
+    // An older program of every tool under the same name would cut on with the first tool where
+    // the machine ignores the tool change.
+    if let Some(old) = output.as_deref().filter(|o| split_by_tool && !dry_run && Path::new(o).is_file()) {
+        warnings.push(format!(
+            "old program: {old} (one program of every tool, written before) is still beside the programs written one per tool: delete it so it is not run by mistake"
+        ));
+    }
+    let setup = sheet::build(&sheet::Inputs {
+        name: &name,
+        machine: &machine,
+        post_name: &post_name,
+        post: &post,
+        work_offset: job.work_offset,
+        origin: place.origin,
+        part: sheet::part_extent(s, &bodies, &place)?,
+        planned: &planned,
+        text: &text,
+        readback: &readback,
+        failures: &failures,
+        notes: &notes,
+        program_file: if dry_run { None } else { output.as_deref() },
+        attention: machine_time.iter().flat_map(|t| t.limits.iter().cloned()).collect(),
+        tool_change: programs::sheet_note(job.tool_change, &planned, split_by_tool),
+        programs: parts.iter().map(|w| programs::part_words(&w.part)).collect(),
+        program_files: parts
+            .iter()
+            .filter_map(|w| w.part.path.as_deref().and_then(|f| Path::new(f).file_name()).map(|f| f.to_string_lossy().to_string()))
+            .collect(),
+        warnings: &warnings,
+    });
+    let summary = sheet::summary(&setup);
 
     let mut outputs = Outputs::default();
     if !dry_run {
-        if let Some(path) = &output {
-            let written = if passed { text.clone() } else { mark_unsafe(&text, &post) };
-            write_file(path, written.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        // A program written with failed checks says so in its first line.
+        let marked = |t: &str| if passed { t.to_string() } else { mark_unsafe(t, &post) };
+        if split_by_tool {
+            for programs::Written { part, text: t } in &parts {
+                if let Some(path) = &part.path {
+                    write_file(path, marked(t).as_bytes()).map_err(|e| {
+                        let done = if outputs.programs.is_empty() { String::new() } else { format!(" ({} written)", outputs.programs.join(", ")) };
+                        EngineError::Other(format!("{path}: {e}{done}"))
+                    })?;
+                    outputs.programs.push(path.clone());
+                }
+            }
+        } else if let Some(path) = &output {
+            write_file(path, marked(&text).as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
             outputs.gcode = Some(path.clone());
         }
         if let Some(path) = &params.preview {
@@ -1675,7 +1747,17 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
             })?;
             outputs.preview = Some(path.clone());
         }
+        if let (Some(path), Some(format)) = (&params.setup_sheet, sheet_format) {
+            write_file(path, setup.render(format).as_bytes()).map_err(|e| {
+                let written: Vec<&str> = outputs.gcode.iter().chain(&outputs.preview).map(String::as_str).collect();
+                let written = if written.is_empty() { String::new() } else { format!(" ({} written)", written.join(" and ")) };
+                EngineError::Other(format!("{path}: {e}{written}"))
+            })?;
+            outputs.setup_sheet = Some(path.clone());
+        }
     }
+    let cut_minutes = machine_time.as_ref().map_or(readback.cut_minutes, |t| t.cut_minutes);
+    let rapid_minutes = machine_time.as_ref().map(|t| t.rapid_minutes);
     Ok(CamJobReply {
         name,
         machine: machine.name.clone(),
@@ -1683,7 +1765,9 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         operations: planned.into_iter().map(|p| p.report).collect(),
         program_lines: text.lines().count(),
         program_head: text.lines().take(HEAD_LINES).map(str::to_string).collect(),
-        cut_minutes: readback.cut_minutes,
+        cut_minutes,
+        rapid_minutes,
+        machine_time,
         readback,
         gouge,
         holder_collisions: holder_total,
@@ -1696,6 +1780,9 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         dry_run,
         outputs,
         notes,
+        summary,
+        warnings,
+        programs: parts.into_iter().map(|w| w.part).collect(),
         param_warnings: Vec::new(),
     })
 }
@@ -2266,6 +2353,13 @@ fn gcode_check(_: &mut Session, p: &Value) -> Result<Value> {
     reply.rapid_minutes = params.rapid_rate.map(|r| reply.rapid_length / r);
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
+
+#[path = "cam_programs.rs"]
+mod programs;
+#[path = "cam_rates.rs"]
+mod rates;
+#[path = "cam_sheet.rs"]
+mod sheet;
 
 #[cfg(test)]
 #[path = "cam_tests.rs"]

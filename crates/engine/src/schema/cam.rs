@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::cam_adaptive::{AdaptiveOp, AdaptiveReport, AdaptiveRoughingOp};
+use super::cam_rates::{MachineRatesSpec, MachineTimeReport};
 use super::cam_stock::{FaceOp, RapidsReport, StockReport, StockSpec, TravelReport};
 use super::types::SketchRef;
 
@@ -42,6 +43,11 @@ pub struct CamJobParams {
     /// network access). Default: no page.
     #[serde(default)]
     pub preview: Option<String>,
+    /// Where to write the setup sheet for the machine operator: a `.html` page (self-contained,
+    /// print styles) or a `.md` file with the work zero, the rotary convention, the tools to
+    /// load, the operations in order, the checks and the warnings. Default: no sheet.
+    #[serde(default)]
+    pub setup_sheet: Option<String>,
     /// Plan and check the job, and report, but write no file; the report says whether the
     /// checks pass instead of refusing. Default: false.
     #[serde(default)]
@@ -50,6 +56,27 @@ pub struct CamJobParams {
     /// the program's first line). Default: false.
     #[serde(default)]
     pub allow_unsafe: Option<bool>,
+    /// Write one program per tool instead of one program: each run of operations with the same
+    /// tool is a program of its own, complete on its own (the safe start, the same work offset,
+    /// the tool's length offset on its first Z, a header naming the tool, its stickout and its
+    /// place in the order), named after `output` with its place and tool (`part-2-T6.ngc`). For
+    /// a machine that does not stop at a tool change (`tool_change: ignored`). Default: false.
+    #[serde(default)]
+    pub split_by_tool: Option<bool>,
+}
+
+/// What the machine does at a tool change (`T.. M6`): a job's `tool_change`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolChangeMode {
+    /// An automatic tool changer: a program may use several tools.
+    Auto,
+    /// The machine stops the spindle and waits (the operator changes the tool, sets its length
+    /// and presses Cycle Start): a program may use several tools.
+    Stop,
+    /// The controller ignores the tool change and runs on with the tool in the spindle: a
+    /// program should use one tool (`split_by_tool`).
+    Ignored,
 }
 
 /// A CAM job: what is machined, on which machine, through which post, with which tools.
@@ -149,6 +176,20 @@ pub struct CamJob {
     pub workholding: Option<Map<String, Value>>,
     /// The operations, run and written in this order.
     pub operations: Vec<OperationSpec>,
+    /// The machine's top rates (from its controller's settings): the reply then times the
+    /// program as the machine runs it and warns about blocks the controller would slow. Give
+    /// this or `machine_rates_path`. Default: none.
+    #[serde(default)]
+    pub machine_rates: Option<MachineRatesSpec>,
+    /// A JSON file holding `machine_rates`, read from the job file's folder when relative.
+    #[serde(default)]
+    pub machine_rates_path: Option<String>,
+    /// What the machine does at a tool change: `auto`, `stop` or `ignored`. With `ignored`, the
+    /// post stops (`M0`) at each tool change after the first, and a program of several tools is
+    /// warned about unless it is written one program per tool (`split_by_tool`). Default: not
+    /// said (no warning).
+    #[serde(default)]
+    pub tool_change: Option<ToolChangeMode>,
 }
 
 /// How a job turns the part (`orientation`).
@@ -818,8 +859,13 @@ pub struct CamJobReply {
     /// workholding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workholding: Option<HoldingReport>,
-    /// Time at feed of the whole program, dwells included, minutes, as written.
+    /// Time at feed of the whole program, dwells included, minutes: as the machine runs it with
+    /// the job's `machine_rates`, otherwise as written.
     pub cut_minutes: f64,
+    /// Time at rapid with the machine's rapid rates, minutes; `null` without `machine_rates`.
+    pub rapid_minutes: Option<f64>,
+    /// The program timed against the job's `machine_rates`; `null` without them.
+    pub machine_time: Option<MachineTimeReport>,
     /// Whether every check passed.
     pub passed: bool,
     /// The checks that failed.
@@ -829,8 +875,17 @@ pub struct CamJobReply {
     /// The files written.
     pub outputs: Outputs,
     /// Anything else worth knowing: a post that writes no work offset, an output extension
-    /// other than the post's.
+    /// other than the post's, what the machine's rates say about the program.
     pub notes: Vec<String>,
+    /// What the operator sets up: the setup sheet's tables in compact form.
+    pub summary: super::cam_sheet::SetupSummary,
+    /// What to look at that does not fail the job (a program of several tools for a machine that
+    /// ignores tool changes).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    /// With `split_by_tool`: the programs in the order to run them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub programs: Vec<ProgramPart>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1006,6 +1061,32 @@ pub struct Outputs {
     /// The HTML preview.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
+    /// The setup sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setup_sheet: Option<String>,
+    /// With `split_by_tool`: every program written, in the order to run them (`gcode` is then
+    /// left out).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub programs: Vec<String>,
+}
+
+/// One program of a job written one program per tool.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct ProgramPart {
+    /// Its place in the order, from 1.
+    pub order: usize,
+    /// The file written; `null` in a dry run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub tool: u32,
+    /// The tool's stickout from its holder, mm, when the tool gives it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stickout: Option<f64>,
+    /// Its operations, in order.
+    pub operations: Vec<String>,
+    pub lines: usize,
+    /// Time at feed, minutes.
+    pub cut_minutes: f64,
 }
 
 /// List the built-in posts.

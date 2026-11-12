@@ -6,7 +6,7 @@ commands work with jobs, from scripts, the CLI and MCP alike:
 
 | Command | What it does |
 | --- | --- |
-| `cam.job` | Plans every operation, writes the program through the job's post, reads it back and checks it, and writes the G-code (and an HTML preview) |
+| `cam.job` | Plans every operation, writes the program through the job's post, reads it back and checks it, and writes the G-code (and an HTML preview and a setup sheet) |
 | `cam.post.list` | Lists the built-in posts |
 | `cam.post.get` | Returns a built-in post as JSON, to copy into a post file |
 | `cam.gcode.check` | Reads a G-code file and reports lengths, time, the rotary range, inverse-time blocks and the first line it cannot read |
@@ -25,8 +25,10 @@ Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`,
 | `job_path` | A `.json` file holding the job. Relative `post_path` and `tool_library_path` in it are read from the file's folder. |
 | `output` | The G-code file. Required unless `dry_run`. |
 | `preview` | An HTML page of the part and every toolpath: self-contained (no network), one view per operation and one for the whole job, orbit and zoom, a slider that plays the moves, rapids dashed. It must be another file than `output`, however the two are spelt. |
+| `setup_sheet` | The setup sheet for the machine operator: a `.html` page (self-contained, print styles) or a `.md` file. See [Setup sheet](#setup-sheet). |
 | `dry_run` | Plan and check, write nothing; the reply says whether the checks pass instead of refusing. |
 | `allow_unsafe` | Write the program even when a check fails. Its first line (the program's name, as a comment) then ends `WRITTEN WITH FAILED CHECKS`, so the file says so; no line moves. |
+| `split_by_tool` | Write one program per tool instead of one program: each run of operations with one tool is a program of its own, named after `output` with its place and tool (`bracket-2-T6.ngc`). Each is complete on its own (the post's safe start, the same work offset, the tool change and the tool's length offset on its first Z), with a header naming its place in the order, the tool (`THIS PROGRAM USES T6 - ...`, not a line a checker reads as a tool table entry), its stickout and the length offset to set; each is read back on its own. The reply's `programs` and `outputs.programs` list them in the order to run them, and the setup sheet does too. An older program of every tool under `output`'s name left beside them is a warning. For a machine that ignores tool changes (`tool_change: ignored`, below). |
 
 Every file is read and written through the session's file access, so an MCP server's
 `--allow-path` folders apply; every path is checked before anything is computed or written.
@@ -90,10 +92,15 @@ message. With `dry_run`, the reply carries `passed: false` and `failures`.
 against; `null` without one), `workholding` (with a workholding), `gouge` (`worst`, `tolerance`, `tessellation`, `allowed`, `hits`,
 `at: {operation, move_index, line?, xyz}` for the deepest, `skipped`, `pass`),
 `holder_collisions` (`null` when no tool has holder data), `cut_minutes` (the program's time at
-feed as written), `passed`,
-`failures`, `dry_run`, `outputs` (`gcode`, `preview`) and `notes` (a post that writes no work
-offset, an output extension other than the post's, in a dry run too). The operations' minutes
-add up to `readback.cut_minutes`, the program's as the controller times it.
+feed: as the machine runs it with the job's `machine_rates`, otherwise as written),
+`rapid_minutes` and `machine_time` (with `machine_rates`, see [Machine rates](#machine-rates);
+`null` without), `passed`, `failures`, `dry_run`, `outputs` (`gcode`, `preview`, `setup_sheet`,
+`programs`), `notes` (a post that writes no work offset, an output extension other than the
+post's, what the machine's rates say about the program, in a dry run too), `summary` (the setup
+sheet's tables, see [Setup sheet](#setup-sheet)), `warnings` (what to look at that does not fail
+the job) and, with `split_by_tool`, `programs` (`order`, `path`, `tool`, `stickout`,
+`operations`, `lines`, `cut_minutes`). The operations' minutes add up to
+`readback.cut_minutes`, the program's as the controller times it.
 
 ## The job
 
@@ -142,6 +149,9 @@ silently left at its default. That holds for the tools, the machine and the post
 | `tools` | The tools, as the CAM crate's `Tool` JSON (below). Give this or `tool_library_path`. |
 | `tool_library_path` | A JSON file holding an array of tools. |
 | `operations` | 1 to 200 operations, run and written in order (below). |
+| `machine_rates` | The machine's top rates, to time the program as the machine runs it (see [Machine rates](#machine-rates)). Give this or `machine_rates_path`. |
+| `machine_rates_path` | A JSON file holding `machine_rates`, read from the job file's folder when relative. |
+| `tool_change` | What the machine does at a tool change (`T.. M6`): `auto` (a tool changer), `stop` (it stops and waits for Cycle Start) or `ignored` (the controller runs on with the tool in the spindle). With `ignored`, the post stops (`M0`) at each tool change after the first, and a program of several tools is a warning (in `warnings`) unless it is written with `split_by_tool`; the setup sheet says what the operator does at each change. Default: not said (no warning). |
 
 ### Coordinates
 
@@ -908,6 +918,118 @@ change) its own clearance is held against the X it works over instead. A post wh
 `safe_rotate` lines take the tool to the machine's top before every turn is not held to either.
 A job that fails is refused with the operation, the height and how far the part (or the stock)
 reaches.
+## Machine rates
+
+A controller moves no axis faster than its top rate. A rapid takes as long as its slowest axis
+needs, and a cut written faster than an axis can go is slowed down, so it takes longer than
+its `F` says. That includes a feed above the machine's top feed, and a cut that turns A
+faster than A can turn, in inverse time (`G93`) or not. Give the job the machine's rates and
+`cam.job` times the program as the machine runs it:
+
+```json
+"machine_rates": {"rapid_xyz_mm_min": 8000, "rapid_z_mm_min": 4000, "rapid_a_deg_min": 8000,
+                  "max_feed_mm_min": 8000, "max_feed_z_mm_min": 4000, "max_a_deg_min": 8000,
+                  "spindle_rpm": [10000, 24000], "spindle_start_seconds": 6, "travel_mm": [300, 170, 130]}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `rapid_xyz_mm_min` | Rapid rate of X and Y, and of Z unless `rapid_z_mm_min` is given. Required. |
+| `rapid_z_mm_min` | Rapid rate of Z, where it differs. |
+| `rapid_a_deg_min` | Rapid rate of the rotaries, degrees a minute. Without it a turn at rapid is not timed (the reply says so). |
+| `max_feed_mm_min`, `max_feed_z_mm_min` | Top feed of X and Y, and of Z. |
+| `max_a_deg_min` | Top rate of the rotaries while cutting, degrees a minute. |
+| `spindle_rpm` | `[lowest, highest]`: the controller runs any other `S` at the nearest end of its range. |
+| `spindle_start_seconds` | How long the controller waits at each spindle start (`M3`, `M4`). |
+| `travel_mm` | `[x, y, z]`: the travel of the linear axes. |
+| `accel_mm_s2`, `accel_z_mm_s2` | Acceleration of X and Y, and of Z, mm/s². Checked and kept with the rates; `cam.job`'s times leave acceleration out. |
+| `accel_a_deg_s2` | Acceleration of the rotaries, degrees/s². |
+| `tool_change_seconds` | How long a tool change (`M6`) takes, added to `total_minutes` for each. |
+| `home_z_mm` | Where Z's home is in work coordinates (mm), to time the returns home (`G28`); default the highest Z the program reaches. |
+
+A rate left out is not limited. Every rate must be above 0. Unknown keys are refused, in a
+`machine_rates_path` file too.
+
+With rates, the reply's `cut_minutes` is the time at feed as the machine runs it (dwells
+included), `rapid_minutes` the time at rapid, and `machine_time` has the detail:
+`written_cut_minutes` (the `F` words alone), `spindle_minutes`, `total_minutes`,
+`slowed_blocks` (and of those `rotary_over` and `feed_over`), `peak_rotary_deg_min` and
+`peak_feed_mm_min` with their lines, `spindle_out_of_range`, `span_mm` and `warnings`. The
+warnings are in the reply's `notes` too: blocks that ask A for more than `max_a_deg_min`
+(the controller slows them, so the time is longer and the feed at the tool is lower than
+written), blocks that ask a linear axis for more than its top feed, spindle speeds outside
+`spindle_rpm`, and a program that spans more than `travel_mm`. Without rates, `cut_minutes`
+is the time as written and `rapid_minutes` is `null`.
+
+The times leave out acceleration, so they are a lower bound for programs of many short blocks.
+A return of Z to the machine's home (`G28 … Z`: before a tool change, and in every rewind of a
+post whose `safe_rotate` lines go home) is timed at the Z rapid rate up to `home_z_mm`, Z's home
+in work coordinates, and the next move from there; without it, up to the highest Z the program
+reaches, a lower bound. `home_returns` counts them.
+
+## Setup sheet
+
+`cam.job {…, "setup_sheet": "C:/parts/bracket-setup.html"}` writes what the machine operator
+needs to set the job up beside its program: a self-contained HTML page (no scripts, nothing
+loaded from the network, print styles so it prints on one or two pages) for a `.html` or `.htm`
+path, Markdown for `.md` or `.markdown`. Any other extension is refused before anything is
+computed. Like the G-code and the preview it is written through the session's file access, so
+an MCP server's `--allow-path` folders apply, and it must be a file of its own (not the
+`output` or the `preview`, however they are spelt). The sheet carries no date and nothing of
+the computer it is made on: the same job writes the same bytes.
+
+It holds, in order:
+
+- **The job:** its name, the machine, the post, the G-code file's name (with `split_by_tool`,
+  `Programs`: the files written, in run order; the one file of every tool is not written) and the
+  work offset it runs in (`G54` to `G59`, or a note that the post writes none).
+- **Before you start: the machine's limits**, when the job runs into any: the blocks the
+  controller will run slower than written (an axis asked for more than its top feed or rate, a
+  spindle speed outside its range, by the job's `machine_rates`). They are in the notes too;
+  here they come first, so the operator reads them before the program runs.
+- **Tool changes**, when the job says what the machine does at one (`tool_change`): with
+  `stop`, put in the tool each change names, set its length and press Cycle Start; with
+  `ignored` and one program per tool, run the programs in order, changing the tool and setting
+  its length before each; with `ignored` and one program of several tools, the program stops
+  (`M0`) at each change for the operator.
+- **Programs, in the order to run them**, with `split_by_tool`: each file with its tool, the
+  tool's stickout, its operations and its minutes, and a box to tick.
+- **Work zero:** the design point that is X0 Y0 Z0 and the part's extent from it (from the part
+  bodies' exact bounds), with each axis in words (on the part's left side, in the middle, on its
+  top, so many mm below its bottom). On a 4th axis set up the usual way (`4axis_a`) Y0 Z0 is the
+  A axis centreline.
+- **Each rotary axis:** what it turns and about which line, which way positive turns it
+  (counter-clockwise seen from the +X end for `4axis_a`; clockwise with `a_reversed`), which side
+  of the part A+90° brings up under the tool and which way the top of the part moves as A
+  rises, and its travel limits when the machine has them.
+- **Tools:** only those the operations use, by number: kind, diameter (and corner radius),
+  flutes, flute length, shank, stickout, holder, the lowest Z the program sends the tip to
+  (Z min, in program coordinates), the operations that use it, and its description. HTML
+  sheets have a box to tick per tool.
+- **Operations** in program order: name, kind, tool, spindle speed, cut and plunge feed,
+  coolant, the A angle as written, Z min, cut length and minutes at feed. Z min and the A
+  angles are read from the written program itself, each operation's blocks being those after
+  the comment the post writes at its start. With a post that writes no comments they are worked
+  out from the toolpaths instead.
+- **Totals:** operations, tools, tool changes, length and time at feed as planned and as the
+  controller times the written program, the program's line count, and the X, Y, Z and A range
+  the program moves over.
+- **Checks:** the read-back, with its result.
+- **Warnings:** failed checks (a sheet is only written with them under `allow_unsafe`), the
+  job's warnings (a program of several tools for a machine that ignores tool changes), a rotary
+  that turns past a full turn either way.
+- **Notes:** a post that writes no work offset and the like.
+
+Every name and description from the job is escaped for the format, so a name such as
+`<b>|*x*` shows as written and never breaks the page or a table.
+
+The reply's `summary` carries the same tables in compact form, on a dry run too, so an agent can
+tell the user what to set up without opening the sheet: `work_zero` (the sentences),
+`part_extent` (`[[x, y, z] lowest, [x, y, z] highest]` from work zero), `work_offset`, `rotary`
+(the sentences), `tools` (`number`, `kind`, `diameter`, `flute_length`, `stickout?`, `holder?`,
+`z_min?`, `operations`), `operations` (`name`, `kind`, `tool`, `spindle_rpm`, `feed`,
+`plunge_feed`, `rotary?`, `cut_length`, `cut_minutes`), `totals` (`operations`, `tools`,
+`tool_changes`, `cut_length`, `cut_minutes`, `program_minutes?`), `checks` and `warnings`.
 
 ## `cam.post.list` and `cam.post.get`
 

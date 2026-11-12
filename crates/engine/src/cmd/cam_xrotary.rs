@@ -197,6 +197,7 @@ fn continuous(c: Common<'_>, r: Resolved, kind: &str, path: Toolpath5) -> Planne
         op: MachineOperation::Continuous(op),
         poses: path,
         sources,
+        feeds: r.feeds,
         gouge_check: c.gouge_check,
         band: None,
         tool: r.tool,

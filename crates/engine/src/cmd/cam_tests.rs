@@ -3043,3 +3043,368 @@ fn hostile_workholdings_are_refused_without_panics() {
         }
     }
 }
+
+// Machine rates, the setup sheet and one program per tool.
+
+/// A small mill's top rates: 8000 mm/min across, 4000 in Z, A at 8000°/min, the spindle from
+/// 10000 to 24000 rpm with a six-second start.
+fn mill_rates() -> Value {
+    json!({
+        "rapid_xyz_mm_min": 8000, "rapid_z_mm_min": 4000, "rapid_a_deg_min": 8000,
+        "max_feed_mm_min": 8000, "max_feed_z_mm_min": 4000, "max_a_deg_min": 8000,
+        "spindle_rpm": [10000, 24000], "spindle_start_seconds": 6, "travel_mm": [300, 170, 130]
+    })
+}
+
+#[test]
+fn machine_rates_time_the_program_and_warn_about_slowed_blocks() {
+    let mut s = top_pocket();
+    // Without rates: the time at feed as written, no rapid time.
+    let r = run(&mut s, "cam.job", json!({"job": pocket_job(), "dry_run": true}));
+    assert_clean(&r);
+    assert!(r["machine_time"].is_null() && r["rapid_minutes"].is_null(), "{r}");
+    assert_eq!(r["cut_minutes"], r["readback"]["cut_minutes"], "{r}");
+
+    // With the mill's rates: rapids timed, one spindle start, nothing slowed.
+    let mut job = pocket_job();
+    job["machine_rates"] = mill_rates();
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    let t = &r["machine_time"];
+    assert!(r["rapid_minutes"].as_f64().is_some_and(|m| m > 0.0), "{r}");
+    assert_eq!(r["rapid_minutes"], t["rapid_minutes"], "{r}");
+    assert_eq!(r["cut_minutes"], t["cut_minutes"], "{r}");
+    assert!((t["spindle_minutes"].as_f64().unwrap() - 0.1).abs() < 1e-12, "{t}");
+    assert_eq!(t["slowed_blocks"], 0, "{t}");
+    let written = t["written_cut_minutes"].as_f64().unwrap();
+    assert!((written - r["readback"]["cut_minutes"].as_f64().unwrap()).abs() < 1e-9, "{r}");
+    let total = t["cut_minutes"].as_f64().unwrap() + t["rapid_minutes"].as_f64().unwrap() + t["spindle_minutes"].as_f64().unwrap();
+    assert!((t["total_minutes"].as_f64().unwrap() - total).abs() < 1e-9, "{t}");
+
+    // A top feed below the job's 800 mm/min: the controller slows the cuts, the reply says so,
+    // and the program still passes its checks.
+    job["machine_rates"]["max_feed_mm_min"] = json!(500);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    let t = &r["machine_time"];
+    assert!(t["feed_over"].as_u64().is_some_and(|n| n > 0), "{t}");
+    assert!(t["cut_minutes"].as_f64().unwrap() > written, "{t}");
+    assert!(!r["notes"].as_array().unwrap().is_empty(), "the slowed blocks are in the notes: {r}");
+    // The setup sheet states the machine's limits the job runs into first.
+    assert!(!r["summary"]["warnings"].is_null(), "{r}");
+
+    // A spindle speed below the machine's range is run at its lowest: the job passes and says so.
+    job["machine_rates"]["max_feed_mm_min"] = json!(8000);
+    job["machine_rates"]["spindle_rpm"] = json!([15000, 24000]);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], true, "{r}");
+    let notes = r["notes"].to_string();
+    assert!(notes.contains("outside the machine's 15000-24000 rpm (S12000 at line"), "{notes}");
+    assert_eq!(r["machine_time"]["spindle_out_of_range"][0]["rpm"].as_f64(), Some(12000.0), "{r}");
+
+    // The rates may come from a file beside the job.
+    let dir = Dir::new("rates");
+    std::fs::write(dir.0.join("rates.json"), mill_rates().to_string()).unwrap();
+    let mut job = pocket_job();
+    job["machine_rates_path"] = json!("rates.json");
+    let job_path = dir.file("pocket.cam.json");
+    std::fs::write(&job_path, job.to_string()).unwrap();
+    let r = run(&mut s, "cam.job", json!({"job_path": job_path, "dry_run": true}));
+    assert_clean(&r);
+    assert_eq!(r["machine_time"]["slowed_blocks"], 0, "{r}");
+
+    // Bad rates are refused before anything is planned, never a panic.
+    let with = |f: &dyn Fn(&mut Value)| {
+        let mut job = pocket_job();
+        job["machine_rates"] = mill_rates();
+        f(&mut job);
+        json!({"job": job, "dry_run": true})
+    };
+    let cases = [
+        (with(&|j| j["machine_rates"]["rapid_xyz"] = json!(1)), "rapid_xyz"),
+        (with(&|j| j["machine_rates"]["rapid_xyz_mm_min"] = json!(0)), "machine rate"),
+        (with(&|j| j["machine_rates"]["max_a_deg_min"] = json!(-5)), "machine rate"),
+        (with(&|j| j["machine_rates"]["max_feed_mm_min"] = json!(1e300)), "machine rate"),
+        (with(&|j| j["machine_rates"]["spindle_rpm"] = json!([24000, 10000])), "spindle"),
+        (with(&|j| j["machine_rates"]["spindle_start_seconds"] = json!(1e9)), "spindle"),
+        (with(&|j| j["machine_rates"]["travel_mm"] = json!([300, 0, 130])), "travel"),
+        (with(&|j| j["machine_rates"] = json!({"max_a_deg_min": 100})), "rapid_xyz_mm_min"),
+        (with(&|j| j["machine_rates"] = json!("8000")), "machine_rates"),
+        (with(&|j| j["machine_rates_path"] = json!("rates.json")), "not both"),
+    ];
+    for (p, word) in cases {
+        let e = s.execute("cam.job", &p).unwrap_err();
+        assert!(matches!(e, EngineError::BadParams { .. }) && e.to_string().contains(word), "{p}: {e}");
+    }
+    std::fs::write(dir.0.join("rates.json"), json!({"rapid_xyz_mm_min": 8000, "max_a": 1}).to_string()).unwrap();
+    let e = s.execute("cam.job", &json!({"job_path": job_path, "dry_run": true})).unwrap_err();
+    assert!(e.to_string().contains("max_a"), "{e}");
+    std::fs::write(dir.0.join("rates.json"), "{not json").unwrap();
+    assert!(matches!(s.execute("cam.job", &json!({"job_path": job_path, "dry_run": true})), Err(EngineError::BadParams { .. })));
+    std::fs::remove_file(dir.0.join("rates.json")).unwrap();
+    assert!(matches!(s.execute("cam.job", &json!({"job_path": job_path, "dry_run": true})), Err(EngineError::BadParams { .. })));
+}
+
+/// A two-tool job on the pocketed block: the pocket with a 4 mm end mill, then the outline with
+/// a 6 mm one that has a holder and a stickout.
+fn two_tool_job() -> Value {
+    let mut job = pocket_job();
+    job["name"] = json!("block two tools");
+    job["tools"] = json!([
+        flat(1, 4.0),
+        {"number": 2, "kind": "flat_endmill", "diameter": 6, "flute_length": 15, "description": "6 mm end mill, long reach",
+         "stickout": 25, "holder": [{"diameter": 30, "length": 20}], "spindle_rpm": 10000, "feed": 900, "plunge_feed": 250}
+    ]);
+    job["operations"].as_array_mut().unwrap().push(json!({
+        "name": "outline", "type": "contour", "tool": 2, "spindle_rpm": 11000, "feeds": {"cut": 700, "plunge": 150},
+        "polygon": [[-20, -15], [20, -15], [20, 15], [-20, 15]],
+        "heights": {"clearance": 20, "retract": 5, "top": 0, "bottom": -10}, "stepdown": 5
+    }));
+    job
+}
+
+fn scoped<T>(dir: &Dir, f: impl FnOnce() -> T) -> T {
+    solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([dir.0.clone()])), f)
+}
+
+#[test]
+fn a_setup_sheet_lists_the_tools_operations_and_checks_of_a_two_tool_job() {
+    let mut s = top_pocket();
+    let dir = Dir::new("sheet");
+    let (out, page, md) = (dir.file("block.ngc"), dir.file("block-setup.html"), dir.file("block-setup.md"));
+    let r = scoped(&dir, || run(&mut s, "cam.job", json!({"job": two_tool_job(), "output": out, "setup_sheet": page})));
+    assert_clean(&r);
+    assert_eq!(r["outputs"]["setup_sheet"], page.as_str(), "{r}");
+    let sum = &r["summary"];
+    // Only the tools the operations use, by number, each with its operations and how low it goes.
+    let tools = sum["tools"].as_array().unwrap();
+    assert_eq!(tools.iter().map(|t| t["number"].as_u64().unwrap()).collect::<Vec<_>>(), [1, 2], "{sum}");
+    assert_eq!(tools[0]["operations"], json!(["top pocket"]), "{sum}");
+    assert_eq!(tools[1]["operations"], json!(["outline"]), "{sum}");
+    assert_eq!(tools[1]["holder"], "Ø30 x 20", "{sum}");
+    assert_eq!(tools[1]["stickout"].as_f64(), Some(25.0), "{sum}");
+    assert!(tools[0].get("holder").is_none(), "{sum}");
+    // Z min is the lowest Z the program writes for each tool: what cam.gcode.check reads.
+    let c = run(&mut s, "cam.gcode.check", json!({"path": out}));
+    assert_eq!(c["bounds"][0][2].as_f64(), Some(-10.0), "{c}");
+    let zmins: Vec<f64> = tools.iter().map(|t| t["z_min"].as_f64().unwrap()).collect();
+    assert_eq!(zmins, [-4.0, -10.0], "{sum}");
+    let ops = sum["operations"].as_array().unwrap();
+    assert_eq!(ops.len(), 2);
+    assert_eq!((ops[1]["spindle_rpm"].as_f64(), ops[1]["feed"].as_f64(), ops[1]["plunge_feed"].as_f64()), (Some(11000.0), Some(700.0), Some(150.0)));
+    assert_eq!((ops[0]["spindle_rpm"].as_f64(), ops[0]["feed"].as_f64()), (Some(12000.0), Some(800.0)), "the tool's data: {sum}");
+    assert!(ops[0].get("rotary").is_none(), "a 3-axis machine has no rotary: {sum}");
+    assert!(ops.iter().all(|o| o["cut_length"].as_f64().is_some_and(|l| l > 50.0) && o["cut_minutes"].as_f64().is_some_and(|m| m > 0.0)));
+    assert_eq!(sum["totals"]["tool_changes"], 2, "{sum}");
+    assert_eq!(sum["totals"]["operations"], 2, "{sum}");
+    assert_eq!(sum["totals"]["tools"], 2, "{sum}");
+    // The part's extent from work zero, from the block's exact bounds.
+    assert_eq!(sum["part_extent"], json!([[-20.0, -15.0, -10.0], [20.0, 15.0, 0.0]]), "{sum}");
+    let zero = sum["work_zero"].to_string();
+    assert!(zero.contains("X0 is in the middle of the part in X") && zero.contains("Z0 is on the part's top"), "{zero}");
+    assert!(sum["rotary"].as_array().is_some_and(Vec::is_empty), "{sum}");
+    assert!(sum["checks"].to_string().contains("Read-back: passed"), "{sum}");
+    // The page holds the same.
+    let html = std::fs::read_to_string(&page).unwrap();
+    for want in [
+        "Setup sheet: block two tools",
+        "top pocket",
+        "outline",
+        "T1",
+        "T2",
+        "Ø30 x 20",
+        "6 mm end mill, long reach",
+        "11000",
+        "Read-back",
+        "passed",
+        "block.ngc",
+        "@media print",
+    ] {
+        assert!(html.contains(want), "{want}: {html}");
+    }
+    assert!(!html.contains("<script") && !html.contains("http://") && !html.contains("https://") && !html.contains("<link"), "self-contained");
+    // The Markdown sheet; the summary is the same whatever the sheet's format, and on a dry run.
+    let r2 = scoped(&dir, || run(&mut s, "cam.job", json!({"job": two_tool_job(), "output": out, "setup_sheet": md})));
+    assert_eq!(r2["summary"], r["summary"]);
+    let text = std::fs::read_to_string(&md).unwrap();
+    assert!(text.starts_with("# Setup sheet: block two tools\n") && text.contains("| T2 | flat end mill | Ø6 |"), "{text}");
+    let dry = run(&mut s, "cam.job", json!({"job": two_tool_job(), "dry_run": true}));
+    assert_eq!(dry["summary"]["tools"], r["summary"]["tools"]);
+    assert!(dry["outputs"].get("setup_sheet").is_none(), "{dry}");
+}
+
+#[test]
+fn a_setup_sheet_escapes_hostile_names() {
+    let mut s = top_pocket();
+    let dir = Dir::new("sheet-hostile");
+    let mut job = two_tool_job();
+    job["name"] = json!("<script>alert(1)</script> & 'x'");
+    job["operations"][0]["name"] = json!("<img src=x onerror=alert(2)> | *b* `c`");
+    job["tools"][1]["description"] = json!("</td></tr></table><script>alert(3)</script>");
+    let (page, md) = (dir.file("hostile.html"), dir.file("hostile.md"));
+    run(&mut s, "cam.job", json!({"job": job, "output": dir.file("a.ngc"), "setup_sheet": page}));
+    run(&mut s, "cam.job", json!({"job": job, "output": dir.file("b.ngc"), "setup_sheet": md}));
+    let html = std::fs::read_to_string(&page).unwrap();
+    assert!(!html.contains("<script") && !html.contains("<img") && !html.contains("</td></tr></table><"), "{html}");
+    assert!(
+        html.contains("&lt;script&gt;alert(1)&lt;/script&gt; &amp; &#39;x&#39;") && html.contains("&lt;img src=x onerror=alert(2)&gt;"),
+        "{html}"
+    );
+    let text = std::fs::read_to_string(&md).unwrap();
+    assert!(!text.contains("<script") && !text.contains("<img"), "{text}");
+    let row = text.lines().find(|l| l.starts_with("| 1 |")).unwrap();
+    assert!(row.contains("\\| \\*b\\* \\`c\\`"), "{row}");
+    assert_eq!(row.replace("\\|", "").matches('|').count(), 13, "the row keeps its cells: {row}");
+}
+
+#[test]
+fn a_setup_sheet_is_written_only_inside_the_agents_folders() {
+    let mut s = top_pocket();
+    let dir = Dir::new("sheet-scope");
+    let root = dir.0.join("allowed");
+    std::fs::create_dir_all(&root).unwrap();
+    let inside = root.join("block.ngc").to_string_lossy().into_owned();
+    let outside = dir.file("block-setup.html");
+    let scope = Some(solidcraft_io::vfs::PathScope::new([root.clone()]));
+    solidcraft_io::vfs::scoped(scope, || {
+        let e = s.execute("cam.job", &json!({"job": two_tool_job(), "output": inside, "setup_sheet": outside})).unwrap_err();
+        assert!(e.to_string().contains("outside the folders this agent may use"), "{e}");
+        let sheet_in = root.join("s.html").to_string_lossy().into_owned();
+        let txt = root.join("s.txt").to_string_lossy().into_owned();
+        for (p, word) in [
+            (json!({"job": two_tool_job(), "output": inside, "setup_sheet": txt}), ".html or .md"),
+            (json!({"job": two_tool_job(), "dry_run": true, "setup_sheet": "sheet.pdf"}), ".html or .md"),
+            (json!({"job": two_tool_job(), "output": inside, "setup_sheet": ""}), ".html or .md"),
+            (json!({"job": two_tool_job(), "output": sheet_in, "setup_sheet": sheet_in}), "file of its own"),
+            (json!({"job": two_tool_job(), "output": inside, "preview": sheet_in, "setup_sheet": sheet_in}), "file of its own"),
+            (json!({"job": two_tool_job(), "output": inside, "setup_sheet": 5}), "setup_sheet"),
+        ] {
+            let e = s.execute("cam.job", &p).unwrap_err();
+            assert!(matches!(e, EngineError::BadParams { .. }) && e.to_string().contains(word), "{p}: {e}");
+        }
+    });
+    assert!(!PathBuf::from(&outside).exists(), "nothing outside the folders");
+    assert!(!PathBuf::from(&inside).exists(), "nothing at all: the paths are checked before anything is written");
+}
+
+#[test]
+fn a_setup_sheet_is_the_same_bytes_every_time() {
+    let dir = Dir::new("sheet-same");
+    let (out, page, md) = (dir.file("p.ngc"), dir.file("p.html"), dir.file("p.md"));
+    let mut runs: Vec<(Vec<u8>, Vec<u8>, Value)> = Vec::new();
+    for _ in 0..2 {
+        // A fresh session each time: nothing carried over.
+        let mut s = top_pocket();
+        let r = run(&mut s, "cam.job", json!({"job": two_tool_job(), "output": out, "setup_sheet": page}));
+        run(&mut s, "cam.job", json!({"job": two_tool_job(), "output": out, "setup_sheet": md}));
+        runs.push((std::fs::read(&page).unwrap(), std::fs::read(&md).unwrap(), r["summary"].clone()));
+    }
+    assert!(runs[0] == runs[1], "two runs give different sheets");
+    let html = String::from_utf8(runs[0].0.clone()).unwrap();
+    assert!(!html.contains("2026") && !html.contains("2025"), "no date on the sheet");
+}
+
+#[test]
+fn a_setup_sheet_spelt_like_the_preview_is_still_the_preview() {
+    let mut s = top_pocket();
+    let dir = Dir::new("sheet-same-file");
+    let out = dir.file("block.ngc");
+    let page = dir.file("block.html");
+    let dotted = dir.0.join(".").join("block.html").to_string_lossy().into_owned();
+    let mut same = vec![dotted];
+    if cfg!(windows) {
+        same.push(dir.file("BLOCK.HTML"));
+    }
+    for sheet in same {
+        let e =
+            scoped(&dir, || s.execute("cam.job", &json!({"job": two_tool_job(), "output": out, "preview": page, "setup_sheet": sheet}))).unwrap_err();
+        assert!(e.to_string().contains("file of its own"), "{sheet}: {e}");
+    }
+    assert!(!PathBuf::from(&page).exists() && !PathBuf::from(&out).exists(), "nothing written");
+}
+
+#[test]
+fn a_4th_axis_setup_sheet_gives_the_a_convention_and_the_centreline() {
+    let mut s = top_pocket();
+    let mut job = pocket_job();
+    job["machine"] = json!("4axis_a");
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    let sum = &r["summary"];
+    assert_eq!(sum["operations"][0]["rotary"], "A0°", "A held at zero, as written: {sum}");
+    let rotary = sum["rotary"].to_string();
+    assert!(rotary.contains("A turns the table (and the part) about +X through work zero"), "{rotary}");
+    assert!(rotary.contains("A+90° brings the part's +Y side up under the tool"), "{rotary}");
+    assert!(sum["work_zero"].to_string().contains("Y0 Z0 is on the A axis centreline"), "{sum}");
+    // Reversed: positive A turns the other way.
+    job["a_reversed"] = json!(true);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    assert!(r["summary"]["rotary"].to_string().contains("-Y side up"), "{r}");
+}
+
+/// A job of two tools for a machine that ignores tool changes: one program stops for the
+/// operator at the change and is warned about; split, each tool's program is complete on its own.
+#[test]
+fn a_job_is_split_one_program_per_tool_for_a_machine_that_ignores_tool_changes() {
+    let mut s = top_pocket();
+    let dir = Dir::new("split");
+    let mut job = two_tool_job();
+    job["tool_change"] = json!("ignored");
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], true, "a warning, not a failure: {r}");
+    let w = r["warnings"][0].as_str().unwrap_or_else(|| panic!("{r}"));
+    assert!(w.contains("ignores tool changes") && w.contains("T1, T2") && w.contains("split_by_tool"), "{w}");
+    let (out, sheet) = (dir.file("block.ngc"), dir.file("block.setup.md"));
+    // Not split, the program stops at the change to T2 for the operator, and the sheet says so.
+    run(&mut s, "cam.job", json!({"job": job, "output": out, "setup_sheet": sheet}));
+    let md = std::fs::read_to_string(&sheet).unwrap();
+    assert!(md.contains("## Tool changes") && md.contains("it stops (M0) at each change after"), "{md}");
+    let tap = std::fs::read_to_string(&out).unwrap();
+    assert_eq!(tap.lines().filter(|l| l.trim() == "M0").count(), 1, "{tap}");
+    std::fs::remove_file(&out).unwrap();
+    // Split: two programs, each with its own safe start, tool change, length offset and header.
+    let r = run(&mut s, "cam.job", json!({"job": job, "output": out, "setup_sheet": sheet, "split_by_tool": true}));
+    assert!(r["warnings"].is_null(), "{r}");
+    let files: Vec<String> = r["outputs"]["programs"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect();
+    assert_eq!(files, [dir.file("block-1-T1.ngc"), dir.file("block-2-T2.ngc")], "{r}");
+    assert!(r["outputs"]["gcode"].is_null() && !std::path::Path::new(&out).exists());
+    let parts = r["programs"].as_array().unwrap();
+    assert_eq!((parts[1]["order"].as_u64(), parts[1]["tool"].as_u64(), parts[1]["stickout"].as_f64()), (Some(2), Some(2), Some(25.0)), "{r}");
+    assert_eq!(parts[1]["operations"], json!(["outline"]));
+    for (k, (f, t)) in files.iter().zip([1, 2]).enumerate() {
+        let text = std::fs::read_to_string(f).unwrap();
+        let head: Vec<String> = text.lines().take(5).map(str::to_lowercase).collect();
+        assert!(head[1].contains(&format!("program {} of 2", k + 1)), "{head:?}");
+        assert!(head[2].starts_with(&format!("(this program uses t{t} - ")) && head[2].contains("stickout"), "{head:?}");
+        assert_eq!(text.lines().filter(|l| l.contains("M6")).count(), 1, "one tool change: {f}");
+        assert!(text.contains(&format!("T{t} M6")) && text.contains(&format!("H{t}")), "{f}");
+        assert!(text.trim_end().ends_with("M30"), "{f}");
+        // Each reads on its own.
+        let c = run(&mut s, "cam.gcode.check", json!({"path": f}));
+        assert!(c["errors"].as_array().unwrap().is_empty(), "{c}");
+    }
+    let md = std::fs::read_to_string(&sheet).unwrap();
+    assert!(
+        md.contains("## Programs, in the order to run them") && md.contains("1. [ ] block-1-T1.ngc") && md.contains("2. [ ] block-2-T2.ngc"),
+        "{md}"
+    );
+    assert!(md.contains("## Tool changes") && md.contains("Run the programs below in order"), "{md}");
+    // The header names the programs written, not the one file of every tool (not written).
+    assert!(md.contains("- **Programs:** block-1-T1.ngc, block-2-T2.ngc") && !md.contains("**Program:** block.ngc"), "{md}");
+}
+
+#[test]
+fn a_split_job_beside_an_older_whole_program_warns_about_it() {
+    let mut s = top_pocket();
+    let dir = Dir::new("split-stale");
+    let mut job = two_tool_job();
+    job["tool_change"] = json!("ignored");
+    let out = dir.file("block.ngc");
+    run(&mut s, "cam.job", json!({"job": job, "output": out}));
+    assert!(std::path::Path::new(&out).exists());
+    let r = run(&mut s, "cam.job", json!({"job": job, "output": out, "split_by_tool": true}));
+    let w = r["warnings"].as_array().unwrap_or_else(|| panic!("{r}"));
+    assert!(w.iter().filter_map(|w| w.as_str()).any(|w| w.contains("block.ngc") && w.contains("delete")), "{w:?}");
+    assert!(!r["warnings"].to_string().contains("   "), "no run of spaces in the text: {w:?}");
+}
