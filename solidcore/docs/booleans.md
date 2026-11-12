@@ -344,8 +344,9 @@ A reviewer can check each of these on a change to the boolean.
 - Point solves on S with ε-grown cache boxes (§4.3).
 - Definitions carried through face splits and copies (§7), tested on a round.
 - The ops entry points with the result contract (`solidcore-ops/src/boolean.rs`).
-- The rig: 124 boolean cases in `solidcore/tests/kernel_cases/booleans/`, none listed in
-  `known_failing.json`.
+- The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
+  `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
+  returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - Opt-in fixes for the cases in §5, §6 and §8: `boolean_coincident_strip_drops_crossing`,
   `boolean_union_refuses_solid_leak`, `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`,
   `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing`,
