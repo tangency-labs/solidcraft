@@ -3,6 +3,10 @@
 # The nightly command downgrades only this diagnostic with --warn unmaintained.
 unmaintained = "all"
 yanked = "warn"
+ignore = [
+    { id = "RUSTSEC-2023-0071", reason = "local document signing only; no remote party can time private-key operations (owner decision 2026-11-12, #15297)" },
+    { id = "RUSTSEC-2026-0387", reason = "local document signing only; no remote party can time private-key operations (owner decision 2026-11-12, #15297)" },
+]
 
 [bans]
 multiple-versions = "warn"
