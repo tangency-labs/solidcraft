@@ -5,8 +5,9 @@
 //! `step_export` writes, so an engine B-rep can be exported without being
 //! tessellated.
 //!
-//! The initial bridge writes one `MANIFOLD_SOLID_BREP` per B-rep, with all live faces
-//! in one closed shell. Curves and surfaces are written as their exact analytic or
+//! It writes a solid per material region: a `MANIFOLD_SOLID_BREP` of its outer shell,
+//! or a `BREP_WITH_VOIDS` when the region has inner shells (voids), every face pointing
+//! out of the material as ISO 10303-42 directs. Curves and surfaces are written as their exact analytic or
 //! NURBS entities. Curved faces carry one pcurve per actual edge use, so a seam edge
 //! used twice carries the two pcurves the writer joins into one `SEAM_CURVE`; a closed
 //! edge used once (a cap circle) is no seam.
@@ -347,34 +348,40 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     let mut face_by_id = BTreeMap::new();
     let mut pcurves = BTreeMap::new();
     let pcurve_kernel = &kernel;
-    // ISO 10303-42 wants each face of a solid's closed shell written from outside the
-    // material: its normal (the surface's, reversed where `same_sense` is false) pointing
-    // out of the material, and its loops anticlockwise about that normal. A faceuse in the
-    // shell of a material region faces into that region, so each face is written from its
-    // mate, the faceuse on the outer side.
-    let mut outward_faceuses = BTreeMap::new();
-    for shell_id in brep.shells().ids() {
-        let shell = brep.shell(shell_id).map_err(|e| err(e.to_string()))?;
-        let Some(region_id) = shell.region else {
-            continue;
-        };
-        if brep
-            .region(region_id)
-            .map_err(|e| err(e.to_string()))?
-            .is_void()
-            != 0
-        {
+    // ISO 10303-42 wants a solid's faces written from outside its material: each face's
+    // normal (the surface's, reversed where `same_sense` is false) pointing out of the
+    // material, and its loops anticlockwise about that normal. A faceuse in a shell of a
+    // material region faces into that region. A region's first shell is its outer one (the
+    // kernel keeps it first); each face of it is written from its mate, the faceuse on the
+    // outer side. Its other shells bound voids, each written as a BREP_WITH_VOIDS void: a
+    // closed shell whose faces point out of the void's own volume (the material faceuses
+    // themselves, pointing into the material), under an ORIENTED_CLOSED_SHELL of
+    // orientation .F., which turns them out of the material.
+    let mut written_faceuses = BTreeMap::new();
+    // each material region's shells, outer first
+    let mut solids: Vec<Vec<solidcore::topology::ShellId>> = Vec::new();
+    for region_id in brep.regions().ids() {
+        let region = brep.region(region_id).map_err(|e| err(e.to_string()))?;
+        if region.is_void() != 0 {
             continue;
         }
-        for faceuse in shell.get_faceuses().map_err(|e| err(e.to_string()))? {
-            let faceuse = brep.faceuse(faceuse).map_err(|e| err(e.to_string()))?;
-            if let Some(face) = faceuse.face {
-                let outward = faceuse
-                    .mate
-                    .ok_or_else(|| err("a material faceuse has no mate"))?;
-                outward_faceuses.insert(face, outward);
+        for (position, shell_id) in region.shells.iter().enumerate() {
+            let shell = brep.shell(*shell_id).map_err(|e| err(e.to_string()))?;
+            for faceuse_id in shell.get_faceuses().map_err(|e| err(e.to_string()))? {
+                let faceuse = brep.faceuse(faceuse_id).map_err(|e| err(e.to_string()))?;
+                if let Some(face) = faceuse.face {
+                    let written = if position == 0 {
+                        faceuse
+                            .mate
+                            .ok_or_else(|| err("a material faceuse has no mate"))?
+                    } else {
+                        faceuse_id
+                    };
+                    written_faceuses.insert(face, written);
+                }
             }
         }
+        solids.push(region.shells.clone());
     }
     for id in brep.face_list() {
         let face = brep.face(*id).map_err(|e| err(e.to_string()))?;
@@ -382,7 +389,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
             .surface
             .as_ref()
             .ok_or_else(|| err("face has no surface"))?;
-        let faceuse = outward_faceuses
+        let faceuse = written_faceuses
             .get(id)
             .copied()
             .or(face.faceuse)
@@ -501,67 +508,104 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     }
     let mut kernel = Kernel::default();
     let sheet = is_sheet(&mut kernel, brep).map_err(|e| err(e.to_string()))?;
-    let mut shell_records = Vec::new();
-    let mut seen_shell_faces: Vec<Vec<usize>> = Vec::new();
-    for (shell_position, shell_id) in brep.shells().ids().enumerate() {
-        let mut shell_faces = Vec::new();
-        for faceuse in brep
-            .shell(shell_id)
-            .map_err(|e| err(e.to_string()))?
-            .get_faceuses()
-            .map_err(|e| err(e.to_string()))?
-        {
-            let face_id = brep.faceuse(faceuse).map_err(|e| err(e.to_string()))?.face;
-            if let Some(face_id) = face_id {
-                if let Some(index) = face_by_id.get(&face_id) {
-                    shell_faces.push(*index);
+    // the faces of a shell, as indices into `faces`
+    let shell_faces =
+        |shell_id: solidcore::topology::ShellId| -> Result<Vec<usize>, ExportModelError> {
+            let mut out = Vec::new();
+            for faceuse in brep
+                .shell(shell_id)
+                .map_err(|e| err(e.to_string()))?
+                .get_faceuses()
+                .map_err(|e| err(e.to_string()))?
+            {
+                let face_id = brep.faceuse(faceuse).map_err(|e| err(e.to_string()))?.face;
+                if let Some(index) = face_id.and_then(|face_id| face_by_id.get(&face_id)) {
+                    out.push(*index);
                 }
             }
+            Ok(out)
+        };
+    let body = |index: usize, kind: BodyKind, shells: Vec<Shell>| Body {
+        step_id: index as u64 + 1,
+        name: None,
+        kind,
+        unit_mm: 1.0,
+        uncertainty_mm: None,
+        shells,
+        faces: faces.clone(),
+        edges: edges.clone(),
+        vertices: vertices.clone(),
+    };
+    let mut bodies = Vec::new();
+    if !sheet {
+        // a solid per material region: its outer shell, and its voids
+        for shells in &solids {
+            let mut records = Vec::new();
+            for (position, shell_id) in shells.iter().enumerate() {
+                let faces_of = shell_faces(*shell_id)?;
+                if faces_of.is_empty() {
+                    continue;
+                }
+                records.push(Shell {
+                    step_id: u64::from(shell_id.index()) + 1,
+                    closed: true,
+                    orientation: position == 0,
+                    faces: faces_of,
+                });
+            }
+            if records.first().is_some_and(|outer| outer.orientation) {
+                let kind = if records.len() > 1 {
+                    BodyKind::SolidWithVoids
+                } else {
+                    BodyKind::ManifoldSolid
+                };
+                bodies.push(body(bodies.len(), kind, records));
+            }
         }
-        if shell_faces.is_empty() {
-            continue;
-        }
-        let mut canonical = shell_faces.clone();
-        canonical.sort_unstable();
-        if seen_shell_faces.contains(&canonical) {
-            continue;
-        }
-        seen_shell_faces.push(canonical);
-        shell_records.push(Shell {
-            step_id: shell_position as u64 + 1,
-            closed: !sheet,
-            orientation: true,
-            faces: shell_faces,
-        });
     }
-    if shell_records.is_empty() {
-        // No region/shell: fall back to every live face in one body.
-        shell_records.push(Shell {
+    if bodies.is_empty() {
+        // No material region (a sheet, or no regions): a body per distinct face shell.
+        let mut seen_shell_faces: Vec<Vec<usize>> = Vec::new();
+        let kind = if sheet {
+            BodyKind::ShellModel
+        } else {
+            BodyKind::ManifoldSolid
+        };
+        for shell_id in brep.shells().ids() {
+            let faces_of = shell_faces(shell_id)?;
+            if faces_of.is_empty() {
+                continue;
+            }
+            let mut canonical = faces_of.clone();
+            canonical.sort_unstable();
+            if seen_shell_faces.contains(&canonical) {
+                continue;
+            }
+            seen_shell_faces.push(canonical);
+            let shell = Shell {
+                step_id: u64::from(shell_id.index()) + 1,
+                closed: !sheet,
+                orientation: true,
+                faces: faces_of,
+            };
+            bodies.push(body(bodies.len(), kind, vec![shell]));
+        }
+    }
+    if bodies.is_empty() {
+        // No shell: every live face in one body.
+        let shell = Shell {
             step_id: 1,
             closed: !sheet,
             orientation: true,
-            faces: face_indices,
-        });
+            faces: face_indices.clone(),
+        };
+        let kind = if sheet {
+            BodyKind::ShellModel
+        } else {
+            BodyKind::ManifoldSolid
+        };
+        bodies.push(body(0, kind, vec![shell]));
     }
-    let bodies = shell_records
-        .into_iter()
-        .enumerate()
-        .map(|(index, shell)| Body {
-            step_id: index as u64 + 1,
-            name: None,
-            kind: if sheet {
-                BodyKind::ShellModel
-            } else {
-                BodyKind::ManifoldSolid
-            },
-            unit_mm: 1.0,
-            uncertainty_mm: None,
-            shells: vec![shell],
-            faces: faces.clone(),
-            edges: edges.clone(),
-            vertices: vertices.clone(),
-        })
-        .collect();
     Ok(Model {
         bodies,
         pcurves,

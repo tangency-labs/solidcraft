@@ -75,6 +75,29 @@ fn gauss() -> [(f64, f64); 8] {
     out
 }
 
+/// The homogeneous point of a B-spline at `t` (de Boor), `knots` full; beyond its ends the
+/// end spans' polynomials.
+fn de_boor(p: usize, knots: &[f64], control: &[[f64; 4]], t: f64) -> [f64; 4] {
+    let n = control.len();
+    // the span: knots[s] <= t < knots[s + 1], clamped to the curve's ends
+    let mut s = p;
+    while s + 1 < n && t >= knots[s + 1] {
+        s += 1;
+    }
+    let mut d: Vec<[f64; 4]> = (0..=p).map(|j| control[s - p + j]).collect();
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = s - p + j;
+            let a = (t - knots[i]) / (knots[i + p + 1 - r] - knots[i]);
+            let below = d[j - 1];
+            for (c, low) in d[j].iter_mut().zip(below) {
+                *c = (1.0 - a) * low + a * *c;
+            }
+        }
+    }
+    d[p]
+}
+
 /// A curve of the file, by its ISO 10303-42 parameterisation.
 #[derive(Clone, Debug)]
 enum IsoCurve {
@@ -109,32 +132,12 @@ impl IsoCurve {
                 weights,
                 knots,
             } => {
-                let p = *degree;
-                let n = points.len();
-                // the span: knots[s] <= t < knots[s + 1], clamped to the curve's ends
-                let mut s = p;
-                while s + 1 < n && t >= knots[s + 1] {
-                    s += 1;
-                }
-                let mut d: Vec<[f64; 4]> = (0..=p)
-                    .map(|j| {
-                        let i = s - p + j;
-                        let w = weights[i];
-                        let q = points[i];
-                        [q[0] * w, q[1] * w, q[2] * w, w]
-                    })
+                let control: Vec<[f64; 4]> = points
+                    .iter()
+                    .zip(weights)
+                    .map(|(q, w)| [q[0] * w, q[1] * w, q[2] * w, *w])
                     .collect();
-                for r in 1..=p {
-                    for j in (r..=p).rev() {
-                        let i = s - p + j;
-                        let a = (t - knots[i]) / (knots[i + p + 1 - r] - knots[i]);
-                        let below = d[j - 1];
-                        for (c, low) in d[j].iter_mut().zip(below) {
-                            *c = (1.0 - a) * low + a * *c;
-                        }
-                    }
-                }
-                let h = d[p];
+                let h = de_boor(*degree, knots, &control, t);
                 [h[0] / h[3], h[1] / h[3], h[2] / h[3]]
             }
         }
@@ -223,6 +226,14 @@ enum IsoSurface {
         curve: IsoCurve,
         step: P,
     },
+    /// Rows along u of homogeneous control points; full knots.
+    BSpline {
+        u_degree: usize,
+        v_degree: usize,
+        rows: Vec<Vec<[f64; 4]>>,
+        u_knots: Vec<f64>,
+        v_knots: Vec<f64>,
+    },
 }
 
 impl IsoSurface {
@@ -256,6 +267,20 @@ impl IsoSurface {
                 )
             }
             IsoSurface::Extrusion { curve, step } => add(curve.at(u), mul(v, *step)),
+            IsoSurface::BSpline {
+                u_degree,
+                v_degree,
+                rows,
+                u_knots,
+                v_knots,
+            } => {
+                let column: Vec<[f64; 4]> = rows
+                    .iter()
+                    .map(|row| de_boor(*v_degree, v_knots, row, v))
+                    .collect();
+                let h = de_boor(*u_degree, u_knots, &column, u);
+                [h[0] / h[3], h[1] / h[3], h[2] / h[3]]
+            }
         }
     }
 
@@ -394,6 +419,46 @@ impl File {
 
     fn surface(&self, id: u64) -> IsoSurface {
         let e = self.e(id);
+        // a B-spline surface, simple or complex (rational)
+        let bspline = if let Some([du, dv, net, ..]) = e.record("B_SPLINE_SURFACE") {
+            let k = e.record("B_SPLINE_SURFACE_WITH_KNOTS").unwrap();
+            Some((du, dv, net, &k[0], &k[1], &k[2], &k[3]))
+        } else if e.name() == "B_SPLINE_SURFACE_WITH_KNOTS" {
+            let b = e.params();
+            Some((&b[1], &b[2], &b[3], &b[8], &b[9], &b[10], &b[11]))
+        } else {
+            None
+        };
+        if let Some((du, dv, net, um, vm, uk, vk)) = bspline {
+            let weights: Option<Vec<Vec<f64>>> = e.record("RATIONAL_B_SPLINE_SURFACE").map(|w| {
+                list(&w[0])
+                    .iter()
+                    .map(|row| list(row).iter().map(real).collect())
+                    .collect()
+            });
+            let rows = list(net)
+                .iter()
+                .enumerate()
+                .map(|(i, row)| {
+                    list(row)
+                        .iter()
+                        .enumerate()
+                        .map(|(j, q)| {
+                            let q = self.point(rid(q));
+                            let w = weights.as_ref().map_or(1.0, |w| w[i][j]);
+                            [q[0] * w, q[1] * w, q[2] * w, w]
+                        })
+                        .collect()
+                })
+                .collect();
+            return IsoSurface::BSpline {
+                u_degree: du.as_i64().unwrap() as usize,
+                v_degree: dv.as_i64().unwrap() as usize,
+                rows,
+                u_knots: full_knots(list(um), list(uk)),
+                v_knots: full_knots(list(vm), list(vk)),
+            };
+        }
         let p = e.params();
         match e.name() {
             "PLANE" => {
@@ -490,6 +555,12 @@ struct FaceMeasure {
     id: u64,
     kind: String,
     same_sense: bool,
+    /// On a void's shell (turned over by its `ORIENTED_CLOSED_SHELL`).
+    void: bool,
+    /// Its loops alone don't say which side the face is (a seam loop round a closed
+    /// surface traces its whole (u, v) box either way): the side is the one `same_sense`
+    /// gives, as ISO readers settle it.
+    settled_by_sense: bool,
     by_loops: f64,
     by_sense: f64,
 }
@@ -531,23 +602,137 @@ fn half_moment(curve: &IsoCurve, a: P, b: P, along: bool) -> P {
     sum
 }
 
+/// A loop of a curved face in its surface's (u, v): its uses' pcurves end to end, each
+/// along its use. The joins follow the edges: consecutive uses meet at their shared
+/// vertex, so each pcurve starts where the last ended, or the two ends lift to that one
+/// point across a singular line of the surface (a pole), which the loop then runs along.
+/// A seam edge carries two pcurves on the surface; where a loop uses it twice each use
+/// takes a different one. A wrap across a periodic seam is not a join: a straight
+/// (u, v) step whose points lift to different points is refused. Where the edges leave
+/// two rings (a seam loop round a closed surface: the same box traced either way), the
+/// one turning as `same_sense` says is taken, and the second value says so.
+fn ring(
+    file: &File,
+    surface: &IsoSurface,
+    surface_id: u64,
+    face: u64,
+    uses: &[(u64, P, P, bool, bool)],
+    same_sense: bool,
+) -> (Vec<[f64; 2]>, bool) {
+    let options: Vec<Vec<Vec<[f64; 2]>>> = uses
+        .iter()
+        .map(|&(edge, _, _, _, forward)| {
+            let mut curves = file.pcurves(edge, surface_id);
+            assert!(
+                !curves.is_empty(),
+                "face #{face}: edge #{edge} has no pcurve"
+            );
+            if !forward {
+                for c in &mut curves {
+                    c.reverse();
+                }
+            }
+            curves
+        })
+        .collect();
+    // the points (u, v) lifts to along a straight step from a to b: one point, or not
+    let degenerate = |a: [f64; 2], b: [f64; 2]| {
+        let p0 = surface.at(a[0], a[1]);
+        let scale = 1.0 + norm(p0);
+        (1..=16).all(|i| {
+            let t = f64::from(i) / 16.0;
+            let q = surface.at(a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]));
+            norm(sub(q, p0)) <= 1e-7 * scale
+        })
+    };
+    let choices: usize = options.iter().map(Vec::len).product();
+    let mut rings = Vec::new();
+    for mut pick in 0..choices {
+        let chosen: Vec<usize> = options
+            .iter()
+            .map(|o| {
+                let c = pick % o.len();
+                pick /= o.len();
+                c
+            })
+            .collect();
+        // a seam used twice takes both its pcurves
+        let reuses = (0..uses.len()).any(|i| {
+            (i + 1..uses.len())
+                .any(|j| uses[i].0 == uses[j].0 && options[i].len() > 1 && chosen[i] == chosen[j])
+        });
+        if reuses {
+            continue;
+        }
+        let joined = (0..uses.len()).all(|i| {
+            let end = *options[i][chosen[i]].last().unwrap();
+            let j = (i + 1) % uses.len();
+            let next = options[j][chosen[j]][0];
+            (end[0] - next[0]).hypot(end[1] - next[1]) < 1e-7 || degenerate(end, next)
+        });
+        if joined {
+            let r: Vec<[f64; 2]> = (0..uses.len())
+                .flat_map(|i| options[i][chosen[i]].iter().copied())
+                .collect();
+            rings.push(r);
+        }
+    }
+    assert!(
+        !rings.is_empty(),
+        "face #{face}: its loop's pcurves do not join along its edges"
+    );
+    if rings.len() == 1 {
+        return (rings.remove(0), false);
+    }
+    let area = |r: &[[f64; 2]]| {
+        (0..r.len())
+            .map(|i| {
+                let (a, b) = (r[i], r[(i + 1) % r.len()]);
+                0.5 * (a[0] * b[1] - b[0] * a[1])
+            })
+            .sum::<f64>()
+    };
+    let i = rings
+        .iter()
+        .position(|r| (area(r) > 0.0) == same_sense)
+        .unwrap_or_else(|| panic!("face #{face}: no ring of its loop turns as same_sense says"));
+    (rings.remove(i), true)
+}
+
 fn measure(text: &str) -> Vec<FaceMeasure> {
     let file = File {
         x: p21::parse(text).expect("the file parses"),
     };
-    let breps: Vec<u64> = file
+    let solids: Vec<u64> = file
         .x
         .entities
         .iter()
-        .filter(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP")
+        .filter(|(_, e)| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS"))
         .map(|(id, _)| *id)
         .collect();
-    assert_eq!(breps.len(), 1, "one solid");
-    let shell = rid(&file.params(breps[0], "MANIFOLD_SOLID_BREP")[1]);
-    let faces = list(&file.params(shell, "CLOSED_SHELL")[1]).to_vec();
+    assert_eq!(solids.len(), 1, "one solid");
+    let solid = file.e(solids[0]);
+    // the solid's shells, each with the sign its faces count with: the outer CLOSED_SHELL,
+    // and each void's ORIENTED_CLOSED_SHELL, which turns its closed shell over when .F.
+    let mut shells = vec![(rid(&solid.params()[1]), 1.0)];
+    if solid.name() == "BREP_WITH_VOIDS" {
+        for void in list(&solid.params()[2]) {
+            let oriented = file.params(rid(void), "ORIENTED_CLOSED_SHELL");
+            let sign = if flag(&oriented[3]) { 1.0 } else { -1.0 };
+            shells.push((rid(&oriented[2]), sign));
+        }
+    }
+    let faces: Vec<(u64, f64)> = shells
+        .iter()
+        .flat_map(|&(shell, sign)| {
+            list(&file.params(shell, "CLOSED_SHELL")[1])
+                .iter()
+                .map(move |face| (rid(face), sign))
+                .collect::<Vec<_>>()
+        })
+        .collect();
     let mut out = Vec::new();
-    for face in faces {
-        let face = rid(&face);
+    for (face, shell_sign) in faces {
         let p = file.params(face, "ADVANCED_FACE");
         let surface_id = rid(&p[2]);
         let same_sense = flag(&p[3]);
@@ -584,6 +769,7 @@ fn measure(text: &str) -> Vec<FaceMeasure> {
             loops.push(uses);
         }
         let kind = file.e(surface_id).name().to_string();
+        let mut settled_by_sense = false;
         let (by_loops, by_sense) = if let IsoSurface::Plane { o, z } = surface {
             let mut area = [0.0; 3];
             for uses in &loops {
@@ -595,65 +781,15 @@ fn measure(text: &str) -> Vec<FaceMeasure> {
             }
             (dot(o, area), sigma * dot(o, z) * norm(area))
         } else {
-            // the loops in (u, v): each use's pcurve, the seam's two in the order that joins
+            // the loops in (u, v), joined by their edges ([`ring`])
+            let mut settled = false;
             let mut rings: Vec<Vec<[f64; 2]>> = Vec::new();
             for uses in &loops {
-                let options: Vec<Vec<Vec<[f64; 2]>>> = uses
-                    .iter()
-                    .map(|&(edge, _, _, _, forward)| {
-                        let mut curves = file.pcurves(edge, surface_id);
-                        assert!(
-                            !curves.is_empty(),
-                            "face #{face}: edge #{edge} has no pcurve"
-                        );
-                        if !forward {
-                            for c in &mut curves {
-                                c.reverse();
-                            }
-                        }
-                        curves
-                    })
-                    .collect();
-                for (u, o) in uses.iter().zip(&options) {
-                    for c in o {
-                        eprintln!(
-                            "DBG face #{face} edge #{} fwd {} {:?} -> {:?}",
-                            u.0,
-                            u.4,
-                            c[0],
-                            c.last().unwrap()
-                        );
-                    }
-                }
-                let choices: usize = options.iter().map(Vec::len).product();
-                let mut best = (f64::INFINITY, Vec::new());
-                for mut pick in 0..choices {
-                    let chosen: Vec<&Vec<[f64; 2]>> = options
-                        .iter()
-                        .map(|o| {
-                            let c = &o[pick % o.len()];
-                            pick /= o.len();
-                            c
-                        })
-                        .collect();
-                    let gap: f64 = (0..chosen.len())
-                        .map(|i| {
-                            let end = chosen[i].last().unwrap();
-                            let next = chosen[(i + 1) % chosen.len()][0];
-                            (end[0] - next[0]).hypot(end[1] - next[1])
-                        })
-                        .sum();
-                    if gap < best.0 {
-                        best = (gap, chosen.into_iter().flatten().copied().collect());
-                    }
-                }
-                assert!(
-                    best.0 < 1e-6,
-                    "face #{face}: its loop's pcurves do not join ({})",
-                    best.0
-                );
-                rings.push(best.1);
+                let (r, by_sense) = ring(&file, &surface, surface_id, face, uses, same_sense);
+                settled |= by_sense;
+                rings.push(r);
             }
+            settled_by_sense |= settled;
             // uv signed area (anticlockwise positive) and the Green line integral
             // −∮ H du, H(u, v) = ∫ from v_ref to v of p·(S_u × S_v) dt
             let v_ref = rings[0][0][1];
@@ -692,8 +828,10 @@ fn measure(text: &str) -> Vec<FaceMeasure> {
             id: face,
             kind,
             same_sense,
-            by_loops: by_loops / 3.0,
-            by_sense: by_sense / 3.0,
+            void: shell_sign < 0.0,
+            settled_by_sense,
+            by_loops: shell_sign * by_loops / 3.0,
+            by_sense: shell_sign * by_sense / 3.0,
         });
     }
     out
@@ -712,13 +850,33 @@ fn assert_right_side_out(name: &str, brep: &Brep, expected: f64, rel: f64) {
     eprintln!("{name}: {kinds:?}");
     for f in &faces {
         eprintln!(
-            "{name}: face #{} {} same_sense {} by loops {:.6} by same_sense {:.6}",
-            f.id, f.kind, f.same_sense, f.by_loops, f.by_sense
+            "{name}: face #{} {}{} same_sense {} by loops {:.6} by same_sense {:.6}{}",
+            f.id,
+            f.kind,
+            if f.void { " (void)" } else { "" },
+            f.same_sense,
+            f.by_loops,
+            f.by_sense,
+            if f.settled_by_sense {
+                " (side settled by same_sense)"
+            } else {
+                ""
+            }
         );
     }
     let by_loops: f64 = faces.iter().map(|f| f.by_loops).sum();
     let by_sense: f64 = faces.iter().map(|f| f.by_sense).sum();
     let scale = expected.abs();
+    // every face counts: off the origin no face's p·n integrates to 0, so a face turned
+    // over changes the volume
+    let silent: Vec<_> = faces
+        .iter()
+        .filter(|f| f.by_sense.abs() <= 1e-6 * scale)
+        .collect();
+    assert!(
+        silent.is_empty(),
+        "{name}: faces that add nothing: {silent:?}"
+    );
     let inconsistent: Vec<_> = faces
         .iter()
         .filter(|f| (f.by_loops - f.by_sense).abs() > rel * scale)
@@ -736,7 +894,7 @@ fn assert_right_side_out(name: &str, brep: &Brep, expected: f64, rel: f64) {
 #[test]
 fn a_box_is_written_right_side_out() {
     let mut kernel = Kernel::default();
-    let brep = api::create_box(&mut kernel, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 30.0).unwrap();
+    let brep = api::create_box(&mut kernel, Point3::new(3.0, 4.0, 5.0), 10.0, 20.0, 30.0).unwrap();
     assert_right_side_out("box", &brep, 6000.0, 1e-12);
 }
 
@@ -746,10 +904,10 @@ fn a_union_and_a_cut_are_written_right_side_out() {
     let cube = |k: &mut Kernel, at: f64| {
         api::create_box(k, Point3::new(at, at, at), 10.0, 10.0, 10.0).unwrap()
     };
-    let (a, b) = (cube(&mut kernel, 0.0), cube(&mut kernel, 5.0));
+    let (a, b) = (cube(&mut kernel, 3.0), cube(&mut kernel, 8.0));
     let union = boolean_union(&mut kernel, a, b).unwrap();
     assert_right_side_out("union", &union, 1875.0, 1e-12);
-    let (a, b) = (cube(&mut kernel, 0.0), cube(&mut kernel, 5.0));
+    let (a, b) = (cube(&mut kernel, 3.0), cube(&mut kernel, 8.0));
     let cut = boolean_difference(&mut kernel, a, b).unwrap();
     assert_right_side_out("cut", &cut, 875.0, 1e-12);
 }
@@ -761,7 +919,60 @@ fn a_cylinder_is_written_right_side_out() {
     assert_right_side_out("cylinder", &brep, 250.0 * std::f64::consts::PI, 1e-9);
 }
 
-/// A quadratic Bezier in the plane `z = 0` or `y = 0`.
+/// A sphere, a cone (a frustum) and a torus: their faces' loops run round closed surfaces,
+/// with seams and (the sphere's) poles.
+#[test]
+fn a_sphere_a_cone_and_a_torus_are_written_right_side_out() {
+    use std::f64::consts::PI;
+    let mut kernel = Kernel::default();
+    let at = Point3::new(3.0, 4.0, 5.0);
+    let sphere = api::create_sphere(&mut kernel, at, 5.0).unwrap();
+    assert_right_side_out("sphere", &sphere, 500.0 * PI / 3.0, 1e-9);
+    let cone = api::create_cone(&mut kernel, at, 3.0, 1.0, 4.0).unwrap();
+    assert_right_side_out("cone", &cone, 4.0 * PI / 3.0 * 13.0, 1e-9);
+    let torus = api::create_torus(&mut kernel, at, 5.0, 1.5).unwrap();
+    assert_right_side_out("torus", &torus, 2.0 * PI * PI * 5.0 * 2.25, 1e-9);
+}
+
+/// A loft (degree 1) from a square of circumradius 2 to one of circumradius 1 turned by
+/// 30 degrees, 6 above it: its four sides are bilinear B-spline surfaces. Its cross-section
+/// area is quadratic in the height, so the prismatoid formula is exact:
+/// V = h/6 (A0 + 4 Am + A1) = 20 + 4√3, the mid section a square of circumradius
+/// |P + Q|/2 (|P + Q|² = 5 + 2√3).
+#[test]
+fn a_lofted_b_spline_solid_is_written_right_side_out() {
+    use solidcore::sweep::api_surfaces::create_skin_primitive;
+    let mut kernel = Kernel::default();
+    let square = |r: f64, turn: f64, z: f64| -> Vec<Curve> {
+        let corner = |i: usize| {
+            let a = (45.0 + 90.0 * i as f64 + turn).to_radians();
+            [3.0 + r * a.cos(), 4.0 + r * a.sin(), 5.0 + z]
+        };
+        (0..4)
+            .map(|i| segment(corner(i), corner((i + 1) % 4)))
+            .collect()
+    };
+    let curves: Vec<Curve> = square(2.0, 0.0, 0.0)
+        .into_iter()
+        .chain(square(1.0, 30.0, 6.0))
+        .collect();
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let skin = create_skin_primitive(&mut kernel, &[4, 4], &refs, 1, true).unwrap();
+    assert_right_side_out("loft", &skin.brep, 20.0 + 4.0 * 3.0_f64.sqrt(), 1e-9);
+}
+
+/// A 10-cube with a 3-cube cavity: one `BREP_WITH_VOIDS`, the cavity a void (its shell
+/// under an `ORIENTED_CLOSED_SHELL` turning it over), 1000 − 27.
+#[test]
+fn a_cavity_is_written_as_a_void() {
+    let mut kernel = Kernel::default();
+    let outer = api::create_box(&mut kernel, Point3::new(3.0, 4.0, 5.0), 10.0, 10.0, 10.0).unwrap();
+    let cavity = api::create_box(&mut kernel, Point3::new(6.0, 7.0, 8.0), 3.0, 3.0, 3.0).unwrap();
+    let solid = boolean_difference(&mut kernel, outer, cavity).unwrap();
+    assert_right_side_out("cavity", &solid, 973.0, 1e-12);
+}
+
+/// A quadratic Bezier.
 fn bezier(points: [P; 3]) -> Curve {
     let control: Vec<Point3> = points.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
     Curve::from(
@@ -787,13 +998,14 @@ fn segment(a: P, b: P) -> Curve {
 }
 
 /// A swept B-spline profile: its side is a surface of linear extrusion. The region under the
-/// parabola from (0, 0) through (5, 5) to (10, 0) is 100/3; 6 tall, 200.
+/// parabola from (0, 0) through (5, 5) to (10, 0) is 100/3; 6 tall, 200. (At z = 5, the
+/// profile moved by (3, 4).)
 #[test]
 fn an_extruded_spline_is_written_right_side_out() {
     let mut kernel = Kernel::default();
     let curves = [
-        bezier([[0.0, 0.0, 0.0], [5.0, 10.0, 0.0], [10.0, 0.0, 0.0]]),
-        segment([10.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+        bezier([[3.0, 4.0, 5.0], [8.0, 14.0, 5.0], [13.0, 4.0, 5.0]]),
+        segment([13.0, 4.0, 5.0], [3.0, 4.0, 5.0]),
     ];
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let brep =
@@ -803,21 +1015,22 @@ fn an_extruded_spline_is_written_right_side_out() {
 
 /// A revolved profile with a B-spline side: its faces are a surface of revolution, a
 /// cylinder and two annuli. The profile in y = 0: the Bezier (2, 0) (4, 2) (2, 4) in (x, z)
-/// and the lines back by (1, 4) and (1, 0); by Pappus its volume is 2π · 12.4.
+/// and the lines back by (1, 4) and (1, 0); by Pappus its volume is 2π · 12.4. (All
+/// moved by (3, 4, 5), its axis too.)
 #[test]
 fn a_revolved_spline_is_written_right_side_out() {
     let mut kernel = Kernel::default();
     let curves = [
-        bezier([[2.0, 0.0, 0.0], [4.0, 0.0, 2.0], [2.0, 0.0, 4.0]]),
-        segment([2.0, 0.0, 4.0], [1.0, 0.0, 4.0]),
-        segment([1.0, 0.0, 4.0], [1.0, 0.0, 0.0]),
-        segment([1.0, 0.0, 0.0], [2.0, 0.0, 0.0]),
+        bezier([[5.0, 4.0, 5.0], [7.0, 4.0, 7.0], [5.0, 4.0, 9.0]]),
+        segment([5.0, 4.0, 9.0], [4.0, 4.0, 9.0]),
+        segment([4.0, 4.0, 9.0], [4.0, 4.0, 5.0]),
+        segment([4.0, 4.0, 5.0], [5.0, 4.0, 5.0]),
     ];
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let brep = create_rotational_sweep(
         &mut kernel,
         &refs,
-        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(3.0, 4.0, 5.0),
         Vec3::new(0.0, 0.0, 1.0),
         360.0,
         true,
@@ -1121,7 +1334,7 @@ fn same_sense_follows_swapped_and_inside_out_parameterisations() {
                 assert!(norm(sub(iso.at(u, v), p)) < 1e-6, "{name}: STEP point");
                 iso.normal(u, v)
             }
-            IsoSurface::Plane { .. } => unreachable!(),
+            IsoSurface::Plane { .. } | IsoSurface::BSpline { .. } => unreachable!(),
         };
         let expected = side * dot(kernel_normal, iso_normal) > 0.0;
         eprintln!(
