@@ -2310,7 +2310,13 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) -> Result<(), String
         }
         RenameWhat::TimelineGroup(g) => app.run("timeline.rename_group", json!({ "group": g, "name": name })).map(|_| ()),
         RenameWhat::Canvas(c) => app.run("canvas.edit", json!({ "canvas": c, "name": name })).map(|_| ()),
-        RenameWhat::View(v) => app.run("view.rename", json!({ "view": v, "name": name })).map(|_| ()),
+        RenameWhat::View(v) => {
+            let renamed = app.run("view.rename", json!({ "view": v, "name": name })).map(|_| ());
+            if renamed.is_ok() {
+                crate::browser::follow_renamed_view(app, v, &name);
+            }
+            renamed
+        }
         RenameWhat::Joint(j) => app.run("joint.edit", json!({ "joint": j, "name": name })).map(|_| ()),
     };
     // The command's own status line explains a refusal; the caller decides whether to keep the

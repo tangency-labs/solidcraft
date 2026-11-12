@@ -705,6 +705,14 @@ pub(crate) fn picked_view(app: &SolveApp) -> Option<String> {
     app.session.doc.named_views.iter().any(|v| v.name == *name).then(|| name.clone())
 }
 
+/// A saved view picked for F2 that was renamed from `old` to `new` stays picked under its new
+/// name, so F2 still renames it.
+pub(crate) fn follow_renamed_view(app: &mut SolveApp, old: &str, new: &str) {
+    if let Some(pick) = app.tree.picked_view.as_mut().filter(|pick| pick.as_str() == old) {
+        *pick = new.to_owned();
+    }
+}
+
 pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
     let Some(pick) = app.tree.picked_folder.as_ref().filter(|pick| pick.current(app)) else { return false };
     let key = pick.key.clone();
