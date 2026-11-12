@@ -473,7 +473,10 @@ mod tests {
             let (_, _, hits) = crate::ui_kit::settings_search::nav(&ctx);
             assert_eq!(hits.len(), 1, "{query}: one real plugin result");
             assert_eq!(hits[0].page, crate::prefs::PAGE_PLUGINS);
-            crate::ui_kit::settings_search::set_reveal(&ctx, Some(crate::ui_kit::settings_search::reveal_for(hits[0].page, &hits[0].label, "prefs")));
+            crate::ui_kit::settings_search::set_reveal(
+                &ctx,
+                Some(crate::ui_kit::settings_search::reveal_for(&ctx, hits[0].page, &hits[0].label, "prefs")),
+            );
             page_frame(&mut h.app, &ctx, &dir, vec![]);
             let card = crate::scenario::rect_of("prefs:plugin:public-one:card").unwrap();
             assert!(crate::scenario::handle_at("prefs:revealed").unwrap().distance(card.center()) <= 1.0);

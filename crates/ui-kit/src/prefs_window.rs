@@ -1,8 +1,10 @@
 //! The Preferences window: the page list (icons, groups), a search over every page that keeps and
 //! outlines the settings that match, Restore Defaults for the page shown, and OK / Cancel / Apply
-//! over a snapshot of the host's settings. The pages and the settings are the host's: the window
-//! draws a page through its [`HostPage::draw`], resets it through [`HostPage::defaults`], and takes
-//! and puts back the snapshot through [`Host`].
+//! over a snapshot of the host's settings. The shared window frame owns the fold: its title-bar
+//! chevron collapses the window to its bar, keeping the page, the search and the snapshot, and
+//! any open of a page — `open_at`, a search result, the control channel — unfolds it again. The
+//! pages and the settings are the host's: the window draws a page through its [`HostPage::draw`],
+//! resets it through [`HostPage::defaults`], and takes and puts back the snapshot through [`Host`].
 use crate::{BackingTooltipExt as _, Icon, settings_search};
 use egui::Ui;
 use solidcraft_theme::Tokens;
@@ -109,6 +111,9 @@ pub struct State<H> {
     pub section: usize,
     /// The search text. Empty shows the selected page as it is.
     pub filter: String,
+    /// The window was asked to open (`open_at`, a search result): the next show unfolds it,
+    /// because the shared window frame owns the fold and remembers it per window.
+    pub opened: bool,
     /// The page on screen when the current search started. Clearing the field returns there.
     search_from: Option<usize>,
     /// The row to scroll to and outline after a result is chosen.
@@ -130,14 +135,16 @@ impl<H> State<H> {
 
 impl<H> Default for State<H> {
     fn default() -> Self {
-        State { open: false, section: 0, filter: String::new(), search_from: None, reveal: None, snapshot: None, restore_error: None }
+        State { open: false, section: 0, filter: String::new(), opened: false, search_from: None, reveal: None, snapshot: None, restore_error: None }
     }
 }
 
 impl<H> State<H> {
-    /// Open the window at `page`, bounded by the `pages` there are.
+    /// Open the window at `page`, bounded by the `pages` there are, unfolded: the shared window
+    /// frame owns the fold, and this asks it to show the page.
     pub fn open_at(&mut self, page: usize, pages: usize) {
         self.open = true;
+        self.opened = true;
         self.section = page.min(pages.saturating_sub(1));
     }
 
@@ -227,11 +234,17 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
         let window = host.window();
         window.clear_search();
         window.snapshot = None;
+        // The frame owns the fold; a window that comes back comes back unfolded.
+        crate::Window::unfold(ctx, options.id);
         settings_search::set_reveal(ctx, None);
         return None;
     }
+    if host.window_ref().opened {
+        host.window().opened = false;
+        crate::Window::unfold(ctx, options.id);
+    }
     hold(host);
-    if host.window_ref().reveal.as_ref().is_some_and(settings_search::Reveal::expired) {
+    if host.window_ref().reveal.as_ref().is_some_and(|reveal| reveal.expired(ctx)) {
         host.window().reveal = None;
     }
     let sink = settings_search::shift_key_sink(ctx);
@@ -387,7 +400,7 @@ fn drive_search<S: Host>(ui: &mut Ui, host: &mut S, id: egui::Id, prefix: &str) 
         settings_search::set_cursor(&ctx, cursor.saturating_sub(1));
     } else if fresh && !hits.is_empty() && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
         if let Some(hit) = hits.get(cursor) {
-            open_result(host, hit.page, &hit.label, prefix);
+            open_result(&ctx, host, hit.page, &hit.label, prefix);
             ctx.memory_mut(|memory| memory.surrender_focus(id));
         }
     } else {
@@ -408,13 +421,14 @@ fn place_search_cursor(ctx: &egui::Context, id: egui::Id, chars: usize) {
 }
 
 /// Show the result's page with the matching row outlined, and leave search.
-fn open_result<S: Host>(host: &mut S, page: usize, label: &str, prefix: &str) {
+fn open_result<S: Host>(ctx: &egui::Context, host: &mut S, page: usize, label: &str, prefix: &str) {
     host.result_opened(page);
     let window = host.window();
+    window.opened = true;
     window.filter.clear();
     window.search_from = None;
     window.section = page;
-    window.reveal = Some(settings_search::reveal_for(page, label, prefix));
+    window.reveal = Some(settings_search::reveal_for(ctx, page, label, prefix));
 }
 
 /// An empty field returns to the page that was up when the search started.

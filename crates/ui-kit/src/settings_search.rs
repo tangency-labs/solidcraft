@@ -17,7 +17,8 @@ const SINK_NOW: &str = "prefs_search_key_sink";
 const SINK_PREV: &str = "prefs_search_key_sink_prev";
 const REVEAL_ID: &str = "prefs_search_reveal";
 
-/// How long an opened result stays outlined, in milliseconds.
+/// How long an opened result stays outlined, in milliseconds on the frame clock the reveal runs
+/// on (`ctx.input` time).
 const REVEAL_MS: f64 = 900.0;
 
 /// One keyboard-reachable match from the last finished pass.
@@ -47,6 +48,7 @@ struct NavStore {
 pub struct Reveal {
     pub page: usize,
     pub label: String,
+    /// The frame-clock time (`ctx.input(|i| i.time)`, seconds) the outline goes at.
     pub until: f64,
     /// What the outlined row's name starts with: `{prefix}:revealed`.
     pub prefix: String,
@@ -836,21 +838,22 @@ pub fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
     });
 }
 
-pub fn reveal_for(page: usize, label: &str, prefix: &str) -> Reveal {
-    Reveal { page, label: label.to_string(), until: now_ms() + REVEAL_MS, prefix: prefix.to_string() }
+/// A reveal for `page`'s `label` row, outlined for the next `REVEAL_MS` of frame time.
+pub fn reveal_for(ctx: &Context, page: usize, label: &str, prefix: &str) -> Reveal {
+    Reveal { page, label: label.to_string(), until: ctx.input(|i| i.time) + REVEAL_MS / 1000.0, prefix: prefix.to_string() }
 }
 
 impl Reveal {
-    /// Whether the outline's time is up, on the same clock that set [`Reveal::until`].
-    pub fn expired(&self) -> bool {
-        now_ms() > self.until
+    /// Whether the outline's time is up, on the same frame clock that set [`Reveal::until`].
+    pub fn expired(&self, ctx: &Context) -> bool {
+        ctx.input(|i| i.time) > self.until
     }
 }
 
 /// Scroll the opened setting into view and outline it until [`Reveal::until`].
 pub fn follow(ui: &Ui, label: &str, rect: Rect) {
     let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
-    if reveal.expired() || fold(label) != fold(&reveal.label) {
+    if reveal.expired(ui.ctx()) || fold(label) != fold(&reveal.label) {
         return;
     }
     let page = with(ui, |state| state.page_index);
@@ -861,12 +864,6 @@ pub fn follow(ui: &Ui, label: &str, rect: Rect) {
     let t = Tokens::get();
     ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
     solidcraft_ui_registry::publish_handle(&format!("{}:revealed", reveal.prefix), rect.center());
-}
-
-/// Wall clock in milliseconds, for how long a reveal stays outlined.
-fn now_ms() -> f64 {
-    use web_time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -939,6 +936,31 @@ mod tests {
                 };
                 assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), Some(response.rect.center()));
             });
+            // Past its time on that clock, the row draws on with no outline and no handle.
+            set_reveal(&ctx, Some(Reveal { page: PAGE_LAYOUT, label: "Quality".into(), until: ctx.input(|i| i.time) - 1.0, prefix: "prefs".into() }));
+            solidcraft_ui_registry::clear_handles();
+            crate::test_support::raw_frame(&ctx, Default::default(), |ui| {
+                let _search = begin(ui, "", "prefs");
+                begin_page(ui, PAGE_LAYOUT, "Layout");
+                let card = Card {
+                    label: "Quality",
+                    sub: None,
+                    selected: false,
+                    enabled: false,
+                    options: None,
+                    check: false,
+                    aspect: 1.0,
+                    figure: &|_, _| {},
+                };
+                let response = match kind {
+                    0 => crate::picture_card(ui, &card, 100.0),
+                    1 => crate::toggle_tile(ui, &card, 100.0),
+                    2 => crate::preset_card(ui, "Quality", "", false, false, &|_, _, _| {}, 100.0),
+                    _ => crate::settings_chip(ui, "Quality", Default::default()),
+                };
+                assert!(!response.clicked());
+            });
+            assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), None, "the outline's time is up");
         }
     }
 

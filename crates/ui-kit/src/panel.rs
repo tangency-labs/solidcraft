@@ -38,7 +38,7 @@ fn header_impl(
     closeable: bool,
     on_close: impl FnOnce(),
 ) {
-    header_actions(ui, icon, title, collapsed, closeable, on_close, None);
+    header_actions(ui, icon, title, collapsed, closeable, on_close, None, true);
 }
 
 fn header_actions(
@@ -49,6 +49,7 @@ fn header_actions(
     closeable: bool,
     on_close: impl FnOnce(),
     actions: Option<(f32, &mut dyn FnMut(&mut Ui))>,
+    rule: bool,
 ) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
@@ -75,8 +76,21 @@ fn header_actions(
             on_close();
         }
     }
+    // The fold sits just left of the close button (at the bar's right end without one); the
+    // accessory starts left of the fold, so a page window can offer both (Preferences search).
+    let mut right = if closeable { close_rect.left() } else { rect.right() - t.space_8 };
+    if let Some(collapsed) = collapsed {
+        let fold = egui::Rect::from_min_size(egui::pos2(right - t.form_close_size - t.space_4, close_rect.top()), close_rect.size());
+        let response =
+            super::disclosure_button_at(ui, fold, !*collapsed, solidcraft_ui_text::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
+        solidcraft_ui_registry::publish_handle("dialog:collapse", response.rect.center());
+        if response.clicked() {
+            *collapsed = !*collapsed;
+        }
+        right = fold.left();
+    }
     let right = if let Some((width, actions)) = actions {
-        let end = if closeable { close_rect.left() - t.space_8 } else { rect.right() - t.space_8 };
+        let end = if closeable { right - t.space_8 } else { right };
         let width = if closeable { width.min((end - icon_rect.right() - t.space_24 * 4.0).max(0.0)) } else { width };
         let action_rect = egui::Rect::from_center_size(
             egui::pos2(end - width / 2.0, rect.center().y),
@@ -91,19 +105,8 @@ fn header_actions(
         actions(&mut action_ui);
         solidcraft_ui_registry::publish_rect("dialog:header:accessory", action_rect);
         action_rect.left() - t.space_8
-    } else if let Some(collapsed) = collapsed {
-        let fold = egui::Rect::from_min_size(egui::pos2(close_rect.left() - t.form_close_size - t.space_4, close_rect.top()), close_rect.size());
-        let response =
-            super::disclosure_button_at(ui, fold, !*collapsed, solidcraft_ui_text::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
-        solidcraft_ui_registry::publish_handle("dialog:collapse", response.rect.center());
-        if response.clicked() {
-            *collapsed = !*collapsed;
-        }
-        fold.left()
-    } else if closeable {
-        close_rect.left()
     } else {
-        rect.right() - t.space_8
+        right
     };
     let left = (icon_rect.right() + t.space_8).min(right);
     let title_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right.max(left), rect.bottom()));
@@ -111,7 +114,12 @@ fn header_actions(
     let title_response = ui.interact(title_rect, ui.make_persistent_id("title_text"), egui::Sense::hover());
     title_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
     solidcraft_ui_registry::publish_rect("dialog:header", rect);
-    t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
+    // The rule separates the band from what follows it. The folded window's bar has nothing
+    // under it — the bar is the whole card — and a straight rule spanning the band would poke
+    // past the card's rounded corners at both ends.
+    if rule {
+        t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
+    }
 }
 
 /// Where a feature panel's OK, Cancel and Apply sit (Preferences › Interface › Dialog buttons,
@@ -469,6 +477,7 @@ impl<'a> Panel<'a> {
                     false,
                     || {},
                     actions.map(|actions| (Tokens::get().control_height * 2.0, actions)),
+                    true,
                 );
             },
             add,
@@ -1216,8 +1225,11 @@ impl<'a> Window<'a> {
         self.show_pages_inner(ctx, selected, pages, state, None, left)
     }
 
-    /// Page navigation with a strip above the page body (Preferences search), a hook for a page
-    /// tab's click and an optional block under the list.
+    /// Page navigation with a strip above the page body (Preferences search) and a hook for a
+    /// page tab's click. The fold is the frame's: the title bar draws the fold button, and while
+    /// the window is folded it is collapsed to its title bar (the search, the page list, the
+    /// pages and the footer stay hidden) — see [`Self::unfold`]. The button needs
+    /// [`Self::page_header_in_titlebar`], whose title bar the page header shares.
     pub fn show_pages_with_header<S>(
         self,
         ctx: &egui::Context,
@@ -1247,32 +1259,60 @@ impl<'a> Window<'a> {
         let (icon, title, closeable) = (self.icon, self.title, self.closeable);
         let header = hooks.map(|hooks| hooks.header);
         let header_closed = std::cell::Cell::new(false);
-        let result = self.show_with_left(
-            ctx,
-            true,
-            |ui| {
-                if in_titlebar {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    let mut accessory = |ui: &mut Ui| {
-                        if let Some(header) = header {
-                            header(ui, state);
-                        }
-                    };
-                    header_actions(
-                        ui,
-                        (icon, Some(Tokens::get().form_primary)),
-                        title,
-                        None,
-                        closeable,
-                        || header_closed.set(true),
-                        Some((Tokens::get().space_24 * 9.0 + Tokens::get().space_14, &mut accessory)),
-                    );
-                }
-                page_list_sized(ui, selected, pages, state, rows, padding, if in_titlebar { None } else { header }, hooks, header.is_some());
-            },
-            left,
-        );
+        // The fold is the frame's, not a caller's: the button lives in the shared title bar and
+        // the flag is remembered per window in egui's memory, so every window drawn through this
+        // frame folds the same way and the caller passes nothing. Without the shared title bar
+        // there is no button to expand with, so the fold waits.
+        let id = self.id;
+        let mut folded = in_titlebar && ctx.data(|d| d.get_temp::<bool>(id.with("folded")).unwrap_or(false));
+        let was_folded = folded;
+        let fold = if in_titlebar { Some(&mut folded) } else { None };
+        let result = if fold.as_deref().copied().unwrap_or(false) {
+            // Collapsed to its title bar: the search, the page list, the pages and the footer
+            // stay hidden until the fold expands the window again.
+            self.actions("", "", None).show(ctx, true, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                header_actions(ui, (icon, Some(Tokens::get().form_primary)), title, fold, closeable, || header_closed.set(true), None, false);
+            })
+        } else {
+            self.show_with_left(
+                ctx,
+                true,
+                |ui| {
+                    if in_titlebar {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        let mut accessory = |ui: &mut Ui| {
+                            if let Some(header) = header {
+                                header(ui, state);
+                            }
+                        };
+                        header_actions(
+                            ui,
+                            (icon, Some(Tokens::get().form_primary)),
+                            title,
+                            fold,
+                            closeable,
+                            || header_closed.set(true),
+                            Some((Tokens::get().space_24 * 9.0 + Tokens::get().space_14, &mut accessory)),
+                            true,
+                        );
+                    }
+                    page_list_sized(ui, selected, pages, state, rows, padding, if in_titlebar { None } else { header }, hooks, header.is_some());
+                },
+                left,
+            )
+        };
+        if folded != was_folded {
+            ctx.data_mut(|d| d.insert_temp(id.with("folded"), folded));
+        }
         (result.0 || header_closed.get(), result.1)
+    }
+
+    /// Unfold the window with this Id again: a page opened programmatically (the control
+    /// channel, a search result) and a window opened again show their pages, not their bar. The
+    /// fold is the frame's, so a host asks the frame instead of carrying a flag.
+    pub fn unfold(ctx: &egui::Context, id: egui::Id) {
+        ctx.data_mut(|d| d.insert_temp(id.with("folded"), false));
     }
 
     /// The same bounded card frame, either movable or an input-blocking modal.
@@ -1316,6 +1356,12 @@ impl<'a> Window<'a> {
             (None, Some((pivot, pos))) => window.pivot(pivot).default_pos(pos),
             (None, None) => window.pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center() - vec2(0.0, row_height() * 2.5)),
         };
+        // egui remembers a Window's position as its pivot point, and the opening placement
+        // centres that pivot, so the frame after a size change — the title bar's fold — would
+        // slide the card to keep the old centre: the folded bar jumps to the middle of where
+        // the window was. The card lays out from the top-left it already had, so re-anchor the
+        // remembered pivot to that corner, the way a LEFT_TOP-pivoted window behaves.
+        let before = if self.anchor.is_none() { egui::containers::AreaState::load(ctx, self.id) } else { None };
         let shown = super::container::FeatureWindow::new(window, self.id, frame).show(ctx, |ui| {
             let result = add(ui);
             super::Container::finish_content(ui, frame);
@@ -1323,6 +1369,17 @@ impl<'a> Window<'a> {
         });
         if let Some(shown) = &shown {
             solidcraft_ui_registry::publish_rect("dialog:window", shown.response.rect);
+            if let Some(before) = before.filter(|state| state.pivot_pos.is_some() && state.size.is_some()) {
+                // `Area::end` re-derived the response around the old centre with the new size;
+                // the card itself drew from the top-left it had, and that is the corner to keep.
+                let rect = shown.response.rect;
+                let top_left = if before.size == Some(rect.size()) { rect.min } else { before.left_top_pos() };
+                if let Some(mut state) = egui::containers::AreaState::load(ctx, self.id) {
+                    state.set_left_top_pos(top_left);
+                    let layer = shown.response.layer_id;
+                    ctx.memory_mut(|mem| mem.areas_mut().set_state(layer, state));
+                }
+            }
         }
         shown.and_then(|r| r.inner).unwrap_or((false, super::Action::None))
     }

@@ -197,6 +197,55 @@ fn apply_keeps_the_change_and_restore_defaults_resets_only_the_page_shown() {
 }
 
 #[test]
+fn the_title_bar_fold_collapses_the_window_to_its_bar_and_keeps_its_state() {
+    let (ctx, mut fake) = opened();
+    assert!(registry::handle_at("dialog:collapse").is_some(), "the title bar has a fold button");
+    let expanded = registry::rect_of("test:window").expect("the window is published");
+    fake.values.grid = true;
+    frame(&ctx, &mut fake, Vec::new());
+    assert!(apply_pending(&fake), "a change is pending before the fold");
+
+    assert_eq!(click(&ctx, &mut fake, "dialog:collapse"), None);
+    frame(&ctx, &mut fake, Vec::new());
+    assert!(fake.drawn.is_empty(), "no page draws while collapsed");
+    assert!(registry::rect_of("test:page_body").is_none(), "the page body is hidden");
+    assert!(
+        registry::handle_at("test:ok").is_none() && registry::handle_at("test:apply").is_none() && registry::handle_at("test:cancel").is_none(),
+        "the footer is hidden"
+    );
+    assert!(
+        registry::handle_at("test:defaults").is_none() && registry::handle_at("test:search").is_none(),
+        "the left slot and the search are hidden"
+    );
+    assert!(registry::handle_at("dialog:close").is_some(), "the close button stays");
+    let collapsed = registry::rect_of("test:window").expect("the collapsed bar is published");
+    assert!(collapsed.height() < expanded.height(), "the window is only its title bar");
+    assert!(
+        fake.window.open && fake.window.snapshot().is_some() && apply_pending(&fake),
+        "the window stays open with its snapshot and pending change"
+    );
+    frame(&ctx, &mut fake, Vec::new());
+    let settled = registry::rect_of("test:window").expect("the collapsed bar is still published");
+    assert!((settled.left_top() - expanded.left_top()).length() < 0.5, "the folded bar keeps the window's top-left instead of jumping to its middle");
+
+    assert_eq!(click(&ctx, &mut fake, "dialog:collapse"), None);
+    for _ in 0..2 {
+        frame(&ctx, &mut fake, Vec::new());
+    }
+    let reopened = registry::rect_of("test:window").expect("the expanded window is published again");
+    assert!((reopened.left_top() - expanded.left_top()).length() < 0.5, "expanding keeps the window's top-left too");
+    assert_eq!(fake.drawn, ["alpha"], "the page shown before the fold draws again");
+    assert_eq!(click(&ctx, &mut fake, "test:cancel"), Some(Button::Cancel));
+    assert_eq!(fake.values, Values::default(), "Cancel still reverts after a fold");
+    assert!(!fake.window.open, "closing closes the window");
+    fake.window.open_at(0, PAGES.len());
+    for _ in 0..3 {
+        frame(&ctx, &mut fake, Vec::new());
+    }
+    assert_eq!(fake.drawn, ["alpha"], "a window opened again comes back unfolded, not folded to its bar");
+}
+
+#[test]
 fn a_failed_restore_keeps_the_window_and_the_snapshot_until_one_succeeds() {
     let (ctx, mut fake) = opened();
     fake.values.shadow = true;
