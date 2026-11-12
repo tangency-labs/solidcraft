@@ -1840,7 +1840,9 @@ fn set_theme_follow(app: &mut SolveApp, value: &serde_json::Value, available: bo
 
 /// Open the dialog at a page.
 pub fn open_at(app: &mut SolveApp, page: usize) {
-    app.prefs_window.plugin_limit_inputs = None;
+    if !app.prefs_window.shell.open {
+        app.prefs_window.plugin_limit_inputs = None;
+    }
     app.prefs_window.shell.open_at(page, PAGES.len());
 }
 

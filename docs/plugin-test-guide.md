@@ -13,7 +13,9 @@ build, not an official release or installer. Running its checks does not require
 wasm-tools, an AI account or additional network permissions.
 
 The source checkout alone does not contain the executables or compiled component.
-Developers can build them using the instructions below. A package must contain a
+Developers can build the native host using the instructions below. The independent guest
+source, package instructions and test-distribution launchers live outside this repository;
+they cannot be built from this checkout. A package must contain a
 WebAssembly **component**, not just a core Wasm module.
 
 ## Run the Windows test distribution
@@ -206,12 +208,13 @@ Build the native GUI/CLI following [the build guide](building.md):
 cargo build --locked --profile ci -p solidcraft -p solidcraft-cli
 ```
 
-Build and componentize the independent guest using its external package
-instructions and the [host WIT](../crates/craft-plugin/wit/plugin.wit). Examples and converters live
-outside this repository, per [the plugin RFC](rfcs/0002-plugins.md). Copy the resulting component and `plugin.json`
-into a folder named `example-box`; its folder name must match the manifest id.
-Use `plugin.inspect` to obtain the actual hash rather than copying a hash from a
-different build. Native binary output paths depend on Cargo's target configuration.
+Plugin examples and converters, including the `example-box` guest and its distribution
+scripts, live outside this repository, per [the plugin RFC](rfcs/0002-plugins.md).
+This checkout supplies the [host WIT](../crates/craft-plugin/wit/plugin.wit) and synthetic
+host-test fixtures; it does not supply the guest source or build instructions. Obtain an
+independently distributed package and follow its own instructions. Use `plugin.inspect`
+to obtain that package's actual hash before explicitly running it. Native binary output
+paths depend on Cargo's target configuration.
 
 ## Troubleshooting
 

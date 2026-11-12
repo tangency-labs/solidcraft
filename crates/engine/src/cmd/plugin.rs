@@ -10,7 +10,7 @@ use crate::{
 use serde_json::Value;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("model.mesh", "Read Body Mesh", checked!("model.mesh", mesh)).icon("inspect").noundo()
+    CommandSpec::new("model.mesh", "Read Body Mesh", checked!("model.mesh", mesh)).icon("inspect").noundo().read_only()
         .contract(&TypedContract::<MeshParams>::new()).output(output_schema_for::<MeshResult>)
         .params("body, tolerance?: finite positive chord tolerance in mm (default 0.05); evaluated component-local mesh, at most 8192 vertices and 16384 triangles; no files or model changes"),
     CommandSpec::new("plugin.inspect", "Inspect Plugin", checked!("plugin.inspect", inspect)).icon("inspect").noundo().doc_only()
@@ -45,7 +45,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("plugin.run", "approval does not match this manifest and component; inspect and review again"));
     }
     let result = plugin::run(s, package, &p.entry, &p.params)?;
-    serde_json::to_value(RunResult { result, param_warnings: vec![] }).map_err(|e| bad("plugin.run", e.to_string()))
+    serde_json::to_value(result).map_err(|e| bad("plugin.run", e.to_string()))
 }
 
 fn mesh(s: &mut Session, p: &Value) -> Result<Value> {
@@ -80,7 +80,7 @@ fn list(s: &mut Session, _p: &Value) -> Result<Value> {
         for folder in folders.flatten().take(1024) {
             let path = folder.path().to_string_lossy().into_owned();
             if let Ok(package) = plugin::read_package(&path) {
-                s.plugin_state.packages.insert(package.manifest.id, path);
+                s.plugin_state.register_discovered(package.manifest.id, path);
             }
         }
     }

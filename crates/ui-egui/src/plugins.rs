@@ -29,9 +29,10 @@ pub(crate) fn normalize_request(session: &solidcraft_engine::Session, method: &s
     match method {
         "engine.execute" | "command" => normalize(session, params),
         "engine.batch" | "engine.script" => {
+            solidcraft_engine::script_steps(params).map_err(|e| e.to_string())?;
             let steps = if params.is_array() { params.as_array_mut() } else { params.get_mut("commands").and_then(serde_json::Value::as_array_mut) };
             if let Some(steps) = steps {
-                for step in steps.iter_mut().take(10_000) {
+                for step in steps.iter_mut() {
                     normalize(session, step)?;
                 }
             }
@@ -707,6 +708,21 @@ mod tests {
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.session.plugin_limits, applied);
     }
+    #[test]
+    fn resource_drafts_survive_preferences_navigation() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Plugins"}));
+        let initial = host_limits(&h.app.preferences);
+        h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs { applied: initial, fuel: "90000000".into(), memory: "512".into() });
+        assert_eq!(h.call("ui.prefs", json!({"open":"General"}))["ok"], true);
+        let draft = h.app.prefs_window.plugin_limit_inputs.as_ref().unwrap();
+        assert_eq!((&draft.fuel, &draft.memory), (&"90000000".to_string(), &"512".to_string()));
+        assert_eq!(h.call("ui.prefs", json!({"button":"apply"}))["ok"], true);
+        assert_eq!(h.app.session.plugin_limits.max_fuel, 90000000);
+        assert_eq!(h.app.session.plugin_limits.max_memory_mib, 512);
+    }
+
     #[test]
     fn search_matches_the_name_the_id_and_the_description() {
         let plugin = Plugin {

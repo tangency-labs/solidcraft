@@ -366,6 +366,7 @@ mod tests {
 
     #[test]
     fn external_plugin_code_always_requires_consent() {
+        crate::i18n::install();
         for id in ["plugin.run", "PLUGIN.RUN", "Plugin.Run"] {
             let verdict = exec(id, json!({"path":"sample","approval":"from-inspect","entry":"make"}));
             let Verdict::Ask(question) = verdict else { panic!("external plugin needs consent") };

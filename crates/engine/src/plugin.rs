@@ -30,6 +30,14 @@ pub struct AppState {
     pub file_grants: Vec<FileGrant>,
 }
 
+impl AppState {
+    /// Discovery must not replace a package path explicitly selected by inspection.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn register_discovered(&mut self, id: String, path: String) {
+        self.packages.entry(id).or_insert(path);
+    }
+}
+
 pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
     let manifest = craft_plugin::parse_manifest(text, folder)?;
     if manifest.runtime.as_ref().is_some_and(|r| r.commands.iter().any(|c| !allowed_command(c))) {
@@ -75,9 +83,12 @@ pub fn read_package(path: &str) -> Result<Package> {
     let manifest_path = dir.join("plugin.json");
     let bytes = solidcraft_io::vfs::read(&manifest_path.to_string_lossy(), MAX_MANIFEST_BYTES).map_err(|e| error(e.to_string()))?;
     let manifest = parse_manifest(&bytes, folder)?;
-    let runtime = manifest.runtime.as_ref().ok_or_else(|| error("metadata-only package has no executable runtime"))?;
-    let module_path = dir.join(&runtime.module);
-    let component = solidcraft_io::vfs::read(&module_path.to_string_lossy(), MAX_COMPONENT_BYTES).map_err(|e| error(e.to_string()))?;
+    let component = if let Some(runtime) = &manifest.runtime {
+        let module_path = dir.join(&runtime.module);
+        solidcraft_io::vfs::read(&module_path.to_string_lossy(), MAX_COMPONENT_BYTES).map_err(|e| error(e.to_string()))?
+    } else {
+        Vec::new()
+    };
     let mut digest = Sha256::new();
     digest.update(b"solidcraft-plugin-approval-v1\0");
     digest.update((bytes.len() as u64).to_le_bytes());
@@ -86,7 +97,7 @@ pub fn read_package(path: &str) -> Result<Package> {
     Ok(Package { manifest, approval: format!("{:x}", digest.finalize()), component })
 }
 
-pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<serde_json::Value> {
+pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
     }
@@ -98,7 +109,7 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let (host, result) = craft_plugin_wasm::run(
-            SolidCraftHost { session: session.scratch(), transaction: None },
+            SolidCraftHost { session: session.scratch(), transaction: None, sketch_exits: Vec::new() },
             &package.manifest,
             &package.component,
             entry,
@@ -115,7 +126,7 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
                 session.echo(message);
             }
         }
-        Ok(value)
+        Ok(crate::schema::plugin::RunResult { result: value, sketch_exits: host.sketch_exits, param_warnings: vec![] })
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
@@ -131,6 +142,7 @@ mod tests;
 pub struct SolidCraftHost {
     pub session: Session,
     transaction: Option<Session>,
+    sketch_exits: Vec<Option<u64>>,
 }
 impl PluginHost for SolidCraftHost {
     fn command_catalog(&self) -> Vec<CommandSchema> {
@@ -141,7 +153,7 @@ impl PluginHost for SolidCraftHost {
                 name: c.id.into(),
                 input_schema: c.contract.map(|c| c.input_schema().to_value()).unwrap_or_else(|| json!({"type":"object"})),
                 output_schema: c.output.map(|f| f().to_value()).unwrap_or(json!({})),
-                effect: if c.undoable { Effect::Edit } else { Effect::Read },
+                effect: c.effect,
             })
             .collect()
     }
@@ -162,6 +174,9 @@ impl PluginHost for SolidCraftHost {
             .find(|r| r.error.is_some() && (previous.get(&r.id) != Some(&r.error) || before.feature(r.id) != s.doc.feature(r.id)))
         {
             return Err(HostError::CommandFailed { command: name.into(), reason: failed.error.clone().unwrap_or_default() });
+        }
+        if matches!(name, "sketch.finish" | "sketch.cancel") {
+            self.sketch_exits.push(reply.get("sketch").and_then(Value::as_u64));
         }
         Ok(reply)
     }
@@ -192,6 +207,7 @@ impl PluginHost for SolidCraftHost {
     }
     fn rollback_transaction(&mut self) -> craft_plugin::Result<()> {
         self.transaction = None;
+        self.sketch_exits.clear();
         Ok(())
     }
     fn granted_folders(&self) -> Vec<FileGrant> {
@@ -203,6 +219,30 @@ impl PluginHost for SolidCraftHost {
             .filter(|g| scope.as_ref().is_none_or(|s| s.check(&g.folder.to_string_lossy()).is_ok()))
             .cloned()
             .collect()
+    }
+    fn authorize_file_path(&self, path: &Path, write: bool) -> craft_plugin::Result<()> {
+        if let Some(scope) = solidcraft_io::vfs::current_scope() {
+            return scope.check(&path.to_string_lossy()).map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
+        }
+        // The approved root and its ancestors are explicit, even in AppData or a hidden
+        // folder. Inspect only names beneath the most specific grant for this operation.
+        let relative = self
+            .session
+            .plugin_state
+            .file_grants
+            .iter()
+            .filter(|grant| if write { grant.write } else { grant.read })
+            .filter_map(|grant| path.strip_prefix(&grant.folder).ok().map(|relative| (grant.folder.components().count(), relative)))
+            .max_by_key(|(depth, _)| *depth)
+            .map(|(_, relative)| relative)
+            .ok_or_else(|| HostError::PermissionDenied { permission: "file path has no applicable folder grant".into() })?;
+        if relative.components().any(|c| {
+            let name = c.as_os_str().to_string_lossy();
+            name.starts_with('.') || (cfg!(windows) && name.eq_ignore_ascii_case("AppData"))
+        }) {
+            return Err(HostError::PermissionDenied { permission: "hidden file path requires an explicit caller scope grant".into() });
+        }
+        Ok(())
     }
     fn log(&mut self, message: &str) {
         if let Some(s) = self.transaction.as_mut() {

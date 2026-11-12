@@ -39,6 +39,19 @@ fn declared_inputs_effects_and_slots_are_readable() {
 }
 
 #[test]
+fn schema_properties_must_be_objects_even_in_nested_inputs() {
+    for schema in [
+        json!({"type":"object","properties":[]}),
+        json!({"type":"object","properties":null}),
+        json!({"type":"object","properties":{"settings":{"type":"object","properties":false}}}),
+    ] {
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(".properties")));
+    }
+}
+
+#[test]
 fn network_permission_is_a_typed_refusal() {
     let mut value = manifest();
     value["runtime"]["permissions"] = json!({"net":true});
@@ -60,6 +73,10 @@ fn named_files_permissions_require_access_and_unique_names() {
 
 #[test]
 fn hostile_manifest_fields_return_errors() {
+    assert!(matches!(
+        parse_manifest(&serde_json::to_vec(&manifest()).unwrap(), "another-folder"),
+        Err(HostError::InvalidManifest { field, reason }) if field == "id" && reason.contains("does not match")
+    ));
     for change in [
         |value: &mut Value| value["runtime"]["module"] = json!("../plugin.wasm"),
         |value: &mut Value| value["runtime"]["entries"] = json!(["make", "make"]),
@@ -97,4 +114,47 @@ fn host_errors_are_machine_readable() {
     assert_eq!(value["command"], "app.make");
     assert_eq!(serde_json::from_value::<HostError>(value).unwrap(), error);
     assert!(WIT.contains(&format!("package {API};")));
+}
+
+#[test]
+fn explicit_folder_grants_allow_hidden_ancestors_but_refuse_hidden_children() {
+    struct Host(Vec<FileGrant>);
+    impl PluginHost for Host {
+        fn command_catalog(&self) -> Vec<CommandSchema> {
+            vec![]
+        }
+        fn run_command(&mut self, _: &str, _: &Value) -> Result<Value> {
+            Ok(Value::Null)
+        }
+        fn begin_transaction(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn commit_transaction(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn rollback_transaction(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn granted_folders(&self) -> Vec<FileGrant> {
+            self.0.clone()
+        }
+        fn log(&mut self, _: &str) {}
+        fn progress(&mut self, _: f32, _: &str) {}
+    }
+    let folder = Path::new("parent").join(".private").join("approved");
+    for (read, write) in [(true, true), (true, false), (false, true)] {
+        let host = Host(vec![FileGrant { name: "project".into(), folder: folder.clone(), read, write }]);
+        assert_eq!(host.authorize_file_path(&folder.join("ordinary.txt"), false).is_ok(), read);
+        assert_eq!(host.authorize_file_path(&folder.join("ordinary.txt"), true).is_ok(), write);
+        for operation in [false, true] {
+            for child in [Path::new(".env").to_owned(), Path::new(".nested").join("ordinary.txt")] {
+                assert!(matches!(host.authorize_file_path(&folder.join(child), operation), Err(HostError::PermissionDenied { .. })));
+            }
+        }
+    }
+    let mut host = Host(vec![FileGrant { name: "project".into(), folder: folder.clone(), read: true, write: true }]);
+    host.0.push(FileGrant { name: "explicit-hidden".into(), folder: folder.join(".nested"), read: true, write: false });
+    assert!(host.authorize_file_path(&folder.join(".nested/ordinary.txt"), false).is_ok());
+    assert!(host.authorize_file_path(&folder.join(".nested/ordinary.txt"), true).is_err());
+    assert!(Host(vec![]).authorize_file_path(&folder.join("ordinary.txt"), false).is_err());
 }

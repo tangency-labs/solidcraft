@@ -2270,8 +2270,14 @@ fn pump_tools(app: &mut SolveApp) {
         let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
         let tool = gate::tool_key(&req.method, &req.params);
         let always = agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
+        let plugin_run = req
+            .params
+            .get("command")
+            .or_else(|| req.params.get("id"))
+            .and_then(Value::as_str)
+            .is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"));
         let verdict = match gate::request(&req.method, &req.params, undo_left) {
-            gate::Verdict::Ask(_) if mode == agents::Mode::All || always => gate::Verdict::Run { change: true },
+            gate::Verdict::Ask(_) if !plugin_run && (mode == agents::Mode::All || always) => gate::Verdict::Run { change: true },
             gate::Verdict::Run { change: true } if mode == agents::Mode::Ask && !always => {
                 gate::Verdict::Ask(gate::describe(&req.method, &req.params))
             }

@@ -29,12 +29,18 @@ pub struct RunParams {
     /// Exact approval hash returned by plugin.inspect, after permission review.
     pub approval: String,
     pub entry: String,
-    #[serde(default)]
+    #[serde(default = "empty_params")]
     pub params: Value,
+}
+fn empty_params() -> Value {
+    Value::Object(Default::default())
 }
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RunResult {
     pub result: Value,
+    /// Sketches closed by accepted guest commands, for the caller's authoring-state cleanup.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketch_exits: Vec<Option<u64>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }

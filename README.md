@@ -112,7 +112,7 @@ Format and example: [docs/scripts.md](docs/scripts.md). Pages can also be driven
 Plugins add separately distributed behaviour without compiling that behaviour into SolidCraft.
 The initial runtime loads **WebAssembly components**, explicitly requested by the user. Merely
 installing a folder, enabling it in Preferences, or opening a design never executes plugin code.
-The interface is experimental (`solidcraft:plugin@0.1.0`); use a plugin built for this API and
+The interface is experimental (`solidcraft:plugin@1.0.0`); use a plugin built for this API and
 review it again after an update. The desktop app and headless CLI use the same commands. Browser
 execution, automatic downloads and updates, custom panels, and plugin-defined parametric feature
 types are future work.
@@ -135,7 +135,7 @@ repository, as specified in [the plugin RFC](docs/rfcs/0002-plugins.md).
   "version": "0.1.0",
   "description": "Create an ordinary editable box from dimensions.",
   "runtime": {
-    "api": "solidcraft:plugin@0.1.0",
+    "api": "solidcraft:plugin@1.0.0",
     "module": "plugin.wasm",
     "entries": ["make"],
     "commands": ["solid.box"],
@@ -220,10 +220,11 @@ or native CAD work. The independent maximum execution deadline stays 30 seconds.
 ### Permissions, results and saved designs
 
 A plugin can call only exact built-in command ids listed in its manifest **and** admitted by the
-host's policy. Recursive plugin calls, design replacement, file operations, process launches and
-network commands are refused. The component receives no WASI imports, filesystem, sockets, clock
-or process API; persistent plugin storage is not supported in this first runtime. Inspection
-commands can disclose model data, so review them as permissions too. In particular, the optional
+host's policy. Recursive plugin calls, design replacement, built-in file commands, process launches
+and network commands are refused. Filesystem calls require matching manifest permissions and approved
+folder grants. The clock requires its manifest permission; otherwise it returns a fixed epoch. No WASI,
+socket or process API is linked; persistent plugin storage is not supported in this first runtime.
+Inspection commands can disclose model data, so review them as permissions too. In particular, the optional
 `model.mesh` permission exposes the requested body's evaluated vertices and triangles in its owning
 component's coordinates (millimetres), with explicit transfer limits. It performs no conversion.
 

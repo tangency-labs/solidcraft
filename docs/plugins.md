@@ -11,7 +11,10 @@ Phase 1 splits the host into two app-agnostic crates:
 An app implements `PluginHost`: it supplies command schemas, each command's
 `read` or `edit` effect, command execution, transaction begin/commit/rollback,
 and the folders that file grants may resolve to. One successful plugin call is
-one undo step; a failed call rolls back the transaction. App commands remain
+one undo step; a failed guest call rolls back the transaction. Granted file writes
+are staged and published only after the guest succeeds and the app commits. A rollback
+deletes staged files without replacing their targets. A filesystem failure during publication
+after app commit is reported and may leave some files changed. App commands remain
 JSON data rather than app-specific WIT types. Both crates are Shared crates;
 `cargo xtask layers` forbids direct and indirect SolidCraft dependencies.
 

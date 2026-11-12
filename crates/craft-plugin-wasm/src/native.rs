@@ -4,7 +4,7 @@ use craft_plugin::{CommandSchema, Effect, HostError, Limits, MAX_COMPONENT_BYTES
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
-use std::path::{Component as PathComponent, Path};
+use std::path::{Component as PathComponent, Path, PathBuf};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     mpsc,
@@ -53,14 +53,20 @@ fn host_error(error: PluginError) -> HostError {
 }
 struct Folder {
     dir: Dir,
+    path: PathBuf,
     read: bool,
     write: bool,
+}
+struct PendingWrite {
+    temporary: PathBuf,
+    order: usize,
 }
 struct State<H> {
     host: H,
     commands: BTreeMap<String, CommandSchema>,
     effect: Effect,
     folders: BTreeMap<String, Folder>,
+    staged: BTreeMap<(String, PathBuf), PendingWrite>,
     clock: bool,
     limits: StoreLimits,
     failed: Option<HostError>,
@@ -95,6 +101,27 @@ impl<H: PluginHost> State<H> {
         let granted = self.folders.get(grant).is_some_and(|f| if write { f.write } else { f.read });
         if !valid || !granted {
             return Err(self.fail(HostError::PermissionDenied { permission: format!("files.{}:{grant}", if write { "write" } else { "read" }) }));
+        }
+        if let Some(folder) = self.folders.get(grant) {
+            self.host.authorize_file_path(&folder.path.join(path), write).map_err(|error| self.fail(error))?;
+        }
+        Ok(())
+    }
+    fn discard_writes(&mut self) {
+        for ((grant, _), pending) in std::mem::take(&mut self.staged) {
+            if let Some(folder) = self.folders.get(&grant) {
+                let _ = folder.dir.remove_file(pending.temporary);
+            }
+        }
+    }
+    fn publish_writes(&mut self) -> Result<()> {
+        let mut writes: Vec<_> = self.staged.iter().collect();
+        writes.sort_by_key(|(_, pending)| pending.order);
+        for ((grant, path), pending) in writes {
+            let folder = self.folders.get(grant).ok_or_else(|| trap("file grant disappeared before publication"))?;
+            folder.dir.rename(&pending.temporary, &folder.dir, path).map_err(|error| HostError::PermissionDenied {
+                permission: format!("files.write:{grant}: publication failed after app commit; files may have changed: {error}"),
+            })?;
         }
         Ok(())
     }
@@ -169,7 +196,8 @@ impl<H: PluginHost> files::Host for State<H> {
         self.file_path(&grant, &path, false)?;
         let read = (|| -> std::io::Result<Vec<u8>> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
-            let file = folder.dir.open(path)?;
+            let staged = self.staged.get(&(grant.clone(), Path::new(&path).components().collect()));
+            let file = folder.dir.open(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path)))?;
             if !file.metadata()?.is_file() {
                 return Err(std::io::Error::other("only regular files are supported"));
             }
@@ -185,12 +213,13 @@ impl<H: PluginHost> files::Host for State<H> {
     }
     fn write_file(&mut self, grant: String, path: String, data: Vec<u8>) -> std::result::Result<(), PluginError> {
         self.file_path(&grant, &path, true)?;
+        let path: PathBuf = Path::new(&path).components().collect();
         if data.len() > MAX_JSON_BYTES {
             return Err(self.fail(limit("file write size")));
         }
-        let write = (|| -> std::io::Result<()> {
+        let write = (|| -> std::io::Result<PathBuf> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
-            let parent = Path::new(&path).parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+            let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
             let temp = parent.join(format!(".craft-plugin-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
@@ -198,14 +227,20 @@ impl<H: PluginHost> files::Host for State<H> {
             let result = (|| {
                 file.write_all(&data)?;
                 file.sync_all()?;
-                folder.dir.rename(&temp, &folder.dir, &path)
+                Ok(())
             })();
             if result.is_err() {
-                let _ = folder.dir.remove_file(temp);
+                let _ = folder.dir.remove_file(&temp);
             }
-            result
+            result.map(|()| temp)
         })();
-        write.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.write:{grant}: {e}") }))
+        let temporary = write.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.write:{grant}: {e}") }))?;
+        if let Some(previous) = self.staged.insert((grant.clone(), path), PendingWrite { temporary, order: self.calls })
+            && let Some(folder) = self.folders.get(&grant)
+        {
+            let _ = folder.dir.remove_file(previous.temporary);
+        }
+        Ok(())
     }
 }
 
@@ -292,7 +327,10 @@ pub(super) fn run<H: PluginHost + 'static>(
             if let Some(request) = runtime.permissions.files.iter().find(|r| r.name == granted.name) {
                 let dir = Dir::open_ambient_dir(&granted.folder, cap_std::ambient_authority())
                     .map_err(|e| HostError::PermissionDenied { permission: format!("files:{}: {e}", granted.name) })?;
-                folders.insert(granted.name, Folder { dir, read: request.read && granted.read, write: request.write && granted.write });
+                folders.insert(
+                    granted.name,
+                    Folder { dir, path: granted.folder, read: request.read && granted.read, write: request.write && granted.write },
+                );
             }
         }
         if host.is_cancelled() {
@@ -305,21 +343,22 @@ pub(super) fn run<H: PluginHost + 'static>(
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut host, outcome) = execute(host, runtime, entry, params, engine, component, commands, folders);
+    let (mut state, outcome) = execute(host, runtime, entry, params, engine, component, commands, folders);
     let result = (|| match outcome {
-        Ok(value) => match host.commit_transaction() {
-            Ok(()) => Ok(value),
+        Ok(value) => match state.host.commit_transaction() {
+            Ok(()) => state.publish_writes().map(|()| value),
             Err(error) => {
-                host.rollback_transaction()?;
+                state.host.rollback_transaction()?;
                 Err(error)
             }
         },
         Err(error) => {
-            host.rollback_transaction()?;
+            state.host.rollback_transaction()?;
             Err(error)
         }
     })();
-    (host, result)
+    state.discard_writes();
+    (state.host, result)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -332,13 +371,14 @@ fn execute<H: PluginHost + 'static>(
     component: Component,
     commands: BTreeMap<String, CommandSchema>,
     folders: BTreeMap<String, Folder>,
-) -> (H, Result<Value>) {
+) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
     let state = State {
         host,
         commands,
         effect: entry.effect,
         folders,
+        staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
         failed: None,
         calls: 0,
@@ -407,7 +447,7 @@ fn execute<H: PluginHost + 'static>(
         }
         serde_json::from_str(&text).map_err(|e| HostError::InvalidInput { field: "result".into(), reason: format!("entry result is not JSON: {e}") })
     })();
-    (store.into_data().host, outcome)
+    (store.into_data(), outcome)
 }
 
 #[cfg(test)]

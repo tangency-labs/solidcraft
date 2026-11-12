@@ -835,15 +835,21 @@ fn render_setup_overrides_obey_shared_validation_before_host_initialization() {
     }
 }
 
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 #[test]
 fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_policy() {
     let scratch = Scratch::new();
     let package = scratch.0.join("sample");
     std::fs::create_dir(&package).unwrap();
-    let wat = include_str!("../../../crates/engine/src/plugin/fixture.wat").replace("\r\n", "\n").replace(
-        "      call $box\n      call $box\n",
-        "      call $box\n      call $box i32.const 2048 memory.grow i32.const -1 i32.eq if unreachable end\n",
-    );
+    let (package_id, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+    let wat = include_str!("../../../crates/engine/src/plugin/fixture.wat")
+        .replace("\r\n", "\n")
+        .replace("__PACKAGE__", package_id)
+        .replace("__VERSION__", version)
+        .replace(
+            "      call $box\n      call $box\n",
+            "      call $box\n      call $box i32.const 2048 memory.grow i32.const -1 i32.eq if unreachable end\n",
+        );
     assert!(wat.contains("memory.grow"), "the fixture must actually request more than 128 MiB");
     std::fs::write(package.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
     let manifest = json!({"id":"sample","name":"Sample","version":"1","runtime":{"api":solidcraft_engine::plugin::API,"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});

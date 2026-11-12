@@ -1,6 +1,5 @@
 use super::*;
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3Geom as _;
 
 fn manifest() -> Value {
     json!({"id":"sample", "name":"Sample", "version":"0.1.0", "runtime":{
@@ -89,6 +88,10 @@ mod native {
         wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
     }
     fn file_component(write: bool) -> Vec<u8> {
+        file_component_path(write, "secret.txt")
+    }
+    fn file_component_path(write: bool, path: &str) -> Vec<u8> {
+        let path_len = path.len();
         let (package, version) = API.split_once('@').unwrap();
         let template = component_template();
         // Keep exactly the shared WIT types, then exercise the real files interface.
@@ -126,10 +129,10 @@ mod native {
     (import "host" "file" (func $file (param {core_parameters})))
     (import "host" "memory" (memory 1))
     (data (i32.const 64) "project")
-    (data (i32.const 96) "secret.txt")
+    (data (i32.const 96) "{path}")
     (data (i32.const 128) "changed")
     (func (export "execute") (param i32 i32 i32 i32) (result i32)
-      i32.const 64 i32.const 7 i32.const 96 i32.const 10 {arguments} i32.const 0 call $file
+      i32.const 64 i32.const 7 i32.const 96 i32.const {path_len} {arguments} i32.const 0 call $file
       i32.const 0)
   )
   (core instance $main (instantiate $main (with "host" (instance $imports))))
@@ -400,18 +403,144 @@ mod native {
 
     #[test]
     fn read_entries_cannot_edit_even_with_an_edit_command_grant() {
-        let f = Fixture::new("call $box");
-        let mut m = manifest();
-        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
-        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        for command in ["solid.box", "sketch.edit"] {
+            let f = Fixture::new("call $box");
+            if command == "sketch.edit" {
+                let source = component_template()
+                    .replace("      call $box\n      call $box\n", "      call $box\n")
+                    .replace("solid.box", "sketch.edit")
+                    .replace(r#"{\22length\22:2,\22width\22:3,\22height\22:4}"#, r#"{\22sketch\22:\22Sketch1\22}"#)
+                    .replace("i32.const 9\n", "i32.const 11\n")
+                    .replace("i32.const 33\n", "i32.const 20\n");
+                std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+            }
+            let mut m = manifest();
+            m["runtime"]["commands"] = json!([command]);
+            m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+            std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+            let mut s = Session::default();
+            s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+            s.execute("sketch.finish", &json!({})).unwrap();
+            s.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+            let before = s.doc.to_json();
+            let history = (s.undo.len(), s.redo.len());
+            let error = f.run(&mut s).unwrap_err();
+            assert!(
+                matches!(error, EngineError::Plugin(craft_plugin::HostError::PermissionDenied { ref permission }) if permission.contains("read entry")),
+                "{command}: {error}"
+            );
+            assert_eq!(s.doc.to_json(), before);
+            assert_eq!(s.active_sketch, None);
+            assert_eq!((s.undo.len(), s.redo.len()), history);
+        }
+    }
+
+    #[test]
+    fn accepted_plugin_replies_identify_inner_sketch_exits() {
+        for command in ["sketch.finish", "sketch.cancel"] {
+            for trap in [false, true] {
+                let f = Fixture::new("call $box");
+                let source = component_template()
+                    .replace(
+                        "      call $box\n      call $box\n",
+                        if trap {
+                            "      i32.const 2048 i32.const 11 i32.const 3072 i32.const 20 i32.const 0 call $run call $box unreachable\n"
+                        } else {
+                            "      i32.const 2048 i32.const 11 i32.const 3072 i32.const 20 i32.const 0 call $run call $box\n"
+                        },
+                    )
+                    .replace("solid.box", command)
+                    .replace(
+                        "file.export",
+                        r#"sketch.edit")
+    (data (i32.const 3072) "{\22sketch\22:\22Sketch1\22}"#,
+                    )
+                    .replace(r#"{\22length\22:2,\22width\22:3,\22height\22:4}"#, "{}")
+                    .replace("i32.const 9\n", &format!("i32.const {}\n", command.len()))
+                    .replace("i32.const 33\n", "i32.const 2\n");
+                std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+                let mut m = manifest();
+                m["runtime"]["commands"] = json!(["sketch.edit", command]);
+                std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+                let mut s = Session::default();
+                s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+                let open = s.active_sketch.unwrap();
+                let before = s.doc.to_json();
+                let result = f.run(&mut s);
+                if trap {
+                    assert!(result.is_err());
+                    assert_eq!(s.active_sketch, Some(open));
+                    assert_eq!(s.doc.to_json(), before);
+                } else {
+                    assert_eq!(result.unwrap()["sketch_exits"], json!([open]));
+                    assert_eq!(s.active_sketch, None);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn folder_grants_apply_the_caller_scope_to_each_hidden_read_and_write() {
+        for write in [false, true] {
+            for name in [".env", ".hidden/secret.txt"] {
+                let f = Fixture::new("call $box");
+                std::fs::create_dir_all(f.0.join("sample/.hidden")).unwrap();
+                let target = f.0.join("sample").join(name);
+                std::fs::write(&target, b"private contents").unwrap();
+                std::fs::write(f.0.join("sample/plugin.wasm"), file_component_path(write, name)).unwrap();
+                let mut m = manifest();
+                m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":true}]});
+                std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+                let mut s = Session::default();
+                s.plugin_state.file_grants.push(FileGrant { name: "project".into(), folder: f.0.join("sample"), read: true, write: true });
+                let scope = solidcraft_io::vfs::PathScope::default().with_design_folder(&f.0);
+                assert!(scope.check(&f.path()).is_ok());
+                for scope in [None, Some(scope)] {
+                    solidcraft_io::vfs::scoped(scope, || {
+                        let error = f.run(&mut s).unwrap_err();
+                        assert!(matches!(error, EngineError::Plugin(HostError::PermissionDenied { .. })), "{write} {name}: {error}");
+                    });
+                    assert_eq!(std::fs::read(&target).unwrap(), b"private contents");
+                }
+                let host = SolidCraftHost { session: s, transaction: None, sketch_exits: Vec::new() };
+                solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
+                    assert!(host.authorize_file_path(&target, write).is_ok(), "explicit scope grants hidden access");
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn omitted_entry_params_are_objects_in_both_call_forms() {
+        let f = Fixture::new("i32.const 0 i32.const 0 i32.store i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
         let mut s = Session::default();
-        let before = s.doc.to_json();
-        let error = f.run(&mut s).unwrap_err();
-        assert!(
-            matches!(error, EngineError::Plugin(craft_plugin::HostError::PermissionDenied { ref permission }) if permission.contains("read entry"))
-        );
-        assert_eq!(s.doc.to_json(), before);
-        assert!(s.undo.is_empty());
+        let inspected = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        let direct = s.execute("plugin.run", &json!({"path":f.path(),"approval":inspected["approval"],"entry":"make"})).unwrap();
+        let namespaced = s.execute("sample.make", &json!({"approval":inspected["approval"]})).unwrap();
+        assert_eq!(direct["result"], json!({}));
+        assert_eq!(direct["result"], namespaced["result"]);
+    }
+
+    #[test]
+    fn metadata_only_discovery_preserves_the_explicitly_inspected_path() {
+        let f = Fixture::new("call $box");
+        std::fs::write(f.0.join("sample/plugin.json"), r#"{"id":"sample","name":"Metadata","version":"1"}"#).unwrap();
+        std::fs::remove_file(f.0.join("sample/plugin.wasm")).unwrap();
+        let mut s = Session::default();
+        let inspected = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        assert_eq!(inspected["manifest"]["name"], "Metadata");
+        assert!(read_package(&f.path()).unwrap().component.is_empty());
+        s.plugin_state.register_discovered("sample".into(), f.0.join("installed/sample").to_string_lossy().into_owned());
+        s.plugin_state.register_discovered("other".into(), "installed/other".into());
+        assert_eq!(s.plugin_state.packages["sample"], f.path());
+        assert_eq!(s.plugin_state.packages["other"], "installed/other");
+        let listed = s.execute("plugin.list", &json!({})).unwrap();
+        let entry = listed["plugins"].as_array().unwrap().iter().find(|p| p["manifest"]["id"] == "sample").unwrap();
+        assert_eq!(entry["manifest"]["name"], "Metadata");
+        assert_eq!(entry["commands"], json!([]));
+        assert!(s.execute("engine.commands", &json!({})).is_ok());
+        let error = s.execute("plugin.run", &json!({"path":f.path(),"approval":inspected["approval"],"entry":"make"})).unwrap_err();
+        assert!(error.to_string().contains("no executable runtime"));
     }
 }
 
@@ -425,16 +554,14 @@ fn evaluated_mesh_transfer_is_bounded_and_does_not_edit_the_design() {
     assert_eq!(result["frame"], "component-local-mm");
     let positions: Vec<[f64; 3]> = serde_json::from_value(result["positions"].clone()).unwrap();
     let triangles: Vec<[u32; 3]> = serde_json::from_value(result["triangles"].clone()).unwrap();
-    let volume: f64 = triangles
-        .iter()
-        .map(|t| {
-            let a = solidcore_record::Vec3::from(positions[t[0] as usize]);
-            let b = solidcore_record::Vec3::from(positions[t[1] as usize]);
-            let c = solidcore_record::Vec3::from(positions[t[2] as usize]);
-            a.dot(b.cross(c)) / 6.
-        })
-        .sum();
-    assert!((volume.abs() - 24.).abs() < 1e-8);
+    assert!(!positions.is_empty() && positions.len() <= 8192);
+    assert_eq!(triangles.len(), 12);
+    assert!(triangles.iter().flatten().all(|i| (*i as usize) < positions.len()));
+    for (axis, max) in [2., 3., 4.].into_iter().enumerate() {
+        assert_eq!(positions.iter().map(|p| p[axis]).fold(f64::INFINITY, f64::min), 0.);
+        assert_eq!(positions.iter().map(|p| p[axis]).fold(f64::NEG_INFINITY, f64::max), max);
+        assert!(positions.iter().all(|p| p[axis].is_finite() && (0. ..=max).contains(&p[axis])));
+    }
     assert_eq!(s.doc.to_json(), before);
     assert_eq!(s.undo.len(), undo);
     assert!(s.execute("model.mesh", &json!({"body":"Box","tolerance":0})).is_err());
@@ -488,4 +615,41 @@ fn host_resource_policy_is_exact_user_state_and_never_design_data() {
     assert_eq!(s.plugin_limits, policy);
     assert!(!s.doc.to_json().contains("max_fuel"));
     assert!(!allowed_command("plugin.configure"));
+}
+
+#[test]
+fn command_effects_are_explicit_and_independent_of_undo() {
+    let host = SolidCraftHost { session: Session::default(), transaction: None, sketch_exits: Vec::new() };
+    let catalog = host.command_catalog();
+    for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
+        assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Edit, "{command}");
+    }
+    for command in
+        ["model.mesh", "model.faces", "model.edges", "document.inspect", "timeline.inspect", "inspect.measure", "sketch.inspect", "sketch.solve"]
+    {
+        assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Read, "{command}");
+    }
+    let new = crate::cmd::CommandSpec::new("sample.new", "New", |_, _| Ok(json!({}))).noundo();
+    assert_eq!(new.effect, Effect::Edit);
+}
+
+#[test]
+fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
+    let root = solidcraft_io::vfs::temp_dir().join(".settings/AppData/granted");
+    let mut session = Session::default();
+    session.plugin_state.file_grants = vec![
+        FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true },
+        FileGrant { name: "hidden".into(), folder: root.join(".hidden"), read: true, write: false },
+    ];
+    let host = SolidCraftHost { session, transaction: None, sketch_exits: Vec::new() };
+    solidcraft_io::vfs::scoped(None, || {
+        for write in [false, true] {
+            assert!(host.authorize_file_path(&root.join("public.txt"), write).is_ok());
+            assert!(host.authorize_file_path(&root.join(".env"), write).is_err());
+            assert!(host.authorize_file_path(&root.join(".hidden/.env"), write).is_err());
+            assert!(host.authorize_file_path(&root.parent().unwrap().join("sibling/public.txt"), write).is_err());
+        }
+        assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), false).is_ok());
+        assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), true).is_err());
+    });
 }

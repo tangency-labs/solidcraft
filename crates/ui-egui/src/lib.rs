@@ -823,6 +823,8 @@ pub struct SolveApp {
     agent_replies: Vec<(std::sync::mpsc::Receiver<serde_json::Value>, std::sync::mpsc::Sender<serde_json::Value>)>,
     /// Agent exports computing on copies of the design.
     control_answering: Vec<control_job::ControlJob>,
+    /// Most recent completed inspection per session and package, ordered by request.
+    plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -1027,6 +1029,7 @@ impl SolveApp {
             control_job: None,
             agent_replies: Vec::new(),
             control_answering: Vec::new(),
+            plugin_inspection_versions: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1459,6 +1462,11 @@ impl SolveApp {
             _ => r,
         };
         if let Ok(v) = &r {
+            if id.eq_ignore_ascii_case("plugin.inspect")
+                && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
+            {
+                self.plugin_inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
+            }
             match id {
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.

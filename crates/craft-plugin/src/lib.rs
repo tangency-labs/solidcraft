@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -71,8 +71,11 @@ pub struct FileGrant {
     pub write: bool,
 }
 
-/// A runtime brackets a whole plugin call in one transaction. Any failure rolls it back.
+/// A runtime brackets a whole plugin call in one transaction. Guest failures roll it back.
 /// The app must retain its original state until commit, including its undo history.
+/// Granted file writes are staged until the guest succeeds and the app commits; rollback
+/// removes staged files without replacing their targets. Publication errors after app
+/// commit can leave a subset of files applied and must be reported to the caller.
 pub trait PluginHost {
     fn command_catalog(&self) -> Vec<CommandSchema>;
     fn run_command(&mut self, name: &str, args: &Value) -> Result<Value>;
@@ -80,6 +83,22 @@ pub trait PluginHost {
     fn commit_transaction(&mut self) -> Result<()>;
     fn rollback_transaction(&mut self) -> Result<()>;
     fn granted_folders(&self) -> Vec<FileGrant>;
+    /// Apply the caller's scope to every complete file path, in addition to folder grants.
+    /// Approved folder roots may have hidden ancestors. Hidden child names require
+    /// a more specific folder grant or a host override applying explicit scope.
+    fn authorize_file_path(&self, path: &Path, write: bool) -> Result<()> {
+        let grants = self.granted_folders();
+        let relative = grants
+            .iter()
+            .filter(|grant| if write { grant.write } else { grant.read })
+            .filter_map(|grant| path.strip_prefix(&grant.folder).ok())
+            .min_by_key(|relative| relative.components().count())
+            .unwrap_or(path);
+        if relative.components().any(|component| matches!(component, Component::Normal(name) if name.to_string_lossy().starts_with('.'))) {
+            return Err(HostError::PermissionDenied { permission: format!("hidden file: {}", path.display()) });
+        }
+        Ok(())
+    }
     fn log(&mut self, message: &str);
     fn progress(&mut self, fraction: f32, message: &str);
     fn is_cancelled(&self) -> bool {
@@ -296,7 +315,8 @@ impl RuntimeManifest {
 }
 
 fn validate_list_inputs(schema: &Value, field: &str) -> Result<()> {
-    if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+    if let Some(properties) = schema.get("properties") {
+        let properties = properties.as_object().ok_or_else(|| invalid(format!("{field}.properties"), "must be an object"))?;
         for (name, property) in properties {
             let field = format!("{field}.properties.{name}");
             if matches!(name.as_str(), "selection" | "target" | "targets" | "bodies" | "body_ids")
@@ -332,8 +352,11 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
     manifest.name = manifest.name.trim().to_string();
     manifest.version = manifest.version.trim().to_string();
     manifest.description = manifest.description.trim().to_string();
-    if !valid_id(&manifest.id) || manifest.id != folder {
+    if !valid_id(&manifest.id) {
         return Err(invalid("id", "must match its lowercase package folder"));
+    }
+    if manifest.id != folder {
+        return Err(invalid("id", format!("package id `{}` does not match the folder `{folder}`", manifest.id)));
     }
     if !plain(&manifest.name, 80) {
         return Err(invalid("name", "requires 1..80 printable characters"));

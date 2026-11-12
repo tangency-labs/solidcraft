@@ -72,7 +72,13 @@ slots exist. Declaring a slot never supplies UI code. `plugin.list` and `engine.
 expose the entry declarations. A read entry can call only commands marked read in the app catalog.
 
 `files.read-file` and `files.write-file` resolve paths only within matching app-approved folder
-grants with the requested access. Declaring a folder name does not itself grant access. `clock.now`
+grants with the requested access. The caller's file scope is checked against each complete
+path on every read and write; hidden paths require explicit authorization. Declaring a folder
+name does not itself grant access. Writes use temporary sibling files, and reads in the same call
+see their staged content. Targets are replaced only after successful guest execution and app
+transaction commit. A trap, refusal, cancellation or failed app commit removes staged files
+without replacing targets. If publication fails after app commit, the error reports that files
+may have changed; publication of several files is not atomic. `clock.now`
 returns a fixed epoch without the clock permission. Log, progress and cancellation checks are
 always available. There are no socket, HTTP, fetch or WASI imports.
 

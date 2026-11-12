@@ -12,6 +12,8 @@ struct App {
     rollbacks: usize,
     grants: Vec<FileGrant>,
     cancelled: bool,
+    fail_commit: bool,
+    unchanged_at_commit: Option<PathBuf>,
 }
 impl PluginHost for App {
     fn command_catalog(&self) -> Vec<CommandSchema> {
@@ -32,6 +34,12 @@ impl PluginHost for App {
         Ok(())
     }
     fn commit_transaction(&mut self) -> Result<()> {
+        if let Some(path) = &self.unchanged_at_commit {
+            assert_eq!(std::fs::read(path).unwrap(), b"original");
+        }
+        if self.fail_commit {
+            return Err(trap("commit refused"));
+        }
         self.saved = None;
         self.commits += 1;
         Ok(())
@@ -144,12 +152,13 @@ fn cancellation_prevents_running_plugin_code() {
     assert_eq!(app.begins, 0);
 }
 
-fn state(app: App) -> State<App> {
+fn state<H: PluginHost>(app: H) -> State<H> {
     State {
         host: app,
         commands: BTreeMap::new(),
         effect: Effect::Edit,
         folders: BTreeMap::new(),
+        staged: BTreeMap::new(),
         clock: false,
         limits: StoreLimitsBuilder::new().build(),
         failed: None,
@@ -173,11 +182,50 @@ fn files_inside_grant_work_and_escape_is_refused() {
     let root = std::env::temp_dir().join(format!("craft-plugin-test-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
     std::fs::create_dir_all(&root).unwrap();
     let mut state = state(App::default());
-    state.folders.insert("data".into(), Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), read: true, write: true });
+    state.folders.insert(
+        "data".into(),
+        Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+    );
     state.write_file("data".into(), "hello.txt".into(), b"hello".to_vec()).unwrap();
     assert_eq!(state.read_file("data".into(), "hello.txt".into()).unwrap(), b"hello");
+    assert!(!root.join("hello.txt").exists());
+    state.publish_writes().unwrap();
+    state.discard_writes();
+    assert_eq!(std::fs::read(root.join("hello.txt")).unwrap(), b"hello");
     assert!(state.read_file("data".into(), "../hello.txt".into()).is_err());
     drop(state);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn staged_writes_publish_in_guest_order_across_grant_aliases_and_normalize_separators() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-write-order-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(root.join("nested")).unwrap();
+    let mut state = state(App::default());
+    for name in ["a", "z"] {
+        state.folders.insert(
+            name.into(),
+            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+        );
+    }
+    state.write_file("z".into(), "nested//target.txt".into(), b"first".to_vec()).unwrap();
+    assert_eq!(state.read_file("z".into(), "nested/target.txt".into()).unwrap(), b"first");
+    state.write_file("a".into(), "nested/target.txt".into(), b"last".to_vec()).unwrap();
+    assert_eq!(state.staged.len(), 2);
+    state.publish_writes().unwrap();
+    state.discard_writes();
+    assert_eq!(std::fs::read(root.join("nested/target.txt")).unwrap(), b"last");
+    assert_eq!(std::fs::read_dir(root.join("nested")).unwrap().count(), 1);
+
+    state.write_file("z".into(), "nested//target.txt".into(), b"replaced".to_vec()).unwrap();
+    state.write_file("z".into(), "nested/target.txt".into(), b"latest".to_vec()).unwrap();
+    assert_eq!(state.staged.len(), 1);
+    assert_eq!(state.read_file("z".into(), "nested//target.txt".into()).unwrap(), b"latest");
+    state.publish_writes().unwrap();
+    state.discard_writes();
+    assert_eq!(std::fs::read(root.join("nested/target.txt")).unwrap(), b"latest");
+    assert_eq!(std::fs::read_dir(root.join("nested")).unwrap().count(), 1);
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -203,6 +251,10 @@ fn epoch_interrupt_is_distinct_from_fuel_exhaustion_in_diagnostics() {
 }
 
 fn files_component(write: bool, swallow_error: bool) -> Vec<u8> {
+    files_component_after(write, swallow_error, "")
+}
+
+fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u8> {
     let (package, version) = API.split_once('@').unwrap();
     let template = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
     // Keep exactly the shared WIT types, then exercise the real files interface.
@@ -248,6 +300,7 @@ fn files_component(write: bool, swallow_error: bool) -> Vec<u8> {
 (func (export "execute") (param i32 i32 i32 i32) (result i32)
   i32.const 64 i32.const 7 i32.const 96 i32.const 10 {arguments} i32.const 0 call $file
   {reply}
+  {after}
   i32.const 0)
   )
   (core instance $main (instantiate $main (with "host" (instance $imports))))
@@ -302,4 +355,129 @@ fn component_file_writes_are_denied_without_a_host_grant() {
         assert_eq!(failure, HostError::PermissionDenied { permission: "files.write:project".into() });
         assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (7, 1, 0, 1));
     }
+}
+
+#[test]
+fn staged_file_writes_publish_after_commit_and_disappear_after_traps_or_commit_failure() {
+    let root = std::env::temp_dir().join(format!("craft-plugin-staged-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    let target = root.join("secret.txt");
+    let mut manifest = manifest();
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: false, write: true });
+    for (after, fail_commit) in [("unreachable", false), ("", true), ("", false)] {
+        std::fs::write(&target, b"original").unwrap();
+        let mut app = App {
+            grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: false, write: true }],
+            fail_commit,
+            unchanged_at_commit: Some(target.clone()),
+            ..Default::default()
+        };
+        let result = run(&mut app, &manifest, &files_component_after(true, true, after), "make", &json!({}));
+        let succeeds = after.is_empty() && !fail_commit;
+        assert_eq!(result.is_ok(), succeeds, "{result:?}");
+        assert_eq!(std::fs::read(&target).unwrap(), if succeeds { b"changed".as_slice() } else { b"original".as_slice() });
+        assert_eq!((app.commits, app.rollbacks), if succeeds { (1, 0) } else { (0, 1) });
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "staged files must be removed");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn every_file_operation_refuses_hidden_names_inside_a_granted_folder() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-hidden-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(root.join(".private")).unwrap();
+    std::fs::write(root.join(".env"), b"secret").unwrap();
+    std::fs::write(root.join(".private/config"), b"secret").unwrap();
+    for path in [".env", ".private/config"] {
+        for write in [false, true] {
+            let mut state = state(App::default());
+            state.folders.insert(
+                "data".into(),
+                Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+            );
+            let result = if write {
+                state.write_file("data".into(), path.into(), b"changed".to_vec())
+            } else {
+                state.read_file("data".into(), path.into()).map(|_| ())
+            };
+            assert!(matches!(result, Err(PluginError::PermissionDenied(_))));
+            assert_eq!(std::fs::read(root.join(path)).unwrap(), b"secret");
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_publication_failure_reports_possible_changes_and_cleans_staged_files() {
+    let root = std::env::temp_dir().join(format!("craft-plugin-publication-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    // The guest's target is a directory, so staging succeeds but publication fails.
+    std::fs::create_dir_all(root.join("secret.txt")).unwrap();
+    let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: false, write: true }], ..Default::default() };
+    let mut manifest = manifest();
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: false, write: true });
+    let failure = run(&mut app, &manifest, &files_component(true, true), "make", &json!({})).unwrap_err();
+    assert!(failure.to_string().contains("publication failed after app commit; files may have changed"), "{failure}");
+    assert_eq!((app.commits, app.rollbacks), (1, 0));
+    assert!(root.join("secret.txt").is_dir());
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_access_authorizes_the_complete_path_for_reads_and_writes() {
+    use files::Host;
+    struct ScopedHost {
+        checks: std::cell::RefCell<Vec<(PathBuf, bool)>>,
+        allowed: PathBuf,
+    }
+    impl PluginHost for ScopedHost {
+        fn command_catalog(&self) -> Vec<CommandSchema> {
+            vec![]
+        }
+        fn run_command(&mut self, _: &str, _: &Value) -> Result<Value> {
+            Err(trap("no commands"))
+        }
+        fn begin_transaction(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn commit_transaction(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn rollback_transaction(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn granted_folders(&self) -> Vec<FileGrant> {
+            vec![]
+        }
+        fn log(&mut self, _: &str) {}
+        fn progress(&mut self, _: f32, _: &str) {}
+        fn authorize_file_path(&self, path: &Path, write: bool) -> Result<()> {
+            self.checks.borrow_mut().push((path.to_owned(), write));
+            if path == self.allowed { Ok(()) } else { Err(HostError::PermissionDenied { permission: "caller file scope".into() }) }
+        }
+    }
+    let root = std::env::temp_dir().join(format!("craft-plugin-scope-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("allowed.txt"), b"original").unwrap();
+    std::fs::write(root.join("denied.txt"), b"original").unwrap();
+    for write in [false, true] {
+        let mut state = state(ScopedHost { allowed: root.join("allowed.txt"), checks: Default::default() });
+        state.folders.insert(
+            "data".into(),
+            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+        );
+        for path in ["allowed.txt", "denied.txt"] {
+            let result = if write {
+                state.write_file("data".into(), path.into(), b"changed".to_vec())
+            } else {
+                state.read_file("data".into(), path.into()).map(|_| ())
+            };
+            assert_eq!(result.is_ok(), path == "allowed.txt");
+        }
+        assert_eq!(*state.host.checks.borrow(), vec![(root.join("allowed.txt"), write), (root.join("denied.txt"), write)]);
+        state.discard_writes();
+    }
+    assert_eq!(std::fs::read(root.join("denied.txt")).unwrap(), b"original");
+    std::fs::remove_dir_all(root).unwrap();
 }
