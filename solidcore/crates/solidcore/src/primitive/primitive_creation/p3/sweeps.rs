@@ -14,8 +14,7 @@
 //! 4096; the repeated linear sweep checks that bound before its end cap, which moves
 //! the profile once per repetition. No additional recursion. Unavailable calls retain
 //! their full caller tails.
-//! Not upstream (WR-409, tangency-labs/solidcore#1113, opt-in
-//! `Kernel::fixes.sheet_sweep_joins_profile_wires`): a profile that bounds no planar
+//! Not upstream (WR-409, tangency-labs/solidcore#1113): a profile that bounds no planar
 //! face becomes wires joined where its curves meet (`join_profile_wire_ends`).
 //! Not upstream (WR-442, tangency-labs/solidcore#478, opt-in
 //! `Kernel::fixes.revolve_nested_shells_as_cavities`): after a full turn's
@@ -249,15 +248,14 @@ fn targets(
         }
     }
 }
-/// Not upstream (WR-409, tangency-labs/solidcore#1113, opt-in
-/// `Kernel::fixes.sheet_sweep_joins_profile_wires`; the SolidCraft fork's
+/// Not upstream (WR-409, tangency-labs/solidcore#1113; the SolidCraft fork's
 /// `sm_CreateJoinedWireEdges`): the profile's wire edges `edges`, in the curves' order,
 /// joined where they meet. An end within the B-rep's tolerance of an earlier wire's end
 /// is glued to that earlier vertex (`GlueVertices`), so two curves meeting at a point
 /// share one vertex there. Without it the topology sweep's copies of two coincident
 /// vertices came out coincident, each with a preimage, and its stitch refused them: a
 /// partial revolve or repeated linear sweep of an open profile of more than one curve
-/// failed. Nothing is done without the opt-in.
+/// failed.
 ///
 /// # Errors
 ///
@@ -268,9 +266,6 @@ fn join_profile_wire_ends(
     edges: &[crate::topology::EdgeId],
 ) -> Result<()> {
     use crate::topology::{edge, vertex, VertexId};
-    if !a.kernel(brep)?.fixes.sheet_sweep_joins_profile_wires {
-        return Ok(());
-    }
     a.with_primitive_brep(brep, |k, b| {
         let tol = b.tolerance();
         // the distinct vertices of the wires so far
