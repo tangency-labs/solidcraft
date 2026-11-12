@@ -168,3 +168,120 @@ fn rails_the_loft_cannot_follow_are_refused() {
         other => panic!("{other:?}"),
     }
 }
+
+/// A pie of `sweep` radians and radius 10 about the origin: the arc, then two lines through the
+/// centre.
+fn pie(sweep: f64) -> Loop2 {
+    let end = Vec2::new(10.0 * sweep.cos(), 10.0 * sweep.sin());
+    Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: 0.0, sweep },
+            Seg2::Line { a: end, b: Vec2::ZERO },
+            Seg2::Line { a: Vec2::ZERO, b: Vec2::new(10.0, 0.0) },
+        ],
+    }
+}
+
+/// A rail straight up from `p` (x, y) from z = 0 to z = `top`.
+fn straight(p: Vec2, top: f64) -> Vec<Vec3> {
+    (0..=80).map(|i| f64::from(i) * top / 80.0).map(|z| Vec3::new(p.x, p.y, z)).collect()
+}
+
+/// Sections whose curves differ in kind take rails (#12512): a half-disc (an arc and a line)
+/// lofted to itself along a straight rail up the arc is the plain loft, the half-cylinder, exactly
+/// (its round wall is the circle at every height); and the half-disc lofts to a rectangle along a
+/// bulging rail, which it follows (the rail's point on the sections drifts from the arc's top
+/// to the middle of the rectangle's edge, so the scaled stations reach past the rail).
+#[test]
+fn sections_of_an_arc_and_a_line_take_rails() {
+    let half = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: 0.0, sweep: PI },
+            Seg2::Line { a: Vec2::new(-10.0, 0.0), b: Vec2::new(10.0, 0.0) },
+        ],
+    };
+    let sections = [(at(0.0), half.clone()), (at(40.0), half.clone())];
+    let b = loft_with_rails(&sections, &[straight(Vec2::new(0.0, 10.0), 40.0)], RailFit::Scale).unwrap();
+    let plain = volume(&loft(&sections).unwrap());
+    assert!(close(volume(&b), 2000.0 * PI, 1e-3), "volume {} vs {}", volume(&b), 2000.0 * PI);
+    assert!(close(volume(&b), plain, 1e-6), "{} vs the plain loft's {}", volume(&b), plain);
+    for z in [5.0, 13.0, 20.0, 31.0] {
+        for a in [0.3, 1.1, PI / 2.0, 2.4, 2.9] {
+            let p = Vec3::new(10.0 * a.cos(), 10.0 * a.sin(), z);
+            assert!(off(&b, p) < 1e-6, "{p:?} is {} mm off the half-cylinder", off(&b, p));
+        }
+    }
+    // The reporter's case: the half-disc to a rectangle, with a rail bulging out from the arc.
+    let rect = Loop2::polygon(&[Vec2::new(-20.0, -10.0), Vec2::new(20.0, -10.0), Vec2::new(20.0, 10.0), Vec2::new(-20.0, 10.0)]);
+    let sections = [(at(0.0), half), (at(40.0), rect)];
+    let r: Vec<Vec3> = (0..=80).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(0.0, 10.0 + 5.0 * bulge(z), z)).collect();
+    let b = loft_with_rails(&sections, std::slice::from_ref(&r), RailFit::Scale).unwrap();
+    let m = measure(&b).unwrap();
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-3, "the rail is {worst} mm off the loft");
+    assert!(m.volume > 40.0 * 50.0 * PI && m.volume < 40.0 * 800.0, "volume {}", m.volume);
+    assert!(m.bbox.max.y > 15.0 - 1e-2 && m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 40.0).abs() < 1e-9, "{:?}", m.bbox);
+}
+
+/// Arcs of different turns (one piece against two, different weights) pair up too: a quarter pie
+/// to a third-of-a-turn pie along a straight rail up their shared centre corner is the plain
+/// loft to a tenth of a percent (the stations between two arcs of different weights are not
+/// the ruled surface's sections exactly).
+#[test]
+fn arcs_of_different_turns_take_rails() {
+    let sections = [(at(0.0), pie(PI / 2.0)), (at(40.0), pie(2.0 * PI / 3.0))];
+    let r = straight(Vec2::ZERO, 40.0);
+    let b = loft_with_rails(&sections, std::slice::from_ref(&r), RailFit::Scale).unwrap();
+    let plain = volume(&loft(&sections).unwrap());
+    assert!(close(volume(&b), plain, 1e-3), "{} vs the plain loft's {}", volume(&b), plain);
+    assert!(volume(&b) > 40.0 * 25.0 * PI && volume(&b) < 40.0 * 100.0 * PI / 3.0, "volume {}", volume(&b));
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-6, "the rail is {worst} mm off the loft");
+}
+
+/// A section on the plane through the origin with axes `x` and `y` (normal x × y), with no curves:
+/// enough for the normals.
+fn facing(x: Vec3, y: Vec3) -> crate::loft_rails::Section {
+    crate::loft_rails::Section { plane: Plane { origin: Vec3::ZERO, x, y }, curves: Vec::new(), numbers: Vec::new() }
+}
+
+/// The sections' oriented normals, with the loft's direction `d(v)` at each section.
+fn normals(sections: &[crate::loft_rails::Section], d: impl Fn(f64) -> Option<Vec3>) -> Vec<Vec3> {
+    let along: Vec<f64> = (0..sections.len()).map(|i| i as f64 / (sections.len() - 1) as f64).collect();
+    crate::loft_rails::section_normals(sections, d, &along)
+}
+
+fn same(a: Vec3, b: Vec3) -> bool {
+    a.dist(b) < 1e-12
+}
+
+/// Section normals for the stations (#12031). A keel on a vertical plane and a sheer on a level
+/// one, at 90°, face along the loft whichever way the keel's sketch faces. Sections within 60°
+/// of each other turn the short way, even where the loft's direction reverses. A first section
+/// that the loft can't decide, because its plane lies along the loft or the loft has no
+/// direction there, takes its facing from the next section that the loft decides.
+#[test]
+fn section_normals_face_along_the_loft_and_turn_the_short_way() {
+    let (x, y, z) = (Vec3::X, Vec3::Y, Vec3::new(0.0, 0.0, 1.0));
+    let up_and_over = |_: f64| Some(Vec3::new(0.1, 0.6, 0.8));
+    let level = facing(x, y);
+    for keel in [facing(x, z), facing(z, x)] {
+        let n = normals(&[keel, level.clone()], up_and_over);
+        assert!(same(n[0], y) && same(n[1], z), "{n:?}");
+    }
+    // Three level sections, the loft rising to the second and falling to the third.
+    let n = normals(&[level.clone(), facing(y, x), level.clone()], |v| Some(if v < 0.4 { z } else { z * -1.0 }));
+    assert!(n.iter().all(|m| same(*m, n[0])), "{n:?}");
+    // A first section along the loft (straight up), then one tilted 20° from level.
+    let (c, s) = (20f64.to_radians().cos(), 20f64.to_radians().sin());
+    let tilted = facing(x, Vec3::new(0.0, c, s));
+    for first in [facing(x, z), facing(z, x)] {
+        let n = normals(&[first, tilted.clone()], |_| Some(z));
+        assert!(n[0].dot(n[1]) > 0.0 && n[1].dot(z) > 0.0, "{n:?}");
+    }
+    // No loft direction at the first section.
+    for first in [facing(x, z), facing(z, x)] {
+        let n = normals(&[first, tilted.clone()], |v| (v > 0.0).then_some(Vec3::new(0.0, 0.6, 0.8)));
+        assert!(n[0].dot(n[1]) > 0.0 && n[1].dot(z) > 0.0, "{n:?}");
+    }
+}

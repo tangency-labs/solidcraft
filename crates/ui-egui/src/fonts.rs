@@ -1,84 +1,21 @@
-//! Bundled IBM Plex interface faces, user overrides, and language-specific system fallbacks
-//! (CJK, Hangul, Thai, Hebrew).
+//! The host part of the interface type: SolidCraft's bundled IBM Plex faces (from its look,
+//! `solidcraft_look::fonts`), user overrides, and language-specific system fallbacks (CJK, Hangul,
+//! Thai, Hebrew), installed under the names the kit's type API gives (see [`crate::ui_kit::type_face`]).
 //! The same definitions are used on desktop and web; the web shell adds Japanese and Chinese
 //! faces on demand.
 
 use std::sync::Arc;
 
-use egui::{FontDefinitions, FontFamily, FontId, RichText};
+use egui::{FontDefinitions, FontFamily};
 
-const PLEX_SANS: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf"));
-const PLEX_MONO: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf"));
-const WEIGHTS: [(&str, f32); 4] = [("plex-sans", 400.0), ("ui-medium", 500.0), ("ui-semibold", 600.0), ("ui-bold", 700.0)];
-
-fn sans_families() -> [FontFamily; 4] {
-    [FontFamily::Proportional, medium_family(), semibold_family(), bold_family()]
-}
+use crate::ui_kit::type_face::{CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, UI_FONT, fallback_order, needs_cjk_font, sans_families};
+use solidcraft_look::fonts::{self as look, with_symbol_fallback};
+// The Thai, Hebrew and Arabic faces come only from the desktop's system font search (and the tests).
+#[cfg(any(test, not(target_arch = "wasm32")))]
+use crate::ui_kit::type_face::{ARABIC_FALLBACK, HEBREW_FALLBACK, THAI_FALLBACK};
 
 fn all_families() -> impl Iterator<Item = FontFamily> {
     sans_families().into_iter().chain([FontFamily::Monospace])
-}
-
-/// IBM Plex Sans at 400/500/600/700 and Plex Mono Regular, followed by egui's symbol/emoji
-/// fallbacks. Each variable instance shares the embedded bytes and selects a real weight.
-pub fn base_font_definitions() -> FontDefinitions {
-    let mut fonts = FontDefinitions::default();
-    let fallbacks = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    for ((name, weight), family) in WEIGHTS.into_iter().zip(sans_families()) {
-        let mut data = egui::FontData::from_static(PLEX_SANS);
-        data.tweak.coords = egui::epaint::text::VariationCoords::new([(b"wght", weight)]);
-        fonts.font_data.insert(name.to_owned(), Arc::new(data));
-        fonts.families.insert(family, std::iter::once(name.to_owned()).chain(fallbacks.iter().cloned()).collect());
-    }
-    fonts.font_data.insert("plex-mono".to_owned(), Arc::new(egui::FontData::from_static(PLEX_MONO)));
-    fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "plex-mono".to_owned());
-    with_symbol_fallback(fonts)
-}
-
-fn medium_family() -> FontFamily {
-    FontFamily::Name("ui-medium".into())
-}
-
-fn semibold_family() -> FontFamily {
-    FontFamily::Name("ui-semibold".into())
-}
-
-fn bold_family() -> FontFamily {
-    FontFamily::Name("ui-bold".into())
-}
-
-/// Medium (500) interface text, retaining the language fallbacks and user override.
-pub fn medium(size: f32) -> FontId {
-    FontId::new(size, medium_family())
-}
-
-/// Semibold (600) interface text, retaining the language fallbacks and user override.
-pub fn semibold(size: f32) -> FontId {
-    FontId::new(size, semibold_family())
-}
-
-/// Bold (700) interface text, retaining the language fallbacks and user override.
-pub fn bold(size: f32) -> FontId {
-    FontId::new(size, bold_family())
-}
-
-/// Select a real interface weight without changing the text's size or colour.
-pub trait RichTextExt {
-    fn medium(self) -> Self;
-    fn semibold(self) -> Self;
-    fn bold_face(self) -> Self;
-}
-
-impl RichTextExt for RichText {
-    fn medium(self) -> Self {
-        self.family(medium_family())
-    }
-    fn semibold(self) -> Self {
-        self.family(semibold_family())
-    }
-    fn bold_face(self) -> Self {
-        self.family(bold_family())
-    }
 }
 
 // Keep pending definitions too: set_fonts takes effect on the next frame, while the web
@@ -90,30 +27,13 @@ fn installed_fonts_id() -> egui::Id {
 fn install(ctx: &egui::Context, fonts: FontDefinitions) {
     let fonts = with_symbol_fallback(fonts);
     ctx.data_mut(|d| d.insert_temp(installed_fonts_id(), fonts.clone()));
-    ctx.set_fonts(fonts);
-    ctx.global_style_mut(|style| {
-        if let Some(heading) = style.text_styles.get_mut(&egui::TextStyle::Heading) {
-            heading.family = semibold(heading.size).family;
-        }
-    });
+    look::apply(ctx, fonts);
 }
 
 /// Install only the bundled definitions (also used by the offscreen scenario shell).
 pub fn setup_bundled_fonts(ctx: &egui::Context) {
-    install(ctx, base_font_definitions());
+    install(ctx, look::definitions());
 }
-
-/// Name of the CJK fallback entry in [`egui::FontDefinitions`].
-pub const CJK_FALLBACK: &str = "cjk_fallback";
-
-/// Name of the Chinese fallback entry in [`egui::FontDefinitions`], after [`CJK_FALLBACK`].
-/// A Japanese-only CJK font (Meiryo, Hiragino Gothic) lacks simplified characters, so
-/// Chinese falls through to this one per glyph.
-pub const CHINESE_FALLBACK: &str = "chinese_fallback";
-
-/// Name of the chosen interface font in [`egui::FontDefinitions`], first in every sans
-/// family when one is set (#1290).
-pub const UI_FONT: &str = "ui_font";
 
 /// The interface font a preference names (#1290): an installed family, a font file, or the
 /// sketch text's built-in family. `None` for the default (empty) or a font that can't be read.
@@ -139,93 +59,6 @@ pub fn with_ui_font(mut fonts: FontDefinitions, font: egui::FontData) -> FontDef
         list.insert(0, UI_FONT.to_owned());
     }
     fonts
-}
-
-/// Name of the Hangul fallback entry in [`egui::FontDefinitions`], after the CJK ones.
-pub const HANGUL_FALLBACK: &str = "hangul_fallback";
-
-/// Name of the Thai fallback entry in [`egui::FontDefinitions`], after the CJK ones (#1902).
-pub const THAI_FALLBACK: &str = "thai_fallback";
-
-/// Name of the Hebrew fallback entry in [`egui::FontDefinitions`], last (#3457).
-pub const HEBREW_FALLBACK: &str = "hebrew_fallback";
-
-/// Name of the Arabic fallback entry in [`egui::FontDefinitions`]: first of the fallbacks for an
-/// Arabic UI, last otherwise. It stays after the Latin interface font, which keeps drawing spaces,
-/// digits and Latin text, so each Arabic word is one shaped run (see [`crate::bidi`]).
-pub const ARABIC_FALLBACK: &str = "arabic_fallback";
-
-/// egui's built-in monospace face, also the last fallback of every sans family (#2955).
-pub const SYMBOL_FALLBACK: &str = "Hack";
-
-/// `fonts` with egui's built-in Hack last in every sans family. Ubuntu-Light, NotoEmoji and
-/// emoji-icon-font lack common symbols such as ▲ ▼ ↑ ↓ → ⁻, which Hack has, so they no longer
-/// show as empty boxes where no system font fills in (#2955). Text the other faces draw keeps them.
-pub fn with_symbol_fallback(mut fonts: egui::FontDefinitions) -> egui::FontDefinitions {
-    if fonts.font_data.contains_key(SYMBOL_FALLBACK) {
-        for family in sans_families() {
-            let list = fonts.families.entry(family).or_default();
-            list.retain(|name| name != SYMBOL_FALLBACK);
-            list.push(SYMBOL_FALLBACK.to_owned());
-        }
-    }
-    fonts
-}
-
-/// UI languages whose text needs a CJK script font on the web.
-pub const CJK_LANGUAGES: &[&str] = &["ja", "zh", "zh-TW", "ko"];
-
-/// Whether the UI language needs a CJK font (the web app fetches one only then).
-pub fn needs_cjk_font(language: &str) -> bool {
-    CJK_LANGUAGES.contains(&language)
-}
-
-/// Whether the UI language needs the Simplified or Traditional Chinese web font (#8894).
-pub fn needs_chinese_font(language: &str) -> bool {
-    matches!(language, "zh" | "zh-TW")
-}
-
-/// Which on-demand web face a CJK UI language loads: `"zh"`, `"zh-TW"`, or `"ja"` (also for
-/// Korean until a Hangul face ships). `None` when the language uses only the bundled Latin faces.
-pub fn web_script_font_kind(language: &str) -> Option<&'static str> {
-    match language {
-        "zh" => Some("zh"),
-        "zh-TW" => Some("zh-TW"),
-        "ja" | "ko" => Some("ja"),
-        _ => None,
-    }
-}
-
-/// Whether `text` has characters only the CJK fallback draws: kana, CJK ideographs and their
-/// punctuation, and full-width forms. Hangul is left out: the web app's font has none.
-pub fn has_cjk(text: &str) -> bool {
-    text.chars().any(|c| {
-        matches!(u32::from(c),
-            0x3000..=0x30FF // CJK punctuation, Hiragana, Katakana
-            | 0x31F0..=0x31FF // Katakana phonetic extensions
-            | 0x3400..=0x4DBF // CJK Extension A
-            | 0x4E00..=0x9FFF // CJK Unified Ideographs
-            | 0xF900..=0xFAFF // CJK Compatibility Ideographs
-            | 0xFF00..=0xFFEF // Half-width and full-width forms
-        )
-    })
-}
-
-/// Whether any text painted so far this frame has CJK characters (see [`has_cjk`]). The web app
-/// calls it after drawing the UI, until its CJK font is loaded, so a Japanese design name, file
-/// name or typed text fetches the font whatever the UI language (#720).
-pub fn painted_cjk(ctx: &egui::Context) -> bool {
-    let mut layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().collect());
-    layers.push(egui::LayerId::background());
-    ctx.graphics(|g| layers.iter().filter_map(|l| g.get(*l)).any(|list| list.all_entries().any(|c| shape_has_cjk(&c.shape))))
-}
-
-fn shape_has_cjk(shape: &egui::Shape) -> bool {
-    match shape {
-        egui::Shape::Text(t) => has_cjk(&t.galley.job.text),
-        egui::Shape::Vec(shapes) => shapes.iter().any(shape_has_cjk),
-        _ => false,
-    }
 }
 
 /// `fonts` with `bytes` appended as the last fallback of every interface
@@ -261,6 +94,22 @@ fn promote_font_to_front(fonts: &mut FontDefinitions, name: &str) {
     }
 }
 
+/// Whether the UI language needs the Simplified or Traditional Chinese web font (#8894).
+pub fn needs_chinese_font(language: &str) -> bool {
+    matches!(language, "zh" | "zh-TW")
+}
+
+/// Which on-demand web face a CJK UI language loads: `"zh"`, `"zh-TW"`, or `"ja"` (also for
+/// Korean until a Hangul face ships). `None` when the language uses only the bundled Latin faces.
+pub fn web_script_font_kind(language: &str) -> Option<&'static str> {
+    match language {
+        "zh" => Some("zh"),
+        "zh-TW" => Some("zh-TW"),
+        "ja" | "ko" => Some("ja"),
+        _ => None,
+    }
+}
+
 /// Install the downloaded Japanese font with the CJK UI's shared mixed-script baseline.
 pub fn install_cjk_font_for(ctx: &egui::Context, bytes: Vec<u8>, language: &str) -> bool {
     install_web_script_fonts(ctx, Some(bytes), None, language)
@@ -273,7 +122,7 @@ pub fn install_web_script_fonts(ctx: &egui::Context, cjk: Option<Vec<u8>>, chine
         setup_fonts_for(ctx, language, "");
         return true;
     }
-    let mut fonts = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap_or_else(base_font_definitions);
+    let mut fonts = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap_or_else(look::definitions);
     // Drop prior script faces so a language change can replace them without stacking duplicates.
     for name in [CJK_FALLBACK, CHINESE_FALLBACK] {
         fonts.font_data.remove(name);
@@ -362,102 +211,6 @@ pub const CHINESE_FONT_KEYWORDS: &[&str] = &[
 pub fn is_chinese_font_name(file_name: &str) -> bool {
     let name = file_name.to_ascii_lowercase();
     CHINESE_FONT_KEYWORDS.iter().any(|k| name.contains(k))
-}
-
-/// Session state of the web app's on-demand script fonts. Pure state so it can be tested off the
-/// web: the shell does the fetch when [`CjkFontLoader::tick`] asks for it.
-#[derive(Debug, Default)]
-pub struct CjkFontLoader {
-    status: CjkFontStatus,
-    /// The saved language while this session falls back to English after a failed load.
-    saved_language: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CjkFontStatus {
-    #[default]
-    Unloaded,
-    Loading,
-    Installed,
-    Failed,
-}
-
-impl CjkFontLoader {
-    pub fn status(&self) -> CjkFontStatus {
-        self.status
-    }
-
-    /// Called every frame with the live language (a `system` preference resolves to its catalog
-    /// via [`crate::i18n::effective_language`]). `ready` is true when the shell already has the
-    /// on-demand face that language needs. Returns true when a fetch should start now. After a
-    /// failed load a CJK language falls back to English for this session; the saved preference is
-    /// kept (see [`Self::persisted_language`]). Switching to another CJK language that still needs
-    /// a face starts another fetch (#8894).
-    pub fn tick(&mut self, language: &mut String, ready: bool) -> bool {
-        if self.saved_language.is_some() && language != "en" {
-            // The user picked a language themselves since the fallback: that is the preference now.
-            self.saved_language = None;
-            if self.status == CjkFontStatus::Failed {
-                self.status = CjkFontStatus::Unloaded;
-            }
-        }
-        if !needs_cjk_font(crate::i18n::effective_language(language)) {
-            return false;
-        }
-        if ready {
-            self.status = CjkFontStatus::Installed;
-            return false;
-        }
-        match self.status {
-            CjkFontStatus::Unloaded | CjkFontStatus::Installed => {
-                self.status = CjkFontStatus::Loading;
-                true
-            }
-            CjkFontStatus::Failed => {
-                self.fall_back(language);
-                false
-            }
-            CjkFontStatus::Loading => false,
-        }
-    }
-
-    /// CJK text is on screen (whatever the UI language). Returns true when the Japanese font fetch
-    /// should start now: once, and never again after a failed load (the UI language stays as it is).
-    pub fn text_needs_font(&mut self) -> bool {
-        if self.status == CjkFontStatus::Unloaded {
-            self.status = CjkFontStatus::Loading;
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Whether the session still watches painted text for CJK characters.
-    pub fn watching_text(&self) -> bool {
-        self.status == CjkFontStatus::Unloaded
-    }
-
-    /// Record the outcome of the fetch and install. A `system` preference resolves to its
-    /// catalog first ([`Self::tick`]).
-    pub fn finished(&mut self, installed: bool, language: &mut String) {
-        if installed {
-            self.status = CjkFontStatus::Installed;
-        } else {
-            self.status = CjkFontStatus::Failed;
-            if needs_cjk_font(crate::i18n::effective_language(language)) {
-                self.fall_back(language);
-            }
-        }
-    }
-
-    fn fall_back(&mut self, language: &mut String) {
-        self.saved_language = Some(std::mem::replace(language, "en".to_owned()));
-    }
-
-    /// The language to write to storage: the user's own choice, not this session's fallback.
-    pub fn persisted_language<'a>(&'a self, live: &'a str) -> &'a str {
-        self.saved_language.as_deref().unwrap_or(live)
-    }
 }
 
 /// Candidate font paths to look for on different operating systems.
@@ -768,25 +521,6 @@ fn find_system_cjk_font() -> Option<Vec<u8>> {
     None
 }
 
-/// The fallback entries in the order they join each family for a UI language.
-///
-/// Chinese goes first for `zh`: a Japanese font (Meiryo, Yu Gothic) lacks the simplified
-/// characters, so the rest of the word falls through to the Chinese font per glyph — and
-/// epaint centres each face's own line height in the row, so glyphs from two faces of very
-/// different height (Meiryo ≈ 2.0 em, Microsoft YaHei ≈ 1.4 em) sit at different heights
-/// inside one word. One face for the whole word keeps them on one baseline.
-/// Thai, Hebrew and Arabic come last whatever the language: no other face draws them. Arabic
-/// goes first for `ar` instead: a CJK font such as Arial Unicode also has Arabic letters, without
-/// the shaping data that joins them.
-pub fn fallback_order(language: &str) -> [&'static str; 6] {
-    match language {
-        "zh" | "zh-TW" => [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
-        "ko" => [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
-        "ar" => [ARABIC_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK],
-        _ => [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
-    }
-}
-
 /// Configure font definitions with system CJK, Chinese, Hangul, Thai and Hebrew fallbacks where available,
 /// ordered for the UI language (see [`fallback_order`]), after the interface font `ui_font`
 /// when one is chosen (see [`ui_font`]).
@@ -865,7 +599,7 @@ fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Opt
         Some(f) => (f.cjk.clone(), f.chinese.clone(), f.hangul.clone(), f.thai.clone(), f.hebrew.clone(), f.arabic.clone()),
         None => (None, None, None, None, None, None),
     };
-    let mut fonts = base_font_definitions();
+    let mut fonts = look::definitions();
     if let Some(font) = self::ui_font(ui_font) {
         fonts = with_ui_font(fonts, font);
     }
@@ -1016,7 +750,7 @@ pub fn setup_fonts_for(ctx: &egui::Context, language: &str, ui_font: &str) {
 
 #[cfg(any(test, target_arch = "wasm32"))]
 fn web_font_definitions(ui_font: &str, previous: Option<FontDefinitions>) -> FontDefinitions {
-    let mut fonts = base_font_definitions();
+    let mut fonts = look::definitions();
     if let Some(font) = self::ui_font(ui_font) {
         fonts = with_ui_font(fonts, font);
     }
@@ -1042,6 +776,7 @@ pub fn setup_fonts(ctx: &egui::Context) {
 /// A context with the production bundled faces, for isolated widget tests.
 #[cfg(test)]
 pub(crate) fn test_context() -> egui::Context {
+    crate::test_support::host_data();
     let ctx = egui::Context::default();
     setup_bundled_fonts(&ctx);
     ctx
@@ -1050,6 +785,8 @@ pub(crate) fn test_context() -> egui::Context {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui_kit::type_face::{RichTextExt as _, SYMBOL_FALLBACK, bold, medium, semibold};
+    use egui::{FontId, RichText};
 
     /// `SOLIDCRAFT_FONT_DIRS` wins and may list several folders; `CRAFT_FONTS_DIR` is the fallback.
     #[cfg(not(target_arch = "wasm32"))]
@@ -1096,7 +833,7 @@ mod tests {
     /// comes last and once, after the system fallbacks, and goes in with the desktop's fonts.
     #[test]
     fn symbols_fall_back_to_the_built_in_hack() {
-        let fonts = with_symbol_fallback(base_font_definitions());
+        let fonts = with_symbol_fallback(look::definitions());
         for family in sans_families() {
             let list = &fonts.families[&family];
             assert_eq!(list.last().map(String::as_str), Some(SYMBOL_FALLBACK));
@@ -1125,7 +862,7 @@ mod tests {
         assert!(ui_font("").is_none());
         assert!(ui_font("No Such Font 1290").is_none());
         let font = ui_font(solidcraft_engine::sketch::DEFAULT_FONT_FAMILY).expect("the built-in sketch font reads");
-        let defaults = base_font_definitions();
+        let defaults = look::definitions();
         let fonts = with_ui_font(defaults.clone(), font.clone());
         let again = with_ui_font(fonts, font);
         for family in sans_families() {
@@ -1138,28 +875,9 @@ mod tests {
     }
 
     #[test]
-    fn bundled_faces_lead_every_family_and_keep_egui_fallbacks() {
-        let defaults = with_symbol_fallback(FontDefinitions::default());
-        let fonts = base_font_definitions();
-        for ((name, weight), family) in WEIGHTS.into_iter().zip(sans_families()) {
-            let list = &fonts.families[&family];
-            assert_eq!(list[0], name);
-            assert_eq!(&list[1..], defaults.families[&FontFamily::Proportional]);
-            let data = &fonts.font_data[name];
-            assert_eq!(data.bytes(), PLEX_SANS);
-            assert_eq!(data.tweak.coords.as_ref()[0].1, weight);
-            assert!(data.variation_axes().iter().any(|a| a.tag == *b"wght"));
-        }
-        let mono = &fonts.families[&FontFamily::Monospace];
-        assert_eq!(mono[0], "plex-mono");
-        assert_eq!(&mono[1..], defaults.families[&FontFamily::Monospace]);
-        assert_eq!(fonts.font_data["plex-mono"].bytes(), PLEX_MONO);
-    }
-
-    #[test]
     fn semibold_has_distinct_metrics_and_rich_text_preserves_size_and_colour() {
         let h = crate::scenario::Harness::new();
-        let ink = crate::theme::Tokens::get().accent;
+        let ink = solidcraft_theme::Tokens::get().accent;
         let (regular, heavier) = h.ctx.fonts_mut(|f| {
             let regular = f.layout_no_wrap("Chamfer Revolve New Sketch".into(), FontId::proportional(16.0), ink);
             let heavier = f.layout_no_wrap("Chamfer Revolve New Sketch".into(), semibold(16.0), ink);
@@ -1197,7 +915,7 @@ mod tests {
             assert_eq!(installed.families[&family].get(1).map(String::as_str), Some(CJK_FALLBACK));
         }
         let reset = web_font_definitions("", Some(installed));
-        for ((name, _), family) in WEIGHTS.into_iter().zip(sans_families()) {
+        for ((name, _), family) in look::WEIGHTS.into_iter().zip(sans_families()) {
             assert_eq!(reset.families[&family][0], name);
             let list = &reset.families[&family];
             assert_eq!(list.get(list.len() - 2).map(String::as_str), Some(CJK_FALLBACK));
@@ -1214,7 +932,7 @@ mod tests {
         let japanese = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf"));
         let chinese = find_system_chinese_font();
         for language in ["ja", "zh"] {
-            let mut fonts = base_font_definitions();
+            let mut fonts = look::definitions();
             for name in fallback_order(language) {
                 let bytes = match name {
                     CJK_FALLBACK => Some(japanese.to_vec()),
@@ -1237,7 +955,7 @@ mod tests {
     }
 
     fn latin_font_bytes() -> Vec<u8> {
-        let defaults = base_font_definitions();
+        let defaults = look::definitions();
         let name = &defaults.families[&egui::FontFamily::Proportional][0];
         defaults.font_data[name].bytes().to_vec()
     }
@@ -1246,13 +964,13 @@ mod tests {
     fn default_ui_language_follows_the_system() {
         // A first start follows the system (#10138); English, the fallback it lands on when
         // nothing matches, needs no CJK face.
-        assert_eq!(crate::prefs::Prefs::default().language, crate::i18n::SYSTEM);
+        assert_eq!(crate::prefs::Prefs::default().language, solidcraft_ui_text::SYSTEM);
         assert!(!needs_cjk_font("en"));
     }
 
     #[test]
     fn cjk_font_is_a_fallback_after_the_latin_ui_font() {
-        let defaults = base_font_definitions();
+        let defaults = look::definitions();
         let fonts = with_cjk_fallback(defaults.clone(), latin_font_bytes()).unwrap();
         for family in all_families() {
             let list = &fonts.families[&family];
@@ -1275,7 +993,7 @@ mod tests {
                 "{lang} keeps the Japanese font first"
             );
         }
-        let defaults = base_font_definitions();
+        let defaults = look::definitions();
         let mut fonts = defaults.clone();
         for name in fallback_order("zh") {
             fonts = with_fallback(fonts, name, latin_font_bytes()).unwrap();
@@ -1327,12 +1045,12 @@ mod tests {
             ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
             ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::proportional(14.0), "שלום"))
         };
-        assert!(!hebrew(base_font_definitions()), "the bundled faces have no Hebrew");
+        assert!(!hebrew(look::definitions()), "the bundled faces have no Hebrew");
         let Some(bytes) = found.into_iter().next() else { return };
-        assert!(hebrew(with_fallback(base_font_definitions(), HEBREW_FALLBACK, bytes).unwrap()), "Hebrew draws with the fallback");
+        assert!(hebrew(with_fallback(look::definitions(), HEBREW_FALLBACK, bytes).unwrap()), "Hebrew draws with the fallback");
     }
 
-    /// What a Hebrew interface shows depends on egui's own shaping as much as on `bidi::visual`:
+    /// What a Hebrew interface shows depends on egui's own shaping as much as on `solidcraft_ui_text::bidi::visual`:
     /// lay messages out with a real Hebrew font and read the glyphs left to right, as they land on
     /// screen. They must come out in the order the line has on screen (#3457).
     #[test]
@@ -1342,7 +1060,7 @@ mod tests {
             return;
         };
         let ctx = egui::Context::default();
-        ctx.set_fonts(with_symbol_fallback(with_fallback(base_font_definitions(), HEBREW_FALLBACK, bytes).unwrap()));
+        ctx.set_fonts(with_symbol_fallback(with_fallback(look::definitions(), HEBREW_FALLBACK, bytes).unwrap()));
         ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
         let on_screen = |text: &str| {
             let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), egui::FontId::proportional(14.0), egui::Color32::WHITE));
@@ -1353,9 +1071,9 @@ mod tests {
         };
         for text in ["עץ התכן", "שמירה בשם", "יחידות: mm", "ייצוא STEP", "פרמטרים (5)", "עומק 20.5 mm", "לשמור את השינויים ב־Bracket?"]
         {
-            assert_eq!(on_screen(&crate::bidi::visual(text)), crate::bidi::screen_order(text), "{text}");
+            assert_eq!(on_screen(&solidcraft_ui_text::bidi::visual(text)), solidcraft_ui_text::bidi::screen_order(text), "{text}");
         }
-        let he = crate::i18n::Locale::for_language("he");
+        let he = solidcraft_ui_text::Locale::for_language("he");
         for id in ["ui.preferences", "ui.new_design", "ui.feature_history", "ui.needs_design"] {
             let logical = he.text(id).to_owned();
             assert_eq!(
@@ -1400,7 +1118,7 @@ mod tests {
         }
         // Read right to left, the screen shows the sentence's words in reading order.
         for text in ["حفظ باسم", "تحليل خطوط المعامِل", "إعادة تعيين الكل", "تصدير STEP"] {
-            let mut read = words_left_to_right(&crate::bidi::visual(text));
+            let mut read = words_left_to_right(&solidcraft_ui_text::bidi::visual(text));
             read.reverse();
             let expected: Vec<Vec<char>> = text.split(' ').map(|word| char_set(word.chars().collect())).collect();
             assert_eq!(read, expected, "{text}");
@@ -1409,7 +1127,7 @@ mod tests {
 
     #[test]
     fn cjk_ui_promotes_primary_cjk_font_to_front_for_consistent_baseline() {
-        let defaults = base_font_definitions();
+        let defaults = look::definitions();
         let mut fonts = with_cjk_fallback(defaults.clone(), latin_font_bytes()).unwrap();
         promote_font_to_front(&mut fonts, CJK_FALLBACK);
         for family in sans_families() {
@@ -1418,7 +1136,7 @@ mod tests {
             assert!(list.contains(&defaults.families[&family][0]), "the bundled weight remains available");
         }
         assert_eq!(fonts.families[&FontFamily::Monospace][0], "plex-mono");
-        let chosen = egui::FontData::from_static(PLEX_SANS);
+        let chosen = egui::FontData::from_static(look::PLEX_SANS);
         let mut fonts = with_ui_font(fonts, chosen);
         promote_font_to_front(&mut fonts, CJK_FALLBACK);
         for family in sans_families() {
@@ -1438,7 +1156,7 @@ mod tests {
             ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
             ctx.fonts(|f| f.definitions().families[&egui::FontFamily::Proportional].clone())
         };
-        let latin = base_font_definitions().families[&egui::FontFamily::Proportional][0].clone();
+        let latin = look::definitions().families[&egui::FontFamily::Proportional][0].clone();
         for language in ["uk", "en", "de"] {
             let list = installed(language);
             assert_eq!(list.first(), Some(&latin), "{language} keeps the Latin face first: {list:?}");
@@ -1453,7 +1171,7 @@ mod tests {
 
     #[test]
     fn hangul_font_falls_back_after_the_cjk_font() {
-        let defaults = base_font_definitions();
+        let defaults = look::definitions();
         let cjk = with_cjk_fallback(defaults.clone(), latin_font_bytes()).unwrap();
         let fonts = with_fallback(cjk, HANGUL_FALLBACK, latin_font_bytes()).unwrap();
         for family in all_families() {
@@ -1566,7 +1284,39 @@ mod tests {
     }
 
     #[test]
+    fn web_chinese_subset_draws_simplified_settings() {
+        let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/craft-ui-sc/CraftUI-SC.otf")).to_vec();
+        let ctx = test_context();
+        assert!(install_web_script_fonts(&ctx, None, Some(bytes), "zh"));
+        let installed = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
+        for family in sans_families() {
+            assert_eq!(installed.families[&family].first().map(String::as_str), Some(CHINESE_FALLBACK));
+        }
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        assert!(ctx.fonts_mut(|f| f.has_glyphs(&semibold(14.0), "设置")));
+    }
+
+    /// The web shell fetches the Chinese face for a Chinese UI and the Japanese one for Japanese
+    /// and Korean (#8894).
+    #[test]
+    fn the_web_shell_fetches_the_face_each_cjk_language_needs() {
+        assert_eq!(web_script_font_kind("zh"), Some("zh"));
+        assert_eq!(web_script_font_kind("zh-TW"), Some("zh-TW"));
+        assert_eq!(web_script_font_kind("ja"), Some("ja"));
+        assert!(needs_chinese_font("zh"));
+        assert!(!needs_chinese_font("ja"));
+    }
+}
+
+/// The kit's CJK font loader over SolidCraft's languages (the catalogs decide which are CJK).
+#[cfg(test)]
+mod cjk_loader_tests {
+    use crate::ui_kit::type_face::*;
+
+    #[test]
     fn web_font_is_fetched_only_for_a_cjk_language() {
+        crate::i18n::install();
         let mut loader = CjkFontLoader::default();
         for lang in ["en", "de"] {
             let mut language = lang.to_owned();
@@ -1583,6 +1333,7 @@ mod tests {
 
     #[test]
     fn chinese_ui_fetches_again_after_japanese_is_installed() {
+        crate::i18n::install();
         let mut loader = CjkFontLoader::default();
         let mut language = "ja".to_owned();
         assert!(loader.tick(&mut language, false));
@@ -1591,41 +1342,13 @@ mod tests {
         assert!(loader.tick(&mut language, false), "Chinese needs its own face (#8894)");
         loader.finished(true, &mut language);
         assert!(!loader.tick(&mut language, true));
-        assert_eq!(web_script_font_kind("zh"), Some("zh"));
-        assert_eq!(web_script_font_kind("zh-TW"), Some("zh-TW"));
-        assert_eq!(web_script_font_kind("ja"), Some("ja"));
-        assert!(needs_chinese_font("zh"));
-        assert!(!needs_chinese_font("ja"));
-    }
-
-    #[test]
-    fn web_chinese_subset_draws_simplified_settings() {
-        let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/craft-ui-sc/CraftUI-SC.otf")).to_vec();
-        let ctx = test_context();
-        assert!(install_web_script_fonts(&ctx, None, Some(bytes), "zh"));
-        let installed = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
-        for family in sans_families() {
-            assert_eq!(installed.families[&family].first().map(String::as_str), Some(CHINESE_FALLBACK));
-        }
-        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
-        output.textures_delta.clear();
-        assert!(ctx.fonts_mut(|f| f.has_glyphs(&semibold(14.0), "设置")));
-    }
-
-    #[test]
-    fn cjk_text_is_recognised() {
-        for cjk in ["テスト", "ひらがな", "部品", "ﾃｽﾄ", "Bracket（改）", "Plate 板"] {
-            assert!(has_cjk(cjk), "{cjk} has CJK characters");
-        }
-        for other in ["", "Bracket", "Ø12 × 3 mm", "Größe", "Привет", "한국어", "émoji ✓"] {
-            assert!(!has_cjk(other), "{other} has no CJK characters the fallback draws");
-        }
     }
 
     /// An English UI fetches the font once CJK text is painted (#720), and a failed fetch leaves
     /// the language alone.
     #[test]
     fn cjk_text_fetches_the_font_with_an_english_ui() {
+        crate::i18n::install();
         let mut loader = CjkFontLoader::default();
         let mut language = "en".to_owned();
         assert!(!loader.tick(&mut language, false));
@@ -1648,25 +1371,9 @@ mod tests {
         assert!(!loader.tick(&mut ja, true));
     }
 
-    /// The painted-text check finds CJK in the frame's labels and nothing else.
-    #[test]
-    fn painted_cjk_sees_labels_in_the_frame() {
-        let ctx = egui::Context::default();
-        let run = |text: &'static str| {
-            let mut seen = false;
-            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
-                ui.label(text);
-                seen = painted_cjk(ui.ctx());
-            });
-            out.textures_delta.clear();
-            seen
-        };
-        assert!(!run("Untitled"));
-        assert!(run("テスト"));
-    }
-
     #[test]
     fn failed_font_fetch_falls_back_for_the_session_without_changing_the_saved_language() {
+        crate::i18n::install();
         let mut loader = CjkFontLoader::default();
         let mut language = "ja".to_owned();
         assert!(loader.tick(&mut language, false));

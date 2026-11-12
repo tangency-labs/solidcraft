@@ -4,7 +4,6 @@
 //! tooltip. Text only for now; pictures and animations are a later step. A new toolbar command
 //! ships with its help: `every_toolbar_command_has_help` fails otherwise.
 
-use crate::i18n;
 use crate::ui_kit::BackingTooltipExt as _;
 
 /// The commands that have help text. Each one needs a `help.<id>` message in the catalogs.
@@ -27,11 +26,13 @@ pub const DOCUMENTED: &[&str] = &[
     "config.preview",
     "config.rules",
     "config.table",
+    "construct.axis",
     "construct.axis.edge",
     "construct.axis.normal_to_face",
     "construct.axis.through_cylinder",
     "construct.axis.two_planes",
     "construct.axis.two_points",
+    "construct.plane",
     "construct.plane.along_path",
     "construct.plane.at_angle",
     "construct.plane.axis_point",
@@ -41,6 +42,7 @@ pub const DOCUMENTED: &[&str] = &[
     "construct.plane.tangent",
     "construct.plane.three_points",
     "construct.plane.two_edges",
+    "construct.point",
     "construct.point.along_path",
     "construct.point.center",
     "construct.point.edge_plane",
@@ -64,6 +66,7 @@ pub const DOCUMENTED: &[&str] = &[
     "file.insert_step",
     "file.save_mesh",
     "file.send_to_slicer",
+    "frame.end_cap",
     "frame.member",
     "inspect.accessibility",
     "inspect.center_of_mass",
@@ -331,7 +334,7 @@ pub fn help(command: &str) -> Option<String> {
         return None;
     }
     let key = format!("help.{command}");
-    let text = i18n::tr(&key);
+    let text = solidcraft_ui_text::tr(&key);
     (text != key).then(|| text.to_owned())
 }
 
@@ -433,6 +436,7 @@ mod tests {
 
     #[test]
     fn a_documented_command_has_help_and_others_do_not() {
+        crate::i18n::install();
         for id in DOCUMENTED {
             assert!(help(id).is_some_and(|text| !text.is_empty()), "{id}");
         }
@@ -441,6 +445,7 @@ mod tests {
 
     #[test]
     fn a_drop_down_row_has_a_tip_only_for_a_reason_or_help() {
+        crate::i18n::install();
         assert_eq!(row_tip("solid.shell", "Shell", Some("S"), None).as_deref(), Some("Shell  (S)"));
         assert_eq!(row_tip("solid.hole", "Hole", None, None).as_deref(), Some("Hole"));
         assert_eq!(row_tip("solid.hole", "Hole", None, Some("Select a face")).as_deref(), Some("Select a face"));

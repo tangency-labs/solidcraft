@@ -35,7 +35,10 @@ name = "sketch_target_bench"
 required-features = ["solver-profiling"]
 
 [dependencies]
+solidcraft-viewport = { workspace = true }
 solidcore-record = { workspace = true }
+solidcraft-color = { workspace = true }
+solidcraft-control = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }

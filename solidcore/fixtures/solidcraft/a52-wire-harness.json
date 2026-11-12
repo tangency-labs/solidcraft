@@ -1,0 +1,60 @@
+{
+  "issue": "none: user's design (a52.solidcraft)",
+  "pr": "none: user's design (a52.solidcraft)",
+  "test": "none: user's design (a52.solidcraft)",
+  "summary": "Wires of the user's e-bike battery model (a52.solidcraft, v2), built with its Pipe feature (a circle swept along a sketch path) on solidcore: SmApiCreatePipeSweep for one path segment, SmApiCreateSweepAlongPlanarPath of a circle normal to the path start for several. A tube of constant circular section has volume pi r^2 L exactly while its radius stays under the path's bend radius, so every expected volume is a closed form. Paths and diameters are the model's own: wiazka-bplus (diameter 2.7) runs w1..w5 in the plane y = 38.5 (line 8.352, quarter arc r 2.808, line 21.225, quarter arc r 2.808, line 134.384; its later segments leave the plane and are left out), przewod-wyjscie-plus (diameter 5.5) starts with the straight run w1 from (-1.4916, 11, 62.9879) to (17.0675, 11, 52.2771). The grommet case puts that 5.5 wire through a grommet bore (r 4.2, as a52-battery-shapes) in a stand-in 60 x 40 x 4 wall; the channel case cuts a 5.5 wire bent at r 10 through a stand-in 30 x 30 x 10 block (a cable channel). The model's other wires follow 3D spline paths, which SM_API cannot rebuild (it has no curve through points).",
+  "cases": [
+    {
+      "name": "harness_bplus_planar_run",
+      "note": "wiazka-bplus w1..w5: a 2.7 wire along line, bend, line, bend, line in the plane y = 38.5",
+      "steps": [
+        {"op": "pipe", "id": "result", "radius": 1.35, "plane": "zx", "origin": [0, 38.5, 0], "path": [
+          {"kind": "line", "from": [36.659, 30.16], "to": [36.659, 21.808]},
+          {"kind": "arc", "center": [39.467, 21.808], "radius": 2.808, "start_deg": 180, "end_deg": 270},
+          {"kind": "line", "from": [39.467, 19.0], "to": [60.692, 19.0]},
+          {"kind": "arc", "center": [60.692, 21.808], "radius": 2.808, "start_deg": 270, "end_deg": 360},
+          {"kind": "line", "from": [63.5, 21.808], "to": [63.5, 156.192]}
+        ]}
+      ],
+      "expect": {"lumps": 1, "volume": {"value": 989.2758217705, "tol": 0.01, "formula": "pi * 1.35^2 * (8.352 + 21.225 + 134.384 + 2 * (pi / 2) * 2.808)"}}
+    },
+    {
+      "name": "exit_wire_straight_run",
+      "note": "przewod-wyjscie-plus w1: the 5.5 exit wire's first straight run",
+      "steps": [
+        {"op": "pipe", "id": "result", "radius": 2.75, "plane": "zx", "origin": [0, 11, 0], "path": [
+          {"kind": "line", "from": [62.9879, -1.4916], "to": [52.2771, 17.0675]}
+        ]}
+      ],
+      "expect": {"lumps": 1, "volume": {"value": 509.0939781395, "tol": 0.01, "formula": "pi * 2.75^2 * sqrt((17.0675 + 1.4916)^2 + (52.2771 - 62.9879)^2)"}}
+    },
+    {
+      "name": "exit_wire_through_grommet_bore",
+      "note": "the 5.5 exit wire passing through an r 4.2 grommet bore without touching it: two lumps",
+      "steps": [
+        {"op": "box", "id": "wall", "origin": [-30, -20, 0], "size": [60, 40, 4]},
+        {"op": "cylinder", "id": "bore", "origin": [11, 0, -1], "axis": [0, 0, 1], "radius": 4.2, "height": 6},
+        {"op": "difference", "id": "drilled", "a": "wall", "b": "bore"},
+        {"op": "pipe", "id": "wire", "radius": 2.75, "plane": "zx", "path": [
+          {"kind": "line", "from": [-5, 11], "to": [9, 11]}
+        ]},
+        {"op": "union", "id": "result", "a": "drilled", "b": "wire"}
+      ],
+      "expect": {"lumps": 2, "volume": {"value": 9710.9453445615, "tol": 0.01, "formula": "60 * 40 * 4 - pi * 4.2^2 * 4 + pi * 2.75^2 * 14"}}
+    },
+    {
+      "name": "bent_wire_channel_cut",
+      "note": "a cable channel: a 5.5 wire bent at r 10 cut through a block, entering at x = 0 and leaving at y = 30",
+      "steps": [
+        {"op": "box", "id": "block", "origin": [0, 0, -5], "size": [30, 30, 10]},
+        {"op": "pipe", "id": "wire", "radius": 2.75, "path": [
+          {"kind": "line", "from": [-5, 10], "to": [15, 10]},
+          {"kind": "arc", "center": [15, 20], "radius": 10, "start_deg": -90, "end_deg": 0},
+          {"kind": "line", "from": [25, 20], "to": [25, 35]}
+        ]},
+        {"op": "difference", "id": "result", "a": "block", "b": "wire"}
+      ],
+      "expect": {"lumps": 1, "volume": {"value": 8032.8482225145, "tol": 0.01, "formula": "30 * 30 * 10 - pi * 2.75^2 * (15 + (pi / 2) * 10 + 10) (the wire's length inside the block)"}}
+    }
+  ]
+}

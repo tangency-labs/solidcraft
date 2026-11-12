@@ -1,6 +1,37 @@
 use super::*;
 use solidcraft_render::job::{CpuHost, JobId};
 
+#[cfg(not(target_arch = "wasm32"))]
+// Validate each live receipt before comparing deterministic accounting. RAM
+// snapshots and other retained leases can change between otherwise equal checks.
+fn preflight_without_memory_observations(mut reply: Value) -> Value {
+    let total = reply["admission"]["estimated_total_bytes"].as_u64().unwrap();
+    let memory = reply["admission"]["host_memory"].as_object_mut().expect("native preflight reports its RAM admission");
+    let required = memory["required_bytes"].as_u64().unwrap();
+    let admitted = memory["admitted_bytes"].as_u64().unwrap();
+    let credited = memory["credited_bytes"].as_u64().unwrap();
+    let additional = memory["additional_bytes"].as_u64().unwrap();
+    let physical = memory["physical_debit_bytes"].as_u64().unwrap();
+    let available = memory["available_bytes"].as_u64().unwrap();
+    let capacity = memory["capacity_bytes"].as_u64().unwrap();
+    assert_eq!(required, total, "native debit includes the complete public admission");
+    assert_eq!(required.checked_sub(credited), Some(additional));
+    assert_eq!(credited, required, "native preflight reports its fully funded prepared capture");
+    assert_eq!(additional, 0, "the final capture self-check needs no new allocation");
+    assert!(additional <= available, "new native debit fits its available RAM: {memory:?}");
+    assert_eq!(available, capacity.saturating_sub(physical), "physical debit accounts for the snapshot allowance");
+    assert!(admitted.checked_add(required).unwrap() <= memory["software_limit_bytes"].as_u64().unwrap());
+    assert!(
+        matches!(memory["source"].as_str(), Some("system_available" | "system_and_cgroup" | "conservative_fallback")),
+        "native receipt identifies its capacity source"
+    );
+    // Keep required_bytes and every non-observation field in the exact comparison.
+    for field in ["admitted_bytes", "available_bytes", "capacity_bytes", "physical_debit_bytes", "source"] {
+        memory.remove(field).unwrap();
+    }
+    reply
+}
+
 fn session() -> (Session, CpuHost) {
     let host = CpuHost::cooperative();
     let mut s = Session::default();
@@ -99,10 +130,10 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
         }
     }
     let mut s = Session::default();
-    let camera = solidcraft_render::Camera { fov: 0.8, ..Default::default() };
+    let camera = solidcraft_viewport::Camera { fov: 0.8, ..Default::default() };
     s.execute("render.settings.set", &json!({"name":"GPU","set":{
         "width":4,"height":4,"camera":camera,"exposure_ev":1.75,"job":{"method":"gpu_path","transparent_background":true,"options":{
-            "samples":7,"max_depth":3,"seed":456,"denoise":true,"tone_map":"aces_fitted",
+            "samples":7,"max_depth":3,"seed":456,"denoise":true,"clamp_indirect":8,"tone_map":"aces_fitted",
             "lens":{"aperture_radius_mm":0.5,"focus_distance_mm":20},
             "lighting":{"environment":[0.1,0.3,0.6],"sun":{"direction":[1,-1,-1],"angular_radius_rad":0.05,"radiance":[2,3,4]},"area_lights":[],"directional_lights":[
                 {"direction":[0,0,2],"color":[0.25,0.5,1],"intensity":0},
@@ -128,7 +159,7 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty());
     let checked = s.execute("render.preflight", &named).unwrap();
     let inline = s.execute("render.preflight", &json!({"settings":saved})).unwrap();
-    assert_eq!(checked, inline);
+    assert_eq!(preflight_without_memory_observations(checked.clone()), preflight_without_memory_observations(inline));
     assert_eq!(checked["resolved"]["executor"], "gpu-path");
     assert_eq!(checked["options"]["exposure_ev"], 1.75);
     assert_eq!(checked["options"]["samples"], 7);
@@ -157,6 +188,9 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     assert_eq!(checked["options"]["lighting"]["directional_lights"][0]["intensity"].as_f64(), Some(0.0));
 
     assert_eq!(checked["options"]["denoise"], true);
+    assert_eq!(checked["options"]["clamp_indirect"], 8.0);
+    assert_eq!(checked["indirect_clamp"]["limit"], 8.0);
+    assert_eq!(checked["indirect_clamp"]["biased"], true);
     assert_eq!(checked["environment"]["rotation_rad"], 0.75);
     assert_eq!(checked["transparency"], "coverage_alpha");
     assert_eq!(checked["request"]["transparent_background"], true);
@@ -209,7 +243,10 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     let doc = s.doc.clone();
     let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty());
     let checked = s.execute("render.preflight", &json!({"setup":"HDR"})).unwrap();
-    assert_eq!(checked, s.execute("render.preflight", &json!({"settings":captured["setup"]})).unwrap());
+    assert_eq!(
+        preflight_without_memory_observations(checked.clone()),
+        preflight_without_memory_observations(s.execute("render.preflight", &json!({"settings":captured["setup"]})).unwrap())
+    );
     assert_eq!(checked["environment"]["source_sha256"], info["sha256"]);
     assert_eq!(checked["environment"]["kind"], "radiance_hdr");
     assert_eq!(checked["environment"]["color_policy"], "declared_linear_srgb_d65");
@@ -253,7 +290,10 @@ fn saved_cpu_job_reopens_and_supplies_exact_options_and_one_exposure_to_check_an
     let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty());
     let named = json!({"setup":"CPU"});
     let checked = s.execute("render.preflight", &named).unwrap();
-    assert_eq!(checked, s.execute("render.preflight", &json!({"settings":saved})).unwrap());
+    assert_eq!(
+        preflight_without_memory_observations(checked.clone()),
+        preflight_without_memory_observations(s.execute("render.preflight", &json!({"settings":saved})).unwrap())
+    );
     assert_eq!(checked["resolved"]["executor"], "cpu-raytrace");
     assert_eq!(checked["request"]["integrator"], "raytrace");
     assert_eq!(checked["request"]["raytrace"]["exposure_ev"], 1.25);
@@ -300,7 +340,10 @@ fn saved_cpu_hdr_reopens_without_source_and_drives_identical_check_start_and_rea
     let doc = s.doc.clone();
     let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty());
     let checked = s.execute("render.preflight", &json!({"setup":"HDR"})).unwrap();
-    assert_eq!(checked, s.execute("render.preflight", &json!({"settings":captured["setup"]})).unwrap());
+    assert_eq!(
+        preflight_without_memory_observations(checked.clone()),
+        preflight_without_memory_observations(s.execute("render.preflight", &json!({"settings":captured["setup"]})).unwrap())
+    );
     assert_eq!(checked["request"]["raytrace"]["exposure_ev"], 1.25);
     assert_eq!(checked["environment"]["samples"], 64);
     assert_eq!(checked["environment"]["rotation_radians"], 0.75);
@@ -308,7 +351,10 @@ fn saved_cpu_hdr_reopens_without_source_and_drives_identical_check_start_and_rea
     let runtime = json!({"integrator":"raytrace","settings":{"width":9,"height":9,"background":[13,27,41]},
         "raytrace":{"lights":[],"shadows":false,"primary_samples":4,"exposure_ev":1.25},
         "environment":{"resource":info["sha256"],"rotation_radians":0.75,"intensity":2,"samples":64}});
-    assert_eq!(checked, s.execute("render.preflight", &runtime).unwrap());
+    assert_eq!(
+        preflight_without_memory_observations(checked.clone()),
+        preflight_without_memory_observations(s.execute("render.preflight", &runtime).unwrap())
+    );
     for environment in [
         json!({"resource":"0".repeat(64)}),
         json!({"resource":info["sha256"],"path":"must-not-open.hdr"}),
@@ -411,6 +457,26 @@ fn additional_executor_routes_by_capability_and_survives_document_adoption() {
     studio["progressive"] = json!(false);
     assert!(session.execute("render.preflight", &studio).unwrap_err().to_string().contains("require progressive"));
     studio["progressive"] = json!(true);
+    // The indirect clamp belongs to gpu-path: another progressive executor, an invalid limit
+    // and a request without progressive rendering are each refused before any work.
+    let mut clamped = request.clone();
+    clamped["clamp_indirect"] = json!(8);
+    let error = session.execute("render.preflight", &clamped).unwrap_err().to_string();
+    assert!(error.contains("clamp_indirect requires the native gpu-path executor"), "{error}");
+    clamped["clamp_indirect"] = json!(0);
+    let error = session.execute("render.preflight", &clamped).unwrap_err().to_string();
+    assert!(error.contains("clamp_indirect must be a finite radiance"), "{error}");
+    clamped["clamp_indirect"] = json!(8);
+    clamped["progressive"] = json!(false);
+    assert!(session.execute("render.preflight", &clamped).unwrap_err().to_string().contains("require progressive"));
+    clamped["progressive"] = json!(true);
+    clamped["clamp_indirect"] = Value::Null;
+    assert_eq!(
+        preflight_without_memory_observations(session.execute("render.preflight", &clamped).unwrap()),
+        preflight_without_memory_observations(preflight.clone()),
+        "an explicit null clamp is off"
+    );
+    assert_eq!(additional.admitted_bytes(), 0);
     studio["lighting"]["area_lights"][0]["u"] = json!([0, 0, 0]);
     assert!(session.execute("render.preflight", &studio).is_err());
     let started = session.execute("render.start", &request).unwrap();
@@ -425,7 +491,7 @@ fn additional_executor_routes_by_capability_and_survives_document_adoption() {
     session.execute("file.new", &json!({})).unwrap();
     assert_eq!(session.execute("render.preflight", &request).unwrap()["resolved"]["executor"], "test-progressive");
     assert!(session.execute("render.status", &json!({"job":id})).is_err());
-    for bad in [json!({"samples":0}), json!({"max_depth":17}), json!({"seed":-1}), json!({"samples":4097})] {
+    for bad in [json!({"samples":0}), json!({"max_depth":65}), json!({"seed":-1}), json!({"samples":65537})] {
         let mut params = request.clone();
         for (key, value) in bad.as_object().unwrap() {
             params[key] = value.clone();
@@ -523,8 +589,8 @@ fn preflight_and_start_reject_excessive_pixel_work_without_reserving_a_job() {
     for _ in 0..8 {
         s.execute("solid.box", &json!({"length":20,"width":20,"height":20,"corner":[-10,-10,-10]})).unwrap();
     }
-    let mut camera = solidcraft_render::Camera { distance: 1.0, fov: 0.0, ..Default::default() };
-    camera.set_view(solidcraft_render::StandardView::Front);
+    let mut camera = solidcraft_viewport::Camera { distance: 1.0, fov: 0.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Front);
     let params = json!({"settings":{"width":1024,"height":1024,"camera":camera}});
     let doc = s.doc.clone();
     let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
@@ -1039,8 +1105,8 @@ fn native_spatial_aa_preflight_and_host_forwarding_change_actual_edge_png() {
     s.execute("render.scene", &json!({})).unwrap();
     let scene = crate::product_scene::extract(&s).unwrap();
     let center = scene.bounds.center();
-    let mut camera = solidcraft_render::Camera { distance: 2.0, fov: 0.0, ..Default::default() };
-    camera.set_view(solidcraft_render::StandardView::Top);
+    let mut camera = solidcraft_viewport::Camera { distance: 2.0, fov: 0.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Top);
     camera.target = solidcore_record::Vec3::new(scene.bounds.min.x, center.y, center.z);
     let doc = s.doc.clone();
     let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
@@ -1226,7 +1292,7 @@ fn dielectric_preflight_and_start_resolve_refraction_without_broadening_boundari
     // The default view sends the single pixel's ray exactly through a box edge, which the optics reject
     // as an ambiguous interface normal. Whether the job then ends Failed or Cancelled would depend on
     // whether the cancel below beats the render thread, so view the glass off-axis.
-    let camera = solidcraft_render::Camera { yaw: 0.3, pitch: 0.4, ..Default::default() };
+    let camera = solidcraft_viewport::Camera { yaw: 0.3, pitch: 0.4, ..Default::default() };
     let document = s.doc.clone();
     let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
     let params = json!({"integrator":"raytrace","settings":{"width":1,"height":1,"camera":camera},"raytrace":{"dielectrics":[{
@@ -1296,7 +1362,7 @@ fn dielectric_preflight_refuses_wrong_captured_identity_without_changing_design(
 fn registered_product_camera_fit_changes_only_view_and_keeps_orientation() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":20,"width":15,"height":10})).unwrap();
-    let camera = solidcraft_render::Camera { yaw: 0.2, pitch: 0.3, roll: 0.1, ..Default::default() };
+    let camera = solidcraft_viewport::Camera { yaw: 0.2, pitch: 0.3, roll: 0.1, ..Default::default() };
     s.execute("render.camera.set", &json!({"camera":camera})).unwrap();
     let doc = s.doc.to_json();
     let undo = s.undo.len();
@@ -1335,8 +1401,8 @@ fn explicit_render_camera_preserves_orientation_and_refuses_invalid_state_atomic
     let mut s = Session::default();
     let document = s.doc.clone();
     let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len(), s.model.is_stale());
-    for up in [solidcraft_render::UpAxis::Z, solidcraft_render::UpAxis::Y] {
-        let camera = solidcraft_render::Camera { roll: 0.41, yaw: -0.3, pitch: 0.5, up, ..Default::default() };
+    for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
+        let camera = solidcraft_viewport::Camera { roll: 0.41, yaw: -0.3, pitch: 0.5, up, ..Default::default() };
         let reply = s.execute("render.camera.set", &json!({"camera":camera})).unwrap();
         assert_eq!(s.camera, Some(camera));
         assert_eq!(reply["camera"], json!(camera));
@@ -1368,7 +1434,7 @@ fn explicit_render_camera_preserves_orientation_and_refuses_invalid_state_atomic
     }
     s.execute("render.camera.set", &json!({"camera":{"target":[0,0,0],"yaw":0.2,"pitch":0.3,"distance":100,"fov":0}})).unwrap();
     assert_eq!(s.camera.unwrap().roll, 0.0);
-    assert_eq!(s.camera.unwrap().up, solidcraft_render::UpAxis::Z);
+    assert_eq!(s.camera.unwrap().up, solidcraft_viewport::UpAxis::Z);
     // The Design API still rejects explicit up, as specified by upstream #5094.
     let before_camera = s.camera;
     assert!(s.execute("view.apply", &json!({"camera":before_camera.unwrap()})).is_err());
@@ -1421,7 +1487,7 @@ fn output_viewer_copy_validates_completed_job_without_mutation_or_pixel_payloads
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
 #[test]
 fn cpu_physical_lens_saved_and_runtime_requests_share_one_captured_camera() {
-    let camera = solidcraft_render::Camera { fov: 0.7, distance: 20.0, roll: 0.3, ..Default::default() };
+    let camera = solidcraft_viewport::Camera { fov: 0.7, distance: 20.0, roll: 0.3, ..Default::default() };
     let lens = solidcraft_render::job::ThinLens { aperture_radius_mm: 0.5, focus_distance_mm: 20.0 };
     let mut s = Session::default();
     s.execute(
@@ -1463,7 +1529,7 @@ fn cpu_lens_refuses_incompatible_sampling_and_camera_before_hdr_or_scene_capture
     let document = s.doc.clone();
     let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
     for fixed in [false, true] {
-        let camera = solidcraft_render::Camera { fov: if fixed { 0.7 } else { 0.0 }, ..Default::default() };
+        let camera = solidcraft_viewport::Camera { fov: if fixed { 0.7 } else { 0.0 }, ..Default::default() };
         let mut request = json!({"integrator":"raytrace","settings":{"width":8,"height":8,"camera":camera},
             "raytrace":{"lens":{"aperture_radius_mm":0.5,"focus_distance_mm":20.0},"progressive":{"samples_per_pixel":3}},
             "environment":{"path":"must-not-open-cpu-lens.hdr"}});
@@ -1490,7 +1556,7 @@ fn cpu_alpha_refuses_opaque_only_output_before_hdr_io_or_scene_capture() {
     let document = s.doc.clone();
     let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
     for output in [json!({"backdrop":{}}), json!({"finishing":{"bloom":{"strength":1}}}), json!({"finishing":{"photographic":{"grain":0.03}}})] {
-        let request = json!({"integrator":"raytrace","transparent_background":true,"settings":{"width":8,"height":8,"camera":solidcraft_render::Camera::default()},
+        let request = json!({"integrator":"raytrace","transparent_background":true,"settings":{"width":8,"height":8,"camera":solidcraft_viewport::Camera::default()},
             "raytrace":{"output":output},"environment":{"path":"must-not-open-cpu-alpha.hdr"}});
         for command in ["render.preflight", "render.start"] {
             let error = s.execute(command, &request).unwrap_err().to_string();
@@ -1512,7 +1578,9 @@ fn saved_cpu_denoise_reports_its_actual_native_request_and_keeps_regrade_raw() {
     s.execute(
         "render.settings.set",
         &json!({"name":"CPU denoise","set":{"width":8,"height":8,
-        "job":{"method":"cpu_raytrace","options":{"denoise":true,"progressive":{"samples_per_pixel":3,"seed":81},"output":{"linear_exr":true}}}}}),
+        "job":{"method":"cpu_raytrace","options":{"threads":2,"supersampling":2,"denoise":true,
+            "denoise_settings":{"passes":2,"strength":0.5,"firefly_suppression":false,"optical_filter":false},"denoise_diagnostics":true,
+            "progressive":{"samples_per_pixel":3,"seed":81},"output":{"linear_exr":true}}}}}),
     )
     .unwrap();
     s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
@@ -1524,7 +1592,15 @@ fn saved_cpu_denoise_reports_its_actual_native_request_and_keeps_regrade_raw() {
     assert_eq!(checked["resolved"]["executor"], "cpu-raytrace");
     assert_eq!(checked["request"]["raytrace"]["denoise"], true);
     assert_eq!(checked["denoising"]["backend"], "native_cpu");
-    assert_eq!(checked["denoising"]["passes"], 3);
+    assert_eq!(checked["denoising"]["passes"], 2);
+    assert_eq!(checked["denoising"]["steps"], json!([1, 2]));
+    assert_eq!(checked["denoising"]["settings"], json!({"passes":2,"strength":0.5,"firefly_suppression":false,"optical_filter":false}));
+    assert_eq!(checked["denoising"]["outlier_policy"], "disabled");
+    assert_eq!(checked["denoising"]["optical_policy"], "legacy opaque-only filtering; mirror and glass radiance bypass display filtering");
+    assert_eq!(checked["request"]["raytrace"]["denoise_settings"]["optical_filter"], false);
+    assert_eq!(checked["request"]["raytrace"]["threads"], 2);
+    assert_eq!(checked["request"]["raytrace"]["supersampling"], 2);
+    assert_eq!(checked["request"]["raytrace"]["denoise_diagnostics"], true);
     assert_eq!(checked["denoising"]["raw_linear_accumulator_preserved"], true);
     let started = s.execute("render.start", &json!({"setup":"CPU denoise"})).unwrap();
     let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
@@ -1534,13 +1610,49 @@ fn saved_cpu_denoise_reports_its_actual_native_request_and_keeps_regrade_raw() {
     assert_eq!(json!(status.request), checked["request"]);
     let frame = handle.frame().unwrap().unwrap();
     let raw = frame.linear_exr().unwrap().to_vec();
+    assert_eq!((frame.info.width, frame.info.height), (8, 8));
+    assert_eq!(image::load_from_memory(frame.png()).unwrap().to_rgba8().dimensions(), (8, 8));
+    let report = status.denoise_diagnostics.unwrap();
+    assert_eq!((report.width, report.height), (16, 16));
+    assert_eq!(report.counts.iter().sum::<u64>(), 256);
+    let mask = frame.denoise_mask_png().unwrap().to_vec();
+    let mask_info = frame.denoise_mask_info().unwrap();
+    assert_eq!((mask_info.width, mask_info.height), (8, 8));
+    assert_eq!(mask_info.bytes, mask.len() as u64);
+    assert_ne!(mask_info.sha256, frame.info.png_sha256);
+    let decoded = image::load_from_memory(&mask).unwrap().to_rgba8();
+    assert_eq!(decoded.dimensions(), (8, 8));
+    assert!(decoded.pixels().all(|pixel| solidcraft_render::job::DenoiseGuideClass::ALL.iter().any(|class| class.color() == pixel.0)));
+    let status_reply = s.execute("render.status", &json!({"job":id})).unwrap();
+    assert_eq!(status_reply["denoise_mask"], json!(mask_info));
+    assert_eq!(status_reply["denoise_diagnostics"], json!(report));
+    let viewed = s.execute("render.result.view", &json!({"view":"denoise_mask"})).unwrap();
+    assert_eq!(viewed, json!({"view":"denoise_mask","job":id}));
+    let path = std::env::temp_dir().join(format!("solidcraft-cpu-guide-mask-{}-{}.png", std::process::id(), id.session));
+    let previous_check = s.param_check;
+    s.param_check = crate::schema::ParamCheck::Strict;
+    let exported = s.execute("render.export", &json!({"job":id,"path":path,"format":"denoise_mask"})).unwrap();
+    s.param_check = previous_check;
+    assert_eq!(std::fs::read(&path).unwrap(), mask);
+    assert_eq!(exported["format"], "denoise_mask");
+    assert_eq!(exported["encoding"], "categorical_srgb");
+    assert_eq!(exported["alpha"], "opaque");
+    assert_eq!(exported["bytes"], mask_info.bytes);
+    assert!(exported.get("param_warnings").is_none());
+    assert_eq!(exported["denoise_mask"], json!(mask_info));
+    assert_eq!(exported["frame"]["png_sha256"], frame.info.png_sha256);
+    std::fs::remove_file(path).unwrap();
     let result = s.execute("render.result.regrade", &json!({"job":id,"presentation":{"exposure_ev":-1.0}})).unwrap();
     let derivative: JobId = serde_json::from_value(result["job"].clone()).unwrap();
     let derivative = s.render_job_handle(derivative).unwrap();
     let finished = derivative.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
     assert_eq!(finished.progress.phase, Phase::Completed);
     assert!(!finished.presentation.as_ref().unwrap().denoise_applied, "regrade never pretends to reconstruct absent geometry guides");
-    assert_eq!(derivative.frame().unwrap().unwrap().linear_exr().unwrap(), raw);
+    let derivative_frame = derivative.frame().unwrap().unwrap();
+    assert_eq!(derivative_frame.linear_exr().unwrap(), raw);
+    assert_eq!(derivative_frame.denoise_mask_png().unwrap(), mask);
+    assert_eq!(json!(derivative_frame.denoise_mask_info()), json!(Some(mask_info)));
+    assert_eq!(finished.denoise_diagnostics, Some(report));
     assert_eq!(frame.linear_exr().unwrap(), raw);
     assert!(Arc::ptr_eq(&document, &s.doc));
     assert_eq!((s.revision, s.evaluations, s.undo.len(), s.redo.len()), before);
@@ -1553,7 +1665,7 @@ fn saved_cpu_optics_match_runtime_capture_pixels_prefixes_cancel_and_accounting(
     use solidcraft_render::raytrace::image::{ImagePoll, ImageTask};
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":10,"width":10,"height":3,"body_name":"Glass"})).unwrap();
-    let camera = solidcraft_render::Camera {
+    let camera = solidcraft_viewport::Camera {
         target: solidcore_record::Vec3::new(5.0, 5.0, 1.5),
         distance: 20.0,
         yaw: 0.3,
@@ -1594,12 +1706,15 @@ fn saved_cpu_optics_match_runtime_capture_pixels_prefixes_cancel_and_accounting(
     let extra_bytes = (extra_slots * std::mem::size_of::<solidcraft_render::job::DielectricOptions>()) as u64;
     assert_eq!(saved["retained_request_bytes"].as_u64().unwrap() + extra_bytes, runtime["retained_request_bytes"].as_u64().unwrap());
     // Two options copies belong to image work; a third belongs to the retained
-    // immutable request. All other admission fields must remain exactly equal.
-    let mut expected_runtime_admission = saved["admission"].clone();
+    // immutable request. All other deterministic admission fields remain exact.
+    let mut expected_runtime_admission = preflight_without_memory_observations(saved.clone())["admission"].clone();
     for (field, copies) in [("preparation_bytes", 2), ("estimated_total_bytes", 3)] {
         expected_runtime_admission[field] = json!(saved["admission"][field].as_u64().unwrap() + copies * extra_bytes);
     }
-    assert_eq!(expected_runtime_admission, runtime["admission"]);
+    for field in ["required_bytes", "credited_bytes"] {
+        expected_runtime_admission["host_memory"][field] = json!(saved["admission"]["host_memory"][field].as_u64().unwrap() + 3 * extra_bytes);
+    }
+    assert_eq!(expected_runtime_admission, preflight_without_memory_observations(runtime.clone())["admission"]);
     assert_eq!(saved["refraction"], true);
     let original_mesh = scene.meshes[0].mesh.clone();
     assert!(!scene.has_transmission(), "saved CPU lowering leaves the captured product appearance and physical material unchanged");
@@ -1687,8 +1802,8 @@ fn cpu_saved_thin_sheet_uses_its_authored_ior_beer_thickness_and_roundtrips_offl
     s.execute("file.insert_mesh", &json!({"path":source})).unwrap();
     let scene = s.execute("render.scene", &json!({})).unwrap();
     let name = scene["bodies"][0]["name"].as_str().unwrap().to_owned();
-    let mut camera = solidcraft_render::Camera { distance: 10.0, ..Default::default() };
-    camera.set_view(solidcraft_render::StandardView::Top);
+    let mut camera = solidcraft_viewport::Camera { distance: 10.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Top);
     s.execute(
         "render.settings.set",
         &json!({"name":"Sheet","set":{"camera":camera,"width":1,"height":1,"job":{"method":"cpu_raytrace","options":{
@@ -1721,7 +1836,7 @@ fn cpu_saved_thin_sheet_uses_its_authored_ior_beer_thickness_and_roundtrips_offl
         let a = (-sigma * 2.0).exp();
         let denominator = 1.0 - f * f * a * a;
         let scene = f + (1.0 - f).powi(2) * (f * a * a + a) / denominator;
-        solidcraft_geom::srgb::encode8(scene / (1.0 + scene))
+        solidcraft_color::srgb::encode8(scene / (1.0 + scene))
     });
     assert_eq!(decoded.get_pixel(0, 0).0, [rgb[0], rgb[1], rgb[2], 255]);
     assert!(Arc::ptr_eq(&before, &s.doc));
@@ -1732,7 +1847,7 @@ fn cpu_saved_thin_sheet_uses_its_authored_ior_beer_thickness_and_roundtrips_offl
 fn cpu_path_saved_and_runtime_captures_execute_without_mutating_document_or_history() {
     let mut s = Session::default();
     s.set_render_job_host(Some(CpuHost::for_platform().unwrap())).unwrap();
-    let camera = solidcraft_render::Camera::default();
+    let camera = solidcraft_viewport::Camera::default();
     s.execute("render.settings.set",&json!({"name":"Path","set":{"width":8,"height":8,"camera":camera,"job":{"method":"cpu_raytrace","options":{"path":{"max_depth":3},"progressive":{"samples_per_pixel":3,"seed":9},"lights":[]}}}})).unwrap();
     let saved = s.execute("render.preflight", &json!({"setup":"Path"})).unwrap();
     let runtime=s.execute("render.preflight",&json!({"settings":{"width":8,"height":8,"camera":camera},"integrator":"raytrace","raytrace":{"path":{"max_depth":3},"progressive":{"samples_per_pixel":3,"seed":9},"lights":[]}})).unwrap();
@@ -1757,7 +1872,7 @@ fn cpu_path_refuses_fixed_or_shadowless_transport_before_hdr_io() {
     let document = s.doc.clone();
     let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
     for fixed in [false, true] {
-        let mut request = json!({"integrator":"raytrace","settings":{"width":8,"height":8,"camera":solidcraft_render::Camera::default()},"raytrace":{"path":{"max_depth":3},"progressive":{"samples_per_pixel":3},"shadows":false},"environment":{"path":"must-not-open-path.hdr"}});
+        let mut request = json!({"integrator":"raytrace","settings":{"width":8,"height":8,"camera":solidcraft_viewport::Camera::default()},"raytrace":{"path":{"max_depth":3},"progressive":{"samples_per_pixel":3},"shadows":false},"environment":{"path":"must-not-open-path.hdr"}});
         if fixed {
             request["raytrace"].as_object_mut().unwrap().remove("progressive");
             request["raytrace"]["shadows"] = json!(true);
@@ -1911,8 +2026,9 @@ fn saved_cpu_aging_cold_reopen_resolves_exact_target_and_changes_real_png_withou
         .unwrap();
     layers.get_mut(0).unwrap().target = Some(target.clone());
     let physical = s.execute("component.properties", &json!({})).unwrap();
-    let mut camera = solidcraft_render::Camera { distance: 15.0, target: solidcore_record::Vec3::new(5.0, 5.0, 1.0), fov: 0.0, ..Default::default() };
-    camera.set_view(solidcraft_render::StandardView::Top);
+    let mut camera =
+        solidcraft_viewport::Camera { distance: 15.0, target: solidcore_record::Vec3::new(5.0, 5.0, 1.0), fov: 0.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Top);
     s.execute("render.settings.set", &json!({"name":"CPU aging","set":{"width":8,"height":8,"camera":camera,
         "job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":3,"seed":81},"aging":layers,"denoise":true,"output":{"linear_exr":true},"lights":[{"direction":[0,0,1],"color":[1,1,1],"intensity":std::f64::consts::PI}]}}}})).unwrap();
     let saved = s.doc.render.setups["CPU aging"].clone();
@@ -1925,7 +2041,10 @@ fn saved_cpu_aging_cold_reopen_resolves_exact_target_and_changes_real_png_withou
     let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty());
     let checked = s.execute("render.preflight", &json!({"setup":"CPU aging"})).unwrap();
     assert_eq!(checked["request"]["raytrace"]["aging"][0]["target"]["body_name"], name);
-    assert_eq!(checked, s.execute("render.preflight", &json!({"settings":saved})).unwrap());
+    assert_eq!(
+        preflight_without_memory_observations(checked.clone()),
+        preflight_without_memory_observations(s.execute("render.preflight", &json!({"settings":saved})).unwrap())
+    );
     let started = s.execute("render.start", &json!({"setup":"CPU aging"})).unwrap();
     let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
     let handle = s.render_job_handle(id).unwrap();
@@ -1989,8 +2108,8 @@ fn cpu_saved_surface_preflight_and_real_factory_render_captured_builtins_after_r
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":10,"width":10,"height":2,"body_name":"Coupon"})).unwrap();
     let scene = crate::product_scene::extract(&s).unwrap();
-    let mut camera = solidcraft_render::Camera::default();
-    camera.fit(&scene.bounds);
+    let mut camera = solidcraft_viewport::Camera::default();
+    camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
     s.execute("render.library.surface.bind",&json!({"name":"CPU maps","surface":{"id":"SURF-001","body_index":0,"body_name":"Coupon"},
         "set":{"camera":camera,"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":3,"seed":9},"output":{"linear_exr":true}}}}})).unwrap();
     s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
@@ -2090,7 +2209,7 @@ fn saved_cpu_general_closed_mesh_path_matches_runtime_and_actual_captured_cylind
     use solidcraft_render::job::{ImageRequest, Phase};
     let mut s = Session::default();
     s.execute("solid.cylinder", &json!({"radius":5,"height":3,"body_name":"Curved"})).unwrap();
-    let camera = solidcraft_render::Camera {
+    let camera = solidcraft_viewport::Camera {
         target: solidcore_record::Vec3::new(0.0, 0.0, 1.5),
         distance: 20.0,
         yaw: 0.3,
@@ -2160,7 +2279,7 @@ fn runtime_checked_hdr_keeps_two_stable_glass_targets_and_exact_cpu_options_with
     for (name, corner) in [("Saved glass", [0, 0, 0]), ("Draft glass", [4, 0, 0])] {
         s.execute("solid.box", &json!({"body_name":name,"length":2,"width":2,"height":2,"corner":corner,"operation":"new"})).unwrap();
     }
-    let camera = solidcraft_render::Camera { target: solidcore_record::Vec3::new(3.0, 1.0, 1.0), distance: 20.0, fov: 0.6, ..Default::default() };
+    let camera = solidcraft_viewport::Camera { target: solidcore_record::Vec3::new(3.0, 1.0, 1.0), distance: 20.0, fov: 0.6, ..Default::default() };
     s.execute("render.settings.set", &json!({"name":"Glass HDR","set":{"width":4,"height":3,"camera":camera,"exposure_ev":0.75,
         "job":{"method":"cpu_raytrace","transparent_background":true,"options":{"path":{"max_depth":12},"progressive":{"samples_per_pixel":3,"seed":81},
         "lights":[],"lens":{"aperture_radius_mm":0.01,"focus_distance_mm":20},"output":{"linear_exr":true}}}}})).unwrap();
@@ -2229,8 +2348,9 @@ fn runtime_checked_hdr_keeps_two_stable_glass_targets_and_exact_cpu_options_with
     raster["environment"]["path"] = json!("must-not-open-raster-stable-glass.hdr");
     assert!(s.execute("render.preflight", &raster).unwrap_err().to_string().contains("stable optics require"));
     let mut over_cap = params.clone();
+    let optical_limit = solidcraft_render::job::MAX_OPTICAL_TARGETS;
     over_cap["settings"]["optics"] = json!(
-        (0..9)
+        (0..=optical_limit)
             .map(|i| {
                 let mut row = params["settings"]["optics"][0].clone();
                 row["target"]["definition"] = json!(format!("Unique unknown optical body {i}"));
@@ -2239,7 +2359,7 @@ fn runtime_checked_hdr_keeps_two_stable_glass_targets_and_exact_cpu_options_with
             .collect::<Vec<_>>()
     );
     over_cap["environment"]["path"] = json!("must-not-open-over-cap-stable-glass.hdr");
-    assert!(s.execute("render.preflight", &over_cap).unwrap_err().to_string().contains("at most eight"));
+    assert!(s.execute("render.preflight", &over_cap).unwrap_err().to_string().contains(&format!("at most {optical_limit}")));
     let mut changed_hdr = params.clone();
     changed_hdr["environment"]["expected_sha256"] = json!("0".repeat(64));
     assert!(s.execute("render.preflight", &changed_hdr).unwrap_err().to_string().contains("changed since selection"));
@@ -2271,13 +2391,13 @@ fn saved_cpu_path_maps_glass_and_targeted_aging_reach_real_preflight_and_render_
     let glass = targets["items"].as_array().unwrap().iter().find(|target| target["name"] == "Glass").unwrap().clone();
     let panel = targets["items"].as_array().unwrap().iter().find(|target| target["name"] == "Panel").unwrap().clone();
     let scene = crate::product_scene::extract(&s).unwrap();
-    let mut camera = solidcraft_render::Camera::default();
-    camera.set_view(solidcraft_render::StandardView::Top);
-    camera.fit(&scene.bounds);
+    let mut camera = solidcraft_viewport::Camera::default();
+    camera.set_view(solidcraft_viewport::StandardView::Top);
+    camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
     s.execute(
         "render.settings.set",
         &json!({"name":"Mixed","set":{"camera":camera,"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{
-            "progressive":{"samples_per_pixel":3,"seed":9},"path":{"max_depth":4},"lights":[],
+            "texture_filtering":true,"progressive":{"samples_per_pixel":3,"seed":9},"path":{"max_depth":4},"lights":[],
             "environment":{"color":[1,1,1],"intensity":1},"output":{"linear_exr":true},
             "aging":[{"kind":"fading","target":panel["stable_target"],"strength":0.25,"coverage":1.0,"upward_bias":0.0}]
         }}}}),
@@ -2301,6 +2421,8 @@ fn saved_cpu_path_maps_glass_and_targeted_aging_reach_real_preflight_and_render_
     let history = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
     let checked = s.execute("render.preflight", &json!({"setup":"Mixed"})).unwrap();
     assert_eq!(checked["textures"]["bodies"], 1);
+    assert_eq!(checked["textures"]["filtering"], true);
+    assert_eq!(checked["request"]["raytrace"]["texture_filtering"], true);
     assert_eq!(checked["request"]["raytrace"]["path"]["max_depth"], 4);
     assert_eq!(checked["request"]["raytrace"]["dielectrics"][0]["body_name"], "Glass");
     assert_eq!(checked["request"]["raytrace"]["dielectrics"][0]["boundary"], "closed_mesh");
@@ -2421,7 +2543,7 @@ fn saved_coat_cpu_direct_and_path_render_match_independent_normal_incidence_laye
         )
         .unwrap();
         let camera =
-            solidcraft_render::Camera { target: Vec3::ZERO, distance: 1.0, yaw: 0.0, pitch: FRAC_PI_2, roll: 0.0, fov: 0.0, ..Default::default() };
+            solidcraft_viewport::Camera { target: Vec3::ZERO, distance: 1.0, yaw: 0.0, pitch: FRAC_PI_2, roll: 0.0, fov: 0.0, ..Default::default() };
         let mut options = json!({"progressive":{"samples_per_pixel":4,"seed":81},"lights":[{"direction":[0,0,1],"color":[1,1,1],"intensity":PI}],
             "environment":{"color":[0,0,0],"intensity":0},"output":{"linear_exr":true}});
         if indirect {
@@ -2470,7 +2592,11 @@ fn saved_coat_cpu_direct_and_path_render_match_independent_normal_incidence_laye
         let mut plain = setup.clone();
         plain.coats = Default::default();
         let plain_check = s.execute("render.preflight", &json!({"settings":plain})).unwrap();
-        assert_eq!(checked["admission"], plain_check["admission"], "coat uses existing inline surface metadata and the same bounded producer stages");
+        assert_eq!(
+            preflight_without_memory_observations(checked.clone())["admission"],
+            preflight_without_memory_observations(plain_check.clone())["admission"],
+            "coat uses existing inline surface metadata and the same bounded producer stages"
+        );
         assert_eq!(checked["retained_request_bytes"], plain_check["retained_request_bytes"]);
         let mut zero = setup;
         let row = zero.coats.iter().next().unwrap().clone();
@@ -2493,7 +2619,7 @@ fn saved_cpu_coat_survives_builtin_maps_aging_and_guided_filter_without_changing
     s.execute("solid.box", &json!({"body_name":"Panel","corner":[-10,-10,-2],"length":20,"width":20,"height":2})).unwrap();
     s.execute("appearance.assign", &json!({"bodies":["Panel"],"color":[128,64,32],"pbr":{"metallic":0,"roughness":0.5,"dielectric_ior":1}})).unwrap();
     let camera =
-        solidcraft_render::Camera { distance: 10.0, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, roll: 0.0, fov: 0.0, ..Default::default() };
+        solidcraft_viewport::Camera { distance: 10.0, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, roll: 0.0, fov: 0.0, ..Default::default() };
     s.execute(
         "render.coat.bind",
         &json!({"name":"Coat","body_index":0,"body_name":"Panel","expected_revision":s.revision,
@@ -2553,7 +2679,7 @@ fn saved_cpu_subsurface_cold_capture_matches_runtime_real_png_raw_and_one_undo_w
     use solidcraft_render::job::{ImageRequest, Phase};
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":10,"width":10,"height":2,"body_name":"Scattering"})).unwrap();
-    let camera = solidcraft_render::Camera {
+    let camera = solidcraft_viewport::Camera {
         target: solidcore_record::Vec3::new(5.0, 5.0, 0.5),
         distance: 0.5,
         yaw: 0.0,
@@ -2622,7 +2748,7 @@ fn saved_cpu_atmosphere_cold_capture_start_matches_runtime_pixels_raw_and_one_un
     use solidcraft_render::job::{ImageRequest, Phase};
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length":10,"width":10,"height":2,"body_name":"Fog receiver"})).unwrap();
-    let camera = solidcraft_render::Camera {
+    let camera = solidcraft_viewport::Camera {
         target: solidcore_record::Vec3::new(5.0, 5.0, 1.0),
         distance: 5.0,
         yaw: 0.0,
@@ -2688,7 +2814,7 @@ fn saved_cpu_atmosphere_incompatibility_is_pure_before_hdr_capture_and_keeps_aut
         [json!({"volume":volume,"denoise":true,"path":{"max_depth":4},"progressive":{"samples_per_pixel":4,"seed":9}}), json!({"volume":volume})]
     {
         options["hdr"] = json!({"resource":"0".repeat(64),"rotation_rad":0,"intensity":1,"samples":16});
-        let params = json!({"settings":{"camera":solidcraft_render::Camera::default(),"width":4,"height":4,"job":{"method":"cpu_raytrace","options":options}}});
+        let params = json!({"settings":{"camera":solidcraft_viewport::Camera::default(),"width":4,"height":4,"job":{"method":"cpu_raytrace","options":options}}});
         let error = s.execute("render.preflight", &params).unwrap_err().to_string();
         assert!(error.contains("Atmosphere"), "{error}");
         assert!(Arc::ptr_eq(&before, &s.doc));
@@ -2728,7 +2854,7 @@ fn cpu_sun_sky_named_runtime_reopen_and_actual_output_keep_the_same_capture() {
     let host = CpuHost::for_platform().unwrap();
     s.set_render_job_host(Some(host.clone())).unwrap();
     s.execute("solid.box", &json!({"length":10,"width":10,"height":3})).unwrap();
-    let camera = solidcraft_render::Camera { distance: 30.0, fov: 0.7, ..Default::default() };
+    let camera = solidcraft_viewport::Camera { distance: 30.0, fov: 0.7, ..Default::default() };
     let options = json!({"path":{"max_depth":3},"progressive":{"samples_per_pixel":3,"seed":81},"lights":[],"denoise":true,
         "sun":{"direction":[0.2,-0.3,0.9],"angular_radius_rad":0.2,"radiance":[10,8,6]},
         "sky":{"kind":"sky","gradient":{"zenith":[0.25,0.5,1.0],"horizon":[0.75,0.5,0.25],"ground":[0.125,0.25,0.5]},"rotation_rad":0.731,"intensity":1.75},
@@ -2793,7 +2919,7 @@ mod bounded_render_preparation {
     use crate::render_preparation::{Kind, finish, prepare};
     use solidcraft_render::job::{CancelToken, CpuHost, JobId};
 
-    fn camera_bits(camera: Option<solidcraft_render::Camera>) -> Option<(solidcraft_render::UpAxis, [u64; 8])> {
+    fn camera_bits(camera: Option<solidcraft_viewport::Camera>) -> Option<(solidcraft_viewport::UpAxis, [u64; 8])> {
         camera.map(|camera| {
             (
                 camera.up,
@@ -2864,7 +2990,7 @@ mod bounded_render_preparation {
             match change {
                 0 => cancel.cancel(),
                 1 => session.revision += 1,
-                2 => session.camera = Some(solidcraft_render::Camera { distance: 51.0, ..Default::default() }),
+                2 => session.camera = Some(solidcraft_viewport::Camera { distance: 51.0, ..Default::default() }),
                 3 => session.set_render_job_host(Some(CpuHost::cooperative())).unwrap(),
                 4 => {
                     let (mut unrelated, _) = fixture();
@@ -2999,7 +3125,7 @@ mod native_camera_queue_preparation {
     fn fixture(count: usize) -> (Session, CpuHost) {
         let (mut s, host) = super::session();
         for i in 0..count {
-            let camera = solidcraft_render::Camera { yaw: i as f64 * 0.2, pitch: 0.3, distance: 51.0 + i as f64, ..Default::default() };
+            let camera = solidcraft_viewport::Camera { yaw: i as f64 * 0.2, pitch: 0.3, distance: 51.0 + i as f64, ..Default::default() };
             s.execute(
                 "render.settings.set",
                 &json!({"name":format!("Shot{i:02}"),"set":{
@@ -3096,7 +3222,8 @@ mod native_camera_queue_preparation {
         let model = s.model.state();
         let camera = s.camera;
         let history = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
-        let cameras: [solidcraft_render::Camera; 32] = s.doc.render.setups.values().map(|setup| setup.camera).collect::<Vec<_>>().try_into().unwrap();
+        let cameras: [solidcraft_viewport::Camera; 32] =
+            s.doc.render.setups.values().map(|setup| setup.camera).collect::<Vec<_>>().try_into().unwrap();
         let (mut prepared, worker) = initial(&mut s, json!({}));
         assert!(prepared.is_first() && prepared.owner_matches(&s) && !prepared.committed());
         assert!(s.render_queue_state().job.is_none(), "no scratch or invented preparing job ID");
@@ -3171,6 +3298,56 @@ mod native_camera_queue_preparation {
         assert!(Arc::ptr_eq(&doc, &s.doc) && Arc::ptr_eq(&model, &s.model.state()));
         assert_eq!(s.camera, camera);
         assert_eq!((s.revision, s.evaluations, s.undo.len(), s.redo.len()), history);
+    }
+
+    #[test]
+    fn native_batch_retained_plan_and_completed_images_allow_a_new_ram_epoch_before_next_capture() {
+        let (mut s, _) = fixture(2);
+        let host = CpuHost::for_platform().unwrap();
+        s.set_render_job_host(Some(host.clone())).unwrap();
+        let wait_released = |handle: &solidcraft_render::job::JobHandle| {
+            assert_eq!(handle.wait_timeout(std::time::Duration::from_secs(10)).unwrap().progress.phase, Phase::Completed);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !handle.work_released() && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            assert!(handle.work_released(), "terminal publication must finish releasing task backing");
+        };
+        let (mut first, worker) = initial(&mut s, json!({}));
+        batch::finish_retained(&mut s, &mut first).unwrap();
+        let mut plan = batch::take_plan(&mut first).unwrap();
+        let plan_bytes = plan.as_ref().unwrap().retained_bytes();
+        worker.retire(first);
+        let first_handle = s.render_job_handle(s.render_queue_state().job.unwrap()).unwrap();
+        wait_released(&first_handle);
+        let frame = first_handle.frame().unwrap().unwrap();
+        let held = host.admitted_bytes();
+        assert!(held > plan_bytes, "the Plan, request metadata, and completed image remain owned");
+
+        let receipt = s.execute("render.preflight", &json!({"setup":"Shot00"})).unwrap();
+        let memory = &receipt["admission"]["host_memory"];
+        assert_eq!(memory["admitted_bytes"], json!(held));
+        let credit = memory["credited_bytes"].as_u64().unwrap();
+        assert!(credit > 0, "engine preflight owns a newly funded capture at its receipt check");
+        assert_eq!(memory["required_bytes"], json!(credit));
+        assert_eq!(memory["additional_bytes"], json!(0));
+        let expected_debit = if memory["source"] == "conservative_fallback" { held.checked_add(credit).unwrap() } else { credit };
+        assert_eq!(memory["physical_debit_bytes"], json!(expected_debit), "only the new capture debits a refreshed actual-RAM snapshot");
+        assert_eq!(host.admitted_bytes(), held, "rebasing does not release software accounting");
+
+        // The next camera borrows old-epoch Plan metadata while funding a new
+        // capture. Its final held/held self-check must not count that credit twice.
+        let claim = batch::claim_next(&mut s, &mut plan, CancelToken::default()).unwrap().unwrap();
+        assert!(plan.is_none());
+        let (mut next, worker) = Worker::prepare(claim);
+        let reply = batch::finish_retained(&mut s, &mut next).unwrap();
+        assert!(batch::take_plan(&mut next).unwrap().is_none());
+        worker.retire(next);
+        let id: JobId = serde_json::from_value(reply["job"].clone()).unwrap();
+        let second_handle = s.render_job_handle(id).unwrap();
+        wait_released(&second_handle);
+        assert!(second_handle.frame().unwrap().is_some());
+        assert!(!frame.png().is_empty(), "the earlier image remains valid across the next epoch");
     }
 
     #[test]
@@ -3496,14 +3673,17 @@ mod native_camera_queue_preparation {
         }
         let (mut s, host) = fixture(2);
         let seen = Arc::new(AtomicBool::new(false));
-        let probe =
-            DropInScope { path: std::env::temp_dir().join("solidcraft-batch-scope-drop.hdr").to_string_lossy().into_owned(), seen: seen.clone() };
+        let probe = DropInScope {
+            path: solidcraft_io::vfs::temp_dir().join("solidcraft-batch-scope-drop.hdr").to_string_lossy().into_owned(),
+            seen: seen.clone(),
+        };
         s.set_command_check(Some(Arc::new(move |_, _, _| {
             assert!(!probe.path.is_empty());
             Ok(())
         })));
         let mut params = Some(json!({}));
-        let mut scope = Some(solidcraft_io::vfs::PathScope::new([std::env::temp_dir()]));
+        // The long-name spelling: the path check refuses a short (8.3) %TEMP% such as ABCDEF~1.XYZ (#14320).
+        let mut scope = Some(solidcraft_io::vfs::PathScope::new([solidcraft_io::vfs::temp_dir()]));
         let claim = batch::claim(&mut s, &mut params, &mut scope, CancelToken::default()).unwrap();
         let (mut prepared, worker) = Worker::prepare(claim);
         batch::finish_retained(&mut s, &mut prepared).unwrap();
@@ -3567,8 +3747,8 @@ fn tessellated_cpu_sheet_saved_and_prospective_bindings_certify_and_render_witho
     let draft_name = scene.meshes[1].name.clone();
     let targets = s.execute("render.library.targets", &json!({})).unwrap();
     let draft_target = targets["items"].as_array().unwrap().iter().find(|row| row["name"] == draft_name).unwrap()["stable_target"].clone();
-    let mut camera = solidcraft_render::Camera { target: solidcore_record::Vec3::new(15.0, 0.0, 0.0), distance: 30.0, ..Default::default() };
-    camera.set_view(solidcraft_render::StandardView::Top);
+    let mut camera = solidcraft_viewport::Camera { target: solidcore_record::Vec3::new(15.0, 0.0, 0.0), distance: 30.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Top);
     s.execute(
         "render.settings.set",
         &json!({"name":"Sheets","set":{"camera":camera,"width":8,"height":4,
@@ -3647,4 +3827,67 @@ fn tessellated_cpu_sheet_saved_and_prospective_bindings_certify_and_render_witho
     assert_eq!(s.doc.render.setups["Sheets"], saved);
     assert!(Arc::ptr_eq(&document, &s.doc) && Arc::ptr_eq(&geometry, &s.model.state()));
     assert_eq!(history, (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty()));
+}
+
+#[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+#[test]
+fn saved_final_cpu_image_preserves_mode_executor_and_authored_quality_through_start() {
+    let mut session = Session::default();
+    let host = CpuHost::for_platform().unwrap();
+    session.set_render_job_host(Some(host)).unwrap();
+    session.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    session
+        .execute(
+            "render.settings.set",
+            &json!({"name":"Final OPUS reference","set":{
+            "mode":"final","width":2,"height":2,"job":{"method":"cpu_raytrace","options":{
+                "budget":"workstation","path":{"max_depth":64},"progressive":{"samples_per_pixel":3,"seed":81},
+                "lights":[],"environment":{"color":[0.1,0.2,0.3],"intensity":1},"output":{"linear_exr":true}
+            }}}}),
+        )
+        .unwrap();
+    let params = json!({"setup":"Final OPUS reference"});
+    let before = session.doc.clone();
+    let preflight = session.execute("render.preflight", &params).unwrap();
+    assert_eq!(preflight["resolved"]["profile"]["mode"], "final");
+    assert_eq!(preflight["resolved"]["executor"], "cpu-raytrace");
+    let started = session.execute("render.start", &params).unwrap();
+    let id = serde_json::from_value(started["job"].clone()).unwrap();
+    let job = session.render_job_handle(id).unwrap();
+    let status = job.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    assert_eq!(status.progress.phase, solidcraft_render::job::Phase::Completed);
+    assert_eq!(status.resolved.profile.mode, solidcraft_render::RenderMode::Final);
+    assert_eq!(status.resolved.executor.as_str(), "cpu-raytrace");
+    let options = status.request.raytrace.unwrap();
+    assert_eq!(options.path.unwrap().max_depth, 64);
+    assert_eq!(options.progressive.unwrap().samples_per_pixel, 3);
+    assert!(job.frame().unwrap().unwrap().linear_master_info().is_some());
+    assert!(Arc::ptr_eq(&before, &session.doc));
+}
+
+#[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+#[test]
+fn cpu_quality_limits_refuse_before_input_io_and_scene_capture() {
+    let mut s = Session::default();
+    let host = CpuHost::for_platform().unwrap();
+    s.set_render_job_host(Some(host.clone())).unwrap();
+    let document = s.doc.clone();
+    let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
+    for (width, height, options) in [
+        (1024, 1024, json!({"supersampling":2,"progressive":{"samples_per_pixel":8}})),
+        (8, 8, json!({"threads":65})),
+        (8, 8, json!({"supersampling":3})),
+        (8, 8, json!({"denoise_settings":{"passes":4}})),
+        (8193, 1, json!({"budget":"workstation","denoise_diagnostics":true})),
+    ] {
+        let request = json!({"integrator":"raytrace","settings":{"width":width,"height":height},
+            "raytrace":options,"environment":{"path":"must-not-open-quality-controls.hdr"}});
+        for command in ["render.preflight", "render.start"] {
+            let error = s.execute(command, &request).unwrap_err().to_string();
+            assert!(!error.contains("must-not-open-quality-controls.hdr"), "quality must refuse before source IO: {error}");
+            assert_eq!(host.admitted_bytes(), 0);
+            assert!(Arc::ptr_eq(&document, &s.doc));
+            assert_eq!(before, (s.revision, s.evaluations, s.undo.len(), s.redo.len()));
+        }
+    }
 }

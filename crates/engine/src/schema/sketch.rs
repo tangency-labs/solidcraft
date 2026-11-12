@@ -26,11 +26,53 @@ use super::types::{IdOrName, Point3, present};
 #[schemars(deny_unknown_fields)]
 pub struct EditParams {
     pub sketch: IdOrName,
-    /// When present, temporarily roll to this sketch and restore this position when the edit
-    /// ends. Null means the end of the timeline; omission leaves the timeline in place.
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<usize>")]
-    pub restore_marker: Option<Option<usize>>,
+    /// A position (or null, the end of the timeline): temporarily roll to this sketch and
+    /// restore that position when the edit ends. Left out, a sketch with features after it is
+    /// rolled to and the current position restored, so those features rebuild once, when the
+    /// edit ends (#14010). `false` leaves the timeline in place, rebuilding them after every
+    /// sketch command.
+    #[serde(default, deserialize_with = "present")]
+    pub restore_marker: Option<EditMarker>,
+}
+
+/// `sketch.edit`'s `restore_marker`: where the timeline goes back to when the edit ends, or
+/// `false` to edit with the timeline left in place.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EditMarker {
+    /// Roll to the sketch; restore this position (`None`: the end) when the edit ends.
+    Restore(Option<usize>),
+    /// Leave the timeline in place.
+    InPlace,
+}
+
+impl EditMarker {
+    pub(crate) fn read(v: &Value) -> Option<Self> {
+        match v {
+            Value::Null => Some(Self::Restore(None)),
+            Value::Bool(false) => Some(Self::InPlace),
+            Value::Number(n) => n.as_u64().and_then(|m| usize::try_from(m).ok()).map(|m| Self::Restore(Some(m))),
+            _ => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EditMarker {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        Self::read(&v).ok_or_else(|| D::Error::custom("`restore_marker` must be a nonnegative timeline position, null or false"))
+    }
+}
+
+impl JsonSchema for EditMarker {
+    fn schema_name() -> Cow<'static, str> {
+        "EditMarker".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A timeline position to restore when the edit ends (null: the end), or false to leave the timeline in place.",
+            "anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}, {"const": false}]
+        })
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -338,8 +380,8 @@ pub struct Constrained {
     pub determined_by: Option<Vec<String>>,
 }
 
-/// What `sketch.constraint.horizontal_vertical`, `tangent`, `parallel`, `perpendicular`,
-/// `collinear`, `concentric` and `midpoint` return.
+/// What `sketch.constraint.horizontal_vertical`, `parallel`, `perpendicular`, `collinear`,
+/// `concentric` and `midpoint` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ConstraintResult {
     #[serde(flatten)]
@@ -347,6 +389,43 @@ pub struct ConstraintResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// What `sketch.constraint.tangent` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TangentResult {
+    #[serde(flatten)]
+    pub made: TangentMade,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What a Tangent call added.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum TangentMade {
+    /// Two curves: one Tangent constraint.
+    Curves(Constrained),
+    /// A curve's end point for `a` or `b` (#12092): the end now lies on the other curve (a
+    /// point-on-curve or, for two end points, a coincident constraint, left out when the end was
+    /// already there) and its curve is tangent there.
+    End {
+        /// The Tangent constraint.
+        constraint: String,
+        /// Every constraint added, the Tangent last.
+        constraints: Vec<String>,
+        /// The sketch's solve: `{solved, dof}`.
+        sketch: Value,
+        /// `true` when they already held and other constraints already determined them: they are
+        /// kept, shown as redundant (not when `if_redundant` is `refuse`, which refuses the call
+        /// instead). Absent otherwise.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        redundant: Option<bool>,
+        /// With `redundant`: the constraints that determine the Tangent, as "id (Name)".
+        #[serde(skip_serializing_if = "Option::is_none")]
+        determined_by: Option<Vec<String>>,
+    },
 }
 
 /// What `sketch.constraint.coincident` returns.
@@ -493,10 +572,11 @@ macro_rules! two_operands {
 }
 
 two_operands! {
-    /// Make two curves, or a curve and a sketch axis, tangent. Two different curves are needed.
+    /// Make two curves, a curve and a sketch axis, or a curve's end point and another curve,
+    /// tangent. Two different curves are needed.
     TangentParams,
-    a: "A curve's id, or `x` / `y` for the sketch's own axis (a curve with that id wins; an axis becomes a linked construction line, reported in `created`), or a model edge.",
-    b: "The other curve, as `a`.",
+    a: "A curve's id, or `x` / `y` for the sketch's own axis (a curve with that id wins; an axis becomes a linked construction line, reported in `created`), or a model edge, or the end point of a line or an arc (such as `l1.end`): that end then lies on the other curve, and its curve is tangent there (`constraints` lists both).",
+    b: "The other curve or end point, as `a`.",
     what: "a curve id, or x / y for a sketch axis"
 }
 

@@ -79,7 +79,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             apply_op(doc, st, f, tools, Operation::Join, &[])
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
-            let tp = doc.resolve_plane_in(vals, target, 0, Some(st))?;
+            let tp = doc.resolve_plane_in(vals, target, 0, f.component, Some(st))?;
             let tn = tp.normal();
             let i = body_at(st, body, &crate::plain(faces))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
@@ -98,7 +98,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
             }
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, b, mb.feature);
+                *slot = mb.remade(b);
             }
             Ok(())
         }
@@ -106,7 +106,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // A plane on either side is worked out now, so the bodies follow it when it moves.
             let (mut from, mut from_normal) = (from.0, from_normal.and_then(|n| n.normalized()));
             if let Some(p) = from_plane {
-                let pl = doc.resolve_plane_in(vals, p, 0, Some(&*st))?;
+                let pl = doc.resolve_plane_in(vals, p, 0, f.component, Some(&*st))?;
                 (from, from_normal) = (pl.origin, Some(pl.normal()));
             }
             // So is a frame (#6257): its origin and z, found again from the geometry.
@@ -116,7 +116,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             let target = match to_frame {
                 Some(_) => None,
-                None => to_plane.as_ref().map(|p| doc.resolve_plane_in(vals, p, 0, Some(&*st))).transpose()?,
+                None => to_plane.as_ref().map(|p| doc.resolve_plane_in(vals, p, 0, f.component, Some(&*st))).transpose()?,
             };
             let (to, to_normal) = match (to_frame, &target) {
                 (Some(fr), _) => fr.resolve(doc, st).map(|(o, z)| (o, Some(z)))?,
@@ -1835,6 +1835,26 @@ pub(super) fn line_beyond_reach(mb: &ModelBody, at: Vec3, dir: Vec3, reach: f64)
     lo > hi
 }
 
+/// Whether [`kernel::cylinder_face_at`] is known to find no face of `mb` at `p`. It takes a face
+/// only when its mesh of the body, made to a chord tolerance of `(size * 1e-3).max(1e-3)`, comes
+/// within a twentieth of the body's size of the point. That mesh lies within its tolerance of
+/// the exact faces, so of the body's exact box ([`exact_box`]): a box farther from the point
+/// than a twentieth of the size and twice that tolerance holds no face for it. Working that out
+/// from the exact box spares meshing every body in the design for each tap marking (#10227). A
+/// mesh body, and a body whose box is unknown, are searched as before.
+pub(super) fn beyond_cylinder_reach(mb: &ModelBody, p: Vec3) -> bool {
+    if mb.body.is_mesh() {
+        return false;
+    }
+    let Some(b) = exact_box(&mb.body) else { return false };
+    let size = mb.body.size();
+    let reach = size * 0.05 + 2.0 * (size * 1e-3).max(1e-3);
+    let off = |at: f64, lo: f64, hi: f64| (lo - at).max(at - hi).max(0.0);
+    let (dx, dy, dz) = (off(p.x, b.min.x, b.max.x), off(p.y, b.min.y, b.max.y), off(p.z, b.min.z, b.max.z));
+    let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+    dist.is_finite() && reach.is_finite() && dist > reach
+}
+
 /// Whether two boxes are known to be apart (an unknown box is never apart).
 pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
     let (Some(a), Some(b)) = (a, b) else { return false };
@@ -2083,7 +2103,7 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 let edges = resolve_edges(&mb.body, &[position.0 + x * r0], &[], &mut warn)?;
                 let nb = mb.traced().then(kernel::fillet(&mb.body, &edges, rf)?);
                 if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                    *slot = mb.remade(nb);
                 }
             }
             if let Some(hd) = hole_diameter {

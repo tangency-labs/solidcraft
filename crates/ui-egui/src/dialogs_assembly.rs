@@ -7,8 +7,8 @@
 
 use std::collections::HashSet;
 
-use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use egui::{Color32, Pos2, RichText, Stroke, vec2};
 use serde_json::{Value, json};
@@ -24,9 +24,10 @@ use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, field, form_row};
 use crate::preview::{Built, Colors};
 use crate::selection::{
-    BODIES, EDGES, FACES, ORIGIN, POINTS, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid,
+    AXES, BODIES, CONSTRUCTION_POINTS, EDGES, FACES, ORIGIN, PLANES, POINTS, SelInput, SelectionExt as _, VERTICES, items as sel_items,
+    point_value as pt, polyline_mid,
 };
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 use crate::viewport::Proj;
 
@@ -73,12 +74,13 @@ pub(crate) fn kind_label(kind: JointKind) -> &'static str {
 
 /// A joint as the joint lists name it: its name, and its type in the user's language.
 pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
-    format!("{name} ({})", crate::i18n::tr_label(kind_label(kind)))
+    format!("{name} ({})", solidcraft_ui_text::tr_label(kind_label(kind)))
 }
 
-/// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, and
-/// a sketch point (so a joint can be placed on the design origin or a hole centre, like Fusion's).
-pub const SNAPS: u16 = FACES | EDGES | VERTICES | ORIGIN | POINTS;
+/// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, a
+/// sketch point (so a joint can be placed on the design origin or a hole centre, like Fusion's),
+/// and the design's planes, axes and construction points.
+pub const SNAPS: u16 = FACES | EDGES | VERTICES | ORIGIN | POINTS | PLANES | AXES | CONSTRUCTION_POINTS;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
 const MOVES: &[&str] = &[
     "joint.create",
@@ -397,33 +399,68 @@ fn side_inputs() -> Vec<SelInput> {
     vec![SelInput::new("Component 1", SNAPS, false), SelInput::new("Component 2", SNAPS, false)]
 }
 
-/// The pick a joint side shows in the side inputs: the face or edge of its own occurrence that
-/// the side's snap names (the piece nearest its pick, when the name has several), else the face
-/// or edge nearest the pick. A point or frame side names no face, so it shows its component.
+/// The pick a joint side shows in the side inputs: the face, edge, plane, or axis of its own
+/// occurrence that the side's snap names (the piece nearest its pick, when the name has
+/// several), else the face or edge nearest the pick. A point or frame side names no face, so it
+/// shows its component.
 fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     let s = &app.session;
     let (pick, face, edge) = match &o.snap {
         Snap::FaceCenter { pick, face, .. } | Snap::CircleCenter { pick, face, .. } => (*pick, face.as_deref(), None),
         Snap::Edge { pick, edge, .. } => (*pick, None, edge.as_deref()),
-        Snap::Point { .. } | Snap::Frame { .. } => {
-            let path = if o.occurrence == 0 {
-                Vec::new()
+        Snap::Plane { plane, .. } => {
+            let name = match plane.as_ref() {
+                solidcraft_engine::doc::PlaneRef::Origin { name } => Some(name.clone()),
+                solidcraft_engine::doc::PlaneRef::Datum { datum } => Some(datum.key()),
+                solidcraft_engine::doc::PlaneRef::Construction { feature } => {
+                    let id = feature.0;
+                    s.doc
+                        .feature(id)
+                        .map(|f| f.name.clone())
+                        .or_else(|| s.model.state().construct.iter().find(|c| c.feature == id).map(|c| c.name.clone()))
+                }
+                _ => None,
+            }?;
+            if matches!(plane.as_ref(), solidcraft_engine::doc::PlaneRef::Datum { .. }) {
+                return Some(Sel::Plane { name });
+            }
+            let name = if o.occurrence == 0 {
+                name
             } else {
-                let occurrence = s.doc.occurrences.iter().find(|p| p.id == o.occurrence)?;
-                let mut path = s.doc.first_path(occurrence.parent);
-                path.push(occurrence.id);
-                s.doc.path_placement(&path)?;
-                path
+                let occ_name = s.doc.occurrences.iter().find(|occ| occ.id == o.occurrence).map(|occ| occ.name.as_str()).unwrap_or("");
+                if occ_name.is_empty() { name } else { format!("{occ_name}/{name}") }
             };
-            return Some(Sel::Occurrence { path });
+            return Some(Sel::Plane { name });
         }
+        Snap::Axis { axis, .. } => {
+            let name = match axis.as_ref() {
+                solidcraft_engine::doc::joints::AxisRef::Name(name) => Some(name.clone()),
+                solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Origin { axis }) => Some(axis.clone()),
+                solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Construction { name }) => {
+                    Some(name.clone())
+                }
+                solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Datum { datum }) => Some(datum.key()),
+                _ => None,
+            }?;
+            if matches!(axis.as_ref(), solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Datum { .. })) {
+                return Some(Sel::Axis { name });
+            }
+            let name = if o.occurrence == 0 {
+                name
+            } else {
+                let occ_name = s.doc.occurrences.iter().find(|occ| occ.id == o.occurrence).map(|occ| occ.name.as_str()).unwrap_or("");
+                if occ_name.is_empty() { name } else { format!("{occ_name}/{name}") }
+            };
+            return Some(Sel::Axis { name });
+        }
+        Snap::Point { .. } | Snap::Frame { .. } => return Some(Sel::Occurrence { path: origin_placement(s, o)? }),
     };
-    // The pick is in the component's coordinates; the placed bodies are in the world.
-    let at =
-        if o.occurrence == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, o.occurrence) };
+    // The pick is in its part's coordinates; the placed bodies are in the world.
+    let path = origin_placement(s, o)?;
+    let (_, at) = s.doc.path_placement(&path)?;
     let p = solidcraft_engine::doc::apply_point(&at, pick);
     let st = crate::open_meshing::session_world(s);
-    let own: Vec<&solidcraft_engine::doc::ModelBody> = st.bodies.iter().filter(|b| occurrence_of_body(s, &b.name) == Some(o.occurrence)).collect();
+    let own: Vec<&solidcraft_engine::doc::ModelBody> = st.bodies.iter().filter(|b| placement_of_body(s, &b.name).as_ref() == Some(&path)).collect();
     let named = match (face, edge) {
         (Some(name), _) => own.iter().filter_map(|b| named_face(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
         (None, Some(name)) => own.iter().filter_map(|b| named_edge(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
@@ -565,7 +602,7 @@ pub fn find_joint(app: &mut SolveApp, id: u64) {
         return;
     }
     let mut cam = app.cam;
-    cam.fit(&bb);
+    cam.fit(&solidcraft_engine::render::view_bounds(&bb));
     app.animate_to(cam);
 }
 
@@ -611,15 +648,34 @@ pub struct SnapPt {
 
 /// The occurrence placing a world body (0: the root design), the instance its name says.
 pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
-    // The world name tells the instance: a further occurrence of a component is not its first.
+    placement_of_body(s, body).map(|path| path.last().copied().unwrap_or(0))
+}
+
+/// The placement of a world body: the occurrence ids from the root (empty: the root design).
+/// The world name tells the instance, a copy of a sub-assembly placed more than once included.
+pub(crate) fn placement_of_body(s: &Session, body: &str) -> Option<Vec<u64>> {
     let st = crate::open_meshing::session_world(s);
     let b = st.body(body)?;
     if s.doc.model_body_component(b) == 0 {
-        return Some(0);
+        return Some(Vec::new());
     }
     let model = s.model.state();
     let (_, _, _, path, _) = s.doc.body_frames_with_source(&model).into_iter().find(|(world, ..)| world == body)?;
-    path.last().copied()
+    (!path.is_empty()).then_some(path)
+}
+
+/// The placement a joint origin's part is at: its occurrence's first placement, then the
+/// occurrences it is inside.
+fn origin_placement(s: &Session, o: &JointOrigin) -> Option<Vec<u64>> {
+    if o.occurrence == 0 {
+        return Some(Vec::new());
+    }
+    let occurrence = s.doc.occurrences.iter().find(|p| p.id == o.occurrence)?;
+    let mut path = s.doc.first_path(occurrence.parent);
+    path.push(occurrence.id);
+    path.extend(&o.inside);
+    s.doc.path_placement(&path)?;
+    Some(path)
 }
 
 /// Centre and unit normal of the circle through a polyline's points, if it lies on one.
@@ -659,7 +715,7 @@ fn straight_edge_axis(pts: &[Vec3]) -> Option<Vec3> {
 }
 
 /// Normal of the mesh face `f` near `p`.
-fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
+pub(crate) fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
     m.triangles
         .iter()
         .zip(&m.tri_face)
@@ -669,10 +725,147 @@ fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
         .and_then(|[a, b, c]| (b - a).cross(c - a).normalized())
 }
 
+/// The hover label tag: "Plane" or "Axis" when picking planes or axes, else the snap kind's name.
+pub(crate) fn snap_tag(s: &SnapPt) -> &'static str {
+    if s.param.get("plane").is_some() {
+        solidcraft_ui_text::tr("ui.plane")
+    } else if s.param.get("axis").is_some() {
+        solidcraft_ui_text::tr("ui.axis")
+    } else {
+        snap_name(s.kind)
+    }
+}
+
 /// The snap a picked item stands for (world coordinates, as the viewport shows them).
 pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
+    let model_st = s.model.state();
     let st = crate::open_meshing::session_world(s);
     let (body, mut snap) = match sel {
+        Sel::Plane { name } => {
+            // A datum side round-trips through its key: the pick stands for that placement's datum.
+            if let Some(datum) = solidcraft_engine::doc::construct::DatumRef::parse_key(name) {
+                let occ = datum.path.last().copied().unwrap_or(0);
+                let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
+                let (at, z) = match datum.item.geom() {
+                    solidcraft_engine::doc::construct::ConstructGeom::Plane(p) => (
+                        solidcraft_engine::doc::apply_point(&t, p.origin),
+                        solidcraft_engine::doc::apply_vector(&t, p.normal()).normalized().unwrap_or(Vec3::Z),
+                    ),
+                    _ => return None,
+                };
+                return Some(SnapPt { at, z, kind: SnapKind::FaceCenter, param: json!({"occurrence": occ, "plane": name}) });
+            }
+            let (occ, plane_name) = if let Some((prefix, plane_name)) = name.rsplit_once('/') {
+                let occ = s
+                    .doc
+                    .occurrences
+                    .iter()
+                    .find(|o| o.name == prefix || o.id.to_string() == prefix)
+                    .map(|o| o.id)
+                    .or_else(|| s.doc.find_component(prefix).and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id))
+                    .unwrap_or(0);
+                (occ, plane_name)
+            } else {
+                let occ = model_st
+                    .construct
+                    .iter()
+                    .find(|c| c.name == *name)
+                    .and_then(|c| {
+                        let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+                        if comp == 0 { Some(0) } else { s.doc.occurrence_of(comp).map(|o| o.id) }
+                    })
+                    .unwrap_or(0);
+                (occ, name.as_str())
+            };
+            let upper = plane_name.to_ascii_uppercase();
+            let (local_origin, local_normal) = if matches!(upper.as_str(), "XY" | "XZ" | "YZ") {
+                let p = solidcore_record::Plane::named(&upper)?;
+                (p.origin, p.normal().normalized().unwrap_or(Vec3::Z))
+            } else {
+                let selected_component = if occ == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occ).map(|o| o.component).unwrap_or(0) };
+                let c = model_st.construct.iter().find(|c| {
+                    c.name == plane_name
+                        && s.doc.feature(c.feature).map(|f| f.component) == Some(selected_component)
+                        && matches!(&c.geom, solidcraft_engine::doc::construct::ConstructGeom::Plane(_))
+                })?;
+                match &c.geom {
+                    solidcraft_engine::doc::construct::ConstructGeom::Plane(p) => (p.origin, p.normal().normalized().unwrap_or(Vec3::Z)),
+                    _ => return None,
+                }
+            };
+            let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
+            let at = solidcraft_engine::doc::apply_point(&t, local_origin);
+            let z = solidcraft_engine::doc::apply_vector(&t, local_normal).normalized().unwrap_or(Vec3::Z);
+            ("", SnapPt { at, z, kind: SnapKind::FaceCenter, param: json!({"occurrence": occ, "plane": plane_name}) })
+        }
+        Sel::Axis { name } => {
+            if let Some(datum) = solidcraft_engine::doc::construct::DatumRef::parse_key(name) {
+                let occ = datum.path.last().copied().unwrap_or(0);
+                let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
+                let (at, z) = match datum.item.geom() {
+                    solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } => (
+                        solidcraft_engine::doc::apply_point(&t, origin),
+                        solidcraft_engine::doc::apply_vector(&t, dir).normalized().unwrap_or(Vec3::Z),
+                    ),
+                    _ => return None,
+                };
+                return Some(SnapPt { at, z, kind: SnapKind::EdgeMid, param: json!({"occurrence": occ, "axis": name}) });
+            }
+            let (occ, axis_name) = if let Some((prefix, axis_name)) = name.rsplit_once('/') {
+                let occ = s
+                    .doc
+                    .occurrences
+                    .iter()
+                    .find(|o| o.name == prefix || o.id.to_string() == prefix)
+                    .map(|o| o.id)
+                    .or_else(|| s.doc.find_component(prefix).and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id))
+                    .unwrap_or(0);
+                (occ, axis_name)
+            } else {
+                let occ = model_st
+                    .construct
+                    .iter()
+                    .find(|c| c.name == *name)
+                    .and_then(|c| {
+                        let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+                        if comp == 0 { Some(0) } else { s.doc.occurrence_of(comp).map(|o| o.id) }
+                    })
+                    .unwrap_or(0);
+                (occ, name.as_str())
+            };
+            let upper = axis_name.to_ascii_uppercase();
+            let (local_origin, local_dir) = if matches!(upper.as_str(), "X" | "Y" | "Z") {
+                let d = match upper.as_str() {
+                    "X" => Vec3::X,
+                    "Y" => Vec3::Y,
+                    _ => Vec3::Z,
+                };
+                (Vec3::ZERO, d)
+            } else {
+                let c = model_st.construct.iter().find(|c| c.name == axis_name)?;
+                match &c.geom {
+                    solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } => (*origin, dir.normalized().unwrap_or(Vec3::Z)),
+                    _ => return None,
+                }
+            };
+            let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
+            let at = solidcraft_engine::doc::apply_point(&t, local_origin);
+            let z = solidcraft_engine::doc::apply_vector(&t, local_dir).normalized().unwrap_or(Vec3::Z);
+            ("", SnapPt { at, z, kind: SnapKind::EdgeMid, param: json!({"occurrence": occ, "axis": axis_name}) })
+        }
+        Sel::ConstructionPoint { name } => {
+            let c = model_st.construct.iter().find(|c| c.name == *name)?;
+            let p = match &c.geom {
+                solidcraft_engine::doc::construct::ConstructGeom::Point(p) => *p,
+                _ => return None,
+            };
+            let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+            let occ = if comp == 0 { 0 } else { s.doc.occurrence_of(comp).map(|o| o.id).unwrap_or(0) };
+            let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
+            let at = solidcraft_engine::doc::apply_point(&t, p);
+            let z = solidcraft_engine::doc::apply_vector(&t, Vec3::Z).normalized().unwrap_or(Vec3::Z);
+            ("", SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"occurrence": occ, "point": pt(at), "z": pt(z)}) })
+        }
         Sel::Face { body, index, point } => {
             let b = st.body(body)?;
             let faces = b.joint_faces().ok()?;
@@ -744,8 +937,13 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         }
         _ => return None,
     };
-    if let (Some(occ), Value::Object(m)) = (occurrence_of_body(s, body), &mut snap.param) {
-        m.insert("occurrence".into(), json!(occ));
+    // The placement picked on, so a part in a sub-assembly placed more than once is found on the
+    // copy it was picked on (#11426).
+    if let (Some(path), Value::Object(m)) = (placement_of_body(s, body), &mut snap.param) {
+        m.insert("occurrence".into(), json!(path.last().copied().unwrap_or(0)));
+        if !path.is_empty() {
+            m.insert("path".into(), json!(path));
+        }
     }
     Some(snap)
 }
@@ -794,6 +992,9 @@ fn shifted(s: &SnapPt, x: f64, y: f64) -> Value {
     let ax = s.z.any_perp();
     let ay = s.z.cross(ax);
     let mut p = json!({"frame": {"origin": pt(s.at + ax * x + ay * y), "z": pt(s.z), "x": pt(ax)}});
+    if let Some(path) = s.param.get("path") {
+        p["path"] = path.clone();
+    }
     if let Some(o) = s.param.get("occurrence") {
         p["occurrence"] = o.clone();
     }
@@ -819,7 +1020,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             }
         }
         Asm::NewComponent { name, activate } => {
-            enter |= text_row(ui, "Name", name, crate::i18n::tr_label("Component1")).0;
+            enter |= text_row(ui, "Name", name, solidcraft_ui_text::tr_label("Component1")).0;
             crate::ui_kit::options(ui, "component_options", &mut [("Activate", activate)]);
         }
         Asm::Joint(f) => {
@@ -832,8 +1033,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 ui.vertical(|ui| {
                     crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
                     if !bodies.is_empty()
-                        && crate::ui_kit::button(ui, crate::i18n::tr("cmd.component_from_bodies"), crate::ui_kit::Button::Normal)
-                            .backing_on_hover_text(crate::i18n::tr("joint.from_bodies_hint"))
+                        && crate::ui_kit::button(ui, solidcraft_ui_text::tr("cmd.component_from_bodies"), crate::ui_kit::Button::Normal)
+                            .backing_on_hover_text(solidcraft_ui_text::tr("joint.from_bodies_hint"))
                             .clicked()
                     {
                         // A refusal shows on the status line; the picks stay either way.
@@ -869,9 +1070,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
                 form_row(ui, "Animate", |ui| {
-                    let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
+                    let label = solidcraft_ui_text::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
                     if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
-                        .backing_on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"))
+                        .backing_on_hover_text(solidcraft_ui_text::tr_label("Play the joint's motion in the view"))
                         .clicked()
                     {
                         f.animate = !f.animate;
@@ -915,7 +1116,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             }
         }
         Asm::JointOrigin { name, .. } => {
-            enter |= text_row(ui, "Name", name, crate::i18n::tr_label("Joint Origin1")).0;
+            enter |= text_row(ui, "Name", name, solidcraft_ui_text::tr_label("Joint Origin1")).0;
         }
         Asm::RigidGroup => {}
         Asm::Drive { joint, values, focus } => {
@@ -927,9 +1128,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             if let Some((id, name)) = &rigid {
                 let mut edit = false;
                 ui.vertical(|ui| {
-                    let why = crate::i18n::format("drive.rigid", &[("joint", name.as_str())]);
+                    let why = solidcraft_ui_text::format("drive.rigid", &[("joint", name.as_str())]);
                     crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
-                    let r = crate::ui_kit::button(ui, crate::i18n::tr_label("Edit Joint"), crate::ui_kit::Button::Normal);
+                    let r = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Edit Joint"), crate::ui_kit::Button::Normal);
                     crate::scenario::publish_handle("drive:edit_joint", r.rect.center());
                     edit = r.clicked();
                 });
@@ -941,7 +1142,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             if list.is_empty() {
                 if rigid.is_none() {
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(crate::i18n::tr_label("no joint that moves yet")).color(t.text_dim));
+                        ui.label(RichText::new(solidcraft_ui_text::tr_label("no joint that moves yet")).color(t.text_dim));
                     });
                 }
                 return false;
@@ -1015,7 +1216,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 ui.vertical(|ui| {
                     ui.label(
                         RichText::new(format!("{} … {}{}", fmt(lo), fmt(hi), if limited { "  (limits)" } else { "  (no limits)" }))
-                            .size(crate::theme::Tokens::get().font_small)
+                            .size(solidcraft_theme::Tokens::get().font_small)
                             .color(if limited { t.text } else { t.text_dim }),
                     );
                 });
@@ -1085,13 +1286,15 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                     ui.horizontal(|ui| {
                         let seconds = ((crate::now_ms() - started) / 1000.0).floor().max(0.0);
                         ui.add(egui::Spinner::new().size(t.font_small));
-                        ui.label(RichText::new(crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])).color(t.text_dim));
+                        ui.label(
+                            RichText::new(solidcraft_ui_text::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])).color(t.text_dim),
+                        );
                     });
                 });
             }
             form_row(ui, "", |ui| {
                 if check.is_some() {
-                    if crate::ui_kit::button(ui, crate::i18n::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                    if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
                         // Its thread finishes the check; the reply is left unread.
                         *check = None;
                     }
@@ -1100,7 +1303,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 let stale = result.is_some() && *of != picked;
                 if crate::ui_kit::button(
                     ui,
-                    crate::i18n::tr(if stale { "dialog.compute_again" } else { "dialog.compute" }),
+                    solidcraft_ui_text::tr(if stale { "dialog.compute_again" } else { "dialog.compute" }),
                     crate::ui_kit::Button::Normal,
                 )
                 .clicked()
@@ -1132,7 +1335,8 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
     let t = Tokens::get();
     if let Some(search) = &f.search {
         // A poisoned lock: the search's thread panicked.
-        let reply = search.reply.lock().map(|mut r| r.take()).unwrap_or_else(|_| Some(Err(crate::i18n::tr("joint.find_limits_failed").to_string())));
+        let reply =
+            search.reply.lock().map(|mut r| r.take()).unwrap_or_else(|_| Some(Err(solidcraft_ui_text::tr("joint.find_limits_failed").to_string())));
         match reply {
             Some(reply) => {
                 // Found for a design changed since (by a script, the control channel, undo), or
@@ -1143,7 +1347,7 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
                     f.searched = Some(searched);
                     fill_limits(&app.session.doc, f, reply);
                 } else {
-                    f.found_note = Some(crate::i18n::tr("joint.find_limits_stale").to_string());
+                    f.found_note = Some(solidcraft_ui_text::tr("joint.find_limits_stale").to_string());
                 }
                 // The rows above were drawn before this: once more, with what was found.
                 ui.ctx().request_repaint();
@@ -1159,20 +1363,20 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
     {
         f.searched = None;
         f.found.clear();
-        f.found_note = Some(crate::i18n::tr("joint.find_limits_stale").to_string());
+        f.found_note = Some(solidcraft_ui_text::tr("joint.find_limits_stale").to_string());
     }
     form_row(ui, "", |ui| {
         if f.search.is_some() {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(t.font_small));
-                ui.label(RichText::new(crate::i18n::tr("joint.finding_limits")).color(t.text_dim));
-                if crate::ui_kit::button(ui, crate::i18n::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                ui.label(RichText::new(solidcraft_ui_text::tr("joint.finding_limits")).color(t.text_dim));
+                if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
                     // Its thread finishes within its work budget; the reply is left unread.
                     f.search = None;
                 }
             });
-        } else if crate::ui_kit::button(ui, crate::i18n::tr("joint.find_limits"), crate::ui_kit::Button::Normal)
-            .backing_on_hover_text(crate::i18n::tr("joint.find_limits_hint"))
+        } else if crate::ui_kit::button(ui, solidcraft_ui_text::tr("joint.find_limits"), crate::ui_kit::Button::Normal)
+            .backing_on_hover_text(solidcraft_ui_text::tr("joint.find_limits_hint"))
             .clicked()
         {
             find_limits(app, f, id, inputs);
@@ -1274,20 +1478,20 @@ fn fill_limits(doc: &solidcraft_engine::doc::Document, f: &mut JointForm, reply:
         let (min, max) = (lo.map(shown), hi.map(shown));
         let mut lines = Vec::new();
         for (label, found, by) in [("Minimum", &min, &v["min_by"]), ("Maximum", &max, &v["max_by"])] {
-            let which = crate::i18n::tr_label(label);
+            let which = solidcraft_ui_text::tr_label(label);
             let value = found.as_ref().map(|(_, shown)| shown.as_str()).unwrap_or_default();
             lines.push(match by.as_str() {
-                Some("loop") => crate::i18n::format("joint.limit_loop", &[("side", which), ("value", value)]),
-                Some("limit") => crate::i18n::format("joint.limit_limit", &[("side", which), ("value", value)]),
-                Some("turn") => crate::i18n::format("joint.limit_turn", &[("side", which), ("value", value)]),
+                Some("loop") => solidcraft_ui_text::format("joint.limit_loop", &[("side", which), ("value", value)]),
+                Some("limit") => solidcraft_ui_text::format("joint.limit_limit", &[("side", which), ("value", value)]),
+                Some("turn") => solidcraft_ui_text::format("joint.limit_turn", &[("side", which), ("value", value)]),
                 Some(_) => {
                     // Down to a tenth, so it never claims more than was searched.
                     let range = (v["range"].as_f64().filter(|x| x.is_finite()).unwrap_or(0.0) / scale * 10.0).floor() / 10.0;
-                    crate::i18n::format("joint.limit_range", &[("side", which), ("range", &num(range, &unit))])
+                    solidcraft_ui_text::format("joint.limit_range", &[("side", which), ("range", &num(range, &unit))])
                 }
                 None => {
                     let (a, b) = (by["a"].as_str().unwrap_or_default(), by["b"].as_str().unwrap_or_default());
-                    crate::i18n::format("joint.limit_contact", &[("side", which), ("value", value), ("a", a), ("b", b)])
+                    solidcraft_ui_text::format("joint.limit_contact", &[("side", which), ("value", value), ("a", a), ("b", b)])
                 }
             });
         }
@@ -1308,7 +1512,7 @@ fn fill_limits(doc: &solidcraft_engine::doc::Document, f: &mut JointForm, reply:
         .map(|o| format!("{} / {}", o["a"].as_str().unwrap_or_default(), o["b"].as_str().unwrap_or_default()))
         .collect();
     if !overlapping.is_empty() {
-        f.found_note = Some(crate::i18n::format("joint.limits_overlapping", &[("pairs", &overlapping.join(", "))]));
+        f.found_note = Some(solidcraft_ui_text::format("joint.limits_overlapping", &[("pairs", &overlapping.join(", "))]));
     }
 }
 
@@ -1343,7 +1547,7 @@ fn interference(app: &SolveApp, picked: &[Sel], clearance: &str) -> Check {
             }
             check_now(app.session.ahead(), &crate::open_meshing::session_world(&app.session), p)
         }
-        _ => (json!({ "error": crate::i18n::tr("dialog.clearance_invalid") }), Vec::new()),
+        _ => (json!({ "error": solidcraft_ui_text::tr("dialog.clearance_invalid") }), Vec::new()),
     };
     if let Ok(mut slot) = check.reply.lock() {
         *slot = Some(reply);
@@ -1389,7 +1593,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     }
     let hits = r["overlaps"].as_array().cloned().unwrap_or_default();
     form_row(ui, "Checked", |ui| {
-        ui.label(crate::i18n::format("dialog.bodies_count", &[("count", &r["bodies"].as_u64().unwrap_or(0).to_string())]));
+        ui.label(solidcraft_ui_text::format("dialog.bodies_count", &[("count", &r["bodies"].as_u64().unwrap_or(0).to_string())]));
     });
     let unchecked = r["unchecked"].as_array().cloned().unwrap_or_default();
     let near = r["near"].as_array().cloned().unwrap_or_default();
@@ -1400,7 +1604,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     // Pairs closer than the clearance, nearest first.
     if !near.is_empty() {
         form_row(ui, "Too close", |ui| {
-            ui.label(RichText::new(crate::i18n::tr("ui.distance")).semibold().color(crate::theme::Tokens::get().text));
+            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
         });
     }
     for h in &near {
@@ -1412,7 +1616,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     let nearest = r["nearest"].as_object().cloned().unwrap_or_default();
     if !nearest.is_empty() {
         form_row(ui, "Nearest", |ui| {
-            ui.label(RichText::new(crate::i18n::tr("ui.distance")).semibold().color(crate::theme::Tokens::get().text));
+            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
         });
     }
     for (body, list) in &nearest {
@@ -1426,7 +1630,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     }
     if !hits.is_empty() {
         form_row(ui, "Interferes", |ui| {
-            ui.label(RichText::new(crate::i18n::tr_label("Volume")).semibold().color(crate::theme::Tokens::get().text));
+            ui.label(RichText::new(solidcraft_ui_text::tr_label("Volume")).semibold().color(solidcraft_theme::Tokens::get().text));
         });
     }
     for h in hits {
@@ -1437,7 +1641,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     // Pairs the check could not work out: not clear, not known to interfere.
     for u in unchecked {
         form_row(ui, &format!("{} · {}", u["a"].as_str().unwrap_or(""), u["b"].as_str().unwrap_or("")), |ui| {
-            ui.label(RichText::new(crate::i18n::tr("dialog.could_not_be_checked")).color(t.warning))
+            ui.label(RichText::new(solidcraft_ui_text::tr("dialog.could_not_be_checked")).color(t.warning))
                 .backing_on_hover_text(u["reason"].as_str().unwrap_or(""));
         });
     }
@@ -1471,11 +1675,18 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
             bodies.push(b.to_string());
         }
     }
-    let occs: Vec<Option<u64>> = bodies.iter().map(|b| occurrence_of_body(&app.session, b)).collect();
-    if occs.first().is_some_and(|first| first.is_some() && occs.iter().all(|o| o == first)) {
+    // The occurrence a joint at each body would hold: a part in a later copy of a sub-assembly is
+    // held through that copy, so picks on the same part in two copies are two sides (#11426).
+    let doc = &app.session.doc;
+    let occs: Vec<Option<u64>> =
+        bodies.iter().map(|b| placement_of_body(&app.session, b).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)).collect();
+    // Only every pick naming a body makes the one-component case a problem: a datum plane or axis
+    // side names its placement's origin, not a body, so a datum of one part against a face of
+    // another is still a two-part joint.
+    if picks.iter().all(|p| body_of(p).is_some()) && occs.first().is_some_and(|first| first.is_some() && occs.iter().all(|o| o == first)) {
         return Some(match bodies.as_slice() {
-            [body] => (crate::i18n::format("joint.one_body", &[("body", body.as_str())]), Vec::new()),
-            _ => (crate::i18n::format("joint.one_component", &[("bodies", &bodies.join(", "))]), bodies),
+            [body] => (solidcraft_ui_text::format("joint.one_body", &[("body", body.as_str())]), Vec::new()),
+            _ => (solidcraft_ui_text::format("joint.one_component", &[("bodies", &bodies.join(", "))]), bodies),
         });
     }
     commands(app, k, inputs).err().map(|e| (e, Vec::new()))
@@ -1509,7 +1720,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         Asm::FromBodies => {
             let bodies = sel_items(inputs, 0).body_names();
             if bodies.is_empty() {
-                return Err(crate::i18n::tr("ui.components_from_bodies_required").into());
+                return Err(solidcraft_ui_text::tr("ui.components_from_bodies_required").into());
             }
             cmd("component.from_bodies", json!({ "bodies": bodies }))
         }
@@ -1573,7 +1784,8 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Ok(cmd("joint.as_built", p));
             }
             let (a, b) = (snap(0, "component 1's joint origin")?, snap(1, "component 2's joint origin")?);
-            if a.param.get("occurrence").is_some() && a.param.get("occurrence") == b.param.get("occurrence") {
+            let placed = |x: &SnapPt| (x.param.get("occurrence").cloned(), x.param.get("path").cloned());
+            if a.param.get("occurrence").is_some() && placed(&a) == placed(&b) {
                 return Err("the two origins are on the same component".into());
             }
             let (x, y) = (eval(&f.offset[0], ValueKind::Length)?, eval(&f.offset[1], ValueKind::Length)?);
@@ -1599,12 +1811,12 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             let occs = occurrences(s, items);
             if occs.len() < 2 {
                 if occs.len() == 1 && items.len() > 1 && items.iter().all(|x| matches!(x, Sel::Body { .. })) {
-                    return Err(crate::i18n::format(
+                    return Err(solidcraft_ui_text::format(
                         "joint.rigid_group_one_component",
-                        &[("count", &items.len().to_string()), ("command", crate::i18n::tr("cmd.component_from_bodies"))],
+                        &[("count", &items.len().to_string()), ("command", solidcraft_ui_text::tr("cmd.component_from_bodies"))],
                     ));
                 }
-                return Err(crate::i18n::tr("joint.rigid_group_select_components").into());
+                return Err(solidcraft_ui_text::tr("joint.rigid_group_select_components").into());
             }
             cmd("joint.rigid_group", json!({ "occurrences": occs }))
         }
@@ -1612,7 +1824,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             let j = s.doc.assembly.joints.get(*joint).ok_or("no joint that moves yet")?;
             // A rigid joint has nothing to drive: the dialog says why and offers Edit Joint (#6981).
             if j.kind == JointKind::Rigid {
-                return Err(crate::i18n::format("drive.rigid", &[("joint", &j.name)]));
+                return Err(solidcraft_ui_text::format("drive.rigid", &[("joint", &j.name)]));
             }
             cmd("joint.drive", json!({"joint": j.id, "values": values}))
         }
@@ -1725,7 +1937,7 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
 /// joined to nothing grounded moves nothing, and says which part that is.
 pub fn drive_stop(reply: &Value) -> Option<String> {
     if let Some(part) = reply.get("unconnected").and_then(Value::as_str) {
-        return Some(crate::i18n::format("drive.unconnected", &[("part", part)]));
+        return Some(solidcraft_ui_text::format("drive.unconnected", &[("part", part)]));
     }
     // The values come as joint.list gives them: degrees and millimetres.
     let at: Vec<String> = reply
@@ -1739,10 +1951,10 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
     let at = at.join(", ");
     let name = |v: &Value| v.as_str().unwrap_or_default().to_string();
     if let Some(l) = reply.get("stopped_by_loop").filter(|v| v.is_object()) {
-        return Some(crate::i18n::format("drive.stopped_by_loop", &[("value", &at), ("joint", &name(&l["joint"]))]));
+        return Some(solidcraft_ui_text::format("drive.stopped_by_loop", &[("value", &at), ("joint", &name(&l["joint"]))]));
     }
     let c = reply.get("stopped_by_contact").filter(|v| v.is_object())?;
-    Some(crate::i18n::format("drive.stopped_by_contact", &[("value", &at), ("a", &name(&c["a"])), ("b", &name(&c["b"]))]))
+    Some(solidcraft_ui_text::format("drive.stopped_by_contact", &[("value", &at), ("a", &name(&c["a"])), ("b", &name(&c["b"]))]))
 }
 
 // ---- overlay ----
@@ -1814,7 +2026,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
                 *hover = Some((sel.clone(), picked_snap(app, &sel)));
             }
             if let Some((_, Some(s))) = hover.as_ref() {
-                glyph(painter, proj, s, t.hover_profile_edge, app.cam.half_height(), Some(snap_name(s.kind)));
+                glyph(painter, proj, s, t.hover_profile_edge, app.cam.half_height(), Some(snap_tag(s)));
             }
         }
         None => *hover = None,
@@ -1848,20 +2060,22 @@ fn joint_menu(
     open: &mut Option<Dialog>,
     run: &mut Option<(&'static str, Value)>,
 ) {
-    if crate::ui_kit::button(ui, crate::i18n::tr_label("Edit Joint"), crate::ui_kit::Button::Normal).clicked() {
+    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Edit Joint"), crate::ui_kit::Button::Normal).clicked() {
         *open = edit_joint(app, id);
         ui.close();
     }
-    if kind != JointKind::Rigid && crate::ui_kit::button(ui, crate::i18n::tr_label("Drive Joint"), crate::ui_kit::Button::Normal).clicked() {
+    if kind != JointKind::Rigid && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Drive Joint"), crate::ui_kit::Button::Normal).clicked() {
         *open = drive_joint(app, id);
         ui.close();
     }
-    if crate::ui_kit::button(ui, crate::i18n::tr_label(if suppressed { "Unsuppress" } else { "Suppress" }), crate::ui_kit::Button::Normal).clicked() {
+    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label(if suppressed { "Unsuppress" } else { "Suppress" }), crate::ui_kit::Button::Normal)
+        .clicked()
+    {
         *run = Some(("joint.edit", json!({"joint": id, "suppressed": !suppressed})));
         ui.close();
     }
     ui.separator();
-    if crate::ui_kit::button(ui, crate::i18n::tr_label("Delete"), crate::ui_kit::Button::Normal).clicked() {
+    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete"), crate::ui_kit::Button::Normal).clicked() {
         *run = Some(("selection.delete", json!({ "joints": [id] })));
         ui.close();
     }
@@ -1952,7 +2166,7 @@ fn joint_group_button(
     at: egui::Pos2,
     count: usize,
     open: bool,
-    accent: crate::theme::TabAccent,
+    accent: solidcraft_theme::TabAccent,
     run: JointRun,
 ) -> (f32, bool) {
     let chip = crate::ui_kit::HistoryGroupChip {
@@ -2003,7 +2217,7 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
     }
     if grouped(app, joints.len()) {
         let open = joints_open(app, joints.len(), set);
-        let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+        let accent = crate::workspace::tab_accent(&t, &app.ui.tab);
         let (width, clicked) = joint_group_button(ui, p, egui::pos2(x, r.top() + 6.0), joints.len(), open, accent, set);
         if clicked {
             toggle_joints(app, set);
@@ -2078,7 +2292,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
                     let (rect, _) = ui.allocate_exact_size(vec2(t.form_section_icon_size, t.form_section_icon_size), egui::Sense::hover());
                     let fold = crate::ui_kit::disclosure_button_at(ui, rect, shown, &header);
                     let response = ui.add(
-                        egui::Label::new(egui::RichText::new(&header).size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim))
+                        egui::Label::new(egui::RichText::new(&header).size(solidcraft_theme::Tokens::get().font_micro).semibold().color(t.text_dim))
                             .sense(egui::Sense::click()),
                     );
                     crate::scenario::publish_handle("timeline:joints", response.rect.center());
@@ -2092,7 +2306,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
                 return;
             }
         } else {
-            ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+            ui.label(egui::RichText::new("JOINTS").size(solidcraft_theme::Tokens::get().font_micro).semibold().color(t.text_dim));
         }
     }
     let mut open = None;
@@ -2119,7 +2333,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
             egui::pos2(icon.right() + 7.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             &name,
-            egui::FontId::proportional(crate::theme::Tokens::get().font_body),
+            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             if suppressed { t.text_dim } else { t.text },
         );
         let response = response.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
@@ -2147,14 +2361,14 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 }
 
 /// The Joints folder at the end of the Browser: a row per joint (double-click edits, the menu
-/// edits, drives, suppresses or deletes).
-pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
+/// edits, drives, suppresses or deletes). Returns the joint whose row is under the pointer.
+pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Option<u64> {
     use crate::browser::{Row, draw_row, is_open, toggle};
     let joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
     if joints.is_empty() {
-        return;
+        return None;
     }
     // Drawn like every other browser node (its fold, eye and rows publish `fold:Joints`,
     // `eye:Joints`, `row:<name>`). The folder's eye is its own: hiding it hides every joint's
@@ -2174,9 +2388,10 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         toggle(app, key, start_open);
     }
     if !open {
-        return;
+        return None;
     }
     let mut dialog: Option<Dialog> = None;
+    let mut hovered = None;
     for (id, name, kind, suppressed) in joints {
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
@@ -2189,6 +2404,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
                 icon: "joint",
                 label: &name,
                 name: true,
+                rename: true,
                 selected,
                 dim: suppressed || !visible || !folder_shown,
                 ..Default::default()
@@ -2197,14 +2413,21 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         if let Some(resp) = &r.resp {
             resp.clone().backing_on_hover_text(format!("{kind:?} joint"));
         }
+        if r.hovered {
+            hovered = Some(id);
+        }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
-        } else if r.clicked {
+        // The slower second click on the only selected joint renames it and keeps it selected.
+        } else if r.clicked && !(r.slow_rename && app.tree.picked_joints == [id]) {
             pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
-        if r.double {
+        if r.slow_rename {
+            crate::browser::start_inline_rename(app, crate::context_menu::RenameWhat::Joint(id), &r);
+        } else if r.double {
             dialog = edit_joint(app, id);
         }
+        crate::browser::inline_rename(app, ui, &r, &name);
         // The same menus as the rest of the browser.
         if let Some(at) = r.secondary {
             if !app.tree.picked_joints.contains(&id) {
@@ -2217,6 +2440,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         app.tool = None;
         app.dialog = Some(d);
     }
+    hovered
 }
 
 /// A click on a joint's browser row: it becomes the pick (or, with Ctrl, toggles in or out of
@@ -2246,11 +2470,12 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
 /// double-click edits it, the eye shows or hides its glyph and the menu is the joint's menu.
 /// The folder starts closed and has no eye of its own (the root folder's eye hides every joint
 /// glyph); it isn't drawn for a placement no joint attaches. `key` is the placement's row key.
-pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) {
+/// Returns the joint whose row is under the pointer.
+pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) -> Option<u64> {
     use crate::browser::{Row, draw_row, is_open, toggle};
     let joints = placement_joints(&app.session.doc, path);
     if joints.is_empty() {
-        return;
+        return None;
     }
     let key = format!("{key}/joints");
     let open = is_open(app, &key, false);
@@ -2259,11 +2484,12 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         toggle(app, &key, false);
     }
     if !open {
-        return;
+        return None;
     }
     // Hiding the root folder hides every glyph: these rows fade with it, as its own rows do.
     let folder_shown = !app.session.folder_hidden("c0/joints");
     let mut dialog: Option<Dialog> = None;
+    let mut hovered = None;
     for j in joints {
         let id = j.id;
         let visible = app.session.joint_visible(id);
@@ -2283,6 +2509,9 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
                 ..Default::default()
             },
         );
+        if r.hovered {
+            hovered = Some(id);
+        }
         if let Some(resp) = &r.resp {
             resp.clone().backing_on_hover_text(format!("{:?} joint", j.kind));
         }
@@ -2305,6 +2534,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         app.tool = None;
         app.dialog = Some(d);
     }
+    hovered
 }
 
 /// A joint as a placement's Joints folder lists it.
@@ -2610,29 +2840,28 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == g.id) else { continue };
         let Some((_, m)) = frames.iter().find(|(f, _)| *f == g.id) else { continue };
         crate::scenario::publish_handle(&format!("joint-glyph:{}", j.name), g.centre);
-        let col = if g.picked {
-            t.sel_edge
-        } else if j.suppressed {
-            t.text_dim
-        } else {
-            t.accent
-        };
-        let col = if g.faded { col.gamma_multiply(0.3) } else { col };
-        let width = if g.picked { 2.5 } else { 1.5 };
-        let stroke = Stroke::new(width, col);
+        let (stroke, rim) = glyph_strokes(app, g.id, g.picked, j.suppressed);
+        // A glyph piled on another is drawn faint.
+        let fade = |s: Stroke| if g.faded { Stroke::new(s.width, s.color.gamma_multiply(0.3)) } else { s };
+        let (stroke, rim) = (fade(stroke), rim.map(fade));
+        let width = stroke.width;
         let c = g.centre;
+        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
         if g.rigid {
             let half = if g.picked { RIGID_MARK + 1.0 } else { RIGID_MARK };
-            let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
-            painter.rect(egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0)), 0.0, fill, stroke, egui::StrokeKind::Middle);
+            let rect = egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0));
+            if let Some(rim) = rim {
+                painter.rect_stroke(rect, 0.0, rim, egui::StrokeKind::Middle);
+            }
+            painter.rect(rect, 0.0, fill, stroke, egui::StrokeKind::Middle);
             continue;
         }
         let len = g.len;
-        // The motion axis (z), both ways.
-        if let (Some(a), Some(b)) = (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
-            painter.line_segment([a, b], stroke);
-        }
-        // A ring about the axis.
+        // The motion axis (z), both ways, and a ring about it: the rim first, then the core.
+        let axis = match (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
+            (Some(a), Some(b)) => Some([a, b]),
+            _ => None,
+        };
         let r = len * 0.5;
         let ring: Vec<Pos2> = (0..=32)
             .filter_map(|k| {
@@ -2640,8 +2869,13 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 proj.to_screen(at(m, r * a.cos(), r * a.sin(), 0.0))
             })
             .collect();
-        if ring.len() > 1 {
-            painter.add(egui::Shape::line(ring, stroke));
+        for s in rim.into_iter().chain([stroke]) {
+            if let Some(axis) = axis {
+                painter.line_segment(axis, s);
+            }
+            if ring.len() > 1 {
+                painter.add(egui::Shape::line(ring.clone(), s));
+            }
         }
         // Limits: ticks across the ring for a turn, across the axis (or slot) for a slide.
         let warning = if g.faded { t.warning.gamma_multiply(0.3) } else { t.warning };
@@ -2663,8 +2897,27 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 }
             }
         }
-        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
-        painter.circle(c, if g.picked { 4.5 } else { 3.5 }, fill, stroke);
+        if let Some(rim) = rim {
+            painter.circle_stroke(c, 4.5, rim);
+        }
+        painter.circle(c, if rim.is_some() { 4.5 } else { 3.5 }, fill, stroke);
+    }
+}
+
+/// A joint glyph's core stroke and, while it is picked or its browser row is hovered, the
+/// lighter rim under it: the colours and widths a selected or hovered body's edges use.
+pub(crate) fn glyph_strokes(app: &SolveApp, id: u64, picked: bool, suppressed: bool) -> (Stroke, Option<Stroke>) {
+    let t = Tokens::get();
+    let lit = if picked {
+        Some((t.sel_edge, t.sel_edge_rim))
+    } else if app.viewport.hover_joint == Some(id) {
+        Some((t.hover_edge, t.hover_edge_halo))
+    } else {
+        None
+    };
+    match lit {
+        Some((core, rim)) => (Stroke::new(2.5, core), Some(Stroke::new(2.5 + 3.0, rim))),
+        None => (Stroke::new(1.5, if suppressed { t.text_dim } else { t.accent }), None),
     }
 }
 

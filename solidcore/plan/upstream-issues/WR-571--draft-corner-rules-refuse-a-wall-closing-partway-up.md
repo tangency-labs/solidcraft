@@ -1,0 +1,11 @@
+#### WR-571. The draft corner rules refuse a wall that closes partway up
+- **Severity:** Failure (a draft that exists is refused)
+- **Area:** Sweeps (taper extrude)
+- **Location:** fork code (SolidCraft): `sm_CreateCurvatureKeepingWalls`, the curvature-keeping and tangent corner rules of `SmPrimitiveCreation::CreateTaperExtrude` (tangency-labs/smlib 54148db, e8f23e0; ported as WR-520/WR-521). Not in pinned upstream, which has no such rules.
+- **What happens:** the walls' seams are built one per profile corner, each from the profile to the far end. A wall whose section shrinks to nothing below the far end (the crossings with its neighbours meet on it) cannot be built that way, and the draft is refused with `SM_TCR_WALL_CLOSES`, though the solid exists: the wall ends at its apex there and its neighbours meet from that point up. Two lines brought face to face (a slot's sides) close together along their common line.
+- **Trigger:** a curvature-keeping or tangent-rule draft of a profile with a wall short enough to close below the far end (a wedge's tip drafted in, a slot drafted out).
+- **How found:** SolidCraft (capi sweeps cases). The fork's fix is tangency-labs/smlib@183ea65 (smlib#64), which follows the section up the height: each live wall's length between its crossings is followed to the first height where it is gone, halved to the root; there the wall ends at its apex, and its neighbours meet from there up along a new seam built the same exact way.
+- **Confirmed:** no C++ run was made here (fork code; the pinned C++ has no corner rules).
+- **Rust port:** the first version (WR-520/WR-521) by default. With `Kernel::fixes.taper_wall_closes_at_apex`, `walls_closing_at_apexes` (`primitive/primitive_creation/p2/taper_walls.rs`) builds the walls from the followed sections. A wall closing at the far end, the whole section closing, and an arc shrinking to its centre are still refused. Its loops are bounded: 64 steps and 100 halvings per wall and event, one event per wall.
+
+  Tests: `crates/solidcore/tests/wr_571_draft_wall_closes_at_apex.rs` (the fork's wedge, 6 faces, V = 72.883284979193, under the curvature and tangent rules; its slot, 10 faces, V = ((10 + 4t)^3 - 1000) / (6t) - 0.08 / t; both refused without the opt-in).
