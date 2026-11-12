@@ -91,6 +91,21 @@ impl Shape {
         (total / TAU).round() != 0.0
     }
 
+    /// How far the chords [`Shape::inside`] walks its arcs in at `sag` stray from them: the
+    /// largest sagitta of those chords (0 with no arcs). A point farther than this from the
+    /// boundary is inside as the true boundary has it.
+    pub fn chord_sag(&self, sag: f64) -> f64 {
+        self.pieces()
+            .map(|piece| match *piece {
+                Piece::Line { .. } => 0.0,
+                Piece::Arc { r, sweep, .. } => {
+                    let n = arc_steps(r, sweep, sag * 0.25);
+                    r * (1.0 - (sweep.abs() / (2.0 * n as f64)).cos())
+                }
+            })
+            .fold(0.0, f64::max)
+    }
+
     /// Whether a tool of radius `r` centred on `p` stays inside the regions without cutting the boundary.
     pub fn clear(&self, p: Vec2, r: f64) -> bool {
         self.dist(p) >= r - 1e-7 && self.inside(p, r.max(1e-6))

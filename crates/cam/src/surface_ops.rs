@@ -264,6 +264,21 @@ pub(crate) fn levels(top: f64, bottom: f64, stepdown: f64, with_top: bool) -> Re
     Ok((first..=n).map(|k| if k == n { bottom } else { top - (top - bottom) * k as f64 / n as f64 }).collect())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Drop-cutter samples this thread spent from a [`Budget`] (the tests' measure of their work).
+    static SPENT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The drop-cutter samples spent from a [`Budget`] on this thread while `f` ran, with what `f`
+/// gave.
+#[cfg(test)]
+pub(crate) fn drops_in<R>(f: impl FnOnce() -> R) -> (R, usize) {
+    let before = SPENT.with(std::cell::Cell::get);
+    let r = f();
+    (r, SPENT.with(std::cell::Cell::get) - before)
+}
+
 /// Counts drop-cutter evaluations against [`MAX_DROPS`], shared by the threads that plan an
 /// operation's levels side by side.
 pub(crate) struct Budget(std::sync::atomic::AtomicUsize);
@@ -275,6 +290,8 @@ impl Budget {
 
     pub(crate) fn spend(&self) -> Result<()> {
         use std::sync::atomic::Ordering::Relaxed;
+        #[cfg(test)]
+        SPENT.with(|s| s.set(s.get() + 1));
         let left = self.0.load(Relaxed);
         // A stop asked for from another thread ends the samples (looked at now and then).
         if left.is_multiple_of(256) {

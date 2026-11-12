@@ -46,6 +46,11 @@
 //! moves they replace), and its descent feeds worked out again for the coordinates as written
 //! ([`limit_descents`]).
 //!
+//! Adaptive clearing ([`adaptive`]) clears a region level by level with the tool's engagement
+//! (how much of its circumference is in material) held under a limit, for a mill that cannot
+//! take a full-width cut. [`engagement`] measures the engagement along a finished path from
+//! the material itself, not from the planner's model, so a path can be checked against it.
+//!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
 //! retract to the machine's top, the tool length offset on the first Z move, modal motion
@@ -58,6 +63,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod adaptive;
 mod chamfer;
 mod check;
 pub mod collision;
@@ -65,6 +71,7 @@ mod compact;
 mod cutter;
 pub mod drill;
 mod dropcutter;
+pub mod engagement;
 pub mod finish3d;
 mod frame;
 mod gcode;
@@ -148,11 +155,15 @@ pub(crate) fn invalid<T>(why: impl Into<String>) -> Result<T> {
 }
 
 #[cfg(test)]
+mod adaptive_tests;
+#[cfg(test)]
 mod chamfer_tests;
 #[cfg(test)]
 mod collision_tests;
 #[cfg(test)]
 mod drill_tests;
+#[cfg(test)]
+mod engagement_tests;
 #[cfg(test)]
 mod finish3d_tests;
 #[cfg(test)]

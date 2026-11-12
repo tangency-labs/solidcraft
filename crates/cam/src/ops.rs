@@ -308,7 +308,7 @@ pub(crate) fn mills(tool: &Tool, ramp_angle: f64) -> Result<()> {
     cuts_sideways(tool)?;
     match tool.kind {
         ToolKind::Chamfer => invalid(
-            "a chamfer mill's side is tapered: it cuts chamfers (the chamfer operation), traces a line to a depth (a contour `side: on`) and spots holes (drill), but does not cut beside a contour, pocket or bore",
+            "a chamfer mill's side is tapered: it cuts chamfers (the chamfer operation), traces a line to a depth (a contour `side: on`) and spots holes (drill), but does not cut beside a contour, pockets, clearing or bores",
         ),
         _ => crate::chamfer::enters(tool, ramp_angle),
     }

@@ -1,7 +1,8 @@
 //! Stopping long planning from another thread: a caller hands a flag to [`scoped`], and the long
-//! loops that already count their work (the drop-cutter's samples) look at it as they count. A
-//! stop set while they run ends them with [`CamError::Stopped`], never with half a toolpath.
-//! Work handed to other threads carries the flag along with [`current`].
+//! loops that already count their work (the drop-cutter's samples, the adaptive clearing's work)
+//! look at it as they count. A stop set while they run ends them with [`CamError::Stopped`],
+//! never with half a toolpath. Work handed to other threads carries the flag along with
+//! [`current`].
 
 use std::cell::RefCell;
 use std::sync::Arc;
