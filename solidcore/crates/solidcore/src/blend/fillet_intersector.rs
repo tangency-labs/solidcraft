@@ -233,7 +233,8 @@ impl EnvelopeCone {
         let rate = 0.5 * (v1.dot(d1 - cent_d) / r1 + v2.dot(d2 - cent_d) / r2);
         let cos = -rate / speed;
         let sin_sq = 1.0 - cos * cos;
-        if !(sin_sq > 0.0) {
+        // (written to accept: a NaN refuses)
+        if sin_sq.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
             return Err(SolidError::blend_failed(
                 OP_FLUSH,
                 "the balls have no envelope at a section",
@@ -1955,7 +1956,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         //     solved and the skin measured against it (`skin_splits`); a span whose skin
         //     is farther than the tolerance takes that section as a station, the spans are
         //     equalised again and everything is built again, at most `SKIN_ROUNDS` times.
-        let skin_held = self.holds_skin(solver)?;
+        let skin_held = Self::holds_skin(solver)?;
         let station_cap = pnts.len().saturating_mul(SKIN_STATION_FACTOR);
         let (deviations, curve_types) = (out.deviations.len(), out.curve_types.len());
         let mut round = 0;
@@ -1963,7 +1964,18 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             out.deviations.truncate(deviations);
             out.curve_types.truncate(curve_types);
             let built = self.build_flush_geometry(solver, k, pseudo, &pnts, &knots, out)?;
-            let Some(skin) = built.fillet_surface.as_ref().filter(|_| skin_held) else {
+            // (a round whose law has corners, built piece by piece from the pieces'
+            // definitions, is their certified nets joined, not a skin of the stations)
+            let defined = built.kept.as_ref().is_some_and(|kept| {
+                kept.pieces
+                    .iter()
+                    .any(|p| matches!(p.kind(), SurfaceKind::ProceduralBlend(_)))
+            });
+            let Some(skin) = built
+                .fillet_surface
+                .as_ref()
+                .filter(|_| skin_held && !defined)
+            else {
                 break built;
             };
             let splits = self.skin_splits(solver, k, &pnts, skin)?;
@@ -1976,10 +1988,20 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                     "the skin stays farther than the tolerance from its balls",
                 ));
             }
-            for (j, knot, mid) in splits.into_iter().rev() {
-                knots.insert(j + 1, knot);
-                pnts.insert(j + 1, mid);
+            // each split's section after the station it follows
+            let mut splits = splits.into_iter().peekable();
+            let mut merged = Vec::new();
+            let mut merged_knots = Vec::new();
+            for (i, (p, knot)) in pnts.into_iter().zip(knots).enumerate() {
+                merged.push(p);
+                merged_knots.push(knot);
+                if let Some((_, mid_knot, mid)) = splits.next_if(|(j, ..)| *j == i) {
+                    merged.push(mid);
+                    merged_knots.push(mid_knot);
+                }
             }
+            pnts = merged;
+            knots = merged_knots;
             self.equalise_spans(solver, k, &mut pnts, &mut knots)?;
             round += 1;
         };
@@ -2025,7 +2047,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
     /// # Errors
     ///
     /// The solver's.
-    fn holds_skin<S: FilletSolverOps<FilletGeom = G>>(&self, solver: &S) -> Result<bool> {
+    fn holds_skin<S: FilletSolverOps<FilletGeom = G>>(solver: &S) -> Result<bool> {
         Ok(solver.skins_varying_balls()?
             && solver.self_intersection_handler()? != Some(HandlingAlgorithmType::Smoothing))
     }

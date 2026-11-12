@@ -338,9 +338,9 @@ crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	Vec::i
 crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	Vec::insert	3	open	insert(at, uv)	
 crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	Vec::insert	4	open	insert(at, exact)	
 crates/solidcore/src/blend/fillet_geom/tangent_end_rib.rs	tangent_end_rib	int-rem	1	proven	order % 2	constant non-zero divisor
-crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::flush_curve	Vec::insert	1	open	insert(j + 1, split_knot)	
-crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::flush_curve	Vec::insert	2	open	insert(j + 1, mid_pnt)	
-crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::flush_curve	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::equalise_spans	Vec::insert	1	proven	insert(j + 1, split_knot)	j + 1 < knots.len() by the loop condition
+crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::equalise_spans	Vec::insert	2	proven	insert(j + 1, mid_pnt)	pnts.get(j + 1) succeeded just above, so j + 1 < pnts.len()
+crates/solidcore/src/blend/fillet_intersector.rs	FilletIntersector::build_flush_geometry	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	2	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	3	proven	Vec::with_capacity(2)	constant capacity
