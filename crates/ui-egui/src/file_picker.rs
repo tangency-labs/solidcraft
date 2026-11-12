@@ -599,6 +599,8 @@ mod tests {
         assert!(placement_hint_painted(&mut h, hint), "{command}: placement instruction is visible");
         // An expired ordinary status must not dismiss the active placement instruction.
         h.app.status = Some(("Old status".into(), crate::now_ms() - 7000.0, false));
+        // Expired on the frame clock the toast's six seconds run on.
+        h.app.status_since = Some(h.ctx.input(|i| i.time) - 7.0);
         assert!(placement_hint_painted(&mut h, hint));
         (h, hint)
     }

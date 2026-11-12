@@ -794,6 +794,8 @@ fn toast_stays_in_free_content_above_history_and_navigation() {
                 }
             }
             h.app.status = Some(("Expired".into(), crate::now_ms() - 6001.0, true));
+            // Expired on the frame clock the toast's six seconds run on.
+            h.app.status_since = Some(h.ctx.input(|i| i.time) - STATUS_TOAST_MS / 1000.0 - 1.0);
             h.frame();
             assert!(h.app.status.is_none());
             assert!(crate::scenario::rect_of("toast").is_none());
@@ -2299,8 +2301,9 @@ fn the_status_toast_closes_with_its_x_and_shows_its_time_left() {
     let t = Tokens::get();
     let mut h = Harness::new();
     h.app.home.open = false;
-    // Half its time gone.
+    // Half its time gone, on the frame clock the toast runs on.
     h.app.status = Some(("Opened".into(), crate::now_ms() - STATUS_TOAST_MS / 2.0, false));
+    h.app.status_since = Some(h.ctx.input(|i| i.time) - STATUS_TOAST_MS / 2000.0);
     h.frames(2);
     let toast = crate::scenario::rect_of("toast").expect("the status toast");
     let close = crate::scenario::handle_at("toast:status:close").expect("its ×");
@@ -2332,6 +2335,25 @@ fn the_status_toast_closes_with_its_x_and_shows_its_time_left() {
     h.step(&json!({"click": {"handle": "status:chip"}})).unwrap();
     h.frames(2);
     assert!(h.app.messages.open, "the card opens the messages");
+}
+
+/// The toast's six seconds run on the frame clock, as the stand-up note's and the 3D mouse
+/// offer's do: a scenario's virtual frames spend them and nothing else does, so no machine's
+/// speed can expire one between the frames of a click.
+#[test]
+fn the_status_toast_six_seconds_run_on_the_frame_clock() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_status("Opened", false);
+    h.frames(300);
+    assert!(h.app.status.is_some(), "five seconds of frames: still up");
+    assert!(crate::scenario::rect_of("toast").is_some(), "still drawn");
+    // As if it had been up for the whole time already, as the note's test does it.
+    let since = h.app.status_since.expect("the toast's clock started when it was drawn");
+    h.app.status_since = Some(since - STATUS_TOAST_MS / 1000.0);
+    h.frames(2);
+    assert!(h.app.status.is_none(), "six seconds of frame time: gone");
+    assert!(crate::scenario::rect_of("toast").is_none());
 }
 
 #[test]

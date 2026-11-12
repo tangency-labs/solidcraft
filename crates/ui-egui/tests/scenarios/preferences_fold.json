@@ -1,0 +1,22 @@
+[
+  {"note": "The Preferences window's title bar has a fold that collapses the window to its bar: the search, the page list, the pages and the footer hide, the window stays open with its snapshot, the bar keeping the window's width and its top-left corner, and expanding returns to the page that was shown. A control-channel open of a page expands it too."},
+  {"call": "ui.prefs", "params": {"open": "General"}},
+  {"frames": 3},
+  {"expect": {"shown": "Restore page defaults", "prefs": {"dialog": "General"}, "shown_handles": ["dialog:collapse", "prefs:search", "prefs:ok", "prefs:cancel"], "same_width": "prefs:window"}},
+  {"click": {"handle": "dialog:collapse"}},
+  {"frames": 2},
+  {"expect": {"not_shown": "Restore page defaults", "hidden_handles": ["prefs:search", "prefs:ok", "prefs:apply", "prefs:cancel", "prefs:defaults"], "shown_handles": ["dialog:collapse", "dialog:close"], "prefs": {"dialog": "General"}, "same_width": "prefs:window"}},
+  {"expect": {"not_shown": "Units of new designs"}},
+  {"click": {"handle": "dialog:collapse"}},
+  {"frames": 2},
+  {"expect": {"shown": "Restore page defaults", "shown_handles": ["prefs:search", "prefs:ok", "prefs:cancel"]}},
+  {"note": "Opening a page from the control channel expands a folded window."},
+  {"click": {"handle": "dialog:collapse"}},
+  {"frames": 2},
+  {"expect": {"hidden_handles": ["prefs:ok"]}},
+  {"call": "ui.prefs", "params": {"open": "Layout"}},
+  {"frames": 2},
+  {"expect": {"shown_handles": ["prefs:ok"], "prefs": {"dialog": "Layout"}}},
+  {"key": "Escape"},
+  {"expect": {"not_shown": "Restore page defaults", "prefs": {"dialog": null}}}
+]

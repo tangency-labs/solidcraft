@@ -6257,7 +6257,8 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, view: Rect, taken: &[Rect]) -> 
     None
 }
 
-/// How long a status message stays in the view (milliseconds).
+/// How long a status message stays in the view, in milliseconds of the frame clock
+/// (`ctx.input` time) — the clock the stand-up note and the 3D mouse offer already run on.
 const STATUS_TOAST_MS: f64 = 6000.0;
 
 /// The selection's measurement in the view's bottom right corner (`quick_measure`), clear of the
@@ -6379,14 +6380,18 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         obstacles.push(r);
         free.max.y = r.top() - t.space_8;
     }
-    if let Some((msg, at, error)) = app.status.clone() {
-        let shown_ms = crate::now_ms() - at;
-        if shown_ms < STATUS_TOAST_MS {
+    if let Some((msg, _at, error)) = app.status.clone() {
+        // The toast's six seconds run on the frame clock, armed when it first draws (and started
+        // again by `set_status`): time the window spends in the background is not spent, and the
+        // wall clock cannot expire one between the frames of a click.
+        let now = ui.ctx().input(|i| i.time);
+        let since = *app.status_since.get_or_insert(now);
+        if now - since < STATUS_TOAST_MS / 1000.0 {
             let undo = app.status_undo;
             let actions = if undo { vec![(solidcraft_ui_text::tr_label("Undo"), ToastKind::Secondary)] } else { Vec::new() };
             let extras = ToastExtras {
                 close: Some("toast:status:close"),
-                countdown: Some((countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
+                countdown: Some((countdown_left(since, now, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
                 // Without Undo, a click anywhere else on it opens the run's messages.
                 card_hint: (!undo).then(|| solidcraft_ui_text::tr("messages.chip_hint")),
                 ..Default::default()
@@ -6413,11 +6418,12 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
                 }
             }
             // One frame when it is due to go, not a frame every half second while it shows.
-            let left_ms = STATUS_TOAST_MS - shown_ms;
-            let left_ms = if (0.0..=STATUS_TOAST_MS).contains(&left_ms) { left_ms } else { STATUS_TOAST_MS };
-            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left_ms / 1000.0 + 0.01));
+            let left_s = STATUS_TOAST_MS / 1000.0 - (now - since);
+            let left_s = if (0.0..=STATUS_TOAST_MS / 1000.0).contains(&left_s) { left_s } else { STATUS_TOAST_MS / 1000.0 };
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left_s + 0.01));
         } else {
             app.status = None;
+            app.status_since = None;
         }
     }
     if let Some(since) = computing_since {

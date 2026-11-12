@@ -255,6 +255,16 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
   padded content and optional 48 pt footer. `show_with_left` pins a left action beside
   the right-aligned buttons. `show_pages` accepts declarative `WindowPage` entries
   (icon, i18n label key, optional group heading, stable handle, scroll policy and draw callback).
+  Every window drawn through `show_pages` / `show_pages_with_header` folds: the frame keeps
+  the fold state per window (in egui's memory, under the window's Id) and its title bar
+  draws a `dialog:collapse` chevron left of the close button, so the caller passes nothing.
+  While folded the window is its title bar — the search strip, the page list, the pages and
+  the footer stay hidden — with the window's width, its top-left corner and no rule under
+  the bar. `Window::unfold` expands a window again; a page opened programmatically (the
+  control channel, a search result) and a window opened again come back unfolded. Every
+  `Window` keeps its top-left when its content size changes: egui anchors a window at its
+  pivot point, which the opening placement centres, so a card that grew or shrank would
+  otherwise slide to keep its old centre.
   Its 188 pt soft page list (150 pt below a 700 pt window width) has 32 pt icon/label rows,
   selected tint/ink and a divider. Page windows use the navigation board's border/radius
   and the shared menu shadow; other windows retain their shared card surface.
