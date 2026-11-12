@@ -878,6 +878,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | apps/solidcraft/src/open_documents.rs (macOS: files opened from Finder and the Dock, its test) | VectorCraft `apps/vectorcraft/src/open_documents.rs` (https://github.com/storytold/vectorcraft) | MIT OR Apache-2.0 |
 | LICENSE-MIT, LICENSE-APACHE (licence text) | CADCraft | — |
 | .github/workflows/release.yml, .github/workflows/packaging-lint.yml and packaging/ (release pipeline: Linux AppImage/deb/rpm/Flatpak/tar.gz, FreeBSD, macOS dmg, Windows MSI/portable zip, web zip; AppRun, nfpm, Flatpak, WiX and Info.plist templates) | PhotoCraft (https://github.com/storytold/photocraft) `.github/workflows/{release,packaging-lint}.yml`, `packaging/` | Apache-2.0 |
+| crates/viewport-gpu/src/environment.rs (the neutral room scene, the GGX prefilter and environment-BRDF table), crates/viewport-gpu/shaders/viewport.wgsl (`finished`, `ibl_ggx_fresnel`, `pbr_neutral`) | google/model-viewer `EnvironmentScene.ts` and its exposure for it (https://github.com/google/model-viewer); KhronosGroup glTF-Sample-Renderer `ibl.glsl`, `pbr.frag` (https://github.com/KhronosGroup/glTF-Sample-Renderer); KhronosGroup ToneMapping `pbrNeutral.glsl`; google/filament `light_indirect.fs`, `ambient_occlusion.fs` (https://github.com/google/filament) | Apache-2.0 |
 
 ## Incremental HDR codec adapter
 

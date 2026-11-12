@@ -63,9 +63,7 @@ fn pbr_brdf(base: vec3<f32>, parameters: vec3<f32>, n: vec3<f32>, v: vec3<f32>, 
     return specular + (vec3<f32>(1.0) - pbr_fresnel(f0, nv, parameters.x, parameters.z)) * (vec3<f32>(1.0) - pbr_fresnel(f0, nl, parameters.x, parameters.z)) * diffuse;
 }
 
-// The palette's PBR materials: for palette row r, texel row 2r holds each entry's linear base
-// colour (and a PBR flag), row 2r + 1 its metallic fraction, roughness and dielectric IOR.
-@group(0) @binding(2) var pbr_materials: texture_2d<f32>;
+// `pbr_materials`, the palette's PBR materials, is declared in viewport.wgsl.
 
 // A placement of a shared smooth mesh whose palette entry names its material (the product
 // preview's instanced PBR parts): moved as `vs_tri_inst` moves it.
