@@ -21,7 +21,7 @@ use solidcore::topology::brep::outward_solid_failure;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::{edge, face};
 use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId, RegionId};
-use solidcore::{Point3, Vec3};
+use solidcore::{Kernel, Point3, Vec3};
 
 use crate::blend::middle;
 use crate::body::Body;
@@ -35,6 +35,7 @@ impl Answer for Distance {}
 impl Answer for solidcore::geom::extent3d::Extent3d {}
 impl Answer for [f64; 3] {}
 impl Answer for Vec<Option<f64>> {}
+impl Answer for Vec<Result<PointClass>> {}
 
 fn array(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
@@ -93,6 +94,122 @@ pub enum PointClass {
     Inside,
     /// Within the body's tolerance of a face, an edge or a vertex.
     OnBoundary,
+}
+
+/// Where the kernel's classification put a point ([`locate_points`]), before any rule for a
+/// region it is unsure of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Located {
+    /// Within the body's zone tolerance of a face, an edge or a vertex.
+    OnBoundary,
+    /// In `region`: material (`Some(true)`), void (`Some(false)`), or a region the kernel is
+    /// unsure of (`None`, its `IsVoid` `UNSURE`).
+    InRegion {
+        /// The region the point lies in.
+        region: RegionId,
+        /// Whether the region is material, `None` when the kernel is unsure.
+        material: Option<bool>,
+    },
+}
+
+/// Why [`locate_points`] could not place a point.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LocateFailure {
+    /// A coordinate is not finite; the point was not classified.
+    NotFinite,
+    /// The kernel's classification refused the point.
+    Classify(solidcore::SolidError),
+    /// The region the point lies in could not be read.
+    Region(solidcore::SolidError),
+    /// The classification succeeded with a class other than a vertex, an edge, a face or a
+    /// region (`SM_ERR` upstream).
+    Unclassified,
+}
+
+/// Where each of `points` lies against `b`, in order: `SmBrep::Point3DClassify` at the body's
+/// own zone tolerance (`SmTol::GetZoneTol3d`), with boundary intersections, so a point within
+/// that tolerance of a vertex, an edge or a face is on the boundary and never decided by a ray.
+/// The tolerance and one `BrepClassifier` (its private copy of `b`, which a solve may give UV
+/// trim curves, and its search structures) are made once for all the points. The kernel's own
+/// answer, before any rule for a region it is unsure of: [`Body::classify_points`] refuses such
+/// a region, a caller holding a raw B-rep (SolidCraft's smlib) chooses its own rule.
+#[must_use]
+pub fn locate_points(
+    k: &Kernel,
+    b: &Brep,
+    points: &[[f64; 3]],
+) -> Vec<std::result::Result<Located, LocateFailure>> {
+    let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+    let mut classifier = BrepClassifier::of_brep(b);
+    points
+        .iter()
+        .map(|&p| locate(k, &mut classifier, tol, p))
+        .collect()
+}
+
+/// One point of [`locate_points`] through `classifier` at zone tolerance `tol`.
+fn locate(
+    k: &Kernel,
+    classifier: &mut BrepClassifier<'_, '_>,
+    tol: f64,
+    p: [f64; 3],
+) -> std::result::Result<Located, LocateFailure> {
+    let p = point(p).map_err(|_| LocateFailure::NotFinite)?;
+    let pc = classifier
+        .point_3d_classify(k, p, tol, true)
+        .map_err(LocateFailure::Classify)?;
+    match (pc.point_class(), pc.object()) {
+        (PointClassType::Vertex | PointClassType::Edge | PointClassType::Face, _) => {
+            Ok(Located::OnBoundary)
+        }
+        (PointClassType::Region, Some(EntityRef::Region(region))) => {
+            match region_material(classifier.brep(), region) {
+                Ok(m) => Ok(Located::InRegion {
+                    region,
+                    material: Some(m),
+                }),
+                Err(solidcore::SolidError::UnsureRegion { .. }) => Ok(Located::InRegion {
+                    region,
+                    material: None,
+                }),
+                Err(e) => Err(LocateFailure::Region(e)),
+            }
+        }
+        _ => Err(LocateFailure::Unclassified),
+    }
+}
+
+/// The only answer of a [`locate_points`] call on one point.
+fn one(
+    mut v: Vec<std::result::Result<Located, LocateFailure>>,
+) -> std::result::Result<Located, LocateFailure> {
+    v.pop().unwrap_or(Err(LocateFailure::Unclassified))
+}
+
+/// [`Body::classify_point`]'s class of a point [`locate_points`] placed: a region the kernel
+/// is unsure of is refused by name, never read as outside or inside.
+fn point_class(l: std::result::Result<Located, LocateFailure>) -> Result<PointClass> {
+    match l {
+        Ok(Located::OnBoundary) => Ok(PointClass::OnBoundary),
+        Ok(Located::InRegion {
+            material: Some(true),
+            ..
+        }) => Ok(PointClass::Inside),
+        Ok(Located::InRegion {
+            material: Some(false),
+            ..
+        }) => Ok(PointClass::Outside),
+        Ok(Located::InRegion {
+            region,
+            material: None,
+        }) => Err(Error::UnsureRegion {
+            region: region.index(),
+        }),
+        Err(LocateFailure::NotFinite) => Err(Error::Argument),
+        Err(LocateFailure::Classify(e) | LocateFailure::Region(e)) => Err(status(e)),
+        // Point3DClassify reports only the four classes above on success: SM_ERR.
+        Err(LocateFailure::Unclassified) => Err(Error::Status(solidcore::error::SM_ERR)),
+    }
 }
 
 /// A distance with its proved rounding bound: the exact distance between the points it was
@@ -299,29 +416,30 @@ impl Body {
     /// point in a region the kernel is unsure is material (never read as outside or inside,
     /// the rule of the mass properties too); the kernel's status.
     pub fn classify_point(&self, p: [f64; 3]) -> Result<PointClass> {
-        let p = point(p)?;
+        point(p)?;
         with_body("classify_point", self, |k, b| {
-            let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
-            let mut classifier = BrepClassifier::of_brep(b);
-            let pc = match classifier.point_3d_classify(k, p, tol, true) {
-                Ok(pc) => pc,
-                Err(e) => return Ok(Err(status(e))),
-            };
-            Ok(match (pc.point_class(), pc.object()) {
-                (PointClassType::Vertex | PointClassType::Edge | PointClassType::Face, _) => {
-                    Ok(PointClass::OnBoundary)
-                }
-                (PointClassType::Region, Some(EntityRef::Region(r))) => {
-                    Ok(if region_material(classifier.brep(), r)? {
-                        PointClass::Inside
-                    } else {
-                        PointClass::Outside
-                    })
-                }
-                // Point3DClassify reports only the four classes above on success: SM_ERR.
-                _ => Err(Error::Status(solidcore::error::SM_ERR)),
-            })
+            Ok(point_class(one(locate_points(k, b, &[p]))))
         })?
+    }
+
+    /// [`Body::classify_point`] for each of `points`, in order, through one classification of
+    /// the body ([`locate_points`]): its zone tolerance, its private copy and its search
+    /// structures are made once for all of them, not once a point (on a large body they cost
+    /// far more than a point's own solve). Each point's class, or its own error.
+    ///
+    /// # Errors
+    /// The kernel's error from the call itself; each point's own error is in its place, as
+    /// [`Body::classify_point`] gives it.
+    pub fn classify_points(&self, points: &[[f64; 3]]) -> Result<Vec<Result<PointClass>>> {
+        if points.iter().all(|&p| point(p).is_err()) {
+            return Ok(points.iter().map(|_| Err(Error::Argument)).collect());
+        }
+        with_body("classify_points", self, |k, b| {
+            Ok(locate_points(k, b, points)
+                .into_iter()
+                .map(point_class)
+                .collect())
+        })
     }
 
     /// Whether the body is one closed manifold solid (`SmApiBrepIsManifoldSolid`).
@@ -799,6 +917,65 @@ pub(crate) mod tests {
             crate::stitch::merge_faces(b, &order, &[]).map(|_| ()),
             Err(unsure)
         );
+    }
+
+    /// A batch reads an unsure region as the one-point call does: `classify_points` refuses that
+    /// point by name and classifies the others; `locate_points` hands the kernel's answer on as
+    /// it is, for a caller with a rule of its own.
+    #[test]
+    fn a_batch_refuses_an_unsure_region_point_by_point() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+        let inner = {
+            let mut k = b.lock();
+            let infinite = k.infinite_region();
+            let inner: Vec<_> = solidcore::topology::brep::p1::regions(&k, None)
+                .unwrap()
+                .into_iter()
+                .filter(|&r| Some(r) != infinite)
+                .collect();
+            assert_eq!(inner.len(), 1);
+            k.region_mut(inner[0]).unwrap().set_is_void(2);
+            inner[0]
+        };
+        let points = [
+            [0.5, 1.0, 1.5],
+            [5.0, 1.0, 1.5],
+            [1.0, 1.0, 1.5],
+            [f64::NAN, 0.0, 0.0],
+        ];
+        let unsure = Error::UnsureRegion {
+            region: inner.index(),
+        };
+        assert_eq!(
+            b.classify_points(&points).unwrap(),
+            vec![
+                Err(unsure.clone()),
+                Ok(PointClass::Outside),
+                Ok(PointClass::OnBoundary),
+                Err(Error::Argument)
+            ]
+        );
+        assert_eq!(b.classify_point(points[0]), Err(unsure));
+        let located = session::run("locate", |k| Ok(Some(locate_points(k, &b.lock(), &points))))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            located[0],
+            Ok(Located::InRegion {
+                region: inner,
+                material: None
+            })
+        );
+        assert!(matches!(
+            located[1],
+            Ok(Located::InRegion {
+                material: Some(false),
+                ..
+            })
+        ));
+        assert_eq!(located[2], Ok(Located::OnBoundary));
+        assert_eq!(located[3], Err(LocateFailure::NotFinite));
     }
 
     /// Two 10 mm cubes and the cube [3, 7]^3 inside the first, its faces turned
