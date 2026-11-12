@@ -586,6 +586,9 @@ pub enum DimensionInput {
 pub const DIMENSION_STEP_MM: std::ops::RangeInclusive<f64> = 0.001..=1000.0;
 pub const DIMENSION_STEP_DEG: std::ops::RangeInclusive<f64> = 0.001..=180.0;
 
+/// How far a sketch dimension's text may be scaled (Preferences › Sketch › Dimension text size).
+pub const DIMENSION_TEXT_SCALE: std::ops::RangeInclusive<f32> = 0.5..=2.5;
+
 /// What an orbit turns around (Preferences: "Orbit around").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -812,6 +815,23 @@ const PERSPECTIVE_FOV: f64 = 0.6;
 /// value is outside the accepted range (a hand edit).
 pub fn perspective_fov(p: &Prefs) -> f64 {
     if accepted::perspective_fov(p) { p.perspective_fov } else { PERSPECTIVE_FOV }
+}
+
+/// The factor a sketch dimension's text is scaled by: the preference, or 1 when a saved value is
+/// outside the accepted range (a hand edit). Applies in the open sketch and to Show Dimensions.
+pub fn dimension_text_scale(p: &Prefs) -> f32 {
+    if accepted::dimension_text_scale(p) { p.dimension_text_scale } else { 1.0 }
+}
+
+/// The colour a sketch dimension draws its lines, arrows and value in: the user's colour when set,
+/// else the theme's colour for a driving dimension or, when `driven`, its driven-dimension colour.
+/// Selection, hover and conflicts are drawn by their own colours before this is consulted.
+pub fn dimension_colour(p: &Prefs, driven: bool) -> egui::Color32 {
+    match p.dimension_colour {
+        Some([r, g, b]) => egui::Color32::from_rgb(r, g, b),
+        None if driven => Tokens::get().dimension_driven,
+        None => Tokens::get().dimension,
+    }
 }
 
 /// Perspective view keeps the target's size when its angle changes (#5364): the distance scales by
@@ -1676,6 +1696,14 @@ preference_settings! {
     /// converted to the unit the value is written in) and to an angle (degrees).
     dimension_step_mm: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_MM);
     dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
+    /// The size of a sketch dimension's text as a factor of the theme's size (Preferences › Sketch ›
+    /// Dimension text size). 1 draws it as the theme does; it also applies to Show Dimensions
+    /// (#14121). A saved value outside the accepted range (a hand edit) reads as 1.
+    dimension_text_scale: f32 = 1.0, PAGE_SKETCH, accept(DIMENSION_TEXT_SCALE);
+    /// The colour a sketch dimension draws its lines, arrows and value in, or `None` for the
+    /// theme's dimension colours (Preferences › Sketch › Dimension color, #14121). Selection, hover
+    /// and conflicts keep their own colours.
+    dimension_colour: Option<[u8; 3]> = None, PAGE_SKETCH;
     /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
     /// its value (#1365). Off: it sizes only what it measures (#4109).
     first_dimension_scales: bool = true, PAGE_SKETCH;
@@ -4034,6 +4062,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::constraint_glyph_scale(&p) {
         p.constraint_glyph_scale = Prefs::default().constraint_glyph_scale;
     }
+    if !accepted::dimension_text_scale(&p) {
+        p.dimension_text_scale = Prefs::default().dimension_text_scale;
+    }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;
@@ -4200,6 +4231,12 @@ fn prepare_preferences(
     {
         return Err(format!("`graphics_backend` must be one of {}", GRAPHICS_BACKENDS.join(", ")));
     }
+    if let Some(v) = p.get("dimension_colour")
+        && !v.is_null()
+        && serde_json::from_value::<[u8; 3]>(v.clone()).is_err()
+    {
+        return Err("`dimension_colour` must be null or three numbers 0…255".into());
+    }
     let mut new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
     migrate_gruvbox(&mut new);
     if let Some(update) = p.get("theme_options") {
@@ -4213,6 +4250,9 @@ fn prepare_preferences(
     }
     if !accepted::constraint_glyph_scale(&new) {
         return Err("`constraint_glyph_scale` must be 1…3".into());
+    }
+    if !accepted::dimension_text_scale(&new) {
+        return Err("`dimension_text_scale` must be 0.5…2.5".into());
     }
     let new = migrate(new);
     if !UNITS.contains(&new.default_units.as_str()) {
@@ -6644,6 +6684,8 @@ mod tests {
             ("look_at_anim", json!(false), PAGE_NAVIGATION),
             ("keep_hover_while_navigating", json!(false), PAGE_NAVIGATION),
             ("selection_shift_add_only", json!(true), PAGE_SKETCH),
+            ("dimension_text_scale", json!(1.5), PAGE_SKETCH),
+            ("dimension_colour", json!([18, 52, 86]), PAGE_SKETCH),
             ("select_other_hidden", json!(false), PAGE_SKETCH),
             ("select_hidden_edges", json!(true), PAGE_SKETCH),
             ("sketch_conflict_colour", json!(false), PAGE_SKETCH),
@@ -7273,6 +7315,30 @@ mod tests {
         }
     }
 
+    /// #14121: the size and colour of sketch dimension text are saved preferences of their own.
+    /// An out-of-range scale and a value that is not an RGB colour are refused; a saved bad value
+    /// falls back to its default without discarding the other preferences.
+    #[test]
+    fn dimension_text_size_and_colour_preferences_validate_and_migrate() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        let out = h.call("ui.prefs", json!({"dimension_text_scale":1.5,"dimension_colour":[18,52,86]}));
+        assert!(out["error"].is_null(), "{out}");
+        assert_eq!((h.app.preferences.dimension_text_scale, h.app.preferences.dimension_colour), (1.5, Some([18, 52, 86])));
+        h.call("ui.prefs", json!({"dimension_colour":null}));
+        assert_eq!(h.app.preferences.dimension_colour, None);
+        for bad in [json!(0.4), json!(2.6)] {
+            assert!(h.call("ui.prefs", json!({"dimension_text_scale":bad}))["error"].is_string(), "{bad}");
+            assert_eq!(lenient(&json!({"dimension_text_scale":bad})).dimension_text_scale, 1.0, "{bad}");
+        }
+        for bad in [json!([256, 0, 0]), json!("red"), json!([1, 2])] {
+            assert!(h.call("ui.prefs", json!({"dimension_colour":bad}))["error"].is_string(), "{bad}");
+            assert_eq!(lenient(&json!({"dimension_colour":bad})).dimension_colour, None, "{bad}");
+        }
+        let read = lenient(&json!({"dimension_text_scale":9.0,"dimension_colour":[256,0,0]}));
+        assert_eq!((read.dimension_text_scale, read.dimension_colour), (1.0, None), "bad values cost only their settings");
+    }
+
     /// The theme strip's Import… reads the theme file through `vfs`, like the other imports: in the
     /// web app a picked file is kept there, where `std::fs` can't read it (#7643). On the disk it
     /// is the same file; a folder scope active while it is read refuses a path outside it, which
@@ -7613,6 +7679,46 @@ mod tests {
         h.call("ui.prefs", json!({"button":"cancel"}));
         h.frames(2);
         assert_eq!(h.app.preferences, before);
+    }
+
+    /// #14121: the Sketch page's size slider and Theme/Custom colour controls edit the real
+    /// preferences, and Cancel restores the opening snapshot.
+    #[test]
+    fn sketch_dimension_text_controls_edit_size_and_colour() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.prefs", json!({"language":"en","theme":"dark"}));
+        h.call("ui.prefs", json!({"open":"Sketch"}));
+        h.frames(3);
+        let original = h.app.preferences.clone();
+        h.app.prefs_window.shell.filter = h.app.tr("prefs.dimension_text_size").into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:dimension_text_scale");
+        let track = crate::scenario::rect_of("dialog:slider_track:Dimension text size").expect("the dimension text size slider");
+        h.step(&json!({"click":[track.center().x,track.center().y]})).unwrap();
+        h.frames(2);
+        assert!((h.app.preferences.dimension_text_scale - 1.5).abs() < 0.06, "{}", h.app.preferences.dimension_text_scale);
+        h.app.prefs_window.shell.filter = h.app.tr("prefs.dimension_colour").into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:dimension_colour:custom");
+        assert!(crate::scenario::rect_of("prefs:dimension_colour_picker").is_some(), "the colour controls are shown");
+        h.step(&json!({"click":{"handle":"prefs:dimension_colour:custom"}})).unwrap();
+        h.frames(2);
+        let theme = Tokens::get().dimension.to_array();
+        assert_eq!(h.app.preferences.dimension_colour, Some([theme[0], theme[1], theme[2]]), "Custom starts at the theme's colour");
+        super::reveal_preference(&mut h, "prefs:dimension_colour_hex");
+        h.step(&json!({"click":{"handle":"prefs:dimension_colour_hex"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"#123456"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.dimension_colour, Some([0x12, 0x34, 0x56]));
+        h.step(&json!({"click":{"handle":"prefs:dimension_colour:theme"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.dimension_colour, None);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        h.frames(2);
+        assert_eq!(h.app.preferences, original);
     }
 
     fn theme_options_fixture(base: &str, count: usize) -> serde_json::Value {
@@ -12913,7 +13019,8 @@ mod settings_search_tests {
                 h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SKETCH).collect();
+                let matching: Vec<_> =
+                    hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SKETCH && hit.label == query).collect();
                 assert_eq!(matching.len(), 1, "{theme}: {query} has exactly one real Sketch setting hit");
                 assert_eq!(matching[0].1.label, query);
                 let tree = h.output.accesskit_update.as_ref().unwrap();
