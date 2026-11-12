@@ -609,15 +609,6 @@ pub struct UpstreamFixes {
     pub surface_continuity_checks_last_v_knot: bool,
     /// `sm_GoodDropResult` (`SmSurface::DropPoint` given a guess) refuses a local solve's result when the result is farther from the point than its guess, as its comment says; upstream measures its two distances the wrong way round (`dDsqGuess` to the result, `dDsqResult` to the guess), so it refused a result nearer than its guess, sending the drop to the global solve, and took one farther. The same fork change also takes a local result as the foot only when the gap's components along the unit tangents are within the local solve's tight tolerance, `SM_EFF_ZERO (1 + max|P|)` (their sum under it; an interior result each under it), where upstream takes any foot 1e-4 off (an interior one 1e-3 off in each direction); a stalled solve goes to the global solve (WR-56, #1852; the fork's tangency-labs/smlib@eaa998a (was 0b4de8c) / eaa998a, fork PR #70).
     pub good_drop_result_distances_in_order: bool,
-    /// `SmSurfacePointSolver::SmSurfacePointSolver` returns the failing status of
-    /// `SmSurface::CalculateBoundingBox` when `eSolverOp == SM_SO_3D_SIGNED_DIRECTED_MAXIMIZE`
-    /// instead of ignoring it and setting `m_sTestPt` from a corner of the uninitialised
-    /// inside-out `SmExtent3d` (`±1.4 * SM_BIG_DOUBLE`, on the wrong side of the surface)
-    /// (WR-72, #2169;
-    /// `plan/upstream-issues/WR-72--addendum-2026-11-01-propagate-bbox-failure.md`).
-    /// Non-directed solver operations and [`crate::SolidError::Unported`] propagation are
-    /// unchanged. Off by default for pinned C++ parity.
-    pub surface_point_solver_propagates_bbox_failure: bool,
     /// `SmTwistVolume::EvaluateSimple` uses positive `per * cos` for the y
     /// component of `Duw` (WR-46). Propagated through volume evaluation options.
     pub twist_simple_duw_sign: bool,
@@ -631,8 +622,6 @@ pub struct UpstreamFixes {
     pub volume_lift_third_derivative_terms: bool,
     /// `SmSurface::DropCurve` tests the drop domain's own V length for `bDegenSurfV`, not the U length again, so a surface whose natural domain is degenerate only in V reports `SM_ERR_DEGENERATE_SURFACE` (`SM_CTC_DEGENSURFACE_FAIL`) and its failure record sets `bDegenSurfV` from V; upstream copies the U test, misses the early exit and goes on to drop (WR-100, 2026-10-31 addendum). Off by default for pinned C++ parity.
     pub drop_curve_v_domain_degeneracy: bool,
-    /// `SmTorus::AssertValid` tests its V (minor) interval, not the U interval twice, and reports its U and V overlap tests as 3 and 4 (and `SmSurfOfRevolution`'s U test as 13), the ids their labels give them, where upstream reports them as 2 and 3 (and 2) (WR-538, #482; the fork's tangency-labs/smlib@0cd9d08).
-    pub torus_check_reads_v_interval: bool,
     /// `SmTorus::AssertValid` reports a spindle torus whose V interval runs through an apex (`V = ±(90 + asin(R/r))`) as test 5, "Self Intersection", where upstream clears its result with no report and tests the U interval against `90 + acos(R/r)`, failing every spindle torus with a whole turn of U (WR-539; the fork's tangency-labs/smlib@daba678).
     pub torus_check_spindle_apex: bool,
     /// Volume line-domain checks using `SmExtent3d::ContainsLineSeg3d` require
@@ -828,8 +817,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-24--addendum-2026-10-31-knot-vector-requires-span.md`).
     /// Off by default for pinned C++ parity.
     pub knot_vector_valid_requires_span: bool,
-    /// `SmCone::IntersectWithPlane` takes a plane parallel to a cylinder's axis as tangent also when it lies within the zone tolerance of a bounded face's wall along a line (`|d| > R - zone_tol`, the larger of the cone's and the plane's face tolerances, 0 for a surface with no face), besides upstream's two-crossing-lines test, so a plane turned a hair off a face's wall it touches does not cut it in two lines microns apart; bare surfaces are unchanged (WR-510, #1525; tangency-labs/smlib#55, merged as b22bfbc (was bd20f6e)).
-    pub cylinder_plane_tangent_within_tolerance: bool,
     /// The Boolean's topology intersector treats a self-loop proto edge whose ends a vertex definition on a vertex combined (`CanCombineVertexDefinitions`) as degenerate, instead of `SmProtoEdge::Resolve` splitting it onto that one vertex, after which `SmMerge::MakeFaceuse` returns `SM_ERR` (WR-214, #480; `plan/upstream-issues/WR-214--smprotoedge-resolve-splits-a-self-loop-proto-edge-onto-one.md`).
     pub proto_edge_self_loop_on_vertex_degenerate: bool,
     /// `SM_BO_SLICE` keeps a coincident pair whose primary face bounds material on one side only when that material lies on the side the sheet's `SM_OT_SAME` faceuse bounds (step 7.4d's rule), instead of falling through to the difference rule, which keeps a face lying in the slicing sheet in both parts (WR-254, #528; `plan/upstream-issues/WR-254--manifoldboolean-keeps-a-face-lying-in-the-slicing-sheet-in.md`).

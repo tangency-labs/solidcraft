@@ -57,9 +57,8 @@
 //!   keep their previous values (initially undefined, [`Vec3::UNDEF`]), and an
 //!   `SmSurfaceEval` accessor reads the values it holds; [`SolidError::Unported`]
 //!   still propagates. A failing `CalculateBoundingBox` of the directed-maximise
-//!   constructor leaves the box in its initial (inside-out) state by default, as
-//!   upstream; [`UpstreamFixes::surface_point_solver_propagates_bbox_failure`](crate::kernel::UpstreamFixes::surface_point_solver_propagates_bbox_failure)
-//!   (WR-72, #2169) opts into returning that bounding-box error.
+//!   constructor returns its error (WR-72, #2169), where upstream leaves the box in its
+//!   initial (inside-out) state and solves against a point `1.4 * SM_BIG_DOUBLE` away.
 //! - **Unported callees.** The base
 //!   `SmSurface::CreateIsoParametricCurve` (`surface.surface_p5`, the iso curve of a
 //!   curve-bounded or STEP surface) return [`SolidError::Unported`].
@@ -138,11 +137,8 @@ impl<'s> SurfacePointSolver<'s> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the bounding box (directed operation only). With
-    /// [`UpstreamFixes::surface_point_solver_propagates_bbox_failure`](crate::kernel::UpstreamFixes::surface_point_solver_propagates_bbox_failure)
-    /// enabled, any [`Surface::calculate_bounding_box`] failure for
-    /// [`SolverOperation::Signed3dDirectedMaximize`] is returned (WR-72, #2169); by
-    /// default its non-`Unported` failures are ignored, as upstream.
+    /// Any [`Surface::calculate_bounding_box`] failure for
+    /// [`SolverOperation::Signed3dDirectedMaximize`] (WR-72, #2169; upstream ignores it).
     pub fn new(
         k: &Kernel,
         surface: &'s Surface,
@@ -173,21 +169,13 @@ impl<'s> SurfacePointSolver<'s> {
             // minimise along its negation.
             solver.dir_vec = (-test_point).unitize_or_z();
 
-            // A point to define a plane: a corner of the expanded bounding box.
-            // By default a failing box is left in its initial, inside-out state, as
-            // upstream; WR-72 (#2169) opts into propagating the bounding-box error.
-            let mut bbox =
-                match surface.calculate_bounding_box(k, &solver.domain, [true, false, false], true)
-                {
-                    Ok(boxes) => boxes.normal_box.unwrap_or_else(Extent3d::new),
-                    Err(e)
-                        if e.is_unported_or_cancelled()
-                            || k.fixes.surface_point_solver_propagates_bbox_failure =>
-                    {
-                        return Err(e);
-                    }
-                    Err(_) => Extent3d::new(),
-                };
+            // A point to define a plane: a corner of the expanded bounding box. A failing
+            // box is an error (WR-72, #2169): upstream leaves it inside-out and solves
+            // against a point 1.4 * SM_BIG_DOUBLE away.
+            let mut bbox = surface
+                .calculate_bounding_box(k, &solver.domain, [true, false, false], true)?
+                .normal_box
+                .unwrap_or_else(Extent3d::new);
             bbox.expand_relative(0.2);
 
             let d = solver.dir_vec;

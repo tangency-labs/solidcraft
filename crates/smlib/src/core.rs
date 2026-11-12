@@ -159,7 +159,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_tight_box_interval_knots = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
-    f.torus_check_reads_v_interval = true;
     f.torus_check_spindle_apex = true;
     f.local_operation_step_walls = true;
     f.edge_check_orders_tangent_faces = true;
@@ -174,7 +173,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
-    f.cylinder_plane_tangent_within_tolerance = true;
     f.fillet_nx1_tangent_corner_edge = true;
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
@@ -255,7 +253,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.circle_offset_antiparallel_normal = true;
     f.global_solver_identical_prefers_larger_when_maximizing = true;
     f.surface_continuity_checks_last_v_knot = true;
-    f.surface_point_solver_propagates_bbox_failure = true;
     f.volume_lift_third_derivative_terms = true;
     f.stop_tracking_checks_own_callback = true;
     f.plane_reparameterize_moves_origin = true;
