@@ -4504,7 +4504,9 @@ fn hat_holes(s: &mut Session, foot: f64) {
 /// the panels between. Inside a foot, an M3 clearance hole is a cut-out and a DXF CIRCLE. At x ±27.5
 /// it is 1.5 from the foot's free edge at ±29, and its radius is 1.7: it breaks out 0.2 past the
 /// edge, so the flat has it as a notch in its outline (DXF ARCs), not as a cut-out. Places are read
-/// from the flat's corner: u along the unrolled profile from the left foot's end, v = y + 20 across.
+/// from the flat's corner: u along the unrolled profile from the left foot's end, v across from the
+/// sketch plane at y 20 the way the flange was pushed (#6748: the flat is seen from the sheet's
+/// surface), v = 20 - y. The feet holes, at y 5, lie at v 15.
 #[test]
 fn holes_in_a_contour_flanges_end_panels_are_cut_outs_or_notches_of_its_flat_pattern() {
     let (t, k, r) = (1.5, 0.44, 1.7);
@@ -4546,7 +4548,7 @@ fn holes_in_a_contour_flanges_end_panels_are_cut_outs_or_notches_of_its_flat_pat
     let c = corner(&f);
     assert_eq!(f["cutouts"].as_array().map(Vec::len), Some(7), "{}", f["cutouts"]);
     let mut holes = top_holes(c);
-    holes.extend([(at(c, 2.2, 25.0), r), (at(c, length - 2.2, 25.0), r)]);
+    holes.extend([(at(c, 2.2, 15.0), r), (at(c, length - 2.2, 15.0), r)]);
     let drawn = circles(&mut inside);
     assert_eq!(drawn.len(), 7, "{drawn:?}");
     for (centre, radius) in holes {
@@ -4579,7 +4581,7 @@ fn holes_in_a_contour_flanges_end_panels_are_cut_outs_or_notches_of_its_flat_pat
         );
     }
     // The feet holes are notches: the outline runs round their circles, and the DXF draws them as
-    // arcs ending on the end edge, ±0.8 (√(1.7² − 1.5²)) either side of v 25.
+    // arcs ending on the end edge, ±0.8 (√(1.7² − 1.5²)) either side of v 15.
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
     let arcs: Vec<_> = solidcraft_io::read_dxf(&dxf)
         .unwrap_or_default()
@@ -4594,13 +4596,13 @@ fn holes_in_a_contour_flanges_end_panels_are_cut_outs_or_notches_of_its_flat_pat
         .map(|p| [p[0].as_f64().unwrap_or(f64::NAN), p[1].as_f64().unwrap_or(f64::NAN)])
         .collect();
     for (u, edge) in [(1.5, 0.0), (length - 1.5, length)] {
-        let centre = at(c, u, 25.0);
+        let centre = at(c, u, 15.0);
         let centre = solidcore_record::Vec2::new(centre[0], centre[1]);
         let on_circle = outline.iter().filter(|p| (solidcore_record::Vec2::new(p[0], p[1]).dist(centre) - r).abs() < 1e-3).count();
         assert!(on_circle >= 3, "the outline does not run round the notch at u {u}: {on_circle} points");
         let notch: Vec<_> = arcs.iter().filter(|(ac, a, _)| ac.dist(centre) < 1e-5 && (a.dist(centre) - r).abs() < 1e-5).collect();
         let ends: Vec<solidcore_record::Vec2> = notch.iter().flat_map(|(_, a, b)| [*a, *b]).collect();
-        for v in [25.0 - 0.8, 25.0 + 0.8] {
+        for v in [15.0 - 0.8, 15.0 + 0.8] {
             let p = at(c, edge, v);
             assert!(ends.iter().any(|e| e.dist(solidcore_record::Vec2::new(p[0], p[1])) < 1e-5), "no notch arc ends at {p:?}: {notch:?}");
         }
@@ -4613,14 +4615,44 @@ fn holes_in_a_contour_flanges_end_panels_are_cut_outs_or_notches_of_its_flat_pat
     run(&mut s, "sheet.refold", json!({}));
     assert!((volume(&mut s) - v1).abs() < 0.05, "{} vs {v1}", volume(&mut s));
 
-    // A cut that reaches a foot's bend (x 23.3…26.7, the bend ending at 24.55) is refused.
+    // A cut that reaches a foot's bend (x 23.3…26.7, the bend ending at 24.55) runs on into the
+    // bend (#6748: a sheet made from surfaces cuts across a bend, as
+    // `a_hole_through_a_plate_that_runs_into_its_bend_is_cut_from_both` has it; the flat model
+    // refused it). Its centre lies d = 0.45 into the foot from the tangent line: the foot loses its
+    // circle less the cap past the tangent line, and the bend (inside radius R 1.5, the wall clear
+    // of the drill at x 21.55…23.05) every fiber the drill meets: the fiber turned phi where
+    // R sin phi <= s - d, s the drill's half chord.
     let mut bend = Session::default();
     hat(&mut bend);
+    let hat_volume = |s: &Session| {
+        let b = s.model.state().bodies.iter().find(|b| b.name == "Hat").map(|b| b.body.clone());
+        b.and_then(|b| solidcraft_kernel::measure_mass(&b).ok()).map_or(f64::NAN, |m| m.volume)
+    };
+    let before = hat_volume(&bend);
+    let size = bend.model.state().bodies.iter().find(|b| b.name == "Hat").map_or(f64::NAN, |b| b.body.size());
     run(&mut bend, "sketch.create", json!({"plane": "XY", "name": "Bend"}));
     run(&mut bend, "sketch.circle.center", json!({"center": [25, 5], "radius": r}));
     run(&mut bend, "sketch.finish", json!({}));
-    let error = bend.execute("solid.extrude", &json!({"sketch": "Bend", "through_all": true, "operation": "cut", "direction": "symmetric"}));
-    assert!(error.as_ref().is_err_and(|e| e.to_string().contains("bend")), "{error:?}");
+    run(&mut bend, "solid.extrude", json!({"sketch": "Bend", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+    let (d, inside) = (25.0 - 24.55, 1.5);
+    let cap = r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    let reach = (r * r - d * d).sqrt();
+    let n = 20_000;
+    let h = 2.0 * reach / f64::from(n);
+    let fiber = |x: f64| (((r * r - x * x).max(0.0).sqrt() - d) / inside).clamp(0.0, 1.0).asin();
+    let simpson = (1..n).map(|i| fiber(-reach + h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 }).sum::<f64>() + fiber(-reach) + fiber(reach);
+    let in_bend = simpson * h / 3.0 * t * (2.0 * inside + t) / 2.0;
+    let removed = (PI * r * r - cap) * t + in_bend;
+    let got = before - hat_volume(&bend);
+    // The bend's outline of the cut, the fibers' ends, has no exact form in the flat (an arcsine
+    // of a root): it is a curve put through points of the cut's edges read within the shadow's sag
+    // of their chords, max(size·10⁻⁴, 10⁻⁴) of the body before the cut. The metal it can be off
+    // by is at most T × its length × that sag; its length is under 2·reach across plus twice
+    // its reach along the zone, (R + K·T)·φmax.
+    let sag = (size * 1e-4).max(1e-4);
+    let along = (inside + k * t) * ((r - d) / inside).asin();
+    let bound = t * (2.0 * reach + 2.0 * along) * sag;
+    assert!((got - removed).abs() <= bound, "{got} vs {removed}, within {bound}");
 }
 
 /// On a folded sheet a counterbore is the same pocket around the same hole, on the base and on a
@@ -8954,8 +8986,12 @@ fn flange_segments_stored_bounds_outside_the_partition_are_refused() {
 /// y = 98 − √2 at z = 30, down to z = 10 at y = 0. With the cut's corner 0.00001 to 0.0001 mm
 /// along the top edge from the flange's corner, or its taper passing that close to the corner,
 /// SMLib's 2D boolean took the two for one point and the flange's outline came back open ("sew:
-/// the faces do not close"), or with an edge that short, which SMLib refused. Every offset builds,
-/// and the flange loses its part above the taper.
+/// the faces do not close"), or with an edge that short, which SMLib refused.
+///
+/// On a sheet made from surfaces (#6748) no cut is moved onto a corner: a cut through the corner,
+/// or clear of it by the body's working tolerance (10⁻⁶ of its size, at least 10⁻⁵ mm), builds and
+/// the flange loses its part above the taper; one that passes nearer than that but not through it
+/// is refused by name, and the part stays as it was.
 #[test]
 fn a_cut_passing_a_hair_off_a_flange_corner_builds() {
     // The flange's flat panel runs 26 from its bend (z = 4) to its top (z = 30) and c along y. The
@@ -8980,6 +9016,8 @@ fn a_cut_passing_a_hair_off_a_flange_corner_builds() {
             run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Part"}));
             run(&mut s, "sheet.flange", json!({"edges": [[0, 50, 2], [30, 100, 2]], "height": 30}));
             let before = volume(&mut s);
+            let size = s.model.state().bodies.iter().find(|b| b.name == "Part").map_or(f64::NAN, |b| b.body.size());
+            let reach = (size * 1e-6).max(1e-5);
             // Along: the cut's corner on the flange's top edge, d from its corner. Past: the taper
             // runs on 1 mm past the mitre, d above the corner there.
             let (corner, k) = if along { ([c + d, 30.0], 20.0 / (c + d)) } else { ([c + 1.0, 10.0 + (c + 1.0) * (20.0 + d) / c], (20.0 + d) / c) };
@@ -8988,6 +9026,16 @@ fn a_cut_passing_a_hair_off_a_flange_corner_builds() {
             run(&mut s, "sketch.finish", json!({}));
             let what = format!("{d:e}, {}", if along { "corner along the top edge" } else { "taper past the corner" });
             let cut = json!({"sketch": "Cut", "profiles": "all", "through_all": true, "direction": "symmetric", "operation": "cut"});
+            // How far the flange's corner (y c, z 30) lies from the cut's outline: along, from the
+            // taper through (c + d, 30) and (0, 10), the nearer of its edges, |d|·20/√((c + d)² + 20²);
+            // past, from the taper through (0, 10) at slope (20 + d)/c, |d|·c/√(c² + (20 + d)²).
+            let off = if along { d.abs() * 20.0 / ((c + d).powi(2) + 400.0).sqrt() } else { d.abs() * c / (c * c + (20.0 + d).powi(2)).sqrt() };
+            if off > solidcraft_geom::LINEAR_TOL && off < reach {
+                let e = s.execute("solid.extrude", &cut).err().map(|e| e.to_string()).unwrap_or_default();
+                assert!(e.contains("from a corner of `Part`") && e.contains("not through it"), "{what}: {off:e} from the corner: {e}");
+                assert!((volume(&mut s) - before).abs() < 1e-9 * before, "{what}: the part changed");
+                continue;
+            }
             if let Err(e) = s.execute("solid.extrude", &cut) {
                 failed.push(format!("{what}: {e}"));
                 continue;

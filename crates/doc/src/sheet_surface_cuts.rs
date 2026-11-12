@@ -573,7 +573,7 @@ pub(crate) fn near_each_other(x: &Seg2, y: &Seg2, near: f64) -> std::result::Res
 }
 
 /// How far point `p` lies from the segment from `a` to `b`.
-fn to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+pub(crate) fn to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     let d = b - a;
     let t = if d.dot(d) > 0.0 { ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0) } else { 0.0 };
     p.dist(a + d * t)
@@ -588,7 +588,7 @@ pub(crate) fn on_arc(v: Vec2, start: f64, sweep: f64) -> bool {
 /// How far point `p` lies from the arc round `center`, `radius` from it, from `start` round
 /// `sweep`, which ends at `ends`: square to it where the way to `p` lies within it, else from an
 /// end.
-fn to_arc(p: Vec2, (center, radius, start, sweep): (Vec2, f64, f64, f64), ends: [Vec2; 2]) -> f64 {
+pub(crate) fn to_arc(p: Vec2, (center, radius, start, sweep): (Vec2, f64, f64, f64), ends: [Vec2; 2]) -> f64 {
     let v = p - center;
     let square = if v.len() > 0.0 && on_arc(v, start, sweep) { (v.len() - radius).abs() } else { f64::INFINITY };
     square.min(p.dist(ends[0])).min(p.dist(ends[1]))

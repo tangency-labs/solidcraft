@@ -2003,6 +2003,63 @@ const MAX_LABELS: usize = 1000;
 /// beside either face. Past a rounding of the numbers its depths come from, a cap within a few
 /// units in the last place of a face is on it. The boolean doesn't resolve such a layer, so the
 /// sheet would keep what the cut took or lose what it kept; the extrude's own interval shows it.
+/// An extrude cut whose profile passes a hair off a corner of a sheet made from surfaces it cuts
+/// (#15346), nearer it than the body's working tolerance but not through it, is refused. The
+/// kernel's booleans and sew take two points that near for one (the record's tolerance, 10⁻⁶ of
+/// the solid's size and at least 10⁻⁵ mm, as `sew` in crates/kernel/src/sew.rs sets it), so the
+/// cut would build another part than the one drawn, or none; moving the cut onto the corner would
+/// change what was drawn. Read exactly in the sketch plane: each corner the extrude runs past, its
+/// distance from the profile's lines and arcs (other curves are not read here). "Through it" is
+/// within the model's linear resolution, `LINEAR_TOL` (10⁻⁶ mm).
+pub(super) fn surface_corner_graze_refused(f: &Feature, st: &ModelState, targets: &[String], c: &ExtrudeConstructor) -> Result<()> {
+    let FeatureKind::Extrude { sketch, profiles, .. } = &f.kind else { return Ok(()) };
+    let Some(ss) = st.sketch(sketch.0) else { return Ok(()) };
+    if c.plane != ss.plane {
+        return Ok(());
+    }
+    let regions = select_profiles(ss, profiles)?;
+    let plane = ss.plane;
+    let n = plane.normal();
+    let (lo, hi) = (c.interval.0.min(c.interval.1), c.interval.0.max(c.interval.1));
+    for sk in &st.surface_sheets {
+        let Some(mb) = st.body(&sk.body) else { continue };
+        if !takes_part(f, targets, mb) {
+            continue;
+        }
+        let reach = (mb.body.size() * 1e-6).max(1e-5);
+        for v in &mb.body.record().vertices {
+            let p = Vec3::new(v.point[0], v.point[1], v.point[2]);
+            let h = (p - plane.origin).dot(n);
+            if h < lo - reach || h > hi + reach {
+                continue;
+            }
+            let q = plane.to_local(p);
+            let near = regions
+                .iter()
+                .flat_map(|r| std::iter::once(&r.outer).chain(&r.holes))
+                .flat_map(|l| &l.segs)
+                .filter_map(|s| match *s {
+                    Seg2::Line { a, b } => Some(crate::sheet_surface_cuts::to_segment(q, a, b)),
+                    Seg2::Arc { center, radius, start, sweep } => {
+                        Some(crate::sheet_surface_cuts::to_arc(q, (center, radius, start, sweep), [s.start(), s.end()]))
+                    }
+                    _ => None,
+                })
+                .fold(f64::INFINITY, f64::min);
+            // On the corner: within the model's linear resolution (a folded panel's corner lies
+            // where its fold puts it, to a rounding far below that).
+            if near > solidcraft_geom::LINEAR_TOL && near < reach {
+                return Err(DocError::Invalid(format!(
+                    "the cut passes {near:.1e} mm from a corner of `{}` at ({:.4}, {:.4}, {:.4}): nearer than the model's tolerance ({reach:.1e} mm) \
+                     but not through it, so it can't be built as drawn. Draw the cut through the corner, or at least {reach:.1e} mm from it",
+                    sk.body, p.x, p.y, p.z
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn surface_thin_layer_refused(
     st: &ModelState,
     reach: &[Option<Aabb3>],
