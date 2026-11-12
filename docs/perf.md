@@ -729,9 +729,10 @@ reporting each highlight build.
 | before (`main`) | 20–24 ms (median 22) | 57 MB (38 MB lines, 19 MB hidden) |
 | after | 1–2 ms | 0 |
 
-The GPU draws the same segments as before. A whole body's highlight now lights the edges the
-view draws: tangent edges that Shaded with edges leaves out are no longer lit on it.
-`whole_body_hover_edges_look_as_their_copies_did` renders the hover both ways.
+The GPU draws the same segments as before. The few edges a body can be picked by that the view
+does not draw (smooth edges between tangent faces, in a shaded view) are still copied, so the
+highlight lights the same edges as before. `whole_body_hover_edges_look_as_their_copies_did`
+renders the hover both ways.
 
 In Wireframe the model draws no faces, so a whole hovered body's faces are still copied (239 MB
 and about 150 ms for this assembly): a separate change.

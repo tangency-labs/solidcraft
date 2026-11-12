@@ -828,6 +828,8 @@ pub struct BlockBuilder {
     bodies: Vec<BodySpan>,
     /// The body being written: its first vertex and the box so far.
     spanning: Option<(u32, [[f32; 3]; 2])>,
+    /// Where the body being written ended its edge lines ([`BlockBuilder::end_edges`]).
+    edges_end: Option<u32>,
 }
 
 impl BlockBuilder {
@@ -836,9 +838,22 @@ impl BlockBuilder {
         u32::try_from(self.lines.len() / LINE_SIZE).unwrap_or(u32::MAX)
     }
 
+    /// The body being written has added all its edge lines: what follows (its vertex markers)
+    /// is not an edge.
+    pub fn end_edges(&mut self) {
+        self.edges_end = Some(self.lines_len());
+    }
+
+    /// Where the body being written ended its edge lines, when it said so
+    /// ([`BlockBuilder::end_edges`]).
+    pub fn edges_end(&self) -> Option<u32> {
+        self.edges_end
+    }
+
     /// The triangles from here to [`BlockBuilder::end_body`] are one body's (its box is kept, so
     /// it can be left out of a view it is not in).
     pub fn begin_body(&mut self) {
+        self.edges_end = None;
         let at = u32::try_from(self.vertices.len() / TRI_SIZE).unwrap_or(u32::MAX);
         self.spanning = Some((at, [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]]));
     }

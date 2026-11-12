@@ -1234,6 +1234,8 @@ impl BodyDraw {
                 }
             }
         }
+        // A whole lit body's edges are drawn again from these lines; its markers are not edges.
+        out.end_edges();
         // Vertex markers follow the edges: drawn where they are, faint behind the model where
         // hidden edges are, and not in plain shaded (#7834).
         if edges && markers {
@@ -1330,8 +1332,9 @@ fn build_block(draws: &[BodyDraw], shaded: bool, build: &impl Fn(&BodyDraw, &mut
         // Its box goes with its triangles, so a view without it leaves them out.
         builder.begin_body();
         build(d, &mut builder);
+        let l1 = builder.edges_end().unwrap_or_else(|| builder.lines_len());
         builder.end_body();
-        spans.push((at(v0)..at(builder.vertices_len()), l0..builder.lines_len()));
+        spans.push((at(v0)..at(builder.vertices_len()), l0..l1));
     }
     let ranges = draws
         .iter()
@@ -5052,12 +5055,21 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             }
         }
         // A whole body's edges: the model's own lines, drawn again (see `highlight_edges`).
+        // The few it can pick that the model does not draw (smooth edges in a shaded view) are
+        // copied as before. A mesh's outlines are drawn but never lit: such a body is copied.
         if whole
             && !use_outlines
+            && !m.display_only_edges
             && gpu_lit(b)
             && let Some(lit) = highlight_edges(app, b, hover_edge, 1.5)
         {
             feedback.lit_edges.push(lit);
+            let shaded = app.ui.visual_style != 2;
+            for (ei, e) in m.edges.iter().enumerate() {
+                if m.edge_pickable(ei) && shaded && !m.shaded_edge_visible(ei) {
+                    edge_lines(&mut feedback, e, hover_edge, 1.5, &[]);
+                }
+            }
             continue;
         }
         for (ei, e) in m.edges.iter().enumerate() {
@@ -11701,13 +11713,56 @@ mod tests {
         assert_eq!((lit.lit_edges[0].block, lit.lit_edges[0].lines.clone()), (block, lines));
         let merged = lit.clone().merged();
         assert!(merged.lines.is_empty() && merged.hidden.is_empty(), "no copy of the plate's edges");
+        // Vertex markers follow a body's edges in the block: they are not part of its edge range.
+        app.viewport.hover_bodies.clear();
+        app.preferences.vertex_markers = true;
+        build_scene(&app);
+        let (_, marked) = app.viewport.body_lines.lock().unwrap().get("Plate").cloned().unwrap();
+        assert_eq!(marked.len(), drawn, "the markers are not drawn again as edges");
+        app.preferences.vertex_markers = false;
         // Shaded without edges: the model has no lines for it, so the highlight copies them.
         app.ui.visual_style = 1;
         build_scene(&app);
         assert!(app.viewport.body_lines.lock().unwrap().is_empty(), "the model draws no edges");
+        app.viewport.hover_bodies = vec!["Plate".into()];
         let copied = build_highlight(&app);
         assert!(copied.lit_edges.is_empty());
         assert!(!copied.merged().lines.is_empty(), "the edges are copied when the model draws none");
+    }
+
+    /// The edges a whole hovered body can be picked by but the shaded view does not draw (smooth
+    /// ones between tangent faces) are lit as before: the model's lines are drawn again for the
+    /// others, and only those are copied.
+    #[test]
+    fn whole_body_hover_still_lights_smooth_edges_the_view_hides() {
+        let mut s = solidcraft_engine::Session::default();
+        let sketch = s.execute("sketch.create", &json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        // A circle r10 as eight G2 cubic splines: the wall's eight seams are smooth edges.
+        let step = std::f64::consts::TAU / 8.;
+        let k = 4. / 3. * (step / 4.).tan() * 10.;
+        for i in 0..8 {
+            let (a, b) = (i as f64 * step, (i + 1) as f64 * step);
+            let p0 = [10. * a.cos(), 10. * a.sin()];
+            let p3 = if i == 7 { [10., 0.] } else { [10. * b.cos(), 10. * b.sin()] };
+            let p1 = [p0[0] - k * a.sin(), p0[1] + k * a.cos()];
+            let p2 = [p3[0] + k * b.sin(), p3[1] - k * b.cos()];
+            s.execute("sketch.spline.control_point", &json!({"points":[p0,p1,p2,p3]})).unwrap();
+        }
+        s.execute("solid.extrude", &json!({"sketch":sketch,"distance":3})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        let body = app.session.world_state().unwrap().bodies[0].clone();
+        build_scene(&app);
+        app.viewport.hover_bodies = vec![body.name.clone()];
+        let lit = build_highlight(&app);
+        assert_eq!(lit.lit_edges.len(), 1, "the drawn edges are the model's own lines");
+        let m = drawn_mesh(&app, &body);
+        let smooth: Vec<usize> = (0..m.edges.len()).filter(|i| m.edge_pickable(*i) && !m.shaded_edge_visible(*i)).collect();
+        assert_eq!(smooth.len(), 8, "the wall's eight smooth seams");
+        let segments: usize = smooth.iter().map(|i| m.edges[*i].len() - 1).sum();
+        let merged = lit.merged();
+        assert_eq!(merged.lines.len(), 2 * segments * crate::gpu::LINE_SIZE, "a halo and a line for each smooth edge's segment, copied");
+        assert_eq!(merged.hidden.len(), segments * crate::gpu::LINE_SIZE);
     }
 
     /// The hover's edges drawn again from the model's lines look as the copy they replace did:
