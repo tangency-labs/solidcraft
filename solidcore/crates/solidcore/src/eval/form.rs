@@ -886,32 +886,19 @@ pub fn extent(
     loops: &[Vec<(&Curve, [f64; 2], bool)>],
     reach: f64,
 ) -> Result<Option<[[f64; 2]; 2]>, EvalError> {
-    extent_by(label, loops, &|eval: &SurfaceEval, q: [f64; 2]| {
-        eval.pole_within(q, reach)
-    })
-}
-
-/// [`extent`] with the boundary points on a pole told apart by `pole` (for each direction,
-/// whether the label is collapsed there): the speed rule of [`super::pcurve::pole_by_speed`] for
-/// a reader that bounds its faces as the pcurves it then fits do.
-pub fn extent_by(
-    label: &Surface,
-    loops: &[Vec<(&Curve, [f64; 2], bool)>],
-    pole: &dyn Fn(&SurfaceEval, [f64; 2]) -> Result<[bool; 2], EvalError>,
-) -> Result<Option<[[f64; 2]; 2]>, EvalError> {
     let mut refused = None;
-    let out = extent_in(label, loops, pole, &mut refused);
+    let out = extent_in(label, loops, reach, &mut refused);
     match refused {
         Some(e) => Err(e),
         None => Ok(out),
     }
 }
 
-/// [`extent_by`]'s body: the classifier's refusal goes to `refused`.
+/// [`extent`]'s body: the classifier's refusal goes to `refused`.
 fn extent_in(
     label: &Surface,
     loops: &[Vec<(&Curve, [f64; 2], bool)>],
-    pole_at: &dyn Fn(&SurfaceEval, [f64; 2]) -> Result<[bool; 2], EvalError>,
+    reach: f64,
     refused: &mut Option<EvalError>,
 ) -> Option<[[f64; 2]; 2]> {
     let eval = SurfaceEval::new(label).ok()?;
@@ -953,7 +940,7 @@ fn extent_in(
                 };
                 let q = at(t, prev)?;
                 // At a pole the collapsed parameter is anything: it bounds nothing.
-                let pole = match pole_at(&eval, q) {
+                let pole = match eval.pole_within(q, reach) {
                     Ok(p) => p,
                     Err(e) => {
                         *refused = Some(e);

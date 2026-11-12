@@ -45,10 +45,12 @@ const TOUCH_AREA: f64 = 1e-6;
 const FOLD_TABS_REJOIN: &str = "not supported yet: folding tabs that join again beyond the bend";
 pub const FOLD_FIXED_OFF_SHEET: &str = "the fold's fixed point is not on the sheet";
 
-/// A bend radius below this (mm), the sheet model's outline tolerance, is a sharp bend. Its inner
-/// face has collapsed to the bend's inner edge, so the folded solid has only the outer cylindrical
-/// face there, as a press brake makes it with a sharp punch: no inner cylinder.
-const SHARP_BEND: f64 = 1e-3;
+/// A bend radius at or below this (mm) is a sharp bend. Its inner face has collapsed to the bend's
+/// inner edge, so the folded solid has only the outer cylindrical face there, as a press brake
+/// makes it with a sharp punch: no inner cylinder. Half the linear tolerance, so the inner arc's
+/// chord (at most √2 · radius) is below it and the end walls' inner edge collapses too; a larger
+/// radius keeps its inner cylinder and the shell stays closed.
+const SHARP_BEND: f64 = LINEAR_TOL / 2.0;
 
 /// The most bores one sheet keeps.
 const MAX_BORES: usize = 1000;
@@ -169,6 +171,76 @@ fn onto_seams(region: Region2, seams: &[(Vec2, Vec2)]) -> Region2 {
         lp
     };
     Region2 { outer: snap_loop(region.outer), holes: region.holes.into_iter().map(snap_loop).collect() }
+}
+
+/// `region` passing through each corner in `corners` (the panels' and bend zones' corners) that it
+/// passes within `reach` of, but not through: a corner of its own that near moves onto it, as
+/// [`onto_seams`] moves corners onto a bend line, and a straight edge that near is split there.
+/// Such a corner is a corner of the cut-out to the folded solid, which is sewn with a tolerance
+/// of `reach` (#15269): left apart, SMLib's 2D boolean took the two for one point and handed the
+/// panel's outline back open, or left an edge between them shorter than the sew's tolerance,
+/// which SMLib refused. The cut moves by under `reach`.
+fn onto_corners(region: Region2, corners: &[Vec2], reach: f64) -> Region2 {
+    if corners.is_empty() {
+        return region;
+    }
+    let snap_loop = |mut lp: Loop2| -> Loop2 {
+        let n = lp.segs.len();
+        if n < 2 {
+            return lp;
+        }
+        for j in 0..n {
+            let prev = (j + n - 1) % n;
+            let (Some(p), Some(q)) = (lp.segs.get(j).and_then(seg_start), lp.segs.get(prev).and_then(seg_end)) else { continue };
+            if p.dist(q) > LINEAR_TOL {
+                continue;
+            }
+            // A corner on one of the corners (to rounding) stays there, whatever other corner is
+            // near.
+            if corners.iter().any(|c| c.dist(p) <= NOISE) {
+                continue;
+            }
+            let near = corners.iter().filter(|c| c.dist(p) < reach);
+            let Some(&c) = near.min_by(|a, b| a.dist(p).total_cmp(&b.dist(p))) else { continue };
+            if let Some(segs) = shifted(&lp.segs, j, c - p) {
+                lp.segs = segs;
+            }
+        }
+        let mut segs = Vec::with_capacity(lp.segs.len());
+        for e in lp.segs {
+            let Seg2::Line { a, b } = e else {
+                segs.push(e);
+                continue;
+            };
+            let d = b - a;
+            let mut on: Vec<(f64, Vec2)> = corners
+                .iter()
+                .filter(|c| c.dist(a) >= reach && c.dist(b) >= reach)
+                .filter_map(|&c| {
+                    let t = (c - a).dot(d) / d.len2().max(1e-30);
+                    let off = (a + d * t).dist(c);
+                    ((0.0..=1.0).contains(&t) && off > NOISE && off < reach).then_some((t, c))
+                })
+                .collect();
+            on.sort_by(|x, y| x.0.total_cmp(&y.0));
+            let mut from = a;
+            for (_, c) in on {
+                if c.dist(from) >= reach {
+                    segs.push(Seg2::Line { a: from, b: c });
+                    from = c;
+                }
+            }
+            segs.push(Seg2::Line { a: from, b });
+        }
+        Loop2 { segs }
+    };
+    Region2 { outer: snap_loop(region.outer), holes: region.holes.into_iter().map(snap_loop).collect() }
+}
+
+/// The working tolerance (mm) of the record the kernel's sew builds a solid `size` mm across
+/// from: 10⁻⁶ of its size, at least 10⁻⁵ mm (`sew_impl` in `crates/kernel/src/sew.rs`).
+fn sew_tolerance(size: f64) -> f64 {
+    (size * 1e-6).max(1e-5)
 }
 
 /// `segs` (a closed loop) with the corner where segment `j` starts moved by `delta`: a line
@@ -403,7 +475,15 @@ impl<'a> NearHoles<'a> {
     }
 }
 
+// The planar booleans this thread ran, for the tests that count them.
+#[cfg(test)]
+thread_local! {
+    static MATERIAL_BOOLEANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn material_boolean(a: &[Region2], b: &[Region2], op: kernel::BoolOp, work: &mut FlatWork) -> Result<Vec<Region2>> {
+    #[cfg(test)]
+    MATERIAL_BOOLEANS.with(|n| n.set(n.get() + 1));
     let (ae, ap) = region_complexity(a)?;
     let (be, bp) = region_complexity(b)?;
     let edges = ae.saturating_add(be);
@@ -2177,8 +2257,16 @@ impl SheetBody {
         let mut cuts = Vec::new();
         let mut cut_points = 0usize;
         let seams = self.seams();
+        // The folded solid is sewn with a tolerance of its size, which the flat pattern's size (and
+        // the thickness) bounds.
+        let flat_box = pieces.iter().try_fold(Aabb2::EMPTY, |b, (_, r)| loop_box(&r.outer).map(|r| b.union(&r)))?;
+        let reach = sew_tolerance(flat_box.diagonal() + self.t);
+        let corners: Vec<Vec2> =
+            pieces.iter().flat_map(|(_, r)| std::iter::once(&r.outer).chain(&r.holes)).flat_map(|l| l.segs.iter().map(Seg2::start)).collect();
         for hole in self.holes.iter().filter(|h| encloses_area(h)) {
-            let region = fitted_region(&onto_seams(planar_region(hole)?, &seams))?;
+            let hole_corners = hole.holes.iter().fold(hole.outer.segs.len(), |n, h| n.saturating_add(h.segs.len()));
+            work.charge(corners.len().saturating_mul(hole_corners))?;
+            let region = fitted_region(&onto_corners(onto_seams(planar_region(hole)?, &seams), &corners, reach))?;
             cut_points = cut_points.saturating_add(region_complexity(std::slice::from_ref(&region))?.1);
             if cut_points > MAX_FLAT_POINTS {
                 return Err(flat_budget_error());
@@ -2916,7 +3004,9 @@ impl SheetBody {
             cuts.push(region);
         }
         cuts.extend(self.through_pocket_regions(&mut work)?);
-        let cuts = material_union(cuts, &mut work)?;
+        // One cut of them all: the planar boolean unites its operand's regions itself (in
+        // balanced rounds, as SMLib sheets), so uniting them first as regions only multiplied the
+        // booleans and their round trips (#13493).
         let regions = if cuts.is_empty() { regions } else { material_boolean(&regions, &cuts, kernel::BoolOp::Cut, &mut work)? };
         Ok(regions)
     }
@@ -3346,8 +3436,12 @@ impl SheetBody {
             let transverse = volume * (3.0 * radius2 + self.t * self.t) / 12.0;
             let own = [[transverse, 0.0, 0.0], [0.0, transverse, 0.0], [0.0, 0.0, volume * radius2 / 2.0]];
             for hole in holes {
-                let world = if self.flat || panels.len() == 1 {
+                // One panel on its own is placed by its own transform: an arc-first contour
+                // has a single flange panel and no base, and that panel is folded.
+                let world = if self.flat {
                     &flat
+                } else if let [(panel_world, _)] = panels.as_slice() {
+                    panel_world
                 } else {
                     &panels.iter().find(|(_, region)| region.contains(hole)).ok_or_else(invalid)?.0
                 };
@@ -7356,6 +7450,27 @@ mod tests {
         assert!((regions[0].area() - area).abs() < 1e-6);
     }
 
+    /// #13493: a flat with many cut-outs takes them all from the material in one planar boolean,
+    /// not after uniting them one pair at a time (63 more for 64 holes, each rebuilding both
+    /// operands in the kernel). Its holes are the same 64 circles.
+    #[test]
+    fn a_flat_with_many_cutouts_cuts_them_in_one_planar_boolean() {
+        let mut s = plate(250.0, 130.0);
+        for i in 0..8 {
+            for j in 0..8 {
+                s.holes.push(Region2 { outer: Loop2::circle(Vec2::new(15.0 + 30.0 * i as f64, 15.0 + 14.0 * j as f64), 2.0), holes: vec![] });
+            }
+        }
+        MATERIAL_BOOLEANS.with(|n| n.set(0));
+        let regions = s.flat_regions().unwrap();
+        let calls = MATERIAL_BOOLEANS.with(std::cell::Cell::get);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].holes.len(), 64);
+        let area = 250.0 * 130.0 - 64.0 * std::f64::consts::PI * 4.0;
+        assert!((regions[0].area() - area).abs() < 1e-6, "{}", regions[0].area());
+        assert_eq!(calls, 1, "planar booleans for one plate and 64 holes");
+    }
+
     #[test]
     fn overlapping_round_cutouts_union_with_exact_arc_boundaries() {
         let mut s = plate(100.0, 60.0);
@@ -8837,6 +8952,33 @@ mod tests {
 
     fn turned(x: f64, y: f64, turn: f64) -> Vec2 {
         Vec2::new(x * turn.cos() - y * turn.sin(), x * turn.sin() + y * turn.cos())
+    }
+
+    #[test]
+    fn a_cut_out_passes_through_a_corner_it_passes_a_hair_off() {
+        // Two corners 0.00008 apart, both within reach of each other (#15269).
+        let (a, b, reach) = (Vec2::new(0.0, 0.0), Vec2::new(8e-5, 0.0), 1.6e-4);
+        let square = |p: Vec2| Region2 {
+            outer: Loop2::polygon(&[p, p + Vec2::new(0.0, 1.0), p + Vec2::new(-1.0, 1.0), p + Vec2::new(-1.0, 0.0)]),
+            holes: vec![],
+        };
+        // A cut-out's corner on either corner stays there.
+        for p in [a, b] {
+            assert_eq!(onto_corners(square(p), &[a, b], reach), square(p));
+        }
+        // One a hair off moves onto the nearest corner.
+        let moved = onto_corners(square(Vec2::new(1.1e-4, 1e-5)), &[a, b], reach);
+        assert!(moved.outer.segs.iter().any(|e| e.start() == b), "{moved:?}");
+        // An edge passing a hair off a corner is split there.
+        let strip = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(-1.0, 1e-5), Vec2::new(1.0, 1e-5), Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0)]),
+            holes: vec![],
+        };
+        let split = onto_corners(strip, &[a], reach);
+        assert_eq!(split.outer.segs.len(), 5, "{split:?}");
+        assert!(split.outer.segs.iter().any(|e| e.start() == a), "{split:?}");
+        // Corners beyond reach move nothing.
+        assert_eq!(onto_corners(square(Vec2::new(1e-3, 0.0)), &[a, b], reach), square(Vec2::new(1e-3, 0.0)));
     }
 
     #[test]

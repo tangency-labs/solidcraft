@@ -216,6 +216,10 @@ impl ControlJob {
     }
 }
 
+/// Most steps still to come that the agent row's tooltip lists: a 100-step batch must not fill
+/// the screen.
+pub(crate) const MAX_NEXT_SHOWN: usize = 12;
+
 fn label(app: &SolveApp, command: &str) -> String {
     let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     language.label(solidcraft_engine::find_command(command).map_or(command, |c| c.label)).to_string()
@@ -244,6 +248,9 @@ fn spawn(
 pub(crate) struct Steps {
     now: AtomicUsize,
     labels: Vec<String>,
+    /// The batch's steps after those computed ahead (the first that can't ends them), for the
+    /// list of what is still to come only.
+    later: Vec<String>,
     total: usize,
     /// The evaluation's progress inside the step it is on, and its Cancel: Stop stops it at its
     /// next feature rather than leaving it to compute unseen.
@@ -257,6 +264,7 @@ impl Steps {
         Arc::new(Steps {
             now: AtomicUsize::new(0),
             labels: commands.iter().map(|(c, _)| label(app, c)).collect(),
+            later: batch_runs(request).into_iter().skip(commands.len()).flatten().map(|(c, _)| label(app, &c)).collect(),
             total,
             progress: Default::default(),
         })
@@ -274,6 +282,12 @@ impl Steps {
     pub(crate) fn current(&self) -> String {
         let now = self.now.load(Ordering::Relaxed).max(1);
         self.labels.get(now - 1).or(self.labels.last()).cloned().unwrap_or_default()
+    }
+
+    /// The steps still to come, as (index, command), after the one running.
+    pub(crate) fn upcoming(&self) -> impl Iterator<Item = (usize, &str)> {
+        let running = self.now.load(Ordering::Relaxed).max(1);
+        self.labels.iter().chain(&self.later).enumerate().skip(running).map(|(i, l)| (i, l.as_str()))
     }
 
     /// Steps done (the one running not yet) and how many there are.
@@ -399,27 +413,31 @@ fn ahead_commands(method: &str, p: &Value) -> Vec<(String, Value)> {
             if ["timings", "profile"].iter().any(|k| p.get(*k).and_then(Value::as_bool) == Some(true)) {
                 return Vec::new();
             }
-            let Some(steps) = p.get("commands").and_then(Value::as_array) else { return Vec::new() };
-            // As the batch will run them: with `coalesce_parameters`, a run of parameter edits
-            // as one edit (#5822).
-            let coalesce = p.get("coalesce_parameters").and_then(Value::as_bool).unwrap_or(false);
-            solidcraft_engine::batch_params::plan(steps, coalesce)
-                .into_iter()
-                .map(|run| match run {
-                    solidcraft_engine::batch_params::BatchRun::Step(i) => {
-                        let step = steps.get(i)?;
-                        let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)?;
-                        Some((command.to_string(), step.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))
-                    }
-                    solidcraft_engine::batch_params::BatchRun::Params { changes, .. } => {
-                        Some(("parameters.change".to_string(), solidcraft_engine::batch_params::combined_params(&changes)))
-                    }
-                })
-                .map_while(|c| c.filter(|(command, params)| computes_ahead(command, params)))
-                .collect()
+            batch_runs(p).into_iter().map_while(|c| c.filter(|(command, params)| computes_ahead(command, params))).collect()
         }
         _ => Vec::new(),
     }
+}
+
+/// Every step of a batch as it will run: its command and params, `None` for a step that names
+/// no command.
+fn batch_runs(p: &Value) -> Vec<Option<(String, Value)>> {
+    let Some(steps) = p.get("commands").and_then(Value::as_array) else { return Vec::new() };
+    // With `coalesce_parameters`, a run of parameter edits is one edit (#5822).
+    let coalesce = p.get("coalesce_parameters").and_then(Value::as_bool).unwrap_or(false);
+    solidcraft_engine::batch_params::plan(steps, coalesce)
+        .into_iter()
+        .map(|run| match run {
+            solidcraft_engine::batch_params::BatchRun::Step(i) => {
+                let step = steps.get(i)?;
+                let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)?;
+                Some((command.to_string(), step.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))
+            }
+            solidcraft_engine::batch_params::BatchRun::Params { changes, .. } => {
+                Some(("parameters.change".to_string(), solidcraft_engine::batch_params::combined_params(&changes)))
+            }
+        })
+        .collect()
 }
 
 /// Wait the app's wait for a worker: `Some(result)` when it finished within it.
@@ -449,6 +467,35 @@ impl SolveApp {
     /// steps ([`Steps`]).
     pub(crate) fn agent_steps(&self) -> Option<Arc<Steps>> {
         self.control_job.as_ref().map_or_else(|| self.agent.computing_steps(), |j| j.steps.clone())
+    }
+
+    /// The steps of the computing batch still to come, as (number from 1, command), at most
+    /// [`MAX_NEXT_SHOWN`].
+    pub(crate) fn agent_next(&self) -> Vec<(usize, String)> {
+        let steps = self.agent_steps();
+        steps.iter().flat_map(|s| s.upcoming()).take(MAX_NEXT_SHOWN).map(|(i, l)| (i + 1, l.to_string())).collect()
+    }
+
+    /// The design changes held behind what is running, in the order they run, as (serial, command).
+    pub(crate) fn agent_held(&self) -> Vec<(u64, String)> {
+        let held = self.control_held.iter().filter(|r| changes_the_design(&r.method));
+        held.map(|r| {
+            let first = match r.method.as_str() {
+                "engine.execute" | "command" => executed(&r.params).map(|(c, _)| c),
+                _ => r.params.get("commands").and_then(Value::as_array).and_then(|s| s.first()).and_then(crate::control::batch_step_command),
+            };
+            (r.serial, label(self, first.unwrap_or(&r.method)))
+        })
+        .collect()
+    }
+
+    /// Cancel the held request with this serial (its client is told it was cancelled; it never runs).
+    pub(crate) fn cancel_held(&mut self, serial: u64) {
+        let at = self.control_held.iter().position(|r| r.serial == serial);
+        if let Some(req) = at.and_then(|at| self.control_held.remove(at)) {
+            req.ticket.cancel();
+            let _ = req.reply.send(cancelled_reply(&req.method));
+        }
     }
 
     /// Stop waiting for the agent's design change that is computing: it is answered as stopped
@@ -693,5 +740,57 @@ impl SolveApp {
                 Err(TryRecvError::Empty) => i += 1,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A computing batch is one row of the operations panel; its tooltip and `next` list the
+    /// steps still to come (at most [`MAX_NEXT_SHOWN`]) and move up as the batch advances.
+    #[test]
+    fn a_computing_batch_is_one_row_listing_its_next_steps() {
+        let mut h = crate::scenario::Harness::new();
+        let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
+        let request = json!({"commands": (0..20).map(|i| hole(20.0 + 3.0 * f64::from(i))).collect::<Vec<_>>()});
+        let commands = ahead_commands("engine.batch", &request);
+        assert_eq!(commands.len(), 20);
+        let steps = Steps::new(&h.app, &request, &commands);
+        let (req, _reply) = ControlRequest::new("engine.batch", request);
+        // The worker never answers: the batch stays where the test puts it.
+        let (_worker, done) = std::sync::mpsc::channel();
+        h.app.control_job = Some(ControlJob { req, work: Work::Answer, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
+        let rows = |h: &mut crate::scenario::Harness| {
+            let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+            listed["operations"].as_array().unwrap().clone()
+        };
+        for (running, first, count) in [(6, 7, MAX_NEXT_SHOWN), (19, 20, 1), (20, 0, 0)] {
+            steps.now.store(running, Ordering::Relaxed);
+            let rows = rows(&mut h);
+            assert_eq!(rows.len(), 1, "a batch is one operation: {rows:?}");
+            assert_eq!(rows[0]["steps"], json!({"done": running - 1, "total": 20}));
+            let next = rows[0]["next"].as_array().unwrap();
+            assert_eq!(next.len(), count, "running step {running}: {next:?}");
+            assert!(next.iter().all(|n| n.as_str().is_some_and(|n| !n.is_empty() && !n.contains('.'))), "{next:?}");
+            let numbers: Vec<_> =
+                crate::operations::current(&h.app).iter().find(|r| r.key == "agent").unwrap().next.iter().map(|(n, _)| *n).collect();
+            assert_eq!(numbers, (first..first + count).collect::<Vec<_>>());
+        }
+        // A step that can't be computed ahead ends the prefix, but the steps after it still come.
+        let box_step = json!({"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 5, "width": 5, "height": 5, "operation": "join"}});
+        let mixed = json!({"commands": [box_step, {"command": "file.export_step", "params": {"path": "out.step"}}, hole(20.0)]});
+        let commands = ahead_commands("engine.batch", &mixed);
+        assert_eq!(commands.len(), 1, "only the box is computed ahead: {commands:?}");
+        let steps = Steps::new(&h.app, &mixed, &commands);
+        let (req, _reply) = ControlRequest::new("engine.batch", mixed);
+        let (_worker, done) = std::sync::mpsc::channel();
+        h.app.control_job = Some(ControlJob { req, work: Work::Answer, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
+        steps.now.store(1, Ordering::Relaxed);
+        let rows = rows(&mut h);
+        assert_eq!(rows[0]["steps"], json!({"done": 0, "total": 3}));
+        let next = rows[0]["next"].as_array().unwrap();
+        assert_eq!(next.len(), 2, "the export and the hole: {next:?}");
+        assert!(next.iter().all(|n| n.as_str().is_some_and(|n| !n.is_empty())), "{next:?}");
     }
 }

@@ -123,6 +123,7 @@ fn remap_geo(
         }
         GeoRef::Plane { plane } => remap_plane(plane, ids, bodies, depth + 1, occurrences, doc)?,
         GeoRef::Datum { datum } => remap_datum_path(datum, occurrences, doc)?,
+        GeoRef::Snap { of, .. } => remap_geo(of, ids, bodies, depth + 1, occurrences, doc)?,
         _ => {}
     }
     Ok(())

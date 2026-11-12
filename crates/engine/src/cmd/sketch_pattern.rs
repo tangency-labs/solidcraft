@@ -219,7 +219,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         Ok((id, center_id, curves, constraints))
     })?;
     let (pattern, center, curves, constraints) = out;
-    reply(cmd, PatternResult { pattern, center, curves, constraints, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, PatternResult { pattern, center, curves, constraints, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn count(p: &Value, k: &str, cmd: &str) -> Result<usize> {

@@ -2068,6 +2068,19 @@ fn align_snaps_to_centres_and_edge_middles() {
     assert_eq!(p["to"]["snap"], json!("edge_mid"));
 }
 
+/// A snap point of no body (a sketch line's middle) aligns to where it is, not to the origin.
+#[test]
+fn align_takes_a_bodyless_snap_point_where_it_is() {
+    let mut app = boxed();
+    let mut d = start(&mut app, vec![], "solid.align");
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(30.0, 5.0, 0.0) }];
+    d.inputs[2].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(0.0, 0.0, 0.0) }];
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_ne!(p["from"], json!("origin"), "{p}");
+    assert_eq!(p["to"], json!("origin"), "{p}");
+}
+
 /// Align by frames (#6257): a sketch circle or point picked as To is a frame whatever the snap, a
 /// face with the Joint Origin snap is the joint origin the Joint dialog makes of it, and Angle is
 /// sent when given; As Picked builds what it built before.
@@ -2107,6 +2120,36 @@ fn align_takes_sketch_frames_and_joint_origins() {
     assert_eq!(apply_commands(&app, &d).unwrap().remove(0).1["to_frame"], json!({"sketch": sketch, "point": "p"}));
     let id = apply(&mut app, &d);
     assert!(app.session.model.result(id).is_some_and(|r| r.error.is_none()));
+}
+
+/// #13502: X, Y and Z limit a move between points. With a face pick the dialog says so in its own
+/// words, and with points the axes are sent.
+#[test]
+fn align_with_cleared_axes_and_a_face_pick_says_what_axes_are_for() {
+    let mut app = boxed();
+    let mut d = start(&mut app, vec![], "solid.align");
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![face(&app, Vec3::new(20.0, 15.0, 0.0))];
+    d.inputs[2].items = vec![face(&app, Vec3::new(20.0, 15.0, 20.0))];
+    if let Kind::Align { axes, .. } = &mut d.kind {
+        *axes = [false, true, false];
+    }
+    let error = apply_commands(&app, &d).unwrap_err();
+    assert!(error.contains("X, Y and Z limit a move between points"), "{error}");
+    assert!(!error.contains("from_face"), "{error}");
+    // Both ends points: the axes go to the command.
+    d.extra.insert("from_snap".into(), json!("center"));
+    d.extra.insert("to_snap".into(), json!("center"));
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!(p["axes"], json!([false, true, false]));
+    // All three ticked: faces align as before.
+    d.extra.remove("from_snap");
+    d.extra.remove("to_snap");
+    if let Kind::Align { axes, .. } = &mut d.kind {
+        *axes = [true; 3];
+    }
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert!(p.get("axes").is_none() && p["from_face"].is_array(), "{p}");
 }
 
 /// The Align dialog takes a plane (viewport or browser click) and the origin plane stays a plane
@@ -3522,6 +3565,22 @@ fn plane_through_three_points_edit_in_a_moved_component_keeps_its_points() {
     h.step(&json!({"key": "Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     assert_eq!(h.app.session.doc.to_json(), before, "editing maps saved local references through world and back once");
+}
+
+/// #11228: a plane through an axis and a snapped middle reopens to edit and keeps the snap.
+#[test]
+fn plane_through_axis_and_a_snapped_point_reopens_and_keeps_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    let snap = json!({"type":"snap","of":{"type":"edge","at":[10,0,20]},"kind":"middle","at":[20,0,20]});
+    let made = h.app.run("construct.plane.axis_point", json!({"axis":{"axis":"Z"},"point":snap,"name":"Fence"})).unwrap();
+    let before = h.app.session.doc.to_json();
+    h.app.edit_feature(made["feature"].as_u64().unwrap());
+    h.frames(1);
+    assert!(h.app.dialog.is_some(), "the edit opens its dialog");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert_eq!(h.app.session.doc.to_json(), before, "the saved snap reference is kept");
 }
 
 /// Point Along Path asks for its position too, and a missing pick names the input.

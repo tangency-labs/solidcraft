@@ -80,7 +80,8 @@ pub(crate) fn eval_message(e: solidcore::eval::EvalError) -> String {
         solidcore::eval::EvalError::Invalid(what)
         | solidcore::eval::EvalError::TooLarge(what)
         | solidcore::eval::EvalError::Unevaluable(what)
-        | solidcore::eval::EvalError::Degenerate(what) => what,
+        | solidcore::eval::EvalError::Degenerate(what)
+        | solidcore::eval::EvalError::OffRange(what) => what,
     }
 }
 
