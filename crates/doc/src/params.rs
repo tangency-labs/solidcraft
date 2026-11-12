@@ -1295,6 +1295,25 @@ mod design_length_tests {
         assert!((inches - 127.0).abs() < 1e-9, "{inches}");
     }
 
+    /// A bare number written with a decimal comma (`2,5`) or as a mixed number (`2 1/8`) means the
+    /// design's units like `2.5` does, not millimetres.
+    #[test]
+    fn a_decimal_comma_or_mixed_number_gets_the_design_unit() {
+        let mut doc = Document::new("Units");
+        doc.units = "in".into();
+        let length = crate::expr::Kind::Length;
+        assert_eq!(doc.with_design_unit("2,5", length), "2,5 in");
+        assert_eq!(doc.with_design_unit("-,5", length), "-,5 in");
+        assert_eq!(doc.with_design_unit("=2 1/8", length), "=2 1/8 in");
+        assert_eq!(doc.with_design_unit("w = 2,5", length), "w = 2,5 in");
+        let inches = doc.eval(&doc.with_design_unit("2 1/8", length), length).unwrap();
+        assert!((inches - 2.125 * 25.4).abs() < 1e-9, "{inches}");
+        // Anything that is not one bare number is left as typed.
+        for e in ["2,5 mm", "2 1/8\"", "(2,5)", "2,5 + 1", "1/2", "d3"] {
+            assert_eq!(doc.with_design_unit(e, length), e, "{e}");
+        }
+    }
+
     #[test]
     fn the_written_value_reads_back_within_a_micrometre() {
         for units in ["mm", "cm", "m", "in", "ft"] {
