@@ -11,6 +11,7 @@ commands work with jobs, from scripts, the CLI and MCP alike:
 | `cam.post.get` | Returns a built-in post as JSON, to copy into a post file |
 | `cam.gcode.check` | Reads a G-code file and reports lengths, time, the rotary range, inverse-time blocks and the first line it cannot read |
 | `cam.simulate` | Runs a written program through a model of the stock and holds what it leaves against the part: gouges, rapids through material, material left |
+| `cam.view.*` | The simulation view: a job's program played move by move on the simulated stock (see [Simulation view](#simulation-view)) |
 
 Units are millimetres and mm/min. Angles in a job are degrees (`ramp_angle_deg`, …).
 
@@ -946,9 +947,9 @@ faster than A can turn, in inverse time (`G93`) or not. Give the job the machine
 | `spindle_rpm` | `[lowest, highest]`: the controller runs any other `S` at the nearest end of its range. |
 | `spindle_start_seconds` | How long the controller waits at each spindle start (`M3`, `M4`). |
 | `travel_mm` | `[x, y, z]`: the travel of the linear axes. |
-| `accel_mm_s2`, `accel_z_mm_s2` | Acceleration of X and Y, and of Z, mm/s². Checked and kept with the rates; `cam.job`'s times leave acceleration out. |
-| `accel_a_deg_s2` | Acceleration of the rotaries, degrees/s². |
-| `tool_change_seconds` | How long a tool change (`M6`) takes, added to `total_minutes` for each. |
+| `accel_mm_s2`, `accel_z_mm_s2` | Acceleration of X and Y, and of Z, mm/s². Only the simulation view's timeline uses them; `cam.job`'s times leave acceleration out. |
+| `accel_a_deg_s2` | Acceleration of the rotaries, degrees/s² (the simulation view). |
+| `tool_change_seconds` | How long a tool change (`M6`) takes, added to `total_minutes` for each; the simulation view's timeline waits it. |
 | `home_z_mm` | Where Z's home is in work coordinates (mm), to time the returns home (`G28`); default the highest Z the program reaches. |
 
 A rate left out is not limited. Every rate must be above 0. Unknown keys are refused, in a
@@ -1129,6 +1130,54 @@ straight down the tool axis from above the stock, and so is the program's first.
 **Time.** The grid is split into bands of rows (of angles on a 4th axis), each running the whole
 program on a thread of its own, one per core up to sixteen (one on the web); the result does not
 depend on how many.
+
+## Simulation view
+
+`cam.view.load` loads a job's program into the simulation view: the job planned and written in
+memory (as `cam.job` with `dry_run`), or a G-code file of it (`program`). The program is cut
+into the stock move by move as the view plays, with the same exact model as `cam.simulate`
+(cutting part of a move and then the rest leaves what cutting it whole does), and what goes wrong
+is found at the move and place it happens. The stock is taken from the part, as `cam.simulate`
+takes it. The view is view state only: nothing is saved in the design, and no command of it is
+an undo step.
+
+The job is read and planned as `cam.job` reads and plans it, so the view plays the program
+`cam.job` would write, block for block, each under its operation. A job `cam.job` refuses is
+refused at load with the same message.
+
+```json
+{"cmd": "cam.view.load", "params": {"job_path": "C:/parts/bracket.cam.json", "run_to_end": true}}
+{"cmd": "cam.view.seek", "params": {"by": 1, "until": "finding"}}
+{"cmd": "cam.view.state", "params": {"findings": "all"}}
+```
+
+| Command | Does |
+| --- | --- |
+| `cam.view.load` | `job` or `job_path`; `program?`; `resolution?`; `run_to_end?` (cut it all once at load, so every finding is known, then go back to the start); `colour_by?`. Replies with the moves, the operations (from the job, or one per tool change for a program file), the tool changes, the program's time, the stock and what is known to be wrong already. |
+| `cam.view.seek` | Exactly one of `move` (to its end), `line`, `op` (a name or a number, with `at`: `start` or `end`), `time_s`, `percent`, `tool_change`, `finding`, `by` (moves on or back; with `until`: `tool_change`, `op` or `finding`, to the next one). Going back puts the stock back from the nearest copy kept before the target and cuts on from there. |
+| `cam.view.play`, `cam.view.pause` | Whether a window plays the view on, at `speed` times real time or `moves_per_s`, with `loop`. Headless, seek instead. |
+| `cam.view.show` | What is drawn: `toolpaths`, `rapids`, `remaining_path`, `stock`, `part`, `tool`, `holder`, `gouges`, `collisions`, `deviation`; `colour_by`. |
+| `cam.view.state` | Where the tool is: the move and the share of it done, the line and its G-code, the operation, the tool, the tip, the axis and the machine's words (A included), the feed, the spindle's speed, the time, the material removed, and the findings so far by code (`findings: all` lists them). |
+| `cam.view.export_stock` | The stock as cut so far, as an STL file. |
+| `cam.view.close` | Drops the view. |
+
+**What is found.** `rapid-in-stock` (a rapid cutting more than the tolerance), `gouge` (a cell
+cut below the part, measured again in 3D), `cut-spindle-off` (cutting after `M5`, once the
+program has started the spindle), `shank-rubs` (material above the flute length where the tool
+cuts), and `shank-hits-stock` and `holder-hits-stock` (the shank or a holder section coming down
+on the stock as it is then). On a 4th axis the shank and holder are checked against the round
+stock at points round their bottoms.
+
+**Time.** Each move is timed with the job's machine rates (without them, rapids at 5000 mm/min
+and cuts at their feed). Where the rates give accelerations, a move speeds up and slows down as
+a trapezoid, slowing at a corner to the speed both moves share times the cosine of the turn (to
+a stop between a rapid and a cut, or at a right angle), round an arc to √(a·r); spindle starts
+and tool changes wait their time. A 1000 mm cut at 6000 mm/min with 2000 mm/s² takes 10.05 s.
+
+**Drawn.** A picture of the model (the MCP `screenshot` tool, a window) draws the stock as cut
+so far coloured by the tool that cut it last, the toolpaths in one colour per tool with what is
+still to come dim and rapids in red, the tool with its shank and holder at the tool's pose, and
+the findings as crosses. The design's own bodies are hidden unless `part` is shown.
 
 ## `cam.post.list` and `cam.post.get`
 

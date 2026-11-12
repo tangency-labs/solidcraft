@@ -3585,3 +3585,237 @@ fn programs_written_one_per_tool_simulate_in_order_as_the_whole_program() {
     assert!(removed(&last) < removed(&b) - 1.0, "{} {}", last["removed_volume"], b["removed_volume"]);
     assert!(b["notes"].as_array().unwrap().iter().any(|n| n.as_str().is_some_and(|n| n.contains("2 programs simulated in order"))), "{b}");
 }
+
+// The simulation view.
+
+#[test]
+fn the_simulation_view_loads_seeks_and_reports_a_job() {
+    let mut s = top_pocket();
+    // Before a load nothing but load is possible.
+    for id in ["cam.view.seek", "cam.view.state", "cam.view.play", "cam.view.pause", "cam.view.show"] {
+        let p = if id == "cam.view.seek" { json!({"move": 0}) } else { json!({}) };
+        let e = s.execute(id, &p).unwrap_err();
+        assert!(e.to_string().contains("cam.view.load"), "{id}: {e}");
+    }
+    let dir = Dir::new("view");
+    let mut job = pocket_job();
+    job["machine_rates"] = json!({"rapid_xyz_mm_min": 5000, "accel_mm_s2": 500, "tool_change_seconds": 4});
+    let r = run(&mut s, "cam.view.load", json!({"job": job, "resolution": 0.25}));
+    let moves = r["moves"].as_u64().unwrap() as usize;
+    assert!(moves > 20, "{r}");
+    assert_eq!(r["operations"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["operations"][0]["name"], "top pocket");
+    assert_eq!(r["tool_changes"][0]["tool"], 1);
+    assert_eq!(r["accelerated"], true, "the job's acceleration");
+    assert!(r["duration_s"].as_f64().unwrap() > 4.0, "{r}");
+    assert_eq!(r["stock"]["kind"], "box");
+    // At the start.
+    let st = run(&mut s, "cam.view.state", json!({}));
+    assert_eq!((st["move"].as_u64(), st["fraction"].as_f64()), (Some(0), Some(0.0)), "{st}");
+    assert_eq!(st["tool"]["number"], 1);
+    // By move, line, time, percent and operation.
+    let st = run(&mut s, "cam.view.seek", json!({"move": 10}));
+    assert_eq!((st["move"].as_u64(), st["fraction"].as_f64()), (Some(10), Some(1.0)));
+    let line = st["line"].as_u64().unwrap();
+    assert!(!st["gcode"].as_str().unwrap().is_empty());
+    let st = run(&mut s, "cam.view.seek", json!({"line": line}));
+    assert_eq!(st["move"].as_u64(), Some(10));
+    let st = run(&mut s, "cam.view.seek", json!({"percent": 50}));
+    let half = st["time_s"].as_f64().unwrap();
+    assert!((half - 0.5 * st["duration_s"].as_f64().unwrap()).abs() < 1e-6, "{st}");
+    assert!(st["removed_volume"].as_f64().unwrap() > 0.0);
+    let st = run(&mut s, "cam.view.seek", json!({"time_s": half * 1.5}));
+    assert!((st["percent"].as_f64().unwrap() - 75.0).abs() < 1e-6, "{st}");
+    let st = run(&mut s, "cam.view.seek", json!({"op": "top pocket", "at": "end"}));
+    assert_eq!(st["move"].as_u64(), Some(moves as u64 - 1));
+    let st = run(&mut s, "cam.view.seek", json!({"op": 0}));
+    assert_eq!((st["move"].as_u64(), st["fraction"].as_f64()), (Some(0), Some(0.0)));
+    let st = run(&mut s, "cam.view.seek", json!({"by": 5}));
+    assert_eq!(st["move"].as_u64(), Some(5));
+    let st = run(&mut s, "cam.view.seek", json!({"by": -3}));
+    assert_eq!(st["move"].as_u64(), Some(2));
+    let st = run(&mut s, "cam.view.seek", json!({"tool_change": 0}));
+    assert_eq!(st["move"].as_u64(), Some(0));
+    // The position: a vertical tool, no rotary words.
+    let st = run(&mut s, "cam.view.seek", json!({"percent": 100}));
+    assert_eq!(st["position"]["axis"], json!([0.0, 0.0, 1.0]));
+    assert!(st["position"]["machine"]["a_deg"].is_null());
+    // A clean job: no errors found by its end.
+    assert_eq!(st["findings_so_far"]["errors"], 0, "{st}");
+    // Play, pause, layers.
+    let st = run(&mut s, "cam.view.play", json!({"speed": 4, "loop": true}));
+    assert_eq!((st["playing"].as_bool(), st["speed"].as_f64(), st["loop"].as_bool()), (Some(true), Some(4.0), Some(true)));
+    let st = run(&mut s, "cam.view.pause", json!({}));
+    assert_eq!(st["playing"], false);
+    let l = run(&mut s, "cam.view.show", json!({"rapids": false, "part": true, "colour_by": "operation"}));
+    assert_eq!(
+        (l["layers"]["rapids"].as_bool(), l["layers"]["part"].as_bool(), l["colour_by"].as_str()),
+        (Some(false), Some(true), Some("operation"))
+    );
+    // The stock as cut, as STL; a picture of the model shows the layer.
+    let stl = dir.file("stock.stl");
+    let e = run(&mut s, "cam.view.export_stock", json!({"path": stl}));
+    assert!(e["triangles"].as_u64().unwrap() > 1000);
+    assert!(std::fs::metadata(&stl).unwrap().len() > 50_000);
+    let b = crate::view::bounds(&s).unwrap();
+    assert!(b.max.z >= -1e-9 && b.min.z <= -10.0 + 1e-9, "the stock is in the view's bounds: {b:?}");
+    let mut sc = solidcraft_viewport::Scene::default();
+    crate::cam_view::scene(&s, &mut sc);
+    assert!(sc.meshes.len() >= 2 && !sc.lines.is_empty(), "stock and tool meshes, paths");
+    // Close drops it.
+    assert_eq!(run(&mut s, "cam.view.close", json!({}))["closed"], true);
+    assert!(s.cam_view.is_none());
+    assert_eq!(run(&mut s, "cam.view.close", json!({}))["closed"], false);
+}
+
+#[test]
+fn the_simulation_view_finds_a_gouge_and_steps_to_it() {
+    let mut s = top_pocket();
+    let dir = Dir::new("view-gouge");
+    // A plunge 2 mm into the block's top beside the pocket, along, and away.
+    let gcode = dir.file("bad.ngc");
+    std::fs::write(&gcode, "G21\nT1 M6\nS12000 M3\nG0 X15. Y10. Z10.\nG1 Z-2. F300\nG1 X16.\nG0 Z10.\nG0 X-15.\nG1 Z-0.5 F300\nG0 Z10.\nM5\nM30\n")
+        .unwrap();
+    let r = run(&mut s, "cam.view.load", json!({"job": pocket_job(), "program": gcode, "resolution": 0.2}));
+    assert_eq!(r["operations"][0]["name"], "T1");
+    assert!(r["findings"].as_array().unwrap().is_empty(), "nothing known before it is cut");
+    // On to the next finding: the gouge of the plunge at line 5.
+    let st = run(&mut s, "cam.view.seek", json!({"by": 1, "until": "finding"}));
+    assert_eq!(st["line"], 5, "{st}");
+    assert_eq!(st["findings_so_far"]["errors"], 1, "{st}");
+    let all = run(&mut s, "cam.view.state", json!({"findings": "all"}));
+    let f = &all["findings"][0];
+    assert_eq!((f["code"].as_str(), f["line"].as_u64()), (Some("gouge"), Some(5)), "{all}");
+    assert!((f["depth"].as_f64().unwrap() - 2.0).abs() < 0.05, "{f}");
+    assert!(f["at"][2].as_f64().unwrap() < -1.9);
+    // The findings so far grow with the tool: back to the start, none.
+    let st = run(&mut s, "cam.view.seek", json!({"move": 0}));
+    assert_eq!(st["findings_so_far"]["errors"], 0);
+    // Seek to a finding by its number; one not known yet is refused.
+    let st = run(&mut s, "cam.view.seek", json!({"finding": 0}));
+    assert_eq!(st["line"], 5);
+    assert!(s.execute("cam.view.seek", &json!({"finding": 5})).is_err());
+    // The gouge goes on along the next move.
+    let st = run(&mut s, "cam.view.seek", json!({"by": 1, "until": "finding"}));
+    assert_eq!(st["line"], 6, "{st}");
+    let st = run(&mut s, "cam.view.seek", json!({"percent": 100}));
+    assert!(st["findings_so_far"]["by_code"][0]["count"].as_u64().unwrap() >= 3, "{st}");
+}
+
+#[test]
+fn the_simulation_view_plays_a_pocket_on_the_fourth_axis() {
+    let mut s = top_pocket();
+    let mut job = pocket_job();
+    job["machine"] = json!("4axis_a");
+    let r = run(&mut s, "cam.view.load", json!({"job": job, "run_to_end": true, "resolution": 0.5}));
+    assert_eq!(r["stock"]["kind"], "cylinder");
+    assert!(r["moves"].as_u64().unwrap() > 10);
+    let st = run(&mut s, "cam.view.seek", json!({"percent": 50}));
+    assert_eq!(st["position"]["machine"]["a_deg"].as_f64(), Some(0.0), "{st}");
+    assert!(st["checked_moves"].as_u64().unwrap() >= r["moves"].as_u64().unwrap(), "run to the end at load");
+    let mut sc = solidcraft_viewport::Scene::default();
+    crate::cam_view::scene(&s, &mut sc);
+    assert!(!sc.meshes.is_empty());
+}
+
+#[test]
+fn hostile_view_commands_are_refused_without_panics() {
+    let mut s = top_pocket();
+    let dir = Dir::new("view-hostile");
+    let loads = [
+        json!({}),
+        json!({"job": pocket_job(), "job_path": dir.file("j.json")}),
+        json!({"job": pocket_job(), "resolution": 0}),
+        json!({"job": pocket_job(), "resolution": f64::MAX}),
+        json!({"job": pocket_job(), "resolution": "fine"}),
+        json!({"job": pocket_job(), "program": ""}),
+        json!({"job": pocket_job(), "program": dir.file("missing.ngc")}),
+        json!({"job": pocket_job(), "machine_model_path": dir.file("m.json")}),
+        json!({"job": pocket_job(), "colour_by": "rainbow"}),
+        json!({"job": pocket_job(), "surprise": 1}),
+    ];
+    for p in &loads {
+        match s.execute("cam.view.load", p) {
+            Err(EngineError::Internal(_, msg)) => panic!("{p}: panicked: {msg}"),
+            Err(_) => {}
+            Ok(v) => panic!("{p}: accepted: {v}"),
+        }
+    }
+    run(&mut s, "cam.view.load", json!({"job": pocket_job(), "resolution": 0.5}));
+    let bad = [
+        ("cam.view.seek", json!({})),
+        ("cam.view.seek", json!({"move": 1, "line": 3})),
+        ("cam.view.seek", json!({"move": -1})),
+        ("cam.view.seek", json!({"move": 1.5})),
+        ("cam.view.seek", json!({"move": 1e12})),
+        ("cam.view.seek", json!({"line": 0})),
+        ("cam.view.seek", json!({"percent": 101})),
+        ("cam.view.seek", json!({"percent": -0.1})),
+        ("cam.view.seek", json!({"time_s": -1})),
+        ("cam.view.seek", json!({"op": "nothing"})),
+        ("cam.view.seek", json!({"op": 7})),
+        ("cam.view.seek", json!({"at": "end"})),
+        ("cam.view.seek", json!({"move": 1, "at": "end"})),
+        ("cam.view.seek", json!({"move": 1, "until": "op"})),
+        ("cam.view.seek", json!({"by": 1e9})),
+        ("cam.view.seek", json!({"by": 0.5})),
+        ("cam.view.seek", json!({"tool_change": 3})),
+        ("cam.view.seek", json!({"finding": 0})),
+        ("cam.view.play", json!({"speed": 0})),
+        ("cam.view.play", json!({"speed": 1001})),
+        ("cam.view.play", json!({"speed": -1})),
+        ("cam.view.play", json!({"moves_per_s": 0})),
+        ("cam.view.play", json!({"speed": 2, "moves_per_s": 3})),
+        ("cam.view.show", json!({"stock": "yes"})),
+        ("cam.view.show", json!({"glitter": true})),
+        ("cam.view.show", json!({"machine": true})),
+        ("cam.view.state", json!({"limit": 0})),
+        ("cam.view.state", json!({"limit": 1e6})),
+        ("cam.view.state", json!({"findings": "some"})),
+        ("cam.view.pause", json!({"now": true})),
+        ("cam.view.export_stock", json!({"path": ""})),
+    ];
+    for (id, p) in &bad {
+        match s.execute(id, p) {
+            Err(EngineError::Internal(_, msg)) => panic!("{id} {p}: panicked: {msg}"),
+            Err(_) => {}
+            Ok(v) => panic!("{id} {p}: accepted: {v}"),
+        }
+    }
+    // Still where it was, still answering.
+    let st = run(&mut s, "cam.view.state", json!({}));
+    assert_eq!(st["move"], 0);
+}
+
+/// The view plays the program `cam.job` writes, block for block.
+#[test]
+fn the_simulation_view_plays_the_program_cam_job_writes() {
+    let mut s = top_pocket();
+    let dir = Dir::new("view-same");
+    let out = dir.file("block.ngc");
+    let job = two_tool_job();
+    run(&mut s, "cam.job", json!({"job": job, "output": out}));
+    let own = run(&mut s, "cam.view.load", json!({"job": job, "resolution": 0.5}));
+    let file = run(&mut s, "cam.view.load", json!({"job": job, "program": out, "resolution": 0.5}));
+    assert_eq!(own["moves"], file["moves"], "{own} {file}");
+    assert_eq!(own["lines"], file["lines"]);
+    let names: Vec<&str> = own["operations"].as_array().unwrap().iter().filter_map(|o| o["name"].as_str()).collect();
+    assert_eq!(names, ["top pocket", "outline"], "{own}");
+    let tools: Vec<&str> = file["operations"].as_array().unwrap().iter().filter_map(|o| o["name"].as_str()).collect();
+    assert_eq!(tools, ["T1", "T2"], "a program file: one operation per tool change: {file}");
+}
+
+/// Pictures of the simulation view (the headless model picture, with the CAM layer), written to
+/// the folder `SOLIDCRAFT_CAM_EVIDENCE` names: the pocket half way.
+#[test]
+fn pictures_of_the_simulation_view() {
+    let Some(out) = std::env::var_os("SOLIDCRAFT_CAM_EVIDENCE").map(PathBuf::from) else { return };
+    std::fs::create_dir_all(&out).unwrap();
+    let mut s = top_pocket();
+    run(&mut s, "cam.view.load", json!({"job": two_tool_job(), "resolution": 0.1}));
+    run(&mut s, "cam.view.seek", json!({"percent": 50}));
+    let cam = crate::view::home_camera(&s).unwrap();
+    let sc = crate::view::scene(&s, &cam).unwrap();
+    let png = solidcraft_viewport::render_png(&sc, &cam, 1280, 900).unwrap();
+    std::fs::write(out.join("pocket-50.png"), png).unwrap();
+}

@@ -1,7 +1,8 @@
 //! CAM (`cam.job`, `cam.post.list`, `cam.post.get`, `cam.gcode.check`, `cam.simulate`): toolpaths
 //! for a design's profiles and surfaces and G-code for a machine, through the `solidcraft-cam`
 //! crate. The job (machine, post, tools, operations) is a JSON file next to the design, never part
-//! of it, so nothing new is saved in a design (docs/cam-jobs.md).
+//! of it, so nothing new is saved in a design (docs/cam-jobs.md). The simulation view's commands
+//! (`cam.view.*`) are in `cam_view.rs`.
 //!
 //! `cam.job` plans every operation in work coordinates (the design less the job's origin): the
 //! 2D ones on profiles, the 3D ones on the part's bodies tessellated from their exact surfaces
@@ -70,6 +71,8 @@ const JOB_CONTRACT: TypedContract<CamJobParams> = TypedContract::new();
 const POST_LIST_CONTRACT: TypedContract<CamPostListParams> = TypedContract::new();
 const POST_GET_CONTRACT: TypedContract<CamPostGetParams> = TypedContract::new();
 const GCODE_CHECK_CONTRACT: TypedContract<CamGcodeCheckParams> = TypedContract::new();
+
+pub(crate) use view::COMMANDS as VIEW_COMMANDS;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("cam.job", "CAM Job", crate::checked!("cam.job", job))
@@ -1389,42 +1392,40 @@ fn load_job(cmd: &str, p: &Value, inline: bool, path: Option<&String>) -> Result
     }
 }
 
-/// `cam.job`.
-fn job(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "cam.job";
-    let params: CamJobParams = parse(cmd, p, "")?;
-    let reply = run_job(s, cmd, p, params)?;
-    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+/// A job planned and its program written in memory: what `cam.job` checks and writes, and what
+/// the simulation view plays.
+struct PlannedJob {
+    name: String,
+    machine: Machine,
+    post_name: String,
+    post: Post5,
+    tools: Vec<Tool>,
+    machine_rates: Option<solidcraft_cam::machine_time::MachineRates>,
+    /// The part's bodies.
+    bodies: Vec<String>,
+    /// The bodies that hold the part.
+    fixtures: Vec<String>,
+    /// Where the part is in work coordinates.
+    place: Placement,
+    tol: f64,
+    /// The chord the part and fixtures are tessellated within.
+    chord: f64,
+    /// How deep a cut into the tessellated part is allowed.
+    allowed: f64,
+    /// The job's `breakthrough`, mm.
+    breakthrough: f64,
+    surfaces: Surfaces,
+    stock: Option<solidcraft_cam::stock::Stock>,
+    notes: Vec<String>,
+    planned: Vec<Planned>,
+    program: MachineProgram,
+    /// The program as the post writes it.
+    text: String,
 }
 
-fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Result<CamJobReply> {
-    let dry_run = params.dry_run.unwrap_or(false);
-    let allow_unsafe = params.allow_unsafe.unwrap_or(false);
-
-    // Every path is checked before anything is computed or written.
-    let output = match (&params.output, dry_run) {
-        (Some(o), _) => Some(o.clone()),
-        (None, true) => None,
-        (None, false) => return Err(bad(cmd, "give `output` (the G-code file to write) or `dry_run: true`")),
-    };
-    let sheet_format = sheet::format_of(cmd, params.setup_sheet.as_deref())?;
-    if !dry_run {
-        for path in output.iter().chain(&params.preview).chain(&params.setup_sheet) {
-            if path.trim().is_empty() {
-                return Err(bad(cmd, "a file path must not be empty"));
-            }
-            solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
-        }
-        if let (Some(o), Some(p)) = (&output, &params.preview)
-            && same_file(o, p)
-        {
-            return Err(bad(cmd, format!("`output` and `preview` must be different files (`{o}` and `{p}` are the same file)")));
-        }
-        sheet::distinct(cmd, output.as_deref(), params.preview.as_deref(), params.setup_sheet.as_deref())?;
-    }
-    let (job, base) = load_job(cmd, raw, params.job.is_some(), params.job_path.as_ref())?;
-    let base = base.as_deref();
-
+/// `job` (its relative paths read from `base`) read and checked, every operation planned in
+/// order, and the program written in memory.
+fn plan_job(cmd: &str, s: &Session, job: &CamJob, base: Option<&Path>) -> Result<PlannedJob> {
     // The job, read and checked.
     if job.operations.is_empty() || job.operations.len() > MAX_OPERATIONS {
         return Err(bad(cmd, format!("a job has 1 to {MAX_OPERATIONS} operations")));
@@ -1440,23 +1441,23 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     if job.work_offset.is_some_and(|w| !(1..=6).contains(&w)) {
         return Err(bad(cmd, "`work_offset` must be 1 to 6 (G54 to G59)"));
     }
-    let name = job_name(cmd, s, &job)?;
-    let machine = machine_of(cmd, &job, base)?;
+    let name = job_name(cmd, s, job)?;
+    let machine = machine_of(cmd, job, base)?;
     if place.axes.is_some() && !machine.rotaries.is_empty() {
         return Err(bad(cmd, "`orientation` turns the part on a 3-axis machine; a 4th axis turns it with its own angles"));
     }
-    let (post_name, mut post) = post_of(cmd, &job, base)?;
+    let (post_name, mut post) = post_of(cmd, job, base)?;
     // A controller that ignores the tool change stops (`M0`) for the operator at each one.
     post.base.stop_at_tool_change |= job.tool_change == Some(ToolChangeMode::Ignored);
-    let tools = tools_of(cmd, &job, base)?;
-    let machine_rates = rates::rates_of(cmd, &job, base)?;
-    let (bodies, fixtures) = job_bodies(cmd, s, &job)?;
+    let tools = tools_of(cmd, job, base)?;
+    let machine_rates = rates::rates_of(cmd, job, base)?;
+    let (bodies, fixtures) = job_bodies(cmd, s, job)?;
     let mut notes = Vec::new();
     // The part and the fixtures as surfaces: what the 3D and rotary operations follow, what A
     // must never turn into the tool, and what every cut is checked for gouges against.
     let chord = tol * CHORD_SHARE;
     let surfaces = surfaces_of(cmd, s, &bodies, &fixtures, &place, chord, &mut notes)?;
-    let stock = cam_stock::stock_of(cmd, s, &job, &bodies, &place)?;
+    let stock = cam_stock::stock_of(cmd, s, job, &bodies, &place)?;
     let breakthrough = match job.breakthrough {
         None => 0.0,
         Some(b) if b.is_finite() && (0.0..=25.0).contains(&b) => b,
@@ -1505,6 +1506,86 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         p.report.rewinds = w.rewinds;
     }
     drop(span);
+    Ok(PlannedJob {
+        name,
+        machine,
+        post_name,
+        post,
+        tools,
+        machine_rates,
+        bodies,
+        fixtures,
+        place,
+        tol,
+        chord,
+        allowed,
+        breakthrough,
+        surfaces,
+        stock,
+        notes,
+        planned,
+        program,
+        text,
+    })
+}
+
+/// `cam.job`.
+fn job(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "cam.job";
+    let params: CamJobParams = parse(cmd, p, "")?;
+    let reply = run_job(s, cmd, p, params)?;
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Result<CamJobReply> {
+    let dry_run = params.dry_run.unwrap_or(false);
+    let allow_unsafe = params.allow_unsafe.unwrap_or(false);
+
+    // Every path is checked before anything is computed or written.
+    let output = match (&params.output, dry_run) {
+        (Some(o), _) => Some(o.clone()),
+        (None, true) => None,
+        (None, false) => return Err(bad(cmd, "give `output` (the G-code file to write) or `dry_run: true`")),
+    };
+    let sheet_format = sheet::format_of(cmd, params.setup_sheet.as_deref())?;
+    if !dry_run {
+        for path in output.iter().chain(&params.preview).chain(&params.setup_sheet) {
+            if path.trim().is_empty() {
+                return Err(bad(cmd, "a file path must not be empty"));
+            }
+            solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+        }
+        if let (Some(o), Some(p)) = (&output, &params.preview)
+            && same_file(o, p)
+        {
+            return Err(bad(cmd, format!("`output` and `preview` must be different files (`{o}` and `{p}` are the same file)")));
+        }
+        sheet::distinct(cmd, output.as_deref(), params.preview.as_deref(), params.setup_sheet.as_deref())?;
+    }
+    let (job, base) = load_job(cmd, raw, params.job.is_some(), params.job_path.as_ref())?;
+    let base = base.as_deref();
+
+    let PlannedJob {
+        name,
+        machine,
+        post_name,
+        post,
+        tools,
+        machine_rates,
+        bodies,
+        fixtures,
+        place,
+        tol,
+        chord,
+        allowed,
+        breakthrough,
+        surfaces,
+        stock,
+        mut notes,
+        mut planned,
+        program,
+        text,
+    } = plan_job(cmd, s, &job, base)?;
 
     // The program as written, read back through the machine and held against the toolpaths.
     let span = solidcraft_profile::span("cam", "job.readback");
@@ -2399,6 +2480,8 @@ mod rates;
 mod sheet;
 #[path = "cam_sim.rs"]
 mod sim;
+#[path = "cam_view.rs"]
+mod view;
 
 #[cfg(test)]
 #[path = "cam_tests.rs"]

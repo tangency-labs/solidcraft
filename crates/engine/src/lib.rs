@@ -10,6 +10,7 @@
 pub mod agent_setup;
 pub mod batch_params;
 pub mod batch_preflight;
+pub mod cam_view;
 pub mod capture;
 pub mod cmd;
 pub mod control_auth;
@@ -614,6 +615,9 @@ pub struct Session {
     /// The curvature combs `inspect.curvature_comb` shows, for the viewport to draw; `None` when
     /// the analysis is off. View state: not part of the design and not an undo step.
     pub comb: Option<CombView>,
+    /// The CAM simulation view (`cam.view.*`): a program played on the simulated stock. View
+    /// state: not part of the design and not an undo step.
+    pub cam_view: Option<Box<cam_view::CamView>>,
     /// Oldest active slot first; replacing an effect retains its row position.
     status_order: Vec<status_items::StatusId>,
     /// Successful source activations, independently of row order and sharing policy.
@@ -872,6 +876,7 @@ impl Session {
             continuity: Vec::new(),
             isocurves: Vec::new(),
             comb: None,
+            cam_view: None,
             status_order: Vec::new(),
             status_activation: Vec::new(),
             single_surface_analysis: true,
@@ -2025,6 +2030,7 @@ impl Session {
             continuity: Vec::new(),
             isocurves: Vec::new(),
             comb: None,
+            cam_view: None,
             status_order: Vec::new(),
             status_activation: Vec::new(),
             single_surface_analysis: self.single_surface_analysis,

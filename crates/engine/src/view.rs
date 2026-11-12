@@ -157,6 +157,9 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> R
             }
         }
     }
+    if let Some(c) = crate::cam_view::bounds(s) {
+        b = b.union(&c);
+    }
     for c in shown_point_clouds(s) {
         for p in c.world_corners().into_iter().flatten() {
             b.add(p);
@@ -999,7 +1002,9 @@ fn build_scene(
     let mut thread_budget = crate::cosmetic_threads::Budget::default();
     // Where the section cuts each closed solid body, by its mesh in `sc.meshes`: their hatches.
     let mut cuts: Vec<(usize, u64, Vec<(Vec3, Vec3)>)> = Vec::new();
-    for body in st.bodies.iter().filter(|b| s.body_visible(&b.name)) {
+    // The CAM simulation view hides the part unless its `part` layer is on.
+    let part_hidden = s.cam_view.as_deref().is_some_and(|v| !v.layers.part);
+    for body in st.bodies.iter().filter(|b| s.body_visible(&b.name) && !part_hidden) {
         let selected = selected_occurrences.contains(&body.name) || s.selection.iter().any(|x| matches!(x, Sel::Body { name } if *name == body.name));
         let mesh = body.mesh();
         // The body's appearance (or imported colour) and faces with looks of their own, as in
@@ -1062,6 +1067,8 @@ fn build_scene(
     for line in s.isocurve_lines().iter().flat_map(|lines| lines.iter()) {
         sc.lines.push(SceneLine { points: line.points.clone(), color: p.isocurve, alpha: 1.0, width: 1.4, on_top: false });
     }
+    // The CAM simulation view: the stock as cut, the toolpaths and the tool.
+    crate::cam_view::scene(s, &mut sc);
     for ss in &st.sketches {
         let active = s.active_sketch == Some(ss.feature);
         if !sketch_shown(s, ss.feature) {

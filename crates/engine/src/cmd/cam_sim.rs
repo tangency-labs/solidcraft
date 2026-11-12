@@ -349,7 +349,7 @@ pub(super) fn simulate(s: &mut Session, p: &Value) -> Result<Value> {
 /// which the controller runs at the range's nearest end, and a note of the stops it makes for a
 /// tool change (an `M6`, or a programmed stop `M0` on a controller that ignores it), each one the
 /// operator's to answer.
-fn program_asks(cmd: &str, text: &str, spindle: Option<[f64; 2]>, warnings: &mut Vec<String>, notes: &mut Vec<String>) -> Result<()> {
+pub(super) fn program_asks(cmd: &str, text: &str, spindle: Option<[f64; 2]>, warnings: &mut Vec<String>, notes: &mut Vec<String>) -> Result<()> {
     if let Some(range) = spindle
         && let Some(w) = solidcraft_cam::machine_time::spindle_range_warning(text, range).map_err(|e| cam_err(cmd, "reading the program", e))?
     {
