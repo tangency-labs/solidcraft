@@ -1,9 +1,11 @@
 //! Configurations: the design's configuration table (rows of parameter values and feature
 //! suppressions) and switching between its rows.
 
+use std::collections::BTreeMap;
+
 use serde_json::{Value, json};
 use solidcraft_doc::DEFAULT_MATERIAL;
-use solidcraft_doc::config::{Column, MAX_COLUMNS, RowKey};
+use solidcraft_doc::config::{Column, MAX_COLUMNS, RowKey, RuleTrace};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
@@ -503,32 +505,46 @@ fn activation(s: &mut Session, p: &Value) -> Result<ConfigActivation> {
     let cmd = "config.activate";
     let key = p.get("row").and_then(RowKey::read).ok_or_else(|| bad(cmd, "`row` is required"))?;
     let mut trial = s.scratch();
-    let trace = trial.doc_mut().apply_configuration_with_trace(key).map_err(|e| bad(cmd, e.to_string()))?;
+    let put = put_row(&mut trial, key, cmd)?;
     // The row by its name in what follows, however it was given.
     let r = trial.doc.configs.active.clone().unwrap_or_default();
-    trial.refresh();
-    let new_errors: Vec<String> = trial
-        .model
-        .results
-        .iter()
-        .filter_map(|result| {
-            result
-                .error
-                .as_ref()
-                .filter(|error| s.model.result(result.id).is_none_or(|before| before.error.as_ref() != Some(*error)))
-                .map(|error| format!("{}: {error}", result.name))
-        })
-        .collect();
-    if !new_errors.is_empty() {
-        return Err(bad(cmd, format!("configuration `{r}` would fail to rebuild: {}", new_errors.join("; "))));
+    if !put.new_errors.is_empty() {
+        return Err(bad(cmd, format!("configuration `{r}` would fail to rebuild: {}", put.new_errors.join("; "))));
     }
     let styles = trial.doc.configuration_style_status(&trial.model.state()).map_err(|error| bad(cmd, format!("configuration `{r}`: {error}")))?;
     let solved = s.solved_sketches();
     s.doc = trial.doc;
     s.settle_value_edit(&solved)?;
     let errors: Vec<String> = s.model.results.iter().filter_map(|x| x.error.clone()).collect();
-    let trace = trace.iter().map(|t| serde_json::to_value(t).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
+    let trace = put.trace.iter().map(|t| serde_json::to_value(t).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
     Ok(ConfigActivation { table: table(s, cmd)?, errors, trace, styles, preview: None, parameters: None, param_warnings: Vec::new() })
+}
+
+/// A row of the configuration table put on a session ([`put_row`]).
+pub(crate) struct PutRow {
+    /// What each of the table's rules did.
+    pub(crate) trace: Vec<RuleTrace>,
+    /// Each feature that fails now with an error it didn't have before, as `name: error`.
+    pub(crate) new_errors: Vec<String>,
+}
+
+/// Puts row `key` of `s`'s configuration table on `s`, as activating it does (#13048): its values set
+/// all or nothing (refused as `cmd` says), its rules run, and the design evaluated with its sketch
+/// patterns' counts rewritten ([`Session::settle_value_edit`]). The one way a row goes on a session:
+/// `config.activate` and `config.preview` refuse a row whose features fail to build, and a drawing
+/// view draws what it builds, so the failures are returned, not refused.
+pub(crate) fn put_row(s: &mut Session, key: RowKey<'_>, cmd: &str) -> Result<PutRow> {
+    let failing: BTreeMap<u64, String> = s.model.results.iter().filter_map(|r| Some((r.id, r.error.clone()?))).collect();
+    let solved_before = s.solved_sketches();
+    let trace = s.doc_mut().apply_configuration_with_trace(key).map_err(|e| bad(cmd, e.to_string()))?;
+    s.settle_value_edit(&solved_before)?;
+    let new_errors = s
+        .model
+        .results
+        .iter()
+        .filter_map(|r| r.error.as_ref().filter(|error| failing.get(&r.id) != Some(*error)).map(|error| format!("{}: {error}", r.name)))
+        .collect();
+    Ok(PutRow { trace, new_errors })
 }
 
 fn preview(s: &mut Session, p: &Value) -> Result<Value> {
@@ -621,6 +637,60 @@ mod tests {
         assert_eq!(run(&mut s, "config.table", json!({}))["active"], Value::Null);
         let t = run(&mut s, "config.row", json!({"name": "Again"}));
         assert!(id_of(&t, "Again").unwrap() > long, "{t}");
+    }
+
+    /// A row put on a copy of the session ([`super::put_row`]) is what activating it makes: a row that
+    /// sets a sketch pattern's count rewrites the pattern's copies in the design as `config.activate`
+    /// does, and the model draws them, while the session it was copied from is left as it was.
+    #[test]
+    fn a_row_put_on_a_copy_is_what_activating_it_makes() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "holes", "expression": "5", "unit": ""}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [20, 0], "radius": 2, "id": "seed"}));
+        run(&mut s, "sketch.pattern.circular", json!({"entities": ["seed"], "center": "origin", "count": "holes"}));
+        run(&mut s, "sketch.finish", json!({}));
+        let sketch = s.doc.features.last().map_or(0, |f| f.id);
+        run(&mut s, "config.configure", json!({"params": ["holes"]}));
+        run(&mut s, "config.row", json!({"name": "Seven", "values": {"holes": "7"}}));
+        let curves = |s: &Session| s.model.state().sketch(sketch).map(|k| k.sketch.curves.len());
+        let before = s.doc.clone();
+        let mut put = s.scratch();
+        let row = super::put_row(&mut put, super::RowKey::Name("Seven"), "test").unwrap();
+        assert!(row.new_errors.is_empty(), "{:?}", row.new_errors);
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &before) && curves(&s) == Some(5), "the session copied is untouched");
+        run(&mut s, "config.activate", json!({"row": "Seven"}));
+        assert_eq!((curves(&put), curves(&s)), (Some(7), Some(7)));
+        assert_eq!(put.doc.features, s.doc.features, "the pattern's copies are rewritten in the design alike");
+        assert_eq!(put.doc.configs, s.doc.configs);
+    }
+
+    /// A row whose features fail to build is refused by `config.activate`, leaving the design as it
+    /// was, and put on a copy ([`super::put_row`]) with those features and why; a failure the design
+    /// already has is not the row's.
+    #[test]
+    fn a_row_that_fails_to_build_is_refused_by_activate_and_put_with_its_errors() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.change", json!({"name": "radius", "expression": "10 mm"}));
+        run(&mut s, "solid.sphere", json!({"radius": "radius"}));
+        let sphere = s.doc.features[0].name.clone();
+        run(&mut s, "config.configure", json!({"params": ["radius"]}));
+        run(&mut s, "config.row", json!({"name": "Inside out", "values": {"radius": "-1 mm"}}));
+        let before = s.doc.clone();
+        let e = s.execute("config.activate", &json!({"row": "Inside out"})).unwrap_err().to_string();
+        assert!(e.contains("configuration `Inside out` would fail to rebuild") && e.contains(&sphere), "{e}");
+        assert_eq!(s.doc, before);
+        let mut put = s.scratch();
+        let row = super::put_row(&mut put, super::RowKey::Name("Inside out"), "test").unwrap();
+        assert_eq!(row.new_errors.len(), 1, "{:?}", row.new_errors);
+        assert!(row.new_errors[0].starts_with(&format!("{sphere}: ")), "{:?}", row.new_errors);
+        assert_eq!(put.doc.configs.active.as_deref(), Some("Inside out"));
+        // Failing already, the row adds no failure of its own.
+        let mut failing = put.scratch();
+        assert!(super::put_row(&mut failing, super::RowKey::Name("Inside out"), "test").unwrap().new_errors.is_empty());
+        // A row the table hasn't got is refused as the command names it.
+        let e = super::put_row(&mut s.scratch(), super::RowKey::Id(999_999), "config.activate").err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("config.activate") && e.contains("999999"), "{e}");
     }
 
     #[test]
