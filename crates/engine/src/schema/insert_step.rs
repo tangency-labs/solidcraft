@@ -75,7 +75,7 @@ fn matrix_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MatrixParam>, D:
 pub struct InsertStepKeys {
     // Optional in the type and required in the schema (`insert_step_schema`): left out, the
     // handler refuses the call with its own message.
-    /// The file to insert: `.step`, `.stp`, `.igs`, `.iges`, `.fcstd` or `.3dm` (any case), not
+    /// The file to insert: `.step`, `.stp`, `.igs`, `.iges`, `.fcstd`, `.3dm` or `.sldprt` (any case), not
     /// blank and fewer than 4096 UTF-8 bytes. Any other kind of file is refused.
     #[serde(default, deserialize_with = "path_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
