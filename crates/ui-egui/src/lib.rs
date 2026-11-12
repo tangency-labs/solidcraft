@@ -41,6 +41,7 @@ pub(crate) mod dialog_tree;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
+pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
@@ -109,6 +110,7 @@ pub mod install;
 pub mod issue_report;
 pub mod joint_drag;
 pub(crate) mod joint_handles;
+pub(crate) mod joint_symbols;
 pub mod keymap;
 #[cfg(test)]
 mod kit_gallery_tests;
@@ -308,12 +310,14 @@ mod sketch_transform_ui;
 pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
+pub mod snap_wake;
 pub mod space_mouse;
 pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
 pub mod stand_up;
 pub use solidcraft_ui_kit::start_page;
+pub mod starting;
 mod status_bar;
 #[cfg(test)]
 mod sweep_dialog_tests;
@@ -568,6 +572,16 @@ pub(crate) enum EscapeOwner {
     Overlay,
 }
 
+/// The viewport's pipelines, compiled off the window's thread ([`SolveApp::build_wgpu_split`]) and
+/// waiting for [`SolveApp::adopt_wgpu`].
+pub struct WgpuBuilt {
+    built: solidcraft_viewport_egui::Built,
+    /// Whether the scene is drawn offscreen (the view's blur reads it then).
+    blur: bool,
+    /// The anti-aliasing check failed at the asked samples and passed at 1x.
+    msaa_fallback: bool,
+}
+
 pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
@@ -771,6 +785,8 @@ pub struct SolveApp {
     /// When the note was first drawn (the window's clock), or since the pointer was last on it; it
     /// goes after `stand_up::NOTE_SECONDS`.
     pub stand_up_note_since: Option<f64>,
+    /// An offer to stand bodies up that waits for their estimate (`stand_up::tick`).
+    pub(crate) stand_up_later: Option<stand_up::Later>,
     /// The anti-aliasing sample counts the scene colour/depth formats support (empty without a GPU).
     pub msaa_supported: Vec<u32>,
     /// The startup check selected 1x; Graphics explains the workaround.
@@ -818,8 +834,13 @@ pub struct SolveApp {
     control_held: std::collections::VecDeque<ControlRequest>,
     /// An agent's design change computing off the window thread ([`control_job`]).
     control_job: Option<control_job::ControlJob>,
+    /// Replies of agents' commands run after computing off the window thread, on their way to
+    /// the agent ([`control_job`]): each is passed on as it comes, its outcome noted.
+    agent_replies: Vec<(std::sync::mpsc::Receiver<serde_json::Value>, std::sync::mpsc::Sender<serde_json::Value>)>,
     /// Agent exports computing on copies of the design.
     control_answering: Vec<control_job::ControlJob>,
+    /// Most recent completed inspection per session and package, ordered by request.
+    plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -850,6 +871,8 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
+    /// Last OS title inputs; unchanged frames allocate nothing and send no title command.
+    pub(crate) window_title: documents::WindowTitle,
     /// The language the installed font fallback chain is ordered for (`ui_kit::type_face::fallback_order`);
     /// changing `preferences.language` re-installs the fonts on the next frame.
     applied_fonts_language: String,
@@ -997,6 +1020,7 @@ impl SolveApp {
             stand_up_assembly: false,
             stand_up_note: false,
             stand_up_note_since: None,
+            stand_up_later: None,
             msaa_supported: Vec::new(),
             msaa_compatibility: false,
             graphics_fallback: None,
@@ -1022,7 +1046,9 @@ impl SolveApp {
             ai_connect: Default::default(),
             control_held: Default::default(),
             control_job: None,
+            agent_replies: Vec::new(),
             control_answering: Vec::new(),
+            plugin_inspection_versions: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1039,6 +1065,7 @@ impl SolveApp {
             open_meshing_next: false,
             frame_watch: Default::default(),
             docs: documents::Documents::default(),
+            window_title: Default::default(),
             applied_fonts_language: "en".into(),
             applied_ui_font: String::new(),
             applied_system_fonts: false,
@@ -1068,7 +1095,8 @@ impl SolveApp {
             tess: false,
             oit: false,
         };
-        self.set_wgpu_targets(rs, target, target);
+        let built = Self::build_wgpu(rs, target, target, !self.cpu_meshing);
+        self.adopt_wgpu(rs, built);
     }
 
     /// Draw the viewport on the GPU with the scene drawn offscreen: `depth_bits`/`stencil_bits`
@@ -1076,6 +1104,16 @@ impl SolveApp {
     /// sample. Native hosts check the installed renderer and fall back to 1x only when that
     /// succeeds where multisampling fails. Returns the effective scene sample count.
     pub fn set_wgpu_split(&mut self, rs: &egui_wgpu::RenderState, depth_bits: u8, stencil_bits: u8, samples: u32) -> u32 {
+        let built = Self::build_wgpu_split(rs, depth_bits, stencil_bits, samples, !self.cpu_meshing);
+        self.adopt_wgpu(rs, built);
+        self.viewport.gpu.map_or(samples, |g| g.samples)
+    }
+
+    /// [`Self::set_wgpu_split`]'s slow half: the viewport's shader compile and the anti-aliasing
+    /// check. It takes no app, so the desktop app runs it on a worker thread while the window keeps
+    /// drawing (#1210); [`Self::adopt_wgpu`] then puts the pipelines in use. `gpu_meshing` is
+    /// `!cpu_meshing`.
+    pub fn build_wgpu_split(rs: &egui_wgpu::RenderState, depth_bits: u8, stencil_bits: u8, samples: u32, gpu_meshing: bool) -> WgpuBuilt {
         let scene = crate::gpu::GpuTarget {
             format: rs.target_format,
             depth: egui_wgpu::depth_format_from_bits(depth_bits, stencil_bits),
@@ -1084,40 +1122,53 @@ impl SolveApp {
             oit: false,
         };
         let window = crate::gpu::GpuTarget { format: rs.target_format, depth: None, samples: 1, tess: false, oit: false };
-        self.set_wgpu_targets(rs, scene, window);
-        self.viewport.gpu.map_or(samples, |g| g.samples)
+        Self::build_wgpu(rs, scene, window, gpu_meshing)
     }
 
-    fn set_wgpu_targets(&mut self, rs: &egui_wgpu::RenderState, scene: crate::gpu::GpuTarget, window: crate::gpu::GpuTarget) {
-        self.blur.install(rs, scene.depth.is_some() && window.depth.is_none() && window.samples == 1);
-        #[allow(unused_mut)] // Only native hosts can wait for the startup readback.
+    /// The pipelines for `scene` shown in a pass like `window`, and (native, offscreen scene) the
+    /// anti-aliasing check that falls back to 1x where multisampling draws nothing.
+    fn build_wgpu(rs: &egui_wgpu::RenderState, scene: crate::gpu::GpuTarget, window: crate::gpu::GpuTarget, gpu_meshing: bool) -> WgpuBuilt {
         #[cfg(not(target_arch = "wasm32"))]
         let force_cpu = solidcraft_gpu::env::force_cpu_tessellation();
         #[cfg(target_arch = "wasm32")]
         let force_cpu = false;
-        let (mut installed, stats, tess_ready) =
-            solidcraft_viewport_egui::install(rs, scene, window, !self.cpu_meshing, force_cpu, gpu::report_gpu_error);
+        #[allow(unused_mut)] // Only native hosts can wait for the startup readback.
+        let mut built = solidcraft_viewport_egui::build(rs, scene, window, gpu_meshing, force_cpu, gpu::report_gpu_error);
+        #[allow(unused_mut)]
+        let mut msaa_fallback = false;
         #[cfg(not(target_arch = "wasm32"))]
         if scene.depth.is_some() && window.depth.is_none() && window.samples == 1 {
-            let mut renderer = rs.renderer.write();
-            if let Some(res) = renderer.callback_resources.get_mut::<gpu::Renderer>() {
-                match res.check_msaa(&rs.device, &rs.queue) {
-                    Ok(solidcraft_viewport_gpu::view::MsaaCheck::Passed) => {}
-                    Ok(solidcraft_viewport_gpu::view::MsaaCheck::Fallback) => {
-                        installed.samples = 1;
-                        self.msaa_compatibility = true;
-                        eprintln!(
-                            "SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session",
-                            scene.samples
-                        );
-                    }
-                    Ok(solidcraft_viewport_gpu::view::MsaaCheck::FailedAtOne) => {
-                        eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
-                    }
-                    Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
+            match built.renderer.check_msaa(&rs.device, &rs.queue) {
+                Ok(solidcraft_viewport_gpu::view::MsaaCheck::Passed) => {}
+                Ok(solidcraft_viewport_gpu::view::MsaaCheck::Fallback) => {
+                    built.target.samples = 1;
+                    msaa_fallback = true;
+                    eprintln!("SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session", scene.samples);
                 }
+                Ok(solidcraft_viewport_gpu::view::MsaaCheck::FailedAtOne) => {
+                    eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
+                }
+                Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
             }
         }
+        WgpuBuilt { built, blur: scene.depth.is_some() && window.depth.is_none() && window.samples == 1, msaa_fallback }
+    }
+
+    /// The view's pipelines could not be built (the thread compiling them failed, #1210): the view
+    /// says so where the model would be, and the status line says it too.
+    pub fn gpu_unavailable(&mut self) {
+        self.viewport.gpu_unavailable = true;
+        let text = self.tr("starting.view_unavailable").to_owned();
+        self.set_status(text, true);
+    }
+
+    /// Draw the viewport with pipelines [`Self::build_wgpu_split`] made, perhaps on another thread.
+    pub fn adopt_wgpu(&mut self, rs: &egui_wgpu::RenderState, built: WgpuBuilt) {
+        self.blur.install(rs, built.blur);
+        if built.msaa_fallback {
+            self.msaa_compatibility = true;
+        }
+        let (installed, stats, tess_ready) = solidcraft_viewport_egui::adopt(rs, built.built);
         self.viewport.gpu = Some(installed);
         self.viewport.tess_ready = tess_ready;
         self.viewport.draw_stats = Some(stats);
@@ -1309,6 +1360,7 @@ impl SolveApp {
         }
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
+        crate::plugins::sync_policy(self);
         prefs::apply_network(&self.preferences);
         // Before a file given at start opens: the largest file it may be (#4086).
         prefs::apply_file_limits(&self.preferences);
@@ -1341,6 +1393,13 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
+        crate::plugins::sync_policy(self);
+        if id.eq_ignore_ascii_case("plugin.run")
+            || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
+        {
+            let key = if cfg!(target_arch = "wasm32") { "ui.plugins_desktop" } else { "ui.plugin_standalone" };
+            return Err(self.tr(key).into());
+        }
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
@@ -1361,6 +1420,7 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
+        print_face_ui::sync(&mut self.session, &self.preferences);
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
             let action = serde_json::from_value(reply["action"].clone()).map_err(|e| e.to_string())?;
@@ -1451,6 +1511,11 @@ impl SolveApp {
             _ => r,
         };
         if let Ok(v) = &r {
+            if id.eq_ignore_ascii_case("plugin.inspect")
+                && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
+            {
+                self.plugin_inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
+            }
             match id {
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
@@ -1511,7 +1576,11 @@ impl SolveApp {
                 _ => {}
             }
             if id == "view.render_inspector" {
-                render_workspace::set_inspector_visible(self, v.get("visible").and_then(Value::as_bool).unwrap_or(true));
+                if v.get("visible").and_then(Value::as_bool).unwrap_or(true) {
+                    render_workspace::reveal_inspector(self);
+                } else {
+                    render_workspace::request_inspector_visibility(self, false);
+                }
             }
             if id == "view.render_live"
                 && let Some(paused) = v.get("paused").and_then(Value::as_bool)
@@ -1696,6 +1765,7 @@ impl SolveApp {
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
                     dim_view::cancel();
+                    self.bom = None;
                     design_properties::close_object(self);
                     timeline::stop_playback(self);
                     self.menu.props = None;
@@ -2206,7 +2276,11 @@ impl SolveApp {
             return;
         }
         if id == "assembly.bom" {
-            bom_panel::open(self);
+            if panel_runtime::production_active(self) && bom_panel::available(self) {
+                bom_panel::set_focus_pending(self, true);
+            } else {
+                bom_panel::open(self);
+            }
             return;
         }
         // Inspect → Measure → Properties: the window, not a reply nobody sees (#8095).
@@ -3341,6 +3415,7 @@ impl SolveApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);
+        stand_up::tick(self, ctx);
         open_meshing::refresh(self, ctx.input(|i| i.time));
         // Routing survives a layout re-pass, but never the next input frame. The legacy
         // policy retains its original per-pass cancellation flag behavior.
@@ -3353,15 +3428,7 @@ impl SolveApp {
         }
         prefs::apply(self, ctx);
         control_switch::tick(self, ctx.input(|i| i.time), Some(ctx));
-        // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
-        solidcraft_theme::set_viewport_dark(self.preferences.viewport_theme.dark());
-        solidcraft_theme::set_viewport_background(self.preferences.viewport_background);
-        if !self.styled || solidcraft_theme::is_dark() != self.ui.dark || solidcraft_theme::vision() != self.preferences.color_vision {
-            solidcraft_theme::set_dark(self.ui.dark);
-            solidcraft_theme::set_vision(self.preferences.color_vision);
-            solidcraft_theme::apply(ctx);
-            self.styled = true;
-        }
+        self.apply_look(ctx);
         self.publish_tab_accent(ctx);
         if !self.fitted {
             self.fit_view();
@@ -3488,6 +3555,52 @@ impl SolveApp {
     }
 
     /// Lay out the whole window.
+    /// The saved language and interface font, for a frame's text: the fonts are set up for them
+    /// when they change, and again once the system's CJK, Hangul and Thai faces (read on a thread)
+    /// are there. Returns the frame's language; text drawn while it lives is in that language.
+    /// The starting page uses it too, before the app's own frames (#1210).
+    pub fn prepare_text(&mut self, ctx: &egui::Context) -> solidcraft_ui_text::LanguageScope {
+        // The first frames draw with the bundled faces while the system's CJK, Hangul and Thai
+        // faces are read on a thread; the fonts are installed again once they are there.
+        crate::fonts::load_system_fonts_in_background(ctx);
+        let system_fonts = crate::fonts::system_fonts_ready();
+        if self.preferences.language != self.applied_fonts_language
+            || self.preferences.ui_font != self.applied_ui_font
+            || (system_fonts && !self.applied_system_fonts)
+        {
+            self.applied_fonts_language.clone_from(&self.preferences.language);
+            self.applied_ui_font.clone_from(&self.preferences.ui_font);
+            self.applied_system_fonts = system_fonts;
+            crate::fonts::setup_fonts_without_waiting(
+                ctx,
+                solidcraft_ui_text::effective_language(&self.preferences.language),
+                &self.preferences.ui_font,
+            );
+        }
+        solidcraft_ui_text::scope(&self.preferences.language)
+    }
+
+    /// The light or dark theme, colour-vision mode and view background the preferences ask for,
+    /// once they change.
+    fn apply_look(&mut self, ctx: &egui::Context) {
+        // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
+        solidcraft_theme::set_viewport_dark(self.preferences.viewport_theme.dark());
+        solidcraft_theme::set_viewport_background(self.preferences.viewport_background);
+        if !self.styled || solidcraft_theme::is_dark() != self.ui.dark || solidcraft_theme::vision() != self.preferences.color_vision {
+            solidcraft_theme::set_dark(self.ui.dark);
+            solidcraft_theme::set_vision(self.preferences.color_vision);
+            solidcraft_theme::apply(ctx);
+            self.styled = true;
+        }
+    }
+
+    /// The preferences that set how the window looks (zoom, theme, colour vision), for the
+    /// starting page, which draws before the app's own frames (#1210).
+    pub fn apply_preferences(&mut self, ctx: &egui::Context) {
+        prefs::apply(self, ctx);
+        self.apply_look(ctx);
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         params_dialog::install_expressions(ui.ctx());
         prefs::prepare_blur(self, ui.ctx());
@@ -3501,24 +3614,7 @@ impl SolveApp {
         ui_kit::set_dialog_mnemonics(self.preferences.dialog_first_letter_buttons);
         recent_colors::share(ui.ctx(), &mut self.ui.recent_colors);
         let t0 = now_ms();
-        // The first frames draw with the bundled faces while the system's CJK, Hangul and Thai
-        // faces are read on a thread; the fonts are installed again once they are there.
-        crate::fonts::load_system_fonts_in_background(ui.ctx());
-        let system_fonts = crate::fonts::system_fonts_ready();
-        if self.preferences.language != self.applied_fonts_language
-            || self.preferences.ui_font != self.applied_ui_font
-            || (system_fonts && !self.applied_system_fonts)
-        {
-            self.applied_fonts_language.clone_from(&self.preferences.language);
-            self.applied_ui_font.clone_from(&self.preferences.ui_font);
-            self.applied_system_fonts = system_fonts;
-            crate::fonts::setup_fonts_without_waiting(
-                ui.ctx(),
-                solidcraft_ui_text::effective_language(&self.preferences.language),
-                &self.preferences.ui_font,
-            );
-        }
-        let _language = solidcraft_ui_text::scope(&self.preferences.language);
+        let _language = self.prepare_text(ui.ctx());
         let mut report_input = None;
         issue_report::CadInput::block(self, ui, &mut report_input);
         semantic_content::begin(self, ui.ctx());
@@ -3543,6 +3639,7 @@ impl SolveApp {
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
+        documents::sync_window_title(self, ui.ctx());
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
@@ -3708,6 +3805,9 @@ impl SolveApp {
                 });
         }
         if render_workspace::active(self) {
+            if panel_runtime::production_active(self) {
+                render_workspace::inspector_panel::owner_overlays(self, ui.ctx());
+            }
             render_ui::overlays(self, ui);
         }
         // Refresh persistent chrome before the host's early confirmation pair.
@@ -3732,7 +3832,9 @@ impl SolveApp {
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
-        bom_panel::show(self, ui.ctx());
+        if !panel_runtime::production_active(self) {
+            bom_panel::show(self, ui.ctx());
+        }
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());
@@ -3798,8 +3900,12 @@ impl SolveApp {
             let shot_waits = open_meshing::active(self) && self.control_held.front().is_some_and(|r| r.method == "ui.screenshot");
             // Held requests go first, in order, once nothing makes them wait.
             let held = if waits || shot_waits { None } else { self.control_held.pop_front() };
-            let Some(req) = held.or_else(|| rx.as_ref().and_then(|rx| rx.try_recv().ok())) else { break };
+            let Some(mut req) = held.or_else(|| rx.as_ref().and_then(|rx| rx.try_recv().ok())) else { break };
             if req.refuse_cancelled_chat() {
+                continue;
+            }
+            if let Err(error) = plugins::normalize_request(&self.session, &req.method, &mut req.params) {
+                let _ = req.reply.send(json!({"ok":false,"error":error}));
                 continue;
             }
             if shot_waits {

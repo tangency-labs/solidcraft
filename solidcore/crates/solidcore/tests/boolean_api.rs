@@ -139,6 +139,13 @@ fn operands(k: &mut Kernel, name: &str) -> solidcore::Result<(Brep, Brep, Op)> {
             api::create_box(k, p(6.5, -3.0, -3.0), 4.0, 6.0, 6.0)?,
             Op::Union,
         ),
+        // The box less its inscribed r=5 sphere, which touches every face at its centre:
+        // (10, 5, 5) on the sphere's seam meridian, as in `seam-sphere-box`.
+        "seam-box-minus-sphere" => (
+            api::create_box(k, p(0.0, 0.0, 0.0), 10.0, 10.0, 10.0)?,
+            api::create_sphere(k, p(5.0, 5.0, 5.0), 5.0)?,
+            Op::Difference,
+        ),
         "torus-minus-box" => (
             api::create_torus(k, p(0.0, 0.0, 0.0), 5.0, 1.5)?,
             api::create_box(k, p(0.0, -10.0, -10.0), 20.0, 20.0, 20.0)?,
@@ -243,57 +250,54 @@ fn run(case: &Case) -> Result<(), String> {
     Ok(())
 }
 
-/// A union of two solids touching at one point.
+/// A union of two solids touching at one point, or a difference whose cavity touches
+/// the outside.
 struct PointContact {
     name: &'static str,
-    /// Analytic volume: the sum of the operands'.
+    /// Analytic volume.
     volume: f64,
     /// Face count: every face of both operands.
     faces: usize,
-    /// The contact lies inside a seam edge: the result needs
-    /// `UpstreamFixes::topological_vertex_has_only_edge_uses` (WR-727, #2520), as the
-    /// cleanup joins the seam through the contact vertex and moves the other face's
-    /// vertex loop to the seam's far end.
-    on_seam_edge: bool,
 }
 
 fn point_contacts() -> Vec<PointContact> {
     let sphere = |r: f64| 4.0 / 3.0 * PI * r.powi(3);
     let torus = 2.0 * PI * PI * 5.0 * 1.5 * 1.5;
-    let contact = |name, volume, faces, on_seam_edge| PointContact {
+    let contact = |name, volume, faces| PointContact {
         name,
         volume,
         faces,
-        on_seam_edge,
     };
+    // A `seam-` contact lies inside a seam edge: the cleanup must not join the seam
+    // through the contact vertex, which would move the other face's vertex loop to the
+    // seam's far end (WR-727, #2520).
     vec![
         // At the sphere's pole, a seam vertex (also in `cases`).
-        contact("tangent-sphere-box", 1000.0 + sphere(3.0), 7, false),
-        contact("seam-sphere-box", 1312.5 + sphere(7.5), 7, true),
-        contact("seam-box-sphere", 1312.5 + sphere(7.5), 7, true),
-        contact("off-seam-sphere-box", 1312.5 + sphere(7.5), 7, false),
-        contact("seam-sphere-sphere", sphere(3.0) + sphere(2.0), 2, true),
-        contact("seam-cylinder-sphere", 40.0 * PI + sphere(3.0), 4, true),
-        contact(
-            "off-seam-cylinder-sphere",
-            40.0 * PI + sphere(3.0),
-            4,
-            false,
-        ),
-        contact("seam-torus-sphere", torus + sphere(2.0), 2, true),
-        contact("seam-torus-box", torus + 144.0, 7, true),
-        contact("seam-vertex-torus-box", torus + 144.0, 7, false),
+        contact("tangent-sphere-box", 1000.0 + sphere(3.0), 7),
+        contact("seam-sphere-box", 1312.5 + sphere(7.5), 7),
+        contact("seam-box-sphere", 1312.5 + sphere(7.5), 7),
+        contact("off-seam-sphere-box", 1312.5 + sphere(7.5), 7),
+        contact("seam-sphere-sphere", sphere(3.0) + sphere(2.0), 2),
+        contact("seam-cylinder-sphere", 40.0 * PI + sphere(3.0), 4),
+        contact("off-seam-cylinder-sphere", 40.0 * PI + sphere(3.0), 4),
+        contact("seam-torus-sphere", torus + sphere(2.0), 2),
+        contact("seam-torus-box", torus + 144.0, 7),
+        contact("seam-vertex-torus-box", torus + 144.0, 7),
+        contact("seam-box-minus-sphere", 1000.0 - sphere(5.0), 7),
     ]
 }
 
-/// The union of `case`, with `UpstreamFixes::topological_vertex_has_only_edge_uses` set
-/// to `fix`: a closed manifold solid with every face of both operands, the analytic
-/// volume and a clean Level2 check.
-fn run_point_contact(case: &PointContact, fix: bool) -> Result<(), String> {
+/// The boolean of `case`: a closed manifold solid with every face of both operands, the
+/// analytic volume and a clean Level2 check.
+fn run_point_contact(case: &PointContact) -> Result<(), String> {
     let mut k = Kernel::default();
-    k.fixes.topological_vertex_has_only_edge_uses = fix;
-    let (a, b, _) = operands(&mut k, case.name).map_err(|e| format!("operands: {e}"))?;
-    let mut brep = boolean_union(&mut k, a, b).map_err(|e| format!("boolean failed: {e}"))?;
+    let (a, b, op) = operands(&mut k, case.name).map_err(|e| format!("operands: {e}"))?;
+    let result = match op {
+        Op::Union => boolean_union(&mut k, a, b),
+        Op::Intersection => boolean_intersection(&mut k, a, b),
+        Op::Difference => boolean_difference(&mut k, a, b),
+    };
+    let mut brep = result.map_err(|e| format!("boolean failed: {e}"))?;
     let solid = solidcore::topology::brep::p2::is_manifold_solid(&brep)
         .map_err(|e| format!("is_manifold_solid: {e}"))?;
     if !solid {
@@ -328,28 +332,14 @@ fn run_point_contact(case: &PointContact, fix: bool) -> Result<(), String> {
 }
 
 // #2520: two solids touching at one point, on a seam edge (sphere, cylinder, torus),
-// at a seam vertex or off the seam, unite into a body that checks clean at Level2.
+// at a seam vertex or off the seam, unite into a body that checks clean at Level2, and so
+// does the box less the sphere inscribed in it.
 #[test]
 fn point_contact_unions_check_clean() {
     let failures: Vec<String> = point_contacts()
         .iter()
         .filter_map(|c| {
-            run_point_contact(c, true)
-                .err()
-                .map(|e| format!("{}: {e}", c.name))
-        })
-        .collect();
-    assert!(failures.is_empty(), "{failures:#?}");
-}
-
-// The contacts away from a seam edge need no fix: the pinned behaviour keeps them.
-#[test]
-fn point_contacts_off_seam_edges_check_clean_by_default() {
-    let failures: Vec<String> = point_contacts()
-        .iter()
-        .filter(|c| !c.on_seam_edge)
-        .filter_map(|c| {
-            run_point_contact(c, false)
+            run_point_contact(c)
                 .err()
                 .map(|e| format!("{}: {e}", c.name))
         })

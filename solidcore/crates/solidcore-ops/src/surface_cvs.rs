@@ -9,7 +9,9 @@ use solidcore::nurbs::crv_fit::p1::approx_knots;
 use solidcore::nurbs::geom::Rectangle;
 use solidcore::nurbs::knots::{clamped_uniform, KnotVector, Side};
 use solidcore::nurbs::math::{CPoint, NOW};
-use solidcore::nurbs::srf_basic::{Direction, Surface as NurbSurface};
+use solidcore::nurbs::srf_basic::{
+    falloff_weight as kernel_falloff, Direction, FalloffShape, Surface as NurbSurface,
+};
 use solidcore::nurbs::srf_deviation::certified_distance;
 use solidcore::Vec3;
 use solidcore_record::brep::{
@@ -77,6 +79,144 @@ pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Br
     record(run("surface_cvs::move_cvs", |k| {
         sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
     }))
+}
+
+/// What [`move_net`] moves: whole rows (u indices), whole columns (v indices) or single control
+/// points `(i, j)`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Picks {
+    /// Every point of these u indices.
+    Rows(Vec<usize>),
+    /// Every point of these v indices.
+    Columns(Vec<usize>),
+    /// These points, `(u index, v index)`.
+    Cvs(Vec<(usize, usize)>),
+}
+
+/// The shape of a soft selection's falloff over the index distance `d` from the picks, with
+/// `s = d / (radius + 1)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// `1 - s`.
+    Linear,
+    /// `1 - (3 s² - 2 s³)`: flat at the picks and at the radius's edge.
+    Smooth,
+}
+
+/// A soft selection: the points within `radius` index steps of the picks move too, by the
+/// weight [`Shape`] gives their distance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Falloff {
+    /// The most index steps from a pick a point moves at: 0 moves the picks alone.
+    pub radius: u32,
+    /// How the weight falls from 1 at the picks.
+    pub shape: Shape,
+}
+
+/// The weight of a point `d` index steps from the nearest pick: 1 at a pick, falling by
+/// `falloff`'s shape, 0 past its radius (and for every point off the picks without a falloff).
+#[must_use]
+pub fn falloff_weight(falloff: Option<Falloff>, d: usize) -> f64 {
+    let Some(f) = falloff else {
+        return if d == 0 { 1.0 } else { 0.0 };
+    };
+    let Ok(d) = u32::try_from(d) else {
+        return 0.0;
+    };
+    let shape = match f.shape {
+        Shape::Linear => FalloffShape::Linear,
+        Shape::Smooth => FalloffShape::Smooth,
+    };
+    kernel_falloff(shape, f.radius, d)
+}
+
+/// The weight table of a `rows` by `cols` net (row by row, as [`Net::points`]): each point's
+/// [`falloff_weight`] at its index distance from the nearest pick. A row pick's distance is
+/// along u (`|i - row|`), a column pick's along v (`|j - column|`), a point pick's the larger of
+/// the two (the square ring of the net around it).
+///
+/// # Errors
+/// [`Error::Argument`] for no picks, a pick past the net, or a net of no points or more than
+/// [`REBUILD_MAX_SAMPLES`].
+pub fn net_weights(
+    rows: usize,
+    cols: usize,
+    picks: &Picks,
+    falloff: Option<Falloff>,
+) -> Result<Vec<f64>> {
+    let total = rows
+        .checked_mul(cols)
+        .filter(|&n| n > 0 && n <= REBUILD_MAX_SAMPLES)
+        .ok_or(Error::Argument)?;
+    let (empty, inside) = match picks {
+        Picks::Rows(p) => (p.is_empty(), p.iter().all(|&i| i < rows)),
+        Picks::Columns(p) => (p.is_empty(), p.iter().all(|&j| j < cols)),
+        Picks::Cvs(p) => (p.is_empty(), p.iter().all(|&(i, j)| i < rows && j < cols)),
+    };
+    if empty || !inside {
+        return Err(Error::Argument);
+    }
+    let nearest = |i: usize, j: usize| -> usize {
+        let d = match picks {
+            Picks::Rows(p) => p.iter().map(|&r| i.abs_diff(r)).min(),
+            Picks::Columns(p) => p.iter().map(|&c| j.abs_diff(c)).min(),
+            Picks::Cvs(p) => p
+                .iter()
+                .map(|&(a, b)| i.abs_diff(a).max(j.abs_diff(b)))
+                .min(),
+        };
+        d.unwrap_or(usize::MAX)
+    };
+    let mut table = Vec::new();
+    table
+        .try_reserve_exact(total)
+        .map_err(|_| Error::Argument)?;
+    for i in 0..rows {
+        for j in 0..cols {
+            table.push(falloff_weight(falloff, nearest(i, j)));
+        }
+    }
+    Ok(table)
+}
+
+/// `sheet` with the picked control points moved by `delta`, and with a `falloff` the points
+/// around them by their weight of it ([`net_weights`]): the kernel moves each point of weight
+/// `t` by `t delta` (`Surface::displace_cpts`). The knots and degrees are kept; the result is a
+/// new one-face sheet on the moved surface, its whole box.
+///
+/// # Errors
+/// As [`control_net`] and [`net_weights`]; [`Error::Argument`] for a `delta` not finite or
+/// past the coordinate bound, or a moved point past it; the kernel's status otherwise.
+pub fn move_net(
+    sheet: &Brep,
+    picks: &Picks,
+    delta: [f64; 3],
+    falloff: Option<Falloff>,
+) -> Result<Brep> {
+    if !coord_ok(&delta) {
+        return Err(Error::Argument);
+    }
+    let ((u, v), points) = untrimmed(sheet)?;
+    let net = control_net(sheet)?;
+    let weights = net_weights(net.rows, net.cols, picks, falloff)?;
+    let moves: Vec<((usize, usize), f64)> = (0..net.rows)
+        .flat_map(|i| (0..net.cols).map(move |j| (i, j)))
+        .zip(weights)
+        .filter(|&(_, t)| t > 0.0)
+        .collect();
+    let mut surface = kernel_surface(u, v, points)?;
+    let moved = record(run("surface_cvs::move_net", |k| {
+        surface.displace_cpts(&moves, Vec3::new(delta[0], delta[1], delta[2]))?;
+        sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
+    }))?;
+    if !control_net(&moved)?
+        .points
+        .iter()
+        .all(|p| coord_ok(p.as_slice()))
+    {
+        return Err(Error::Argument);
+    }
+    Ok(moved)
 }
 
 /// `sheet`'s surface refitted to degrees `(deg_u, deg_v)` with `(spans_u, spans_v)` uniform
@@ -370,6 +510,166 @@ mod tests {
         );
         assert_eq!(
             move_cvs(&s, &[((0, 0), [f64::NAN, 0.0, 0.0])]),
+            Err(Error::Argument)
+        );
+    }
+
+    #[test]
+    fn a_row_move_moves_exactly_that_row() {
+        let s = long_sheet();
+        let net = control_net(&s).unwrap();
+        let delta = [0.0, 0.0, 1.0];
+        let last = net.rows - 1;
+        for falloff in [
+            None,
+            Some(Falloff {
+                radius: 0,
+                shape: Shape::Smooth,
+            }),
+        ] {
+            let moved = move_net(&s, &Picks::Rows(vec![last]), delta, falloff).unwrap();
+            let after = control_net(&moved).unwrap();
+            assert_eq!((after.rows, after.cols), (net.rows, net.cols));
+            for (n, (p, q)) in net.points.iter().zip(&after.points).enumerate() {
+                if n / net.cols == last {
+                    assert_eq!(*q, [p[0], p[1], p[2] + 1.0], "point {n}");
+                } else {
+                    assert_eq!(p, q, "point {n}");
+                }
+            }
+        }
+        // a column the same way
+        let moved = move_net(&s, &Picks::Columns(vec![0]), delta, None).unwrap();
+        let after = control_net(&moved).unwrap();
+        for (n, (p, q)) in net.points.iter().zip(&after.points).enumerate() {
+            if n % net.cols == 0 {
+                assert_eq!(*q, [p[0], p[1], p[2] + 1.0], "point {n}");
+            } else {
+                assert_eq!(p, q, "point {n}");
+            }
+        }
+    }
+
+    #[test]
+    fn falloff_weights_are_one_at_the_pick_zero_past_the_radius_and_monotone() {
+        assert_eq!(falloff_weight(None, 0), 1.0);
+        assert_eq!(falloff_weight(None, 1), 0.0);
+        for shape in [Shape::Linear, Shape::Smooth] {
+            let f = Some(Falloff { radius: 3, shape });
+            let w: Vec<f64> = (0..8).map(|d| falloff_weight(f, d)).collect();
+            assert_eq!(w[0], 1.0, "{shape:?}");
+            assert!(
+                w[1..=3].iter().all(|&x| x > 0.0 && x < 1.0),
+                "{shape:?}: {w:?}"
+            );
+            assert!(w[4..].iter().all(|&x| x == 0.0), "{shape:?}: {w:?}");
+            assert!(
+                w.windows(2).all(|p| p[1] < p[0] || p[1] == 0.0),
+                "{shape:?}: {w:?}"
+            );
+            // the table: a point pick's distance is its square ring on the net
+            let table = net_weights(9, 7, &Picks::Cvs(vec![(4, 3)]), f).unwrap();
+            assert_eq!(table.len(), 63);
+            for i in 0..9_usize {
+                for j in 0..7_usize {
+                    let d = i.abs_diff(4).max(j.abs_diff(3));
+                    assert_eq!(table[i * 7 + j], w[d], "{shape:?} at ({i}, {j})");
+                }
+            }
+        }
+        // the smooth shape is flat at the pick: it falls less over the first step
+        let (linear, smooth) = (
+            falloff_weight(
+                Some(Falloff {
+                    radius: 3,
+                    shape: Shape::Linear,
+                }),
+                1,
+            ),
+            falloff_weight(
+                Some(Falloff {
+                    radius: 3,
+                    shape: Shape::Smooth,
+                }),
+                1,
+            ),
+        );
+        assert!(smooth > linear, "{smooth} {linear}");
+        // rows and columns by their one index
+        let rows = net_weights(
+            5,
+            3,
+            &Picks::Rows(vec![0]),
+            Some(Falloff {
+                radius: 1,
+                shape: Shape::Linear,
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        );
+        // bad picks
+        assert_eq!(
+            net_weights(5, 3, &Picks::Rows(vec![]), None),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            net_weights(5, 3, &Picks::Rows(vec![5]), None),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            net_weights(5, 3, &Picks::Columns(vec![3]), None),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            net_weights(5, 3, &Picks::Cvs(vec![(0, 3)]), None),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            net_weights(0, 3, &Picks::Rows(vec![0]), None),
+            Err(Error::Argument)
+        );
+    }
+
+    #[test]
+    fn a_soft_move_moves_each_point_by_its_weight() {
+        let s = bicubic();
+        let net = control_net(&s).unwrap();
+        let f = Some(Falloff {
+            radius: 1,
+            shape: Shape::Linear,
+        });
+        let picks = Picks::Cvs(vec![(1, 1)]);
+        let moved = move_net(&s, &picks, [0.0, 0.0, 2.0], f).unwrap();
+        let after = control_net(&moved).unwrap();
+        let weights = net_weights(net.rows, net.cols, &picks, f).unwrap();
+        for (n, ((p, q), w)) in net
+            .points
+            .iter()
+            .zip(&after.points)
+            .zip(&weights)
+            .enumerate()
+        {
+            assert_eq!((q[0], q[1]), (p[0], p[1]), "point {n}");
+            assert!(
+                (q[2] - (p[2] + 2.0 * w)).abs() <= 1e-15 * (1.0 + p[2].abs()),
+                "point {n}: {p:?} to {q:?}, weight {w}"
+            );
+        }
+        // the pick by the whole delta, its ring by half, the rest not at all
+        assert_eq!(weights[5], 1.0);
+        assert_eq!(weights[0], 0.5);
+        assert_eq!(weights[3 * 4 + 3], 0.0);
+        assert_eq!(after.points[15], net.points[15]);
+        // bad moves
+        assert_eq!(
+            move_net(&s, &picks, [f64::NAN, 0.0, 0.0], f),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            move_net(&s, &Picks::Cvs(vec![(4, 0)]), [0.0; 3], f),
             Err(Error::Argument)
         );
     }

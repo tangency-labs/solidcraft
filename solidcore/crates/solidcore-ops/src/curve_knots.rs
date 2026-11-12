@@ -131,6 +131,24 @@ fn within(
 /// # Errors
 /// [`Error::Argument`] for another curve, one the record refuses, or knots not clamped.
 pub(crate) fn nurb_of(curve: &Curve) -> Result<NurbCurve> {
+    let nurb = net_of(curve)?;
+    let (knots, degree) = (nurb.knots(), nurb.degree());
+    let flat =
+        |ends: Option<&[f64]>| ends.is_some_and(|e| e.windows(2).all(|w| w.first() == w.get(1)));
+    let last = knots.len().checked_sub(degree + 1);
+    if !flat(knots.get(..=degree)) || !flat(last.and_then(|s| knots.get(s..))) {
+        return Err(Error::Argument);
+    }
+    Ok(nurb)
+}
+
+/// The kernel's curve of a record spline or rational spline that is valid, on any knots the
+/// record takes (clamped, or a closed curve's periodic ones): its control points and their
+/// weights, its degree and knots as they are.
+///
+/// # Errors
+/// [`Error::Argument`] for another curve, or one the record refuses.
+pub(crate) fn net_of(curve: &Curve) -> Result<NurbCurve> {
     check_curve(curve, &mut Budget::input()).map_err(|_| Error::Argument)?;
     let (knots, pw): (&[f64], Vec<CPoint>) = match curve {
         Curve::Spline { knots, points } => (
@@ -153,12 +171,6 @@ pub(crate) fn nurb_of(curve: &Curve) -> Result<NurbCurve> {
         .len()
         .checked_sub(pw.len() + 1)
         .ok_or(Error::Argument)?;
-    let flat =
-        |ends: Option<&[f64]>| ends.is_some_and(|e| e.windows(2).all(|w| w.first() == w.get(1)));
-    let last = knots.len().checked_sub(degree + 1);
-    if !flat(knots.get(..=degree)) || !flat(last.and_then(|s| knots.get(s..))) {
-        return Err(Error::Argument);
-    }
     NurbCurve::new(pw, degree, knots.to_vec()).map_err(|_| Error::Argument)
 }
 

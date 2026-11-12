@@ -140,8 +140,9 @@ impl FilletSolver {
         let fil_eu = solver
             .solver()
             .edgeuse(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let fil_edge = eu::edge(target, fil_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's first edge use"))?;
+        let fil_edge = eu::edge(target, fil_eu)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge use's edge"))?;
         let concave = is_concave_edge(k, target, fil_edge)?;
         let approx_tol = solver.solver().this_approx_tol_3d();
         let ang_tol = solver.solver().this_ang_tol_rad();
@@ -156,11 +157,12 @@ impl FilletSolver {
             let fillet_surface = fillets
                 .geom(id)?
                 .fillet_surface(None)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the fillet surface"))?
                 .clone();
             let (start, end) = edge::start_end_vertices(target, fil_edge)?;
             for v in [start, end] {
-                let v = v.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let v =
+                    v.ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's vertex"))?;
                 let corner = context.corner_of_vertex(v)?;
                 let vertex_edges = vertex::edges(target, v, None)?;
                 // the fork's IsEndOnEndFace() (53c47b8; WR-697): the Nx1 corner pinned
@@ -181,21 +183,21 @@ impl FilletSolver {
                     if !both {
                         break;
                     }
-                    let rail = fillets
-                        .geom(id)?
-                        .rail(ii)
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let rail = fillets.geom(id)?.rail(ii).ok_or_else(|| {
+                        SolidError::blend_missing(OP, "the fillet geometry's rail")
+                    })?;
                     let curve = edge::curve(fillets.brep(), rail)?
-                        .ok_or_else(|| SolidError::null_pointer(OP))?
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?
                         .clone();
                     let face = fillets
                         .fillet_edge(rail)?
                         .original_face()
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
-                    let primary = eu::primary_edgeuse(fillets.brep(), rail)?
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's original face"))?;
+                    let primary = eu::primary_edgeuse(fillets.brep(), rail)?.ok_or_else(|| {
+                        SolidError::blend_missing(OP, "the rail's primary edge use")
+                    })?;
                     let mate = eu::mate(fillets.brep(), primary)?
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                        .ok_or_else(|| SolidError::blend_missing(OP, "the rail edge use's mate"))?;
                     let mut side = None;
                     for &e in &vertex_edges {
                         let faces = edge::faces(target, e, None)?;
@@ -248,7 +250,9 @@ impl FilletSolver {
                         .map(|cc| cc.intervals().to_vec());
                     fillets.fillet_edge_mut(rail)?.curve_class = attached;
                     classified?;
-                    let intervals = intervals.ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let intervals = intervals.ok_or_else(|| {
+                        SolidError::blend_missing(OP, "the rail's curve classification")
+                    })?;
                     let mut nearest = BIG_DOUBLE;
                     for ivl in &intervals {
                         for (pc, t) in [
@@ -317,7 +321,7 @@ impl FilletSolver {
                 )?;
                 let section = curves
                     .curve_3d
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the end section's 3D curve"))?;
                 // the section from one crossing to the other (the intersection may run
                 // on past them)
                 let mut ends = [0.0; 2];
@@ -332,7 +336,10 @@ impl FilletSolver {
                         SolverOperation::Minimize,
                     )?;
                     if !dropped.success || dropped.distance > 10.0 * approx_tol {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::blend_failed(
+                            OP,
+                            "the crossing does not drop onto the end section",
+                        ));
                     }
                     *at = dropped.parameter;
                 }
@@ -379,7 +386,10 @@ impl FilletSolver {
                             continue;
                         };
                         let EntityRef::Edge(e) = o.target_entity()? else {
-                            return Err(SolidError::null_pointer(OP));
+                            return Err(SolidError::blend_missing(
+                                OP,
+                                "the classification's side edge",
+                            ));
                         };
                         if is_concave_edge(k, target, e)? {
                             under = true;

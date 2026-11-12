@@ -271,6 +271,26 @@ fn tangent_chains_follow_smooth_edges() {
     assert_eq!(seam.tangent_chain(0, 5f64.to_radians()), vec![0]);
 }
 
+#[test]
+fn a_mesh_chain_runs_through_one_and_a_half_degrees_and_stops_at_three() {
+    // Edges of an open polyline whose direction turns `turn` degrees at each vertex.
+    let polyline = |turn: f64| {
+        let mut m = Mesh { positions: vec![Vec3::ZERO, Vec3::X], ..Default::default() };
+        let (mut p, mut a) = (Vec3::ZERO, 0.0f64);
+        for _ in 0..4 {
+            let q = p + Vec3::new(a.cos(), a.sin(), 0.0) * 5.0;
+            m.edges.push(vec![p, q]);
+            (p, a) = (q, a + turn.to_radians());
+        }
+        m.edge_faces = vec![vec![0]; 4];
+        m
+    };
+    let mut c = polyline(1.5).tangent_chain(0, TANGENT_CHAIN);
+    c.sort();
+    assert_eq!(c, vec![0, 1, 2, 3], "1.5° is inside the chain angle");
+    assert_eq!(polyline(3.0).tangent_chain(0, TANGENT_CHAIN), vec![0], "3° is a corner");
+}
+
 /// A helix of `pieces` edge pieces (a thread's crest), each five points long.
 fn helix(pieces: usize) -> Mesh {
     let at = |t: f64| Vec3::new(4.0 * t.cos(), 4.0 * t.sin(), 0.2 * t);

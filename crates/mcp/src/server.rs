@@ -1,14 +1,20 @@
 //! SolidCraft's MCP server: its tools, instructions and resources over the shared server
 //! (`solidcraft-mcp-server`), with the agent's folders and the output options around each call.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Mutex, mpsc};
 
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs::{self, PathScope};
-use solidcraft_mcp_server::{Contents, Incoming, Info, Tools, read_message, response};
+use solidcraft_mcp_server::{Contents, Info, Tools};
+#[cfg(not(target_arch = "wasm32"))]
+use solidcraft_mcp_server::{Incoming, read_message, response};
 
-use crate::backend::{Backend, Remote};
+use crate::backend::Backend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::backend::Remote;
 use crate::options::Options;
 use crate::tools::{call_tool_with, tool_definitions_with};
 
@@ -69,6 +75,7 @@ fn design_files(name: &str, args: &Value) -> Vec<String> {
 
 /// The id of a `tools/call` of `running` (no arguments), the one call answered apart from the
 /// call in progress (#14007); `None` for anything else, which waits its turn.
+#[cfg(not(target_arch = "wasm32"))]
 fn running_call(line: &str) -> Option<Value> {
     let msg: Value = serde_json::from_str(line.trim()).ok()?;
     let id = msg.get("id").filter(|id| !id.is_null())?;
@@ -83,6 +90,7 @@ fn running_call(line: &str) -> Option<Value> {
 
 /// A fresh bridge to the app for a `running` call while another call is in progress, with the
 /// options tools run with; `None` when the backend is not bridged to an app.
+#[cfg(not(target_arch = "wasm32"))]
 fn side_probe(side: &Mutex<Option<(Remote, Options)>>) -> Option<(Remote, Options)> {
     let side = side.lock().ok()?;
     let (template, options) = side.as_ref()?;
@@ -90,6 +98,7 @@ fn side_probe(side: &Mutex<Option<(Remote, Options)>>) -> Option<(Remote, Option
 }
 
 /// Write one reply line and flush it, whole, whichever thread sends it.
+#[cfg(not(target_arch = "wasm32"))]
 fn write_line(output: &Mutex<impl std::io::Write>, reply: &str) -> std::io::Result<()> {
     let mut out = output.lock().map_err(|_| std::io::Error::other("output lock poisoned"))?;
     out.write_all(format!("{reply}\n").as_bytes())?;
@@ -217,7 +226,9 @@ impl Server {
     /// call that arrives while another call is still being handled (a long `batch`) is answered at
     /// once on a connection of its own to the app, as its docs promise, instead of after that call
     /// (#14007). Replies to those calls may then come before the reply to the call in progress;
-    /// each carries its request's id.
+    /// each carries its request's id. Native only: it needs the stdin reader thread and the bridge
+    /// to the app, which the browser build has neither of.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn serve(&mut self, input: impl std::io::BufRead + Send, output: impl std::io::Write + Send) -> std::io::Result<()> {
         let output = Mutex::new(output);
         // Messages read and not yet answered by the main loop: counted when the reader queues one,
@@ -276,6 +287,7 @@ impl Server {
     }
     /// A fresh bridge to the app for answering `running` apart from the call in progress, with
     /// the options tools run with now; `None` when the backend is not bridged to an app.
+    #[cfg(not(target_arch = "wasm32"))]
     fn side(&mut self) -> Option<(Remote, Options)> {
         let options = self.inner.tools().listed;
         self.inner.tools().backend.side_channel().map(|r| (r, options))

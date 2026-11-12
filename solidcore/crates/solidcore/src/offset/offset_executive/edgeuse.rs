@@ -31,7 +31,7 @@ use crate::geom::object::ObjectRef;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind};
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3};
+use crate::math::{Point2, Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::offset::offset_geometry_creation::{
     EdgeuseOffset, OffsetBrep, OffsetExecutive as CreatorExecutive, OffsetGeometryCreation,
@@ -1145,6 +1145,16 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
         }
     }
 
+    fn edgeuse_middle_binormal(&mut self, k: &Kernel, u: Handle) -> Result<Vec3> {
+        let (arena, u) = u.edgeuse()?;
+        let b = self.brep_mut(arena);
+        let e = eu::edge(b, u)?
+            .ok_or_else(|| SolidError::invalid_input(OP, "edge use without edge"))?;
+        let middle = edge::interval(b, e)?.evaluate(0.5);
+        let options = eu3::BinormalOptions::default();
+        Ok(eu3::evaluate_binormal(k, b, u, middle, false, &options)?.binormal)
+    }
+
     fn edgeuse_normalized_evaluate(
         &mut self,
         k: &Kernel,
@@ -1222,6 +1232,15 @@ impl CreatorExecutive<Handle> for Executive<'_> {
     fn keeps_edge(&self, original: Handle) -> bool {
         match original.object {
             Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) => self.inner.keeps_edgeuse(u),
+            _ => false,
+        }
+    }
+
+    fn crosses_at(&self, original: Handle) -> bool {
+        match original.object {
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) => {
+                self.inner.crosses_at_edgeuse(u)
+            }
             _ => false,
         }
     }

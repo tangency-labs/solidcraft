@@ -1340,6 +1340,13 @@ impl OffsetBrep<H> for Two {
     fn edgeuse_is_marked(&self, _k: &Kernel, eu: H, _mark: MarkType) -> solidcore::Result<bool> {
         Ok(self.marked.contains(&eu))
     }
+    fn edgeuse_middle_binormal(&mut self, k: &Kernel, eu: H) -> solidcore::Result<Vec3> {
+        let b = self.brep_m(eu)?;
+        let e = eu1::edge(b, euid(eu))?.ok_or_else(|| invalid("edge use without edge"))?;
+        let middle = ed::interval(b, e)?.evaluate(0.5);
+        let options = eu3::BinormalOptions::default();
+        Ok(eu3::evaluate_binormal(k, b, euid(eu), middle, false, &options)?.binormal)
+    }
     fn edgeuse_normalized_evaluate(
         &mut self,
         k: &Kernel,

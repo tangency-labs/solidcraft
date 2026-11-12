@@ -1,8 +1,10 @@
 # Export the current view as DXF
 
 Choose **File → Export Current View as DXF…**, choose whether to omit hidden edges or
-export them as dashed lines, set **Curve tolerance**, then choose **Export DXF…** and a
-destination. Both settings are remembered. The Japanese menu is
+export them as dashed lines, choose the drawing's **Zero point** — **Camera target** (the
+point the camera looks at) or **Model origin** (the model's origin as seen from the camera,
+for machining from a part corner) — set **Curve tolerance**, then choose **Export DXF…** and
+a destination. All three settings are remembered. The Japanese menu is
 **ファイル → 現在の表示をDXFでエクスポート…**.
 
 On desktop, the export runs on a background worker while the window continues repainting
@@ -63,10 +65,19 @@ the browser runs serially. Export memory, candidate lines, output lines and tota
 work remain bounded, and exceeding a budget returns an error without writing a partial drawing.
 
 Programmatic callers use `file.export_view_dxf` with `camera: Camera`, `hidden: "omit"` or
-`"dashed"`, optional `tolerance` (0.0001–1 mm), optional `zero` and optional `path`. The drawing's
+`"dashed"`, optional `tolerance` (0.0001–1 mm), optional `zero`, optional `curves` and optional `path`. The drawing's
 0,0 is the point the camera looks at (`zero: "target"`, the default); with `zero: "origin"` it
 is the model's origin as seen from the camera, for machining from a part corner. Without `path`, the
 command returns the DXF text. The command does not modify the design or its undo history.
+
+The view's curved edges are built from short straight lines, so by default a round hole is written
+as a ring of `LINE` entities. With `curves: "arcs"`, each ring of visible lines that lies on one
+circle is written as a single `CIRCLE`, and each run of lines that lies on one circle is written as
+an `ARC`, so a milling or CAD program can pick them as circles. A ring only counts as a circle when
+its lines sag from the circle by no more than the `tolerance` (twice, for rounding); a polygon with
+few sides, such as a hexagon, stays as lines. Points closer than a hundredth of the `tolerance` are
+treated as one point, so the top and bottom edges of a hole are written once. Dashed hidden lines
+and every other line stay as they are. The default is `curves: "lines"`.
 The result also includes `stats`: placed body and shared mesh counts, source triangle count,
 retained mesh bytes, worker limit, candidate segment count, occlusion work, and preparation,
 projection and occlusion times in milliseconds. These timings exclude STEP import and DXF

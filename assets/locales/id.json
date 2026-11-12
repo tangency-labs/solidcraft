@@ -4915,7 +4915,7 @@
   "ui.pitch": "Pitch",
   "ui.placement": "Penempatan",
   "ui.placement_handles": "Handle penempatan",
-  "ui.placement_handles_tip": "Handle pada pratinjau Rest, Boss, atau Snap Fit: seret penanda untuk memindahkannya di model, putar lewat cincinnya",
+  "ui.placement_handles_tip": "Penanda untuk menyeret fitur di atas model dan, jika fitur dapat diputar, cincin untuk memutarnya.",
   "ui.plane": "Bidang",
   "ui.plane_at_angle": "Bidang Bersudut",
   "ui.plugins": "Plugin",

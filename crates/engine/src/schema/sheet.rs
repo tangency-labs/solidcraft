@@ -355,7 +355,7 @@ impl JsonSchema for PerforationPattern {
 }
 
 /// Add a sheet metal flange: a base flange from sketch profiles, a contour flange along an open
-/// chain of sketch lines, or edge flanges on a sheet's edges. Thickness, K-factor, bend radius
+/// chain of sketch lines and tangent arcs, or edge flanges on a sheet's edges. Thickness, K-factor, bend radius
 /// and reliefs come from the sheet metal rule (`sheet.manage_rules`), so those keys are refused;
 /// an edge flange may set its own `radius` and corner relief. `participants` changes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -382,7 +382,8 @@ pub struct FlangeParams {
     /// to the other side of the chain. Edge: the flanges bend the other way. Default: false.
     #[serde(default)]
     pub flip: Option<bool>,
-    /// Contour: the open chain's lines (curve ids; arcs aren't supported yet), 1 to 1000.
+    /// Contour: the open chain's lines and arcs (curve ids), 1 to 1000. An arc is a bend of its
+    /// own radius; it must meet the curves beside it tangentially.
     #[serde(default)]
     pub curves: Option<StringList>,
     /// Contour: how far the flange runs from the sketch plane, positive.
