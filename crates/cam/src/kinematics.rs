@@ -409,6 +409,35 @@ pub fn tool_axis(machine: &Machine, rotary: &[f64]) -> Vec3 {
     table_dir_inv(machine, rotary, head_dir(machine, rotary, Vec3::Z))
 }
 
+/// Where a point fixed to the machine's bed (given in work coordinates with every rotary at
+/// zero: a vise, a clamp, the table) is in work coordinates with the rotaries at `rotary`.
+pub fn bed_point(machine: &Machine, rotary: &[f64], p: Vec3) -> Vec3 {
+    table_point_inv(machine, rotary, p + machine.work_origin) - machine.work_origin
+}
+
+/// How a point fixed to the work stands against the bed with the rotaries at `rotary`, when the
+/// table rotaries all turn about lines along X: the angle about +X and the line's bed Y and Z
+/// (bed coordinates: machine coordinates less the work origin). No table rotary: no turn.
+/// `None` when a table rotary turns about another direction, or two about different lines.
+pub fn work_turn_x(machine: &Machine, rotary: &[f64]) -> Option<crate::obstacle::Turn> {
+    let mut turned = 0.0;
+    let mut center: Option<[f64; 2]> = None;
+    for (i, r) in machine.rotaries.iter().enumerate().filter(|(_, r)| r.carrier == Carrier::Table) {
+        let d = r.dir();
+        if d.y.abs() > 1e-9 || d.z.abs() > 1e-9 {
+            return None;
+        }
+        let c = [r.center.y - machine.work_origin.y, r.center.z - machine.work_origin.z];
+        if center.is_some_and(|o| (o[0] - c[0]).abs() > 1e-9 || (o[1] - c[1]).abs() > 1e-9) {
+            return None;
+        }
+        center = Some(c);
+        turned += r.sign() * angle(rotary, i) * d.x.signum();
+    }
+    let center = center.unwrap_or([0.0, 0.0]);
+    turned.is_finite().then_some(crate::obstacle::Turn { angle: turned, center })
+}
+
 /// Where the tool is against the work (work coordinates) with the machine's axes at `joints`.
 pub fn forward(machine: &Machine, joints: &Joints) -> Pose {
     let tip = joints.linear + head_point(machine, &joints.rotary, Vec3::ZERO);

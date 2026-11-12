@@ -22,6 +22,29 @@ pub enum StockShape {
     Cylinder { x_min: f64, x_max: f64, radius: f64 },
 }
 
+/// An outline seen along the tool axis (from above on a 3-axis machine), work coordinates.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Footprint {
+    Circle { x: f64, y: f64, r: f64 },
+    Rect { x0: f64, x1: f64, y0: f64, y1: f64 },
+}
+
+impl Footprint {
+    pub fn bounds(self) -> (f64, f64, f64, f64) {
+        match self {
+            Footprint::Circle { x, y, r } => (x - r, x + r, y - r, y + r),
+            Footprint::Rect { x0, x1, y0, y1 } => (x0, x1, y0, y1),
+        }
+    }
+
+    pub fn contains(self, px: f64, py: f64) -> bool {
+        match self {
+            Footprint::Circle { x, y, r } => (px - x).powi(2) + (py - y).powi(2) <= r * r,
+            Footprint::Rect { x0, x1, y0, y1 } => px >= x0 && px <= x1 && py >= y0 && py <= y1,
+        }
+    }
+}
+
 /// How finely and how strictly to simulate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SimParams {

@@ -562,3 +562,23 @@ fn big_four_axis_turns_stay_on_the_chord_all_along() {
         close3(forward(&m, &prev).tip, p1.tip, 1e-9);
     }
 }
+
+#[test]
+fn the_turn_of_the_work_against_the_bed_is_the_tables_own() {
+    // What turns with A (a chuck's jaws, a ring) is placed by `work_turn_x`; the bed's things by
+    // `bed_point`. They must agree, whichever way A turns and wherever its centre is.
+    let mut rng = Lcg(11);
+    let mut seen = 0;
+    for m in machines() {
+        for _ in 0..50 {
+            let j = random_joints(&m, &mut rng);
+            let Some(t) = work_turn_x(&m, &j.rotary) else { continue };
+            seen += 1;
+            let p = Vec3::new(rng.range(-50.0, 50.0), rng.range(-50.0, 50.0), rng.range(-50.0, 50.0));
+            let q = t.apply([p.y, p.z]);
+            // The bed point `q` holds, turned back into the work, is `p`.
+            close3(bed_point(&m, &j.rotary, Vec3::new(p.x, q[0], q[1])), p, 1e-9);
+        }
+    }
+    assert!(seen >= 200, "{seen}");
+}

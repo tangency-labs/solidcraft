@@ -1087,3 +1087,48 @@ pub fn tilt_away(surface: &Surface, tool: &Tool, path: &Toolpath5, opts: &TiltOp
     }
     Ok(out)
 }
+
+/// Whether triangle `t` reaches inside the axis-aligned box `min`..`max` (touching a face of
+/// the box is not inside): exact, by the separating axes of a box and a triangle.
+pub fn box_meets_triangle(min: Vec3, max: Vec3, t: &[Vec3; 3]) -> bool {
+    let c = (min + max) * 0.5;
+    let h = (max - min) * 0.5;
+    if !(h.x > 0.0 && h.y > 0.0 && h.z > 0.0) {
+        return false;
+    }
+    let v = [t[0] - c, t[1] - c, t[2] - c];
+    let e = [v[1] - v[0], v[2] - v[1], v[0] - v[2]];
+    let unit = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
+    let mut axes = [Vec3::ZERO; 13];
+    axes[..3].copy_from_slice(&unit);
+    axes[3] = e[0].cross(e[1]);
+    for (k, (a, d)) in unit.iter().flat_map(|a| e.iter().map(move |d| (a, d))).enumerate() {
+        if let Some(slot) = axes.get_mut(4 + k) {
+            *slot = a.cross(*d);
+        }
+    }
+    for ax in axes {
+        let r = h.x * ax.x.abs() + h.y * ax.y.abs() + h.z * ax.z.abs();
+        // A degenerate axis (parallel edges, a flat triangle) separates nothing.
+        if !(r > 1e-300) {
+            continue;
+        }
+        let p = [ax.dot(v[0]), ax.dot(v[1]), ax.dot(v[2])];
+        let lo = p[0].min(p[1]).min(p[2]);
+        let hi = p[0].max(p[1]).max(p[2]);
+        if lo >= r || hi <= -r {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether triangle `t` reaches inside the upright cylinder about (`x`, `y`) of radius `r` from
+/// height `z0` to `z1`: exact, as the holder check measures its envelopes.
+pub fn upright_cylinder_meets_triangle(x: f64, y: f64, r: f64, z0: f64, z1: f64, t: &[Vec3; 3]) -> bool {
+    if !(r > 0.0 && z1 > z0) {
+        return false;
+    }
+    let pose = Pose::vertical(Vec3::new(x, y, 0.0));
+    cylinder_gap(&pose, &Envelope { bottom: z0, top: z1, radius: r }, t).is_some_and(|g| g < 0.0)
+}

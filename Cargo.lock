@@ -4310,6 +4310,7 @@ version = "0.40.0-rc.4"
 dependencies = [
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "solidcore-record",
  "solidcraft-geom",
  "solidcraft-profile",

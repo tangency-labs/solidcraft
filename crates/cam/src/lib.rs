@@ -103,10 +103,13 @@ mod gcode;
 pub mod gcode5;
 pub mod helical;
 pub mod indexed;
+pub mod keys;
 pub mod kinematics;
 mod leads;
+pub mod machine_model;
 pub mod machine_time;
 mod multiaxis;
+pub mod obstacle;
 mod offset;
 mod ops;
 mod par;
@@ -207,6 +210,8 @@ mod helical_tests;
 mod kinematics_tests;
 #[cfg(test)]
 mod leads_tests;
+#[cfg(test)]
+mod machine_model_tests;
 #[cfg(test)]
 mod machine_time_tests;
 #[cfg(test)]

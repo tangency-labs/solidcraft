@@ -130,7 +130,7 @@ pub(crate) use self::compare::distance_within;
 pub use self::dexels::SideLines;
 pub use self::heights::Removed;
 pub use self::left::{LeftPiece, PartLeft, SPOT_APART, SPOTS};
-pub use self::params::{DEFAULT_CELL_TOLERANCES, DEFAULT_CELLS, Grid, MAX_CELLS, SimParams, StockShape, stock_around};
+pub use self::params::{DEFAULT_CELL_TOLERANCES, DEFAULT_CELLS, Footprint, Grid, MAX_CELLS, SimParams, StockShape, stock_around};
 pub(crate) use self::profile::Profile;
 pub use self::program::{PartFloor, SimPlan, StepView, plan_sim};
 pub use self::rays::Gaps;
