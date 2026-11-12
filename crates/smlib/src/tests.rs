@@ -449,22 +449,25 @@ fn answered<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
 /// or still open, blocked here on a channel, while another makes and measures a body of its own.
 #[test]
 fn a_kernel_call_that_does_not_end_holds_up_no_other_call() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_by_no_other_call");
     let volume = answered(|| {
         let a = Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
         let b = Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap();
         a.boolean(&b, BooleanOp::Union).unwrap().unwrap().volume(1e-7).unwrap()
     });
     assert!((volume - 1500.0).abs() < 1e-6, "{volume}");
-    assert!(current_call().is_some_and(|c| c.contains("held_open")), "the call still runs");
+    assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call")), "the call still runs");
     // And one holds up no other held open beside it.
-    let (release_too, held_too) = call_held_open("held_open_too");
-    assert!(current_call().is_some_and(|c| c.contains("held_open") && c.contains("held_open_too")));
+    let (release_too, held_too) = call_held_open("held_open_too_by_no_other_call");
+    assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") && c.contains("held_open_too_by_no_other_call")));
     for (release, held) in [(release, held), (release_too, held_too)] {
         release.send(()).unwrap();
         held.join().unwrap().unwrap();
     }
-    assert!(!current_call().is_some_and(|c| c.contains("held_open")), "neither is in flight any more");
+    assert!(
+        !current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") || c.contains("held_open_too_by_no_other_call")),
+        "neither is in flight any more"
+    );
 }
 
 /// Bodies are made and used on whichever kernel is free, at the same time on several threads, and
@@ -472,7 +475,7 @@ fn a_kernel_call_that_does_not_end_holds_up_no_other_call() {
 /// kernel is used once it is free, and two bodies from different kernels go into one boolean.
 #[test]
 fn bodies_move_between_kernels_and_calls_run_side_by_side() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_beside_moved_bodies");
     let on_second = answered(|| Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap());
     release.send(()).unwrap();
     held.join().unwrap().unwrap();
@@ -506,7 +509,7 @@ fn bodies_move_between_kernels_and_calls_run_side_by_side() {
 /// away and the other call and later ones go on.
 #[test]
 fn a_panic_beside_a_running_call_costs_only_its_own_kernel() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_beside_a_panic");
     let r: Result<()> = core::run("panicking", |_| panic!("on purpose"));
     assert!(matches!(r, Err(Error::Internal(_))), "{r:?}");
     let v = answered(|| Brep::make_box([0.0; 3], [2.0; 3]).unwrap().volume(1e-7).unwrap());
