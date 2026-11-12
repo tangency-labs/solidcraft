@@ -245,13 +245,21 @@ pub(crate) struct Steps {
     now: AtomicUsize,
     labels: Vec<String>,
     total: usize,
+    /// The evaluation's progress inside the step it is on, and its Cancel: Stop stops it at its
+    /// next feature rather than leaving it to compute unseen.
+    pub(crate) progress: Arc<solidcraft_engine::doc::progress::Progress>,
 }
 
 impl Steps {
     fn new(app: &SolveApp, request: &Value, commands: &[(String, Value)]) -> Arc<Steps> {
         // A batch counts all its steps, also those after the ones computed ahead.
         let total = request.get("commands").and_then(Value::as_array).map_or(commands.len(), Vec::len).max(commands.len());
-        Arc::new(Steps { now: AtomicUsize::new(0), labels: commands.iter().map(|(c, _)| label(app, c)).collect(), total })
+        Arc::new(Steps {
+            now: AtomicUsize::new(0),
+            labels: commands.iter().map(|(c, _)| label(app, c)).collect(),
+            total,
+            progress: Default::default(),
+        })
     }
 
     /// What the chip says: the command running, and in a batch which step it is
@@ -333,6 +341,11 @@ pub struct Ahead {
     pub(crate) label: String,
     /// How far it has got.
     pub(crate) steps: Arc<Steps>,
+    /// What it computes, and for which design: `doc` and `revision`, as in [`Work::Ahead`].
+    commands: Vec<(String, Value)>,
+    doc: Arc<solidcraft_engine::doc::Document>,
+    revision: u64,
+    tries: u8,
 }
 
 impl Ahead {
@@ -341,13 +354,29 @@ impl Ahead {
     /// (not computed off the window thread, or nothing to compute).
     pub(crate) fn begin(app: &SolveApp, method: &str, request: &Value, ticket: &Ticket) -> Option<Ahead> {
         app.apply_off_thread?;
-        if !app.preferences.agent_off_thread || app.file_load.busy() || app.file_picker.is_some() {
+        if !app.preferences.agent_off_thread || app.file_load_holds() || app.file_picker.is_some() {
             return None;
         }
-        let commands = ahead_commands(method, request);
+        Self::start(app, request, ticket, ahead_commands(method, request), 0)
+    }
+
+    fn start(app: &SolveApp, request: &Value, ticket: &Ticket, commands: Vec<(String, Value)>, tries: u8) -> Option<Ahead> {
         let label = label(app, &commands.first()?.0);
-        let (done, kept, steps) = evaluate_ahead(app, request, ticket, commands)?;
-        Some(Ahead { done, kept, started: crate::now_ms(), label, steps })
+        let (done, kept, steps) = evaluate_ahead(app, request, ticket, commands.clone())?;
+        let (doc, revision) = (app.session.doc.clone(), app.session.revision);
+        Some(Ahead { done, kept, started: crate::now_ms(), label, steps, commands, doc, revision, tries })
+    }
+
+    /// A person's edit went first (as for [`Work::Ahead`]): this was computed for another design.
+    pub(crate) fn stale(&self, app: &SolveApp) -> bool {
+        (!Arc::ptr_eq(&app.session.doc, &self.doc) || app.session.revision != self.revision) && self.tries < MAX_TRIES
+    }
+
+    /// Computed again for the design as it is now, off the window thread.
+    pub(crate) fn restart(&self, app: &SolveApp, request: &Value, ticket: &Ticket) -> Option<Ahead> {
+        let again = Self::start(app, request, ticket, self.commands.clone(), self.tries + 1)?;
+        ticket.computing(false);
+        Some(Ahead { started: self.started, ..again })
     }
 
     /// The evaluation is in (or its worker ended).
@@ -426,6 +455,11 @@ impl SolveApp {
     /// and nothing of it is applied (its worker finishes on its own, unseen). Requests waiting
     /// behind it go on.
     pub fn stop_agent_command(&mut self) {
+        // Its evaluation stops at its next feature: nothing of it is wanted any more.
+        if let Some(steps) = self.agent_steps() {
+            steps.progress.cancel();
+        }
+        crate::operations::ended(self, "agent", crate::operations::Outcome::Cancelled);
         let stopped = match self.control_job.take() {
             Some(job) => {
                 job.req.ticket.stop();
@@ -445,7 +479,7 @@ impl SolveApp {
     /// Take a control request off the window thread when it computes long (see the module
     /// notes). Returns it when it should simply run here now.
     pub(crate) fn offload_control(&mut self, ctx: &egui::Context, req: ControlRequest) -> Option<ControlRequest> {
-        if self.apply_off_thread.is_none() || self.file_load.busy() || self.file_picker.is_some() {
+        if self.apply_off_thread.is_none() || self.file_load_holds() || self.file_picker.is_some() {
             return Some(req);
         }
         // Reading the design (a measure, an inspection that measures): on a copy, answered from
@@ -549,6 +583,9 @@ impl SolveApp {
     /// Each frame: exports that are done reply; a design change whose evaluation is in runs.
     /// Those their client cancelled are answered as stopped.
     pub(crate) fn poll_control_jobs(&mut self, ctx: &egui::Context) {
+        if !self.agent_replies.is_empty() {
+            self.forward_agent_replies();
+        }
         if !self.control_answering.is_empty() {
             let mut i = 0;
             while i < self.control_answering.len() {
@@ -589,7 +626,7 @@ impl SolveApp {
         let Some(job) = self.control_job.take() else { return };
         ctx.request_repaint();
         // A file opening meanwhile: the request waits for it as any design change does.
-        if (self.file_load.busy() || self.file_picker.is_some()) && job.req.ticket.wait_again() {
+        if (self.file_load_holds() || self.file_picker.is_some()) && job.req.ticket.wait_again() {
             self.control_held.push_front(job.req);
             return;
         }
@@ -614,6 +651,47 @@ impl SolveApp {
             }
         }
         self.big_operation |= crate::now_ms() - job.started >= crate::recovery_ui::BIG_OPERATION_MS;
-        self.run_with_kept(Some(kept), |app| app.run_control(ctx, job.req));
+        // Its reply goes to the agent as ever, seen on the way for the operations panel.
+        let mut req = job.req;
+        let (tap, tapped) = std::sync::mpsc::channel();
+        let reply_to = std::mem::replace(&mut req.reply, tap);
+        self.run_with_kept(Some(kept), |app| app.run_control(ctx, req));
+        self.agent_replies.push((tapped, reply_to));
+        self.forward_agent_replies();
+    }
+
+    /// Pass the replies of agents' commands that computed off the window thread on to the agent,
+    /// noting each command's outcome (a reply held for later goes on when it comes).
+    fn forward_agent_replies(&mut self) {
+        let mut i = 0;
+        while i < self.agent_replies.len() {
+            let Some((tapped, _)) = self.agent_replies.get(i) else { break };
+            match tapped.try_recv() {
+                Ok(reply) => {
+                    let (_, reply_to) = self.agent_replies.remove(i);
+                    // A batch stopped by a failing step answers `ok` with that step in `failed`.
+                    let failed_step = reply["result"]["failed"].as_object().map(|step| {
+                        let (command, error) = (step.get("command").and_then(Value::as_str), step.get("error").and_then(Value::as_str));
+                        error.map_or_else(|| "a step failed".to_string(), |e| command.map_or_else(|| e.to_string(), |c| crate::friendly_error(c, e)))
+                    });
+                    let outcome = if let Some(why) = failed_step {
+                        crate::operations::Outcome::Failed(why)
+                    } else if reply["ok"] == true {
+                        crate::operations::Outcome::Done
+                    } else if reply["stopped"] == true {
+                        crate::operations::Outcome::Cancelled
+                    } else {
+                        crate::operations::Outcome::Failed(reply["error"].as_str().unwrap_or("failed").to_string())
+                    };
+                    crate::operations::ended(self, "agent", outcome);
+                    let _ = reply_to.send(reply);
+                }
+                // Dropped unanswered: the agent's own receiver sees that too, as before.
+                Err(TryRecvError::Disconnected) => {
+                    self.agent_replies.remove(i);
+                }
+                Err(TryRecvError::Empty) => i += 1,
+            }
+        }
     }
 }

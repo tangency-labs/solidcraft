@@ -5,7 +5,7 @@
 //! by name, a sketch or construction plane by feature id. Expand All / Collapse All return the
 //! tree keys the UI opens or closes; they do not change the design.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use std::collections::BTreeMap;
 
@@ -20,8 +20,9 @@ use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
     BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, Isolated, PlaneFrame, RedefineAttachment,
-    RedefineSketchParams, RedefineSketchResult, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn, ViewApplyParams,
-    ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved, VisibilityState,
+    RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn,
+    ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved,
+    VisibilityState,
 };
 use crate::schema::view_navigation::CameraReply;
 use crate::schema::{TypedContract, output_schema_for};
@@ -55,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("rename")
         .contract(&RENAME_BODY_CONTRACT)
         .output(output_schema_for::<BodyRenamed>)
-        .params("body: its name, name: the new name (features that use the body follow)"),
+        .params("body: its name, or bodies: several body names (each in turn gets the first of name, name (2), name (3)… that no other body has), name: the new name (features that use the bodies follow)"),
     // The import and failed operations offer it for a part the modelling kernel refuses.
     CommandSpec::new("body.repair", "Repair Part", crate::checked!("body.repair", repair_body))
         .icon("body")
@@ -1118,7 +1119,7 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.doc_mut().preserve_configuration_units(&old, &kept);
     if let Some(row) = matched_configuration {
-        s.doc_mut().apply_configuration(&row)?;
+        s.doc_mut().apply_configuration(row.as_str())?;
     }
     s.settle_value_edit(&solved)?;
     reply(kept)
@@ -1351,17 +1352,111 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+/// The longest body name `body.rename` gives.
+const MAX_BODY_NAME: usize = 128;
+
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
-    let given = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?;
+    fn new_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
+        str_(p, "name")
+            .map(str::trim)
+            .filter(|n| !n.is_empty() && n.len() <= MAX_BODY_NAME)
+            .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))
+    }
+    let Some(list) = p.get("bodies").filter(|v| !v.is_null()) else {
+        let given = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?;
+        let renamed = rename_one(s, cmd, given, new_name(cmd, p)?)?;
+        return reply(cmd, renamed);
+    };
+    // Several bodies with one name (#12341): each in turn takes the first of `name`,
+    // `name (2)`, `name (3)`… that no other body has, all in this one command (one undo step;
+    // a refused rename leaves every body as it was).
+    if p.get("body").is_some_and(|b| !b.is_null()) {
+        return Err(bad(cmd, "give `body` or `bodies`, not both"));
+    }
+    let max = crate::schema::browser::MAX_RENAMED_BODIES;
+    let list: Vec<&str> = list
+        .as_array()
+        .filter(|a| !a.is_empty() && a.len() <= max)
+        .and_then(|a| a.iter().map(Value::as_str).collect::<Option<Vec<_>>>())
+        .ok_or_else(|| bad(cmd, format!("`bodies` must be a list of 1 to {max} body names")))?;
+    let mut olds: Vec<String> = Vec::new();
+    for given in list {
+        let old = s.own_body_name(given).ok_or_else(|| bad(cmd, format!("no body `{given}`")))?;
+        // Two placed copies of one body name the same body: it is renamed once.
+        if !olds.contains(&old) {
+            olds.push(old);
+        }
+    }
+    let name = new_name(cmd, p)?;
+    let targets = numbered_names(s, &olds, name);
+    if let Some(target) = targets.iter().find(|t| t.len() > MAX_BODY_NAME) {
+        return Err(bad(cmd, format!("`{target}` is longer than {MAX_BODY_NAME} characters; choose a shorter name")));
+    }
+    // Each rename reads the model (a feature's other bodies, the bodies named after this one),
+    // so the model follows each one before the next, as it follows a `body.rename` of one body;
+    // so do the selection and the hidden and locked bodies (#9737). With one body that changes
+    // its name the session follows it after the command, as for `body`.
+    let changes = olds.iter().zip(&targets).filter(|(old, target)| old != target).count();
+    let selection = s.selection.clone();
+    let mut renamed = Vec::new();
+    for (old, target) in olds.iter().zip(&targets) {
+        let before = s.doc.clone();
+        let one = match rename_one(s, cmd, old, target) {
+            Ok(one) => one,
+            Err(e) => {
+                // The session puts the design and the visibility back; the selection is this
+                // command's to put back.
+                s.selection = selection;
+                return Err(e);
+            }
+        };
+        if changes > 1 && !std::sync::Arc::ptr_eq(&before, &s.doc) {
+            s.refresh_from(&before, false);
+        }
+        renamed.push(RenamedBody { body: one.body, name: one.name });
+    }
+    let (body, name) = renamed.first().map(|r| (r.body.clone(), r.name.clone())).unwrap_or_default();
+    reply(cmd, BodyRenamed { body, name, renamed, param_warnings: Vec::new() })
+}
+
+/// The names `body.rename` gives `bodies` (#12341): each in turn takes the first of `name`,
+/// `name (2)`, `name (3)`… that is its own name now, or that no body has (the listed ones
+/// included, as they are renamed one after another), no Remove feature keeps, and no earlier body
+/// of the list took.
+fn numbered_names(s: &Session, olds: &[String], name: &str) -> Vec<String> {
+    let st = s.model.state();
+    // Sets, not lists: with up to MAX_RENAMED_BODIES bodies, each trying many candidates, a
+    // linear search per candidate would make the command cubic in the list.
+    let mut taken: HashSet<&str> = st.bodies.iter().map(|b| b.name.as_str()).chain(olds.iter().map(String::as_str)).collect();
+    for f in &s.doc.features {
+        if let FeatureKind::Remove { bodies } = &f.kind {
+            taken.extend(bodies.iter().map(|b| b.0.as_str()));
+        }
+    }
+    let mut given: HashSet<String> = HashSet::with_capacity(olds.len());
+    let mut out: Vec<String> = Vec::with_capacity(olds.len());
+    for old in olds {
+        // Every body, listed name and Remove target can rule out one candidate at most.
+        let tries = taken.len() + out.len() + 1;
+        let pick = (1..=tries)
+            .map(|k| if k == 1 { name.to_string() } else { format!("{name} ({k})") })
+            .find(|c| !given.contains(c) && (c == old || !taken.contains(c.as_str())))
+            .unwrap_or_else(|| format!("{name} ({})", tries + 1));
+        given.insert(pick.clone());
+        out.push(pick);
+    }
+    out
+}
+
+/// Rename the body `given` (or the body a placed copy's name shows) to `name`.
+fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<BodyRenamed> {
     // A placed copy's name (`KB (K:2)`, the name the browser lists a pasted placement's body by)
     // means the body it shows, as appearance.assign takes it (#9740): renaming it renames that body,
     // in every placement of its component (#10017).
     let old = s.own_body_name(given).ok_or_else(|| bad(cmd, format!("no body `{given}`")))?;
-    let name =
-        str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     if name == old {
-        return reply(cmd, BodyRenamed { body: old, name: name.to_string(), param_warnings: Vec::new() });
+        return Ok(BodyRenamed { body: old, name: name.to_string(), renamed: Vec::new(), param_warnings: Vec::new() });
     }
     let previous = s.doc.clone();
     let st = s.model.state();
@@ -1496,7 +1591,7 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     // A sketch projecting the body in another placement of its component keeps it.
     super::sketch_project::follow_placed_renames(d, &st, &placed, Some((&old, name)));
     s.remember_body_rename(&previous, &old, name);
-    reply(cmd, BodyRenamed { body: old, name: name.to_string(), param_warnings: Vec::new() })
+    Ok(BodyRenamed { body: old, name: name.to_string(), renamed: Vec::new(), param_warnings: Vec::new() })
 }
 
 fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1970,6 +2065,90 @@ mod tests {
         assert!(s.execute("body.rename", &json!({"body": "Lid", "name": " "})).is_err());
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(names(&s)[1], b);
+    }
+
+    /// #12341: `bodies` renames a selection with one name, numbering the bodies after the first
+    /// as the app numbers a STEP file's same-named solids. A numbered name another body has is
+    /// skipped, the bodies' users follow them, and it is one undo step.
+    #[test]
+    fn several_bodies_rename_to_one_name_numbered_after_the_first() {
+        let mut s = Session::default();
+        for (i, n) in ["A", "B", "C", "Red (2)"].iter().enumerate() {
+            run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [10 * i, 0, 0], "body_name": n}));
+        }
+        run(&mut s, "solid.move", json!({"bodies": ["C"], "translate": [0, 0, 5]}));
+        let undo = s.undo.len();
+        let r = run(&mut s, "body.rename", json!({"bodies": ["A", "B", "C"], "name": " Red "}));
+        // `Red (2)` belongs to the fourth body, so B takes `Red (3)` and C `Red (4)`.
+        assert_eq!(names(&s), ["Red", "Red (3)", "Red (4)", "Red (2)"]);
+        assert_eq!(r["body"], "A");
+        assert_eq!(r["name"], "Red");
+        assert_eq!(r["renamed"], json!([{"body": "A", "name": "Red"}, {"body": "B", "name": "Red (3)"}, {"body": "C", "name": "Red (4)"}]), "{r}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "the move still finds its body");
+        assert_eq!(s.undo.len(), undo + 1, "one undo step");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(names(&s), ["A", "B", "C", "Red (2)"]);
+
+        // A body keeps its own name when that is the one it would get, and a body listed twice is
+        // renamed once. The listed bodies' current names are free to take: `B` names C below.
+        run(&mut s, "body.rename", json!({"bodies": ["A", "A", "B"], "name": "A"}));
+        assert_eq!(names(&s), ["A", "A (2)", "C", "Red (2)"]);
+        run(&mut s, "body.rename", json!({"bodies": ["C", "A (2)"], "name": "B"}));
+        assert_eq!(names(&s), ["A", "B (2)", "B", "Red (2)"]);
+
+        // Refused, with every body left as it was: an unknown body, both `body` and `bodies`, an
+        // empty list, a list with a number in it, and a name too long once numbered.
+        let before = names(&s);
+        for p in [
+            json!({"bodies": ["A", "Nope"], "name": "X"}),
+            json!({"body": "A", "bodies": ["B"], "name": "X"}),
+            json!({"bodies": [], "name": "X"}),
+            json!({"bodies": ["A", 5], "name": "X"}),
+            json!({"bodies": ["A", "B"], "name": "x".repeat(126)}),
+        ] {
+            assert!(s.execute("body.rename", &p).is_err(), "{p}");
+            assert_eq!(names(&s), before, "{p} changed nothing");
+        }
+    }
+
+    /// #12341, as reported: one extrude of three circles makes three bodies of one feature. All
+    /// three take the new name, numbered, and the selection and a hidden body follow them, as
+    /// they follow one renamed body (#9737). A refused rename leaves the selection as it was.
+    #[test]
+    fn the_bodies_of_one_feature_rename_together_and_the_selection_follows() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        for x in [0, 30, 60] {
+            run(&mut s, "sketch.circle.center", json!({"center": [x, 0], "radius": 5}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "new_body"}));
+        let made = names(&s);
+        assert_eq!(made.len(), 3, "{made:?}");
+        let items: Vec<Value> = made.iter().map(|n| json!({"type": "body", "name": n})).collect();
+        run(&mut s, "select.set", json!({"items": items}));
+        run(&mut s, "browser.visibility", json!({"items": [made[1].clone()], "visible": false}));
+        assert_eq!(s.visibility.hidden_bodies, [made[1].clone()]);
+        run(&mut s, "body.rename", json!({"bodies": made, "name": "Test"}));
+        assert_eq!(names(&s), ["Test", "Test (2)", "Test (3)"]);
+        let selected: Vec<_> = s.selection.iter().filter_map(|x| x.body_name()).collect();
+        assert_eq!(selected, ["Test", "Test (2)", "Test (3)"], "the selection follows every renamed body");
+        assert_eq!(s.visibility.hidden_bodies, ["Test (2)"], "the hidden body stays hidden under its new name");
+        // Undo and redo evaluate the design again: the names are the feature's stored names, and
+        // the hide follows them both ways.
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(names(&s), made);
+        assert_eq!(s.visibility.hidden_bodies, [made[1].clone()]);
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(names(&s), ["Test", "Test (2)", "Test (3)"]);
+        assert_eq!(s.visibility.hidden_bodies, ["Test (2)"]);
+        let items: Vec<Value> = names(&s).iter().map(|n| json!({"type": "body", "name": n})).collect();
+        run(&mut s, "select.set", json!({"items": items}));
+        // A refusal after the first rename leaves names and selection as they were.
+        let selection = s.selection.clone();
+        assert!(s.execute("body.rename", &json!({"bodies": ["Test", "Test (2)"], "name": "y".repeat(126)})).is_err());
+        assert_eq!(names(&s), ["Test", "Test (2)", "Test (3)"]);
+        assert_eq!(s.selection, selection);
     }
 
     /// #10123: renaming a piece cut off a frame member must land on that piece after a rebuild,

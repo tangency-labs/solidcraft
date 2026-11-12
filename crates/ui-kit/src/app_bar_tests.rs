@@ -242,8 +242,13 @@ fn file_item(id: &str, enabled: bool) -> FileItem {
 /// The File menu drawn for a frame with `events`: what it returned, and where each text was.
 fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
     let rows = vec![FileRow::Item(file_item("new", true)), FileRow::Item(file_item("save", false)), FileRow::Separator];
+    file_menu_frame_of(ctx, &rows, 600.0, time, events)
+}
+
+/// The File menu with `rows` in an 800 by `height` window, drawn for a frame with `events`.
+fn file_menu_frame_of(ctx: &egui::Context, rows: &[FileRow], height: f32, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
     let input = egui::RawInput {
-        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, height))),
         time: Some(time),
         events,
         focused: true,
@@ -251,10 +256,37 @@ fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> 
     };
     let mut out = FileMenuOut::default();
     let output = crate::test_support::raw_frame(ctx, input, |ui| {
-        out = file_menu(ui.ctx(), &rows, pos2(100.0, HEIGHT), egui::Id::unique("test_file_menu"), false);
+        out = file_menu(ui.ctx(), rows, pos2(100.0, HEIGHT), egui::Id::unique("test_file_menu"), false);
     });
     let texts = crate::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
     (out, texts)
+}
+
+/// A File menu taller than the window stays inside it, and its last row scrolls into view.
+#[test]
+fn a_file_menu_taller_than_the_window_scrolls_its_rows() {
+    let ctx = crate::test_support::context();
+    let rows: Vec<FileRow> = (0..40).map(|i| FileRow::Item(file_item(&format!("r{i}"), true))).collect();
+    let height = 360.0;
+    file_menu_frame_of(&ctx, &rows, height, 0.0, Vec::new());
+    file_menu_frame_of(&ctx, &rows, height, 0.1, Vec::new());
+    let menu = ctx.memory(|m| m.area_rect(egui::Id::unique("test_file_menu"))).expect("the menu is laid out");
+    assert!(menu.bottom() <= height, "the menu ends at {} inside a {height} high window", menu.bottom());
+    let shown = |texts: &[(String, Pos2)], text: &str| texts.iter().any(|(t, p)| t == text && menu.contains(*p));
+    let over = menu.center();
+    let mut texts = Vec::new();
+    for i in 0..20 {
+        let wheel = egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -400.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        (_, texts) = file_menu_frame_of(&ctx, &rows, height, 0.2 + f64::from(i) * 0.1, vec![egui::Event::PointerMoved(over), wheel]);
+    }
+    assert!(shown(&texts, "Item r39"), "scrolling shows the last row");
+    assert!(!shown(&texts, "Item r0"), "and the first has scrolled out");
 }
 
 /// A row returns its id and closes the menu; a disabled one returns nothing and keeps it open;

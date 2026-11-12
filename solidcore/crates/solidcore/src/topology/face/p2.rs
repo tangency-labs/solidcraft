@@ -2034,6 +2034,7 @@ impl<'a> OdeIsoCurveLength<'a> {
     /// index outside `dydx`.
     #[allow(clippy::too_many_lines)] // one upstream function
     pub fn evaluate(&self, t: f64, dydx: &mut [f64]) -> Result<()> {
+        self.kernel.work_counters.add_mass_iso_evaluation();
         let lay = self.layout;
         let mut pv = [[Vec3::ZERO; 2]; 2];
         let mut pv2 = [[Vec3::ZERO; 2]; 2];
@@ -2338,10 +2339,34 @@ impl OdeArea<'_> {
             dydx.resize(num_components + 1, 0.0);
             return Ok(());
         }
+        let dy = self.iso_integral(k, p0.x, self.min_v, p0.y)?;
+        dydx.clear();
+        dydx.push(0.0);
+        dydx.extend_from_slice(&dy);
+        for v in dydx.iter_mut().skip(1) {
+            // (* -1.0: an exact negation)
+            *v = -(*v * p1.x);
+        }
+
+        Ok(())
+    }
+
+    /// The iso-curve integral at `u` from `v = from` to `v = to` (either way), each
+    /// component of the layout: the inner integral of `Evaluate`, run piece by piece
+    /// between the surface's v knots strictly between the two.
+    ///
+    /// Not upstream: upstream steps across the knots (WR-494, #1435), and runs only
+    /// from its `m_dMinV` up to the curve point.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`surface_knots_inside`] and of the inner integration.
+    pub fn iso_integral(&self, k: &Kernel, u: f64, from: f64, to: f64) -> Result<Vec<f64>> {
+        let num_components = self.y_scale.len();
         let eval = OdeIsoCurveLength::new(
             self.kernel,
             self.surface,
-            p0.x,
+            u,
             self.origin,
             self.face_thickness,
             self.layout,
@@ -2355,26 +2380,32 @@ impl OdeArea<'_> {
         // knot, and a step across any knot has an error its estimate does not measure.
         // Integrated span by span, as the trim curve is (WR-494; the SolidCraft fork's
         // tangency-labs/smlib@08d9a14).
-        let knots = surface_knots_inside(k, self.surface, SurfParamType::V, self.min_v, p0.y)?;
+        let knots = if to >= from {
+            surface_knots_inside(k, self.surface, SurfParamType::V, from, to)?
+        } else {
+            let mut down = surface_knots_inside(k, self.surface, SurfParamType::V, to, from)?;
+            down.reverse();
+            down
+        };
         let mut piece_y = Vec::new();
         piece_y.resize(num_components, 0.0);
-        // (the pieces `[a, b]` between `min_v`, the knots and `p0.y`, in that order)
-        let mut a = self.min_v;
-        for b in knots.into_iter().chain(core::iter::once(p0.y)) {
+        // (the pieces `[a, b]` between `from`, the knots and `to`, in that order)
+        let mut a = from;
+        for b in knots.into_iter().chain(core::iter::once(to)) {
             piece_y.fill(0.0);
-            // Each piece's end (a v knot, or the trim point) is evaluated in the
+            // Each piece's ends (v knots, or the trim point) are evaluated in the
             // piece's own span: the integral over [a, b] is of the integrand's
-            // restriction to that span, whose value at b is the limit from below.
-            // Upstream's `TRUE` takes the span above, so where the derivatives jump
-            // at the knot (C0 at a rational circle's double knot, #1435; a G2 not C2
-            // loft, #2091) the piece's last sample was the next span's value: the
+            // restriction to that span, whose value at its upper end is the limit from
+            // below. Upstream's `TRUE` takes the span above, so where the derivatives
+            // jump at the knot (C0 at a rational circle's double knot, #1435; a G2 not
+            // C2 loft, #2091) the piece's last sample was the next span's value: the
             // steps shrank toward every knot, and underflowed at tight accuracies
-            // (WR-670). A piece descending to b (the curve point below `min_v`, one
-            // piece) lies in the span above b, upstream's side.
+            // (WR-670). An ascending piece's upper end is b, a descending one's a; its
+            // lower end lies in the span above it, upstream's side.
             let piece_eval = if b > a {
                 eval.with_v_end_from_below(b)
             } else {
-                eval
+                eval.with_v_end_from_below(a)
             };
             // A failed inner integration is not a zero-area contribution.
             runge_kutta_ode_integrate(
@@ -2391,15 +2422,7 @@ impl OdeArea<'_> {
             }
             a = b;
         }
-        dydx.clear();
-        dydx.push(0.0);
-        dydx.extend_from_slice(&dy);
-        for v in dydx.iter_mut().skip(1) {
-            // (* -1.0: an exact negation)
-            *v = -(*v * p1.x);
-        }
-
-        Ok(())
+        Ok(dy)
     }
 }
 
@@ -2440,11 +2463,20 @@ pub fn surface_knots_inside(
 /// bisections). Ascending, the curve's ends included; breaks the integrator cannot step
 /// between are merged into one, a curve knot kept over a crossing.
 ///
+/// Not the fork's: the crossings of the lines `v = l` of `v_lines` (ascending), found the
+/// same way, are breaks too: banded integration changes its iso-curve base there. The
+/// span's points are evaluated once for all the lines.
+///
 /// # Errors
 ///
 /// `SM_ERR` for fewer than two curve knots; those of the curve's knots, bounding box,
 /// degree and evaluation and of [`surface_knots_inside`].
-pub fn trim_curve_breaks(k: &Kernel, uv_curve: &Curve, surface: &Surface) -> Result<Vec<f64>> {
+pub fn trim_curve_breaks(
+    k: &Kernel,
+    uv_curve: &Curve,
+    surface: &Surface,
+    v_lines: &[f64],
+) -> Result<Vec<f64>> {
     let mut breaks = Vec::new();
     let ivl = uv_curve.natural_interval();
     let (knots, _) = uv_curve.knots(k, Some(&ivl))?;
@@ -2464,21 +2496,51 @@ pub fn trim_curve_breaks(k: &Kernel, uv_curve: &Curve, surface: &Surface) -> Res
         .normal
         .ok_or_else(|| null("trim_curve_breaks: bounding box not computed"))?;
     let u_lines = surface_knots_inside(k, surface, SurfParamType::U, bbox.min().x, bbox.max().x)?;
+    let (v_lo, v_hi) = (bbox.min().y, bbox.max().y);
+    // (the lines in either direction: `(true, l)` for `u = l`, `(false, l)` for `v = l`)
+    let lines: Vec<(bool, f64)> = u_lines
+        .iter()
+        .map(|&l| (true, l))
+        .chain(
+            v_lines
+                .iter()
+                .filter(|&&l| l > v_lo && l < v_hi)
+                .map(|&l| (false, l)),
+        )
+        .collect();
 
     let samples = 4 * (uv_curve.degree()? + 1);
-    let u = |t: f64| -> Result<f64> { Ok(uv_curve.evaluate_point(k, t)?.x) };
+    let coordinate = |t: f64, along_u: bool| -> Result<f64> {
+        let p = uv_curve.evaluate_point(k, t)?;
+        Ok(if along_u { p.x } else { p.y })
+    };
+    let mut points: Vec<(f64, Point2)> = Vec::new();
     for pair in knots.windows(2) {
         let &[a, b] = pair else {
             continue;
         };
         breaks.push(a);
-        for &line in &u_lines {
-            let mut t0 = a;
-            let mut u0 = u(t0)?;
-            for i in 1..=samples {
-                // (`(dB - dA) * iS / lSamples`: an unsigned count converted to double)
-                let t1 = a + (b - a) * (i as f64) / (samples as f64);
-                let u1 = u(t1)?;
+        if lines.is_empty() {
+            continue;
+        }
+        points.clear();
+        for i in 0..=samples {
+            // (`(dB - dA) * iS / lSamples`: an unsigned count converted to double)
+            let t = if i == 0 {
+                a
+            } else {
+                a + (b - a) * (i as f64) / (samples as f64)
+            };
+            let p = uv_curve.evaluate_point(k, t)?;
+            points.push((t, Point2::new(p.x, p.y)));
+        }
+        for &(along_u, line) in &lines {
+            let at = |p: &Point2| if along_u { p.x } else { p.y };
+            for (i, pair) in points.windows(2).enumerate() {
+                let &[(t0, p0), (t1, p1)] = pair else {
+                    continue;
+                };
+                let (u0, u1) = (at(&p0), at(&p1));
                 if (u0 - line) * (u1 - line) < 0.0 {
                     let mut lo = t0;
                     let mut hi = t1;
@@ -2486,7 +2548,7 @@ pub fn trim_curve_breaks(k: &Kernel, uv_curve: &Curve, surface: &Surface) -> Res
                     let mut bisections = 0;
                     while bisections < 64 && hi - lo > EFF_ZERO * (1.0 + hi.abs()) {
                         let mid = 0.5 * (lo + hi);
-                        let u_mid = u(mid)?;
+                        let u_mid = coordinate(mid, along_u)?;
                         if (u_lo - line) * (u_mid - line) <= 0.0 {
                             hi = mid;
                         } else {
@@ -2496,11 +2558,11 @@ pub fn trim_curve_breaks(k: &Kernel, uv_curve: &Curve, surface: &Surface) -> Res
                         bisections += 1;
                     }
                     breaks.push(0.5 * (lo + hi));
-                } else if u1 == line && i < samples {
+                } else if u1 == line && i + 1 < samples && (along_u || u0 != line) {
+                    // (a trim lying along a v line breaks where it reaches it, not at
+                    // every point it has on it)
                     breaks.push(t1);
                 }
-                t0 = t1;
-                u0 = u1;
             }
         }
     }
@@ -2778,6 +2840,9 @@ pub struct FaceCurves {
     /// consecutive edge uses of a loop end at one vertex at two parameters (a pole), so
     /// they stand for no edge of the face.
     pub filled_gaps: Vec<usize>,
+    /// (not upstream) The edge of each curve of `curves_3d`, in the same order (filled
+    /// only when 3D curves are asked for).
+    pub edges: Vec<EdgeId>,
 }
 
 /// `CreateCurvesFromFace`: copies of the face's loop curves (3D and/or UV) of the face
@@ -2903,6 +2968,7 @@ pub fn create_curves_from_face(
                 copy.trim(k, &mut ivl, TrimMode::Notify)?;
                 if let Some(list) = out.curves_3d.as_mut() {
                     list.push(copy);
+                    out.edges.push(e);
                 }
             }
         }

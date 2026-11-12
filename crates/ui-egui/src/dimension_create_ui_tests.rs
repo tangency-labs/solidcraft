@@ -1894,6 +1894,60 @@ fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
     assert!((plate_max(&h)[1] - 10.0).abs() < 1e-6, "undo restores it");
 }
 
+/// A sketch seen nearly edge-on, with one of its directions pointing at the eye, keeps its
+/// dimensions near the sketch: shown on a finished sketch (Show Dimensions) and on the sketch
+/// being edited. The text sizes in millimetres came from that foreshortened direction alone, so
+/// the extension lines ran far across the window and over the panels (#14826).
+#[test]
+fn a_sketch_seen_edge_on_keeps_its_dimension_lines_near_it() {
+    fn points(s: &egui::Shape, colour: egui::Color32, out: &mut Vec<egui::Pos2>) {
+        match s {
+            egui::Shape::LineSegment { points, stroke } if stroke.color == colour => out.extend(points),
+            egui::Shape::Path(p) if p.stroke.color == egui::epaint::ColorMode::Solid(colour) => out.extend(&p.points),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| points(s, colour, out)),
+            _ => {}
+        }
+    }
+    let (mut h, sketch) = shown_dimensions();
+    // The sketch's x direction at the eye: level with the sketch, and the reporter's 1° above it.
+    h.app.cam.yaw = -std::f64::consts::FRAC_PI_2;
+    for editing in [false, true] {
+        if editing {
+            h.app.run("sketch.edit", json!({"sketch":sketch})).unwrap();
+        }
+        for pitch in [0.0, 0.017_454_589_843_749_955] {
+            h.app.cam.pitch = pitch;
+            h.settle();
+            h.frames(2);
+            let view = h.app.viewport.rect.expect("the viewport is laid out");
+            let mut drawn = Vec::new();
+            h.shapes.iter().for_each(|s| points(&s.shape, solidcraft_theme::Tokens::get().dimension, &mut drawn));
+            assert!(!drawn.is_empty(), "the dimensions are drawn (editing: {editing}, pitch {pitch})");
+            let far = drawn.iter().filter(|p| !view.expand(50.0).contains(**p)).collect::<Vec<_>>();
+            assert!(far.is_empty(), "dimension lines run out of the view {view:?} (editing: {editing}, pitch {pitch}): {far:?}");
+        }
+    }
+}
+
+/// A dimension is still sized, from the direction that does reach the screen, when one of the
+/// sketch's x and y directions does not project (for example it ends behind the eye).
+#[test]
+fn a_dimension_is_sized_from_whichever_direction_reaches_the_screen() {
+    use crate::dim_view::mm_per_pixel;
+    use solidcore_record::Vec2;
+    let at = Vec2::new(3.0, 4.0);
+    // 1 mm along x is 4 px, 1 mm along y is 2 px.
+    let screen = |p: Vec2| egui::Pos2::new(4.0 * p.x as f32, 2.0 * p.y as f32);
+    assert_eq!(mm_per_pixel(|p| Some(screen(p)), at), Some(0.25), "the longer direction sizes it");
+    let only_x = |p: Vec2| (p.y == at.y).then(|| screen(p));
+    assert_eq!(mm_per_pixel(only_x, at), Some(0.25), "y does not project: x alone sizes it");
+    let only_y = |p: Vec2| (p.x == at.x).then(|| screen(p));
+    assert_eq!(mm_per_pixel(only_y, at), Some(0.5), "x does not project: y alone sizes it");
+    let neither = |p: Vec2| (p.x == at.x && p.y == at.y).then(|| screen(p));
+    assert_eq!(mm_per_pixel(neither, at), None, "no direction projects: no size");
+    assert_eq!(mm_per_pixel(|_| None, at), None, "the point itself does not project");
+}
+
 #[test]
 fn escape_cancels_a_shown_dimensions_value() {
     let (mut h, _) = shown_dimensions();

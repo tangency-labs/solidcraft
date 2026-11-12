@@ -5744,3 +5744,26 @@ fn a_command_check_that_panics_refuses_the_command() {
     assert!(matches!(r, Err(EngineError::Internal(..))), "{r:?}");
     assert!(s.doc.features.is_empty());
 }
+
+/// #4153, #11901: the other ISO 261 metric sizes (M33, M39, M45, M3.5…) are known by name with
+/// their ISO 262 coarse pitch, as the first-choice ones are, and a thread named so is cut with
+/// it. The size chosen automatically for a face is still one of the first-choice sizes, as
+/// before they were added: a 33 mm shaft is sized M30 on main and here.
+#[test]
+fn second_choice_metric_threads_are_known_by_name() {
+    use solidcraft_doc::thread_forms::ThreadForm;
+    for (name, dia, pitch) in [("M3.5", 3.5, 0.6), ("M7", 7.0, 1.0), ("M33", 33.0, 3.5), ("M39", 39.0, 4.0), ("M45", 45.0, 4.5), ("M64", 64.0, 6.0)] {
+        assert_eq!(solidcraft_doc::parse_metric_thread(name), Some((dia, pitch)), "{name}");
+        assert_eq!(ThreadForm::Metric.format(dia, pitch, pitch), name);
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"diameter": dia, "height": 4.0 * dia, "body_name": "Shaft"}));
+        let named = run(&mut s, "solid.thread", json!({"face": [dia / 2.0, 0.0, 2.0 * dia], "designation": name}));
+        assert!((named["thread"]["pitch"].as_f64().unwrap() - pitch).abs() < 1e-9, "{named}");
+    }
+    // The smallest second-choice size, by name only (no shaft that thin is cut here).
+    assert_eq!(solidcraft_doc::parse_metric_thread("M1.1"), Some((1.1, 0.25)));
+    assert_eq!(ThreadForm::Metric.format(1.1, 0.25, 0.25), "M1.1");
+    assert_eq!(ThreadForm::Metric.fit(33.0, false), Some((30.0, 3.5)));
+    assert_eq!(ThreadForm::Metric.fit(7.0, false), Some((6.0, 1.0)));
+    assert_ne!(ThreadForm::Metric.fit(39.0, true).map(|(d, _)| d), Some(39.0), "a 39 mm hole is not sized M39 automatically");
+}
