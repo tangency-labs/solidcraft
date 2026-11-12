@@ -3532,6 +3532,26 @@ pub use rails::{compute_support_edge, split_rail, RailOwnership, RetainedRailOwn
 mod tests {
     use super::*;
 
+    /// The solvers whose ball changes its radius along the round, so that
+    /// `skins_varying_balls` holds their exact-circle skin to its balls (#15256): a
+    /// variable radius and a constant distance (its radius follows the faces' angle),
+    /// not a constant radius or the constant-radius-assisted solver.
+    #[test]
+    fn variable_radius_and_constant_distance_balls_vary() {
+        use FilletSolverType as T;
+        assert!(T::VariableRadius.ball_radius_varies());
+        assert!(T::ConstDist.ball_radius_varies());
+        for t in [
+            T::Unknown,
+            T::SurfSurf,
+            T::ConstRadius,
+            T::CurveBased,
+            T::ConstRadiusAssisted,
+        ] {
+            assert!(!t.ball_radius_varies(), "{t:?}");
+        }
+    }
+
     #[test]
     fn audit_483_edge_domain_is_no_trimmed_curve_after_a_failed_trim() {
         let k = Kernel::default();
