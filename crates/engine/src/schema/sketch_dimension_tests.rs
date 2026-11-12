@@ -208,8 +208,8 @@ fn the_types_read_each_key_like_the_handler() {
     for entities in [json!(5), json!([5]), json!([null]), json!([{"face": [1, 2, 3]}]), json!([{}]), json!({"edge": [1, 2, 3]}), json!([["a"]])] {
         assert!(!parses(json!({"entities": entities})), "{entities}");
     }
-    // The count is the handler's: one or two.
-    assert!(!parses(json!({"entities": []})) && !parses(json!({"entities": ["a", "b", "c"]})));
+    // The count is the handler's: one, two or three (three points give the angle at the middle one).
+    assert!(!parses(json!({"entities": []})) && parses(json!({"entities": ["a", "b", "c"]})) && !parses(json!({"entities": ["a", "b", "c", "d"]})));
     // A value: a number, or an expression of up to 4096 characters, including `name = expression`.
     for value in [json!(2), json!(-1.5), json!("width / 2"), json!("50 mm"), json!("w = 40"), json!("#w = 4 mm")] {
         assert!(parses(json!({"entities": ["l1"], "value": value})), "{value}");
@@ -264,7 +264,8 @@ fn the_schema_takes_what_the_handler_reads() {
         (json!({}), false),
         (json!({"value": 3}), false),
         (json!({"entities": []}), false),
-        (json!({"entities": ["a", "b", "c"]}), false),
+        (json!({"entities": ["a", "b", "c"]}), true),
+        (json!({"entities": ["a", "b", "c", "d"]}), false),
         (json!({"entities": ["a"], "value": true}), false),
         (json!({"entities": ["a"], "driven": 1}), false),
         (json!({"entities": ["a"], "colour": 1}), false),

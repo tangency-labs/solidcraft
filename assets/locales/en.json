@@ -4810,7 +4810,7 @@
   "sketch.hint.constraint.generic": "Constraint: pick the sketch entities",
   "sketch.hint.constraint.horizontal_vertical": "Horizontal/Vertical: pick a line, two points, or a point and a line; hold Shift to pick a line midpoint",
   "sketch.hint.constraint.midpoint": "MidPoint: pick a point and a line, or two lines to center the second on the first",
-  "sketch.hint.dimension": "Dimension: pick one or two entities and type the value (or click to place it first); click a dimension to edit it; Enter applies",
+  "sketch.hint.dimension": "Dimension: pick one or two entities (or three points for the angle at the middle one) and type the value (or click to place it first); click a dimension to edit it; Enter applies",
   "sketch.hint.extend": "Extend: click a curve near the end to extend (Shift: click two curves to extend both to where they meet)",
   "sketch.hint.fallback": "Click in the sketch",
   "sketch.hint.line": "Line: click points; right-click or Esc to finish",
