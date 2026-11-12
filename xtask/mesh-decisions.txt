@@ -130,7 +130,6 @@ crates/engine/src/cmd/interference.rs:interference finds interference between B-
 crates/engine/src/cmd/interference.rs:meshes_apart decides two bodies are apart by mesh triangles
 crates/engine/src/cmd/join_pieces.rs:adds_nothing decides a join adds no material by display mesh volumes
 crates/engine/src/cmd/join_pieces.rs:mesh_volume measures the volume a closed mesh encloses
-crates/engine/src/cmd/joints.rs:body_centre centres an occurrence by the display mesh's box
 crates/engine/src/cmd/joints.rs:cam_profile samples a cam's picked edges from the display mesh
 crates/engine/src/cmd/measure_sel.rs:closest measures closest points on mesh triangles
 crates/engine/src/cmd/measure_sel.rs:describe measures a selection on the display mesh
