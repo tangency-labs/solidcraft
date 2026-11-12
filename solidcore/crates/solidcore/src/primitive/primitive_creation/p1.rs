@@ -33,7 +33,6 @@ mod offset_profile;
 mod primitives;
 
 pub use offset_profile::offset_profile;
-pub(crate) use primitives::coplanar_with_axis;
 pub use primitives::{analytic_rotational_sweep, create_circle, create_rectangle, Boolean2d};
 
 use std::collections::BTreeMap;
