@@ -187,6 +187,39 @@ pub fn text_button(ui: &mut Ui, label: &str, enabled: bool) -> Response {
     response
 }
 
+/// Frameless name action bounded to a row's available width. The complete name remains
+/// available to assistive technology and in its tooltip; only keyboard focus draws a ring.
+pub fn text_button_bounded(ui: &mut Ui, label: &str, enabled: bool, width: f32) -> Response {
+    let t = Tokens::get();
+    let width = dimension(width).min(ui.available_width().max(0.0));
+    let response = ui
+        .add_enabled_ui(enabled, |ui| {
+            ui.spacing_mut().button_padding.x = 0.0;
+            ui.add_sized(
+                vec2(width, t.control_height),
+                egui::Button::new((RichText::new(label).size(t.font_label).color(t.form_ink), egui::Atom::grow()))
+                    .frame(false)
+                    .gap(0.0)
+                    .truncate()
+                    .min_size(vec2(0.0, t.control_height)),
+            )
+        })
+        .inner;
+    if response.is_pointer_button_down_on() || response.clicked_by(egui::PointerButton::Primary) {
+        response.surrender_focus();
+    }
+    if response.hovered() {
+        ui.painter().hline(response.rect.x_range(), response.rect.bottom() - t.space_4, egui::Stroke::new(t.space_2 * 0.5, t.form_ink));
+    }
+    if response.has_focus() {
+        ui.painter().add(native_button_focus(ui, &response, response.rect));
+    }
+    pointer_on_hover(ui, &response);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && enabled, label));
+    solidcraft_ui_registry::publish_target(&format!("dialog:action:{label}"), response.rect);
+    response.backing_on_hover_text(label)
+}
+
 /// Esc cancels; unowned Enter submits only when valid. Tokens: `none`.
 pub fn keyboard(ctx: &egui::Context, ok_enabled: bool) -> Action {
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

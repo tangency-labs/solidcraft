@@ -59,7 +59,9 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         }
         // No thread to write on: save here, as before.
     }
-    let _ = app.run(command, params);
+    crate::documents::sync_close_changes(app);
+    let result = app.run(command, params);
+    crate::documents::close_save_result(app, result.map(|_| ()));
     false
 }
 
@@ -76,6 +78,7 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
         }
     };
     let Some(Saving { command, .. }) = app.saving.take() else { return };
+    crate::documents::sync_close_changes(app);
     let (r, cancelled) = match outcome {
         Some((copy, Ok(v), _)) => {
             app.session.adopt_save(&copy);
@@ -102,7 +105,7 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
             app.set_status(first, true);
         }
     }
-    crate::documents::saved_for_close(app);
+    crate::documents::close_save_result(app, r.map(|_| ()));
 }
 
 #[cfg(test)]

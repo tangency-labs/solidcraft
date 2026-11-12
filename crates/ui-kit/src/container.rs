@@ -317,6 +317,12 @@ pub struct ModalHost {
 }
 
 impl ModalHost {
+    /// Name the dialog for assistive technology, including any count in its title.
+    pub fn accessible_name(mut self, name: impl Into<String>) -> Self {
+        self.modal.modal.area = self.modal.modal.area.accessible_name(name);
+        self
+    }
+
     pub fn backdrop_color(mut self, color: Color32) -> Self {
         self.modal = self.modal.backdrop_color(color);
         self
