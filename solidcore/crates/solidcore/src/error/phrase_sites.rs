@@ -585,7 +585,10 @@ pub(in crate::error) fn phrase_sites() -> Vec<(String, Vec<Site>)> {
 /// Every library file that builds a phrase cause, with its exact number of sites (see the
 /// module docs for what counts). Converting a site lowers its file's count here in the
 /// same PR, and a file that reaches 0 loses its line. The count never rises: a new
-/// failure gets a classed cause.
+/// failure gets a classed cause. Code that moves between files moves its sites: the PR
+/// lowers one file's count and raises the other's by the same number, and the total stays
+/// (the failure says so). Per file, as the bare-status ratchets are (`assert_waiting`), so
+/// a rise hidden by a conversion in another file still fails.
 #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
 const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/blend_corner.rs", 5),
@@ -706,6 +709,13 @@ mod tests {
                 "phrase-cause sites: pinned {pinned_total}, found {found_total}"
             )
             .unwrap();
+            if pinned_total == found_total {
+                writeln!(
+                    report,
+                    "the total is unchanged: if code moved between files, update both lines"
+                )
+                .unwrap();
+            }
             let mut files: Vec<&str> = PINNED.iter().map(|(f, _)| *f).collect();
             files.extend(counts.iter().map(|(f, _)| *f));
             files.sort_unstable();
