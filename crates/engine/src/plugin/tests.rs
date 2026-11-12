@@ -757,3 +757,121 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), true).is_err());
     });
 }
+
+mod install_zip {
+    use super::*;
+    use crate::plugin::install::{InstallError, unpack};
+    use solidcraft_io::safe_zip;
+
+    fn manifest_bytes(id: &str, capabilities: Value) -> Vec<u8> {
+        let mut m = manifest();
+        m["id"] = json!(id);
+        m["name"] = json!("Gears");
+        m["capabilities"] = capabilities;
+        serde_json::to_vec(&m).unwrap()
+    }
+    fn zip(files: &[(&str, &[u8])]) -> Vec<u8> {
+        safe_zip::write(files).unwrap()
+    }
+    fn gears(version: &str) -> Vec<u8> {
+        let mut m: Value = serde_json::from_slice(&manifest_bytes("gears", json!(["commands@0.1"]))).unwrap();
+        m["version"] = json!(version);
+        zip(&[("gears-0.1.0/plugin.json", &serde_json::to_vec(&m).unwrap()[..]), ("gears-0.1.0/plugin.wasm", b"\0asm"), ("__MACOSX/._x", b"")])
+    }
+    /// A session whose plugins folder is a fresh temporary one, and the folder of the zip files.
+    fn session(name: &str) -> (Session, std::path::PathBuf) {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-install-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("zips")).unwrap();
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(root.join("plugins"));
+        (s, root)
+    }
+    fn put(root: &Path, name: &str, bytes: &[u8]) -> String {
+        let path = root.join("zips").join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_valid_zip_installs_and_its_entries_resolve() {
+        let (mut s, root) = session("valid");
+        let path = put(&root, "gears.zip", &gears("0.1.0"));
+        let dry = s.execute("plugin.install", &json!({"path": path, "dry_run": true})).unwrap();
+        assert_eq!((dry["installed"].clone(), root.join("plugins/gears").exists()), (json!(false), false));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!(reply["id"], "gears");
+        assert_eq!(reply["name"], "Gears");
+        assert_eq!(reply["version"], "0.1.0");
+        assert_eq!(reply["capabilities"], json!(["commands@0.1"]));
+        assert_eq!(reply["entries"], json!(["gears.make"]));
+        assert_eq!(reply["commands"], json!(["solid.box"]));
+        assert!(reply["permissions"].is_object() && reply.get("replaces").is_none());
+        assert_eq!(std::fs::read(root.join("plugins/gears/plugin.wasm")).unwrap(), b"\0asm");
+        assert!(!root.join("plugins/gears/__MACOSX").exists());
+        // Installed means loaded: the package reads back and plugin.list shows it.
+        assert!(read_package(&root.join("plugins/gears").to_string_lossy()).is_ok());
+        let list = s.execute("plugin.list", &json!({})).unwrap();
+        assert_eq!(list["plugins"][0]["commands"], json!(["gears.make"]));
+        let only = std::fs::read_dir(root.join("plugins")).unwrap().count();
+        assert_eq!(only, 1, "no staging folders are left behind");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn replacing_an_installed_plugin_needs_replace() {
+        let (mut s, root) = session("replace");
+        s.execute("plugin.install", &json!({"path": put(&root, "a.zip", &gears("0.1.0"))})).unwrap();
+        let newer = put(&root, "b.zip", &gears("0.2.0"));
+        let dry = s.execute("plugin.install", &json!({"path": newer, "dry_run": true})).unwrap();
+        assert_eq!(dry["replaces"], "Gears 0.1.0");
+        let refused = s.execute("plugin.install", &json!({"path": newer})).unwrap_err().to_string();
+        assert!(refused.contains("already installed"), "{refused}");
+        let dir = root.join("plugins");
+        let error = crate::plugin::install::install(&unpack(&gears("0.2.0")).unwrap(), &dir, false).unwrap_err();
+        assert_eq!(error, InstallError::AlreadyInstalled { id: "gears".into(), name: "Gears".into(), version: "0.1.0".into() });
+        assert_eq!(read_package(&dir.join("gears").to_string_lossy()).unwrap().manifest.version, "0.1.0", "kept as it was");
+        s.execute("plugin.install", &json!({"path": newer, "replace": true})).unwrap();
+        assert_eq!(read_package(&dir.join("gears").to_string_lossy()).unwrap().manifest.version, "0.2.0");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "the old folder is gone");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unsafe_oversized_and_incomplete_zips_are_refused_before_anything_is_written() {
+        let good_bytes = manifest_bytes("gears", json!(["commands@0.1"]));
+        let good: &[u8] = &good_bytes;
+        let slip = unpack(&zip(&[("plugin.json", good), ("plugin.wasm", b"x"), ("../evil", b"x")])).unwrap_err();
+        assert!(matches!(slip, InstallError::Archive(safe_zip::Error::UnsafeEntry { .. })), "{slip}");
+        let absolute = unpack(&zip(&[("/plugin.json", good)])).unwrap_err();
+        assert!(matches!(absolute, InstallError::Archive(safe_zip::Error::UnsafeEntry { .. })), "{absolute}");
+        let huge = vec![0u8; MAX_COMPONENT_BYTES + 1];
+        let bomb = unpack(&zip(&[("plugin.json", good), ("plugin.wasm", &huge[..])])).unwrap_err();
+        assert!(matches!(bomb, InstallError::Archive(safe_zip::Error::EntryTooLarge { .. })), "{bomb}");
+        let chunk = vec![0u8; 15 << 20];
+        let many: Vec<String> = (0..5).map(|i| format!("data/{i}.bin")).collect();
+        let mut files: Vec<(&str, &[u8])> = vec![("plugin.json", good), ("plugin.wasm", b"x")];
+        files.extend(many.iter().map(|n| (n.as_str(), chunk.as_slice())));
+        assert_eq!(unpack(&zip(&files)).unwrap_err(), InstallError::Archive(safe_zip::Error::TooLarge { limit: 64 << 20 }));
+        assert_eq!(unpack(&zip(&[("plugin.wasm", b"x")])).unwrap_err(), InstallError::MissingManifest);
+        assert_eq!(unpack(&zip(&[("plugin.json", good)])).unwrap_err(), InstallError::MissingModule("plugin.wasm".into()));
+        let two = zip(&[("a/plugin.json", good), ("a/plugin.wasm", b"x"), ("b/plugin.json", good), ("b/plugin.wasm", b"x")]);
+        assert_eq!(unpack(&two).unwrap_err(), InstallError::NotOnePlugin);
+        let stray = zip(&[("a/plugin.json", good), ("a/plugin.wasm", b"x"), ("other.txt", b"x")]);
+        assert_eq!(unpack(&stray).unwrap_err(), InstallError::NotOnePlugin);
+        let deep = zip(&[("a/b/plugin.json", good), ("a/b/plugin.wasm", b"x")]);
+        assert_eq!(unpack(&deep).unwrap_err(), InstallError::NotOnePlugin);
+        let newer = unpack(&zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.2"]))[..]), ("plugin.wasm", b"x")])).unwrap_err();
+        assert!(matches!(&newer, InstallError::Manifest(HostError::UnsupportedCapability { .. })), "{newer}");
+        assert_eq!(newer.to_string(), "needs commands 0.2; update SolidCraft or the plugin");
+        // Through the command: refused, and the plugins folder is never created.
+        let (mut s, root) = session("refused");
+        let path = put(&root, "slip.zip", &zip(&[("plugin.json", good), ("plugin.wasm", b"x"), ("../evil", b"x")]));
+        assert!(s.execute("plugin.install", &json!({"path": path})).is_err());
+        let path = put(&root, "newer.zip", &zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.2"]))[..]), ("plugin.wasm", b"x")]));
+        let error = s.execute("plugin.install", &json!({"path": path})).unwrap_err();
+        assert!(matches!(error, crate::EngineError::Plugin(HostError::UnsupportedCapability { .. })), "{error}");
+        assert!(!root.join("plugins").exists() && !root.join("evil").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
