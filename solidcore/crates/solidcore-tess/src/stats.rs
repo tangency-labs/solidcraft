@@ -118,6 +118,12 @@ pub enum Cap {
     /// The sag refinement added all the points it may (`MAX_REFINE`) with triangles still off
     /// the surface by more than the tolerance.
     Refine,
+    /// The mesh path's ([`crate::mesh()`]) refinement for sag, side length and shape stopped at a
+    /// bound with work left: it added all the points it may (`MAX_MESH_REFINE`), or ran all its
+    /// rounds, with a triangle still off the surface, longer than the side asked or sharper than
+    /// the spec's angle; or the face's lattice had more seeds than a face may have (`MAX_SEEDS`,
+    /// 200 000), and it was refined from its boundary alone.
+    Shape,
 }
 
 /// An edge the planner could not sample: its index in the record and why.

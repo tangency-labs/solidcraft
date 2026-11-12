@@ -118,6 +118,32 @@ const MAX_LINES: usize = 8192;
 const FLAT_MIN_ANGLE_DEG: f64 = 15.0;
 /// Most points Ruppert refinement may add to one face, beyond its seeds.
 const MAX_REFINE: usize = 20_000;
+/// Most points the mesh path's refinement for sag, side length and shape may add to one face,
+/// beyond its seeds ([`Purpose::Mesh`]; as many as its lattice may have): past it the face is
+/// named in [`PlanStats::over_tolerance`] with [`crate::Cap::Shape`].
+const MAX_MESH_REFINE: usize = 200_000;
+
+/// What a plan is for: the display's planner ([`plan`]), which takes the cheapest layout that
+/// suits each face, or the mesh path ([`crate::mesh()`]), which sends every face to constrained
+/// Delaunay with lattice seeds, refinement and shaping, and fills nothing leniently.
+#[derive(Clone, Copy)]
+pub(crate) enum Purpose<'a> {
+    Display,
+    Mesh(Shape<'a>),
+}
+
+/// The mesh path's rules beside the chord tolerance ([`crate::MeshSpec`]).
+#[derive(Clone, Copy)]
+pub(crate) struct Shape<'a> {
+    /// The smallest angle Ruppert refinement aims for (degrees, in (0, 30]).
+    pub(crate) min_angle: f64,
+    /// The longest side asked anywhere (mm); `None`: the rules' longest side
+    /// ([`size::Rules::max_len`]).
+    pub(crate) side: Option<f64>,
+    /// The caller's size function, where it gives one.
+    pub(crate) size_at: Option<size::SizeAt<'a>>,
+}
+
 /// Most rounds of splitting the edge segments where a face's sampled boundary crosses itself:
 /// each round halves them, so their chords sag a quarter as far.
 const MAX_UNTANGLE: u32 = 16;
@@ -177,7 +203,7 @@ fn face_edges(f: &brep::Face) -> impl Iterator<Item = &brep::OrientedEdge> {
 /// tolerance `t` ([`crate::MeshTolerance`]): faces and edges are the record's, in its order.
 pub fn plan(b: &brep::Brep, t: &crate::MeshTolerance, size: f64) -> Result<(TessPlan, PlanStats)> {
     let (tol, turn) = t.rules(size);
-    plan_at(b, tol, turn)
+    plan_at(b, tol, turn, Purpose::Display)
 }
 
 /// What the planner reads of a body before it plans any face, in the record's order: each face's
@@ -208,11 +234,11 @@ pub(crate) struct Prepared {
 }
 
 /// Plan the tessellation of `b` with chord tolerance `tol` and, when given, a facet angle no
-/// facet may turn more than (where it sags above the angle's floor). Faces and edges are the
-/// record's, in its order.
-pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPlan, PlanStats)> {
+/// facet may turn more than (where it sags above the angle's floor), for `purpose`. Faces and
+/// edges are the record's, in its order.
+pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<(TessPlan, PlanStats)> {
     let faces = &b.faces;
-    let Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled } = prepare(b, tol, turn)?;
+    let Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled } = prepare(b, tol, turn, purpose)?;
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
     let indexed: Vec<usize> = (0..faces.len()).collect();
     let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
@@ -223,7 +249,7 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
             return Err(unsupported(format!("face {fi}: missing")));
         };
         let refused = tangled.iter().find(|(f, _)| *f == fi).map(|(_, why)| why.as_str());
-        let result = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, fb.reach, refused);
+        let result = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, fb.reach, refused, purpose);
         // A point whose poles the kernel could not tell refuses the face: nothing is taken for
         // its answer. Read before the plan's own error, which may be a later symptom of it.
         if let Some(why) = eval.refusal() {
@@ -281,8 +307,10 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
 }
 
 /// Every face's surface, size and boundary and every edge's nodes, as [`plan_at`] reads them
-/// ([`Prepared`]), with chord tolerance `tol` and the facet angle `turn`.
-pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<Prepared> {
+/// ([`Prepared`]), with chord tolerance `tol` and the facet angle `turn`, for `purpose`: on the
+/// mesh path every face, planar ones included, asks for the spec's side where its surface asks
+/// for no less, and every edge follows the caller's size function too.
+pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>, purpose: Purpose<'_>) -> Result<Prepared> {
     let faces = &b.faces;
     let forward = forward_faces(b);
     // The faces each edge bounds, each once, in the order of the edge's uses.
@@ -340,6 +368,13 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         crate::par::map("face sizes", &evals, curved >= PARALLEL_SIZES, |s| Ok(size::face_size(s, &uv::domain(s), &rules)))
             .into_iter()
             .collect::<Result<_>>()?;
+    let (sizes, size_at) = match purpose {
+        Purpose::Display => (sizes, None),
+        Purpose::Mesh(shape) => {
+            let side = shape.side.unwrap_or(rules.max_len);
+            (sizes.into_iter().map(|(h, speed)| (h.min(side), speed)).collect(), shape.size_at)
+        }
+    };
     let face_h = |f: usize| sizes.get(f).map_or(rules.max_len, |(h, _)| *h);
     // A flat face asks for no size (infinite): an edge between flat faces is whole, one beside
     // a curved face takes the curved face's size, so both meet at the same nodes.
@@ -352,7 +387,7 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
     let mut unsampled_edges: Vec<crate::RefusedEdge> = Vec::new();
     let mut nodes: Vec<edges::Nodes> = Vec::with_capacity(jobs.len());
     for (ei, r) in crate::par::map("edge nodes", &jobs, solved >= PARALLEL_CURVES || jobs.len() >= PARALLEL_EDGES, |(e, h)| {
-        edges::sample_edge(b, *e, &rules, *h)
+        edges::sample_edge_sized(b, *e, &rules, *h, size_at)
     })
     .into_iter()
     .enumerate()
@@ -1143,7 +1178,9 @@ fn holes_beside_outer(dom: &uv::Domain, loops: &mut [seam::Loop]) {
 /// refusal is the error (and [`plan`] leaves the face out, named). `refused`: a face whose
 /// boundary still crosses itself after [`untangle`] (two edges meeting tangentially at a cusp,
 /// whose chords cross however often they are halved), filled leniently straight away with that
-/// reason.
+/// reason. On the mesh path ([`Purpose::Mesh`]) nothing is filled leniently: the first refusal
+/// is the error.
+#[allow(clippy::too_many_arguments)]
 fn plan_or_fill(
     fi: usize,
     kind: &str,
@@ -1153,17 +1190,21 @@ fn plan_or_fill(
     size: (f64, [f64; 2]),
     reach: f64,
     refused: Option<&str>,
+    purpose: Purpose<'_>,
 ) -> Result<(FacePlan, PlanStats)> {
     let mut stats = PlanStats::default();
     let strict = match refused {
         Some(why) => Err(unsupported(why.to_string())),
-        None => plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::No),
+        None => plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::No, purpose),
     };
+    if let Purpose::Mesh(_) = purpose {
+        return strict.map(|fp| (fp, stats));
+    }
     match strict {
         Ok(fp) => Ok((fp, stats)),
         Err(first) => {
             let mut stats = PlanStats::default();
-            match plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::Yes) {
+            match plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::Yes, purpose) {
                 Ok(fp) => {
                     stats.lenient.push(RefusedFace { face: fi, reason: first.to_string() });
                     Ok((fp, stats))
@@ -1287,7 +1328,8 @@ pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rule
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
 /// `reach`: how near a pole a point is taken as one ([`Boundary::reach`]). `lenient`: the last resort
-/// for a face no method could plan (see [`Lenient`]).
+/// for a face no method could plan (see [`Lenient`]). `purpose`: on the mesh path every face goes
+/// to constrained Delaunay ([`cdt::mesh`]), however it suits a cheaper layout.
 #[allow(clippy::too_many_arguments)]
 fn plan_face(
     fi: usize,
@@ -1299,6 +1341,7 @@ fn plan_face(
     reach: f64,
     stats: &mut PlanStats,
     lenient: Lenient,
+    purpose: Purpose<'_>,
 ) -> Result<FacePlan> {
     let tol = rules.tol;
     let (h, speed) = size;
@@ -1339,7 +1382,24 @@ fn plan_face(
     // Planar and curved faces alike: a structured grid where the boundary runs along the
     // parameter box (a rectangle, a cylinder half), a Coons grid on four corners, else Delaunay.
     // The lenient fill is the constrained Delaunay alone: the caller names the face in the stats.
-    let (extra, triangles) = if lenient == Lenient::Yes {
+    let (extra, triangles) = if let Purpose::Mesh(shape) = purpose {
+        // The mesh path: every face, planar ones too, by constrained Delaunay with an equilateral
+        // lattice of side `h`, refined for sag and side length and shaped, the two in turn.
+        if planar {
+            stats.planar += 1;
+        } else {
+            stats.delaunay += 1;
+        }
+        let seeds = cdt::lattice_scanned(bbox, step, &polys, speed);
+        let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
+        let sag = cdt::Sag { eval: &eval, tol, h, turn: rules.turn, scale: speed };
+        let meshed = cdt::mesh(&uvs, &ranges, (seeds.0.as_slice(), seeds.1), &sag, shape.size_at, MAX_MESH_REFINE, shape.min_angle)
+            .ok_or_else(|| fail("boundary crosses itself"))?;
+        if meshed.capped {
+            caps.push(crate::Cap::Shape);
+        }
+        (meshed.extra, meshed.triangles)
+    } else if lenient == Lenient::Yes {
         delaunay()?
     } else {
         let mut us = uv::divide(s, 0, bbox[0], bbox[1], rules, h, MAX_LINES);
@@ -1464,6 +1524,11 @@ fn plan_face(
             let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
             stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within: sag <= tol && unmeasured == 0, caps: std::mem::take(&mut caps) });
         }
+    } else if matches!(purpose, Purpose::Mesh(_)) && !caps.is_empty() {
+        // A plane on the mesh path a bound limited is named too (its triangles lie in it).
+        let poles = sag::Poles::new(s, reach);
+        let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
+        stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within: sag <= tol && unmeasured == 0, caps: std::mem::take(&mut caps) });
     }
     // Both evaluators take a closed spline's parameters inside its active interval.
     for q in &mut all {
@@ -1743,3 +1808,5 @@ fn closed_boundary(ranges: &[std::ops::Range<usize>], fixed: &[Vec3], uvs: &[[f6
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod mesh_tests;
