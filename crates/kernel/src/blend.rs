@@ -1178,10 +1178,8 @@ pub(crate) fn rounds_into_hollow(body: &Body, picks: &[Vec3], edges: &[usize], r
     let rec = Faces::of(body)?;
     for (i, (&e, &r)) in edges.iter().zip(radii).enumerate() {
         let Some(section) = Section::of(&rec, e) else { continue };
-        let Some((opens, at)) = section.opening(body, &rec, edges, radii)? else { continue };
-        if r <= opens + section.tolerance {
-            continue;
-        }
+        // Only an opening under the round's radius (less the tolerance) refuses it.
+        let Some((_, at)) = section.opening(body, &rec, edges, radii, r - section.tolerance)? else { continue };
         let pick = picks.get(i).map(|p| format!(" at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
         return Err(KernelError::TooLarge(format!(
             "the round of radius {r} mm on the edge{pick} would cut through the material behind it into the hollow at ({:.3}, {:.3}, \
@@ -1250,18 +1248,18 @@ impl Section {
         (hi - lo > self.tolerance).then_some(0.5 * (lo + hi))
     }
 
-    /// The smallest radius at which the round opens into a hollow behind it and the point where it
-    /// does (at the middle of the stretch the opening runs along); `None` where it never does
-    /// through the boundary looked at ([`rounds_into_hollow`]). `edges` and `radii`: the fillet's.
-    fn opening(&self, body: &Body, rec: &Faces, edges: &[usize], radii: &[f64]) -> Result<Option<(f64, Vec3)>> {
-        let mut best: Option<(f64, Vec3)> = None;
-        let mut keep = |found: Option<(f64, Vec3)>| {
-            if let Some((r, p)) = found
-                && best.is_none_or(|(b, _)| r < b)
-            {
-                best = Some((r, p));
-            }
-        };
+    /// The smallest radius under `below` at which the round opens into a hollow behind it and
+    /// the point where it does (at the middle of the stretch the opening runs along); `None`
+    /// where it never does through the boundary looked at ([`rounds_into_hollow`]). `edges` and
+    /// `radii`: the fillet's.
+    ///
+    /// Where each boundary point would open is plain arithmetic; only the ones that would open
+    /// under `below` (the round's own radius, less the tolerance) can refuse it, so only theirs
+    /// are classified, all in one classification of the body ([`Body::classify_points`]): on a
+    /// large body most of a classification is setting it up, and a body with many edges
+    /// parallel to the round's has many such points, nearly all far beyond a small round.
+    fn opening(&self, body: &Body, rec: &Faces, edges: &[usize], radii: &[f64], below: f64) -> Result<Option<(f64, Vec3)>> {
+        let mut found: Vec<Opening> = Vec::new();
         // Straight edges parallel to the round's: a hollow's corner, or a picked concave edge whose
         // round of its own fills it.
         for (j, edge) in rec.rec.edges.iter().enumerate() {
@@ -1278,14 +1276,14 @@ impl Section {
             if q.len() <= self.tolerance {
                 continue;
             }
-            let found = match edges.iter().position(|&p| p == j) {
+            let opening = match edges.iter().position(|&p| p == j) {
                 Some(at) => match (concave_round_centre(rec, j, radii.get(at).copied()), radii.get(at)) {
-                    (Some((o, arc)), Some(&rho)) => self.through_circle(body, self.flat(o), rho, middle, Some(arc))?,
+                    (Some((o, arc)), Some(&rho)) => self.through_circle(self.flat(o), rho, middle, Some(arc), below),
                     _ => None,
                 },
-                None => self.through_point(body, q, middle)?,
+                None => self.through_point(q, middle, below),
             };
-            keep(found);
+            found.extend(opening);
         }
         // Cylindrical faces about axes parallel to the edge: a hollow's rounded corner.
         for (f, face) in rec.rec.faces.iter().enumerate() {
@@ -1297,7 +1295,20 @@ impl Section {
                 rec.uses(f).filter_map(|u| rec.ends(u.edge as usize)).flat_map(|(a, b)| [a, b]).map(|p| (p - self.start).dot(self.dir)).collect();
             let (lo, hi) = along.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| (lo.min(*t), hi.max(*t)));
             let Some(middle) = self.shared(lo, hi) else { continue };
-            keep(self.through_circle(body, self.flat(v3(frame.origin)), *radius, middle, None)?);
+            found.extend(self.through_circle(self.flat(v3(frame.origin)), *radius, middle, None, below));
+        }
+        if found.is_empty() {
+            return Ok(None);
+        }
+        let points: Vec<Vec3> = found.iter().flat_map(|o| o.probes.iter().map(|&(p, _)| p)).collect();
+        let mut classes = body.classify_points(&points)?.into_iter();
+        let mut best: Option<(f64, Vec3)> = None;
+        for o in found {
+            // Every probe is read, so each opening takes its own classes from the list.
+            let opens = o.probes.iter().fold(true, |all, &(_, want)| classes.next() == Some(want) && all);
+            if opens && best.is_none_or(|(r, _)| o.r < r) {
+                best = Some((o.r, o.at));
+            }
         }
         Ok(best)
     }
@@ -1305,36 +1316,26 @@ impl Section {
     /// Where the round opens through the section point `q` (a boundary point running along the
     /// edge): its larger radius on the circle through `q`, when `q` then lies on the round's arc
     /// strictly inside the wedge and no material lies just beyond it, toward the centre.
-    fn through_point(&self, body: &Body, q: Vec3, middle: f64) -> Result<Option<(f64, Vec3)>> {
+    fn through_point(&self, q: Vec3, middle: f64, below: f64) -> Option<Opening> {
         // |q − r k|² = r²: (|k|² − 1) r² − 2 (q·k) r + |q|² = 0.
-        let Some(r) = larger_root(self.k.len2() - 1.0, q.dot(self.k), q.len2()) else { return Ok(None) };
-        self.opens_at(body, r, q, middle)
+        let r = larger_root(self.k.len2() - 1.0, q.dot(self.k), q.len2())?;
+        self.opens_at(r, q, middle, below, None)
     }
 
     /// Where the round opens through a circle of the section, centre `o`, radius `rho`, with the
     /// hollow inside it: where the circle's far point from the round's centre reaches the round's
     /// arc (|o − r k| + rho = r). `arc`: the directions from `o` the circle is the boundary
     /// along, when it is a picked concave edge's round, not yet built.
-    fn through_circle(&self, body: &Body, o: Vec3, rho: f64, middle: f64, arc: Option<(Vec3, Vec3)>) -> Result<Option<(f64, Vec3)>> {
+    fn through_circle(&self, o: Vec3, rho: f64, middle: f64, arc: Option<(Vec3, Vec3)>, below: f64) -> Option<Opening> {
         // |o − r k|² = (r − rho)²: (|k|² − 1) r² − 2 (o·k − rho) r + |o|² − rho² = 0.
-        let Some(r) = larger_root(self.k.len2() - 1.0, o.dot(self.k) - rho, o.len2() - rho * rho) else { return Ok(None) };
-        let Some(out) = (o - self.k * r).normalized() else { return Ok(None) };
+        let r = larger_root(self.k.len2() - 1.0, o.dot(self.k) - rho, o.len2() - rho * rho)?;
+        let out = (o - self.k * r).normalized()?;
         let q = o + out * rho;
         match arc {
-            Some((m1, m2)) => {
-                // On the concave round's own arc: between its two contacts, seen from its centre.
-                if !within(out, m1, m2, self.tolerance / rho.max(1.0)) {
-                    return Ok(None);
-                }
-                self.opens_at(body, r, q, middle)
-            }
-            None => {
-                // On the face itself.
-                if body.classify_point(self.place(q, middle))? != crate::body::PointClass::OnBoundary {
-                    return Ok(None);
-                }
-                self.opens_at(body, r, q, middle)
-            }
+            // On the concave round's own arc: between its two contacts, seen from its centre.
+            Some((m1, m2)) => within(out, m1, m2, self.tolerance / rho.max(1.0)).then(|| self.opens_at(r, q, middle, below, None)).flatten(),
+            // On the face itself.
+            None => self.opens_at(r, q, middle, below, Some(self.place(q, middle))),
         }
     }
 
@@ -1343,22 +1344,33 @@ impl Section {
         self.start + self.dir * middle + q
     }
 
-    /// `Some((r, q placed))` when, at radius `r`, `q` lies on the round's arc strictly inside the
-    /// wedge and the body has no material just beyond it toward the centre.
-    fn opens_at(&self, body: &Body, r: f64, q: Vec3, middle: f64) -> Result<Option<(f64, Vec3)>> {
-        if !(r.is_finite() && r > self.tolerance) {
-            return Ok(None);
+    /// The opening at radius `r` through `q`, when `r` is under `below` and `q` lies on the
+    /// round's arc strictly inside the wedge: it opens when the body has no material just beyond
+    /// `q` toward the centre, and `on` (a point that must be on the body's boundary) is on it.
+    fn opens_at(&self, r: f64, q: Vec3, middle: f64, below: f64, on: Option<Vec3>) -> Option<Opening> {
+        if !(r.is_finite() && r > self.tolerance && r < below) {
+            return None;
         }
         let centre = self.k * r;
         // q − centre = α n_A + β n_B with α, β > 0: on the arc between the contacts.
         if !within(q - centre, self.na, self.nb, self.tolerance) {
-            return Ok(None);
+            return None;
         }
-        let Some(inward) = (centre - q).normalized() else { return Ok(None) };
+        let inward = (centre - q).normalized()?;
         let step = (r * 1e-3).max(self.tolerance * 10.0);
         let at = self.place(q, middle);
-        Ok((body.classify_point(at + inward * step)? == crate::body::PointClass::Outside).then_some((r, at)))
+        let mut probes = vec![(at + inward * step, crate::body::PointClass::Outside)];
+        probes.extend(on.map(|p| (p, crate::body::PointClass::OnBoundary)));
+        Some(Opening { r, at, probes })
     }
+}
+
+/// Where a round may open into a hollow ([`Section::opening`]): at radius `r`, through `at`,
+/// when each probe point lies as it says.
+struct Opening {
+    r: f64,
+    at: Vec3,
+    probes: Vec<(Vec3, crate::body::PointClass)>,
 }
 
 /// Whether `w` = α a + β b with α, β > `margin` (a, b unit, not parallel).

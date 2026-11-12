@@ -297,6 +297,22 @@ faces that did not move, which is the intersection of the same two surfaces agai
 `local_operation.rs` or the executive keeps such an edge as it was; keeping the edges between
 unmoved faces, so the operation changes nothing it does not move, is open.
 
+**Tangent edges.** An edge whose faces were tangent in the input is extended and trimmed along its
+old line, unless the reach proves that the new surfaces, a plane and a quadric, cross in every
+normal section of the edge (`LocalReach::crossing`, `local_extension_reach`). The plane then cuts
+the quadric on both sides of the old edge, about √(2rδ) away for a round of radius r moved by δ,
+so the nearest midpoint decides nothing: the mitre keeps the cut on the curved face's side, where
+the plane is extended past its edge. An edge mated next to such a tangent edge, once that one is
+mated, ends at its new vertex (a lamina edge still ends at its vertex's image); where that vertex
+is not on the edge's curve, the mate is refused (`OffsetFailure::TangentEndOffCurve`).
+
+**A given surface's side.** A face's new surface is turned to face the way its old one did by
+comparing the two normals. Upstream reads the new normal at the middle of the new surface's
+domain; for a full cylinder given to a round that point is across the axis, where the normal
+opposes the old round's though both face out, and the round came back inside out. The new normal
+is read where the new surface passes nearest the old face's middle (the domain middle when that
+drop fails or there is no normal at the nearest point, as at a cone's apex).
+
 **Moving faces** (`offset/offset_faces.rs`, `OffsetFacesExecutive`): the tangent blends on the
 named faces are taken off, the faces moved by a local operation onto their offset surfaces, and the
 blends put back (`take_off`, `move_faces`, `reblend`); refusals are `OffsetFacesRefusal`. "Moved no

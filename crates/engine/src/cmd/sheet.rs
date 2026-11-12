@@ -67,7 +67,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PATH_FLANGE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "edge: [x,y,z] on a top or bottom edge of the sheet; sketch + curves: an open chain of sketch lines and tangent arcs drawn on a plane across \
+        "edge: [x,y,z] on a top or bottom edge of the sheet; sketch + curves: an open chain of sketch lines drawn on a plane across \
          that edge, from the edge out (each line one flange as long as the line, to the outer face from the virtual sharp; each \
          corner one bend, turning the way the lines turn); radius? (default: rule); body?. One feature, one body",
     ),

@@ -961,12 +961,31 @@ pub fn invalidate_scene(app: &mut SolveApp) {
     }
 }
 
+/// Inspect tools that only pick what an analysis shows. They edit nothing, so ending one loses
+/// no work, and a running one does not hold the Render workspace closed (#14993).
+const LOOK_ONLY_TOOLS: &[&str] =
+    &["inspect.center_of_mass", "inspect.continuity", "inspect.curvature_comb", "inspect.isocurve", "inspect.minimum_radius"];
+
+/// Whether the Render workspace can be entered now: no sketch, dialog or file load is open and
+/// no tool is running, except a look-only Inspect tool, which [`enter`] ends as Esc does.
+pub(crate) fn entry_open(app: &SolveApp) -> bool {
+    let tool_holds = app.tool.as_ref().is_some_and(|tool| !LOOK_ONLY_TOOLS.contains(&tool.cmd));
+    app.session.active_sketch.is_none() && !tool_holds && app.dialog.is_none() && !app.file_load_holds()
+}
+
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
     if render {
-        if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load_holds() {
+        if !entry_open(app) {
             return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
         }
         app.run("render.scene", json!({}))?;
+        // A look-only Inspect tool ends as Esc ends it; Isocurve's curves stay on (#14993).
+        if app.tool.is_some() {
+            crate::tools::finish(app);
+            if app.tool.is_some() {
+                return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
+            }
+        }
         let entering = !active(app);
         if entering {
             app.render_workspace.displayed.clear();
@@ -3643,9 +3662,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !environment::ring_input(app, ui, rect, &response) {
         let input = crate::navigation::handle(app, ui, input_rect, &response, crate::navigation::NavCaps::RENDER);
         let image_inside = input.inside && input.hover.is_some_and(|point| rect.contains(point));
-        let navigating = input.scroll != 0.0
-            || input.pinch != 1.0
-            || input.pan != egui::Vec2::ZERO
+        // The wheel, the trackpad and the pinch move the view under a pointer that stays
+        // where it is: the face under it keeps its highlight while the view moves (#2130).
+        // A mouse drag, the spin and an animated view own the pointer instead, and their
+        // hover goes off as before.
+        let view_moving = crate::navigation::view_moving(app, input.scroll, input.pinch, input.pan);
+        // The face under a still pointer keeps its highlight while the view moves under it
+        // (#2130); a mouse drag owns the pointer instead, and its hover goes off.
+        let hover_frozen = crate::navigation::hover_is_frozen(&input, app);
+        let navigating = view_moving
             || input.middle
             || input.secondary_down
             || (input.primary_nav.is_some() && input.primary_down)
@@ -3659,7 +3684,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .map(|p| crate::viewport::pick_cached(app, &crate::viewport::projection(app, rect), p))
             .unwrap_or_default();
         let candidate = assign::candidate(app, &hits, input.mods);
-        app.viewport.hover = candidate.as_ref().map(|(hit, _)| hit.clone());
+        // The view moved under a still pointer: the highlight under it stays on the face
+        // it was on instead of going off (#2130). It is picked again when the gesture ends.
+        if !(hover_frozen && image_inside) {
+            app.viewport.hover = candidate.as_ref().map(|(hit, _)| hit.clone());
+        }
         let assigning = assign::input(app, ui, &response, candidate.as_ref(), image_inside && !navigating && geometry_current);
         if !assigning && image_inside && !navigating {
             assign::hover_tooltip(app, &response, candidate.as_ref());

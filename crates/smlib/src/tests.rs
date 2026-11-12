@@ -95,7 +95,7 @@ const NO_KERNEL: [&str; 14] = [
     "hold_a_kernel",
 ];
 
-const ANSWERING: [&str; 65] = [
+const ANSWERING: [&str; 66] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -133,6 +133,7 @@ const ANSWERING: [&str; 65] = [
     "stitch",
     "offset_sheet",
     "classify_point",
+    "classify_points",
     "mass_properties",
     "bounds",
     "edge_face_distance",
@@ -251,6 +252,7 @@ fn every_entry_point_answers() {
     says("stitch", sheet.stitch(0.1));
     says("offset_sheet", sheet.offset_sheet(1.0));
     says("classify_point", a.classify_point([1.0; 3]));
+    says("classify_points", a.classify_points(&[[1.0; 3], [f64::NAN; 3]]));
     says("mass_properties", a.mass_properties(1e-6));
     says("bounds", a.bounds());
     says("edge_face_distance", a.edge_face_distance(0, 0));
@@ -635,4 +637,87 @@ fn every_call_starts_clean_on_any_kernel() {
     let held = hold_a_kernel();
     assert_eq!(core::run("draw", draw).unwrap(), first, "another kernel");
     drop(held);
+}
+
+/// The sites in this crate that still make a bare status ([`Error::Status`], "SMLib failed (status
+/// n)") for a failure that has no type yet: a set that only shrinks. A failure solidcore-ops types
+/// travels as its refusal ([`Error::Refused`]), never as a new status; a site that goes lowers its
+/// file's count here (a file that reaches none drops its line). Counted in the crate's code: every
+/// use of `Error::Status`, called or point-free (`.map_err(Error::Status)`), but not in comments,
+/// match patterns, `*tests.rs` files or the top-level `#[cfg(test)] mod name { .. }` blocks (a
+/// `#[cfg(test)]` item of another kind, or a `mod name;` declaration, hides no code).
+#[test]
+fn status_sites_only_shrink() {
+    const SITES: &[(&str, usize)] =
+        &[("core/blend.rs", 9), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
+    /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
+    /// `}` alone at the start of a line).
+    fn code_lines(text: &str) -> Vec<&str> {
+        let lines: Vec<&str> = text.lines().collect();
+        let (mut out, mut i) = (Vec::new(), 0);
+        while i < lines.len() {
+            let next = lines.get(i + 1).copied().unwrap_or("");
+            let inline_mod = ["mod ", "pub mod ", "pub(crate) mod "].iter().any(|p| next.starts_with(p)) && next.ends_with(" {");
+            if lines[i] == "#[cfg(test)]" && inline_mod {
+                i += 2;
+                while i < lines.len() && lines[i] != "}" {
+                    i += 1;
+                }
+                i += 1;
+                continue;
+            }
+            out.push(lines[i]);
+            i += 1;
+        }
+        out
+    }
+    /// The uses of `Error::Status` in `line` that make a status (not a match pattern).
+    fn uses(line: &str) -> usize {
+        const NAME: &str = "Error::Status";
+        line.match_indices(NAME)
+            .filter(|(i, _)| {
+                let rest = &line[i + NAME.len()..];
+                if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+                    return false;
+                }
+                let Some(args) = rest.strip_prefix('(') else { return true };
+                let after = args.find(')').map_or("", |j| args[j + 1..].trim_start());
+                !(after.starts_with("=>") || after.starts_with("if ") || after.starts_with('|'))
+            })
+            .count()
+    }
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, usize)>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+        entries.sort();
+        for p in entries {
+            if p.is_dir() {
+                walk(&p, root, out);
+                continue;
+            }
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            if !name.ends_with(".rs") || name.ends_with("tests.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&p).unwrap();
+            let n: usize = code_lines(&text).into_iter().filter(|l| !l.trim_start().starts_with("//")).map(uses).sum();
+            if n > 0 {
+                out.push((p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"), n));
+            }
+        }
+    }
+    // the counter itself: a point-free use counts, a pattern does not, nor a test module
+    assert_eq!(uses("    .map_err(Error::Status)?;"), 1);
+    assert_eq!(uses("        Error::Status(s) => s,"), 0);
+    assert_eq!(uses("        Err(Error::Status(1001))"), 1);
+    let module = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn b() { Error::Status(1) }\n}\nfn c() {}\n#[cfg(test)]\nmod more_tests;\n#[cfg(test)]\nconst X: u8 = 0;";
+    assert_eq!(code_lines(module), ["fn a() {}", "fn c() {}", "#[cfg(test)]", "mod more_tests;", "#[cfg(test)]", "const X: u8 = 0;"]);
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = Vec::new();
+    walk(&root, &root, &mut found);
+    let expected: Vec<(String, usize)> = SITES.iter().map(|&(f, n)| (f.to_owned(), n)).collect();
+    for (file, n) in &found {
+        let listed = SITES.iter().find(|(f, _)| f == file).map_or(0, |&(_, m)| m);
+        assert!(*n <= listed, "{file} makes {n} bare statuses, {listed} listed: carry the typed refusal (Error::Refused), not a new status");
+    }
+    assert_eq!(found, expected, "fewer bare statuses than listed: lower the counts in SITES");
 }

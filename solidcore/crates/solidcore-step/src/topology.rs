@@ -1559,21 +1559,32 @@ impl<'b, 'a> Builder<'b, 'a> {
         std::iter::once(outer).chain((0..face.loops.len()).filter(|l| *l != outer)).collect()
     }
 
-    /// A face's box on its label over its edge loops (`crate::kernel::form::extent`); `None` where the
-    /// boundary does not project onto it.
+    /// A face's box on its label over its edge loops (`crate::kernel::form::extent`), a boundary
+    /// point on a pole within the face's tolerance (the largest of its edges' and vertices': a
+    /// cone's apex or a sphere's pole a file places a few µm off); `None` where the boundary does
+    /// not project onto it.
     fn face_extent(&self, fi: usize) -> R<Option<[[f64; 2]; 2]>> {
         let face = self.faces.get(fi).ok_or("face reference")?;
-        let mut boundary = Vec::with_capacity(face.loops.len());
+        let vertex_tolerance = |v: u32| self.vertices.get(v as usize).map(|x| x.tolerance).ok_or("vertex reference");
+        let (mut boundary, mut reach) = (Vec::with_capacity(face.loops.len()), self.tol);
         for l in &face.loops {
-            let LoopB::Edges(es) = l else { continue };
+            let es = match l {
+                LoopB::Edges(es) => es,
+                LoopB::Vertex(v) => {
+                    reach = reach.max(vertex_tolerance(*v)?);
+                    continue;
+                }
+            };
             let mut b = Vec::with_capacity(es.len());
             for &(e, forward) in es {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let [v0, v1] = edge.vertices;
+                reach = reach.max(edge.tolerance).max(vertex_tolerance(v0)?).max(vertex_tolerance(v1)?);
                 b.push((&edge.curve, edge.interval, forward));
             }
             boundary.push(b);
         }
-        Ok(crate::kernel::form::extent(&face.surface, &boundary))
+        Ok(crate::kernel::form::extent(&face.surface, &boundary, reach))
     }
 
     /// The pcurves of a face's edge loops (in its edge-loop order), its domain, whether it was

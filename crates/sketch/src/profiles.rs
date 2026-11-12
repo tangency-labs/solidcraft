@@ -2408,7 +2408,8 @@ mod tests {
         let ring = [(20.0, 0.0), (10.0, 17.0), (-10.0, 17.0), (-20.0, 0.0), (-10.0, -17.0), (10.0, -17.0)];
         let mut pts: Vec<usize> = ring.iter().map(|(x, y)| sk.add_point(Vec2::new(*x, *y), None).unwrap()).collect();
         pts.push(pts[0]);
-        let outline = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
+        let outline =
+            sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None).unwrap();
         let pieces = sk.exact_pieces(outline);
         assert!(pieces.len() >= 2, "{pieces:?}");
         // The point of a piece furthest out from the middle chord of its polyline.
@@ -2425,7 +2426,9 @@ mod tests {
         // Bulging out past the fit point the two pieces share.
         let corner = pieces[0].end() * 1.15;
         let bulge: Vec<usize> = [start, corner, end].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-        let bulge = sk.add_curve(CurveKind::Spline { pts: bulge, control: false, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+        let bulge = sk
+            .add_curve(CurveKind::Spline { pts: bulge, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)
+            .unwrap();
         islands_match_whole(&sk);
         let profiles = find_profiles(&sk);
         assert_eq!(profiles.len(), 2, "the inside and the bulge: {profiles:?}");
