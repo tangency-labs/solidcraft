@@ -18,7 +18,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - The product name is SolidCraft; the old name lives in `docs/compatibility.md`.
 - Sorted lists (message catalogs, `mod` lines, languages) stay sorted: `cargo xtask lists`. Never edit generated files (`docs/features.md`, `THIRD-PARTY-LICENSES.txt`) in a PR.
 - A design-format change is ONE new file in `crates/doc/src/format/pending/`: `scripts/test-format-pending.sh`.
-- A command has input and output schemas (will become required; `schema/unconverted.txt` only shrinks): `skills/solidcraft-commands/SKILL.md`.
+- A command has input and output schemas: `skills/solidcraft-commands/SKILL.md`.
 - New UI strings go in `assets/locales/pending/<slug>.json`, ATTRIBUTION rows in `attribution/pending/<slug>.md`: `cargo xtask lists`.
 - A changed default (existing UI, not kernel results) keeps the old behaviour behind a preference; fill the PR's `Changes a default:` line.
 - A regression test goes in the area's existing test file, never a per-bug file (#3226).
@@ -32,7 +32,8 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 | Working on | Read |
 |---|---|
 | A PR, a claim, review, CI or evidence | `skills/solidcraft-contributing/SKILL.md` |
-| Licences, assets, clean-room, the name | `skills/solidcraft-ground-rules/SKILL.md` |
+| Licences, assets, clean-room | `skills/solidcraft-ground-rules/SKILL.md` |
+| The name, glossary terms, units | `skills/solidcraft-name/SKILL.md` |
 | Non-test Rust, hostile input, a crash report | `skills/solidcraft-crash-safety/SKILL.md` |
 | A command, a crate boundary | `skills/solidcraft-commands/SKILL.md` |
 | SolidCraft or solidcore, kernel, geometry | `skills/solidcraft-layers/SKILL.md` |
