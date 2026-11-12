@@ -906,7 +906,7 @@ fn planes_line(p: Vec3, a: Tangent, b: Tangent, tangent_sine: f64) -> Option<Tra
 /// `F(x0 + τ u) = A τ² + B τ + C` for the quadric's implicit function `F` (a cone's
 /// `|P v|² − (r + t z)²`, `v = x − origin`, `z = v·a`, `P` the projection off the axis; a
 /// sphere's `|v|² − r²`), with the cone's radius `r0 + rd τ` along the line (a sphere has
-/// no nappe: `cone` false); `None` for any other kind.
+/// no nappe: `cone` false) and the discriminant `B² − 4 A C`; `None` for any other kind.
 #[derive(Debug, Clone, Copy)]
 struct AlongLine {
     a: Di,
@@ -915,9 +915,37 @@ struct AlongLine {
     r0: Di,
     rd: Di,
     cone: bool,
+    disc: Di,
 }
 
 impl AlongLine {
+    fn new(a: Di, b: Di, c: Di, r0: Di, rd: Di, cone: bool) -> Self {
+        let disc = b * b - Di::constant(4.0) * a * c;
+        Self {
+            a,
+            b,
+            c,
+            r0,
+            rd,
+            cone,
+            disc,
+        }
+    }
+
+    /// The same over a piece, its discriminant's value enclosed by its mean-value form
+    /// about the piece's middle `mid`, `dt` the piece about its middle ([`mean_value`]):
+    /// the plain enclosure of `B² − 4 A C` grows with every operation's dependency, so a
+    /// piece where the discriminant keeps one sign is not decided on it.
+    fn centred(self, mid: &Self, dt: Ivl) -> Self {
+        Self {
+            disc: Di {
+                v: mean_value(self.disc, mid.disc, dt),
+                d: self.disc.d,
+            },
+            ..self
+        }
+    }
+
     /// Whether the point at `tau` is certified on the cone's nappe (`Some(true)`), certified
     /// off it (`Some(false)`), or neither; a sphere's every point is on it.
     fn on_nappe(&self, tau: Di) -> Option<bool> {
@@ -950,26 +978,26 @@ fn along_line(q: &Implicit, line: &Trace) -> Option<AlongLine> {
             let (p0, pd) = (v.sub(axis.scale(z0)), line.u.sub(axis.scale(zd)));
             let t = Di::constant(tan_angle);
             let (r0, rd) = (Di::constant(radius) + t * z0, t * zd);
-            Some(AlongLine {
-                a: pd.dot(pd) - rd * rd,
-                b: two * (p0.dot(pd) - r0 * rd),
-                c: p0.dot(p0) - r0 * r0,
+            Some(AlongLine::new(
+                pd.dot(pd) - rd * rd,
+                two * (p0.dot(pd) - r0 * rd),
+                p0.dot(p0) - r0 * r0,
                 r0,
                 rd,
-                cone: true,
-            })
+                true,
+            ))
         }
         Implicit::Sphere { centre, radius } => {
             let v = line.x0.sub(Dv::constant(centre));
             let r = Di::constant(radius);
-            Some(AlongLine {
-                a: line.u.dot(line.u),
-                b: two * v.dot(line.u),
-                c: v.dot(v) - r * r,
-                r0: Di::constant(0.0),
-                rd: Di::constant(0.0),
-                cone: false,
-            })
+            Some(AlongLine::new(
+                line.u.dot(line.u),
+                two * v.dot(line.u),
+                v.dot(v) - r * r,
+                Di::constant(0.0),
+                Di::constant(0.0),
+                false,
+            ))
         }
         _ => None,
     }
@@ -1029,8 +1057,8 @@ enum Plan {
 }
 
 /// The discriminant `B² − 4 A C`.
-fn discriminant(q: &AlongLine) -> Di {
-    q.b * q.b - Di::constant(4.0) * q.a * q.c
+const fn discriminant(q: &AlongLine) -> Di {
+    q.disc
 }
 
 /// The two roots of `plan`'s formula (`None` where its divisor is not certified apart from
@@ -1161,8 +1189,13 @@ fn planned(plan: &Plan, line: &Trace, q: &AlongLine) -> Option<Vec<Di>> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PieceBound {
     /// An upper bound over the piece and a value the bounded quantity takes at its middle
-    /// (a lower bound on its largest, which steers the halving only).
-    Value { upper: f64, lower: f64 },
+    /// (a lower bound on its largest, which steers the halving only), and whether the two
+    /// surfaces are certified to cross in every section of the piece ([`Plan::Roots`]).
+    Value {
+        upper: f64,
+        lower: f64,
+        crosses: bool,
+    },
     /// No meeting anywhere on the piece.
     Apart,
     /// Not decided on the piece.
@@ -1201,6 +1234,7 @@ fn plane_quadric_piece(
     let (Some((line, q)), Some((mline, mq))) = (trace(over), trace(mid)) else {
         return PieceBound::Unknown;
     };
+    let q = q.centred(&mq, dt);
     let plan = plan_of(&line, &q, quadric, tolerance);
     if plan == Plan::Apart {
         return PieceBound::Apart;
@@ -1221,6 +1255,7 @@ fn plane_quadric_piece(
         Some(upper) => PieceBound::Value {
             upper,
             lower: attained(&mline, &mq, quadric, tolerance),
+            crosses: matches!(plan, Plan::Roots { .. }),
         },
         None => PieceBound::Unknown,
     }
@@ -1274,7 +1309,11 @@ fn plane_net_piece(
         _ => 0.0,
     };
     if upper.is_finite() {
-        PieceBound::Value { upper, lower }
+        PieceBound::Value {
+            upper,
+            lower,
+            crosses: false,
+        }
     } else {
         PieceBound::Unknown
     }
@@ -1359,6 +1398,7 @@ fn quadric_distance_piece(over: Dv, mid: Dv, dt: Ivl, quadric: &Implicit) -> Pie
     PieceBound::Value {
         upper: round_up(enclosed.mag() / root),
         lower: m.v.mig() / root,
+        crosses: false,
     }
 }
 
@@ -1422,7 +1462,7 @@ enum EdgeQuantity {
 #[derive(Debug, Clone)]
 struct EdgeBound {
     on: Vec<u64>,
-    bound: Option<(f64, bool)>,
+    bound: Option<(f64, bool, bool)>,
 }
 
 /// Everything an edge's bound is a function of besides the quantity, as bits: the edge's
@@ -1572,7 +1612,8 @@ fn spans(cn: &NurbsCurve, interval: crate::geom::extent1d::Extent1d) -> Vec<(f64
 
 /// A certified upper bound on the largest value over edge `e` of what `f` bounds on each
 /// piece of its parameters (given the point and tangent over the piece, at its middle, and
-/// the piece about its middle), and whether some piece is apart.
+/// the piece about its middle), whether some piece is apart, and whether the surfaces cross
+/// on every piece ([`PieceBound::Value`]'s `crosses`; none apart).
 ///
 /// Every piece is decided first: an undecided one is halved until each piece is bounded or
 /// apart, at most [`MAX_INTERVAL_HALVINGS`] times; an edge with a piece still undecided
@@ -1600,7 +1641,7 @@ fn edge_interval_maximum(
     bounds: &mut EdgeBounds,
     of: EdgeQuantity,
     surfaces: Option<&[u64]>,
-) -> Result<Option<(f64, bool)>> {
+) -> Result<Option<(f64, bool, bool)>> {
     let Some(cn) = edge_nurbs(b, e)? else {
         return Ok(None);
     };
@@ -1625,7 +1666,7 @@ fn interval_maximum(
     interval: crate::geom::extent1d::Extent1d,
     f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> PieceBound,
     tolerance: f64,
-) -> Result<Option<(f64, bool)>> {
+) -> Result<Option<(f64, bool, bool)>> {
     let mut undecided = spans(cn, interval);
     // the bound on a piece; a bound that is not finite bounds nothing
     let bound_of = |t0: f64, t1: f64| -> Result<PieceBound> {
@@ -1645,13 +1686,19 @@ fn interval_maximum(
         (depth < MAX_INTERVAL_HALVINGS && t0 < tm && tm < t1).then_some(tm)
     };
     let (mut best, mut apart, mut seen) = (0.0_f64, false, 0_usize);
+    let mut crosses = true;
     let mut bounded: std::collections::BinaryHeap<Bounded> = std::collections::BinaryHeap::new();
     // every piece decided: bounded or apart
     while let Some((t0, t1, depth)) = undecided.pop() {
         seen += 1;
         match bound_of(t0, t1)? {
             PieceBound::Apart => apart = true,
-            PieceBound::Value { upper, lower } => {
+            PieceBound::Value {
+                upper,
+                lower,
+                crosses: c,
+            } => {
+                crosses &= c;
                 best = best.max(lower);
                 bounded.push(Bounded {
                     upper,
@@ -1676,7 +1723,7 @@ fn interval_maximum(
     while let Some(top) = bounded.pop() {
         let tm = halves(top.t0, top.t1, top.depth).filter(|_| seen + 2 <= MAX_INTERVALS);
         let Some(tm) = tm.filter(|_| top.halvable && top.upper > best + tolerance) else {
-            return Ok(Some((top.upper, apart)));
+            return Ok(Some((top.upper, apart, crosses && !apart)));
         };
         seen += 2;
         let mut parts = Vec::with_capacity(2);
@@ -1684,7 +1731,7 @@ fn interval_maximum(
         for (t0, t1) in [(top.t0, tm), (tm, top.t1)] {
             match bound_of(t0, t1)? {
                 PieceBound::Apart => apart = true,
-                PieceBound::Value { upper, lower } => {
+                PieceBound::Value { upper, lower, .. } => {
                     best = best.max(lower);
                     parts.push(Bounded {
                         upper,
@@ -1707,7 +1754,7 @@ fn interval_maximum(
         }
     }
     // every piece apart
-    Ok(Some((0.0, apart)))
+    Ok(Some((0.0, apart, false)))
 }
 
 /// How the line where two planes meet passes a quadric at a corner
@@ -1993,7 +2040,11 @@ fn kept_straight_edge_corner(
 /// root's squared distance over each piece by its mean-value form ([`plane_quadric_piece`],
 /// [`Plan`]), and the pieces halved to the B-rep's tolerance ([`edge_interval_maximum`]).
 /// Pieces where the trace passes the quadric beyond the tolerance (a plane moved off a round,
-/// which bends away from it) are apart: listed, adding nothing.
+/// which bends away from it) are apart: listed, adding nothing. Where the discriminant,
+/// enclosed by its mean-value form, is positive on every piece and a root lies on the nappe
+/// ([`Plan::Roots`]), the trace cuts the quadric in every section: the surfaces cross along
+/// the edge, even where its faces
+/// were tangent in the input, and the edge is listed in [`LocalReach::crossing`].
 ///
 /// The move is the largest distance of an edge point from a moved surface beside it,
 /// bounded the same way (a plane's on control points, a quadric's by the mean-value form of
@@ -2136,7 +2187,7 @@ pub fn local_extension_reach(
                           bounds: &mut EdgeBounds,
                           of: EdgeQuantity,
                           surfaces: Option<&[u64]>|
-             -> Result<(f64, bool)> {
+             -> Result<(f64, bool, bool)> {
                 edge_interval_maximum(b, e, f, tolerance, bounds, of, surfaces)?
                     .ok_or_else(uncertified)
             };
@@ -2176,15 +2227,16 @@ pub fn local_extension_reach(
                     None => net_moved = true,
                 }
             }
-            let (reach, apart) = match (&own, &other) {
+            let (reach, apart, crosses) = match (&own, &other) {
                 (&Exact::Plane(a), &Exact::Plane(c)) => {
                     match plane_pair(a, c, tangent_sine, tolerance) {
                         PlanePair::Line => (
                             hull(&|x| line_distance(x, a, c, tangent_sine, tolerance))?,
                             false,
+                            false,
                         ),
-                        PlanePair::One => (hull(&|x| plane_distance(x, a))?, false),
-                        PlanePair::Apart => (0.0, true),
+                        PlanePair::One => (hull(&|x| plane_distance(x, a))?, false, false),
+                        PlanePair::Apart => (0.0, true, false),
                     }
                 }
                 (&Exact::Plane(plane), Exact::Quadric(q))
@@ -2219,6 +2271,9 @@ pub fn local_extension_reach(
             };
             if apart && !found.apart.contains(&e) {
                 found.apart.push(e);
+            }
+            if crosses && !found.crossing.contains(&e) {
+                found.crossing.push(e);
             }
             found.reach = found.reach.max(reach);
             // each meeting lies on the moved net: no farther from the edge point than it
@@ -2435,6 +2490,10 @@ pub struct LocalReach {
     /// The edges whose two new surfaces are parallel planes apart: no extension makes them
     /// meet, and they add nothing to the reach.
     pub apart: Vec<crate::topology::EdgeId>,
+    /// The edges where a plane and a quadric, the two new surfaces, are certified to cross
+    /// in every normal section ([`Plan::Roots`] on every piece): they meet at an angle, even
+    /// where the faces were tangent in the input.
+    pub crossing: Vec<crate::topology::EdgeId>,
 }
 
 /// Every face at `vertex` other than `own` (each once): its edge neighbours at the vertex
@@ -2837,6 +2896,20 @@ mod tests {
         x >= want - 1e-9 && x <= want + b.tolerance() + 1e-6
     }
 
+    /// The edge of `b` between faces `f` and `g`.
+    fn edge_between(b: &Brep, f: FaceId, g: FaceId) -> EdgeId {
+        crate::topology::face::p4::edges(b, f, None, false, None)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                edge::edgeuses(b, e, None, None)
+                    .unwrap()
+                    .into_iter()
+                    .any(|u| eu::face(b, u).unwrap() == Some(g))
+            })
+            .unwrap()
+    }
+
     fn plane_at_x(x: f64) -> Surface {
         Surface::from(crate::surface::plane::Plane::from_normal(
             Point3::new(x, 0.0, 0.0),
@@ -2850,11 +2923,13 @@ mod tests {
     /// planes, parallel, give nothing; the side's other edges, across right angles, reach
     /// 0.1. The round, which stays, is reached as far at that edge, and the bottom as far
     /// at its corner there (the moved side's line on the bottom meets the round's cylinder
-    /// 1 from the vertex). Each moved 0.1.
+    /// 1 from the vertex). Each moved 0.1. The side and the round cross along their tangent
+    /// edge, on every piece of it; the bottom, whose edges with them stay, lists nothing.
     #[test]
     fn a_plane_moved_into_a_round_is_reached_where_it_meets_it() {
         let mut k = Kernel::default();
         let (b, round, side, bottom) = rounded_cube(&mut k);
+        let tangent = edge_between(&b, side, round);
         let into = plane_at_x(19.9);
         let moved = [(side, &into)];
         for f in [side, round, bottom] {
@@ -2862,6 +2937,8 @@ mod tests {
             assert!(bounds(&b, found.reach, 1.0), "{f:?}: {found:?}");
             assert!(bounds(&b, found.shift, 0.1), "{f:?}: {found:?}");
             assert!(found.apart.is_empty(), "{f:?}: {found:?}");
+            let crossing: &[EdgeId] = if f == bottom { &[] } else { &[tangent] };
+            assert_eq!(found.crossing, crossing, "{f:?}: {found:?}");
         }
     }
 
@@ -2889,6 +2966,30 @@ mod tests {
             assert!(bounds(&b, found.reach, want), "{f:?}: {found:?}");
             assert!(bounds(&b, found.shift, 0.1), "{f:?}: {found:?}");
         }
+        // the round crosses both sides, x = 20 and y = 20, along its tangent edges, on every
+        // piece of them
+        let other_side = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                let face = b.face(f).unwrap();
+                let surface = face.surface.as_ref().unwrap();
+                let p = surface
+                    .evaluate_point(&k, face.uv_domain.evaluate(0.5, 0.5))
+                    .unwrap();
+                matches!(surface.kind(), SurfaceKind::Plane(_)) && (p.y - 20.0).abs() < 1e-9
+            })
+            .unwrap();
+        let tangent = [
+            edge_between(&b, side, round),
+            edge_between(&b, other_side, round),
+        ];
+        assert_eq!(reach_of(&k, &b, side, &moved).crossing, tangent[..1]);
+        let at_round = reach_of(&k, &b, round, &moved);
+        assert!(
+            tangent.iter().all(|e| at_round.crossing.contains(e)),
+            "{at_round:?}"
+        );
     }
 
     /// A cylinder r 1 from z 0 to 2 (its side one face meeting itself across its seam,
@@ -2939,7 +3040,7 @@ mod tests {
         };
         let piece =
             |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| quadric_distance_piece(over.0, mid.0, dt, &q);
-        let (at_seam, apart) = edge_interval_maximum(
+        let (at_seam, apart, _) = edge_interval_maximum(
             &b,
             seam,
             &piece,
@@ -3088,6 +3189,7 @@ mod tests {
         assert!(at_bottom.apart.is_empty(), "{at_bottom:?}");
         for found in [at_side, at_round, at_bottom] {
             assert!(bounds(&b, found.shift, 0.1), "{found:?}");
+            assert!(found.crossing.is_empty(), "{found:?}");
         }
     }
 
@@ -3405,7 +3507,7 @@ mod tests {
         let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
             plane_net_piece(over, mid, dt, into, &net, &guess)
         };
-        let (reach, apart) = edge_interval_maximum(
+        let (reach, apart, _) = edge_interval_maximum(
             &b,
             tangent,
             &piece,
@@ -3491,7 +3593,7 @@ mod tests {
         let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
             plane_net_piece(over, mid, dt, tilted, &net, &guess)
         };
-        let (reach, apart) = edge_interval_maximum(
+        let (reach, apart, _) = edge_interval_maximum(
             &b,
             arc,
             &piece,
