@@ -228,6 +228,9 @@ pub struct ViewportState {
     /// The point the orbit under way turns around (Preferences: orbit around the cursor, or the
     /// view's centre (`navigation::view_middle`)), chosen when it begins.
     pub orbit_pivot: Option<Vec3>,
+    /// Where on screen the orbit under way chose its pivot around the view's centre
+    /// (`navigation::view_middle`): the pivot is kept while it stays there.
+    pub(crate) orbit_middle: Option<Pos2>,
     /// The orbit drag under way, summed from where it began (see [`crate::navigation::orbit`]).
     pub orbit_from: Option<crate::navigation::OrbitFrom>,
     /// An orbit drag moved the cursor to the view's other side: the jump, until the pointer
@@ -239,6 +242,8 @@ pub struct ViewportState {
     /// the view's centre (`navigation::view_middle`)), chosen when it starts and kept until it
     /// stops, so the model stays in view (#1044).
     pub spin_pivot: Option<Vec3>,
+    /// [`Self::orbit_middle`] for continuous orbit.
+    pub(crate) spin_middle: Option<Pos2>,
     /// The 3D mouse's motion this frame, for the page showing the camera to apply with what its
     /// camera may do (`navigation::device`).
     pub device_motion: Option<crate::space_mouse::DeviceMotion>,

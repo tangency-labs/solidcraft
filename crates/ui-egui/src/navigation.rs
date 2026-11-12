@@ -436,6 +436,7 @@ pub(crate) fn modifier_motion(
     let previous = app.viewport.modifier_nav;
     if previous.map(|(m, _)| m) != next.map(|(m, _)| m) {
         app.viewport.orbit_pivot = None;
+        app.viewport.orbit_middle = None;
         app.viewport.orbit_from = None;
         app.viewport.orbit_free = None;
     }
@@ -969,6 +970,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     if !dragging && motion.is_none() && !(trackpad_orbit && app.viewport.trackpad_gesture) {
         app.viewport.orbit_pivot = None;
+        app.viewport.orbit_middle = None;
         app.viewport.orbit_from = None;
         app.viewport.cursor_wrap = None;
     }
@@ -1001,6 +1003,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     if !app.viewport.spin {
         app.viewport.spin_pivot = None;
+        app.viewport.spin_middle = None;
     }
     if !app.cam.is_valid() {
         app.viewport.orbit_free = None;
@@ -1374,7 +1377,7 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
 /// began. Every pivot is kept still on screen; a cursor drag that begins over empty space turns
 /// around the centre of the visible geometry instead, so the model never swings around a far-off
 /// point. The cursor pivot is chosen once, when the drag begins; the view-centre pivot too, while
-/// it stays under the middle of the view (see [`kept_view_middle`]).
+/// it stays where it was on screen (see [`kept_view_middle`]).
 pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>) {
     let pivot = match app.preferences.orbit_around {
         OrbitAround::ViewCentre => view_middle_pivot(app, rect),
@@ -1422,8 +1425,9 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
 fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
     match app.preferences.orbit_around {
         OrbitAround::ViewCentre => {
-            app.viewport.spin_pivot = kept_view_middle(app, rect, app.viewport.spin_pivot);
-            app.viewport.spin_pivot
+            let kept = kept_view_middle(app, rect, app.viewport.spin_pivot, app.viewport.spin_middle);
+            (app.viewport.spin_pivot, app.viewport.spin_middle) = kept;
+            kept.0
         }
         OrbitAround::Origin => Some(Vec3::ZERO),
         OrbitAround::Cursor => Some(match app.viewport.spin_pivot {
@@ -1439,40 +1443,68 @@ fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
 
 /// The orbit pivot around the view's centre for the drag under way (see [`kept_view_middle`]).
 fn view_middle_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
-    app.viewport.orbit_pivot = kept_view_middle(app, rect, app.viewport.orbit_pivot);
-    app.viewport.orbit_pivot
+    let kept = kept_view_middle(app, rect, app.viewport.orbit_pivot, app.viewport.orbit_middle);
+    (app.viewport.orbit_pivot, app.viewport.orbit_middle) = kept;
+    kept.0
 }
 
-/// [`view_middle`] for an orbit under way: the point it began with while that point is still under
-/// the free view's middle (turning about it keeps it there), else the point under it now, as after
-/// a pan or a zoom in the same gesture.
-fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>) -> Option<Vec3> {
-    let middle = app.viewport.layout.as_ref().map(|l| l.middle.center());
-    let proj = || projection(app, rect);
-    match kept.zip(middle) {
-        Some((p, m)) if proj().to_screen(p).is_some_and(|s| s.distance(m) < 0.5) => Some(p),
-        _ => view_middle(app, rect),
+/// [`view_middle`] for an orbit under way, and the point on screen it was chosen under: the pivot
+/// it began with while that pivot is still there (turning about it keeps it there, and the camera
+/// target always is), else the one under [`home_middle`] now, as after a pan or a zoom in the same
+/// gesture. The point Home would use moves as the view turns, so it is chosen once.
+fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>, at: Option<Pos2>) -> (Option<Vec3>, Option<Pos2>) {
+    if let Some(at) = at
+        && kept.is_none_or(|p| projection(app, rect).to_screen(p).is_some_and(|s| s.distance(at) < 0.5))
+    {
+        return (kept, Some(at));
     }
+    let at = home_middle(app, rect);
+    (at.and_then(|at| at_target_depth(app, rect, at)), at)
 }
 
 /// What orbit around the view's centre turns about: the point at the camera target's depth under
-/// the middle of the part of the view the panels leave free (`Layout::middle`). Home and Fit move
-/// the model towards that middle, as far as the compass and the navigation bar leave room. With
-/// the Browser open the middle lies beside the window's centre, and turning about the window's
-/// centre swung the model off to one side (#14651). `None`, so that the camera turns about its
-/// target, when the middle is within half a point of the window's centre, before the view is
-/// first laid out, in the Render workspace (which frames its own picture), and when the camera
-/// gives no finite point.
+/// [`home_middle`], where Home puts the model's middle, so that the model turns in place straight
+/// after Home. With the Browser open, turning about the window's centre swung the model off to
+/// one side, and turning about the middle of the free view moved it as well, as Home keeps it
+/// clear of the navigation bar (#14651). `None`, so that the camera turns about its target, when
+/// that point is within half a point of the window's centre, before the view is first laid out,
+/// in the Render workspace, and when the camera gives no finite point.
 pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
+    at_target_depth(app, rect, home_middle(app, rect)?)
+}
+
+/// Where Home puts the middle of what is shown, with the view turned as it is now: the point on
+/// screen where the camera from [`SolveApp::home_fitted`] draws it. Home keeps the model clear of
+/// the compass and the navigation bar, so this can lie above or beside the middle of the part of
+/// the view the panels leave free (`Layout::middle`), the point used when nothing is shown.
+/// `None` before the view is first laid out and in the Render workspace (which frames its own
+/// picture).
+fn home_middle(app: &SolveApp, rect: Rect) -> Option<Pos2> {
     if crate::render_workspace::active(app) {
         return None;
     }
     let middle = app.viewport.layout.as_ref()?.middle.center();
-    if !middle.is_finite() || middle.distance(rect.center()) < 0.5 {
+    let bounds = crate::viewport::view_bounds(app);
+    if bounds.is_empty() {
+        return middle.is_finite().then_some(middle);
+    }
+    let mut cam = app.home_fitted(app.cam);
+    cam.fov = app.view_fov();
+    let centre = bounds.center();
+    let radius = (bounds.diagonal() * 0.5 + centre.dist(cam.target)).max(cam.half_height() * 2.0).max(10.0);
+    let (x, y, _) = cam.to_screen(centre, f64::from(rect.width()), f64::from(rect.height()), radius)?;
+    let at = rect.min + vec2(x as f32, y as f32);
+    at.is_finite().then_some(at)
+}
+
+/// The point at the camera target's depth under `at`, or `None` when `at` is within half a point
+/// of the window's centre (the camera target) or the camera gives no finite point.
+fn at_target_depth(app: &SolveApp, rect: Rect, at: Pos2) -> Option<Vec3> {
+    if at.distance(rect.center()) < 0.5 {
         return None;
     }
     let proj = projection(app, rect);
-    let (origin, dir) = proj.ray(middle);
+    let (origin, dir) = proj.ray(at);
     let back = proj.cam.back();
     let along = dir.dot(back);
     if along.abs() < 1e-9 {

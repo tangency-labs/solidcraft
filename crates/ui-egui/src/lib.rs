@@ -3076,6 +3076,13 @@ impl SolveApp {
         viewport_layout::fit_bounds_sized(cam, bounds, layout, self.view_fov(), f64::from(self.preferences.home_fit_size))
     }
 
+    /// `cam` framing the whole model as Home frames it, keeping the view direction: the
+    /// navigators' way with their Fit on (#10091), else as Fit frames it. The default orbit turns
+    /// about the point this puts the model's middle at (`navigation::view_middle`).
+    pub(crate) fn home_fitted(&self, cam: Camera) -> Camera {
+        if self.preferences.navigator_fit { self.navigator_fitted(cam) } else { self.fitted(cam) }
+    }
+
     /// `cam` framing the whole model the navigators' way (#10091): looking at the middle of the
     /// model from the distance that fits its bounding sphere in the free part of the view, at
     /// the Fit size. The sphere looks the same from every side, so Home and every face,
@@ -3280,7 +3287,7 @@ impl SolveApp {
             // keeps the zoom (#10091).
             let shared = self.preferences.navigator_fit;
             self.pending_fit = Some((to, viewport::view_bounds(self), true, shared));
-            to = if shared { self.navigator_fitted(to) } else { self.fitted(to) };
+            to = self.home_fitted(to);
         } else {
             // With something selected, Fit frames the selection.
             match viewport::selection_bounds(self) {
