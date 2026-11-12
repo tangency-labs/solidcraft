@@ -3208,15 +3208,24 @@ mod tests {
             whole.execute("doc.open", &json!({"path": path})).unwrap();
             errors(&whole)
         };
+        // Each evaluation of the design takes seconds (its last round), so each mode's reference
+        // is opened once and each starting mode is tried once.
         for mode in Validation::ALL {
-            for started in [mode, Validation::EachFeature, Validation::Off] {
+            let reference = open(mode);
+            let mut starts = vec![mode];
+            for other in [Validation::EachFeature, Validation::Off] {
+                if !starts.contains(&other) {
+                    starts.push(other);
+                }
+            }
+            for started in starts {
                 let mut steps = OpenSteps::start(&json!({"path": path}), started).unwrap().expect("a design is opened in steps");
                 while steps.step() {}
                 let mut stepped = Session::default();
                 stepped.set_validation(mode);
                 steps.finish(&mut stepped).unwrap();
                 assert_eq!(stepped.validation(), mode);
-                assert_eq!(errors(&stepped), open(mode), "started under {started:?}, the session's mode {mode:?}");
+                assert_eq!(errors(&stepped), reference, "started under {started:?}, the session's mode {mode:?}");
                 let again = if started == mode { 0 } else { stepped.doc.features.len() };
                 assert_eq!(stepped.model.last_recomputed, again, "started under {started:?}, the session's mode {mode:?}");
                 assert!(stepped.model.is_current(&stepped.doc));
