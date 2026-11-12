@@ -727,8 +727,7 @@ pub fn theme_palette(dark: bool) -> Option<Palette> {
     let Some(accent) = solidcraft_theme::accent() else { return palette };
     let rgb = |c: egui::Color32| [c.r(), c.g(), c.b()];
     let mut palette = palette.unwrap_or_default();
-    palette.accents[0] =
-        Some([rgb(accent.lerp_to_gamma(egui::Color32::WHITE, 0.15)), rgb(accent), rgb(accent.lerp_to_gamma(egui::Color32::BLACK, 0.25))]);
+    palette.accents[0] = Some(solidcraft_theme::accent_icon_shades(accent).map(rgb));
     Some(palette)
 }
 

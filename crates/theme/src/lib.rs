@@ -416,6 +416,11 @@ pub fn accent() -> Option<Color32> {
     ACCENT.get()
 }
 
+/// An icon ramp's three shades of `accent`: lighter, the accent itself, darker.
+pub fn accent_icon_shades(accent: Color32) -> [Color32; 3] {
+    [accent.lerp_to_gamma(Color32::WHITE, 0.15), accent, accent.lerp_to_gamma(Color32::BLACK, 0.25)]
+}
+
 /// `#rrggbb` as an opaque accent; anything else (an empty preference: the theme's) is `None`.
 pub fn parse_accent(s: &str) -> Option<Color32> {
     let hex = s.trim().strip_prefix('#').filter(|h| h.len() == 6)?;
