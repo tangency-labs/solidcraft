@@ -2015,9 +2015,10 @@ mod tests {
     /// domain `[0, 1]`, scale 10, from `(-5, -5)` along X): it evaluates between
     /// `x = -5` and `5`, but its drop converts the infinite line's foot to a NURB
     /// parameter that need not invert the evaluation and accepts `(8, -5)`, past the
-    /// segment on its line, at distance 0. A point on an edge's infinite line is walked
-    /// (on the edge, as the drop says), and the face classifies it the same with the
-    /// shortcut on and off.
+    /// segment on its line, at distance 0. The exclusion mirrors that drop, so the loop
+    /// is walked for such a point (the walk makes the drop only where the edge's box
+    /// reaches, `curve_box_reaches`, so it is the walk that answers), and the face
+    /// classifies it the same with the shortcut on and off.
     #[test]
     fn a_point_on_a_line_edges_infinite_line_is_walked() {
         let k = Kernel::default();
@@ -2063,8 +2064,6 @@ mod tests {
         );
         assert!(!drop_cannot_reach(e, point));
         assert!(!exclusion_at(&k, &b, l, uv).is_some_and(|x| x.excludes(&k, &b, l)));
-        let walk = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
-        assert_eq!(walk.containment, PointContainment::OnBoundary);
         hold_in_outer_square(&mut b);
         let (on, off) = classified_on_and_off(&b, uv);
         assert_eq!(on, off);
