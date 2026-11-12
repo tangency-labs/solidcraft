@@ -3,6 +3,8 @@
 
 use solidcore::SolidError;
 
+pub use solidcore::topology::brep::SolidTest;
+
 /// SMLib's `SM_ERR_INVALID_INPUT`, the status of input the kernel refuses.
 pub const INVALID_INPUT: i32 = solidcore::error::SM_ERR_INVALID_INPUT;
 
@@ -18,6 +20,11 @@ pub enum Error {
     Empty,
     /// The kernel reported success, but a solid input gave a result that is not a closed solid.
     NotSolid,
+    /// A body that is not a closed solid facing out, and the test it fails (the kernel's
+    /// [`SolidTest`], the first that fails in the order the tests run). [`Error::NotSolid`]
+    /// stays for the calls that return it; [`crate::Body::check_solid`] returns this one.
+    #[non_exhaustive]
+    NotSolidBecause(SolidTest),
     /// No room for the operation: an inward offset (a shell's wall, faces moved in) leaves none
     /// inside the body, or a blend is larger than the faces it rolls on allow.
     NoRoom,
@@ -182,6 +189,23 @@ pub enum Error {
     /// The kernel found its own state inconsistent part way through a call, or was called
     /// before the preparation it needs.
     Exception,
+    /// The kernel found one of its own invariants broken part way through a call (the
+    /// kernel's `SolidError::PortInvariant`): its class, that it is a defect, the operation, and
+    /// what did not hold. Not [`Error::Exception`], which ops' own consistency checks and a
+    /// missing preparation still give.
+    #[non_exhaustive]
+    Invariant {
+        /// The kernel's class of the failure (`SolidError::kind`, today
+        /// [`solidcore::error::ErrorKind::PortInvariant`]).
+        class: solidcore::error::ErrorKind,
+        /// True: the failure is the kernel's fault, not a fact of the input (a consistency check
+        /// of its own that did not hold), a bug to report, not a refusal.
+        defect: bool,
+        /// The kernel operation whose invariant failed.
+        operation: &'static str,
+        /// What did not hold.
+        reason: &'static str,
+    },
     /// A contact test the kernel's certified bracket of the boundary distance does not decide
     /// (`solidcore::query::contact`): the tolerance lies inside `[lower, upper]` (or the
     /// boundaries are apart but one body's enclosure of the other is not decided), or a
@@ -197,6 +221,15 @@ pub enum Error {
     },
     /// The application cancelled the call.
     Cancelled,
+    /// A body built from a record whose blend face's net its definition does not certify (the
+    /// kernel's `DefinitionNotCertified`): the face, by its index in the body's face order, and
+    /// the bound ε its definition states.
+    DefinitionNotCertified {
+        /// The face's index in the body's face order.
+        face: usize,
+        /// The bound the definition states.
+        eps: f64,
+    },
     /// Ops was called from inside a kernel call or from the failure callback.
     Reentered,
     /// A record the conversion cannot carry to the kernel, and why.
@@ -467,6 +500,9 @@ impl std::fmt::Display for Error {
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
+            Error::NotSolidBecause(test) => {
+                write!(f, "the body is not a closed solid facing out: {test}")
+            }
             Error::NoRoom => write!(f, "no room"),
             Error::RailPastTolerance {
                 asked,
@@ -477,6 +513,9 @@ impl std::fmt::Display for Error {
                 "the loft's guided edges were asked within {asked} of their rails; at {wires} wires the bound proved is {reached}"
             ),
             Error::WallsTouch => write!(f, "the offset's walls meet"),
+            Error::DefinitionNotCertified { face, eps } => {
+                write!(f, "the definition of face {face} does not certify its net within {eps}")
+            }
             Error::TooLarge { size, kind, .. } => {
                 write!(f, "too large: the largest {kind:?} that fits is {size}")
             }
@@ -548,6 +587,18 @@ impl std::fmt::Display for Error {
             }
             Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
+            Error::Invariant {
+                class,
+                defect,
+                operation,
+                reason,
+            } => {
+                let defect = if *defect { ", a defect to report" } else { "" };
+                write!(
+                    f,
+                    "solidcore broke its own invariant in {operation} ({class}{defect}): {reason}"
+                )
+            }
             Error::ContactUndecided {
                 other,
                 lower,
@@ -609,7 +660,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// A kernel error as the operation's, by its type: a kernel status where it stands for one
 /// (input refused, not converged, the kernel's other failures), a refusal of what the kernel does
-/// not support or has not ported, a cancellation, or an inconsistency the kernel found in itself.
+/// not support or has not ported, a cancellation, a broken invariant of the kernel's
+/// ([`Error::Invariant`]), or a call made before the preparation it needs.
 #[must_use]
 pub(crate) fn status(e: SolidError) -> Error {
     use solidcore::error::{SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NOT_CONVERGING};
@@ -624,9 +676,13 @@ pub(crate) fn status(e: SolidError) -> Error {
         SolidError::Unsupported { reason, .. } => Error::Unsupported(reason),
         SolidError::Unported { upstream, .. } => Error::Unported(upstream),
         SolidError::Cancelled { .. } => Error::Cancelled,
-        SolidError::PortInvariant { .. } | SolidError::PreparationRequired { .. } => {
-            Error::Exception
-        }
+        e @ SolidError::PortInvariant { operation, reason } => Error::Invariant {
+            class: e.kind(),
+            defect: true,
+            operation,
+            reason,
+        },
+        SolidError::PreparationRequired { .. } => Error::Exception,
         // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for
         e => Error::Status(e.sm_status().unwrap_or(SM_ERR)),

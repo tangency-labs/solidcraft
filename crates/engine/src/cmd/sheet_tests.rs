@@ -700,6 +700,49 @@ fn contour_flange_hem_and_tray() {
     assert!(rel(v, want) < 1e-4 && rel(v, 29666.234) < 1e-4, "{v} {want}");
 }
 
+#[test]
+fn contour_flange_takes_tangent_arcs_and_develops_their_bends() {
+    // A 90° arc after a 30 mm line and before a 20 mm line. The chain turns toward the material,
+    // so the arc is the outer surface: radius 10 with the bend's inner radius 10 - 2 = 8.
+    // Developed length = 30 + (π/2)(8 + 0.5·2) + 20.
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 2, "k_factor": 0.5, "bend_radius": 2, "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Arc"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["l1"]}));
+    let h = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
+    run(&mut s, "sketch.arc.three_point", json!({"start": [30, 0], "end": [40, -10], "through": [30.0 + h, -10.0 + h], "id": "a1"}));
+    run(&mut s, "sketch.line", json!({"points": [[40, -10], [40, -30]], "ids": ["l2"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let r = run(&mut s, "sheet.flange", json!({"sketch": "Arc", "curves": ["l1", "a1", "l2"], "distance": 50, "rule": "R"}));
+    assert!(r.get("error").is_none(), "{r}");
+    let f = flat(&mut s);
+    let want = 50.0 + FRAC_PI_2 * (8.0 + 0.5 * 2.0);
+    let got = f["flat_size_mm"][0].as_f64().unwrap_or(f64::NAN);
+    assert!((got - want).abs() < 1e-6, "{got} vs {want}: {f}");
+    let bends = f["bends"].as_array().cloned().unwrap_or_default();
+    assert_eq!(bends.len(), 1, "{f}");
+    assert!((bends[0]["radius"].as_f64().unwrap_or(0.0) - 8.0).abs() < 1e-9, "{f}");
+    assert!((bends[0]["angle_deg"].as_f64().unwrap_or(0.0) - 90.0).abs() < 1e-9, "{f}");
+    assert!((bends[0]["allowance"].as_f64().unwrap_or(0.0) - FRAC_PI_2 * 9.0).abs() < 1e-9, "{f}");
+    // A 180° half pipe alone: outer radius 56 and 1.5 thick, with no flat panel before or
+    // after it.
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 1.5, "k_factor": 0.5, "bend_radius": 1.5, "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Trough"}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [56, 0], "end": [-56, 0], "through": [0, -56], "id": "a1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let r = run(&mut s, "sheet.flange", json!({"sketch": "Trough", "curves": ["a1"], "distance": 100, "rule": "R", "flip": true}));
+    assert!(r.get("error").is_none(), "{r}");
+    let want = PI / 2.0 * (56.0f64.powi(2) - 54.5f64.powi(2)) * 100.0;
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+    let b = bbox(&mut s);
+    assert!((b["min"][1].as_f64().unwrap_or(f64::NAN) + 56.0).abs() < 1e-6, "{b}");
+    assert!(b["max"][1].as_f64().unwrap_or(f64::NAN).abs() < 1e-6, "{b}");
+    let f = flat(&mut s);
+    let want = PI * (54.5 + 0.5 * 1.5);
+    assert!((f["flat_size_mm"][0].as_f64().unwrap_or(f64::NAN) - want).abs() < 1e-6, "{f}");
+}
+
 /// A 150 x 100 base on a 2 mm rule with one 40 mm wall on its left edge: the part a chained
 /// flap (#4094) is made on.
 fn wall_bracket(s: &mut Session) {

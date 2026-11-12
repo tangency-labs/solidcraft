@@ -7,9 +7,9 @@
 //!   its NURBS form, proved on each other; an analytic face by its label and its NURBS form,
 //!   proved (`lies_on`); a plane by its placement, its parameters its kernel ones times its
 //!   scales. Nothing is sampled. A curve or surface with no NURBS form (an offset) is refused.
-//!   Two things still cross as approximations: a procedural blend goes as its net and loses its
-//!   definition and bound until the definition records move into the record (PR 1's last
-//!   commit, still to come), and a use with no UV trim gets one the kernel makes by fitting.
+//!   A blend face goes as its definition and its net ([`face_definition`]: a procedural blend, a
+//!   round of an exact class whose net has no analytic label); a use with no UV trim gets one the
+//!   kernel makes by fitting.
 //! - **Pcurves:** every use's pcurve is the kernel's own UV trim (made first where a use has
 //!   none, by the kernel's fit), its knots on the edge record's interval ([`record_trim`]). A face's parameters in
 //!   the record are its NURBS's (or a plane's, scaled), none periodic, so no loop is moved by
@@ -35,6 +35,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::record_face;
+use solidcore::surface::procedural_blend::convert::face_definition;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep_data::{BrepData, NO_OBJECT, UNDEF_ULONG};
 use solidcore::topology::brep_data_write::FromBrepEnv;
@@ -47,6 +48,31 @@ use solidcore::{Brep, EdgeId, FaceId};
 use solidcore_record::brep as r;
 
 use super::{Order, Unsupported, R};
+
+/// A blend face's record: its definition as its label and its net as its NURBS form (the form the
+/// face was written with, or its surface when that is the net itself), when the kernel reads a
+/// definition off it ([`face_definition`]) and the net is a NURBS surface; otherwise the face as
+/// written.
+fn with_definition(
+    k: &Kernel,
+    surface: &solidcore::surface::surface::Surface,
+    label: r::Surface,
+    form: Option<r::Surface>,
+) -> R<(r::Surface, Option<r::Surface>)> {
+    let net = form.as_ref().unwrap_or(&label);
+    if !matches!(
+        net,
+        r::Surface::Spline { .. } | r::Surface::RationalSpline { .. }
+    ) {
+        return Ok((label, form));
+    }
+    let Some(definition) = face_definition(k, surface)? else {
+        return Ok((label, form));
+    };
+    let net = form.unwrap_or(label);
+    let definition = Box::new(crate::blend::record_blend(definition));
+    Ok((r::Surface::Blend { definition }, Some(net)))
+}
 
 fn index(i: usize) -> R<u32> {
     u32::try_from(i).map_err(|_| Unsupported::Invalid("index"))
@@ -166,9 +192,15 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
             .as_ref()
             .ok_or(Unsupported::Invalid("a face without a surface"))?;
         let made = record_face(k, surface, &fd.uv_domain)?;
+        let (label, form) = with_definition(
+            k,
+            surface,
+            crate::record_surface(made.surface)?,
+            made.nurbs.map(crate::record_surface).transpose()?,
+        )?;
         let mut face = Face {
-            surface: crate::record_surface(made.surface)?,
-            nurbs: made.nurbs.map(crate::record_surface).transpose()?,
+            surface: label,
+            nurbs: form,
             domain: made.domain,
             agrees: made.agrees,
             loops: Vec::new(),

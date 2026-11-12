@@ -64,9 +64,9 @@
 //!   applied to the new report before it is added (the same result: they only touch
 //!   a report that was added, and report equality ignores those fields). `WARN`
 //!   messages are not ported.
-//!   Opt-in (WR-668, `Kernel::fixes.curve_check_zero_speed_tangent_end`, the fork's
-//!   tangency-labs/smlib ecf1963, replayed patch for patch as 6ca3405 in
-//!   tangency-labs/smlib#76): at a zero-speed tangent end of an edge's curve or
+//!   Not upstream (WR-668, the fork's tangency-labs/smlib ecf1963, replayed patch for
+//!   patch as 6ca3405 in tangency-labs/smlib#76; the default since its flag was
+//!   retired): at a zero-speed tangent end of an edge's curve or
 //!   trim, test 3 passes over the coincident first control points and tests 13/14
 //!   pass over a radius below the tolerance within the end's growth stretch. The fork
 //!   reads the curve's edge (`GetEdge`, `GetEdgeuse()->GetEdge()`); a Rust curve has
@@ -384,9 +384,8 @@ pub(crate) struct DerivedOverrides<'a> {
     /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560); `None` for any other curve.
     pub trim_surface: Option<&'a Surface>,
     /// Not upstream: the edge this curve is the 3D curve or a UV trim of
-    /// (`GetEdge()`, `GetEdgeuse()->GetEdge()`), read only with
-    /// `Kernel::fixes.curve_check_zero_speed_tangent_end` (WR-668); `None` for a curve
-    /// on no edge.
+    /// (`GetEdge()`, `GetEdgeuse()->GetEdge()`), read for WR-668's zero-speed tangent
+    /// ends; `None` for a curve on no edge.
     pub edge_ends: Option<&'a EdgeEnds>,
 }
 
@@ -1435,8 +1434,8 @@ impl BSplineCurve {
     }
 
     /// [`BSplineCurve::assert_valid_on`] of the 3D curve or a UV trim of an edge whose
-    /// ends are `edge_ends` (read with `Kernel::fixes.curve_check_zero_speed_tangent_end`,
-    /// WR-668; `None` for a curve on no edge).
+    /// ends are `edge_ends` (read for WR-668's zero-speed tangent ends; `None` for a
+    /// curve on no edge).
     ///
     /// # Errors
     ///
@@ -1557,11 +1556,10 @@ impl BSplineCurve {
             let start_scaled_zero = EFF_ZERO * (1.0 + euclid.max_dimension());
             let start_cpt_dist = dist_cpt_cpt(cpt(0)?, cpt(1)?);
 
-            // not upstream (WR-668, opt-in): not at a zero-speed tangent end, whose first
-            // two control points coincide by construction (the fork's ecf1963)
+            // not upstream (WR-668): not at a zero-speed tangent end, whose first two
+            // control points coincide by construction (the fork's ecf1963)
             if is_zero_to_tol(start_cpt_dist, start_scaled_zero)
-                && !(k.fixes.curve_check_zero_speed_tangent_end
-                    && is_zero_speed_tangent_end(self, 0, start_scaled_zero, ovr.edge_ends)?)
+                && !is_zero_speed_tangent_end(self, 0, start_scaled_zero, ovr.edge_ends)?
             {
                 /*  3 */
                 let ok = !is_zero_to_tol(start_cpt_dist, start_scaled_zero);
@@ -1909,12 +1907,12 @@ impl BSplineCurve {
             // fires; the opt-in `Kernel::fixes.bspline_check_min_radius` reads it first:
             // WR-382, tangency-labs/solidcore#475)
             //
-            // Not upstream (fork tangency-labs/smlib ecf1963, WR-668, opt-in): at a
+            // Not upstream (fork tangency-labs/smlib ecf1963, WR-668): at a
             // zero-speed tangent end the radius vanishes as |t - t_end|. A solution below
             // the tolerance within the stretch where that growth puts it below is that
             // growth and is passed over; the first other solution is read instead.
             let mut stretch = [-1.0, -1.0];
-            if k.fixes.curve_check_zero_speed_tangent_end && radii {
+            if radii {
                 for (end, slot) in stretch.iter_mut().enumerate() {
                     let i = if end == 0 { 0 } else { cur.n() };
                     let end_cpt = cpt(i)?.to_euclid();
@@ -2602,19 +2600,16 @@ mod tests {
         let c = zero_speed_end_curve();
         let tangent = ends((0.0, 1.0), true);
         let mut k = Kernel::default();
-        // main: test 3 (coincident first control points)
-        assert_eq!(edge_failed_tests(&k, &c, Some(&tangent)), vec![3]);
-        // with the minimum radius read: also test 14. Before tangency-labs/solidcore#2574
-        // the 0 it compared came from the objective failing at the zero-speed end; it is
-        // now the radius where the search stopped, still below the tolerance (#2669).
+        // at a vertex where the edge's faces touch, the coincident first control points
+        // (test 3) and, with the minimum radius read, the radius below the tolerance
+        // (test 14) are the zero-speed end (upstream reports both)
+        assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
         k.fixes.bspline_check_min_radius = true;
-        assert_eq!(edge_failed_tests(&k, &c, Some(&tangent)), vec![3, 14]);
-
-        // the fix: at a vertex where the edge's faces touch, both are the zero-speed end
-        k.fixes.curve_check_zero_speed_tangent_end = true;
         assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
         // on no edge, where the faces meet at an angle, or at no end of the edge, it
-        // still fails both
+        // still fails both. Before tangency-labs/solidcore#2574 the 0 test 14 compared
+        // came from the objective failing at the zero-speed end; it is now the radius
+        // where the search stopped, still below the tolerance (#2669).
         assert_eq!(edge_failed_tests(&k, &c, None), vec![3, 14]);
         let angled = ends((0.0, 1.0), false);
         assert_eq!(edge_failed_tests(&k, &c, Some(&angled)), vec![3, 14]);
@@ -2651,21 +2646,6 @@ mod tests {
         assert!(!is_zero_speed_tangent_end(&c, 1, 1e-15, Some(&tangent)).unwrap());
     }
 
-    /// With the flag off nothing about the edge is read: a regular curve and the
-    /// zero-speed one report the same with and without an edge context.
-    #[test]
-    fn wr_668_flag_off_ignores_the_edge() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_check_min_radius = true;
-        let tangent = ends((0.0, 1.0), true);
-        for c in [zero_speed_end_curve(), quad()] {
-            assert_eq!(
-                edge_failed_tests(&k, &c, Some(&tangent)),
-                edge_failed_tests(&k, &c, None)
-            );
-        }
-    }
-
     /// [`zero_speed_end_curve`] run backwards, of dimension `dim`: its zero-speed end
     /// is the curve's end (`t = 1`).
     fn zero_speed_at_end_curve(dim: u64) -> BSplineCurve {
@@ -2682,7 +2662,7 @@ mod tests {
     /// 3D curve (test 14) and as a UV trim (test 13): the stretch is measured back from
     /// the domain's max and the radius below the tolerance there is passed over. Test 3
     /// reads only the first pair, and test 4 reports the first pair's values, so with
-    /// the minimum radius read only the radius test fails before the fix.
+    /// the minimum radius read only the radius test would fail without WR-668.
     #[test]
     fn wr_668_zero_speed_tangent_end_at_the_curve_end() {
         let tol = 1e-4;
@@ -2698,8 +2678,6 @@ mod tests {
             let mut k = Kernel::default();
             assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
             k.fixes.bspline_check_min_radius = true;
-            assert_eq!(edge_failed_tests(&k, &c, Some(&tangent)), vec![radius_test]);
-            k.fixes.curve_check_zero_speed_tangent_end = true;
             assert!(edge_failed_tests(&k, &c, Some(&tangent)).is_empty());
             // on no edge, or on an edge that ends past the curve's end, it still fails
             assert_eq!(edge_failed_tests(&k, &c, None), vec![radius_test]);
@@ -2708,11 +2686,11 @@ mod tests {
         }
     }
 
-    /// Coincident end control points that are no zero-speed end stay a fault with the
-    /// fix, at a vertex where the edge's faces touch: the quartic Bezier `(0,0) (0,0)
+    /// Coincident end control points that are no zero-speed end stay a fault at a vertex
+    /// where the edge's faces touch: the quartic Bezier `(0,0) (0,0)
     /// (0,0) (1,0) (1,1)` has its second derivative vanish at `t = 0` as well
     /// (`sm_IsZeroSpeedTangentEnd` refuses `|C''| <= dScaledZero`), so tests 3 and 14
-    /// report what they report without it.
+    /// report the fault.
     #[test]
     fn wr_668_coincident_points_without_curvature_stay_a_fault() {
         let c = curve(
@@ -2731,10 +2709,9 @@ mod tests {
         for min_radius in [false, true] {
             let mut k = Kernel::default();
             k.fixes.bspline_check_min_radius = min_radius;
-            let before = edge_failed_tests(&k, &c, Some(&tangent));
-            assert!(before.contains(&3), "{before:?}");
-            k.fixes.curve_check_zero_speed_tangent_end = true;
-            assert_eq!(edge_failed_tests(&k, &c, Some(&tangent)), before);
+            let on_edge = edge_failed_tests(&k, &c, Some(&tangent));
+            assert!(on_edge.contains(&3), "{on_edge:?}");
+            assert_eq!(edge_failed_tests(&k, &c, None), on_edge);
         }
     }
 

@@ -60,7 +60,7 @@ use crate::surface::surface::{
 use crate::sweep::topology_sweep::access::{FaceRef, RegionRef};
 use crate::topology::{BrepId, EdgeuseId, FaceId};
 
-use super::skin_sources::{layer_sources, LoopSpans, NotTraced, SkinSources, SkinTrace};
+use super::skin_sources::{layer_sources, LoopSpans, NotTraced, Segment, SkinSources, SkinTrace};
 
 const OP: &str = "primitive::primitive_creation::p3";
 
@@ -361,7 +361,7 @@ impl PrimitiveCreation {
         approx_tol: f64,
         degree: usize,
         new_faces: &mut Vec<FaceId>,
-        trace: Option<&mut SkinTrace>,
+        mut trace: Option<&mut SkinTrace>,
     ) -> Result<()> {
         self.init_entity_maps();
         new_faces.clear();
@@ -392,10 +392,8 @@ impl PrimitiveCreation {
             for (j, (mut composite, edges)) in composites.into_iter().enumerate() {
                 let (joined, breaks) = composite.make_composite_nurb_with_breaks()?;
                 if trace.is_some() && untraced.is_none() {
-                    match LoopSpans::of(&joined, breaks, edges) {
-                        Ok(spans) => loop_spans.push((j, spans)),
-                        Err(_) => untraced = Some(NotTraced::JoinedCurveUnreadable),
-                    }
+                    let segments = edges.into_iter().map(Segment::Edge).collect();
+                    loop_spans.push((j, LoopSpans { breaks, segments }));
                 }
                 skin_curves.push(joined);
                 layers.push(j);
@@ -405,11 +403,22 @@ impl PrimitiveCreation {
             skin_curves.extend_from_slice(profiles);
             layer_count = 1;
             layers.resize(skin_curves.len(), 0);
-            untraced = Some(NotTraced::OpenProfiles);
+            // (the trace: the open loops the skin recorded, one per profile, all one layer)
+            if let Some(t) = trace.as_deref_mut() {
+                let open = std::mem::take(&mut t.open_loops);
+                if open.len() == profiles.len() {
+                    loop_spans.extend(open.into_iter().map(|l| (0, l)));
+                } else {
+                    untraced = Some(NotTraced::OpenProfiles);
+                }
+            }
         }
+        // (the trace: where each section's knots went, when asked; the surface is the same
+        // either way)
+        let want_maps = trace.is_some() && untraced.is_none();
         // Each layer's skin at chord-length parameters, as upstream.
         let skin = |k: &crate::kernel::Kernel, curves: &[BSplineCurve], params: Option<&[f64]>| {
-            BSplineSurface::create_skinned_surface(
+            BSplineSurface::create_skinned_surface_mapped(
                 k,
                 curves,
                 SkinnedSurfaceOptions {
@@ -419,6 +428,7 @@ impl PrimitiveCreation {
                     section_params: params,
                     ..Default::default()
                 },
+                want_maps,
             )
         };
         let mut layer_curves = Vec::new();
@@ -439,7 +449,7 @@ impl PrimitiveCreation {
         if let Some(planes) = SectionPlanes::of(&*a, faces)? {
             let tol = a.brep(brep)?.tolerance();
             let mut leaves = false;
-            for s in &surfaces {
+            for (s, _) in &surfaces {
                 leaves = leaves || planes.leaves(s, tol)?;
             }
             if leaves {
@@ -451,7 +461,7 @@ impl PrimitiveCreation {
         }
         let mut traced: Vec<(FaceId, Vec<usize>)> = Vec::new();
         let mut made = Vec::new();
-        for (layer, surface) in surfaces.into_iter().enumerate() {
+        for (layer, (surface, maps)) in surfaces.into_iter().enumerate() {
             // (the trace: the surface's knots across the sections, V)
             let surface_knots = trace
                 .is_some()
@@ -477,7 +487,8 @@ impl PrimitiveCreation {
                         let edge_curves = trace
                             .as_deref()
                             .map_or(&[][..], |t| t.edge_curves.as_slice());
-                        layer_sources(edge_curves, &sections, &knots, &intervals)
+                        let maps = maps.as_deref().unwrap_or(&[]);
+                        layer_sources(edge_curves, &sections, maps, &knots, &intervals)
                     }
                     (Some(Err(_)) | None, _) => Err(NotTraced::SurfaceKnotsUnreadable),
                     (_, None) => Err(NotTraced::FaceDomainUnreadable),
@@ -489,8 +500,7 @@ impl PrimitiveCreation {
             }
         }
         if let Some(t) = trace {
-            let why = untraced.or_else(|| t.open_profiles.then_some(NotTraced::OpenProfiles));
-            t.sources = Some(match why {
+            t.sources = Some(match untraced {
                 Some(why) => SkinSources::NotTraced { why },
                 None => SkinSources::Traced(traced),
             });
