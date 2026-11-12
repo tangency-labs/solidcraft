@@ -4,9 +4,9 @@
 
 use std::collections::BTreeMap;
 
+use solidcore::eval::plan::EvalSurface;
 use solidcore_ops::boolean::boolean;
 use solidcore_ops::{BooleanOp, make_box, make_cylinder, make_sphere};
-use solidcore::eval::plan::EvalSurface;
 use solidcore_record::Vec3 as P;
 use solidcore_record::brep;
 
