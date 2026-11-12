@@ -376,6 +376,11 @@ macro_rules! operation {
             /// still run. Default: true.
             #[serde(default)]
             pub gouge_check: Option<bool>,
+            /// The faces or edges of the part it works on, by their persistent names: found
+            /// again each time the job is planned and read as its `feature`, in place of
+            /// `sketch`, `polygon` or `feature`. Default: none.
+            #[serde(default)]
+            pub picks: Option<Vec<crate::schema::cam_picks::Pick>>,
             $($(#[$fdoc])* pub $field: $ty,)*
         }
 
@@ -951,6 +956,9 @@ pub struct CamJobReply {
     /// With `split_by_tool`: the programs in the order to run them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub programs: Vec<ProgramPart>,
+    /// How each operation's picks were found again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub picks_resolved: Vec<super::cam_picks::PickResolved>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

@@ -3196,6 +3196,83 @@ fn tapped(holes: &mut [HoleReport], threads: &[solidcraft_doc::ThreadInfo], orig
     }
 }
 
+/// Exact facts about the faces and edges of one body, for picks (`cam_picks`): what each face is,
+/// where it lies, which faces an edge bounds. Coordinates are the design's.
+pub(crate) struct BodyFaces<'a> {
+    topo: Topo<'a>,
+}
+
+impl<'a> BodyFaces<'a> {
+    pub fn new(name: &str, body: &'a Body) -> BodyFaces<'a> {
+        BodyFaces { topo: Topo::new(name, body, Vec3::ZERO) }
+    }
+
+    pub fn face_count(&self) -> usize {
+        self.topo.record.faces.len()
+    }
+
+    /// Face `f`'s analytic surface.
+    pub fn surface(&self, f: usize) -> Option<FaceSurface> {
+        self.topo.surface(f).copied()
+    }
+
+    /// Face `f`'s exact extent along the axes of `frame` (work coordinates `origin` away from the
+    /// design's), in the frame's coordinates: [[low x, low y, low z], [high x, high y, high z]].
+    pub fn extent(&self, f: usize, origin: Vec3, frame: &Frame) -> Option<[[f64; 3]; 2]> {
+        let mut lo = [0.0; 3];
+        let mut hi = [0.0; 3];
+        for (k, dir) in [frame.x, frame.y, frame.z].into_iter().enumerate() {
+            let (a, b) = self.topo.face_range(f, dir, true)?;
+            let shift = (origin + frame.origin).dot(dir);
+            lo[k] = a - shift;
+            hi[k] = b - shift;
+        }
+        Some([lo, hi])
+    }
+
+    /// The faces a design point lies on: within `tol` of the face's surface and inside its exact
+    /// extent (grown by `tol`), nearest the middle of its extent first.
+    pub fn faces_at(&self, p: Vec3, tol: f64) -> Vec<usize> {
+        let mut hits: Vec<(f64, usize)> = Vec::new();
+        for f in 0..self.face_count() {
+            let Some(surface) = self.topo.surface(f) else { continue };
+            let Some(on) = surface.nearest(p) else { continue };
+            if on.dist(p) > tol {
+                continue;
+            }
+            let Some([lo, hi]) = self.extent(f, Vec3::ZERO, &Frame::IDENTITY) else { continue };
+            let q = [p.x, p.y, p.z];
+            if (0..3).all(|k| q[k] >= lo[k] - tol && q[k] <= hi[k] + tol) {
+                let mid = Vec3::new((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5);
+                hits.push((mid.dist(p), f));
+            }
+        }
+        hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+        hits.into_iter().map(|(_, f)| f).collect()
+    }
+
+    /// How far point `p` is from face `f`'s exact surface (mm).
+    pub fn distance(&self, f: usize, p: Vec3) -> Option<f64> {
+        let on = self.topo.surface(f)?.nearest(p)?;
+        Some(on.dist(p))
+    }
+
+    /// A point on face `f`'s surface near the middle of its extent: where a pick of it is
+    /// looked for when its name finds nothing.
+    pub fn point_on(&self, f: usize) -> Option<Vec3> {
+        let [lo, hi] = self.extent(f, Vec3::ZERO, &Frame::IDENTITY)?;
+        let mid = Vec3::new((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5);
+        let s = self.topo.surface(f)?;
+        // On a round face's axis every direction is as near: step off it along X or Y.
+        s.nearest(mid).or_else(|| s.nearest(mid + Vec3::new(1e-3, 0.0, 0.0))).or_else(|| s.nearest(mid + Vec3::new(0.0, 1e-3, 0.0)))
+    }
+
+    /// The faces edge `e` bounds.
+    pub fn edge_faces(&self, e: usize) -> Vec<usize> {
+        self.topo.edge_faces.get(e).cloned().unwrap_or_default()
+    }
+}
+
 /// A quantised coordinate for ordering features.
 fn q(v: f64, tol: f64) -> i64 {
     let k = (v / tol).round();

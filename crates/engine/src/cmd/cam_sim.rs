@@ -304,7 +304,7 @@ pub(super) fn simulate(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_io::vfs::check(out).map_err(|e| EngineError::Other(e.to_string()))?;
     }
     // The job the program was written for, read as `cam.job` reads it.
-    let (job, base) = load_job(cmd, p, params.job.is_some(), params.job_path.as_ref())?;
+    let (job, _, base) = load_job(cmd, s, p, params.job.is_some(), params.job_path.as_ref())?;
     let tol = job.tolerance.unwrap_or(0.01);
     if !(tol.is_finite() && (TOLERANCE_RANGE.0..=TOLERANCE_RANGE.1).contains(&tol)) {
         return Err(bad(cmd, "the job's `tolerance` must be from 0.0001 to 1 mm"));

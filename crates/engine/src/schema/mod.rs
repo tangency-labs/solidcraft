@@ -62,6 +62,7 @@ pub mod cam;
 pub mod cam_adaptive;
 pub mod cam_features;
 pub mod cam_image;
+pub mod cam_picks;
 pub mod cam_rates;
 pub mod cam_sheet;
 pub mod cam_sim;

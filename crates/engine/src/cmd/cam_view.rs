@@ -153,7 +153,7 @@ fn load(s: &mut Session, p: &Value) -> Result<Value> {
     if params.resolution.is_some_and(|r| !(r.is_finite() && (1e-4..=1e4).contains(&r))) {
         return Err(bad(cmd, "`resolution` must be from 0.0001 to 10000 mm"));
     }
-    let (job, base) = load_job(cmd, p, params.job.is_some(), params.job_path.as_ref())?;
+    let (job, _, base) = load_job(cmd, s, p, params.job.is_some(), params.job_path.as_ref())?;
     let base = base.as_deref();
     let mut notes: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();

@@ -47,6 +47,7 @@ use crate::schema::cam::{
     CamPostListReply, Common, GougeAt, GougeReport, HeightsSpec, MachineSpec, Op3Spec, OperationReport, OperationSpec, Outputs, ParseErrorReport,
     PostEntry, ReadbackReport, RotaryRange, SideSpec, ToolChangeMode,
 };
+use crate::schema::cam_picks::PickResolved;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -1412,21 +1413,41 @@ fn job_name(cmd: &str, s: &Session, job: &CamJob) -> Result<String> {
     }
 }
 
-/// The job of a call (`inline` under `job`, or the file `path`) and the folder its relative
-/// paths are read from (the job file's).
-fn load_job(cmd: &str, p: &Value, inline: bool, path: Option<&String>) -> Result<(CamJob, Option<PathBuf>)> {
+/// The job of a call (`inline` under `job`, or the file `path`) as JSON, what it is called in a
+/// refusal, and the folder its relative paths are read from (the job file's).
+fn job_value(cmd: &str, p: &Value, inline: bool, path: Option<&String>) -> Result<(Value, String, Option<PathBuf>)> {
     match (inline, path) {
         (true, Some(_)) => Err(bad(cmd, "give `job` or `job_path`, not both")),
         (false, None) => Err(bad(cmd, "give the `job` (an object) or a `job_path` (a .json file)")),
-        (true, None) => Ok((parse(cmd, p.get("job").unwrap_or(&Value::Null), "`job`")?, None)),
+        (true, None) => Ok((p.get("job").cloned().unwrap_or(Value::Null), "`job`".into(), None)),
         (false, Some(path)) => {
             let raw = read_json(cmd, path, "job_path")?;
             if !raw.is_object() {
                 return Err(bad(cmd, format!("job_path {path}: the job must be a JSON object")));
             }
-            Ok((parse(cmd, &raw, &format!("job_path {path}"))?, Path::new(path).parent().map(Path::to_path_buf)))
+            Ok((raw, format!("job_path {path}"), Path::new(path).parent().map(Path::to_path_buf)))
         }
     }
+}
+
+/// The job of a call (`inline` under `job`, or the file `path`), its operations' picks found
+/// again and read as their geometry (`cam_picks.rs`), how each pick was found, and the folder its
+/// relative paths are read from.
+fn load_job(cmd: &str, s: &Session, p: &Value, inline: bool, path: Option<&String>) -> Result<(CamJob, Vec<PickResolved>, Option<PathBuf>)> {
+    let (mut value, what, base) = job_value(cmd, p, inline, path)?;
+    let job: CamJob = parse(cmd, &value, &what)?;
+    let has_picks =
+        value.get("operations").and_then(Value::as_array).is_some_and(|ops| ops.iter().any(|o| o.get("picks").is_some_and(|v| !v.is_null())));
+    if !has_picks {
+        return Ok((job, Vec::new(), base));
+    }
+    let machine = machine_of(cmd, &job, base.as_deref())?;
+    let m = picks::Model::new(cmd, s, &job, &machine)?;
+    let resolved = match &mut value {
+        Value::Object(map) => picks::resolve_job(&m, map)?,
+        _ => Vec::new(),
+    };
+    Ok((parse(cmd, &value, &what)?, resolved, base))
 }
 
 /// A job planned and its program written in memory: what `cam.job` checks and writes, and what
@@ -1603,7 +1624,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams, only: 
         }
         sheet::distinct(cmd, output.as_deref(), params.preview.as_deref(), params.setup_sheet.as_deref())?;
     }
-    let (job, base) = load_job(cmd, raw, params.job.is_some(), params.job_path.as_ref())?;
+    let (job, picks_resolved, base) = load_job(cmd, s, raw, params.job.is_some(), params.job_path.as_ref())?;
     let base = base.as_deref();
 
     let PlannedJob {
@@ -1954,6 +1975,7 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams, only: 
         images,
         warnings,
         programs: parts.into_iter().map(|w| w.part).collect(),
+        picks_resolved,
         param_warnings: Vec::new(),
     })
 }
@@ -2527,6 +2549,8 @@ fn gcode_check(_: &mut Session, p: &Value) -> Result<Value> {
 
 #[path = "cam_features.rs"]
 mod features;
+#[path = "cam_picks.rs"]
+mod picks;
 #[path = "cam_image.rs"]
 mod pictures;
 #[path = "cam_programs.rs"]

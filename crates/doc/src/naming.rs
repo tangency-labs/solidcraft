@@ -1294,6 +1294,19 @@ pub fn point_on_face(st: &ModelState, name: &str, p: Vec3) -> Option<Vec3> {
     locate_face(st, name, p).map(|hit| hit.point)
 }
 
+/// The face a stored face name finds, on the body called `body` first (see
+/// [`crate::name_lookup::locate_face_on_body`]): its body's and its own index, whether its name
+/// follows exact history, and whether `p` still lies on it.
+pub fn locate_face_named(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<(usize, usize, bool, bool)> {
+    crate::name_lookup::locate_face_on_body(st, body, name, p).map(|hit| (hit.body, hit.face, hit.verified, hit.on_point))
+}
+
+/// The edge of `b` a stored edge name finds (see [`crate::name_lookup::locate_edge`]): its index,
+/// whether the names it is found by follow exact history, and whether `near` lies on it.
+pub fn locate_edge_named(b: &ModelBody, name: &str, near: Vec3) -> Result<(usize, bool, bool), String> {
+    crate::name_lookup::locate_edge(b, name, near).map(|hit| (hit.edge, hit.verified, hit.on_point))
+}
+
 /// Resolve a legacy named face only on its recorded source body. Return the
 /// selected face index as well as the closest point, which may lie on a shared
 /// edge and therefore must not be used to pick the face a second time.

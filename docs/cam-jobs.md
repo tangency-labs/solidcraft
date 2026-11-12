@@ -218,8 +218,8 @@ mill or a bull nose; `adaptive` as a `pocket`; a `drill` with a drill, a flat en
 
 Every operation has `name`, `type`, `tool` (a tool's `number`), and optionally `spindle_rpm`,
 `feeds: {cut, plunge, descent?}`, `coolant` (default false), `gouge_check` (default true: see
-The checks) and `enabled` (default true: `false` keeps it in the job but leaves it out of the
-program). `heights` are `{clearance, retract, top,
+The checks), `enabled` (default true: `false` keeps it in the job but leaves it out of the
+program) and `picks` (the faces or edges it works on, see [Picks](#picks)). `heights` are `{clearance, retract, top,
 bottom}` in work coordinates: all four on a sketch or polygon; on a `feature` (see
 [Operations on features](#operations-on-features)) any of them left out come from it.
 
@@ -1351,3 +1351,37 @@ have, and says which axis the features were found along.
 An operation here runs with every rotary at 0, so a feature on another side of a 4th-axis part
 (its `a_deg` not 0) is refused with its A angle. Fillets, chamfers, surfaces and turned diameters
 have no outline: a 2D operation on one is refused, saying where the area is.
+
+### Picks
+
+An operation can name its geometry by the design's persistent face and edge names instead of a
+sketch, a polygon or a feature id (which renumber when the model gains or loses a hole):
+
+```json
+"picks": [
+  {"body": "Bracket", "face": "F12:side:c3", "at": [10.0, -4.0, 7.5]},
+  {"body": "Bracket", "edge": "F2:top|F7:side:l4", "at": [-20.0, 15.0, 20.0]}
+]
+```
+
+`face` and `edge` are the names `model.faces` and `model.edges` give; `at` is a point on the face
+or edge (design coordinates), where it is looked for when the name finds nothing. Each time the
+job is planned every pick is found again: by its name, else by the exact face its point lies on
+(the face's surface and exact extent, never the display mesh), and is `lost` when neither finds
+it. The reply's `picks_resolved` says how (`name`, `point` or `lost`) and which `cam.features` id
+it belongs to. A lost pick refuses the job, naming the operation, and nothing is written. One
+found by its position, or by a name worked out from the shape rather than exact history, has a
+`note` to check, and so has one found by its name whose face is no longer where it was picked
+(its `at` is off the face by more than the pick tolerance, by exact geometry: a pocket made
+deeper, a step raised, a face made smaller), "has moved since it was picked", so a changed depth
+is seen before a program is written. An operation turned off (`enabled: false`) is neither
+planned nor written, so its picks are not looked for and a lost one stops nothing. The job as
+stored keeps the picks; what the planners read is worked out from them:
+
+| Operation | A pick means |
+| --- | --- |
+| `pocket` | the feature the face or edge is part of, a pocket first, then a hole, then a face: `feature` |
+| `contour` | the same, an outline first (the part's side or top), then a pocket, a hole, a face: `feature` |
+
+The picks of one operation must be on one feature and one side of the part. `picks` with
+`sketch`, `polygon` or `feature` is refused.
