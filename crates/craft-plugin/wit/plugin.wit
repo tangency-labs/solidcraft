@@ -1,5 +1,8 @@
-package solidcraft:plugin@1.0.0;
+package craft:plugin@0.1.0;
 
+// Capability `commands@0.1`: every interface in this file. A plugin names it in its manifest's
+// `capabilities` list. Later capabilities (ui, viewport, formats, storage) arrive as their own
+// interfaces. While the version is 0.x, a minor version may break the one before it.
 // App commands and their schemas are data; this world never names app types.
 interface types {
     type json = string;
@@ -15,7 +18,8 @@ interface types {
         cancelled,
     }
 }
-interface engine {
+// The app's command surface: the same commands, inputs and results its MCP clients get.
+interface commands {
     use types.{json, plugin-error};
     run: func(command: string, args: json) -> result<json, plugin-error>;
 }
@@ -35,15 +39,16 @@ interface files {
 interface clock {
     now: func() -> u64;
 }
-interface command {
+// What the plugin exports: its manifest's entries, called by name.
+interface entry {
     use types.{json, plugin-error};
     execute: func(entry: string, params: json) -> result<json, plugin-error>;
 }
 world command-plugin {
-    import engine;
+    import commands;
     import log;
     import control;
     import files;
     import clock;
-    export command;
+    export entry;
 }

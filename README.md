@@ -112,8 +112,9 @@ Format and example: [docs/scripts.md](docs/scripts.md). Pages can also be driven
 Plugins add separately distributed behaviour without compiling that behaviour into SolidCraft.
 The initial runtime loads **WebAssembly components**, explicitly requested by the user. Merely
 installing a folder, enabling it in Preferences, or opening a design never executes plugin code.
-The interface is experimental (`solidcraft:plugin@1.0.0`); use a plugin built for this API and
-review it again after an update. The desktop app and headless CLI use the same commands. Browser
+The interface is experimental: WIT package `craft:plugin@0.1.0`, capability `commands@0.1`. While
+it is 0.x a minor version may break the one before it; the host refuses a plugin that needs a
+capability it does not have, in plain words. Review a plugin again after an update. The desktop app and headless CLI use the same commands. Browser
 execution, automatic downloads and updates, custom panels, and plugin-defined parametric feature
 types are future work.
 
@@ -134,8 +135,8 @@ repository, as specified in [the plugin RFC](docs/rfcs/0002-plugins.md).
   "name": "Example box",
   "version": "0.1.0",
   "description": "Create an ordinary editable box from dimensions.",
+  "capabilities": ["commands@0.1"],
   "runtime": {
-    "api": "solidcraft:plugin@1.0.0",
     "module": "plugin.wasm",
     "entries": ["make"],
     "commands": ["solid.box"],
@@ -219,11 +220,16 @@ or native CAD work. The independent maximum execution deadline stays 30 seconds.
 
 ### Permissions, results and saved designs
 
-A plugin can call only exact built-in command ids listed in its manifest **and** admitted by the
-host's policy. Recursive plugin calls, design replacement, built-in file commands, process launches
-and network commands are refused. Filesystem calls require matching manifest permissions and approved
-folder grants. The clock requires its manifest permission; otherwise it returns a fixed epoch. No WASI,
-socket or process API is linked; persistent plugin storage is not supported in this first runtime.
+A plugin can call any command in the MCP catalog whose exact id its manifest lists. Commands that
+reach past the open design are grouped: `file` (saving, exporting, importing, inserting from files,
+libraries), `doc` (opening or switching designs), `app` (settings, window, diagnostics) and `plugin`
+(inspecting or running plugins). Each group is refused unless the manifest requests it in
+`runtime.permissions.command_groups` and the user grants it; this version has no grant UI yet.
+Filesystem calls require matching manifest permissions and approved folder grants. The clock
+requires its manifest permission; otherwise it returns a fixed epoch. No WASI, socket or process
+API is linked. A design container reserves `plugins/<plugin-id>/` for a plugin's own data, kept
+and saved back untouched when the plugin is missing; plugins cannot read or write it until the
+`storage` capability arrives.
 Inspection commands can disclose model data, so review them as permissions too. In particular, the optional
 `model.mesh` permission exposes the requested body's evaluated vertices and triangles in its owning
 component's coordinates (millimetres), with explicit transfer limits. It performs no conversion.

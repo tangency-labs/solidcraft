@@ -2,8 +2,8 @@ use super::*;
 use serde_json::{Value, json};
 
 fn manifest() -> Value {
-    json!({"id":"sample", "name":"Sample", "version":"0.1.0", "runtime":{
-        "api":API,"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],
+    json!({"id":"sample", "name":"Sample", "version":"0.1.0", "capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","entries":["make"],"commands":["solid.box"],
         "limits":{"fuel":100000,"memory_mib":1,"deadline_ms":5000}}})
 }
 #[test]
@@ -24,7 +24,11 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
         |m: &mut Value| m["runtime"]["limits"]["memory_mib"] = json!(4097),
         |m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(0),
         |m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(30_001),
-        |m: &mut Value| m["runtime"]["api"] = json!("solidcraft:plugin@99.0.0"),
+        |m: &mut Value| m["runtime"]["api"] = json!("solidcraft:plugin@1.0.0"),
+        |m: &mut Value| m["capabilities"] = json!(["commands@0.2"]),
+        |m: &mut Value| m["capabilities"] = json!([]),
+        |m: &mut Value| m["runtime"]["commands"] = json!(["solid.no_such_command"]),
+        |m: &mut Value| m["runtime"]["permissions"] = json!({"command_groups":["network"]}),
         |m: &mut Value| m["network"] = json!(true),
         |m: &mut Value| m["permissions"] = json!(["net"]),
         |m: &mut Value| m["runtime"]["permissions"] = json!(["net"]),
@@ -35,6 +39,84 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
         assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_err(), "{m}");
     }
     assert!(parse_manifest(&vec![b' '; MAX_MANIFEST_BYTES + 1], "sample").is_err());
+}
+#[test]
+fn capability_refusals_are_plain_and_name_solidcraft() {
+    let refusal = |capabilities: Value| {
+        let mut m = manifest();
+        m["capabilities"] = capabilities;
+        parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap_err().to_string()
+    };
+    assert_eq!(refusal(json!(["commands@0.2"])), "plugin: needs commands 0.2; update SolidCraft or the plugin");
+    assert!(refusal(json!(["commands@0.1", "viewport@0.1"])).contains("needs viewport 0.1, which this version of SolidCraft does not have"));
+    let mut old = manifest();
+    old["runtime"]["api"] = json!("solidcraft:plugin@1.0.0");
+    let old = parse_manifest(&serde_json::to_vec(&old).unwrap(), "sample").unwrap_err().to_string();
+    assert!(old.contains("was built for solidcraft:plugin@1.0.0") && old.contains("update the plugin"), "{old}");
+}
+#[test]
+fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
+    let host = SolidCraftHost { session: Session::default(), transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+    let catalog = host.command_catalog();
+    let built = crate::command_specs().into_iter().filter(|c| c.planned.is_none()).count();
+    assert_eq!(catalog.len(), built, "the plugin catalog is the whole MCP catalog");
+    let group = |id: &str| catalog.iter().find(|c| c.name == id).unwrap_or_else(|| panic!("{id} is in the catalog")).group.clone();
+    for (id, expected) in [
+        ("solid.box", None),
+        ("sketch.line", None),
+        ("timeline.inspect", None),
+        ("parameters.change", None),
+        ("file.save", Some("file")),
+        ("file.export_step", Some("file")),
+        ("sketch.insert_dxf", Some("file")),
+        ("canvas.insert", Some("file")),
+        ("library.export", Some("file")),
+        ("doc.open", Some("doc")),
+        ("settings.get", Some("app")),
+        ("plugin.run", Some("plugin")),
+    ] {
+        if crate::find_command(id).is_some() {
+            assert_eq!(group(id).as_deref(), expected, "{id}");
+        }
+    }
+    for c in &catalog {
+        if let Some(g) = &c.group {
+            assert!(COMMAND_GROUPS.contains(&g.as_str()), "{}: {g}", c.name);
+        }
+    }
+    // A manifest names the group for each sensitive command it lists; then it loads.
+    let mut m = manifest();
+    m["runtime"]["commands"] = json!(["solid.box", "file.export_step"]);
+    let refused = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap_err().to_string();
+    assert!(refused.contains("needs \"file\" in runtime.permissions.command_groups"), "{refused}");
+    m["runtime"]["permissions"] = json!({"command_groups":["file"]});
+    assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
+}
+#[test]
+fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees_only_its_folders() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-groups-{}", std::process::id()));
+    let granted = root.join("granted");
+    std::fs::create_dir_all(&granted).unwrap();
+    let mut host = SolidCraftHost { session: Session::default(), transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+    host.begin_transaction().unwrap();
+    s_box(&mut host);
+    let save = |host: &mut SolidCraftHost, path: &std::path::Path| host.run_command("file.save_as", &json!({"path": path.to_string_lossy()}));
+    let refused = save(&mut host, &granted.join("a.sc")).unwrap_err();
+    assert!(matches!(&refused, HostError::PermissionDenied { permission } if permission.contains("`file` permission")), "{refused}");
+    for id in ["doc.open", "plugin.list"] {
+        assert!(matches!(host.run_command(id, &json!({})), Err(HostError::PermissionDenied { .. })), "{id}");
+    }
+    host.groups.insert("file".into());
+    host.file_folders = vec![granted.clone()];
+    save(&mut host, &granted.join("a.sc")).unwrap();
+    assert!(granted.join("a.sc").is_file());
+    let outside = save(&mut host, &root.join("outside.sc")).unwrap_err();
+    assert!(matches!(outside, HostError::CommandFailed { .. }), "{outside}");
+    assert!(!root.join("outside.sc").exists());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+fn s_box(host: &mut SolidCraftHost) {
+    host.run_command("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
 }
 #[test]
 fn disabled_ids_survive_scratch_and_new_design() {
@@ -95,7 +177,7 @@ mod native {
         let (package, version) = API.split_once('@').unwrap();
         let template = component_template();
         // Keep exactly the shared WIT types, then exercise the real files interface.
-        let (types, _) = template.split_once(&format!("  (type $ty-{package}/engine@{version}")).unwrap();
+        let (types, _) = template.split_once(&format!("  (type $ty-{package}/commands@{version}")).unwrap();
         let (operation, result, parameters, arguments) = if write {
             ("write-file", "(result (error $error))", "(param \"data\" (list u8))", "i32.const 128 i32.const 7")
         } else {
@@ -143,7 +225,7 @@ mod native {
     (export "json" (type $json))
     (export "plugin-error" (type $plugin-error))
     (export "execute" (func $execute)))
-  (export "{package}/command@{version}" (instance $command))
+  (export "{package}/entry@{version}" (instance $command))
 )"#
         );
         wat::parse_str(source).unwrap()
@@ -502,7 +584,7 @@ mod native {
                     });
                     assert_eq!(std::fs::read(&target).unwrap(), b"private contents");
                 }
-                let host = SolidCraftHost { session: s, transaction: None, sketch_exits: Vec::new() };
+                let host = SolidCraftHost { session: s, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
                     assert!(host.authorize_file_path(&target, write).is_ok(), "explicit scope grants hidden access");
                 });
@@ -614,12 +696,12 @@ fn host_resource_policy_is_exact_user_state_and_never_design_data() {
     s.execute("file.new", &json!({})).unwrap();
     assert_eq!(s.plugin_limits, policy);
     assert!(!s.doc.to_json().contains("max_fuel"));
-    assert!(!allowed_command("plugin.configure"));
+    assert!(command_group("plugin.configure") == Some("plugin") && catalog_command("plugin.configure").is_none());
 }
 
 #[test]
 fn command_effects_are_explicit_and_independent_of_undo() {
-    let host = SolidCraftHost { session: Session::default(), transaction: None, sketch_exits: Vec::new() };
+    let host = SolidCraftHost { session: Session::default(), transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
     let catalog = host.command_catalog();
     for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Edit, "{command}");
@@ -644,7 +726,7 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true },
         FileGrant { name: "hidden".into(), folder: root.join(".hidden"), read: true, write: false },
     ];
-    let host = SolidCraftHost { session, transaction: None, sketch_exits: Vec::new() };
+    let host = SolidCraftHost { session, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
     solidcraft_io::vfs::scoped(None, || {
         for write in [false, true] {
             assert!(host.authorize_file_path(&root.join("public.txt"), write).is_ok());

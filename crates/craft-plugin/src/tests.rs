@@ -2,8 +2,8 @@ use super::*;
 use serde_json::json;
 
 fn manifest() -> Value {
-    json!({"id":"sample","name":" Sample ","version":" 1 ","runtime":{
-        "api":API,"module":"plugin.wasm","entries":["make"],"commands":["app.make"]
+    json!({"id":"sample","name":" Sample ","version":" 1 ","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","entries":["make"],"commands":["app.make"]
     }})
 }
 fn parse(value: &Value) -> Result<Manifest> {
@@ -157,4 +157,43 @@ fn explicit_folder_grants_allow_hidden_ancestors_but_refuse_hidden_children() {
     assert!(host.authorize_file_path(&folder.join(".nested/ordinary.txt"), false).is_ok());
     assert!(host.authorize_file_path(&folder.join(".nested/ordinary.txt"), true).is_err());
     assert!(Host(vec![]).authorize_file_path(&folder.join("ordinary.txt"), false).is_err());
+}
+
+#[test]
+fn capabilities_are_checked_at_load_with_plain_refusals() {
+    assert!(WIT.starts_with("package craft:plugin@0.1.0;") && API == "craft:plugin@0.1.0");
+    // The commands capability is the WIT package's version.
+    let (_, version) = API.split_once('@').unwrap();
+    let (major, minor) = CAPABILITIES.iter().find(|(name, _)| *name == "commands").unwrap().1;
+    assert!(version.starts_with(&format!("{major}.{minor}.")));
+    let caps = |list: &[&str]| list.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+    assert!(check_capabilities(&caps(&["commands@0.1"]), "Craft").is_ok());
+    assert!(check_capabilities(&caps(&["commands@0.1.3"]), "Craft").is_ok());
+    let refused = |list: &[&str]| match check_capabilities(&caps(list), "Craft") {
+        Err(HostError::UnsupportedCapability { reason, .. }) => reason,
+        other => panic!("{list:?}: {other:?}"),
+    };
+    assert_eq!(refused(&["commands@0.2"]), "needs commands 0.2; update Craft or the plugin");
+    assert_eq!(refused(&["commands@1.0"]), "needs commands 1.0; update Craft or the plugin");
+    assert!(refused(&["commands@0.0"]).contains("was built for commands 0.0") && refused(&["commands@0.0"]).ends_with("update the plugin"));
+    assert!(refused(&["ui@0.1"]).starts_with("needs ui 0.1, which this version of Craft does not have"));
+    for bad in [&["commands"][..], &["commands@x"], &["commands@0.1", "commands@0.1"], &["Commands@0.1"], &["commands@0.1.2.3"]] {
+        assert!(matches!(check_capabilities(&caps(bad), "Craft"), Err(HostError::InvalidManifest { .. })), "{bad:?}");
+    }
+    // A runtime needs the commands capability; inert metadata needs none.
+    let mut m = manifest();
+    m.as_object_mut().unwrap().remove("capabilities");
+    assert!(matches!(parse_manifest(m.to_string().as_bytes(), "sample"), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    assert!(parse_manifest(br#"{"id":"sample","name":"Sample","version":"1"}"#, "sample").is_ok());
+    // A plugin from before capabilities is told what it was built for, not a parse error.
+    let mut old = manifest();
+    old["runtime"]["api"] = json!("solidcraft:plugin@1.0.0");
+    let refusal = parse_manifest(old.to_string().as_bytes(), "sample").unwrap_err().to_string();
+    assert!(refusal.contains("was built for solidcraft:plugin@1.0.0") && refusal.contains("craft:plugin@0.1.0"), "{refusal}");
+    // Sensitive command groups are named, bounded requests.
+    let mut groups = manifest();
+    groups["runtime"]["permissions"] = json!({"command_groups":["file","doc"]});
+    assert_eq!(parse_manifest(groups.to_string().as_bytes(), "sample").unwrap().runtime.unwrap().permissions.command_groups.len(), 2);
+    groups["runtime"]["permissions"] = json!({"command_groups":["File"]});
+    assert!(parse_manifest(groups.to_string().as_bytes(), "sample").is_err());
 }

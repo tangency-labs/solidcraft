@@ -32,9 +32,12 @@ Native execution is provided on x86-64 and AArch64. On other architectures, incl
 browser `wasm32`, functions return the supplied host and `HostError::Trap` explaining that
 execution is unsupported. There is no browser execution backend.
 
-The [WIT](../craft-plugin/wit/plugin.wit) imports engine commands, logging, progress,
+The [WIT](../craft-plugin/wit/plugin.wit) imports app commands, logging, progress,
 cancellation, named files and a clock. No WASI is linked. Commands are intersected with
-the host catalog; read entries cannot invoke commands marked edit. File access requires
+the host catalog; read entries cannot invoke commands marked edit, and a command in a
+sensitive group needs that group requested by the manifest and granted by the host. A
+component importing another version of the `craft:plugin` interfaces is refused before
+instantiation with `HostError::UnsupportedCapability`. File access requires
 matching approved grants and `PluginHost::authorize_file_path` approval for each complete
 path. A symbolic link (or Windows junction) anywhere in a requested path inside a granted
 folder is refused, not followed. There is no ambient filesystem access. Wall time requires

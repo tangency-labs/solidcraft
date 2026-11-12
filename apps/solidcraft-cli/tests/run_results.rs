@@ -852,7 +852,7 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
         );
     assert!(wat.contains("memory.grow"), "the fixture must actually request more than 128 MiB");
     std::fs::write(package.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
-    let manifest = json!({"id":"sample","name":"Sample","version":"1","runtime":{"api":solidcraft_engine::plugin::API,"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
     std::fs::write(package.join("plugin.json"), manifest.to_string()).unwrap();
     let args = json!({"path":package}).to_string();
     let inspected = json_output(cli().args(["exec", "plugin.inspect", &args]).output().unwrap());

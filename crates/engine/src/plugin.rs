@@ -8,8 +8,8 @@ pub use craft_plugin::{
 use craft_plugin::{CommandSchema, HostError, PluginHost};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 static PROCESS_HOST_LIMITS: std::sync::OnceLock<HostLimits> = std::sync::OnceLock::new();
 pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
@@ -28,6 +28,9 @@ fn error(s: impl Into<String>) -> EngineError {
 pub struct AppState {
     pub packages: BTreeMap<String, String>,
     pub file_grants: Vec<FileGrant>,
+    /// Sensitive command groups ([`COMMAND_GROUPS`]) the user granted. A plugin calls a grouped
+    /// command only when its manifest asks for the group too.
+    pub command_groups: BTreeSet<String>,
 }
 
 impl AppState {
@@ -39,35 +42,77 @@ impl AppState {
 }
 
 pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
-    let manifest = craft_plugin::parse_manifest(text, folder)?;
-    if manifest.runtime.as_ref().is_some_and(|r| r.commands.iter().any(|c| !allowed_command(c))) {
-        return Err(HostError::InvalidManifest {
-            field: "runtime.commands".into(),
-            reason: "commands include an unavailable or forbidden built-in command".into(),
+    let manifest = craft_plugin::parse_manifest_for(text, folder, "SolidCraft")?;
+    let refuse = |field: &str, reason: String| -> EngineError { HostError::InvalidManifest { field: field.into(), reason }.into() };
+    if let Some(runtime) = &manifest.runtime {
+        if let Some(group) = runtime.permissions.command_groups.iter().find(|g| !COMMAND_GROUPS.contains(&g.as_str())) {
+            return Err(refuse(
+                "runtime.permissions.command_groups",
+                format!("unknown command group `{group}`; SolidCraft has {}", COMMAND_GROUPS.join(", ")),
+            ));
         }
-        .into());
+        for command in &runtime.commands {
+            if catalog_command(command).is_none() {
+                return Err(refuse(
+                    "runtime.commands",
+                    format!("uses `{command}`, which this version of SolidCraft does not have; update SolidCraft or the plugin"),
+                ));
+            }
+            if let Some(group) = command_group(command)
+                && !runtime.permissions.command_groups.contains(group)
+            {
+                return Err(refuse(
+                    "runtime.commands",
+                    format!("`{command}` needs \"{group}\" in runtime.permissions.command_groups"),
+                ));
+            }
+        }
     }
     Ok(manifest)
 }
-/// Positive host policy, intersected with the manifest. New command families require review.
-pub fn allowed_command(id: &str) -> bool {
-    let family = id.starts_with("solid.") || id.starts_with("sketch.");
-    let explicit = matches!(
-        id,
-        "parameters.add"
-            | "parameters.change"
-            | "parameters.delete"
-            | "timeline.add"
-            | "timeline.inspect"
-            | "timeline.redefine"
-            | "timeline.delete"
-            | "document.inspect"
-            | "model.faces"
-            | "model.edges"
-            | "model.mesh"
-            | "inspect.measure"
-    );
-    (family || explicit) && !id.starts_with("sketch.insert_") && crate::find_command(id).is_some()
+
+/// The sensitive command groups. Each reaches past the open design and is refused unless the
+/// manifest asks for it and the user grants it, as file folders are:
+/// - `file`: reads or writes files (save, export, import, insert from a file, libraries);
+/// - `doc`: opens, creates, recovers or switches designs;
+/// - `app`: app settings, the window and diagnostics, outside any design;
+/// - `plugin`: inspects or runs plugins.
+pub const COMMAND_GROUPS: &[&str] = &["app", "doc", "file", "plugin"];
+
+/// Commands outside the `file.` family that read or write files.
+const FILE_COMMANDS: &[&str] = &[
+    "canvas.insert",
+    "component.insert_design",
+    "motion.export",
+    "motion.export_animation",
+    "parameters.export",
+    "parameters.import",
+    "parts.insert",
+    "pointcloud.insert",
+    "pointcloud.reload",
+    "render.export",
+    "sheet.export_bend_table",
+    "sheet.export_dxf",
+    "sketch.export_dxf",
+    "timeline.export_script",
+];
+
+/// The sensitive group of a command, or `None` when it acts on the open design alone.
+pub fn command_group(id: &str) -> Option<&'static str> {
+    let family = id.split_once('.').map_or(id, |(family, _)| family);
+    match family {
+        "plugin" => Some("plugin"),
+        "doc" => Some("doc"),
+        "file" | "library" => Some("file"),
+        "settings" | "ui" | "diagnostics" => Some("app"),
+        _ if FILE_COMMANDS.contains(&id) || id.starts_with("sketch.insert_") => Some("file"),
+        _ => None,
+    }
+}
+
+/// A command of the MCP catalog: every command that is built, by its exact id.
+fn catalog_command(id: &str) -> Option<&'static crate::CommandSpec> {
+    crate::command_specs().into_iter().find(|c| c.id == id && c.planned.is_none())
 }
 
 pub struct Package {
@@ -108,8 +153,18 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
+        // What this call may reach: the groups both the manifest asks for and the user granted,
+        // and for `file` commands the granted folders the manifest may both read and write.
+        let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&session.plugin_state.command_groups).cloned().collect();
+        let host = SolidCraftHost { session: session.scratch(), transaction: None, sketch_exits: Vec::new(), groups, file_folders: Vec::new() };
+        let file_folders = host
+            .granted_folders()
+            .into_iter()
+            .filter(|g| g.read && g.write && rt.permissions.files.iter().any(|r| r.name == g.name && r.read && r.write))
+            .map(|g| g.folder)
+            .collect();
         let (host, result) = craft_plugin_wasm::run(
-            SolidCraftHost { session: session.scratch(), transaction: None, sketch_exits: Vec::new() },
+            SolidCraftHost { file_folders, ..host },
             &package.manifest,
             &package.component,
             entry,
@@ -143,29 +198,45 @@ pub struct SolidCraftHost {
     pub session: Session,
     transaction: Option<Session>,
     sketch_exits: Vec<Option<u64>>,
+    /// Granted sensitive command groups, for this call's manifest.
+    groups: BTreeSet<String>,
+    /// The file scope of a granted `file` command; every other command has none.
+    file_folders: Vec<PathBuf>,
 }
 impl PluginHost for SolidCraftHost {
     fn command_catalog(&self) -> Vec<CommandSchema> {
         crate::command_specs()
             .iter()
-            .filter(|c| allowed_command(c.id))
+            .filter(|c| c.planned.is_none())
             .map(|c| CommandSchema {
                 name: c.id.into(),
                 input_schema: c.contract.map(|c| c.input_schema().to_value()).unwrap_or_else(|| json!({"type":"object"})),
                 output_schema: c.output.map(|f| f().to_value()).unwrap_or(json!({})),
                 effect: c.effect,
+                group: command_group(c.id).map(String::from),
             })
             .collect()
     }
     fn run_command(&mut self, name: &str, params: &Value) -> craft_plugin::Result<Value> {
-        if !allowed_command(name) {
+        if catalog_command(name).is_none() {
             return Err(HostError::PermissionDenied { permission: format!("command {name} is not granted") });
         }
+        let group = command_group(name);
+        if let Some(group) = group
+            && !self.groups.contains(group)
+        {
+            return Err(HostError::PermissionDenied { permission: format!("command {name} needs the `{group}` permission, which is not granted") });
+        }
+        // Only a granted `file` or `doc` command reaches files, and only the folders granted for it.
+        let scope = match group {
+            Some("file" | "doc") => solidcraft_io::vfs::PathScope::new(self.file_folders.iter().cloned()),
+            _ => Default::default(),
+        };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
         let before = s.doc.clone();
         let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
         // Even implicit font and linked-design reads have no authority from a command grant.
-        let reply = solidcraft_io::vfs::scoped(Some(Default::default()), || s.execute(name, params))
+        let reply = solidcraft_io::vfs::scoped(Some(scope), || s.execute(name, params))
             .map_err(|e| HostError::CommandFailed { command: name.into(), reason: e.to_string() })?;
         if let Some(failed) = s
             .model
@@ -209,6 +280,9 @@ impl PluginHost for SolidCraftHost {
         self.transaction = None;
         self.sketch_exits.clear();
         Ok(())
+    }
+    fn granted_command_groups(&self) -> BTreeSet<String> {
+        self.groups.clone()
     }
     fn granted_folders(&self) -> Vec<FileGrant> {
         let scope = solidcraft_io::vfs::current_scope();

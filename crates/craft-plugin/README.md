@@ -22,7 +22,10 @@ The app implements `PluginHost` and defines command policy, approval and transac
 grants. Its default denies hidden child names unless a more specific approved folder grant
 covers them; an app may override it to enforce its explicit scope policy.
 
-The [WIT](wit/plugin.wit) declares `solidcraft:plugin@1.0.0`, world `command-plugin`.
+The [WIT](wit/plugin.wit) declares `craft:plugin@0.1.0`, world `command-plugin`: the
+capability `commands@0.1` (`CAPABILITIES`). A manifest lists the capabilities it needs
+(`"capabilities": ["commands@0.1"]`); `check_capabilities` refuses an unknown or newer one with
+`HostError::UnsupportedCapability`. While a version is 0.x, minors may break each other.
 The [Wasm runtime](../craft-plugin-wasm/README.md) begins an app transaction and requests
 commit or rollback after guest execution. It stages granted file writes until the guest
 succeeds and the app commits. File publication after app commit is not atomic across
@@ -36,7 +39,9 @@ Invocation defaults are 10,000,000 fuel, 64 MiB memory and a 5000 ms deadline.
 budgets against their ceilings before execution. Fuel must be positive, memory is
 1..4096 MiB and the deadline is 1..30000 ms. Manifests are capped at 16 KiB.
 
-Commands are exact ids, intersected with the app catalog. Folder requests alone grant
+Commands are exact ids, intersected with the app catalog. A catalog command may carry a
+sensitive `group`; the guest calls it only when `permissions.command_groups` requests the
+group and `PluginHost::granted_command_groups` grants it. Folder requests alone grant
 nothing: the app supplies matching `FileGrant` values. Clock permission allows wall time;
 without it, the runtime returns a fixed epoch. Requests for `net` are refused.
 Parsing a manifest neither approves nor executes its component. These contracts have no

@@ -2,7 +2,7 @@ use crate::RuntimeOptions;
 use cap_std::fs::{Dir, OpenOptions};
 use craft_plugin::{CommandSchema, Effect, HostError, Limits, MAX_COMPONENT_BYTES, MAX_JSON_BYTES, Manifest, PluginHost, Result};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Component as PathComponent, Path, PathBuf};
 use std::sync::{
@@ -38,6 +38,9 @@ fn wit_error(error: HostError) -> PluginError {
         HostError::InvalidInput { field, reason } => PluginError::InvalidInput(types::FieldFailure { field, reason }),
         HostError::Trap { reason } => PluginError::Trap(reason),
         HostError::Cancelled => PluginError::Cancelled,
+        HostError::UnsupportedCapability { reason, .. } => {
+            PluginError::InvalidManifest(types::FieldFailure { field: "capabilities".into(), reason })
+        }
     }
 }
 fn host_error(error: PluginError) -> HostError {
@@ -64,6 +67,8 @@ struct PendingWrite {
 struct State<H> {
     host: H,
     commands: BTreeMap<String, CommandSchema>,
+    /// Sensitive command groups both the manifest requests and the app grants.
+    groups: BTreeSet<String>,
     effect: Effect,
     folders: BTreeMap<String, Folder>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
@@ -131,7 +136,7 @@ impl<H: PluginHost> State<H> {
     }
 }
 impl<H: PluginHost> types::Host for State<H> {}
-impl<H: PluginHost> engine::Host for State<H> {
+impl<H: PluginHost> commands::Host for State<H> {
     fn run(&mut self, command: String, args: String) -> std::result::Result<String, PluginError> {
         self.check()?;
         if args.len() > MAX_JSON_BYTES {
@@ -140,6 +145,12 @@ impl<H: PluginHost> engine::Host for State<H> {
         let Some(schema) = self.commands.get(&command) else {
             return Err(self.fail(HostError::PermissionDenied { permission: format!("command {command} is not granted") }));
         };
+        if let Some(group) = schema.group.as_deref()
+            && !self.groups.contains(group)
+        {
+            let permission = format!("command {command} needs the `{group}` permission (runtime.permissions.command_groups), which is not granted");
+            return Err(self.fail(HostError::PermissionDenied { permission }));
+        }
         if self.effect == Effect::Read && schema.effect != Effect::Read {
             return Err(self.fail(HostError::PermissionDenied { permission: format!("edit command {command} from read entry") }));
         }
@@ -297,6 +308,15 @@ fn reject_network_imports(engine: &Engine, component: &Component) -> Result<()> 
         }
         *remaining -= 1;
         let package = craft_plugin::API.split_once('@').map(|(package, _)| package).unwrap_or(craft_plugin::API);
+        if let Some(version) = name.strip_prefix(&format!("{package}/")).and_then(|rest| rest.split_once('@')).map(|(_, version)| version)
+            && Some(version) != craft_plugin::API.split_once('@').map(|(_, version)| version)
+        {
+            let version: String = version.chars().take(32).collect();
+            return Err(HostError::UnsupportedCapability {
+                capability: format!("{package}@{version}"),
+                reason: format!("built against {package}@{version}, and this host runs {}; update the app or the plugin", craft_plugin::API),
+            });
+        }
         if name == "fetch" || name.starts_with("wasi:sockets/") || name.starts_with("wasi:http/") || name.starts_with(&format!("{package}/fetch")) {
             return Err(HostError::PermissionDenied { permission: format!("network import is forbidden: {name}") });
         }
@@ -348,6 +368,7 @@ pub(super) fn run<H: PluginHost + 'static>(
         let engine = Engine::new(&config).map_err(|e| trap(e.to_string()))?;
         let component = Component::from_binary(&engine, bytes).map_err(|e| trap(format!("component compilation failed: {e:#}")))?;
         let commands = host.command_catalog().into_iter().filter(|s| runtime.commands.contains(&s.name)).map(|s| (s.name.clone(), s)).collect();
+        let groups: BTreeSet<String> = host.granted_command_groups().intersection(&runtime.permissions.command_groups).cloned().collect();
         let mut folders = BTreeMap::new();
         for granted in host.granted_folders() {
             if let Some(request) = runtime.permissions.files.iter().find(|r| r.name == granted.name) {
@@ -363,7 +384,7 @@ pub(super) fn run<H: PluginHost + 'static>(
             return Err(HostError::Cancelled);
         }
         host.begin_transaction()?;
-        Ok((runtime, entry, params, engine, component, commands, folders))
+        Ok((runtime, entry, params, engine, component, (commands, groups), folders))
     })();
     let (runtime, entry, params, engine, component, commands, folders) = match prepared {
         Ok(prepared) => prepared,
@@ -395,13 +416,14 @@ fn execute<H: PluginHost + 'static>(
     params: String,
     engine: Engine,
     component: Component,
-    commands: BTreeMap<String, CommandSchema>,
+    (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
     folders: BTreeMap<String, Folder>,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
     let state = State {
         host,
         commands,
+        groups,
         effect: entry.effect,
         folders,
         staged: BTreeMap::new(),

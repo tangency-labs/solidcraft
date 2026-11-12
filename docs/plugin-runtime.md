@@ -32,8 +32,9 @@ supplies an owned scratch session and adopts its edits only after a successful c
    limiter, and links only the published component interfaces. No WASI is linked. Reserved
    sockets, HTTP and fetch imports are refused even if unused. Instantiation and the entry
    share the same execution budget, including component start functions.
-5. `engine.run` reaches `PluginHost::run_command`, which SolidCraft implements with
-   `Session::execute` on a scratch session, under an empty file scope.
+5. `commands.run` reaches `PluginHost::run_command`, which SolidCraft implements with
+   `Session::execute` on a scratch session, under an empty file scope (a granted `file` or
+   `doc` command sees only the granted folders; see below).
    Explicit paths and implicit reads during feature evaluation cannot inherit the caller's broader
    file access. Results are bounded JSON. Refused calls poison the transaction, even if guest code
    catches the error and returns success.
@@ -55,16 +56,23 @@ lowercase letters, digits and hyphens, without a leading/trailing hyphen, and mu
 name. Names are at most 80 characters; versions at most 32; descriptions at most 240. Control
 characters and unknown fields are refused. The manifest has a 16 KiB byte cap.
 
+`capabilities` lists the host capabilities the plugin needs, as `name@major.minor`. A package with
+a `runtime` needs `"commands@0.1"`. The host checks the list when it reads the manifest
+(inspection, listing, running) and refuses an unknown or newer capability with a typed
+`unsupported_capability` error in plain words, for example `needs commands 0.2; update SolidCraft
+or the plugin`. Nothing crashes and no code runs. A manifest from the earlier preview, which named
+`runtime.api: "solidcraft:plugin@1.0.0"`, is told what it was built for. A component importing
+another version of the `craft:plugin` interfaces is refused the same way before it is instantiated.
+
 `runtime` is optional for metadata-only packages. Executable packages declare:
 
 | Field | Meaning |
 |---|---|
-| `api` | Exactly the package identifier declared in the [WIT](../crates/craft-plugin/wit/plugin.wit) |
 | `module` | One lowercase `.wasm` file name within the package; no directories |
 | `entries` | 1..32 distinct entries with `name`, `effect: read \| edit`, `input_schema` and optional `slots`; legacy string ids default to edit |
-| `commands` | At most 128 exact existing built-in command ids, intersected with host policy |
+| `commands` | At most 128 exact command ids from the app's MCP catalog; a sensitive command also needs its group in `permissions.command_groups` |
 | `limits` | Optional object with all of `fuel`, `memory_mib`, `deadline_ms`; omitted object uses defaults |
-| `permissions` | Optional object: `files` requests named read/write folder grants, `clock` requests wall clock; `net: true` is refused |
+| `permissions` | Optional object: `files` requests named read/write folder grants, `clock` requests wall clock, `command_groups` requests sensitive command groups; `net: true` is refused |
 
 Entry inputs are object schemas; selection and target fields are arrays. Named slots use
 `{"kind":"menu","name":"…"}` or `{"kind":"ribbon","name":"…"}`; the app decides which
@@ -88,12 +96,41 @@ another process. A dependency is not installed when a component fails to load.
 
 ## Command and data surface
 
-The host admits existing `solid.*` and `sketch.*` commands (except file-based `sketch.insert_*`),
-plus `parameters.add/change/delete`, `timeline.add/inspect/redefine/delete`, `document.inspect`,
-`model.faces`, `model.edges`, `model.mesh` and `inspect.measure`. Admission still requires the exact
-id in the package manifest. New families require a host policy review. Wildcards, command aliases,
-plugin-to-plugin calls, batches/scripts and `file.*`/`doc.*` commands are not guest capabilities.
-The empty file scope also applies to a feature that names an external font or linked design.
+Every command in the MCP catalog is reachable: the same ids, input schemas, results and read/edit
+effects an MCP client gets (`engine.commands`, `engine.describe`). A package lists the exact ids it
+calls; there are no wildcards or aliases. Commands that reach past the open design are grouped,
+and each group is refused unless the manifest asks for it in `permissions.command_groups` **and**
+the user grants it, as folders are:
+
+| Group | Commands |
+|---|---|
+| `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
+| `doc` | `doc.*`: opening, recovering or switching designs |
+| `app` | `settings.*`, `ui.*`, `diagnostics.*`: app state outside any design |
+| `plugin` | `plugin.*`: inspecting or running plugins |
+
+A manifest that lists a grouped command without its group is refused when it is read. A refused
+call is a typed `permission_denied` error naming the group, and it poisons the transaction like
+any other refusal. Ungrouped commands run under an empty file scope, so even a feature that names
+an external font or linked design gets no file access. A granted `file` or `doc` command runs with
+a scope of exactly the approved folders that the manifest requests for both read and write. This
+version has no user interface for granting groups; `PluginState::command_groups` holds the grants.
+
+## Versions and capabilities
+
+The WIT package is `craft:plugin@0.1.0`. Its interfaces (`types`, `commands`, `log`, `control`,
+`files`, `clock` and the exported `entry`) make up the capability `commands@0.1`. Later
+capabilities arrive as their own interfaces, each named and versioned on its own in the manifest:
+`ui`, `viewport`, `formats` and `storage`. While a version is 0.x, a minor version may break the
+previous one, so a host for `commands@0.1` runs only `commands@0.1` plugins.
+
+## Per-design plugin data
+
+A design container reserves `plugins/<plugin-id>/` for files a plugin keeps with that design
+(`plugin_data` in the design, base64 by `<plugin-id>/<path>` in a plain JSON design). SolidCraft
+keeps those files and saves them back byte for byte whether or not the plugin is installed;
+opening a design never needs, loads or runs a plugin. Plugins cannot read or write this data yet:
+the `storage` capability adds that.
 
 `model.mesh {body, tolerance?}` is a general read-only input boundary. Tolerance is a finite positive
 number in millimetres (default 0.05). It returns `body`, its owning `component`,
@@ -214,7 +251,8 @@ model data or package paths.
 
 There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
 network integration, persistent store, plugin installer, signed index, custom panels or icons.
-The WIT has no persistent store interface. `manifest()` is not used.
+The WIT has no persistent store interface yet (`storage` arrives later; designs already keep
+`plugins/<plugin-id>/` data untouched). `manifest()` is not used.
 
 ## Author an original plugin
 
@@ -222,7 +260,11 @@ Plugin packages, examples and converters live outside this repository, as specif
 [the plugin RFC](rfcs/0002-plugins.md). This repository contains the host, WIT and synthetic test
 fixtures. The host compiles no plugin algorithm into SolidCraft. Rust first builds a core module with WIT metadata; `wasm-tools component new`
 wraps it as a component without a WASI adapter. Other languages may use the same published
-[WIT](../crates/craft-plugin/wit/plugin.wit) if they produce compatible components without unsupported imports.
+[WIT](../crates/craft-plugin/wit/plugin.wit) if they produce compatible components without unsupported imports;
+JavaScript works with `jco componentize` with its WASI features turned off (`stdio`, `random`,
+`clocks`, `http`, `fetch-event`). A Rust guest calls `craft::plugin::commands::run` and implements
+`exports::craft::plugin::entry::Guest`; a JavaScript guest imports `run` from
+`craft:plugin/commands@0.1.0` and exports `entry`. Its manifest says `"capabilities": ["commands@0.1"]`.
 
 ## Platforms and validation
 
@@ -230,7 +272,8 @@ Native execution on x86-64 or AArch64 requires the engine's `plugins` Cargo feat
 Other native architectures retain the commands but report that no execution host is available. The browser build publishes the
 same command descriptions but refuses execution without a native host. Turning off this feature
 keeps metadata, inspection and the general mesh query available while excluding Wasmtime.
-No new design format or custom `FeatureKind::Plugin` is introduced.
+No custom `FeatureKind::Plugin` is introduced. The one design-format change is the reserved
+`plugins/<plugin-id>/` data namespace.
 
 The runtime tests use original generated components, not mocks of a successful plugin: host calls,
 two edits grouped into one undo step, measured volume, undo/redo and cold reopen after removing

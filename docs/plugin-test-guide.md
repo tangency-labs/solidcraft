@@ -18,17 +18,20 @@ source, package instructions and test-distribution launchers live outside this r
 they cannot be built from this checkout. A package must contain a
 WebAssembly **component**, not just a core Wasm module.
 
-Use only a separately supplied test distribution matching this host revision and its
-`solidcraft:plugin@1.0.0` WIT. Older 0.1.0 test kits are incompatible; changing their manifest
-API string alone does not update compiled components. Check the distribution's `BUILD-INFO.json`
+Use only a separately supplied test distribution built for this host's `craft:plugin@0.1.0` WIT.
+Its manifests say `"capabilities": ["commands@0.1"]`. Kits from the earlier
+`solidcraft:plugin@1.0.0` preview are refused at inspection with a message saying what they were
+built for; editing their manifest alone does not update compiled components, which must be rebuilt
+against the new WIT. Check the distribution's `BUILD-INFO.json`
 and file checksums before starting. This guide does not supply that distribution.
 
 ## Run the Windows test distribution
 
 1. Extract the ZIP. In File Explorer, open the extracted folder that contains
    `Run-Plugin-Test.cmd` and `Start-SolidCraft-Test.cmd`.
-2. Open `plugins/example-box/plugin.json` in a text editor. Its only command grant is
-   `solid.box`; this example cannot read the existing design's mesh. Close the editor
+2. Open `plugins/example-box/plugin.json` in a text editor. It needs the capability
+   `commands@0.1`, and its only command is `solid.box`; this example cannot read the existing
+   design's mesh. Close the editor
    without saving changes.
 3. Return to that folder in File Explorer. Press **Ctrl+L**, type `cmd`, and press
    **Enter**. A Command Prompt opens in the extracted folder. Type the following and
@@ -146,6 +149,10 @@ updates, custom panels, persistent guest storage and plugin-defined parametric
 feature types are not implemented. See [the runtime reference](plugin-runtime.md)
 for exact limits and supported commands.
 
+A design may carry plugin data under `plugins/<plugin-id>/` in its container. Opening and saving
+such a design with no plugin installed keeps that data byte for byte; nothing in this version
+writes it yet.
+
 Entries declare read/edit effects, input schemas and optional named menu/ribbon slots. The app
 can inspect these declarations with `plugin.list` and `engine.describe`. Selection and target
 inputs are lists. A read entry cannot run an edit command. Named files permissions require
@@ -229,8 +236,14 @@ paths depend on Cargo's target configuration.
   package contents before using their new hash.
 - **Component compilation failed:** verify this is a compatible WebAssembly component,
   not a core Wasm module, DLL or executable.
-- **Command is not granted:** the exact command must be permitted by both the manifest
-  and the host. There are no wildcard grants.
+- **Command is not granted:** the manifest must list the exact command id; there are no
+  wildcard grants. Every command in the MCP catalog can be listed.
+- **Command needs the `file` (or `doc`, `app`, `plugin`) permission:** that command reaches past
+  the open design. The manifest must request the group in `runtime.permissions.command_groups`,
+  and the user must grant it. This test build has no grant UI, so such commands are refused.
+- **"needs commands 0.2; update SolidCraft or the plugin":** the plugin was built for a newer
+  capability than this build has. Use a matching build. "was built for solidcraft:plugin@1.0.0"
+  means a kit from the earlier preview: rebuild it against `craft:plugin@0.1.0`.
 - **Desktop asks for a standalone request:** send one `engine.execute` containing
   `plugin.run`, outside `engine.batch` and `engine.script`.
 - **Check build identity:** consult the distribution's `BUILD-INFO.json`,

@@ -236,8 +236,8 @@ fn sketch_finish_plugin(h: &Harness, fail_after: bool) -> String {
     std::fs::write(dir.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
     std::fs::write(
         dir.join("plugin.json"),
-        json!({"id":"sample","name":"Sketch exit","version":"1","runtime":{
-            "api":solidcraft_engine::plugin::API,"module":"plugin.wasm",
+        json!({"id":"sample","name":"Sketch exit","version":"1","capabilities":["commands@0.1"],"runtime":{
+            "module":"plugin.wasm",
             "entries":[{"name":"make","effect":"edit","input_schema":{"type":"object"}}],
             "commands":[command]
         }})

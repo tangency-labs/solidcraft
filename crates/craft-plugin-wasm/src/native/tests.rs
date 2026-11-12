@@ -1,6 +1,7 @@
 use super::*;
 
 use craft_plugin::{API, FileGrant, FilePermission};
+use std::collections::BTreeSet;
 use serde_json::json;
 
 #[derive(Default)]
@@ -14,6 +15,9 @@ struct App {
     cancelled: bool,
     fail_commit: bool,
     unchanged_at_commit: Option<PathBuf>,
+    /// The sensitive group `app.write` is in, and the groups the user granted.
+    write_group: Option<String>,
+    groups: BTreeSet<String>,
 }
 impl PluginHost for App {
     fn command_catalog(&self) -> Vec<CommandSchema> {
@@ -22,6 +26,7 @@ impl PluginHost for App {
             input_schema: json!({"type":"object"}),
             output_schema: json!({"type":"object"}),
             effect: Effect::Edit,
+            group: self.write_group.clone(),
         }]
     }
     fn run_command(&mut self, _: &str, _: &Value) -> Result<Value> {
@@ -52,6 +57,9 @@ impl PluginHost for App {
     fn granted_folders(&self) -> Vec<FileGrant> {
         self.grants.clone()
     }
+    fn granted_command_groups(&self) -> BTreeSet<String> {
+        self.groups.clone()
+    }
     fn log(&mut self, _: &str) {}
     fn progress(&mut self, _: f32, _: &str) {}
     fn is_cancelled(&self) -> bool {
@@ -60,8 +68,8 @@ impl PluginHost for App {
 }
 fn manifest() -> Manifest {
     craft_plugin::parse_manifest(
-        json!({"id":"sample","name":"Sample","version":"1","runtime":{
-            "api":API,"module":"plugin.wasm","entries":[{"name":"make","effect":"edit","input_schema":{"type":"object"}}],
+        json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{
+            "module":"plugin.wasm","entries":[{"name":"make","effect":"edit","input_schema":{"type":"object"}}],
             "commands":["app.write"],"limits":{"fuel":100000,"memory_mib":1,"deadline_ms":5000}
         }})
         .to_string()
@@ -146,6 +154,40 @@ fn read_entries_cannot_edit_even_when_manifest_grants_the_command() {
     assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
 }
 #[test]
+fn a_grouped_command_runs_only_when_the_manifest_asks_and_the_app_grants() {
+    let asks = |groups: &[&str]| {
+        let mut manifest = manifest();
+        manifest.runtime.as_mut().unwrap().permissions.command_groups = groups.iter().map(|g| g.to_string()).collect();
+        manifest
+    };
+    let granted = |groups: &[&str]| App { write_group: Some("file".into()), groups: groups.iter().map(|g| g.to_string()).collect(), ..Default::default() };
+    for (manifest, mut app) in [(asks(&[]), granted(&["file"])), (asks(&["file"]), granted(&[])), (asks(&["doc"]), granted(&["doc"]))] {
+        let failure = run(&mut app, &manifest, &component("call $box"), "make", &json!({})).unwrap_err();
+        assert!(
+            matches!(&failure, HostError::PermissionDenied { permission } if permission.contains("needs the `file` permission")),
+            "{failure}"
+        );
+        assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
+    }
+    let mut app = granted(&["file"]);
+    run(&mut app, &asks(&["file"]), &component("call $box"), "make", &json!({})).unwrap();
+    assert_eq!((app.value, app.commits), (1, 1));
+}
+#[test]
+fn a_component_for_another_api_version_is_refused_in_plain_words() {
+    let (package, version) = API.split_once('@').unwrap();
+    let source = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
+    let (prefix, _) = source.rsplit_once(')').unwrap();
+    let source = format!("{prefix}\n(import \"{package}/storage@0.2.0\" (instance))\n)");
+    let mut app = App::default();
+    let failure = run(&mut app, &manifest(), &wat::parse_str(source).unwrap(), "make", &json!({})).unwrap_err();
+    assert!(
+        matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.2.0")) && reason.contains("update")),
+        "{failure}"
+    );
+    assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
+}
+#[test]
 fn cancellation_prevents_running_plugin_code() {
     let mut app = App { cancelled: true, ..Default::default() };
     assert_eq!(run(&mut app, &manifest(), &component("(loop br 0)"), "make", &json!({})).unwrap_err(), HostError::Cancelled);
@@ -156,6 +198,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
     State {
         host: app,
         commands: BTreeMap::new(),
+        groups: BTreeSet::new(),
         effect: Effect::Edit,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
@@ -259,7 +302,7 @@ fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u
     let (package, version) = API.split_once('@').unwrap();
     let template = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
     // Keep exactly the shared WIT types, then exercise the real files interface.
-    let (types, _) = template.split_once(&format!("  (type $ty-{package}/engine@{version}")).unwrap();
+    let (types, _) = template.split_once(&format!("  (type $ty-{package}/commands@{version}")).unwrap();
     let (operation, result, parameters, arguments) = if write {
         ("write-file", "(result (error $error))", "(param \"data\" (list u8))", "i32.const 128 i32.const 7")
     } else {
@@ -312,7 +355,7 @@ fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u
 (export "json" (type $json))
 (export "plugin-error" (type $plugin-error))
 (export "execute" (func $execute)))
-  (export "{package}/command@{version}" (instance $command))
+  (export "{package}/entry@{version}" (instance $command))
 )"#
     );
     wat::parse_str(source).unwrap()

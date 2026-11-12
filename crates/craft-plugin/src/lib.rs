@@ -38,6 +38,57 @@ pub enum HostError {
     Trap { reason: String },
     #[error("plugin cancelled")]
     Cancelled,
+    /// The plugin needs a capability, or a version of one, that this host does not serve.
+    #[error("{reason}")]
+    UnsupportedCapability { capability: String, reason: String },
+}
+
+/// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
+/// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
+/// version may break the one before it, so 0.x matches only the same minor.
+pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1))];
+
+fn capability_version(text: &str) -> Option<(u32, u32)> {
+    let mut parts = text.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    match (parts.next(), parts.next()) {
+        (None, _) => Some((major, minor)),
+        (Some(patch), None) if patch.parse::<u32>().is_ok() => Some((major, minor)),
+        _ => None,
+    }
+}
+
+/// Checks a manifest's `capabilities` against [`CAPABILITIES`]. `app` names the host in the
+/// refusal ("update SolidCraft or the plugin").
+pub fn check_capabilities(requested: &[String], app: &str) -> Result<()> {
+    if requested.len() > 16 {
+        return Err(invalid("capabilities", "at most 16 capabilities"));
+    }
+    let mut names = BTreeSet::new();
+    for capability in requested {
+        let parsed = capability.split_once('@').and_then(|(name, version)| Some((name, capability_version(version)?)));
+        let Some((name, (major, minor))) = parsed.filter(|(name, _)| valid_id(name)) else {
+            return Err(invalid("capabilities", format!("`{capability}` is not name@major.minor, e.g. \"commands@0.1\"")));
+        };
+        if !names.insert(name) {
+            return Err(invalid("capabilities", format!("`{name}` is listed twice")));
+        }
+        let unsupported = |reason: String| HostError::UnsupportedCapability { capability: capability.clone(), reason };
+        let Some((_, (have_major, have_minor))) = CAPABILITIES.iter().find(|(known, _)| *known == name) else {
+            return Err(unsupported(format!("needs {name} {major}.{minor}, which this version of {app} does not have; update {app} or the plugin")));
+        };
+        let (have_major, have_minor) = (*have_major, *have_minor);
+        if (major, minor) > (have_major, have_minor) {
+            return Err(unsupported(format!("needs {name} {major}.{minor}; update {app} or the plugin")));
+        }
+        if major != have_major || (major == 0 && minor != have_minor) {
+            return Err(unsupported(format!(
+                "was built for {name} {major}.{minor}, and this version of {app} runs {name} {have_major}.{have_minor}; update the plugin"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn invalid(field: impl Into<String>, reason: impl Into<String>) -> HostError {
@@ -60,6 +111,11 @@ pub struct CommandSchema {
     pub input_schema: Value,
     pub output_schema: Value,
     pub effect: Effect,
+    /// A sensitive command's permission group (`file`, `doc`, ...): callable only when the
+    /// manifest's `permissions.command_groups` names it and the app grants it. `None` for
+    /// commands that act on the open design alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 /// A named folder resolved by the app after user approval, never a guest-supplied root.
@@ -83,6 +139,11 @@ pub trait PluginHost {
     fn commit_transaction(&mut self) -> Result<()>;
     fn rollback_transaction(&mut self) -> Result<()>;
     fn granted_folders(&self) -> Vec<FileGrant>;
+    /// The sensitive command groups the user granted. A guest may call a grouped command only
+    /// when its manifest requests the group too. None by default.
+    fn granted_command_groups(&self) -> BTreeSet<String> {
+        BTreeSet::new()
+    }
     /// Apply the caller's scope to every complete file path, in addition to folder grants.
     /// Approved folder roots may have hidden ancestors. Hidden child names require
     /// a more specific folder grant or a host override applying explicit scope.
@@ -170,6 +231,9 @@ impl Limits {
 pub struct Permissions {
     pub files: Vec<FilePermission>,
     pub clock: bool,
+    /// Sensitive command groups the plugin asks for, such as `file` or `doc`. Each is refused
+    /// unless the app grants it too; which groups exist is the app's.
+    pub command_groups: BTreeSet<String>,
     /// Reserved: refused in this API regardless of app grants.
     pub net: bool,
 }
@@ -177,6 +241,9 @@ impl Permissions {
     pub fn validate(&self) -> Result<()> {
         if self.net {
             return Err(HostError::PermissionDenied { permission: "net".into() });
+        }
+        if self.command_groups.len() > 16 || self.command_groups.iter().any(|group| !valid_id(group)) {
+            return Err(invalid("runtime.permissions.command_groups", "at most 16 lowercase group names"));
         }
         if self.files.len() > 32 {
             return Err(invalid("runtime.permissions.files", "at most 32 folder grants"));
@@ -259,6 +326,10 @@ pub struct Manifest {
     pub version: String,
     #[serde(default)]
     pub description: String,
+    /// The host capabilities the plugin needs, as `name@major.minor` (`commands@0.1`). A runtime
+    /// needs `commands`. The host refuses a capability it does not serve, before any code runs.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
 }
@@ -266,7 +337,6 @@ pub struct Manifest {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeManifest {
-    pub api: String,
     /// A single file name within the package, never a directory or absolute path.
     pub module: String,
     pub entries: Vec<Entry>,
@@ -279,9 +349,6 @@ pub struct RuntimeManifest {
 }
 impl RuntimeManifest {
     pub fn validate(&self) -> Result<()> {
-        if self.api != API {
-            return Err(invalid("runtime.api", "unsupported plugin API"));
-        }
         if !valid_id(self.module.strip_suffix(".wasm").unwrap_or("")) {
             return Err(invalid("runtime.module", "must be one lowercase .wasm file name"));
         }
@@ -345,8 +412,23 @@ fn plain(value: &str, max: usize) -> bool {
 }
 
 pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
+    parse_manifest_for(text, folder, "the app")
+}
+
+/// [`parse_manifest`], naming the host `app` in a capability refusal.
+pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manifest> {
     if text.len() > MAX_MANIFEST_BYTES {
         return Err(HostError::LimitExceeded { limit: "manifest size exceeds 16 KiB".into() });
+    }
+    // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
+    if let Ok(value) = serde_json::from_slice::<Value>(text)
+        && let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api"))
+    {
+        let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
+        return Err(HostError::UnsupportedCapability {
+            capability: api.clone(),
+            reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.1\"]); update the plugin"),
+        });
     }
     let mut manifest: Manifest = serde_json::from_slice(text).map_err(|error| invalid("manifest", error.to_string()))?;
     manifest.name = manifest.name.trim().to_string();
@@ -367,7 +449,11 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
     if manifest.description.chars().count() > 240 || manifest.description.chars().any(char::is_control) {
         return Err(invalid("description", "requires at most 240 printable characters"));
     }
+    check_capabilities(&manifest.capabilities, app)?;
     if let Some(runtime) = &manifest.runtime {
+        if !manifest.capabilities.iter().any(|capability| capability.starts_with("commands@")) {
+            return Err(invalid("capabilities", "a plugin with a runtime needs the commands capability: \"capabilities\": [\"commands@0.1\"]"));
+        }
         runtime.validate()?;
     }
     Ok(manifest)

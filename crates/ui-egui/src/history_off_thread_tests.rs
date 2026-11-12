@@ -1387,8 +1387,8 @@ fn plugin_package_for_worker_test(tag: &str) -> std::path::PathBuf {
     std::fs::write(dir.join("plugin.wasm"), wat::parse_str(&wat).unwrap()).unwrap();
     std::fs::write(
         dir.join("plugin.json"),
-        json!({"id":"sample","name":"Worker sample","version":"1","runtime":{
-        "api":solidcraft_engine::plugin::API,"module":"plugin.wasm","entries":["make"],"commands":[]}})
+        json!({"id":"sample","name":"Worker sample","version":"1","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","entries":["make"],"commands":[]}})
         .to_string(),
     )
     .unwrap();
