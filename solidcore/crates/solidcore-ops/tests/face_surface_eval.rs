@@ -21,6 +21,7 @@
 mod common;
 
 use common::{all_fixes, edge_at, vertex_at};
+use solidcore::math::det;
 use solidcore_ops::blend::{blend, fillet_variable, Blend, Corners};
 use solidcore_ops::boolean::boolean;
 use solidcore_ops::face_surface::{Exact, FaceSurface};
@@ -165,7 +166,7 @@ fn plate() -> Body {
 /// A point of the circle of radius 5 about (15, 15) at height `z`, off any seam.
 fn on_rim(z: f64) -> [f64; 3] {
     let a = std::f64::consts::FRAC_PI_4;
-    [15.0 + 5.0 * a.cos(), 15.0 + 5.0 * a.sin(), z]
+    [15.0 + 5.0 * det::cos(a), 15.0 + 5.0 * det::sin(a), z]
 }
 
 #[test]

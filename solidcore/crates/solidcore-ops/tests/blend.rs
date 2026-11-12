@@ -174,7 +174,7 @@ fn blends_turn_round_a_shallow_sharp_corner() {
     all_fixes();
     let plate = |kink: f64, convex: bool| {
         let t = if convex { -kink } else { kink }.to_radians();
-        let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+        let (u, n) = ([det::cos(t), det::sin(t)], [det::sin(t), -det::cos(t)]);
         let p = [
             [0.0, 0.0],
             [50.0, 0.0],
@@ -216,7 +216,7 @@ fn blends_turn_round_a_shallow_sharp_corner() {
                 blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
                     panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
                 });
-                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let corner = 2.0 * m * det::tan(kink.to_radians() / 2.0);
                 let want = 90.0 * a + if convex { -corner } else { corner };
                 let off = before - volume(&b);
                 assert!(

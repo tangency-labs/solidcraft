@@ -1372,7 +1372,7 @@ impl Perpendicular {
     /// `p`'s angle about the axis, right-handed.
     fn angle(&self, p: Vec3) -> f64 {
         let d = p - self.origin;
-        d.dot(self.y).atan2(d.dot(self.x))
+        det::atan2(d.dot(self.y), d.dot(self.x))
     }
 
     /// The Bézier pieces of a curve's NURBS form on `interval` (a line, circle or ellipse on its
@@ -1439,7 +1439,7 @@ impl Perpendicular {
                 return None;
             }
             let d = *p - self.origin;
-            let r = d.dot(self.x).hypot(d.dot(self.y));
+            let r = det::hypot(d.dot(self.x), d.dot(self.y));
             if !(r > 0.0) {
                 return None;
             }
@@ -1452,7 +1452,7 @@ impl Perpendicular {
         if !(hi - lo < PI) {
             return None;
         }
-        let r = least * (0.5 * (hi - lo)).cos();
+        let r = least * det::cos(0.5 * (hi - lo));
         let pad = gamma(16) * (PI + far) + if tol > 0.0 { tol / r } else { 0.0 };
         (pad.is_finite() && r > 0.0).then_some(([a0 + lo, a0 + hi], pad))
     }

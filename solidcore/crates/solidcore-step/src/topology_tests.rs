@@ -596,7 +596,7 @@ fn a_band_narrower_than_its_tolerance_at_a_vertex_gets_its_seam_where_it_is_wide
         let mut w = W::default();
         // A 45 degree cone opening up +z, radius 1 at z = 0: radius 1 + z at height z.
         let r = |z: f64| 1.0 + z;
-        let at = |z: f64, angle: f64| [r(z) * angle.cos(), r(z) * angle.sin(), z];
+        let at = |z: f64, angle: f64| [r(z) * det::cos(angle), r(z) * det::sin(angle), z];
         let (lo, hi, rim) = (0.5, 0.95, 1.0);
         let t = PI / 3.0;
         let v_rim = w.vertex(at(rim, 0.0));
@@ -636,7 +636,7 @@ fn a_band_narrower_than_its_tolerance_at_a_vertex_gets_its_seam_where_it_is_wide
             (a[2] - b[2]).abs() > 0.475
         });
         let [a, b] = seam.unwrap().vertices.map(|v| s.brep.vertices[v as usize].point);
-        assert!(a[1].atan2(a[0]).abs() > 2.0 * t && b[1].atan2(b[0]).abs() > 2.0 * t, "seam at {a:?} {b:?}");
+        assert!(det::atan2(a[1], a[0]).abs() > 2.0 * t && det::atan2(b[1], b[0]).abs() > 2.0 * t, "seam at {a:?} {b:?}");
     }
 }
 
@@ -659,13 +659,13 @@ fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
     // The hole: a window from 10 degrees west of +x to 10 east, between latitudes 20 and 40,
     // bounded by two parallels and two meridians.
     let (west, east, south, north) = (-PI / 18.0, PI / 18.0, PI / 9.0, 2.0 * PI / 9.0);
-    let on = |lat: f64, lon: f64| [radius * lat.cos() * lon.cos(), radius * lat.cos() * lon.sin(), radius * lat.sin()];
+    let on = |lat: f64, lon: f64| [radius * det::cos(lat) * det::cos(lon), radius * det::cos(lat) * det::sin(lon), radius * det::sin(lat)];
     let (sw, se, ne, nw) = (w.vertex(on(south, west)), w.vertex(on(south, east)), w.vertex(on(north, east)), w.vertex(on(north, west)));
-    let s_edge = arc_about_z(&mut w, (sw, se), radius * south.cos(), radius * south.sin());
-    let n_edge = arc_about_z(&mut w, (nw, ne), radius * north.cos(), radius * north.sin());
+    let s_edge = arc_about_z(&mut w, (sw, se), radius * det::cos(south), radius * det::sin(south));
+    let n_edge = arc_about_z(&mut w, (nw, ne), radius * det::cos(north), radius * det::sin(north));
     // A meridian with its angle the latitude.
     let meridian = |w: &mut W, lon: f64, (a, b): (u64, u64)| {
-        let k = w.circle([0.0; 3], [lon.sin(), -lon.cos(), 0.0], [lon.cos(), lon.sin(), 0.0], radius);
+        let k = w.circle([0.0; 3], [det::sin(lon), -det::cos(lon), 0.0], [det::cos(lon), det::sin(lon), 0.0], radius);
         w.add(format!("EDGE_CURVE('',#{a},#{b},#{k},.T.)"))
     };
     let (w_edge, e_edge) = (meridian(&mut w, west, (sw, nw)), meridian(&mut w, east, (se, ne)));
@@ -693,7 +693,7 @@ fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
     });
     let seam = seam.unwrap_or_else(|| panic!("no seam from the foot to the top: {:?}", s.brep.vertices));
     let foot_end = seam.vertices.map(|v| s.brep.vertices[v as usize].point).into_iter().find(|p| p[2].abs() < 1e-9).unwrap();
-    let angle = foot_end[1].atan2(foot_end[0]);
+    let angle = det::atan2(foot_end[1], foot_end[0]);
     assert!(angle.abs() > east, "the seam at {angle} rad crosses the hole");
 }
 
