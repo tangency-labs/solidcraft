@@ -489,7 +489,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
     if loops.is_empty() {
         *loops = face_p2::loops(b, face, false, None)?;
         if loops.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(OP, "the face has no loops"));
         }
     }
 
@@ -851,7 +851,10 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
 
         let Some(inc_indx) = inc_indx.filter(|_| done_size != 0) else {
             // unexpected empty DoneTouchDirList or invalid lIncIndx
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(
+                OP,
+                "the touch-direction list is empty or its index is unset",
+            ));
         };
 
         let mut jj = 0usize;
@@ -1356,7 +1359,14 @@ mod tests {
         };
         let mut scratch = CurveClassification::new(&k);
         let r = classify_loops(&k, &b, f, &mut loops, &mut out, &mut scratch, &mut props);
-        assert_eq!(r, Err(SolidError::sm_err(OP)));
+        assert_eq!(
+            r,
+            Err(SolidError::query_failed(OP, "the face has no loops"))
+        );
+        assert_eq!(
+            r.as_ref().map_err(SolidError::upstream_status),
+            Err(Some(crate::error::SM_ERR))
+        );
         // the out-params keep the caller's values
         assert_eq!(out.ordered_no_area_indices, vec![9]);
     }

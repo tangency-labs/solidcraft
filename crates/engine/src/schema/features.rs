@@ -16,8 +16,8 @@ use super::motion::require;
 use super::types::{
     AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FacesParam,
     FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
-    OperationParam, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint,
-    TouchingParam, feature_common, present,
+    OperationParam, PatternAxis, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam,
+    ToPoint, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -37,7 +37,8 @@ pub struct BoxParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub corner: Option<PointExpr3>,
-    /// The box's centre, instead of `corner`.
+    /// The box's centre, instead of `corner`. The box stays centred there when its length, width
+    /// or height changes later.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub center: Option<PointExpr3>,
@@ -453,10 +454,21 @@ pub struct SweepParams {
     /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
     #[serde(default)]
     pub exact_regions: Option<bool>,
-    /// The sketch holding the path, by id or name.
-    pub path_sketch: SketchRef,
-    /// The path's curve ids, in order along the path.
-    pub path: StringList,
+    /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub path_sketch: Option<SketchRef>,
+    /// The path's curve ids, in order along the path. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub path: Option<StringList>,
+    /// The name of the body whose edges are the path, instead of a sketch's curves.
+    #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
+    pub path_body: Option<String>,
+    /// The points on that body's edges that are the path, 1 to 1000.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathEdgePoints")]
+    pub path_edges: Option<PathEdgePoints>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub shape: SweepShape,
     /// How the sweep combines with existing bodies. Default: new.
@@ -499,10 +511,22 @@ pub struct SurfaceSweepParams {
     /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
     #[serde(default)]
     pub exact_regions: Option<bool>,
-    /// The sketch holding the path, by id or name.
-    pub path_sketch: SketchRef,
-    /// The path's curve ids, in order along the path: 1 to 1000.
-    pub path: StringList,
+    /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub path_sketch: Option<SketchRef>,
+    /// The path's curve ids, in order along the path: 1 to 1000. Not needed when the path is a
+    /// body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub path: Option<StringList>,
+    /// The name of the body whose edges are the path, instead of a sketch's curves.
+    #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
+    pub path_body: Option<String>,
+    /// The points on that body's edges that are the path, 1 to 1000.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathEdgePoints")]
+    pub path_edges: Option<PathEdgePoints>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub shape: SweepShape,
     #[serde(flatten, deserialize_with = "feature_common")]
@@ -617,6 +641,53 @@ fn target_body<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     match Value::deserialize(d)? {
         Value::String(name) => Ok(name),
         _ => Err(D::Error::custom(whole("`target` must be a body name"))),
+    }
+}
+
+/// `path_body`: the name of the body whose edges are the path, as the handler's `sweep_path`
+/// reads it: a body name, or `null` (which the handler reads as absent). Anything else is
+/// refused with the handler's message.
+fn path_body_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(name) => Ok(Some(name)),
+        _ => Err(D::Error::custom(whole("`path_body` must be a body name"))),
+    }
+}
+
+/// `path_edges`: the points on the edges of the path, as the handler's `path_edge_points` reads
+/// them: 1 to 1000 points, each `[x, y, z]` or `{x, y, z}` of finite numbers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PathEdgePoints(pub Vec<Point3>);
+
+impl<'de> Deserialize<'de> for PathEdgePoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let items = v.as_array().ok_or_else(|| D::Error::custom(whole("`path_edges` must be a list of points")))?;
+        if items.is_empty() || items.len() > 1000 {
+            return Err(D::Error::custom(whole("the path needs 1…1000 edges")));
+        }
+        items
+            .iter()
+            .map(|item| Point3::deserialize(item).map_err(|_| D::Error::custom(whole("each `path_edges` entry must be a point [x,y,z]"))))
+            .collect::<Result<_, _>>()
+            .map(PathEdgePoints)
+    }
+}
+
+impl JsonSchema for PathEdgePoints {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PathEdgePoints".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let item = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "The points on the body's edges that are the path, one on each edge of the chain: 1 to 1000.",
+            "type": "array",
+            "items": item,
+            "minItems": 1,
+            "maxItems": 1000
+        })
     }
 }
 
@@ -871,6 +942,66 @@ pub struct FilletResult {
     /// With `fit: reduce` where it reduced the radius: each edge's radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radii_applied: Option<Vec<AppliedRadius>>,
+}
+
+/// `alignment`, with the handler's message.
+fn pattern_alignment<'de, D: Deserializer<'de>>(d: D) -> Result<Option<solidcraft_sketch::PatternAlignment>, D::Error> {
+    serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole("`alignment` must be left, center or right")))
+}
+
+/// `reversed`, with the handler's message.
+fn pattern_reversed<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole("`reversed` must be true or false")))
+}
+
+/// Copy features, bodies or components evenly round an axis. Give one of `features`, `bodies` or
+/// `components`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PatternCircularParams {
+    /// The features to copy, by name. Used when `bodies` and `components` are left out or empty.
+    #[serde(default)]
+    pub features: Option<NameList>,
+    /// The bodies to copy, by name. Used when `components` is left out or empty.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// The components to place more of, by id or name. The reply then lists the new occurrences.
+    #[serde(default)]
+    pub components: Option<NameList>,
+    /// The axis to turn about. The coordinates of `{origin, dir}`'s origin may also be length
+    /// expressions, which the pattern follows.
+    pub axis: PatternAxis,
+    /// How many, the original included: a whole number or an expression that gives one.
+    pub count: NumberExpr,
+    /// The angle the copies span. Default: 360 deg; a partial arc includes both ends.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Where the original sits in the pattern. Default: right, the original stays fixed.
+    #[serde(default, deserialize_with = "pattern_alignment", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
+    pub alignment: Option<solidcraft_sketch::PatternAlignment>,
+    /// Flip the pattern's direction; for an even count centred, selects the extra side.
+    #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reversed: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// What `solid.pattern.circular` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PatternCircularResult {
+    /// With `features` or `bodies`.
+    Feature(Box<FeatureResult>),
+    /// With `components`.
+    Components {
+        /// The new occurrences' ids.
+        occurrences: Vec<u64>,
+        /// In the warn parameter-check mode: what the call's parameters got wrong.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
 }
 
 /// What a feature command returns.

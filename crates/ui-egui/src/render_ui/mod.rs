@@ -21,7 +21,10 @@ pub(crate) fn compact(app: &SolveApp, width: f32) -> bool {
 }
 
 pub(crate) fn focus_shortcut(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if crate::render_workspace::active(app) && !ui.ctx().text_edit_focused() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+    if crate::render_workspace::active(app)
+        && !ui.ctx().text_edit_focused()
+        && (!crate::panel_runtime::production_active(app) || !ui.ctx().egui_wants_keyboard_input())
+        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
     {
         ui.ctx().memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
         app.start("view.render_focus");
@@ -231,6 +234,10 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !focused(app) {
         shots_pill(app, ui, free);
     }
+    // The Design viewport is not drawn here: its frame-rate readout's anchor is from another
+    // workspace (or none), so the panel would stack on nothing in this one.
+    app.frame_rate.top = None;
+    crate::operations::show(app, ui, crate::shell::bottom_overlay_rect(app, viewport));
     crate::viewport::transient_messages(app, ui, viewport, None);
 }
 

@@ -23,7 +23,7 @@
 use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
-use solidcore::mass::enclosure::VolumeSign;
+use solidcore::mass::enclosure::{enclose_volume, VolumeSign};
 use solidcore::nurbs::nurbs_srf::decompose_srf;
 use solidcore::surface::extend::Continuity;
 use solidcore::surface::side::BoxSide;
@@ -143,12 +143,16 @@ fn the_extrusion_defeatures_to_the_same_solid_at_any_reach() {
         assert!(s.manifold, "reach {dist:?}");
         assert!(s.check.lines().is_empty(), "reach {dist:?}: {:?}", s.check);
         assert_eq!(bp1::faces(&b, None).unwrap().len(), 13, "reach {dist:?}");
-        Some(volume_of(&s))
+        positive(s.volume);
+        Some(narrow(&k, &mut b))
     };
     let Some(v) = base(None) else { return };
+    // the same solid at every reach: every volume in one enclosure is within `REL` of
+    // every volume in the other
     for d in [10.0, 15.0, 19.999_999_999, 20.0, 25.0] {
         let w = base(Some(d)).unwrap();
-        assert!(w.0 <= v.1 && v.0 <= w.1, "reach {d}: {w:?} against {v:?}");
+        let apart = (w.1 - v.0).max(v.1 - w.0);
+        assert!(apart <= REL * v.0, "reach {d}: {w:?} against {v:?}");
     }
 }
 
@@ -189,11 +193,45 @@ fn a_feature_whose_cap_cannot_be_built_is_kept_and_named() {
     let s = validation::soundness(&mut k, &mut b).unwrap();
     assert!(s.manifold);
     assert!(s.check.lines().is_empty(), "{:?}", s.check);
-    let v = volume_of(&s);
+    positive(s.volume);
+    // every volume in the enclosure is within `REL` of the body's
+    let (lo, hi) = narrow(&k, &mut b);
+    let apart = (hi - VOLUME).max(VOLUME - lo);
+    assert!(apart <= REL * lo, "[{lo}, {hi}]");
+}
+
+/// The volume of the body `a_feature_whose_cap_cannot_be_built_is_kept_and_named` makes: the
+/// middle of its certified enclosure `[757.499_497_550_496_5, 757.499_497_564_175]` (width
+/// 1.4e-8). The case first pinned `757.499_499_825_162`, the volume estimator's answer at
+/// accuracy 1e-6 (`brep_volume_default`, still its answer on main); the enclosure proves that
+/// 3.0e-9 of the volume too large, past the case's own relative bound [`REL`] (#15038).
+const VOLUME: f64 = 757.499_497_557;
+
+/// How far apart, relative to the volume, two volumes of the same solid may be: the bound
+/// the case compared its volumes with before the volume became an enclosure (#15038).
+const REL: f64 = 1e-9;
+
+/// The body's volume enclosed to a quarter of [`REL`] of itself, as `(lo, hi)`: narrow
+/// enough that two enclosures of one solid are within `REL` of each other end to end, so the
+/// comparison is the relative bound on numbers, proved, and not an overlap of enclosures of
+/// any width.
+fn narrow(k: &Kernel, b: &mut Brep) -> (f64, f64) {
+    let rough = enclose_volume(k, b, 1.0).unwrap();
+    assert!(rough.lo > 0.0, "{rough:?}");
+    let e = enclose_volume(k, b, 0.25 * REL * rough.lo).unwrap();
     assert!(
-        v.0 <= 757.499_499_825_162 && 757.499_499_825_162 <= v.1,
-        "{v:?}"
+        e.width() <= 0.25 * REL * rough.lo,
+        "not enclosed narrowly enough: {e:?}"
     );
+    (e.lo, e.hi)
+}
+
+/// A volume proved positive, as its enclosure's ends.
+fn positive(v: Option<VolumeSign>) -> (f64, f64) {
+    match v {
+        Some(VolumeSign::Positive(e)) => (e.lo, e.hi),
+        other => panic!("a volume not proved positive: {other:?}"),
+    }
 }
 
 /// The body's counts and volume, to compare a base with its state before a call.
@@ -203,7 +241,7 @@ fn state(k: &mut Kernel, b: &mut Brep) -> ([usize; 3], (f64, f64)) {
         bp1::edges(b, None).unwrap().len(),
         bp1::vertices(b, None).unwrap().len(),
     ];
-    let v = volume_of(&validation::soundness(k, b).unwrap());
+    let v = positive(validation::soundness(k, b).unwrap().volume);
     (counts, v)
 }
 
@@ -246,8 +284,12 @@ fn a_feature_that_cannot_be_partitioned_refuses_the_call_and_leaves_the_base() {
         ex.features_mut()[1].defeature_ready = false;
         ex.do_defeature(&mut k)
     };
+    // a status answer: an `Upstream`, or the typed blend failure that replaced it (#13790)
     assert!(
-        matches!(r, Err(solidcore::SolidError::Upstream { .. })),
+        r.as_ref()
+            .err()
+            .and_then(solidcore::error::upstream_status)
+            .is_some(),
         "{r:?}"
     );
     assert_eq!(state(&mut k, &mut b), before);
@@ -274,14 +316,4 @@ fn a_cancelled_defeature_leaves_the_base() {
         "{r:?}"
     );
     assert_eq!(state(&mut k, &mut b), before);
-}
-
-/// The certified enclosure of the body's volume ([`validation::Soundness::volume`]) as
-/// `(lo, hi)`: main certifies a sign, not a number, so volumes are compared as enclosures.
-fn volume_of(s: &validation::Soundness) -> (f64, f64) {
-    match s.volume.as_ref().unwrap() {
-        VolumeSign::Positive(e) | VolumeSign::Negative(e) | VolumeSign::Undecided(e) => {
-            (e.lo, e.hi)
-        }
-    }
 }

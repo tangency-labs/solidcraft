@@ -71,6 +71,8 @@
 //! The lamina clean-up's `DeleteFaces` runs through merge p4's arena intersector over
 //! the offset B-rep alone (both upstream operands are that B-rep); it notifies under
 //! `DELETE_FACES_NAMESPACE` rather than the caller's offset keys.
+//! `ReplaceImplicitOffsets` replaces each implicit offset by its certified net
+//! (`certified_offset`, WR-718), not by NLib's `N_SrfOffset` fit checked at samples.
 //!
 //! Cancellation: `replace_implicit_offsets` polls the kernel's cancel token (#2136, #2372) per face and inside each surface offset.
 
@@ -93,7 +95,6 @@ use crate::intersect::topology_solver::p1::TopologySolver;
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
 use crate::math::{Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
-use crate::nurbs::b_spline_surface_n_lib::p1::OffsetParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
@@ -218,6 +219,10 @@ pub struct OffsetExecutive {
     /// face and by each of its face uses, recorded as the face is offset.
     extension_reaches: BTreeMap<FaceId, f64>,
     faceuse_extension_reaches: BTreeMap<FaceuseId, f64>,
+    /// Not upstream: the edge bounds the local operation's reaches have found, each edge's
+    /// taken again from here for its other face ([`super::reach::EdgeBounds`]); forgotten
+    /// when the local surfaces are set and when the relations are cleared.
+    edge_bounds: super::reach::EdgeBounds,
     /// Not upstream: the faces of a local operation that move to surfaces of their own
     /// (the others keep theirs), for their neighbours' reach
     /// ([`super::reach::local_extension_reach`]).
@@ -288,6 +293,7 @@ impl OffsetExecutive {
             extended_surfaces: BTreeMap::new(),
             extension_reaches: BTreeMap::new(),
             faceuse_extension_reaches: BTreeMap::new(),
+            edge_bounds: super::reach::EdgeBounds::default(),
             moved_faces: Vec::new(),
             kept_edges: BTreeSet::new(),
             kept_edgeuses: BTreeSet::new(),
@@ -405,6 +411,7 @@ impl OffsetExecutive {
         self.local_faces = faces.to_vec();
         self.local_surfaces = surfaces;
         self.moved_faces = moved.to_vec();
+        self.edge_bounds.clear();
     }
 
     /// Not upstream: in a local operation, records the edges of `original` that keep their
@@ -607,6 +614,7 @@ impl OffsetExecutive {
         self.blend_to_faces.remove_all();
         self.extension_reaches.clear();
         self.faceuse_extension_reaches.clear();
+        self.edge_bounds.clear();
     }
 
     /// Records how far the surface of original face `face` must be extended for its
@@ -668,6 +676,7 @@ impl OffsetExecutive {
                 &moved,
                 &kept,
                 self.tangency_tol_radians,
+                &mut self.edge_bounds,
             )?
             // A new edge must cross each neighbouring surface's boundary, not sit on it:
             // the mate and the intersection identify points within the body's tolerance,
@@ -884,12 +893,15 @@ impl OffsetExecutive {
         self.extended_surfaces.insert(base_key, surface);
     }
 
-    /// Replaces implicit offset surfaces with approximations (`ReplaceImplicitOffsets`).
+    /// Replaces implicit offset surfaces with certified nets (`ReplaceImplicitOffsets`).
     /// The unconditional initial shrink is `topology.brep_p4`'s `ShrinkGeometry`.
     ///
-    /// Every face with an `SmOffsetSurface` gets a cubic approximation of the offset of
-    /// its extended (else its own) base, which must be a B-spline surface, within
-    /// `approximation_tol_3d`. All approximations are built before any face is
+    /// Every face with an `SmOffsetSurface` gets a bicubic B-spline within
+    /// `approximation_tol_3d` of the exact offset of its extended (else its own) base at
+    /// every parameter, in the base's parametrisation
+    /// ([`crate::offset::construction::sheets::certified_offset`]; not upstream, WR-718:
+    /// upstream fits NLib's `N_SrfOffset` and checks it at samples). The base must be a
+    /// B-spline surface. All nets are built before any face is
     /// changed; each face is then notified (`PRE_EDIT`), given the new surface's
     /// natural domain and the surface (`SmBrep::ReplaceSurface`, old surface to the
     /// deleted list, UV trim curves rebuilt) and notified again (`POST_EDIT`), in
@@ -897,7 +909,7 @@ impl OffsetExecutive {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a base that is not a B-spline surface; those of the approximation
+    /// `SM_ERR` for a base that is not a B-spline surface; those of `certified_offset`
     /// and of `ReplaceSurface` (`SER`). The notifications' statuses are not checked.
     pub fn replace_implicit_offsets(
         kernel: &mut Kernel,
@@ -932,28 +944,19 @@ impl OffsetExecutive {
             let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, base)? else {
                 return Err(SolidError::sm_err(OP));
             };
-            let approximation = if kernel.fixes.shell_one_construction {
-                // Not upstream (WR-718, #2350 S1): the offset certified within the
-                // tolerance at every parameter, in the base's parametrisation
-                let base_nurb = nurb.gw_nurb().ok_or_else(|| SolidError::null_pointer(OP))?;
-                let made = crate::offset::construction::sheets::certified_offset(
-                    kernel,
-                    base_nurb,
-                    offset.offset_distance(),
-                    approximation_tol_3d,
-                )?;
-                crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false)
-            } else {
-                // use NLIB function to build offset surface approximation
-                // (the cancel token polled inside, #2136 / #2372; none changes nothing)
-                nurb.approximate_offset_surface_cancellable(
-                    offset.offset_distance(),
-                    approximation_tol_3d,
-                    OffsetParamType::Inherited,
-                    crate::nurbs::srf_offset::OffsetOptions::default(),
-                    kernel.cancel_token(),
-                )?
-            };
+            // Not upstream (WR-718, #2350 S1): the offset certified within the tolerance
+            // at every parameter, in the base's parametrisation, where upstream fits
+            // NLib's `N_SrfOffset` and checks it at samples (the cancel token polled
+            // inside, #2136 / #2372)
+            let base_nurb = nurb.gw_nurb().ok_or_else(|| SolidError::null_pointer(OP))?;
+            let made = crate::offset::construction::sheets::certified_offset(
+                kernel,
+                base_nurb,
+                offset.offset_distance(),
+                approximation_tol_3d,
+            )?;
+            let approximation =
+                crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false);
             // remember face/surface pair
             fix.push((f, Surface::from(approximation)));
         }
@@ -4143,6 +4146,20 @@ mod tests {
         assert_eq!(executive.kept_edgeuses.len(), 16);
     }
 
+    /// The reach's edge bounds ([`super::super::reach::EdgeBounds`]) live for one local
+    /// operation: setting its surfaces forgets them, and so does clearing its relations.
+    #[test]
+    fn a_local_operations_edge_bounds_are_forgotten_with_its_surfaces() {
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.125, 1.0e-6);
+        executive.edge_bounds.hold(EdgeId::from_index(3));
+        assert_eq!(executive.edge_bounds.held(), 1);
+        executive.set_local_surfaces(&[], Vec::new(), &[]);
+        assert_eq!(executive.edge_bounds.held(), 0);
+        executive.edge_bounds.hold(EdgeId::from_index(3));
+        executive.clear_relations();
+        assert_eq!(executive.edge_bounds.held(), 0);
+    }
+
     #[test]
     fn a_box_face_margin_is_its_offset_corner_reach() {
         let mut kernel = Kernel::default();
@@ -4718,14 +4735,13 @@ mod tests {
         let mut original = Brep::new();
         let cache = BrepCache::new(crate::geom::a_object::BREP_TYPE).unwrap();
         let keys = OriginalKeys::new(&original).unwrap();
-        assert!(matches!(
-            solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO),
-            Err(SolidError::Upstream {
-                operation: "intersect::topology_solver::p1::TopologyObjects::brep_trees",
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO)
+            .unwrap_err();
+        assert_eq!(
+            e.operation(),
+            "intersect::topology_solver::p1::TopologyObjects::brep_trees"
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]

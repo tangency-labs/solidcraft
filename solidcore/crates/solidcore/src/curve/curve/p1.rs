@@ -25,6 +25,10 @@
 //!   degenerate), a [`Tessellation`] (all three arrays; upstream fills the ones it is
 //!   given, each independently, and fails with `SM_ERR_INVALID_INPUT` when none is),
 //!   and a [`SolutionArray`] for `GlobalPointSolve`.
+//! - **Projected extrema at interval ends (#13658, WR-775).** For a projected minimum
+//!   (maximum), `GlobalPointSolve` returns an end of its interval when the projected
+//!   distance grows (shrinks) from that end into the interval. Upstream returns no
+//!   solution there, or a farther (nearer) stationary point.
 //! - **Objects.** Solutions name the caller's handles: `GlobalPointSolve` takes the
 //!   handle of the curve (named by the line drop and the tree solutions, upstream
 //!   `this`) and of its analytic replacement ([`GlobalPointSolveOptions`]; upstream
@@ -156,8 +160,10 @@ fn first_n<const N: usize>(v: &[Vec3]) -> [Vec3; N] {
 /// The `SmStatus` value of an error a `double` function returns as its value
 /// (`sm_GetProjDist`'s `SER`).
 fn status_value(e: &SolidError) -> f64 {
+    if let Some(code) = e.upstream_status() {
+        return f64::from(code);
+    }
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         _ => 1001.0,
     }
@@ -201,11 +207,18 @@ where
         }
 
         if sol.num_variables != 2 {
-            return Err(SolidError::sm_err(OP_REFINE));
+            return Err(SolidError::curve_failed(
+                OP_REFINE,
+                "a range solution does not have two variables",
+            ));
         }
 
-        let crv1 = curve_of(sol.objects[0]).ok_or(SolidError::null_pointer(OP_REFINE))?;
-        let crv2 = curve_of(sol.objects[1]).ok_or(SolidError::null_pointer(OP_REFINE))?;
+        let crv1 = curve_of(sol.objects[0]).ok_or_else(|| {
+            SolidError::curve_missing(OP_REFINE, "a range solution's first curve")
+        })?;
+        let crv2 = curve_of(sol.objects[1]).ok_or_else(|| {
+            SolidError::curve_missing(OP_REFINE, "a range solution's second curve")
+        })?;
 
         let natural_dom1 = crv1.natural_interval();
         let natural_dom2 = crv2.natural_interval();
@@ -528,10 +541,16 @@ impl Curve {
 
         // need 2 breakpoints to define the curve interval
         let (Some(&first), Some(&last)) = (breaks.first(), breaks.last()) else {
-            return Err(SolidError::sm_err(OP_APPROX));
+            return Err(SolidError::curve_failed(
+                OP_APPROX,
+                "there are fewer than two breakpoints",
+            ));
         };
         if breaks.len() < 2 {
-            return Err(SolidError::sm_err(OP_APPROX));
+            return Err(SolidError::curve_failed(
+                OP_APPROX,
+                "there are fewer than two breakpoints",
+            ));
         }
 
         // low work - degenerate curves
@@ -641,14 +660,20 @@ impl Curve {
                     pop_stack(&mut stack)?;
                 } else {
                     if subdivisions >= MAX_APPROXIMATION_SUBDIVISIONS {
-                        return Err(SolidError::sm_err(OP_APPROX));
+                        return Err(SolidError::curve_failed(
+                            OP_APPROX,
+                            "the approximation passed its most subdivisions",
+                        ));
                     }
                     subdivisions += 1;
 
                     // get param mid point and associated curve pos and tan
                     let mid_t = (last_t + curr_t) / 2.0;
                     if !mid_t.is_finite() || mid_t == last_t || mid_t == curr_t {
-                        return Err(SolidError::sm_err(OP_APPROX));
+                        return Err(SolidError::curve_failed(
+                            OP_APPROX,
+                            "the midpoint parameter no longer splits the step",
+                        ));
                     }
                     let mid_pv: [Vec3; 2] = eval_n(k, self, mid_t, 1, true, true)?; // NonZeroTangent values
                     curr_t = mid_t;
@@ -1009,7 +1034,10 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
         let point_node = self.base.branch_node(branch, 0)?;
         let curve_node = self.base.branch_node(branch, 1)?;
         if matches!(curve_node.data, NodeData::None) {
-            return Err(SolidError::null_pointer(OP_LOCAL));
+            return Err(SolidError::curve_missing(
+                OP_LOCAL,
+                "the branch's curve node data",
+            ));
         }
         let curve_tree = self.base.tree(1)?;
         let bez_span = *curve_tree.curve_span(curve_node)?;
@@ -1040,10 +1068,14 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
         // ends there: with the exact test alone, an end a rounding past a knot leaves this span
         // thinking the answer lies in a next span that never looks, and a point whose foot is at
         // the end has no solution at all.
-        if bez_ivl.min() <= interval.min() || are_same(bez_ivl.min(), interval.min()) {
+        let at_interval_start =
+            bez_ivl.min() <= interval.min() || are_same(bez_ivl.min(), interval.min());
+        let at_interval_end =
+            bez_ivl.max() >= interval.max() || are_same(bez_ivl.max(), interval.max());
+        if at_interval_start {
             conts[0] = ContinuityType::Discontinuous;
         }
-        if bez_ivl.max() >= interval.max() || are_same(bez_ivl.max(), interval.max()) {
+        if at_interval_end {
             conts[1] = ContinuityType::Discontinuous;
         }
 
@@ -1179,6 +1211,61 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
             }
 
             return Ok(needs_more_subdivision);
+        }
+
+        // (not upstream, #13658, WR-775) An end of the solver's interval where the projected
+        // distance is not stationary is no root of the property search below, and the loop gives
+        // up on the span when its first guess finds no root, before its own end point branch.
+        // A point whose nearest (farthest) projected point is that end then had no solution
+        // at all. The end is a solution when the projected distance grows (shrinks) from it
+        // into the interval; an end where it is stationary is left to the search.
+        if op == SolverOperation::ProjectedMinimize || op == SolverOperation::ProjectedMaximize {
+            let normal = self.opt(0)?;
+            // (at the interval's end, continuity side, parameter, is the start)
+            let ends = [
+                (at_interval_start, 0, bez_ivl.min(), true),
+                (at_interval_end, 1, bez_ivl.max(), false),
+            ];
+            for (at_bound, side, parameter, is_start) in ends {
+                let open = conts
+                    .get(side)
+                    .is_some_and(|c| (*c as i32) < (ContinuityType::G1 as i32));
+                if !(at_bound && open) {
+                    continue;
+                }
+                // the tangent on the interval's side of the end: at a knot where the curve
+                // turns, the other side's tangent says nothing about the interval. At a knot
+                // the evaluation's flag picks the span that starts there (`true`) or the one
+                // that ends there (`false`).
+                let (end, tangent) = match curve.evaluate(k, parameter, 1, is_start, true) {
+                    Ok(v) => match v.as_slice() {
+                        [point, tangent, ..] => (*point, *tangent),
+                        _ => continue,
+                    },
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    Err(_) => continue,
+                };
+                let outward = if is_start { -tangent } else { tangent };
+                if !end_is_projected_extremum(end, outward, test_pnt, normal, op) {
+                    continue;
+                }
+                let value =
+                    match proj_dist(k, curve, parameter, test_pnt, normal, true, Vec3::ZERO, op) {
+                        Ok(d) => d,
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                        Err(_) => continue,
+                    };
+                let mut at_end: Solution<O> = Solution::new();
+                at_end.solution_type = SolutionType::SingleValue;
+                at_end.nodes[0] = branch[0];
+                at_end.nodes[1] = branch[1];
+                at_end.num_variables = 1;
+                at_end.start.solution_value = value;
+                at_end.start.parameters[0] = parameter;
+                at_end.num_objects = 1;
+                at_end.objects[0] = curve_obj;
+                self.add_solution(&at_end, true)?;
+            }
         }
 
         // arrive here when bezier segment is not zeroLength
@@ -1643,7 +1730,10 @@ fn drop_point_fast<O: Copy>(
             requested,
             handle,
         ),
-        _ => Err(SolidError::sm_err("curve::curve::p1::drop_point_fast")),
+        _ => Err(SolidError::curve_failed(
+            "curve::curve::p1::drop_point_fast",
+            "the curve kind has no fast point drop",
+        )),
     }
 }
 
@@ -1779,10 +1869,12 @@ impl Curve {
             *cache = Some(match make_curve_cache::<O>(k, self, opts.handle) {
                 Ok(c) => c,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Err(SolidError::null_pointer(OP_GLOBAL)),
+                Err(_) => return Err(SolidError::curve_missing(OP_GLOBAL, "the curve's cache")),
             });
         }
-        let cache = cache.as_mut().ok_or(SolidError::null_pointer(OP_GLOBAL))?;
+        let cache = cache
+            .as_mut()
+            .ok_or_else(|| SolidError::curve_missing(OP_GLOBAL, "the curve's cache"))?;
 
         // Analytical Curve Optimization
         if op == SolverOperation::Minimize || op == SolverOperation::Intersect {
@@ -1842,7 +1934,9 @@ impl Curve {
         // Execute a Point/CurveLeafNode solution for every LeafNode in the target
         // curve's cache.
         let point_tree: Tree<O> = Tree::from_point(test_point, 0.0, false);
-        let curve_tree = cache.tree().ok_or(SolidError::null_pointer(OP_GLOBAL))?;
+        let curve_tree = cache
+            .tree()
+            .ok_or_else(|| SolidError::curve_missing(OP_GLOBAL, "the curve cache's tree"))?;
 
         // Construct and init global solver
         let mut gs = CpGlobalSolver::new(k, &point_tree, curve_tree, *interval).with_curve(self);
@@ -1851,7 +1945,8 @@ impl Curve {
 
         // set atDistance value - when appropriate
         if op == SolverOperation::AtDistance {
-            let d = target.ok_or(SolidError::null_pointer(OP_GLOBAL))?;
+            let d = target
+                .ok_or_else(|| SolidError::curve_missing(OP_GLOBAL, "the target distance"))?;
             gs.base.set_at_distance(d);
         }
 
@@ -1896,6 +1991,35 @@ impl Curve {
         )?;
 
         Ok(solutions)
+    }
+}
+
+/// Whether an end of the interval is where the projected distance from `test_point` to the
+/// curve is smallest (`ProjectedMinimize`) or largest (`ProjectedMaximize`) near that end:
+/// `end` is the curve point there, `outward` its tangent pointing out of the interval and
+/// `normal` the projection direction. The distance must change at the end, by more than
+/// the angular zero: an end where it is stationary, or where the point projects onto the
+/// end, or with no tangent in the projection plane, is `false` (#13658).
+fn end_is_projected_extremum(
+    end: Point3,
+    outward: Vec3,
+    test_point: Point3,
+    normal: Vec3,
+    op: SolverOperation,
+) -> bool {
+    let offset = normal.cross(end - test_point).cross(normal);
+    let outward = normal.cross(outward).cross(normal);
+    let scale = offset.length() * outward.length();
+    if !scale.is_finite() || offset.length() < EFF_ZERO || outward.length() < EFF_ZERO {
+        return false;
+    }
+    // the cosine between the offset and the outward tangent: negative when the distance
+    // grows into the interval, positive when it shrinks
+    let cosine = offset.dot(outward) / scale;
+    if op == SolverOperation::ProjectedMaximize {
+        cosine > EFF_ZERO_RAD
+    } else {
+        cosine < -EFF_ZERO_RAD
     }
 }
 
@@ -2361,7 +2485,7 @@ mod tests {
         // trillions of spans, despite this curve having only two control points.
         assert!(matches!(
             c.approximate_curve_base(&k, &[0.0, 1e100], -1e300, &opts),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if crate::error::upstream_status(&e) == Some(1001)
         ));
     }
 
@@ -2375,7 +2499,7 @@ mod tests {
         };
         assert!(matches!(
             c.approximate_curve_base(&Kernel::default(), &[f64::MAX * 0.75, f64::MAX], 0.0, &opts,),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if crate::error::upstream_status(&e) == Some(1001)
         ));
     }
 
@@ -2396,6 +2520,208 @@ mod tests {
             )
             .unwrap();
         assert_eq!(sols.len(), 1);
+    }
+
+    /// The projected answers `(parameter, value)` of `op` for `point` seen along Z.
+    fn projected_answers(
+        curve: &Curve,
+        interval: (f64, f64),
+        op: SolverOperation,
+        point: Vec3,
+        tolerance: f64,
+        requested: SolutionRequested,
+    ) -> Vec<(f64, f64)> {
+        let options = GlobalPointSolveOptions {
+            opt_vectors: Some(&[Vec3::Z]),
+            ..Default::default()
+        };
+        let interval = Extent1d::from_min_max(interval.0, interval.1);
+        let answers = curve
+            .global_point_solve::<Obj>(
+                &Kernel::default(),
+                &interval,
+                op,
+                point,
+                tolerance,
+                requested,
+                &options,
+            )
+            .unwrap();
+        answers
+            .as_slice()
+            .iter()
+            .map(|s| (s.start.parameters[0], s.start.solution_value))
+            .collect()
+    }
+
+    /// #13658: the nearest (farthest) point seen along a direction is an end of the
+    /// interval when the distance still falls (rises) there. The line runs from x = -1
+    /// to x = 1 over [0, 1]; the expected values are plain Pythagoras.
+    #[test]
+    fn projected_extremum_at_an_end_of_the_interval_is_a_solution() {
+        use SolutionRequested::{All, Single};
+        use SolverOperation::{ProjectedMaximize, ProjectedMinimize};
+        let line = Curve::from(
+            BSplineCurve::create_line_segment(3, Vec3::new(-1.0, 0.0, 0.0), Vec3::X).unwrap(),
+        );
+        let whole = (0.0, 1.0);
+        let close = |got: &[(f64, f64)], want: &[(f64, f64)]| {
+            got.len() == want.len()
+                && got
+                    .iter()
+                    .zip(want)
+                    .all(|(g, w)| (g.0 - w.0).abs() < 1e-9 && (g.1 - w.1).abs() < 1e-9)
+        };
+        // beyond either end, whatever the height along the direction: the near end
+        for (point, want) in [
+            (Vec3::new(2.0, 0.5, 0.0), (1.0, 1.25_f64.sqrt())),
+            (Vec3::new(-3.0, 1.0, 5.0), (0.0, 5.0_f64.sqrt())),
+        ] {
+            for requested in [Single, All] {
+                let got =
+                    projected_answers(&line, whole, ProjectedMinimize, point, 1e-6, requested);
+                assert!(close(&got, &[want]), "{point:?} {requested:?}: {got:?}");
+            }
+        }
+        // the ends of a part of the line count the same way
+        let got = projected_answers(
+            &line,
+            (0.25, 0.75),
+            ProjectedMinimize,
+            Vec3::new(2.0, 0.5, 0.0),
+            1e-6,
+            Single,
+        );
+        assert!(close(&got, &[(0.75, 2.5_f64.sqrt())]), "{got:?}");
+        // a foot inside the line is the one minimum however wide the tolerance: the
+        // ends are the farthest points, not near ones
+        let above = Vec3::new(0.25, 0.5, 0.0);
+        for (tolerance, requested) in [(1e-6, Single), (1e-6, All), (50.0, All)] {
+            let got =
+                projected_answers(&line, whole, ProjectedMinimize, above, tolerance, requested);
+            assert!(
+                close(&got, &[(0.625, 0.5)]),
+                "{tolerance} {requested:?}: {got:?}"
+            );
+        }
+        // the farthest point is the far end; with a wide tolerance both ends, and never
+        // the foot
+        let far = (0.0, 1.8125_f64.sqrt());
+        let near = (1.0, 0.8125_f64.sqrt());
+        let got = projected_answers(&line, whole, ProjectedMaximize, above, 1e-6, Single);
+        assert!(close(&got, &[far]), "{got:?}");
+        let mut got = projected_answers(&line, whole, ProjectedMaximize, above, 50.0, All);
+        got.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert!(close(&got, &[far, near]), "{got:?}");
+    }
+
+    /// An interval that starts at a corner of the curve: the tangent that says whether the
+    /// start is the nearest point is the one inside the interval. The polyline runs
+    /// (-1, 0) to (0, 0) to (0, 1) with its corner at 0.5; the interval [0.5, 1] is the
+    /// second leg, along +y.
+    #[test]
+    fn projected_extremum_at_an_interval_starting_at_a_corner_uses_the_inside_tangent() {
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::{CPoint, NOW};
+        use SolutionRequested::{All, Single};
+        let controls = vec![
+            CPoint::new(-1.0, 0.0, 0.0, NOW),
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(0.0, 1.0, 0.0, NOW),
+        ];
+        let net = Net::new(controls, 1, vec![0.0, 0.0, 0.5, 1.0, 1.0]).unwrap();
+        let corner = Curve::from(BSplineCurve::from_nurb(net, 3, false));
+        let leg = (0.5, 1.0);
+        let op = SolverOperation::ProjectedMinimize;
+        // below the leg: the corner is the nearest point, although the first leg's
+        // tangent there points towards the query point
+        let below = Vec3::new(0.3, -1.0, 0.0);
+        for requested in [Single, All] {
+            let got = projected_answers(&corner, leg, op, below, 1e-6, requested);
+            assert_eq!(got.len(), 1, "{requested:?}: {got:?}");
+            assert!((got[0].0 - 0.5).abs() < 1e-12, "{got:?}");
+            assert!((got[0].1 - 1.09_f64.sqrt()).abs() < 1e-12, "{got:?}");
+        }
+        // beside the leg: the foot (0, 0.5) is the one minimum; the corner is farther
+        // and the distance falls from it into the interval
+        let beside = Vec3::new(-0.5, 0.5, 0.0);
+        for (tolerance, requested) in [(1e-6, Single), (50.0, All)] {
+            let got = projected_answers(&corner, leg, op, beside, tolerance, requested);
+            assert_eq!(got.len(), 1, "{tolerance} {requested:?}: {got:?}");
+            assert!((got[0].0 - 0.75).abs() < 1e-9, "{got:?}");
+            assert!((got[0].1 - 0.5).abs() < 1e-9, "{got:?}");
+        }
+        // the same for an interval that ends at the corner: the first leg, along +x.
+        // Right of the corner the corner is nearest; above the leg its foot is.
+        let first = (0.0, 0.5);
+        let right = Vec3::new(1.0, 0.3, 0.0);
+        let got = projected_answers(&corner, first, op, right, 1e-6, Single);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert!((got[0].0 - 0.5).abs() < 1e-6, "{got:?}");
+        assert!((got[0].1 - 1.09_f64.sqrt()).abs() < 1e-9, "{got:?}");
+        let above = Vec3::new(-0.5, 0.5, 0.0);
+        for (tolerance, requested) in [(1e-6, Single), (50.0, All)] {
+            let got = projected_answers(&corner, first, op, above, tolerance, requested);
+            assert_eq!(got.len(), 1, "{tolerance} {requested:?}: {got:?}");
+            assert!((got[0].0 - 0.25).abs() < 1e-9, "{got:?}");
+            assert!((got[0].1 - 0.5).abs() < 1e-9, "{got:?}");
+        }
+    }
+
+    /// #13677's curve: a straight projected spline with a knot at 0.5, seen from the
+    /// origin. The squared distance is 1 + ((t - 0.5) / 1536)^2 on [0.5, 2] and falls
+    /// on [0, 0.5], so the two ends are the only maxima.
+    #[test]
+    fn projected_maximum_of_a_straight_spline_is_at_its_ends() {
+        use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
+        use crate::nurbs::b_spline_curve::ProjectionType;
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::{CPoint, NOW};
+        let a = 1.0 / 1024.0;
+        let controls = vec![
+            CPoint::new(-a, 1.0, 0.0, NOW),
+            CPoint::new(0.0, 1.0, 0.0, NOW),
+            CPoint::new(a, 1.0, 0.0, NOW),
+        ];
+        let net = Net::new(controls, 1, vec![0.0, 0.0, 0.5, 2.0, 2.0]).unwrap();
+        let base = Curve::from(BSplineCurve::from_nurb(net, 3, false));
+        let curve = Curve::from(
+            ProjectedCurve::new(
+                base,
+                Some(Vec3::ZERO),
+                Some(Vec3::Z),
+                None,
+                ProjectionType::Parallel,
+                OwnsCurve::Yes,
+            )
+            .unwrap(),
+        );
+        let value = (1.0 + a * a).sqrt();
+        // 1.0 is the tolerance of #13677: wide enough to hold every point of the curve
+        for (tolerance, requested) in [
+            (1e-9, SolutionRequested::Single),
+            (1e-9, SolutionRequested::All),
+            (1.0, SolutionRequested::All),
+        ] {
+            let mut got = projected_answers(
+                &curve,
+                (0.0, 2.0),
+                SolverOperation::ProjectedMaximize,
+                Vec3::ZERO,
+                tolerance,
+                requested,
+            );
+            got.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert!(!got.is_empty(), "{tolerance} {requested:?}");
+            assert!(
+                got.iter()
+                    .all(|(t, v)| (*t == 0.0 || *t == 2.0) && (v - value).abs() < 1e-12),
+                "{tolerance} {requested:?}: {got:?}"
+            );
+            if requested == SolutionRequested::All {
+                assert_eq!(got.len(), 2, "{tolerance}: {got:?}");
+            }
+        }
     }
 
     #[test]

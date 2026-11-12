@@ -1,7 +1,7 @@
 //! STEP (ISO 10303-21) export: AP242 product structure, assemblies, names and colours.
 //!
 //! Each body's record is written as it is, the exact B-rep, by
-//! [`solidcraft_step::write::topology`]: its material regions as solids, its open shells as a
+//! [`solidcore_step::write::topology`]: its material regions as solids, its open shells as a
 //! surface model. Around it this writes one header and context, a product per part with its
 //! shape representation, named solids, surface and face colours, and assemblies as
 //! next-assembly-usage occurrences placed by item-defined transformations (the structure the
@@ -10,8 +10,8 @@
 
 use std::fmt::Write as _;
 
-use solidcraft_step::p21::Param;
-use solidcraft_step::write::{GeomWriter, Writer, string, topology};
+use solidcore_step::p21::Param;
+use solidcore_step::write::{GeomWriter, Writer, string, topology};
 
 use crate::body::Body;
 use crate::{KernelError, Result};
@@ -161,7 +161,7 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         ("GLOBAL_UNIT_ASSIGNED_CONTEXT", vec![refs(&[mm, rad, sr])]),
         ("REPRESENTATION_CONTEXT", vec![s("Context #1"), s("3D Context with UNIT and UNCERTAINTY")]),
     ]);
-    let origin = GeomWriter::new(&mut w).placement(&solidcraft_step::geom::Placement {
+    let origin = GeomWriter::new(&mut w).placement(&solidcore_step::geom::Placement {
         origin: [0.0; 3],
         axis: [0.0, 0.0, 1.0],
         ref_direction: [1.0, 0.0, 0.0],
@@ -209,14 +209,15 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
             let opacity = b.body.paint().map_or(1.0, |p| p.opacity);
             let items: Vec<u64> = written.solids.iter().copied().chain(written.sheets).collect();
             if let Some(c) = b.color {
+                let name = b.body.paint().and_then(|p| p.name.as_deref());
                 for item in &items {
-                    styled.push(style(&mut w, *item, c, opacity));
+                    styled.push(style(&mut w, *item, c, opacity, name));
                 }
             }
             // Faces with colours of their own.
             for f in b.body.paint().map(|p| p.faces.as_slice()).unwrap_or(&[]) {
                 if let Some(&face) = written.faces.get(f.face).filter(|id| **id != 0) {
-                    styled.push(style(&mut w, face, f.color, f.opacity));
+                    styled.push(style(&mut w, face, f.color, f.opacity, f.name.as_deref()));
                 }
             }
             solids.extend(written.solids);
@@ -279,9 +280,11 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
     Ok(text)
 }
 
-/// A surface colour for an item (STYLED_ITEM chain; the styles are shared).
-fn style(w: &mut Writer, item: u64, c: [f32; 3], opacity: f32) -> u64 {
-    let rgb = w.add("COLOUR_RGB", &[s(""), Param::Real(c[0] as f64), Param::Real(c[1] as f64), Param::Real(c[2] as f64)]);
+/// A surface colour for an item (STYLED_ITEM chain; the styles are shared), named as its look is
+/// (`COLOUR_RGB`'s name, read back on import) when it has a name.
+fn style(w: &mut Writer, item: u64, c: [f32; 3], opacity: f32, name: Option<&str>) -> u64 {
+    let name = name.and_then(crate::body::colour_name).unwrap_or_default();
+    let rgb = w.add("COLOUR_RGB", &[s(&name), Param::Real(c[0] as f64), Param::Real(c[1] as f64), Param::Real(c[2] as f64)]);
     let fasc = w.add("FILL_AREA_STYLE_COLOUR", &[s(""), r(rgb)]);
     let fas = w.add("FILL_AREA_STYLE", &[s(""), refs(&[fasc])]);
     let ssfa = w.add("SURFACE_STYLE_FILL_AREA", &[r(fas)]);
@@ -318,9 +321,9 @@ pub fn step_export_bodies(bodies: &[ExportBody], header: &StepHeader) -> Result<
 mod tests {
     use super::*;
     use solidcore_record::Vec3;
+    use solidcore_step::p21;
+    use solidcore_step::write::real;
     use solidcraft_geom::prelude::*;
-    use solidcraft_step::p21;
-    use solidcraft_step::write::real;
 
     #[test]
     fn islands_are_solids_of_their_own_not_voids() {

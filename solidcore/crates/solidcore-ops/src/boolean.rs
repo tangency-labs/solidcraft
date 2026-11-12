@@ -15,7 +15,7 @@ use solidcore::primitive::primitive_creation::p1::Boolean2d;
 use solidcore::Brep;
 use solidcore::Result as KernelResult;
 
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish_proved, Body, Expect, Outward};
 use crate::session::run_taking;
 use crate::{Error, Result};
 
@@ -32,7 +32,8 @@ pub enum BooleanOp {
 
 /// What a call gave before it is a result.
 enum Done {
-    Body(Box<Brep>),
+    /// The result, with the proof [`finish_proved`] made on it.
+    Body(Box<Brep>, Option<Outward>),
     Empty,
     Refused(Error),
 }
@@ -46,21 +47,25 @@ impl crate::session::Answer for Done {
     }
 }
 
-/// The result contract of a boolean ([`finish`]): faces left, and a solid in gives a solid out,
-/// solids touching along an edge or at a vertex allowed.
+/// The result contract of a boolean ([`finish_proved`]): faces left, and a solid in gives a
+/// solid out, solids touching along an edge or at a vertex allowed; the result keeps the proof
+/// its solid test made, for the next operation that takes it as an operand.
 fn finished(k: &mut Kernel, r: Brep, expect: Expect) -> KernelResult<Done> {
-    Ok(match finish(k, r, expect.touching())? {
-        Ok(b) => Done::Body(Box::new(b)),
+    Ok(match finish_proved(k, r, expect.touching())? {
+        Ok((b, outward)) => Done::Body(Box::new(b), outward),
         Err(Error::Empty) => Done::Empty,
         Err(e) => Done::Refused(e),
     })
 }
 
-/// What the operands make a boolean's result: a solid when every operand is one.
-fn expect_of(k: &mut Kernel, operands: &mut [Brep]) -> KernelResult<Expect> {
+/// What the operands make a boolean's result: a solid when every operand is one. Each comes
+/// with the proof its body held ([`Body::take_held`]), taken where it stands
+/// ([`Expect::of_held`]): an operand a previous operation proved, unchanged since, is not
+/// proved again (#14830).
+fn expect_of(k: &mut Kernel, operands: &mut [(Brep, Option<Outward>)]) -> KernelResult<Expect> {
     let mut all = true;
-    for b in operands.iter_mut() {
-        all &= Expect::of(k, b)? != Expect::FACES;
+    for (b, outward) in operands.iter_mut() {
+        all &= Expect::of_held(k, b, outward.take())? != Expect::FACES;
     }
     Ok(if all { Expect::SOLID } else { Expect::FACES })
 }
@@ -86,9 +91,9 @@ fn usable(call: &'static str, bodies: &[Body]) -> Result<()> {
     Ok(())
 }
 
-/// The kernel's body taken out of `b`, leaving it empty.
-fn take(b: &Body) -> Brep {
-    std::mem::replace(&mut *b.lock(), Brep::new())
+/// The kernel's body taken out of `b`, leaving it empty, with the proof it held.
+fn take(b: &Body) -> (Brep, Option<Outward>) {
+    b.take_held()
 }
 
 fn operation(op: BooleanOp) -> BooleanOperation {
@@ -101,7 +106,7 @@ fn operation(op: BooleanOp) -> BooleanOperation {
 
 fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
     match d {
-        Done::Body(b) => Ok(Some(Body::new(*b))),
+        Done::Body(b, outward) => Ok(Some(Body::held(*b, outward))),
         Done::Empty => empty,
         Done::Refused(e) => Err(e),
     }
@@ -120,7 +125,7 @@ pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
         let [a, b] = &both;
         let mut operands = [take(a), take(b)];
         let expect = expect_of(k, &mut operands)?;
-        let [ca, cb] = operands;
+        let [(ca, _), (cb, _)] = operands;
         let r = sm::boolean(k, ca, cb, operation(op))?;
         finished(k, r.result, expect)
     })?;
@@ -141,8 +146,9 @@ pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
     }
     usable("union_all", &bodies)?;
     let d = run_taking("union_all", &operands(&bodies), |k| {
-        let mut level: Vec<Brep> = bodies.iter().map(take).collect();
-        let expect = expect_of(k, &mut level)?;
+        let mut held: Vec<(Brep, Option<Outward>)> = bodies.iter().map(take).collect();
+        let expect = expect_of(k, &mut held)?;
+        let mut level: Vec<Brep> = held.into_iter().map(|(b, _)| b).collect();
         while level.len() > 1 {
             let mut next = Vec::new();
             let mut it = level.into_iter();
@@ -172,7 +178,7 @@ pub fn boolean2d(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
     usable("SmApiBoolean2d", &both)?;
     let d = run_taking("SmApiBoolean2d", &operands(&both), |k| {
         let [a, b] = &both;
-        let (ca, cb) = (take(a), take(b));
+        let ((ca, _), (cb, _)) = (take(a), take(b));
         if ca.face_list().is_empty() || cb.face_list().is_empty() {
             return Ok(Done::Empty);
         }
@@ -200,7 +206,7 @@ fn counts(b: &Brep) -> [usize; 3] {
 
 /// `tool`'s edges imprinted on `body` (`SmApiBooleanWithOptions(SM_BO_IMPRINT)`: cookie cutter
 /// off, imprinting on, post-process off, imprint-and-classify off, keep other on), with the
-/// result contract ([`finish`]: faces left, a solid in gives a solid out), and whether the
+/// result contract ([`finish_proved`]: faces left, a solid in gives a solid out), and whether the
 /// imprint changed `body`'s topology (a face cut, an edge split: its face, edge or vertex
 /// count moved). When it changed nothing the body comes back as the kernel left it, never
 /// dropped.
@@ -214,17 +220,17 @@ pub fn imprint(body: Body, tool: Body) -> Result<(Body, bool)> {
     let mut before = [0; 3];
     let d = run_taking("SmApiBooleanWithOptions", &operands(&both), |k| {
         let [body, tool] = &both;
-        let (mut a, t) = (take(body), take(tool));
+        let ((mut a, outward), (t, _)) = (take(body), take(tool));
         before = counts(&a);
-        let expect = Expect::of(k, &mut a)?;
+        let expect = Expect::of_held(k, &mut a, outward)?;
         let options = MergeOptions::new(false, true, false, false, true);
         let r = sm::boolean_with_options(k, a, t, BooleanOperation::Imprint, options)?.result;
         finished(k, r, expect)
     })?;
     match d {
-        Done::Body(b) => {
+        Done::Body(b, outward) => {
             let changed = counts(&b) != before;
-            Ok((Body::new(*b), changed))
+            Ok((Body::held(*b, outward), changed))
         }
         Done::Empty => Err(Error::Empty),
         Done::Refused(e) => Err(e),

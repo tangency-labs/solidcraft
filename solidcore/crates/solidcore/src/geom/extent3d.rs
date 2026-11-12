@@ -72,7 +72,7 @@
 //!   binary64 inputs (WR-4;
 //!   `plan/upstream-issues/WR-4--addendum-2026-10-31-approx-unbounded-original-min.md`).
 //! - Status codes: `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; the
-//!   `SM_ERR` of `ComputeConeBoundTo` is [`SolidError::Upstream`] with code 1001.
+//!   `SM_ERR` of `ComputeConeBoundTo` is [`GeomFailure`](crate::error::geom::GeomFailure) with code 1001.
 //! - `SetUInterval`/`SetVInterval` only validate their argument under
 //!   `SM_DEBUG_CODE`; in the release build they always succeed, so the Rust methods
 //!   return nothing.
@@ -97,9 +97,6 @@ use crate::math::{
     is_infinite_param, max2, max3, min2, min3, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ,
     INFINITE_PARAMETER, PI, UNDEF_DOUBLE,
 };
-
-// Upstream status `SM_ERR`.
-use crate::error::SM_ERR;
 
 /// Classification of one interval of an extent (`SmBoundaryType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -966,10 +963,11 @@ impl Extent3d {
             let axis = if vec.length_squared() > EFF_ZERO * scale {
                 // `Unitize` fails only below EFF_ZERO_SQ, which the test above
                 // excludes; upstream then returns SM_ERR.
-                vec.unitize().map_err(|_| SolidError::Upstream {
-                    operation: "geom::extent3d::Extent3d::cone_bound_to",
-                    code: SM_ERR,
-                    entity: None,
+                vec.unitize().map_err(|_| {
+                    SolidError::geom_failed(
+                        "geom::extent3d::Extent3d::cone_bound_to",
+                        "the axis to the sphere's centre has no direction",
+                    )
                 })?
             } else {
                 Vec3::new(0.0, 0.0, 1.0)

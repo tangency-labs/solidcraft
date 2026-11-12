@@ -43,7 +43,7 @@ use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p2::{is_manifold_solid, is_sheet};
 use solidcore::topology::brep::p3::{new_brep, with_kernel_callbacks};
 use solidcore::topology::brep::p8::create_face_from_surface;
-use solidcore::topology::brep::p9::orient_sheet_surfaces;
+use solidcore::topology::brep::p9::{OrientSheetNote, orient_sheet_surfaces};
 use solidcore::topology::brep::p10::merge_curves_on_surface_through_surface;
 use solidcore::topology::brep::planar_section::face_planar_section_curves;
 use solidcore::topology::brep_cache::CacheObject;
@@ -497,7 +497,8 @@ pub(crate) fn split_body_by_sheet(body: &Body, sheet: &Body, face: usize) -> Res
             // the sheet's own attributes, so its faces' tags see each swap.
             let turned = with_kernel_callbacks(k, &mut copy, |k, b, env| orient_sheet_surfaces(k, b, Some(f), !flip, env));
             copy.refresh_cached_topology();
-            Ok(match turned {
+            // the orientation's note fails the side as its status 1 did
+            Ok(match OrientSheetNote::stop_on_note(turned) {
                 Ok(()) => Ok(copy),
                 Err(e) => Err(status(e)),
             })

@@ -41,6 +41,7 @@ use crate::error::offset::OffsetFailure;
 use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::expansion as exact;
 use crate::kernel::Kernel;
 use crate::mass::enclosure::VolumeSign;
 use crate::math::Vec3;
@@ -66,8 +67,9 @@ pub use crate::offset::offset_executive::p2::local_operation_simple;
 
 const OP: &str = "topology::brep::local_operation::local_operation";
 
-fn null() -> SolidError {
-    SolidError::null_pointer(OP)
+/// `what` is missing (upstream `SM_ERR_NULL_POINTER`).
+fn null(what: &'static str) -> SolidError {
+    SolidError::topology_missing(OP, what)
 }
 
 /// `SmBrep::LocalOperation(rFaces, rNewSurfaces)`: `surfaces[i]` becomes the surface of
@@ -110,7 +112,7 @@ pub fn local_operation(
 ) -> Result<()> {
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
     if surfaces.len() < faces.len() {
-        return Err(null());
+        return Err(null("a surface for every face"));
     }
     // (not upstream) a refusal or a failure leaves `b` as it came in, the caches its
     // surfaces had included (the operation runs on its copy), and the caller's
@@ -165,7 +167,7 @@ fn local_operation_on(
     let mut moving = Vec::new();
     for &face in &all_faces {
         let index = faces.iter().position(|&f| f == face);
-        let own = face_ops::surface(b, face)?.ok_or_else(null)?;
+        let own = face_ops::surface(b, face)?.ok_or_else(|| null("the face's surface"))?;
         if let Some(new) = index.and_then(|i| given.get(i)).and_then(Option::as_ref) {
             if !is_own_surface(own, new) {
                 moving.push(face);
@@ -175,7 +177,7 @@ fn local_operation_on(
     let mut continued = continued_planes(k, b, &all_faces, &moving)?;
     for &face in &all_faces {
         let index = faces.iter().position(|&f| f == face);
-        let own = face_ops::surface(b, face)?.ok_or_else(null)?;
+        let own = face_ops::surface(b, face)?.ok_or_else(|| null("the face's surface"))?;
         let replacement = match index {
             Some(index) if moving.contains(&face) => {
                 if let Some(slot) = placed.get_mut(index) {
@@ -185,7 +187,7 @@ fn local_operation_on(
                     given
                         .get_mut(index)
                         .and_then(Option::take)
-                        .ok_or_else(null)?,
+                        .ok_or_else(|| null("the face's given surface"))?,
                 )
             }
             _ => continued.remove(&face),
@@ -245,14 +247,16 @@ fn local_operation_on(
         for (j, slot) in placed.iter().enumerate() {
             let surface = match (given.get(j).and_then(Option::as_ref), slot) {
                 (Some(surface), _) => surface,
-                (None, Some(at)) => new_list.get(*at).ok_or_else(null)?,
+                (None, Some(at)) => new_list
+                    .get(*at)
+                    .ok_or_else(|| null("the placed new surface"))?,
                 (None, None) => continue,
             };
             let domain = surface.natural_uv_domain_with_nurb(k)?;
             let surf_box = surface
                 .calculate_bounding_box(k, &domain, [true, false, false], true)?
                 .normal_box
-                .ok_or_else(null)?;
+                .ok_or_else(|| null("the new surface's bounding box"))?;
             bbox = bbox.union(&surf_box);
         }
     }
@@ -802,7 +806,7 @@ fn keeps_seams(k: &Kernel, b: &mut Brep, face: FaceId, surface: &Surface) -> Res
                     scratch = Some(b.clone_standing_for_self()?);
                 }
                 let Some(s) = scratch.as_mut() else {
-                    return Err(null());
+                    return Err(null("the scratch copy of the B-rep"));
                 };
                 let _ = get_or_create_uv_trim_curve(k, s, u, false, false, true)?;
                 match eu1::uv_trim_curve(s, u)?.0 {
@@ -1246,178 +1250,6 @@ fn moved_surface_on_own_frame(
     }
 }
 
-/// Error-free arithmetic on doubles: a value is an expansion, a sum of doubles whose
-/// components do not overlap (Shewchuk's grow-expansion), so sums and products of doubles
-/// are held without rounding and a value's sign is read off exactly (an expansion is zero
-/// exactly when every component is).
-///
-/// A sum (`two_sum`) is error-free at any magnitude short of overflow, which leaves an
-/// infinite or NaN component, never a zero. A product (`product`) is error-free only in
-/// range: a product that could underflow, or of a subnormal or non-finite factor, is
-/// `None`, and so is every value built from it. A caller reads `None` as not shown zero.
-mod exact {
-    use crate::math::Vec3;
-
-    /// `2^-968`: the least rounded product of two normal doubles whose rounding error
-    /// `fma(a, b, -a b)` is exact. The error is a multiple of `ulp(a) ulp(b) =
-    /// 2^(ea + eb - 104)` (`ea`, `eb` the exponents) of at most 53 bits, so exact when
-    /// that unit is not below the least subnormal `2^-1074`, `ea + eb >= -970`; a rounded
-    /// product of at least `2^-968` has `|a b| > 2^-969` and, as `|a b| < 2^(ea + eb + 2)`,
-    /// `ea + eb >= -970`.
-    const LEAST_EXACT_PRODUCT: f64 = f64::MIN_POSITIVE * 18_014_398_509_481_984.0;
-
-    /// `a + b` as `(s, e)`: `s = fl(a + b)` and its rounding error (Knuth's `TwoSum`).
-    fn two_sum(a: f64, b: f64) -> (f64, f64) {
-        let s = a + b;
-        let bb = s - a;
-        (s, (a - (s - bb)) + (b - bb))
-    }
-
-    /// `e + b` as an expansion (Grow-Expansion).
-    fn grow(e: &[f64], b: f64) -> Vec<f64> {
-        let mut q = b;
-        let mut out = Vec::new();
-        for &c in e {
-            let (s, err) = two_sum(q, c);
-            out.push(err);
-            q = s;
-        }
-        out.push(q);
-        out
-    }
-
-    /// `e + f` as an expansion.
-    fn add(e: &[f64], f: &[f64]) -> Vec<f64> {
-        f.iter().fold(e.to_vec(), |acc, &c| grow(&acc, c))
-    }
-
-    /// `e - f` as an expansion.
-    pub(super) fn sub(e: &[f64], f: &[f64]) -> Vec<f64> {
-        f.iter().fold(e.to_vec(), |acc, &c| grow(&acc, -c))
-    }
-
-    /// `a b` as an expansion: the product and its rounding error, `fma(a, b, -p)`; zero
-    /// exactly when `a` or `b` is. `None` out of range: `a` or `b` subnormal or not
-    /// finite, or the rounded product not finite or below [`LEAST_EXACT_PRODUCT`] (where
-    /// the error, or the product itself, could underflow).
-    fn product(a: f64, b: f64) -> Option<Vec<f64>> {
-        if a == 0.0 || b == 0.0 {
-            return (a.is_finite() && b.is_finite()).then(|| vec![0.0]);
-        }
-        let p = a * b;
-        let in_range =
-            a.is_normal() && b.is_normal() && p.is_finite() && p.abs() >= LEAST_EXACT_PRODUCT;
-        in_range.then(|| vec![a.mul_add(b, -p), p])
-    }
-
-    /// `e b` as an expansion: each component's product, summed.
-    pub(super) fn scale(e: &[f64], b: f64) -> Option<Vec<f64>> {
-        e.iter()
-            .try_fold(Vec::new(), |acc, &c| Some(add(&acc, &product(c, b)?)))
-    }
-
-    /// `u × v`, each component an expansion.
-    pub(super) fn cross(u: Vec3, v: Vec3) -> Option<[Vec<f64>; 3]> {
-        Some([
-            sub(&product(u.y, v.z)?, &product(u.z, v.y)?),
-            sub(&product(u.z, v.x)?, &product(u.x, v.z)?),
-            sub(&product(u.x, v.y)?, &product(u.y, v.x)?),
-        ])
-    }
-
-    /// `u · v` as an expansion.
-    pub(super) fn dot(u: Vec3, v: Vec3) -> Option<Vec<f64>> {
-        Some(add(
-            &add(&product(u.x, v.x)?, &product(u.y, v.y)?),
-            &product(u.z, v.z)?,
-        ))
-    }
-
-    /// `det(a, b, c) = (a × b) · c` as an expansion.
-    pub(super) fn det3(a: Vec3, b: Vec3, c: Vec3) -> Option<Vec<f64>> {
-        let [x, y, z] = cross(a, b)?;
-        Some(add(
-            &add(&scale(&x, c.x)?, &scale(&y, c.y)?),
-            &scale(&z, c.z)?,
-        ))
-    }
-
-    /// Whether the expansion is zero exactly.
-    pub(super) fn is_zero(e: &[f64]) -> bool {
-        e.iter().all(|&c| c == 0.0)
-    }
-
-    /// The expansion's exact sign: `-1`, `0` or `1`. The components do not overlap and
-    /// are stored least significant first, so the most significant non-zero one's sign
-    /// is the value's.
-    pub(super) fn sign(e: &[f64]) -> i32 {
-        match e.iter().rev().find(|&&c| c != 0.0) {
-            Some(c) if *c > 0.0 => 1,
-            Some(_) => -1,
-            None => 0,
-        }
-    }
-
-    /// The expansion's value as a double, rounded by summing its components from the most
-    /// significant down. Not correctly rounded and not canonical: a partial sum can
-    /// round, and a later component's contribution can then be lost (non-overlapping
-    /// components can straddle a tie). With `r` non-zero components and no intermediate
-    /// overflow the error is at most `gamma_(r-1) * sum |e|`, where
-    /// `gamma_j = j u / (1 - j u)` and `u = 2^-53`; adding a zero is exact, and an exact
-    /// sum of doubles is a multiple of the least subnormal, so the fold itself has no
-    /// subnormal underflow. Callers use it for a quotient or a displacement, a
-    /// rounding-level estimate, and read exactness from [`is_zero`] and [`sign`], never
-    /// from this value.
-    pub(super) fn to_f64(e: &[f64]) -> f64 {
-        e.iter().rev().fold(0.0, |sum, &c| sum + c)
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn a_rounded_sum_is_not_zero_but_its_exact_one_is() {
-            // 0.1 + 0.2 - 0.3 rounds to 5.6e-17; exactly it is that too (the doubles are
-            // not the decimals), while 1e16 + 1 - 1e16 is 1, not the 0 or 2 of rounding
-            assert!(!is_zero(&sub(&add(&[0.1], &[0.2]), &[0.3])));
-            assert_eq!(sub(&add(&[1e16], &[1.0]), &[1e16]).iter().sum::<f64>(), 1.0);
-            let (p, q) = (product(3.0, 0.1).unwrap(), product(0.1, 3.0).unwrap());
-            assert!(is_zero(&sub(&p, &q)));
-        }
-
-        #[test]
-        fn a_determinant_is_zero_exactly_only_for_dependent_vectors() {
-            let a = Vec3::new(0.1, 0.7, 0.3);
-            let b = Vec3::new(0.9, 0.2, 0.4);
-            assert!(is_zero(&det3(a, b, a).unwrap()));
-            let c = Vec3::new(0.1, 0.7, 0.3 + 1e-16 * 0.3);
-            assert!(!is_zero(&det3(a, b, c).unwrap()));
-        }
-
-        /// A product whose rounding error is not a double is out of range: one that
-        /// underflows (rounded to zero, its `fma` error zero too, so it read as zero), one
-        /// of a subnormal factor, one that overflows. A zero factor's product is zero, and
-        /// one just in range is exact.
-        #[test]
-        fn a_product_that_could_underflow_is_out_of_range() {
-            assert_eq!(LEAST_EXACT_PRODUCT, 2.0_f64.powi(-968));
-            assert!(product(1e-200, 1e-200).is_none());
-            assert!(product(1e-160, 1e-160).is_none());
-            assert!(product(1e-310, 1.0).is_none());
-            assert!(product(1.0, -5e-324).is_none());
-            assert!(product(f64::MAX, 2.0).is_none());
-            assert!(product(f64::NAN, 1.0).is_none());
-            assert_eq!(product(0.0, 1e-310), Some(vec![0.0]));
-            let h = 2.0_f64.powi(-484);
-            assert_eq!(product(h, h), Some(vec![0.0, LEAST_EXACT_PRODUCT]));
-            assert!(product(1e-140, 1e-140).is_some());
-            let z = Vec3::new(0.0, 0.0, 1e-310);
-            assert!(det3(Vec3::X, Vec3::Y, z).is_none());
-        }
-    }
-}
-
 /// `RemoveFaces(GetFaces)` of `b`, then `pNewBrep->CopyFaces(GetFaces, b)`.
 fn move_faces(k: &mut Kernel, b: &mut Brep, new_brep: &mut Brep) -> Result<()> {
     let old_faces = bp1::faces(b, None)?;
@@ -1779,7 +1611,15 @@ mod tests {
         let r = with_notifications(&mut b, |b, notes| {
             local_operation(&mut k, b, &[face], Vec::new(), notes)
         });
-        assert!(r.is_err());
+        let e = r.unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.operation(), OP);
+        assert_eq!(
+            e.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Missing(
+                "a surface for every face"
+            ))
+        );
     }
 
     /// The top face of a 20 mm cube.
@@ -2983,11 +2823,13 @@ mod tests {
     }
 
     /// The same cube, its top given a roof with a ridge: a degree-1 B-spline patch whose
-    /// interior knot is a crease. The roof has no exact class, so the reach of the moved
-    /// top has no certified bound: refused as `ReachUncertified` at the top, before any
-    /// body is built, the cube as it came in with the input's own failures.
+    /// interior knot is a crease. The roof is a bare net beside the sides, and the reach is
+    /// bounded where it meets them (across the crease too: the net is continuous there), so
+    /// a body is built; it fails more of the check than the cube did (the sides along the
+    /// ridge meet the roof in a kinked line), so the gate refuses it as `Unsound`, and the
+    /// cube is as it came in, with the input's own failures.
     #[test]
-    fn a_creased_roof_on_a_defective_input_is_refused_as_reach_uncertified() {
+    fn a_creased_roof_on_a_defective_input_is_refused_as_unsound() {
         use crate::nurbs::b_spline_surface::BSplineSurface;
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as Net;
@@ -3008,7 +2850,15 @@ mod tests {
         .unwrap();
         let roof = Surface::from(BSplineSurface::from_gw_nurb(&roof));
         let why = refused_unchanged_or_returned(&mut k, &mut b, &[top], vec![roof]);
-        assert_eq!(why, Some(OffsetFailure::ReachUncertified { face: top }));
+        assert!(
+            matches!(
+                why,
+                Some(OffsetFailure::Unsound {
+                    what: crate::error::offset::Unsoundness::Check { .. }
+                })
+            ),
+            "{why:?}"
+        );
         assert_eq!(failure_classes(&mut k, &b), had);
     }
 

@@ -20,21 +20,36 @@
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::Unsound`]             | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::Failed`]              | `SM_ERR`                                  |
+//! | [`OffsetFailure::Missing`]             | `SM_ERR_NULL_POINTER`                     |
+//! | [`OffsetFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`                    |
+//! | [`OffsetFailure::Inconsistent`]        | `SM_ERR_ASSERT_FAILURE`                   |
 //!
-//! Deviations: not upstream. Entity ids are those of the operation's input B-rep.
+//! Deviations: not upstream. Entity ids are those of the operation's input B-rep. The
+//! last four describe, in a phrase, the failures of offset routines that returned a bare
+//! status ([`OffsetFailure::replaces_upstream_status`]); the failure's `operation` path
+//! says which routine and its entity, where the site named one, which face. The files
+//! with open work elsewhere (`offset_executive/{p1,p2,step_gaps,reach}`,
+//! `offset_faces`, `offset_geometry_creation`) do not use them yet.
 
 use super::{
-    EntityRef, ErrorKind, SM_ERR, SM_ERR_BAD_INTERSECTIONS, SM_ERR_INVALID_INPUT,
-    SM_ERR_OFFSET_EDGE_VANISHES, SM_ERR_OFFSET_WALLS_TOUCH,
+    EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_BAD_INTERSECTIONS,
+    SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER, SM_ERR_OFFSET_EDGE_VANISHES,
+    SM_ERR_OFFSET_WALLS_TOUCH,
 };
 use crate::topology::{EdgeId, FaceId};
 
 /// Why an offset, shell, thicken or local operation is refused.
+///
+/// A caller outside the crate matches it with a wildcard: a reason it does not name yet still
+/// has its class ([`OffsetFailure::kind`]) and says whether it is a phrase
+/// ([`OffsetFailure::is_phrase`]) or a defect ([`OffsetFailure::is_defect`]), which every reason
+/// must answer here.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum OffsetFailure {
     /// The offset of `face` by `distance` folds: the wall is thicker than a radius of
-    /// curvature of the face on its side (opt-in `fixes.shell_one_construction`).
+    /// curvature of the face on its side (WR-718; every offset but the local operation).
     Folds {
         /// The face whose offset folds.
         face: FaceId,
@@ -160,6 +175,17 @@ pub enum OffsetFailure {
         /// What the built body fails.
         what: Unsoundness,
     },
+    /// An offset routine could not continue, as the phrase says (for example "the face
+    /// has no surface").
+    Failed(&'static str),
+    /// Something an offset routine needs is missing, as the phrase says (for example "the
+    /// offset B-rep").
+    Missing(&'static str),
+    /// A value an offset routine was given is not one it can use, as the phrase says.
+    InvalidValue(&'static str),
+    /// A consistency check of an offset routine's own data did not hold, as the phrase
+    /// says.
+    Inconsistent(&'static str),
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -248,7 +274,79 @@ impl OffsetFailure {
             Self::ExactCurveUncut
             | Self::Unsound { .. }
             | Self::DistanceUnresolved { .. }
-            | Self::ToleranceUnresolved { .. } => None,
+            | Self::ToleranceUnresolved { .. }
+            | Self::Failed(_)
+            | Self::Missing(_)
+            | Self::InvalidValue(_)
+            | Self::Inconsistent(_) => None,
+        }
+    }
+
+    /// True for a failure that replaced a bare status an offset routine returned
+    /// ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
+    /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]): it answers with
+    /// that status as the `Upstream` it replaced did. The refusals replaced none.
+    #[must_use]
+    pub const fn replaces_upstream_status(&self) -> bool {
+        matches!(
+            self,
+            Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_)
+        )
+    }
+
+    /// True for a phrase cause ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
+    /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]): a routine's failure
+    /// not yet given a cause of its own, told apart only by its words. Its class is its status's
+    /// kind; each moves to a cause of its own, as the blend's phrase causes do
+    /// ([`crate::error::blend::BlendFailure`]).
+    #[must_use]
+    pub const fn is_phrase(&self) -> bool {
+        match self {
+            Self::Folds { .. }
+            | Self::NotCertified { .. }
+            | Self::Collapses { .. }
+            | Self::WallsTouch { .. }
+            | Self::LoopsCross { .. }
+            | Self::EdgeVanishes { .. }
+            | Self::DistanceUnresolved { .. }
+            | Self::ToleranceUnresolved { .. }
+            | Self::SeamOpened { .. }
+            | Self::ExactCurveUncut
+            | Self::FacesApart { .. }
+            | Self::ReachUncertified { .. }
+            | Self::LoopGapUncertified { .. }
+            | Self::Unsound { .. } => false,
+            Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
+                true
+            }
+        }
+    }
+
+    /// True for a failure that is the kernel's fault, not a fact of the input: a consistency
+    /// check of a routine's own data that did not hold ([`OffsetFailure::Inconsistent`]).
+    /// Report it. Said per cause, as its class ([`ErrorKind::Failed`]) does not say it, until
+    /// offset failures move onto a class of their own.
+    #[must_use]
+    pub const fn is_defect(&self) -> bool {
+        match self {
+            Self::Inconsistent(_) => true,
+            Self::Folds { .. }
+            | Self::NotCertified { .. }
+            | Self::Collapses { .. }
+            | Self::WallsTouch { .. }
+            | Self::LoopsCross { .. }
+            | Self::EdgeVanishes { .. }
+            | Self::DistanceUnresolved { .. }
+            | Self::ToleranceUnresolved { .. }
+            | Self::SeamOpened { .. }
+            | Self::ExactCurveUncut
+            | Self::FacesApart { .. }
+            | Self::ReachUncertified { .. }
+            | Self::LoopGapUncertified { .. }
+            | Self::Unsound { .. }
+            | Self::Failed(_)
+            | Self::Missing(_)
+            | Self::InvalidValue(_) => false,
         }
     }
 
@@ -263,7 +361,11 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::LoopGapUncertified { .. }
-            | Self::Unsound { .. } => SM_ERR,
+            | Self::Unsound { .. }
+            | Self::Failed(_) => SM_ERR,
+            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
             Self::LoopsCross { .. } => SM_ERR_BAD_INTERSECTIONS,
             Self::EdgeVanishes { .. } => SM_ERR_OFFSET_EDGE_VANISHES,
@@ -290,6 +392,9 @@ impl OffsetFailure {
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
                 ErrorKind::InvalidInput
+            }
+            Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
+                ErrorKind::of_status(self.comparison_status())
             }
         }
     }
@@ -486,6 +591,294 @@ impl core::fmt::Display for OffsetFailure {
                 "invalid input: offset tolerance {tolerance:e} is nonzero but at or below the \
                  effective zero (1e-12): no B-rep can hold a tolerance that small"
             ),
+            Self::Failed(what) => f.write_str(what),
+            Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::InvalidValue(what) => write!(f, "invalid input: {what}"),
+            Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
         }
+    }
+}
+
+impl crate::SolidError {
+    /// [`crate::SolidError::Failed`] for an offset routine that fails with `failure`.
+    #[must_use]
+    pub(crate) fn offset(operation: &'static str, failure: OffsetFailure) -> Self {
+        Failure::new(operation, failure).into_error()
+    }
+
+    /// [`crate::SolidError::Failed`] for something an offset routine needs that is not
+    /// there, as the phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)`
+    /// on a `NULL` pointer).
+    #[must_use]
+    pub(crate) fn offset_missing(operation: &'static str, what: &'static str) -> Self {
+        Self::offset(operation, OffsetFailure::Missing(what))
+    }
+
+    /// The offset failure behind this error, for a [`crate::SolidError::Failed`] with a
+    /// [`Reason::Offset`].
+    #[must_use]
+    pub fn offset_failure(&self) -> Option<&OffsetFailure> {
+        match self {
+            Self::Failed(f) => match &f.reason {
+                Reason::Offset(o) => Some(o),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SolidError;
+
+    /// The offset failures that replaced a bare status keep the status, kind, operation
+    /// and entity of the `Upstream` they replace; a sample of each converted file
+    /// (`offset_executive/crossing_loops`, `offset_executive/cavity`, `draft`).
+    #[test]
+    fn offset_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
+        let face = Some(EntityRef::Face(FaceId::from_index(3)));
+        let samples = [
+            (
+                "offset::offset_executive::crossing_loops",
+                OffsetFailure::Inconsistent(
+                    "an edge use's UV trim curve does not span its edge's interval",
+                ),
+                SM_ERR_ASSERT_FAILURE,
+                None,
+            ),
+            (
+                "offset::offset_executive::crossing_loops",
+                OffsetFailure::Missing("an entity or curve of the offset face"),
+                SM_ERR_NULL_POINTER,
+                None,
+            ),
+            (
+                "offset::offset_executive::cavity::is_cavity_region",
+                OffsetFailure::Missing("the face's surface"),
+                SM_ERR_NULL_POINTER,
+                None,
+            ),
+            (
+                "offset::draft",
+                OffsetFailure::InvalidValue("the face has no surface or no outer face use"),
+                SM_ERR_INVALID_INPUT,
+                face,
+            ),
+            ("offset::op", OffsetFailure::Failed("x"), SM_ERR, None),
+        ];
+        for (operation, failure, code, entity) in samples {
+            assert!(failure.replaces_upstream_status());
+            let typed = match entity {
+                Some(e) => Failure::new(operation, failure).at(e).into_error(),
+                None => SolidError::offset(operation, failure),
+            };
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), before.entity(), "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(
+                typed.is_unported_or_cancelled(),
+                before.is_unported_or_cancelled()
+            );
+            assert_eq!(typed.offset_failure(), Some(&failure));
+        }
+        assert_eq!(
+            Failure::new(
+                "offset::draft",
+                OffsetFailure::InvalidValue("the face has no surface or no outer face use"),
+            )
+            .at(EntityRef::Face(FaceId::from_index(3)))
+            .into_error()
+            .to_string(),
+            "offset::draft: invalid input: the face has no surface or no outer face use (face 3)"
+        );
+        assert_eq!(
+            SolidError::offset_missing("offset::op", "the face's surface").to_string(),
+            "offset::op: the face's surface is missing"
+        );
+        // a refusal replaced no status and does not answer as one
+        let folds = SolidError::offset(
+            "offset::op",
+            OffsetFailure::Folds {
+                face: FaceId::from_index(1),
+                distance: 2.0,
+                largest: 1.0,
+            },
+        );
+        assert_eq!(folds.upstream_status(), None);
+        assert_eq!(SolidError::sm_err("offset::op").offset_failure(), None);
+    }
+
+    /// Every offset failure's class, and whether it is a phrase (a routine's failure not yet
+    /// given a cause of its own) or a defect of the kernel, pinned. A new reason must answer
+    /// all three (`kind`, `is_phrase` and `is_defect` match exhaustively) and adds its arm to
+    /// `row` and its row here, so a caller outside the crate, which has to match with a
+    /// wildcard, still gets its class and never only its text (#15035).
+    #[test]
+    fn every_offset_failure_keeps_its_class() {
+        use OffsetFailure as O;
+        let face = FaceId::from_index(1);
+        // (the failure, its class, a phrase, a defect)
+        let pinned = [
+            (
+                O::Folds {
+                    face,
+                    distance: 2.0,
+                    largest: 1.0,
+                },
+                ErrorKind::OffsetFolds,
+                false,
+                false,
+            ),
+            (
+                O::NotCertified {
+                    face,
+                    distance: 2.0,
+                },
+                ErrorKind::OffsetFolds,
+                false,
+                false,
+            ),
+            (
+                O::Collapses {
+                    face,
+                    distance: -5.0,
+                    radius: 5.0,
+                },
+                ErrorKind::OffsetCollapses,
+                false,
+                false,
+            ),
+            (
+                O::WallsTouch {
+                    face: None,
+                    contact: WallContact::Touch,
+                },
+                ErrorKind::OffsetWallsTouch,
+                false,
+                false,
+            ),
+            (
+                O::LoopsCross {
+                    face: None,
+                    crossing: LoopCrossing::SharesEdge,
+                },
+                ErrorKind::OffsetLoopsCross,
+                false,
+                false,
+            ),
+            (
+                O::EdgeVanishes {
+                    edge: None,
+                    face: None,
+                },
+                ErrorKind::OffsetEdgeVanishes,
+                false,
+                false,
+            ),
+            (
+                O::DistanceUnresolved {
+                    distance: 1e-9,
+                    resolution: 1e-6,
+                },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+            ),
+            (
+                O::ToleranceUnresolved { tolerance: 1e-13 },
+                ErrorKind::InvalidInput,
+                false,
+                false,
+            ),
+            (O::SeamOpened { face }, ErrorKind::Unsupported, false, false),
+            (O::ExactCurveUncut, ErrorKind::Unsupported, false, false),
+            (O::FacesApart { face }, ErrorKind::Unsupported, false, false),
+            (
+                O::ReachUncertified { face },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (
+                O::LoopGapUncertified { face: None },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (
+                O::Unsound {
+                    what: Unsoundness::NotManifoldSolid,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (O::Failed("x"), ErrorKind::Failed, true, false),
+            (O::Missing("x"), ErrorKind::Missing, true, false),
+            (O::InvalidValue("x"), ErrorKind::InvalidInput, true, false),
+            // a consistency check of the kernel's own data that did not hold: its fault
+            (O::Inconsistent("x"), ErrorKind::Failed, true, true),
+        ];
+        let row = |o: &O| -> usize {
+            match o {
+                O::Folds { .. } => 0,
+                O::NotCertified { .. } => 1,
+                O::Collapses { .. } => 2,
+                O::WallsTouch { .. } => 3,
+                O::LoopsCross { .. } => 4,
+                O::EdgeVanishes { .. } => 5,
+                O::DistanceUnresolved { .. } => 6,
+                O::ToleranceUnresolved { .. } => 7,
+                O::SeamOpened { .. } => 8,
+                O::ExactCurveUncut => 9,
+                O::FacesApart { .. } => 10,
+                O::ReachUncertified { .. } => 11,
+                O::LoopGapUncertified { .. } => 12,
+                O::Unsound { .. } => 13,
+                O::Failed(_) => 14,
+                O::Missing(_) => 15,
+                O::InvalidValue(_) => 16,
+                O::Inconsistent(_) => 17,
+            }
+        };
+        for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
+            assert_eq!(row(o), i, "{o:?} is listed once, in order");
+            assert_eq!(o.kind(), *class, "{o:?}");
+            assert_eq!(o.is_phrase(), *phrase, "{o:?}");
+            assert_eq!(o.is_defect(), *defect, "{o:?}");
+            // a phrase is what replaced a bare status, and only a phrase
+            assert_eq!(o.replaces_upstream_status(), *phrase, "{o:?}");
+        }
+    }
+
+    /// The offset routines describe their failures: their library code builds no bare
+    /// `Upstream` status, except the files listed (with the bare sites each may still
+    /// hold) whose conversion waits on other open work.
+    #[test]
+    fn the_offset_routines_build_no_bare_statuses() {
+        super::super::bare_scan::assert_waiting(
+            "offset",
+            20,
+            &[
+                ("offset/offset_executive/p1.rs", 9),
+                ("offset/offset_executive/p2.rs", 9),
+                ("offset/offset_executive/reach.rs", 1),
+                ("offset/offset_executive/step_gaps.rs", 1),
+                ("offset/offset_faces.rs", 4),
+                ("offset/offset_geometry_creation.rs", 17),
+            ],
+        );
     }
 }

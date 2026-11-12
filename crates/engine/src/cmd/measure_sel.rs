@@ -166,7 +166,7 @@ fn arc_points(center: Vec3, axis: UnitVec3, start: Vec3, angle: f64) -> Vec<Vec3
 
 /// The solved sketch holding a picked curve or point: `sketch` when given, else the active
 /// sketch, else the last sketch with that id.
-fn sketch_of<'a>(
+pub(super) fn sketch_of<'a>(
     s: &Session,
     st: &'a solidcraft_doc::ModelState,
     sketch: Option<u64>,
@@ -489,6 +489,23 @@ pub(crate) fn shape_of(s: &Session, sel: &Sel) -> Option<(Shape, Vec<Vec3>, Vec<
     })
 }
 
+/// What `selection.get` reports of a picked item beyond its identity: the measurement
+/// `inspect.measure` gives it (length, area, volume, radius…), its direction where it has one
+/// (a planar face's normal, a straight edge's direction) and, for an edge, whether it is a line,
+/// a circle, an arc or another curve.
+pub(super) fn resolve(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<(Value, Option<Vec3>)> {
+    let item = describe(s, st, sel)?;
+    let mut json = item.json;
+    if matches!(sel, Sel::Edge { .. }) {
+        json["curve"] = match item.shape {
+            Shape::Line { .. } => json!("line"),
+            Shape::Round { .. } => json.get("round").cloned().unwrap_or_else(|| json!("arc")),
+            _ => json!("other"),
+        };
+    }
+    Some((json, item.dir))
+}
+
 fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
     let step = v.len().div_ceil(max).max(1);
     v.iter().step_by(step).copied().collect()
@@ -658,12 +675,14 @@ fn corner_cos(a: Shape, b: Shape) -> Option<f64> {
     Some((end_a - p).normalized()?.dot((end_b - q).normalized()?))
 }
 
-/// A face or edge as `inspect.measure` takes it: the body and a point on the item; `index` is
-/// optional (the point finds the item).
+/// A face or edge as `inspect.measure` takes it: the body and a point on the item, its index, or
+/// both (the point finds the item without an index; an index alone names it, as `model.faces`
+/// and `model.edges` list it, even after a joint has moved the body) (#14011).
 #[derive(serde::Deserialize)]
 struct Pick {
     body: String,
-    point: Vec3,
+    #[serde(default)]
+    point: Option<Vec3>,
     #[serde(default)]
     index: Option<usize>,
 }
@@ -674,6 +693,12 @@ fn resolve_pick(st: &solidcraft_doc::ModelState, face: bool, value: &Value) -> s
     let Pick { body, point, index } = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
     let b = st.body(&body).ok_or_else(|| format!("no body named '{body}'"))?;
     let m = b.mesh();
+    let point = match (point, index) {
+        (Some(p), _) => p,
+        (None, Some(i)) if face => face_tris(&m, i).first().map(|t| t[0]).ok_or_else(|| format!("'{body}' has no face {i}"))?,
+        (None, Some(i)) => m.edges.get(i).and_then(|e| e.get(e.len() / 2).copied()).ok_or_else(|| format!("'{body}' has no edge {i}"))?,
+        (None, None) => return Err("give a `point` on the item or its `index`".into()),
+    };
     if face {
         let index = match index {
             Some(i) => i,

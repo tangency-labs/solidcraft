@@ -65,8 +65,9 @@
 //!   whose `MakeNurb` cannot create a NURB.
 //! - **Missing NURB.** Upstream methods that dereference the `NULL` returned by
 //!   `GetOrCreateGwNurbPointer` for a surface without NURB data (built by
-//!   `SmBSplineSurface()`) crash; here they return [`SolidError::Upstream`] `SM_ERR`
-//!   (the status of the failed `MakeNurb`). The counts, degree, domain, rationality
+//!   `SmBSplineSurface()`) crash; here they return a
+//!   [`BSplineFailure::NoNurbsForm`] with status `SM_ERR` (the status of the failed
+//!   `MakeNurb`). The counts, degree, domain, rationality
 //!   and parallelism queries return `0` / `false` / the empty domain there, as
 //!   upstream; `GetCanonical` returns `SM_ERR_NULL_POINTER` and `GetKnots` `SM_ERR`.
 //!   Copying a surface without NURB gives one without NURB, as upstream
@@ -79,8 +80,8 @@
 //!   dropped and it always builds a new surface (upstream's "fill the surface passed
 //!   in" branch and its `IsKindOf` check have no counterpart).
 //! - **Errors.** Out-params become return values. A failing NLib routine becomes
-//!   `SM_ERR` ([`SolidError::Upstream`], code 1001), as upstream's
-//!   `if(NL_YES == ...) SER(SM_ERR)`; `SM_ERR_INVALID_INPUT` checks are
+//!   a [`BSplineFailure::RoutineFailed`] with status `SM_ERR` that keeps the routine's
+//!   failure as its cause, as upstream's `if(NL_YES == ...) SER(SM_ERR)`; `SM_ERR_INVALID_INPUT` checks are
 //!   [`SolidError::InvalidInput`]. Where upstream would index outside its arrays or
 //!   allocate from wrapped or negative sizes (fewer multiplicities than knots or no
 //!   control points in `CreateCanonical`, too short arrays for the data constructor,
@@ -130,6 +131,7 @@
 //!   `IsDegenerateCurve` runs the `SmSurface` base body on a copy of the B-spline
 //!   wrapped as a `Surface` (without owner).
 
+use crate::error::nurbs::BSplineFailure;
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -922,6 +924,30 @@ impl BSplineSurface {
         self.nurb.as_ref()
     }
 
+    /// Certified boxes covering the whole surface, one per knot span
+    /// ([`crate::nurbs::nurbs_srf::srf_span_boxes`]); `None`, meaning no certified
+    /// cover, without a NURB, when the weights or knots cannot be read as a cover, or
+    /// while evaluation beyond the natural domain is enabled (the extension leaves the
+    /// convex hull). Not upstream.
+    #[must_use]
+    pub fn span_boxes(&self) -> Option<Vec<Extent3d>> {
+        if self.is_out_of_bounds_enabled() {
+            return None;
+        }
+        crate::nurbs::nurbs_srf::srf_span_boxes(self.gw_nurb()?)
+    }
+
+    /// The refinable certified cover ([`crate::nurbs::nurbs_srf::SurfaceCover`]), refined
+    /// `depth` times; `None` under the conditions of [`BSplineSurface::span_boxes`].
+    /// Not upstream.
+    #[must_use]
+    pub fn cover(&self, depth: usize) -> Option<crate::nurbs::nurbs_srf::SurfaceCover> {
+        if self.is_out_of_bounds_enabled() {
+            return None;
+        }
+        crate::nurbs::nurbs_srf::SurfaceCover::new(self.gw_nurb()?, depth)
+    }
+
     /// The NURB, made first if missing (`GetOrCreateGwNurbPointer`).
     ///
     /// # Errors
@@ -934,7 +960,7 @@ impl BSplineSurface {
         }
         self.nurb
             .as_mut()
-            .ok_or_else(|| SolidError::sm_err(OP_NURB))
+            .ok_or_else(|| SolidError::b_spline(OP_NURB, BSplineFailure::NoNurbsForm))
     }
 
     /// Makes the NURB representation (`MakeNurb`): a plain B-spline only checks that it
@@ -945,7 +971,7 @@ impl BSplineSurface {
     /// `SM_ERR` without a NURB.
     pub fn make_nurb(&mut self) -> Result<()> {
         if self.nurb.is_none() {
-            return Err(SolidError::sm_err(OP_NURB));
+            return Err(SolidError::b_spline(OP_NURB, BSplineFailure::NoNurbsForm));
         }
         Ok(())
     }
@@ -959,7 +985,8 @@ impl BSplineSurface {
 
     /// [`BSplineSurface::nurb_ref`] for methods that dereference it upstream.
     fn nurb_or_err(&self, operation: &'static str) -> Result<&Surface> {
-        self.nurb_ref().ok_or_else(|| SolidError::sm_err(operation))
+        self.nurb_ref()
+            .ok_or_else(|| SolidError::b_spline(operation, BSplineFailure::NoNurbsForm))
     }
 
     /// Mutable access to the out-of-bounds evaluation flag (`GetOutOfBoundsEnabled`).
@@ -1179,9 +1206,9 @@ impl BSplineSurface {
     ///
     /// `SM_ERR_NULL_POINTER` without NURB.
     pub fn canonical(&self) -> Result<SurfaceCanonical> {
-        let sur = self
-            .nurb_ref()
-            .ok_or(SolidError::null_pointer(OP_GET_CANON))?;
+        let sur = self.nurb_ref().ok_or_else(|| {
+            SolidError::b_spline(OP_GET_CANON, BSplineFailure::Missing("the NURBS form"))
+        })?;
         let (knu, knv) = sur.knot_vectors()?;
         let (u_knots, u_multiplicities) = get_knots(&knu, None);
         let (v_knots, v_multiplicities) = get_knots(&knv, None);
@@ -1498,9 +1525,9 @@ impl BSplineSurface {
             norm[9] = evaluate_normal(k, self, uv_domain.evaluate(0.5, 0.5))?;
 
             if planar {
-                pol.add_vector_with_kernel(k, norm[9], None);
+                pol.add_vector(norm[9], None);
                 if polar_guess.is_some() {
-                    trial_polar_box.add_vector_with_kernel(k, norm[9], None);
+                    trial_polar_box.add_vector(norm[9], None);
                 }
             } else {
                 // get corner normals
@@ -1527,14 +1554,14 @@ impl BSplineSurface {
                     // build the polar box by adding all the vectors
                     pol.reset();
                     for v in norm {
-                        pol.add_vector_with_kernel(k, v, None);
+                        pol.add_vector(v, None);
                     }
 
                     if let Some(g) = polar_guess {
                         guess_basis = Some(polar_guess_basis(g));
                         trial_polar_box.reset();
                         for v in norm {
-                            trial_polar_box.add_vector_with_kernel(k, v, guess_basis);
+                            trial_polar_box.add_vector(v, guess_basis);
                         }
                     }
                 }
@@ -1545,18 +1572,18 @@ impl BSplineSurface {
         // derivatives of the midpoints to establish the base line vector.
         if let (Some(pol), false) = (polar_box.as_mut(), analytic) {
             let n0 = evaluate_normal(k, self, uv_domain.evaluate(0.5, 0.5))?;
-            pol.add_vector_with_kernel(k, n0, None);
+            pol.add_vector(n0, None);
             let n1 = evaluate_normal(k, self, uv_domain.evaluate(1.0, 0.5))?;
-            pol.add_vector_with_kernel(k, n1, None);
+            pol.add_vector(n1, None);
             let n2 = evaluate_normal(k, self, uv_domain.evaluate(0.5, 1.0))?;
-            pol.add_vector_with_kernel(k, n2, None);
+            pol.add_vector(n2, None);
 
             if let Some(g) = polar_guess {
                 guess_basis = Some(polar_guess_basis(g));
                 trial_polar_box.reset();
-                trial_polar_box.add_vector_with_kernel(k, n0, guess_basis);
-                trial_polar_box.add_vector_with_kernel(k, n1, guess_basis);
-                trial_polar_box.add_vector_with_kernel(k, n2, guess_basis);
+                trial_polar_box.add_vector(n0, guess_basis);
+                trial_polar_box.add_vector(n1, guess_basis);
+                trial_polar_box.add_vector(n2, guess_basis);
             }
         }
 
@@ -1585,9 +1612,9 @@ impl BSplineSurface {
                     if let (Some(pol), true) = (polar_box.as_mut(), net_polar) {
                         // get control net tangent vectors
                         let mut add = |cross: Vec3, pol: &mut PolarBox| {
-                            pol.add_vector_with_kernel(k, cross, None);
+                            pol.add_vector(cross, None);
                             if polar_guess.is_some() {
-                                trial_polar_box.add_vector_with_kernel(k, cross, guess_basis);
+                                trial_polar_box.add_vector(cross, guess_basis);
                             }
                         };
                         let dv0 = if j > 1 {
@@ -1671,7 +1698,8 @@ impl BSplineSurface {
         u1v1: Point3,
     ) -> Result<Self> {
         // create an NLib NonRational bilinear BSpline Surface interpolating the 4 corner points
-        let sur = corner_pts(u0v0, u1v0, u0v1, u1v1).map_err(SolidError::nl_ser(OP_BILINEAR))?;
+        let sur =
+            corner_pts(u0v0, u1v0, u0v1, u1v1).map_err(SolidError::nurbs_routine(OP_BILINEAR))?;
         Ok(Self::from_gw_nurb(&sur))
     }
 
@@ -1806,7 +1834,7 @@ impl BSplineSurface {
             u,
             v,
         })
-        .map_err(SolidError::nl_ser(OP_CANON))?;
+        .map_err(SolidError::nurbs_routine(OP_CANON))?;
 
         // build NMTlib SmBSpline from Nlib Nurb
         let mut srf = Self::from_gw_nurb(&sur);
@@ -1865,7 +1893,7 @@ impl BSplineSurface {
             ctp,
             dir,
         )
-        .map_err(SolidError::nl_ser(OP_CONE))?;
+        .map_err(SolidError::nurbs_routine(OP_CONE))?;
 
         let mut srf = Self::from_gw_nurb(&sur);
         srf.set_b_spline_surface_form(BSplineSurfaceForm::ConicalSurf);
@@ -1930,9 +1958,10 @@ impl BSplineSurface {
         // pass the call along
         let cur = curve_to_sweep
             .get_or_create_gw_nurb()
-            .map_err(SolidError::nl_ser(OP_SWEEP))?;
+            .map_err(SolidError::nurbs_routine(OP_SWEEP))?;
         // extruded surface is linear in u direction
-        let sur = extrude_crv(cur, w, dist, Direction::U).map_err(SolidError::nl_ser(OP_SWEEP))?;
+        let sur =
+            extrude_crv(cur, w, dist, Direction::U).map_err(SolidError::nurbs_routine(OP_SWEEP))?;
 
         // set output
         Ok(Self::from_gw_nurb(&sur))
@@ -2023,7 +2052,7 @@ impl BSplineSurface {
 
         let sur = self
             .get_or_create_gw_nurb()
-            .map_err(|_| SolidError::sm_err(OP_XFORM))?;
+            .map_err(|_| SolidError::b_spline(OP_XFORM, BSplineFailure::NoNurbsForm))?;
         // (N_SrfTransform status ignored)
         let _ = sur.transform(&rma);
 
@@ -2048,7 +2077,7 @@ impl BSplineSurface {
         // (N_SrfTransform status ignored)
         let _ = bss
             .get_or_create_gw_nurb()
-            .map_err(|_| SolidError::sm_err(OP_XFORM))?
+            .map_err(|_| SolidError::b_spline(OP_XFORM, BSplineFailure::NoNurbsForm))?
             .transform(&rma);
         Ok(bss)
     }
@@ -2178,7 +2207,10 @@ impl BSplineSurface {
 
         // Point not close enough to surface - error
         let Some(&uv) = solutions.first() else {
-            return Err(SolidError::sm_err(OP_STEP_INV));
+            return Err(SolidError::b_spline(
+                OP_STEP_INV,
+                BSplineFailure::Failed("the point is not close enough to the surface"),
+            ));
         };
 
         // when point is on a singular boundary
@@ -2291,7 +2323,7 @@ impl BSplineSurface {
         let max_degree = MAX_DEGREE as i64;
         if p < 1 || i64::from(p) > max_degree || q < 1 || i64::from(q) > max_degree {
             return Err(bad(
-                "NURBS surface degree is outside the supported range 1 to NL_MAXDEG",
+                "NURBS surface degree is outside 1 to the largest degree the NURBS routines handle",
             ));
         }
 
@@ -2532,6 +2564,7 @@ fn polar_guess_basis(g: &PolarBox) -> Vec3 {
 mod tests {
     use super::*;
     use crate::curve::curve::Curve;
+    use crate::error::nurbs::NurbsFailure;
     use crate::kernel::UpstreamFixes;
     use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData};
     use crate::surface::plane::Plane;
@@ -2578,7 +2611,9 @@ mod tests {
         assert!(s.knots(SurfParamType::U, None).is_err());
         assert!(matches!(
             s.canonical(),
-            Err(SolidError::Upstream { code: 1006, .. })
+            Err(e) if e.sm_status() == Some(1006)
+                && e.nurbs_failure()
+                    == Some(&NurbsFailure::BSpline(BSplineFailure::Missing("the NURBS form")))
         ));
         assert!(s.copy().gw_nurb().is_none());
         assert!(s.approx_eq(&BSplineSurface::new()));

@@ -11,7 +11,7 @@
 //! | [`BSplineCurve::calculate_bounding_box`], [`BoundingBoxRequest`], [`BoundingBoxes`] | `CalculateBoundingBox` |
 //! | [`BSplineCurve::is_planar`], [`Planar`]     | `SmCurve::IsPlanar`                    |
 //! | [`BSplineCurve::create_analytic_curve`], [`AnalyticCurve`] | `CreateAnalyticCurve`         |
-//! | [`BSplineCurve::create_by_joining`]               | `CreateByJoining`                      |
+//! | [`BSplineCurve::create_by_joining`], [`BSplineCurve::create_by_joining_with_breaks`] | `CreateByJoining` |
 //! | [`BSplineCurve::create_point_curve`]              | `CreatePointCurve`                     |
 //! | [`BSplineCurve::create_simple_offset`]            | `CreateSimpleOffset`                   |
 //! | [`BSplineCurve::has_repeated_end_control_points`] | `HasRepeatedEndControlPoints`          |
@@ -43,9 +43,12 @@
 //!   `p1`). `CalculateBoundingBox`'s unused `bExpandBox` flag is dropped and the boxes
 //!   asked for come back in [`BoundingBoxes`] (fresh boxes, as a caller passing new
 //!   `SmExtent3d` / `SmPseudoBox` / `SmPolarBox` objects gets).
+//! - **Join breaks** (not upstream). [`BSplineCurve::create_by_joining_with_breaks`]
+//!   also returns the knot at which each segment ends, read off the knot vector as it is
+//!   built (the skin's face sources, tangency-labs/solidcore#3139).
 //! - **Missing NURB.** Where upstream dereferences the `NULL` NURB of a curve built
 //!   without one (`GetOrCreateGwNurbPointer` cannot make it for a plain B-spline), the
-//!   port returns `SM_ERR` ([`SolidError::Upstream`]). That includes
+//!   port returns `SM_ERR` ([`BSplineFailure::NoNurbsForm`]). That includes
 //!   `CalculateBoundingBox`'s sampling fallback for derived types, whose `Evaluate`
 //!   calls have no NURB to evaluate either.
 //! - **Analytics.** `CreateAnalyticCurve` (with `USE_ANALYTICS`, defined in
@@ -98,6 +101,7 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::curve::offset_curve::OffsetCurve;
+use crate::error::nurbs::BSplineFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -437,6 +441,34 @@ impl BSplineCurve {
         Ok(self.degree()? == 3 && self.is_piecewise_c0()?)
     }
 
+    /// Certified boxes covering the part of the curve over `interval`, one per knot span
+    /// that meets it ([`crate::nurbs::nurbs_crv::crv_span_boxes`]); `None`, meaning no
+    /// certified cover, without a NURB, when the weights, knots or interval cannot be
+    /// read as a cover, or while evaluation beyond the natural interval is enabled.
+    /// Not upstream.
+    #[must_use]
+    pub fn span_boxes(&self, interval: &Extent1d) -> Option<Vec<Extent3d>> {
+        if self.is_out_of_bounds_enabled() {
+            return None;
+        }
+        crate::nurbs::nurbs_crv::crv_span_boxes(self.nurb.as_ref()?, interval)
+    }
+
+    /// The refinable certified cover ([`crate::nurbs::nurbs_crv::CurveCover`]) over
+    /// `interval`, refined `depth` times; `None` under the conditions of
+    /// [`BSplineCurve::span_boxes`]. Not upstream.
+    #[must_use]
+    pub fn cover(
+        &self,
+        interval: &Extent1d,
+        depth: usize,
+    ) -> Option<crate::nurbs::nurbs_crv::CurveCover> {
+        if self.is_out_of_bounds_enabled() {
+            return None;
+        }
+        crate::nurbs::nurbs_crv::CurveCover::new(self.nurb.as_ref()?, interval, depth)
+    }
+
     /// Bounding boxes of the part of the curve over `interval` (clamped to the natural
     /// interval), built from the control points of the spans it covers
     /// (`CalculateBoundingBox`). The pseudo box takes its basis from the control point
@@ -518,13 +550,15 @@ impl BSplineCurve {
                 (0, n + 1)
             } else {
                 // use control polygon which contributes to the included spans
-                let knt = cur.knot_vector().map_err(SolidError::nl_ser(OP_BBOX))?;
+                let knt = cur
+                    .knot_vector()
+                    .map_err(SolidError::nurbs_routine(OP_BBOX))?;
                 let start_span = knt
                     .find_span(p, target.min(), Side::Left)
-                    .map_err(SolidError::nl_ser(OP_BBOX))?;
+                    .map_err(SolidError::nurbs_routine(OP_BBOX))?;
                 let end_span = knt
                     .find_span(p, target.max(), Side::Right)
-                    .map_err(SolidError::nl_ser(OP_BBOX))?;
+                    .map_err(SolidError::nurbs_routine(OP_BBOX))?;
                 let start = start_span
                     .checked_sub(p)
                     .ok_or_else(|| invalid(OP_BBOX, "span below the degree"))?;
@@ -536,7 +570,10 @@ impl BSplineCurve {
             };
 
         if num_points < 1 {
-            return Err(SolidError::sm_err(OP_BBOX));
+            return Err(SolidError::b_spline(
+                OP_BBOX,
+                BSplineFailure::Failed("the span range has no points"),
+            ));
         }
 
         let cpt = |i: usize| {
@@ -862,6 +899,34 @@ impl BSplineCurve {
     /// different dimension or degree; `SM_ERR` without a NURB, for a zero end weight or
     /// when degree elevation or the canonical construction fails.
     pub fn create_by_joining(segments: &mut [Self], senses: Option<&[bool]>) -> Result<Self> {
+        Self::join(segments, senses, None)
+    }
+
+    /// [`BSplineCurve::create_by_joining`], also returning where each segment lies in
+    /// the joined curve: the joined curve's first knot, then each segment's last knot,
+    /// in segment order (`segments.len() + 1` values). Segment `i` spans
+    /// `[breaks[i], breaks[i + 1]]`. Each value is one of the joined curve's knots, the
+    /// very value its knot vector holds. The curve is the one
+    /// [`BSplineCurve::create_by_joining`] makes.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineCurve::create_by_joining`].
+    pub fn create_by_joining_with_breaks(
+        segments: &mut [Self],
+        senses: Option<&[bool]>,
+    ) -> Result<(Self, Vec<f64>)> {
+        let mut breaks = Vec::new();
+        let joined = Self::join(segments, senses, Some(&mut breaks))?;
+        Ok((joined, breaks))
+    }
+
+    /// `CreateByJoining`, recording the segments' breaks in `breaks` when asked.
+    fn join(
+        segments: &mut [Self],
+        senses: Option<&[bool]>,
+        mut breaks: Option<&mut Vec<f64>>,
+    ) -> Result<Self> {
         let mut ctrl_pts: Vec<Point3> = Vec::new();
         let mut weights: Vec<f64> = Vec::new();
         let mut knot_mult: Vec<usize> = Vec::new();
@@ -960,6 +1025,9 @@ impl BSplineCurve {
                 }
                 ctrl_pts.push(last_point);
                 knots.push(first_of(&seg_knots)?);
+                if let Some(b) = breaks.as_mut() {
+                    b.push(first_of(&seg_knots)?);
+                }
                 knot_mult.push(
                     *seg_knot_mult
                         .first()
@@ -1030,7 +1098,10 @@ impl BSplineCurve {
                 let w0 = first_of(&seg_weights)?;
                 if !is_zero(last_weight - w0) {
                     if last_weight.abs() < EFF_ZERO || w0.abs() < EFF_ZERO {
-                        return Err(SolidError::sm_err(OP_JOIN));
+                        return Err(SolidError::b_spline(
+                            OP_JOIN,
+                            BSplineFailure::Failed("an end weight of the joined curves is zero"),
+                        ));
                     }
 
                     // Scale the weights
@@ -1076,6 +1147,13 @@ impl BSplineCurve {
                     );
                 }
                 ctrl_pts.push(pt);
+            }
+            if let Some(b) = breaks.as_mut() {
+                b.push(
+                    *knots
+                        .last()
+                        .ok_or_else(|| invalid(OP_JOIN, "empty joined data"))?,
+                );
             }
         }
 
@@ -1610,13 +1688,15 @@ impl BSplineCurve {
             (0, n + 1)
         } else {
             // use control polygon which contributes to the included spans
-            let knt = cur.knot_vector().map_err(SolidError::nl_ser(OP_POLYGON))?;
+            let knt = cur
+                .knot_vector()
+                .map_err(SolidError::nurbs_routine(OP_POLYGON))?;
             let start_span = knt
                 .find_span(p, interval.min(), Side::Left)
-                .map_err(SolidError::nl_ser(OP_POLYGON))?;
+                .map_err(SolidError::nurbs_routine(OP_POLYGON))?;
             let end_span = knt
                 .find_span(p, interval.max(), Side::Right)
-                .map_err(SolidError::nl_ser(OP_POLYGON))?;
+                .map_err(SolidError::nurbs_routine(OP_POLYGON))?;
             let start = start_span
                 .checked_sub(p)
                 .ok_or_else(|| invalid(OP_POLYGON, "span below the degree"))?;
@@ -1646,7 +1726,10 @@ impl BSplineCurve {
         let other_pts = other.control_points()?;
         let our_pts = self.nurb_ref_mut()?.cpts_mut();
         if other_pts.len() != our_pts.len() {
-            return Err(SolidError::sm_err(OP_MATCH));
+            return Err(SolidError::b_spline(
+                OP_MATCH,
+                BSplineFailure::Failed("the curves have different numbers of control points"),
+            ));
         }
 
         for (ours, theirs) in our_pts.iter_mut().zip(other_pts) {
@@ -1672,7 +1755,10 @@ impl BSplineCurve {
         // no work - no degree increase needed
         let degree = self.degree()?;
         if new_degree < degree {
-            return Err(SolidError::sm_err(OP_ELEVATE));
+            return Err(SolidError::b_spline(
+                OP_ELEVATE,
+                BSplineFailure::Failed("the new degree is below the current one"),
+            ));
         }
         if new_degree == degree {
             return Ok(());
@@ -1682,7 +1768,7 @@ impl BSplineCurve {
         let cur = self
             .nurb_ref()?
             .elevate_degree(increment)
-            .map_err(SolidError::nl_ser(OP_ELEVATE))?;
+            .map_err(SolidError::nurbs_routine(OP_ELEVATE))?;
 
         // Swap Nurbs with this
         self.nurb = Self::from_gw_nurb(self.dim, &cur).nurb;
@@ -1703,7 +1789,7 @@ impl BSplineCurve {
 
         self.nurb_ref_mut()?
             .reverse()
-            .map_err(SolidError::nl_ser(OP_REVERSE))?;
+            .map_err(SolidError::nurbs_routine(OP_REVERSE))?;
 
         let new_ivl = self.natural_interval();
         let (a, b) = (new_ivl.evaluate(t_new_min), new_ivl.evaluate(t_new_max));
@@ -1752,7 +1838,10 @@ impl BSplineCurve {
     ) -> Result<()> {
         let pw = self.nurb_ref_mut()?.cpts_mut();
         if index >= pw.len() {
-            return Err(SolidError::sm_err(OP_SET_CP));
+            return Err(SolidError::b_spline(
+                OP_SET_CP,
+                BSplineFailure::Failed("the control point index is past the last control point"),
+            ));
         }
 
         let mut control_point = point;
@@ -1776,9 +1865,12 @@ impl BSplineCurve {
         }
 
         let rational = pw.first().is_some_and(|c| c.w != NOW);
-        let cpt = pw
-            .get_mut(index)
-            .ok_or_else(|| SolidError::sm_err(OP_SET_CP))?;
+        let cpt = pw.get_mut(index).ok_or_else(|| {
+            SolidError::b_spline(
+                OP_SET_CP,
+                BSplineFailure::Failed("the control point index is past the last control point"),
+            )
+        })?;
         cpt.x = control_point.x;
         cpt.y = control_point.y;
         cpt.z = control_point.z;
@@ -1889,7 +1981,7 @@ impl BSplineCurve {
         // [1, NL_MAXDEG].
         if p < 1 || i64::from(p) > MAX_DEGREE as i64 {
             return Err(bad(
-                "NURBS curve degree is outside the supported range 1 to NL_MAXDEG",
+                "NURBS curve degree is outside 1 to the largest degree the NURBS routines handle",
             ));
         }
 

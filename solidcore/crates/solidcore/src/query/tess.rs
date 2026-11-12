@@ -662,7 +662,7 @@ impl TessSrfCache {
         // the PolyEdges of the first poly face (phase 1 poly breps have one face)
         let poly_face = pb
             .first_poly_face()?
-            .ok_or(SolidError::null_pointer(OP_BUILD))?;
+            .ok_or_else(|| SolidError::query_missing(OP_BUILD, "the poly B-rep's first face"))?;
         let poly_edges = pb.face_poly_edges(poly_face)?;
 
         // implant every PolyEdge into the subdivision tree - point testing off
@@ -757,7 +757,7 @@ impl TessSrfCache {
         let pb = self
             .poly_brep
             .as_ref()
-            .ok_or(SolidError::null_pointer(OP_UV))?;
+            .ok_or_else(|| SolidError::query_missing(OP_UV, "the poly B-rep"))?;
         let s3 = pb.edge_start_point(segment)?;
         let e3 = pb.edge_end_point(segment)?;
         let tol_3d = pb.edge_tolerance(segment)?;
@@ -802,7 +802,10 @@ impl TessSrfCache {
 
         // check state - segment should intersect some subdivision tree nodes
         if nodes.is_empty() {
-            return Err(SolidError::sm_err(OP_UV));
+            return Err(SolidError::query_failed(
+                OP_UV,
+                "the segment meets no subdivision tree node",
+            ));
         }
 
         // for every subdivision leaf within the segment box
@@ -942,10 +945,10 @@ impl TessSrfCache {
                 let pb = self
                     .poly_brep
                     .as_mut()
-                    .ok_or(SolidError::null_pointer(OP_MARK))?;
-                let pf = pb
-                    .first_poly_face()?
-                    .ok_or(SolidError::null_pointer(OP_MARK))?;
+                    .ok_or_else(|| SolidError::query_missing(OP_MARK, "the poly B-rep"))?;
+                let pf = pb.first_poly_face()?.ok_or_else(|| {
+                    SolidError::query_missing(OP_MARK, "the poly B-rep's first face")
+                })?;
                 let original = pb.face_original_face(pf)?;
                 found_face = original.map(TessHandle::Object);
                 let mid = domain.evaluate(0.5, 0.5);
@@ -1031,7 +1034,8 @@ fn tess_test_against_tolerances(
     if out.needs_subdivision {
         return Ok(out);
     }
-    let driver = driver.ok_or(SolidError::null_pointer(OP_TEST))?;
+    let driver =
+        driver.ok_or_else(|| SolidError::query_missing(OP_TEST, "the tessellation driver"))?;
     let Some(view) = driver.view else {
         return Ok(out);
     };

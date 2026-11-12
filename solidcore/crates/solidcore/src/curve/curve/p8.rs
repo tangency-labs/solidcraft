@@ -294,7 +294,9 @@ fn cache_analytic<O: SolutionObject>(
 
 /// The cache tree (`GetTree`, `NER`).
 fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
-    cache.tree().ok_or(SolidError::null_pointer(OP_GCI))
+    cache
+        .tree()
+        .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the curve cache's tree"))
 }
 
 /// `GetOrCreateObjectCache` for a curve (`NER` on failure). `zone_tol_3d` is the zone
@@ -317,7 +319,7 @@ fn build_cache<O: SolutionObject>(
     ) {
         Ok(c) => Ok(c),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::null_pointer(OP_GCI)),
+        Err(_) => Err(SolidError::curve_missing(OP_GCI, "the curve's cache")),
     }
 }
 
@@ -615,14 +617,14 @@ impl Curve {
         }
         let cache1 = cache1_slot
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_GCI))?;
+            .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the first curve's cache"))?;
         let mut cache2_own = if same_curve {
             None
         } else {
             Some(
                 cache2_slot
                     .as_mut()
-                    .ok_or(SolidError::null_pointer(OP_GCI))?,
+                    .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the second curve's cache"))?,
             )
         };
 
@@ -632,8 +634,13 @@ impl Curve {
             let tree2 = cache_tree(cache2_own.as_deref().unwrap_or(cache1))?;
 
             // no work - topNode bounding boxes are disjoint
-            let root1 = tree1.node(tree1.top_node().ok_or(SolidError::null_pointer(OP_GCI))?)?;
-            let root2 = tree2.node(tree2.top_node().ok_or(SolidError::null_pointer(OP_GCI))?)?;
+            let root1 =
+                tree1.node(tree1.top_node().ok_or_else(|| {
+                    SolidError::curve_missing(OP_GCI, "the first tree's top node")
+                })?)?;
+            let root2 = tree2.node(tree2.top_node().ok_or_else(|| {
+                SolidError::curve_missing(OP_GCI, "the second tree's top node")
+            })?)?;
             let mut bbox = root1.bbox;
             bbox.expand_absolute(dist_tol);
             if bbox.are_disjoint(&root2.bbox, 0.0) {
@@ -1662,10 +1669,10 @@ impl Curve {
                 // both solutions and at the midpoint.
                 let curve_a = named
                     .curve_of(sol_a.objects[0])
-                    .ok_or(SolidError::null_pointer(OP_GCI))?;
-                let curve_b = named
-                    .curve_of(sol_a.objects[1])
-                    .ok_or(SolidError::null_pointer(OP_GCI))?;
+                    .ok_or_else(|| SolidError::curve_missing(OP_GCI, "a solution's first curve"))?;
+                let curve_b = named.curve_of(sol_a.objects[1]).ok_or_else(|| {
+                    SolidError::curve_missing(OP_GCI, "a solution's second curve")
+                })?;
                 let pt_a = point_or_pass_on(k, curve_a, param_a1)?;
                 let pt_b = point_or_pass_on(k, curve_b, param_b1)?;
                 let dist1 = pt_a.distance(pt_b);

@@ -549,10 +549,13 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 /// edgeuse runs against the edge (`same` false) reversed exactly (control points in reverse
 /// order, knots t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's
 /// interval; where the two ends differ by the rounding of SMLib's own or this remap (within the
-/// schema's 10⁻⁹ of the interval's magnitude, at least 1), every knot within that of an interval
-/// end is that end, and the end spans this leaves without length go with their control points,
-/// so the pcurve is a valid record defined on the edge; farther apart is an error.
-fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2]) -> Res<b::Curve2> {
+/// schema's 10⁻⁹ of the interval's magnitude, at least 1), or by more but at one point of the edge
+/// within its tolerance (`on_edge`: a circle on its NURBS form whose end lies a rounding past the
+/// quarter line its trim stops on moves along it 10⁻⁷ of the form's parameter, a micron), every
+/// knot within that of an interval end is that end, and the end spans this leaves without length
+/// go with their control points, so the pcurve is a valid record defined on the edge; farther
+/// apart is an error.
+fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2], on_edge: &dyn Fn(f64, f64) -> bool) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
             return (knots.to_vec(), points.to_vec());
@@ -571,19 +574,41 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
     // support has no length is zero on the domain, so dropping its knot and point leaves the
     // curve on the edge as it was (exact where the dead span starts at a knot of multiplicity
     // degree + 1, within the slack otherwise).
-    fn map<T: Clone>(k: Vec<f64>, points: Vec<T>, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2]) -> Res<(Vec<f64>, Vec<T>)> {
+    fn map<T: Clone>(
+        k: Vec<f64>,
+        points: Vec<T>,
+        [scale, offset]: [f64; 2],
+        [t0, t1]: [f64; 2],
+        on_edge: &dyn Fn(f64, f64) -> bool,
+    ) -> Res<(Vec<f64>, Vec<T>)> {
         let mut k: Vec<f64> = k.into_iter().map(|t| scale * t + offset).collect();
         let n = points.len();
         let degree = k.len().checked_sub(n + 1).ok_or_else(|| invalid("UV trim knots"))?;
         let (a, z) = (at(&k, degree, "UV trim knots")?, at(&k, n, "UV trim knots")?);
-        let slack = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
-        if (a - t0).abs() > slack || (z - t1).abs() > slack {
+        let rounding = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
+        // Each end's slack: the rounding, or the gap where it is one point of the edge (less
+        // than a quarter of the interval, so the two ends' slacks never meet).
+        let end = |x: f64, t: f64| {
+            let gap = (x - t).abs();
+            if gap <= rounding {
+                Some(rounding)
+            } else if gap < 0.25 * (t1 - t0).abs() && on_edge(x, t) {
+                Some(gap * (1.0 + 1e-12) + rounding)
+            } else {
+                None
+            }
+        };
+        let (Some(s0), Some(s1)) = (end(a, t0), end(z, t1)) else {
             return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]")));
-        }
+        };
+        // A knot within the rounding of an end is that end, and so is one past the end on the
+        // side the trim runs over it, up to the trim's end; a knot inside the edge's interval
+        // farther than the rounding stays (moving it would change the curve).
+        let snaps = |x: f64, t: f64, end: f64, slack: f64| (x - t).abs() <= rounding || ((x - t) * (end - t) > 0.0 && (x - t).abs() <= slack);
         for x in &mut k {
-            if (*x - t0).abs() <= slack {
+            if snaps(*x, t0, a, s0) {
                 *x = t0;
-            } else if (*x - t1).abs() <= slack {
+            } else if snaps(*x, t1, z, s1) {
                 *x = t1;
             }
         }
@@ -602,12 +627,12 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
     Ok(match trim {
         b::Curve2::Spline { knots, points } => {
             let (k, points) = along(knots, points, same);
-            let (knots, points) = map(k, points, [scale, offset], [t0, t1])?;
+            let (knots, points) = map(k, points, [scale, offset], [t0, t1], on_edge)?;
             b::Curve2::Spline { knots, points }
         }
         b::Curve2::RationalSpline { knots, homogeneous } => {
             let (k, homogeneous) = along(knots, homogeneous, same);
-            let (knots, homogeneous) = map(k, homogeneous, [scale, offset], [t0, t1])?;
+            let (knots, homogeneous) = map(k, homogeneous, [scale, offset], [t0, t1], on_edge)?;
             b::Curve2::RationalSpline { knots, homogeneous }
         }
     })
@@ -801,7 +826,16 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
                 l.push((index(e)?, same != edge.reversed));
                 let trim = trims.get(u).ok_or_else(|| invalid("edgeuse"))?.as_ref();
                 g.push(match (spline, edge.trim_map, trim) {
-                    (true, Some(map), Some(trim)) => Some(mapped(trim, same, map, edge.interval)?),
+                    (true, Some(map), Some(trim)) => {
+                        // The edge's points at two of its parameters lie within its tolerance.
+                        let curve = edge.nurbs.as_ref().unwrap_or(&edge.curve);
+                        let reach = tolerances.edges.as_ref().and_then(|t| t.get(e)).copied().unwrap_or(tolerance);
+                        let on_edge = |s: f64, t: f64| match (point3(curve, s), point3(curve, t)) {
+                            (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= reach,
+                            _ => false,
+                        };
+                        Some(mapped(trim, same, map, edge.interval, &on_edge)?)
+                    }
                     _ => None,
                 });
             }
@@ -1587,6 +1621,38 @@ fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
     }
     let n = pts.len();
     Ok(0.5 * (0..n).filter_map(|k| Some((pts.get(k)?, pts.get((k + 1) % n)?))).map(|(p, q)| p[0] * q[1] - q[0] * p[1]).sum::<f64>())
+}
+
+/// An edge curve's point at `t` within its domain: a line's, or a spline's (de Boor on the
+/// homogeneous coefficients); none for other kinds, or outside the domain.
+fn point3(c: &b::Curve, t: f64) -> Option<[f64; 3]> {
+    let (knots, pts): (&[f64], Vec<[f64; 4]>) = match c {
+        b::Curve::Line { start, end } => return Some([0, 1, 2].map(|k| start[k] + t * (end[k] - start[k]))),
+        b::Curve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
+        b::Curve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+        _ => return None,
+    };
+    let n = pts.len();
+    let p = knots.len().checked_sub(n + 1)?;
+    if !(*knots.get(p)? <= t && t <= *knots.get(n)?) {
+        return None;
+    }
+    let mut s = p;
+    while s + 1 < n && *knots.get(s + 1)? <= t {
+        s += 1;
+    }
+    let mut d: Vec<[f64; 4]> = (0..=p).map(|j| pts.get(s + j - p).copied()).collect::<Option<_>>()?;
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = s + j - p;
+            let den = knots.get(i + p + 1 - r)? - knots.get(i)?;
+            let a = if den == 0.0 { 0.0 } else { (t - knots.get(i)?) / den };
+            let (lo, hi) = (*d.get(j - 1)?, *d.get(j)?);
+            *d.get_mut(j)? = [0, 1, 2, 3].map(|c| (1.0 - a) * lo[c] + a * hi[c]);
+        }
+    }
+    let q = d.get(p)?;
+    (q[3] != 0.0).then(|| [q[0] / q[3], q[1] / q[3], q[2] / q[3]])
 }
 
 /// A pcurve's point at `t` (de Boor on the homogeneous coefficients).

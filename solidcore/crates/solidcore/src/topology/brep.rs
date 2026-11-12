@@ -62,7 +62,7 @@ pub use p8::{
     create_face_from_surface, create_faces_with_curves, create_planar_face_with_3d_curves,
     create_planar_faces_with_3d_curves, FaceBuildEnv,
 };
-pub use p9::{make_vertex_loop, orient_sheet_surfaces};
+pub use p9::{make_vertex_loop, orient_sheet_surfaces, OrientSheetNote};
 
 /// Whether `b` is a valid closed solid facing out (not upstream): one closed manifold solid
 /// ([`is_manifold_solid`]), passed by the kernel's validity check (its pointer check and
@@ -118,8 +118,17 @@ pub fn is_outward_touching_solids(
     is_valid_and_outward(k, b)
 }
 
-/// The validity check, no unsure region, and the volume's sign, for a closed body.
-fn is_valid_and_outward(
+/// The validity check, no unsure region, and the volume's sign, for a closed body: the part
+/// of [`is_outward_solid`] and [`is_outward_touching_solids`] after their topology tests,
+/// which both share. `true` only where the check passes (pointers and `AssertValid`, at
+/// `Level0`), no region is unsure, and the volume is proved positive. A caller that holds
+/// this proof for a body it has not changed since may take it for the body again under the
+/// same kernel settings (solidcore-ops' proof reuse, #14830).
+///
+/// # Errors
+///
+/// As [`is_outward_solid`]'s, after its manifold test.
+pub fn is_valid_and_outward(
     k: &mut crate::kernel::Kernel,
     b: &mut crate::topology::Brep,
 ) -> crate::Result<bool> {

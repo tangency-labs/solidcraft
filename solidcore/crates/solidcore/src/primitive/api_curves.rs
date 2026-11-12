@@ -35,9 +35,10 @@
 //! - **Context.** `SmApiGetOrCreateContext()` is the caller's [`Kernel`]; the
 //!   B-spline and line constructors take no context in the port.
 //! - **Statuses.** `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`];
-//!   `SM_ERR_NOT_WITHIN_TOLERANCE` and `SM_ERR` are [`SolidError::Upstream`] with
-//!   [`SM_ERR_NOT_WITHIN_TOLERANCE`] / [`crate::error::SM_ERR`]. Errors of the called
-//!   constructors pass through unchanged.
+//!   `SM_ERR_NOT_WITHIN_TOLERANCE` is [`PrimitiveFailure::HelixDeviates`] (comparison
+//!   status [`SM_ERR_NOT_WITHIN_TOLERANCE`]) and `SM_ERR` a
+//!   [`PrimitiveFailure::Failed`] (comparison status [`crate::error::SM_ERR`]). Errors
+//!   of the called constructors pass through unchanged.
 //! - `SmApiCreateHelix` returns the curve as an `SmBSplineCurve`; the fitter's
 //!   `TWOPI` literal `6.2831853071795864` is [`core::f64::consts::TAU`] (the same
 //!   double).
@@ -56,6 +57,7 @@ use core::f64::consts::TAU;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::zone_tol_3d_of_curve;
@@ -69,8 +71,8 @@ use crate::nurbs::b_spline_curve::{
 use crate::nurbs::b_spline_curve_n_lib::HelixSpec;
 use crate::nurbs::crv_fit::p1::ParamMethod;
 
-/// Upstream `SmStatus` value `SM_ERR_NOT_WITHIN_TOLERANCE`, as carried by
-/// [`SolidError::Upstream`].
+/// Upstream `SmStatus` value `SM_ERR_NOT_WITHIN_TOLERANCE`, the comparison status of
+/// [`PrimitiveFailure::HelixDeviates`].
 pub use crate::error::SM_ERR_NOT_WITHIN_TOLERANCE;
 
 const OP_LINE: &str = "primitive::api_curves::create_line";
@@ -361,7 +363,7 @@ pub fn create_helix(params: &HelixParams) -> Result<BSplineCurve> {
             if e.is_unported_or_cancelled() {
                 e
             } else {
-                SolidError::sm_err(OP_HELIX)
+                SolidError::primitive_failed(OP_HELIX, "the fitted helix could not be evaluated")
             }
         })?;
 
@@ -390,11 +392,13 @@ pub fn create_helix(params: &HelixParams) -> Result<BSplineCurve> {
     }
 
     if max_dev > tolerance {
-        return Err(SolidError::Upstream {
-            operation: OP_HELIX,
-            code: SM_ERR_NOT_WITHIN_TOLERANCE,
-            entity: None,
-        });
+        return Err(SolidError::primitive(
+            OP_HELIX,
+            PrimitiveFailure::HelixDeviates {
+                deviation: max_dev,
+                tolerance,
+            },
+        ));
     }
 
     Ok(helix)
@@ -449,12 +453,19 @@ fn segments(points: &[Point3], operation: &'static str) -> Result<Vec<Line>> {
         let p1 = points
             .get((ii + 1) % points.len())
             .copied()
-            .ok_or_else(|| SolidError::sm_err(operation))?;
+            .ok_or_else(|| {
+                SolidError::primitive_failed(operation, "a polygon corner is out of range")
+            })?;
         match Line::create_line_segment(3, p0, p1, None) {
             Ok(seg) => result.push(seg),
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // Drop the segments this call already made.
-            Err(_) => return Err(SolidError::sm_err(operation)),
+            Err(_) => {
+                return Err(SolidError::primitive_failed(
+                    operation,
+                    "a polygon side could not be made",
+                ))
+            }
         }
     }
     Ok(result)
@@ -527,7 +538,12 @@ pub fn create_regular_polygon(center: Point3, num_sides: u64, radius: f64) -> Re
             Ok(seg) => result.push(seg),
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // Drop the segments this call already made.
-            Err(_) => return Err(SolidError::sm_err(OP_POLYGON)),
+            Err(_) => {
+                return Err(SolidError::primitive_failed(
+                    OP_POLYGON,
+                    "a polygon side could not be made",
+                ))
+            }
         }
     }
 
@@ -777,7 +793,7 @@ mod tests {
         );
         assert!(matches!(
             create_rectangle(p(0.0, 1.0e10, 0.0), 10.0, 1.0e-9),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(ref e) if e.upstream_status() == Some(SM_ERR)
         ));
         assert!(matches!(
             create_rectangle(c, f64::NAN, 6.0),
@@ -789,7 +805,7 @@ mod tests {
         );
         assert!(matches!(
             create_regular_polygon(p(1.0e10, 1.0e10, 0.0), 5, 1.5e-6),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(ref e) if e.upstream_status() == Some(SM_ERR)
         ));
         assert!(create_regular_polygon(c, 6, f64::INFINITY).is_err());
     }

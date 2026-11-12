@@ -1302,6 +1302,22 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let other = self
             .other
             .ok_or(invalid(OP_INSERT_RELATE, "no other B-rep"))?;
+
+        // A proto vertex's ball never reaches two distinct vertices of one operand. Two
+        // vertices a distance d apart are never both closer than d / 2 to one point, so the
+        // capture distance stays below half the smallest distance between two vertices of
+        // either operand; it never drops below the intersection tolerance, within which
+        // points are one. Upstream's capture distance is unbounded: with a STEP file's
+        // tolerances (0.01 everywhere) it is 10 mm, every vertex of a 30 mm rim was captured
+        // into one proto vertex, and the rim minus its own copy failed in the merge.
+        let mut nearest = f64::INFINITY;
+        for b in [brep.brep_arena(this)?, brep.brep_arena(other)?] {
+            nearest = nearest.min(nearest_vertex_pair_distance(b)?);
+        }
+        if nearest.is_finite() {
+            capture_distance = capture_distance.min(max2(0.5 * nearest, topo_int_tol));
+        }
+
         let mut mgr = ProtoTopologyManager::new(
             k,
             (this, brep.brep_arena(this)?),
@@ -2514,6 +2530,31 @@ fn teardown_reads_freed<O: ClassObject>(mgr: &ProtoTopologyManager<O>) -> bool {
     lists
         .iter()
         .any(|(_, l)| l.iter().any(|e| freed.contains(e)))
+}
+
+/// The smallest distance between two distinct vertices of `b` (by their points);
+/// infinite with fewer than two vertices. The points are swept along x, so a pair is
+/// compared only while its x gap is below the best distance found so far.
+///
+/// # Errors
+///
+/// Those of the vertex list and the vertex records.
+fn nearest_vertex_pair_distance(b: &crate::topology::Brep) -> Result<f64> {
+    let mut points = Vec::new();
+    for v in crate::topology::brep::p1::vertices(b, None)? {
+        points.push(crate::topology::vertex::point(b, v)?);
+    }
+    points.sort_by(|p, q| p.x.total_cmp(&q.x));
+    let mut nearest = f64::INFINITY;
+    for (i, p) in points.iter().enumerate() {
+        for q in points.iter().skip(i + 1) {
+            if q.x - p.x >= nearest {
+                break;
+            }
+            nearest = nearest.min(p.distance(*q));
+        }
+    }
+    Ok(nearest)
 }
 
 #[cfg(test)]

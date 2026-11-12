@@ -488,7 +488,9 @@ fn dump_state(o: &mut Vec<f64>, s: &BSplineSurface) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -587,6 +589,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 intersections_with_rails: params.as_deref(),
                 deriv_surfs: ds.as_ref().map(|[a, b]| [a.as_ref(), b.as_ref()]),
                 degree: *degree,
+                section_params: None,
             };
             BSplineSurface::create_skinned_surface(k, &secs, opts).map(|s| {
                 o.push(1.0);
