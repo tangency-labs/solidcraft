@@ -39,6 +39,28 @@ The command never writes a program that fails one of these unless `allow_unsafe`
 - **Read-back.** The program as written is read back through the machine's kinematics and
   compared with the toolpaths, both ways round: the tip within the post's precision and
   tolerances (`readback.allowed_tip`), the tool axis within its angle precision.
+- **Gouges.** Along every cutting move of every operation the cutter (a cylinder of its
+  radius, endless above its end) must be no deeper in the part or a fixture than
+  `gouge.allowed`: the job's tolerance less the tessellation's chord error
+  (`gouge.tessellation`), so no cut that passes is deeper than the tolerance into the exact
+  part. The depth is the true one: the deepest point of the part inside the cutter, measured to
+  the cutter's own surface (a cutter buried deeper than its radius is reported as far as it
+  would have to back out along its axis). A ball whose axis holds along a move is measured
+  exactly along all of it; other cutters are tested at samples at least half their radius
+  apart and half way and near the thirds between them, the deepest sample measured exactly
+  against the triangles and the deepest gouge followed to its deepest point. Arcs are followed
+  for the check within a twentieth of the allowance. A failure names the operation, the move of
+  its toolpath, the G-code line that ends that move (when it is found) and the work coordinates
+  of the tool tip there, and says how deep that can be in the exact part. An operation that cuts
+  what the model does not show (an engraving) sets `gouge_check: false`; the reply lists it
+  under `gouge.skipped`, and it is still checked against the fixtures.
+- **Holder.** For tools with holder data (`stickout` above the flutes, `shank_diameter`,
+  `holder`), the shank and holder must not touch the part or a fixture along a cutting move. A
+  shank or holder section no wider than the cutter is inside the cutter's endless cylinder, so
+  it reaches nothing the cutter does not reach first: it may come as close as the gouge check
+  allows (a wall the cutter has just cut is no collision). Counts are of moves of the
+  operation's toolpath.
+- **The 4th-axis setup check** (see [The setup check](#the-setup-check)).
 - **Operation checks** that are part of planning, each refusing the job with a message that
   names the operation: a tool that cannot cut the operation (below), heights out of order, a
   stepover wider than the tool, a profile the tool does not fit in.
@@ -49,10 +71,13 @@ message. With `dry_run`, the reply carries `passed: false` and `failures`.
 ### The reply
 
 `name`, `machine`, `post`, `operations` (each with `name`, `kind`, `tool`, `moves`,
-`cut_length`, `cut_minutes`, `rewinds`, `max_tilt_deg`, `a_deg` (indexed ones), `warnings`),
-`program_lines`, `program_head` (the first lines),
+`cut_length`, `cut_minutes`, `rewinds`, `max_tilt_deg`, `a_deg` (indexed ones), `gouge`, `gouge_at`
+(when it gouges), `holder_collisions`, `warnings`), `program_lines`, `program_head` (the first lines),
 `readback` (`max_tip_deviation`, `max_axis_deviation_deg`, `allowed_tip`, `allowed_axis_deg`,
-`cut_minutes`, `pass`), `cut_minutes` (the program's time at feed as written), `passed`,
+`cut_minutes`, `pass`), `gouge` (`worst`, `tolerance`, `tessellation`, `allowed`, `hits`,
+`at: {operation, move_index, line?, xyz}` for the deepest, `skipped`, `pass`),
+`holder_collisions` (`null` when no tool has holder data), `cut_minutes` (the program's time at
+feed as written), `passed`,
 `failures`, `dry_run`, `outputs` (`gcode`, `preview`) and `notes` (a post that writes no work
 offset, an output extension other than the post's, in a dry run too). The operations' minutes
 add up to `readback.cut_minutes`, the program's as the controller times it.
@@ -93,8 +118,9 @@ silently left at its default. That holds for the tools, the machine and the post
 | `post_path` | A post as a JSON file: the CAM crate's `Post5` (`cam.post.get {"name": …}` returns one to start from). This is how a machine's own post is matched: copy the closest built-in post and change its header, tool change, spindle, comments, decimals, inverse time and rotary settings until its output matches. |
 | `work_offset` | 1 to 6 (G54 to G59), for posts whose header writes `{work_offset}`. Default: 1. |
 | `origin` | The design point that is work zero, `[x, y, z]`. On a 4th axis the A axis is work X through it. Default: the design's origin. |
-| `bodies` | The part's bodies by name: the surface the 3D operations follow, drawn in the preview. Default: every visible body. |
-| `tolerance` | 0.0001 to 1 mm (default 0.01): how far a toolpath may be from the profiles and surfaces it follows. |
+| `bodies` | The part's bodies by name: the surface the 3D operations follow and every cut is checked for gouges against, drawn in the preview. Default: every visible body not in `fixtures`. |
+| `fixtures` | Bodies the tool must stay clear of (vises, clamps, a fixture plate modelled in the design): checked for gouges and holder collisions, never machined. Default: none. |
+| `tolerance` | 0.0001 to 1 mm (default 0.01): how far a toolpath may be from the profiles and surfaces it follows, and how deep a cut into the part counts as a gouge. |
 | `tools` | The tools, as the CAM crate's `Tool` JSON (below). Give this or `tool_library_path`. |
 | `tool_library_path` | A JSON file holding an array of tools. |
 | `operations` | 1 to 200 operations, run and written in order (below). |
@@ -118,10 +144,11 @@ path the mesh exports are built on). The facets then lie within a quarter of the
 the true surfaces: inside a convex surface, outside a hollow one. A 3D operation is planned on
 the facets within the rest of its tolerance (the operation's `tolerance`, the job's by default,
 less the chord error; at least half of it): four fifths of that for the operation itself and
-one fifth for merging its moves (below). A mesh body (an imported STL, 3MF or OBJ) is used as
-it is; the reply's notes say so. The toolpaths are output, made within the tolerance as an
-export is; they are not yet planned on the exact surfaces. A job of contours and pockets alone
-tessellates nothing for planning.
+one fifth for merging its moves (below). The gouge check allows the same, so a toolpath right
+on the true surface of a hole, which seems to cut the chord error into the facets, still
+passes. A mesh body (an imported STL, 3MF or OBJ) is used as it is; the reply's notes say so.
+The toolpaths are output, made within the tolerance as an export is. Neither they nor the
+gouge check are yet on the exact surfaces.
 
 ### Tools
 
@@ -139,8 +166,9 @@ nose or a face mill; any other tool is refused, with the operation named.
 ### Operations
 
 Every operation has `name`, `type`, `tool` (a tool's `number`), and optionally `spindle_rpm`,
-`feeds: {cut, plunge, descent?}`, `coolant` (default false) and `enabled` (default true: `false`
-keeps it in the job but leaves it out of the program). `heights` are `{clearance, retract, top,
+`feeds: {cut, plunge, descent?}`, `coolant` (default false), `gouge_check` (default true: see
+The checks) and `enabled` (default true: `false` keeps it in the job but leaves it out of the
+program). `heights` are `{clearance, retract, top,
 bottom}` in work coordinates.
 
 | `type` | Keys (defaults) |

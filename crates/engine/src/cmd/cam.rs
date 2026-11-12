@@ -8,16 +8,21 @@
 //! within a quarter of the job's tolerance. On a 4th axis a 3-axis operation may be indexed (A
 //! held at an angle), and the rotary and wrapped operations turn A as they cut
 //! (`cam_xrotary.rs`, with the check that A never turns the part into the tool). It writes the program through the job's post for
-//! its machine, reads that back and compares it with the toolpaths. A program that fails the
-//! check is not written unless the call allows it. Every path is checked against the session's
+//! its machine, reads that back and compares it with the toolpaths, and checks every cutting
+//! move for gouges against the part and the job's fixtures and, for tools with holder data, for
+//! shank and holder collisions. A program that fails a check is not written unless the call
+//! allows it. Every path is checked against the session's
 //! folders (`vfs`, which MCP's `--allow-path` confines) before anything is computed or written.
 
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcraft_cam::collision::{Hit, holder_collisions_within};
+use solidcraft_cam::drill::tool_gouges;
 use solidcraft_cam::gcode5::{JointWords, MachineOperation, MachineProgram, Post5, Rewind, emit_program_report, parse5};
 use solidcraft_cam::indexed::{IndexedOperation, frame_for_index};
 use solidcraft_cam::kinematics::{AxisLetter, Carrier, Machine, RotaryAxis};
@@ -34,8 +39,8 @@ use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::cam::{
     BoundarySpec, CamGcodeCheckParams, CamGcodeCheckReply, CamJob, CamJobParams, CamJobReply, CamPostGetParams, CamPostGetReply, CamPostListParams,
-    CamPostListReply, Common, HeightsSpec, MachineSpec, Op3Spec, OperationReport, OperationSpec, Outputs, ParseErrorReport, PostEntry,
-    ReadbackReport, RotaryRange, SideSpec,
+    CamPostListReply, Common, GougeAt, GougeReport, HeightsSpec, MachineSpec, Op3Spec, OperationReport, OperationSpec, Outputs, ParseErrorReport,
+    PostEntry, ReadbackReport, RotaryRange, SideSpec,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -59,19 +64,21 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "job: {…} | job_path: .json (the CAM job, docs/cam-jobs.md: name?, machine: \"3axis\" | \"4axis_a\" | Machine JSON \
              | machine_path: Machine JSON file, a_reversed?, a_limits_deg?: [min, max], post: built-in name (cam.post.list) | post_path: Post5 JSON file, work_offset?: 1-6, \
-             origin?: [x,y,z] (the design point that is work zero; on a 4th axis the A axis is work X through it), bodies?: [names] (the surface 3D operations follow, drawn in the \
-             preview; default every visible body), tolerance?: mm (default 0.01; 3D operations plan on the bodies tessellated within a \
+             origin?: [x,y,z] (the design point that is work zero; on a 4th axis the A axis is work X through it), bodies?: [names] (the part: what 3D operations follow and every \
+             cut is checked for gouges against, drawn in the preview; default every visible body), fixtures?: [names] (checked \
+             against, never cut), tolerance?: mm (default 0.01; 3D operations plan on the bodies tessellated within a \
              quarter of it), tools: [Tool JSON] | tool_library_path, operations: [{name, type: contour | pocket (sketch + profiles? | \
              polygon: [[x,y],…], stepdown?, side? (contour: outside | inside | on), stepover? (pocket), ramp_angle_deg?) | parallel | \
              roughing | waterline | scallop | steep_shallow | pencil | rest_finish (boundary?: {rect?, polygon?, holes?}, stepover?, \
              step?, …) | indexed {a_deg, operation, name?} | indexed_pattern {a_deg: [..] | count, start_deg?, operation, name?} | \
              rotary_finish | rotary_roughing (pattern: lines | helix | rings, clearance, retract, stock_radius?) | wrap | wrap_pocket | \
              wrap_contour (radius, …), tool: number, heights: {clearance, retract, top, bottom}, climb?, stock_to_leave?, tolerance?, spindle_rpm?, \
-             feeds?: {cut, plunge, descent?}, coolant?, enabled?}]; unknown keys are refused); output: G-code path (required unless dry_run); preview?: \
+             feeds?: {cut, plunge, descent?}, coolant?, gouge_check? (false: not against the part, still against fixtures), enabled?}]; unknown keys are refused); output: G-code path (required unless dry_run); preview?: \
              HTML path, another file than output (the part and toolpaths, self-contained); dry_run?: plan and check, write nothing; \
-             allow_unsafe?: write even when the read-back fails (its first line then says so) → name, machine, post, operations: [{name, \
-             kind, tool, moves, cut_length, cut_minutes, rewinds, max_tilt_deg, a_deg?, warnings}], program_lines, program_head, readback: {max_tip_deviation, \
-             max_axis_deviation_deg, allowed_tip, allowed_axis_deg, cut_minutes, pass}, cut_minutes, passed, failures, dry_run, outputs: \
+             allow_unsafe?: write even when a check fails (its first line then says so) → name, machine, post, operations: [{name, \
+             kind, tool, moves, cut_length, cut_minutes, rewinds, max_tilt_deg, a_deg?, gouge, gouge_at?, holder_collisions, warnings}], program_lines, program_head, readback: {max_tip_deviation, \
+             max_axis_deviation_deg, allowed_tip, allowed_axis_deg, cut_minutes, pass}, gouge: {worst, tolerance, tessellation, \
+             allowed, hits, at?: {operation, move_index, line?, xyz}, skipped, pass}, holder_collisions, cut_minutes, passed, failures, dry_run, outputs: \
              {gcode?, preview?}, notes. Without dry_run or allow_unsafe a failed check refuses and nothing is written",
         ),
     CommandSpec::new("cam.post.list", "List CAM Posts", crate::checked!("cam.post.list", post_list))
@@ -126,6 +133,10 @@ const CHORD_SHARE: f64 = 0.25;
 /// The share of a 3D operation's part of the tolerance its moves may move by when they are
 /// merged into fewer (lines and arcs); the rest is the operation's own.
 const COMPACT_SHARE: f64 = 0.2;
+/// The share of the gouge check's allowance arcs are followed within for the checks.
+const CHECK_ARC_SHARE: f64 = 0.05;
+/// Most program lines looked through for the line one move ends on.
+const LINE_WINDOW: usize = 20_000;
 /// The coarsest the preview draws the part within, when the job's tolerance is finer (mm): the
 /// picture needs no more.
 const PREVIEW_CHORD: f64 = 0.05;
@@ -401,34 +412,35 @@ fn tools_of(cmd: &str, job: &CamJob, base: Option<&Path>) -> Result<Vec<Tool>> {
     Ok(tools)
 }
 
-/// The part's bodies: the job's `bodies`, else every visible body. Each must be in the design.
-fn part_bodies(cmd: &str, s: &Session, job: &CamJob) -> Result<Vec<String>> {
+/// The part's bodies (the job's `bodies`, else every visible body not in `fixtures`) and the
+/// fixtures'. Each must be in the design, and none in both.
+fn job_bodies(cmd: &str, s: &Session, job: &CamJob) -> Result<(Vec<String>, Vec<String>)> {
     let st = s.world_state()?;
+    let fixtures: Vec<String> = job.fixtures.clone().unwrap_or_default();
     let part: Vec<String> = match &job.bodies {
         Some(b) => b.clone(),
-        None => st.bodies.iter().map(|b| b.name.clone()).filter(|n| s.body_visible(n)).collect(),
+        None => st.bodies.iter().map(|b| b.name.clone()).filter(|n| !fixtures.contains(n) && s.body_visible(n)).collect(),
     };
-    if part.len() > MAX_BODY_NAMES {
+    if part.len() > MAX_BODY_NAMES || fixtures.len() > MAX_BODY_NAMES {
         return Err(bad(cmd, format!("a job names at most {MAX_BODY_NAMES} bodies")));
     }
-    if let Some(missing) = part.iter().find(|n| !st.bodies.iter().any(|b| &b.name == *n)) {
+    if let Some(missing) = part.iter().chain(&fixtures).find(|n| !st.bodies.iter().any(|b| &b.name == *n)) {
         return Err(bad(cmd, format!("no body `{missing}`")));
+    }
+    if let Some(both) = part.iter().find(|n| fixtures.contains(n)) {
+        return Err(bad(cmd, format!("body `{both}` is in both `bodies` and `fixtures`")));
     }
     if job.bodies.is_some() && part.is_empty() {
         return Err(bad(cmd, "`bodies` names no body: leave it out to take every visible body"));
     }
-    Ok(part)
+    Ok((part, fixtures))
 }
 
-/// The surface the 3D operations follow: the bodies `names` tessellated from their exact
-/// surfaces within `chord`, in work coordinates (the design less `origin`). The toolpaths are
-/// output, planned within the job's tolerance as an export is; they are not yet planned on the
-/// exact surfaces.
-fn part_surface(cmd: &str, s: &Session, names: &[String], origin: Vec3, chord: f64, notes: &mut Vec<String>) -> Result<Surface> {
-    if names.is_empty() {
-        return Err(bad(cmd, "the job's 3D operations need a part: the design has no visible body, or give `bodies`"));
-    }
-    let st = s.world_state()?;
+/// The bodies `names` tessellated from their exact surfaces within `chord` into one mesh, in
+/// work coordinates (the design less `origin`): what the 3D operations follow and every
+/// operation is checked for gouges against. The toolpaths are output, planned within the job's
+/// tolerance as an export is; neither they nor the gouge check are yet on the exact surfaces.
+fn bodies_mesh(cmd: &str, st: &solidcraft_doc::ModelState, names: &[String], origin: Vec3, chord: f64, notes: &mut Vec<String>) -> Result<Mesh> {
     let mut out = Mesh::default();
     for name in names {
         let Some(b) = st.bodies.iter().find(|b| &b.name == name) else { return Err(bad(cmd, format!("no body `{name}`"))) };
@@ -453,15 +465,55 @@ fn part_surface(cmd: &str, s: &Session, names: &[String], origin: Vec3, chord: f
             return Err(bad(cmd, "the part has too many triangles at this tolerance: raise the job's `tolerance`"));
         }
     }
-    let surface = Surface::from_mesh(&out).map_err(|e| cam_err(cmd, "the part", e))?;
-    if surface.is_empty() {
+    Ok(out)
+}
+
+/// The part, the fixtures and the two together, in work coordinates.
+struct Surfaces {
+    part: Surface,
+    /// The fixtures alone (`None` without any), which an operation that skips the gouge check
+    /// against the part is still checked against.
+    fixtures: Option<Surface>,
+    all: Surface,
+}
+
+/// The [`Surfaces`] of the bodies `part` and `fixtures`, tessellated within `chord`.
+fn surfaces_of(cmd: &str, s: &Session, part: &[String], fixtures: &[String], origin: Vec3, chord: f64, notes: &mut Vec<String>) -> Result<Surfaces> {
+    if part.is_empty() {
+        return Err(bad(
+            cmd,
+            "the job's operations need a part to plan on and to check for gouges: the design has no visible body, or give `bodies`",
+        ));
+    }
+    let st = s.world_state()?;
+    let mut both = bodies_mesh(cmd, &st, part, origin, chord, notes)?;
+    let part = Surface::from_mesh(&both).map_err(|e| cam_err(cmd, "the part", e))?;
+    if part.is_empty() {
         return Err(bad(cmd, "the part's bodies have no surface to machine"));
     }
+    let (all, fixtures) = if fixtures.is_empty() {
+        (part.clone(), None)
+    } else {
+        let fix = bodies_mesh(cmd, &st, fixtures, origin, chord, notes)?;
+        let fixture_surface = Surface::from_mesh(&fix).map_err(|e| cam_err(cmd, "the fixtures", e))?;
+        let Ok(start) = u32::try_from(both.positions.len()) else { return Err(bad(cmd, "the part has too many triangles")) };
+        both.positions.extend(fix.positions);
+        both.normals.extend(fix.normals);
+        for t in fix.triangles {
+            let [Some(a), Some(b), Some(c)] = t.map(|i| i.checked_add(start)) else { return Err(bad(cmd, "the part has too many triangles")) };
+            both.triangles.push([a, b, c]);
+        }
+        (Surface::from_mesh(&both).map_err(|e| cam_err(cmd, "the fixtures", e))?, (!fixture_surface.is_empty()).then_some(fixture_surface))
+    };
     notes.push(format!(
-        "for the 3D operations the bodies are tessellated from their exact surfaces within {} mm (a quarter of the job's tolerance)",
-        num(chord)
+        "bodies tessellated from their exact surfaces within {} mm (a quarter of the job's tolerance), in work coordinates (the design \
+         less origin [{}, {}, {}])",
+        num(chord),
+        num(origin.x),
+        num(origin.y),
+        num(origin.z)
     ));
-    Ok(surface)
+    Ok(Surfaces { part, fixtures, all })
 }
 
 /// The part's triangles for the preview page only, in work coordinates (the design less
@@ -597,6 +649,8 @@ struct Ctx<'a> {
     part: Option<&'a Surface>,
     /// The chord tolerance the part was tessellated within (mm).
     chord: f64,
+    /// How closely arcs are followed into the poses the checks run along (mm).
+    pose_tol: f64,
 }
 
 impl<'a> Ctx<'a> {
@@ -740,21 +794,6 @@ fn split_budget(budget: f64) -> (f64, Option<(f64, f64)>) {
 /// An operation as planned, its tool, its kind, and for a 3D one the tolerance its moves may be
 /// merged within and the one it was planned within.
 type Planned3 = (Toolpath, Resolved, &'static str, Option<(f64, f64)>);
-
-/// Whether `spec` is planned on the part's surface (a 3D or rotary operation, or one indexed).
-fn needs_part(spec: &OperationSpec) -> bool {
-    let flat = |op: &Op3Spec| matches!(op, Op3Spec::Contour(_) | Op3Spec::Pocket(_));
-    match spec {
-        OperationSpec::Contour(_)
-        | OperationSpec::Pocket(_)
-        | OperationSpec::Wrap(_)
-        | OperationSpec::WrapPocket(_)
-        | OperationSpec::WrapContour(_) => false,
-        OperationSpec::Indexed(o) => !flat(&o.operation),
-        OperationSpec::IndexedPattern(o) => !flat(&o.operation),
-        _ => true,
-    }
-}
 
 /// A 3-axis operation planned in `frame`: a 3D one's runs of moves merged where its tolerance leaves
 /// room, and its slowed descents worked out again from the coordinates as the post writes them.
@@ -910,6 +949,10 @@ fn op_enabled(spec: &OperationSpec) -> bool {
 struct Planned {
     op: MachineOperation,
     poses: Toolpath5,
+    /// For each move of `poses`, the move of the operation's own toolpath it comes from.
+    sources: Vec<usize>,
+    /// Whether it is checked for gouges into the part (always against the fixtures).
+    gouge_check: bool,
     tool: Tool,
     report: OperationReport,
     axes: String,
@@ -924,7 +967,7 @@ fn plan_indexed(ctx: &Ctx<'_>, op: &Op3Spec, rotary: Vec<f64>, a_deg: Option<f64
     let (path, r, kind) = plan_path(ctx, op, &frame)?;
     let stats = path.stats();
     let io = IndexedOperation { name: c.name.into(), tool: r.tool.clone(), spindle_rpm: r.rpm, coolant: c.coolant, rotary, path };
-    let poses = io.poses(ctx.machine, ctx.post.base.arc_tolerance).map_err(|e| ctx.bad(c.name, e))?;
+    let (poses, sources) = io.poses_mapped(ctx.machine, ctx.pose_tol).map_err(|e| ctx.bad(c.name, e))?;
     let report = OperationReport {
         name: c.name.into(),
         kind: if a_deg.is_some() { format!("indexed {kind}") } else { kind.into() },
@@ -940,7 +983,7 @@ fn plan_indexed(ctx: &Ctx<'_>, op: &Op3Spec, rotary: Vec<f64>, a_deg: Option<f64
         Some(a) => format!("3+1 A{}°", num(a)),
         None => "3-axis".into(),
     };
-    Ok(Planned { op: MachineOperation::Indexed(io), poses, tool: r.tool, report, axes })
+    Ok(Planned { op: MachineOperation::Indexed(io), poses, sources, gouge_check: c.gouge_check, tool: r.tool, report, axes })
 }
 
 /// One operation planned: a 3-axis one with every rotary at zero (on a 3-axis machine and a 4th
@@ -1064,24 +1107,25 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
     let machine = machine_of(cmd, &job, base)?;
     let (post_name, post) = post_of(cmd, &job, base)?;
     let tools = tools_of(cmd, &job, base)?;
-    let bodies = part_bodies(cmd, s, &job)?;
+    let (bodies, fixtures) = job_bodies(cmd, s, &job)?;
     let mut notes = Vec::new();
-    // The part as a surface: for the 3D and rotary operations, and on a rotary machine for the
-    // check that A never turns the part into the tool.
+    // The part and the fixtures as surfaces: what the 3D and rotary operations follow, what A
+    // must never turn into the tool, and what every cut is checked for gouges against.
     let chord = tol * CHORD_SHARE;
-    let rotary = !machine.rotaries.is_empty();
-    let part = if job.operations.iter().any(|o| op_enabled(o) && needs_part(o)) || (rotary && !bodies.is_empty()) {
-        Some(part_surface(cmd, s, &bodies, origin, chord, &mut notes)?)
-    } else {
-        None
-    };
+    let surfaces = surfaces_of(cmd, s, &bodies, &fixtures, origin, chord, &mut notes)?;
+    // How deep a cut into the tessellated part is allowed: the tolerance less what the
+    // tessellation itself may be off by.
+    let allowed = tol - chord;
+    // Arcs are followed far closer than the post's tolerance for the checks, so their chords
+    // are not taken for cuts into the part.
+    let pose_tol = post.base.arc_tolerance.min(allowed * CHECK_ARC_SHARE).max(1e-6);
     if job.work_offset.is_some() && !post.base.writes_work_offset() {
         notes.push(format!("post `{post_name}` writes no work offset: the program runs in whichever the controller has active"));
     }
 
     // Every operation planned, in order, then the program written in memory.
     let span = solidcraft_profile::span("cam", "job.plan");
-    let ctx = Ctx { cmd, s, machine: &machine, tools: &tools, origin, tol, post: &post, part: part.as_ref(), chord };
+    let ctx = Ctx { cmd, s, machine: &machine, tools: &tools, origin, tol, post: &post, part: Some(&surfaces.part), chord, pose_tol };
     let mut planned: Vec<Planned> = Vec::with_capacity(job.operations.len());
     for spec in job.operations.iter().filter(|o| op_enabled(o)) {
         let ops = xrotary::plan_op(&ctx, spec, planned.len())?;
@@ -1110,6 +1154,84 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         pass: rb.within(),
     };
     let mut failures: Vec<String> = Vec::new();
+    // Gouges and holder collisions, along every cutting move.
+    let span = solidcraft_profile::span("cam", "job.gouge_holder");
+    let mut gouge = GougeReport { tolerance: tol, tessellation: chord, allowed, ..GougeReport::default() };
+    let mut holder_total: Option<usize> = None;
+    // The operations' own toolpaths, as written (indexed ones), to find the line of a move.
+    let own_paths: Vec<Option<&Toolpath>> = planned
+        .iter()
+        .map(|p| match &p.op {
+            MachineOperation::Indexed(io) => Some(&io.path),
+            MachineOperation::Continuous(_) => None,
+        })
+        .collect();
+    let b = &post.base;
+    let lines = move_lines(&text, &own_paths, b.units.mm(), 10f64.powi(-i32::from(b.decimals)) * b.units.mm());
+    for (k, p) in planned.iter_mut().enumerate() {
+        let step = (p.tool.radius() * 0.5).clamp(0.1, 2.0);
+        let op = p.report.name.clone();
+        // The moves of the operation's own toolpath hits are along.
+        let moves_of = |hits: &[Hit]| hits.iter().filter_map(|h| p.sources.get(h.index)).collect::<BTreeSet<_>>().len();
+        let (against, what) = if p.gouge_check {
+            (Some(&surfaces.all), "the part or a fixture as tessellated")
+        } else {
+            // Not against the part, but a fixture is never cut.
+            gouge.skipped.push(op.clone());
+            p.report.warnings.push("not checked for gouges into the part (`gouge_check: false`); checked against the fixtures".into());
+            (surfaces.fixtures.as_ref(), "a fixture")
+        };
+        if let Some(against) = against {
+            let hits =
+                tool_gouges(against, &p.tool, &p.poses, allowed, step).map_err(|e| cam_err(cmd, &format!("operation `{op}`: gouge check"), e))?;
+            let moves = moves_of(&hits);
+            if let Some(worst) = hits.iter().max_by(|a, b| a.distance.total_cmp(&b.distance)) {
+                let move_index = p.sources.get(worst.index).copied().unwrap_or(worst.index);
+                let line = lines.get(k).and_then(|l| l.get(move_index)).copied().flatten();
+                let tip = worst.pose.tip;
+                let at = GougeAt { operation: op.clone(), move_index, line, xyz: [tip.x, tip.y, tip.z] };
+                let exact = if p.gouge_check {
+                    format!(
+                        " (the check allows {} mm: the {} mm tolerance less the tessellation's {} mm), up to {} mm into the exact part,",
+                        num(allowed),
+                        num(tol),
+                        num(chord),
+                        num(worst.distance + chord)
+                    )
+                } else {
+                    String::new()
+                };
+                failures.push(format!(
+                    "gouge: operation `{op}` cuts {} mm into {what}{exact} along {moves} moves; deepest at move {move_index}{} at X{} Y{} Z{} \
+                     (work coordinates)",
+                    num(worst.distance),
+                    line.map_or(String::new(), |l| format!(" (G-code line {l})")),
+                    num(tip.x),
+                    num(tip.y),
+                    num(tip.z)
+                ));
+                p.report.gouge = worst.distance;
+                if worst.distance > gouge.worst {
+                    gouge.worst = worst.distance;
+                    gouge.at = Some(at.clone());
+                }
+                p.report.gouge_at = Some(at);
+            }
+            gouge.hits += moves;
+        }
+        if !p.tool.envelopes().is_empty() {
+            let hits = holder_collisions_within(&surfaces.all, &p.tool, &p.poses, 0.0, allowed, step)
+                .map_err(|e| cam_err(cmd, &format!("operation `{op}`: holder check"), e))?;
+            let moves = moves_of(&hits);
+            p.report.holder_collisions = moves;
+            *holder_total.get_or_insert(0) += moves;
+            if moves > 0 {
+                failures.push(format!("holder: operation `{op}`: the tool's shank or holder touches the part or a fixture along {moves} moves"));
+            }
+        }
+    }
+    gouge.pass = gouge.hits == 0;
+    drop(span);
     if !readback.pass {
         failures.push(format!(
             "read-back: the written program is up to {} mm and {}° from its toolpaths (the post's precision allows {} mm and {}°)",
@@ -1162,6 +1284,8 @@ fn run_job(s: &mut Session, cmd: &str, raw: &Value, params: CamJobParams) -> Res
         program_head: text.lines().take(HEAD_LINES).map(str::to_string).collect(),
         cut_minutes: readback.cut_minutes,
         readback,
+        gouge,
+        holder_collisions: holder_total,
         passed,
         failures,
         dry_run,
@@ -1233,6 +1357,95 @@ fn file_key(path: &str) -> String {
 /// Whether two paths name the same file ([`file_key`]).
 fn same_file(a: &str, b: &str) -> bool {
     file_key(a) == file_key(b)
+}
+
+/// For each operation whose toolpath `paths` gives in the program's own coordinates, the line
+/// (counted from 1) of `text` each of its moves ends on, where it is found: the next line that
+/// leaves the axes where the move ends (to within `digit` mm, the last written digit), looking
+/// on from the move before. A move written as no line (too short to change a word) ends on the
+/// line before. Words are in the post's units, `unit` mm each; lines in incremental
+/// coordinates or that home the axes leave them unknown.
+fn move_lines(text: &str, paths: &[Option<&Toolpath>], unit: f64, digit: f64) -> Vec<Vec<Option<usize>>> {
+    // Every line that leaves all three axes known, and where it leaves them.
+    let mut ends: Vec<(usize, Vec3)> = Vec::new();
+    let mut at: [Option<f64>; 3] = [None; 3];
+    let mut incremental = false;
+    for (no, raw) in text.lines().enumerate() {
+        let mut clean = String::with_capacity(raw.len());
+        let mut depth = 0usize;
+        for c in raw.chars() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth = depth.saturating_sub(1),
+                ';' if depth == 0 => break,
+                c if depth == 0 => clean.push(c.to_ascii_uppercase()),
+                _ => {}
+            }
+        }
+        let mut words: Vec<(char, f64)> = Vec::new();
+        let mut chars = clean.chars().peekable();
+        while let Some(c) = chars.next() {
+            if !c.is_ascii_alphabetic() {
+                continue;
+            }
+            let mut v = String::new();
+            while let Some(&d) = chars.peek() {
+                if d.is_ascii_digit() || d == '.' || d == '-' || d == '+' || d == ' ' {
+                    if d != ' ' {
+                        v.push(d);
+                    }
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if let Ok(x) = v.parse::<f64>() {
+                words.push((c, x));
+            }
+        }
+        let g = |code: f64| words.iter().any(|&(c, v)| c == 'G' && (v - code).abs() < 1e-6);
+        if g(91.0) {
+            incremental = true;
+        }
+        if g(90.0) {
+            incremental = false;
+        }
+        let homing = g(28.0) || g(53.0);
+        let mut moved = false;
+        for (k, letter) in ['X', 'Y', 'Z'].into_iter().enumerate() {
+            if let Some(&(_, v)) = words.iter().find(|w| w.0 == letter)
+                && let Some(slot) = at.get_mut(k)
+            {
+                *slot = if homing || incremental { None } else { Some(v * unit) };
+                moved = true;
+            }
+        }
+        if moved && let [Some(x), Some(y), Some(z)] = at {
+            ends.push((no + 1, Vec3::new(x, y, z)));
+        }
+    }
+    let near = 0.5 * digit + 1e-9;
+    let mut cursor = 0usize;
+    paths
+        .iter()
+        .map(|path| {
+            let Some(path) = path else { return Vec::new() };
+            path.moves
+                .iter()
+                .map(|m| {
+                    let to = m.target()?;
+                    let from = cursor.saturating_sub(1);
+                    let found = ends
+                        .get(from..ends.len().min(cursor.saturating_add(LINE_WINDOW)))?
+                        .iter()
+                        .position(|(_, p)| (p.x - to.x).abs() <= near && (p.y - to.y).abs() <= near && (p.z - to.z).abs() <= near)?;
+                    let k = from + found;
+                    cursor = k + 1;
+                    ends.get(k).map(|(line, _)| *line)
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// `text` safe to put inside HTML.

@@ -82,10 +82,15 @@ pub struct CamJob {
     /// work X through work zero. Default: the design's origin.
     #[serde(default)]
     pub origin: Option<[f64; 3]>,
-    /// The part's bodies by name: the surface 3D operations follow, drawn in the preview.
-    /// Default: every visible body.
+    /// The part's bodies by name: the surface 3D operations follow and every operation is
+    /// checked for gouges against, drawn in the preview. Default: every visible body not in
+    /// `fixtures`.
     #[serde(default)]
     pub bodies: Option<Vec<String>>,
+    /// Bodies the tool must stay clear of (vises, clamps): checked for gouges and holder
+    /// collisions, never machined. Default: none.
+    #[serde(default)]
+    pub fixtures: Option<Vec<String>>,
     /// The machining tolerance in mm, 0.0001 to 1: how far a toolpath may be from the profiles
     /// and surfaces it follows. 3D operations plan on the bodies tessellated within a quarter of
     /// it. Default: 0.01.
@@ -222,6 +227,11 @@ macro_rules! operation {
             /// Coolant on while it cuts. Default: false.
             #[serde(default)]
             pub coolant: Option<bool>,
+            /// Check this operation for gouges into the part. Turn it off only for a cut the
+            /// model does not show (an engraving); the fixtures, holder and read-back checks
+            /// still run. Default: true.
+            #[serde(default)]
+            pub gouge_check: Option<bool>,
             $($(#[$fdoc])* pub $field: $ty,)*
         }
 
@@ -234,6 +244,7 @@ macro_rules! operation {
                     feeds: self.feeds,
                     coolant: self.coolant.unwrap_or(false),
                     enabled: self.enabled.unwrap_or(true),
+                    gouge_check: self.gouge_check.unwrap_or(true),
                 }
             }
         }
@@ -250,6 +261,8 @@ pub struct Common<'a> {
     pub coolant: bool,
     /// Whether it is planned and written (`enabled`, true by default).
     pub enabled: bool,
+    /// Whether it is checked for gouges into the part (`gouge_check`, true by default).
+    pub gouge_check: bool,
 }
 
 operation! {
@@ -660,6 +673,11 @@ pub struct CamJobReply {
     pub program_head: Vec<String>,
     /// The program read back and compared with the toolpaths.
     pub readback: ReadbackReport,
+    /// The gouge check against the part and fixtures.
+    pub gouge: GougeReport,
+    /// Moves along which a tool's shank or holder comes closer to the part or fixtures than
+    /// zero (tools with holder data only); `null` when no tool has holder data.
+    pub holder_collisions: Option<usize>,
     /// Time at feed of the whole program, dwells included, minutes, as written.
     pub cut_minutes: f64,
     /// Whether every check passed.
@@ -700,6 +718,14 @@ pub struct OperationReport {
     /// The A angle it is indexed at, degrees (indexed operations only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub a_deg: Option<f64>,
+    /// How deep its deepest gouge is in the tessellated part, mm (0: none deeper than the check
+    /// allows).
+    pub gouge: f64,
+    /// Where that gouge is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gouge_at: Option<GougeAt>,
+    /// Moves with a holder collision.
+    pub holder_collisions: usize,
     pub warnings: Vec<String>,
 }
 
@@ -717,6 +743,44 @@ pub struct ReadbackReport {
     /// Time at feed as the controller times the written program, minutes.
     pub cut_minutes: f64,
     pub pass: bool,
+}
+
+/// The gouge check.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct GougeReport {
+    /// The deepest gouge of any operation, mm into the tessellated part (0: none deeper than
+    /// `allowed`): the deepest point of the part inside the cutter, measured to the cutter.
+    pub worst: f64,
+    /// The job's tolerance, mm.
+    pub tolerance: f64,
+    /// How far the tessellated part may be from the exact one, mm.
+    pub tessellation: f64,
+    /// Depths into the tessellated part up to this count as touching, mm: the tolerance less
+    /// the tessellation, so no cut passed is deeper than the tolerance into the exact part.
+    pub allowed: f64,
+    /// Moves with a gouge.
+    pub hits: usize,
+    /// Where the deepest gouge is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<GougeAt>,
+    /// Operations not checked against the part (`gouge_check: false`); they are still checked
+    /// against the fixtures.
+    pub skipped: Vec<String>,
+    pub pass: bool,
+}
+
+/// Where a gouge is.
+#[derive(Clone, Debug, Default, Serialize, JsonSchema)]
+pub struct GougeAt {
+    /// The operation's name.
+    pub operation: String,
+    /// The move of the operation's toolpath (counted from 0) along which it is.
+    pub move_index: usize,
+    /// The line of the program (counted from 1) that ends that move, when it is found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    /// The tool tip at the deepest point, work coordinates, mm.
+    pub xyz: [f64; 3],
 }
 
 /// The files `cam.job` wrote.

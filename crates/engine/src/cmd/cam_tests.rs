@@ -67,6 +67,8 @@ fn pocket_job() -> Value {
 fn assert_clean(r: &Value) {
     assert_eq!(r["passed"], true, "{r}");
     assert_eq!(r["readback"]["pass"], true, "{r}");
+    assert_eq!(r["gouge"]["pass"], true, "{r}");
+    assert_eq!(r["gouge"]["worst"].as_f64(), Some(0.0), "{r}");
     assert!(r["failures"].as_array().is_some_and(Vec::is_empty), "{r}");
 }
 
@@ -169,7 +171,14 @@ fn a_contour_round_a_sketch_circle_is_written_with_arcs() {
     assert!(c["arcs"].as_u64().is_some_and(|n| n >= 2), "{c}");
     // Two passes round, each 2π × 13 mm long at least.
     assert!(c["feed_length"].as_f64().is_some_and(|l| l > 2.0 * std::f64::consts::TAU * 13.0), "{c}");
-    // The default contour runs outside; inside runs a tool radius in.
+    // The default contour runs outside; inside runs a tool radius in, round a hole of the same
+    // circle through a plate.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "corner": [-20, -20, -5], "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 7, "axis": "Z", "base": [0, 0, -6], "operation": "cut"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
     let mut inside = job.clone();
     inside["operations"][0]["side"] = json!("inside");
     let r = run(&mut s, "cam.job", json!({"job": inside, "output": out}));
@@ -985,7 +994,7 @@ fn a_wrapped_slot_is_cut_to_its_width_at_the_floor_radius() {
     let mut s = bar();
     let mut job = slot_job("wrap_pocket");
     job["operations"] = json!([{
-        "name": "groove", "type": "wrap", "tool": 1, "radius": 10,
+        "name": "groove", "type": "wrap", "tool": 1, "radius": 10, "gouge_check": false,
         "points": [[-10, 0, -0.5], [0, 10, -0.5], [10, 20, -0.5]]
     }]);
     let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
@@ -1231,4 +1240,136 @@ fn hostile_rotary_jobs_are_refused_without_panics() {
     j["job"]["operations"][0]["clearance"] = json!(25);
     let e = s.execute("cam.job", &j).unwrap_err();
     assert!(e.to_string().contains("rotary axis"), "{e}");
+}
+
+/// A pocket on a face the model shows solid cuts into the part: refused and nothing written, a
+/// failure in a dry run, and written with `allow_unsafe`, the reply saying where: the operation,
+/// the move, the line of the program that ends it and the tool tip.
+#[test]
+fn a_pocket_into_the_solid_side_is_a_gouge_with_its_line() {
+    let mut solid = Session::default();
+    run(&mut solid, "solid.box", json!({"length": 40, "width": 30, "height": 30, "corner": [-20, -15, -15]}));
+    let dir = Dir::new("gouge");
+    let out = dir.file("side.ngc");
+    let e = solid.execute("cam.job", &json!({"job": side_pocket_job(), "output": out})).unwrap_err();
+    assert!(matches!(e, EngineError::BadParams { .. }) && e.to_string().contains("gouge"), "{e}");
+    assert!(!PathBuf::from(&out).exists(), "nothing was written");
+    let r = run(&mut solid, "cam.job", json!({"job": side_pocket_job(), "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["gouge"]["worst"].as_f64().is_some_and(|w| w > 4.0), "the pocket is 5 mm into the face: {r}");
+    assert_eq!(r["gouge"]["pass"], false, "{r}");
+    let r = run(&mut solid, "cam.job", json!({"job": side_pocket_job(), "output": out, "allow_unsafe": true}));
+    assert_eq!(r["passed"], false);
+    assert!(PathBuf::from(&out).exists());
+    let at = &r["gouge"]["at"];
+    assert_eq!(at["operation"], "side pocket", "{r}");
+    let moves = r["operations"][0]["moves"].as_u64().unwrap();
+    assert!(at["move_index"].as_u64().is_some_and(|m| m < moves), "{r}");
+    let line = at["line"].as_u64().unwrap_or_else(|| panic!("no line: {r}")) as usize;
+    let text = std::fs::read_to_string(&out).unwrap();
+    let written = text.lines().nth(line - 1).unwrap();
+    assert!(written.starts_with('G') || written.starts_with('X') || written.starts_with('Y') || written.starts_with('Z'), "line {line}: {written}");
+    // The tip is in the pocket, at its floor 5 mm into the +Y face.
+    let xyz: Vec<f64> = at["xyz"].as_array().unwrap().iter().filter_map(Value::as_f64).collect();
+    assert!(xyz.len() == 3 && xyz[0].abs() <= 6.0 + 1e-6 && (xyz[1] - 10.0).abs() <= 1e-6, "{xyz:?}");
+    assert_eq!(r["operations"][0]["gouge_at"]["move_index"], at["move_index"], "{r}");
+    let failure = r["failures"].as_array().unwrap().iter().filter_map(Value::as_str).find(|f| f.starts_with("gouge")).unwrap();
+    assert!(failure.contains("side pocket") && failure.contains(&format!("G-code line {line}")) && failure.contains("work coordinates"), "{failure}");
+    assert!(r["gouge"]["allowed"].as_f64().is_some_and(|a| (a - 0.0075).abs() < 1e-12), "{r}");
+    // On the bar without the slot a wrapped slot cuts what the model does not show.
+    let r = run(&mut bar(), "cam.job", json!({"job": slot_job("wrap_pocket"), "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["gouge"]["worst"].as_f64().is_some_and(|w| w > 1.9), "the slot is 2 mm deep: {r}");
+}
+
+/// `gouge_check: false` leaves an operation unchecked against the part (an engraving the model
+/// does not show), never against a fixture; a fixture is never cut, and `fixtures` and `bodies`
+/// may not share a body.
+#[test]
+fn a_fixture_is_never_cut_even_without_the_gouge_check() {
+    let mut s = top_pocket();
+    run(&mut s, "solid.box", json!({"length": 6, "width": 30, "height": 8, "corner": [23, -15, -10], "body_name": "Clamp"}));
+    // An outline round the block: it runs through the clamp standing beside it.
+    let mut job = pocket_job();
+    job["fixtures"] = json!(["Clamp"]);
+    job["operations"] = json!([{
+        "name": "outline", "type": "contour", "tool": 1, "polygon": [[-20, -15], [20, -15], [20, 15], [-20, 15]],
+        "heights": {"clearance": 20, "retract": 5, "top": 0, "bottom": -6}, "stepdown": 3
+    }]);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["failures"].as_array().unwrap().iter().any(|f| f.as_str().is_some_and(|f| f.contains("gouge"))), "{r}");
+    // Without the check against the part, still against the fixture.
+    job["operations"][0]["gouge_check"] = json!(false);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert_eq!(r["gouge"]["skipped"], json!(["outline"]), "{r}");
+    assert!(r["failures"].as_array().unwrap().iter().any(|f| f.as_str().is_some_and(|f| f.contains("into a fixture"))), "{r}");
+    assert!(r["operations"][0]["warnings"][0].as_str().is_some_and(|w| w.contains("gouge_check: false")), "{r}");
+    // Above the clamp's top (Z -2), the outline passes.
+    job["operations"][0]["gouge_check"] = json!(true);
+    job["operations"][0]["heights"]["bottom"] = json!(-1);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    for (bodies, fixtures) in [(json!(["Block"]), json!(["Block"])), (json!(["Block"]), json!(["Nope"]))] {
+        let mut j = job.clone();
+        j["bodies"] = bodies;
+        j["fixtures"] = fixtures;
+        assert!(matches!(s.execute("cam.job", &json!({"job": j, "dry_run": true})), Err(EngineError::BadParams { .. })));
+    }
+}
+
+/// A plate with a 6 mm hole through it.
+fn plate_with_a_hole() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 15, "corner": [-15, -10, -15], "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 20, "axis": "Z", "base": [0, 0, -17], "operation": "cut"}));
+    s
+}
+
+/// The points of a circle of radius `r` about the origin, `n` round.
+fn circle(r: f64, n: usize) -> Value {
+    json!(
+        (0..n)
+            .map(|k| {
+                let a = std::f64::consts::TAU * k as f64 / n as f64;
+                [r * a.cos(), r * a.sin()]
+            })
+            .collect::<Vec<_>>()
+    )
+}
+
+/// A 4 mm end mill with a shank of its own diameter, cutting round the inside of a 6 mm hole:
+/// its shank above the flutes runs along the wall the cutter has just cut. That is no holder
+/// collision, and a shank wider than the cutter is one, counted in moves.
+#[test]
+fn a_shank_as_wide_as_the_cutter_passes_the_hole_it_cuts() {
+    let mut s = plate_with_a_hole();
+    let mut tool = flat(4, 4.0);
+    tool["flute_length"] = json!(12);
+    tool["shank_diameter"] = json!(4);
+    tool["stickout"] = json!(20);
+    tool["holder"] = json!([{"diameter": 34, "length": 4}, {"diameter": 34, "length": 18}]);
+    let mut job = json!({
+        "machine": "3axis",
+        "post": "linuxcnc_4axis",
+        "tools": [tool],
+        "operations": [{
+            "name": "hole", "type": "contour", "tool": 4, "polygon": circle(3.0, 256), "side": "inside",
+            "heights": {"clearance": 10, "retract": 2, "top": 0, "bottom": -15.3}, "stepdown": 1, "ramp_angle_deg": 2
+        }]
+    });
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_clean(&r);
+    assert_eq!(r["holder_collisions"], 0, "{r}");
+    // Wider than the cutter, the shank is into the wall.
+    job["tools"][0]["shank_diameter"] = json!(5);
+    let r = run(&mut s, "cam.job", json!({"job": job, "dry_run": true}));
+    assert_eq!(r["passed"], false, "{r}");
+    let (hits, moves) = (r["operations"][0]["holder_collisions"].as_u64().unwrap(), r["operations"][0]["moves"].as_u64().unwrap());
+    assert!(hits > 0 && hits <= moves, "{hits} collisions in {moves} moves");
+    assert!(r["failures"].as_array().unwrap().iter().any(|f| f.as_str().is_some_and(|f| f.starts_with("holder"))), "{r}");
+    // A tool without holder data is not checked for it: `null`, not 0.
+    let r = run(&mut s, "cam.job", json!({"job": pocket_job(), "dry_run": true}));
+    assert!(r["holder_collisions"].is_null(), "{r}");
 }

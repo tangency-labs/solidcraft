@@ -44,7 +44,13 @@ impl IndexedOperation {
     /// the tips from the frame of [`frame_for_index`], the axis where the rotaries point the
     /// tool (the frame's Z only while the head is upright).
     pub fn poses(&self, machine: &Machine, tol: f64) -> Result<Toolpath5> {
-        let mut path = Toolpath5::from_frame(&self.path, &frame_for_index(machine, &self.rotary)?, tol)?;
+        self.poses_mapped(machine, tol).map(|(p, _)| p)
+    }
+
+    /// [`IndexedOperation::poses`], with the index in [`IndexedOperation::path`] of the move
+    /// each pose's move comes from.
+    pub fn poses_mapped(&self, machine: &Machine, tol: f64) -> Result<(Toolpath5, Vec<usize>)> {
+        let (mut path, from) = Toolpath5::from_frame_mapped(&self.path, &frame_for_index(machine, &self.rotary)?, tol)?;
         let axis = tool_axis(machine, &self.rotary);
         for m in &mut path.moves {
             match m {
@@ -52,7 +58,7 @@ impl IndexedOperation {
                 Move5::Dwell { .. } => {}
             }
         }
-        Ok(path)
+        Ok((path, from))
     }
 }
 

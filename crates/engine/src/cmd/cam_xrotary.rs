@@ -184,7 +184,8 @@ fn continuous(c: Common<'_>, r: Resolved, kind: &str, path: Toolpath5) -> Planne
         path: path.clone(),
         plunge_feed: Some(r.feeds.plunge),
     };
-    Planned { op: MachineOperation::Continuous(op), poses: path, tool: r.tool, report, axes: "4-axis".into() }
+    let sources = (0..path.moves.len()).collect();
+    Planned { op: MachineOperation::Continuous(op), poses: path, sources, gouge_check: c.gouge_check, tool: r.tool, report, axes: "4-axis".into() }
 }
 
 pub(super) fn plan_rotary_finish(ctx: &Ctx<'_>, o: &RotaryFinishOp) -> Result<Planned> {
