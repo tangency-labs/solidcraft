@@ -987,58 +987,13 @@ mod tests {
     }
 
     #[test]
-    fn wr573_default_gives_success_without_surface() {
-        // upstream: the starter's simple knots run its patches past its control points
-        let k = kernel();
-        let r = offset_wave()
-            .approximate_surface(&k, 1e-3, 3, false)
-            .unwrap();
-        assert!(r.surface.is_none());
-    }
-
-    #[test]
-    fn wr573_bezier_starter_approximates_the_offset_wave() {
-        let mut k = kernel();
-        k.fixes.approximate_surface_bezier_starter = true;
-        let off = offset_wave();
-        let tol = 1e-3;
-        let r = off.approximate_surface(&k, tol, 3, false).unwrap();
-        // the flag's path ran: the starter's patches no longer overrun its control
-        // points, so a pass was sampled and a surface returned (without the flag
-        // there is no surface and no sample)
-        let s = r.surface.unwrap();
-        // Upstream accepts a pass when its last row (or column) of patches is within
-        // `tol`: `bFailed` starts over with every row (SmSurface.cpp, the `outer`
-        // loop), so a pass can succeed with an earlier row outside `tol`. Its
-        // achieved tolerance is the largest deviation over the whole pass, above `tol`
-        // here. Pinned (the kernel is deterministic): any change in the fit shows.
-        let want = 0.001_620_828_043_730_338_3;
-        assert!(
-            (r.achieved_tol - want).abs() <= 1e-12 * want,
-            "{}",
-            r.achieved_tol
-        );
-        // the surface is that pass's, its excess knots removed within `tol`
-        let dom = off.natural_uv_domain_with_nurb(&k).unwrap();
-        for (fu, fv) in [(0.1, 0.2), (0.5, 0.5), (0.83, 0.9)] {
-            let uv = dom.evaluate(fu, fv);
-            let p = s.evaluate_point(&k, uv).unwrap();
-            let q = off.evaluate_point(&k, uv).unwrap();
-            assert!(
-                p.distance(q) <= r.achieved_tol + tol,
-                "{fu} {fv}: {}",
-                p.distance(q)
-            );
-        }
-    }
-
-    #[test]
     fn wr726_every_row_checked_keeps_the_fit_within_the_tolerance() {
-        // #2507: the pass above is accepted at 1.62e-3 for 1e-3 because only its last
-        // row is within `tol`; with every row checked it is subdivided further
-        let mut k = kernel();
-        k.fixes.approximate_surface_bezier_starter = true;
-        k.fixes.approximate_surface_checks_every_row = true;
+        // WR-573: the starter's simple inner knots are raised to full multiplicity, so
+        // its patches stay on its control net and a surface comes back (upstream:
+        // success with no surface). #2507 (WR-726): upstream accepts the pass at
+        // 1.62e-3 for 1e-3 because only its last row is within `tol`; with every row
+        // checked it is subdivided further
+        let k = kernel();
         let off = offset_wave();
         let tol = 1e-3;
         let r = off.approximate_surface(&k, tol, 3, false).unwrap();
@@ -1070,9 +1025,7 @@ mod tests {
         // subdivision level 0 (one pass in each direction) leaves the fit outside
         // `tol`: a failure the caller sees, with the achieved tolerance of the last
         // pass, above `tol`
-        let mut k = kernel();
-        k.fixes.approximate_surface_bezier_starter = true;
-        k.fixes.approximate_surface_checks_every_row = true;
+        let k = kernel();
         let tol = 1e-3;
         let r = offset_wave()
             .approximate_surface_ignoring_status(&k, tol, 0, false)

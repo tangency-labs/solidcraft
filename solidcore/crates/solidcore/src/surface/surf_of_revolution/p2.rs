@@ -1316,9 +1316,10 @@ mod tests {
     /// tangency-labs/solidcore#973: a surface of revolution about +z through the origin
     /// whose generator (in the x-z plane, from the axis at z = -1 out to (4, 0, -5)) lies
     /// below the frame's origin. Offset to one side, the generator crosses the axis below
-    /// the origin too: the axis segment, which ran from the origin along +z only, missed
-    /// the crossing, and the offset generator was left reaching past the axis (a negative
-    /// radius). With the opt-in it is cut at the axis.
+    /// the origin too: upstream's axis segment, which runs from the origin along +z only,
+    /// misses the crossing, and the offset generator is left reaching past the axis (a
+    /// negative radius). The axis segment spans the offset on both sides of the origin, so
+    /// it is cut at the axis (WR-343).
     #[test]
     fn issue_973_offset_cut_at_axis_below_origin() {
         let gen = Curve::from(BSplineCurve::from_nurb(
@@ -1346,18 +1347,12 @@ mod tests {
         )
         .unwrap();
         surface.make_nurb(&k).unwrap();
-        let min_radius = |both_sides: bool| -> f64 {
-            let mut k = Kernel::default();
-            k.fixes.revolution_offset_axis_both_sides = both_sides;
-            [1.0, -1.0]
-                .into_iter()
-                .flat_map(|d| end_radii(&k, &surface.create_offset_surface(&k, d, 1e-6).unwrap()))
-                .fold(f64::INFINITY, f64::min)
-        };
-        // upstream: one of the two offsets keeps a stretch past the axis
-        assert!(min_radius(false) < -0.1);
-        // the opt-in cuts it at the axis
-        assert!(min_radius(true) > -1e-6);
+        let min_radius = [1.0, -1.0]
+            .into_iter()
+            .flat_map(|d| end_radii(&k, &surface.create_offset_surface(&k, d, 1e-6).unwrap()))
+            .fold(f64::INFINITY, f64::min);
+        // neither offset keeps a stretch past the axis (upstream's does, below -0.1)
+        assert!(min_radius > -1e-6, "{min_radius}");
     }
 
     /// #13790: a typed `SM_ERR` that replaced the inversion's off-generator `Upstream` is
