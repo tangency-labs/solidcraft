@@ -9,7 +9,7 @@
 //! plane ([`plane_of`], `IsPlanar` at [`EFF_ZERO`]) and its UV trims are made again from its
 //! edges' 3D curves (`ReplaceSurface` with `bCreateUVTrimCurves`).
 
-use crate::blend::fillet_cliff_overflow::plane_of;
+use crate::blend::fillet_cliff_overflow::{plane_of, PlaneFrame};
 use crate::error::{EntityRef, Result};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -55,6 +55,20 @@ pub fn flat_walls_as_planes(k: &Kernel, b: &mut Brep, faces: &[FaceId]) -> Resul
     Ok(made)
 }
 
+/// The plane's axes in `frame` with its natural normal (x × y) the way `normal` points (the
+/// B-spline's, which `plane_of`'s may oppose): `frame`'s, or with y reversed. `None` when
+/// `normal` does not lie along the plane's: no clear side.
+fn axes(frame: &PlaneFrame, normal: Vec3) -> Option<(Vec3, Vec3)> {
+    let side = normal.dot(frame.z);
+    if side.abs() < 0.5 {
+        None
+    } else if side > 0.0 {
+        Some((frame.x, frame.y))
+    } else {
+        Some((frame.x, -frame.y))
+    }
+}
+
 /// The plane of face `f` when its surface is a B-spline lying in one: axes so that its natural
 /// normal (x × y) points the way the B-spline's does at the middle of its domain, over the box
 /// of its control points in the plane with a margin. `None` otherwise.
@@ -71,16 +85,7 @@ fn flat_wall_plane(k: &Kernel, b: &Brep, f: FaceId) -> Option<Surface> {
     let normal = surface
         .evaluate_normal(k, middle, Side::Left, Side::Left)
         .ok()?;
-    let side = normal.dot(frame.z);
-    // the B-spline's normal must lie along the plane's: anything else is no clear side
-    if side.abs() < 0.5 {
-        return None;
-    }
-    let (x, y): (Vec3, Vec3) = if side > 0.0 {
-        (frame.x, frame.y)
-    } else {
-        (frame.x, -frame.y)
-    };
+    let (x, y) = axes(&frame, normal)?;
     let (_, _, points) = spline.control_points().ok()?;
     let (mut u0, mut v0) = (f64::INFINITY, f64::INFINITY);
     let (mut u1, mut v1) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
@@ -110,10 +115,13 @@ fn flat_wall_plane(k: &Kernel, b: &Brep, f: FaceId) -> Option<Surface> {
 
 #[cfg(test)]
 mod tests {
+    use super::axes;
+    use crate::blend::fillet_cliff_overflow::PlaneFrame;
     use crate::curve::curve::Curve;
     use crate::kernel::Kernel;
     use crate::mass::integrator::properties::brep_volume_default;
     use crate::math::Point3;
+    use crate::math::Vec3;
     use crate::primitive::api_curves::{create_arc, create_line_segment};
     use crate::surface::surface::p2::SurfaceKind;
     use crate::sweep::api_surfaces::{create_skin_primitive, SkinPrimitive};
@@ -128,12 +136,19 @@ mod tests {
 
     /// The square of half side `h` about the Z axis at height `z`, counter-clockwise.
     fn square(h: f64, z: f64) -> Vec<Curve> {
-        let c = [[-h, -h], [h, -h], [h, h], [-h, h]];
-        (0..4)
-            .map(|i| {
-                let (a, b) = (c[i], c[(i + 1) % 4]);
-                line([a[0], a[1], z], [b[0], b[1], z])
-            })
+        square_by(h, z, false, |p| p)
+    }
+
+    /// The square of half side `h` at height `z`, clockwise when `cw`, each corner moved by `to`.
+    fn square_by(h: f64, z: f64, cw: bool, to: impl Fn([f64; 3]) -> [f64; 3]) -> Vec<Curve> {
+        let mut c = vec![[-h, -h, z], [h, -h, z], [h, h, z], [-h, h, z]];
+        if cw {
+            c.reverse();
+        }
+        let c: Vec<[f64; 3]> = c.into_iter().map(to).collect();
+        c.iter()
+            .zip(c.iter().cycle().skip(1))
+            .map(|(&a, &b)| line(a, b))
             .collect()
     }
 
@@ -226,6 +241,77 @@ mod tests {
         let want = frustum(50.0, area(50.0), area(30.0));
         let (planes, splines, volume) = skin(&sections, 1, true);
         assert_eq!((planes, splines), (3, 1));
+        assert!(near(volume, want), "{volume} vs {want}");
+    }
+
+    /// The squares in line run clockwise: the walls' B-splines face the other way, and each is
+    /// still a plane facing out (the check passes and the volume is positive).
+    #[test]
+    fn walls_are_planes_whichever_way_the_sections_run() {
+        let want = frustum(120.0, 4.0 * 55.0 * 55.0, 4.0 * 100.0 * 100.0);
+        for cw in [false, true] {
+            let sections = [55.0, 77.5, 100.0]
+                .iter()
+                .zip([0.0, 60.0, 120.0])
+                .map(|(&h, z)| square_by(h, z, cw, |p| p))
+                .collect::<Vec<_>>();
+            let (planes, splines, volume) = skin(&sections, 2, true);
+            assert_eq!((planes, splines), (4, 0), "cw {cw}");
+            assert!(near(volume, want), "cw {cw}: {volume} vs {want}");
+        }
+    }
+
+    /// The plane's normal follows the B-spline's whichever way `plane_of`'s points: kept along
+    /// it, y reversed against it, none across it. (The skins above all meet the first: their
+    /// `IsPlanar` normal already agrees.)
+    #[test]
+    fn the_plane_faces_the_way_the_spline_does() {
+        let frame = PlaneFrame {
+            origin: Point3::new(1.0, 2.0, 3.0),
+            x: Vec3::new(1.0, 0.0, 0.0),
+            y: Vec3::new(0.0, 1.0, 0.0),
+            z: Vec3::new(0.0, 0.0, 1.0),
+        };
+        for normal in [
+            frame.z,
+            -frame.z,
+            Vec3::new(0.6, 0.0, 0.8),
+            Vec3::new(0.0, -0.6, -0.8),
+        ] {
+            let (x, y) = axes(&frame, normal).expect("a clear side");
+            assert!(x.cross(y).dot(normal) > 0.5, "{normal:?}");
+        }
+        assert!(axes(&frame, Vec3::new(1.0, 0.0, 0.0)).is_none());
+        assert!(axes(&frame, Vec3::new(0.0, 0.9, 0.3)).is_none());
+    }
+
+    /// A duct twenty times the size (half sides 1100 / 1550 / 2000, 2.4 m long) turned about an
+    /// oblique axis: rounding in the skin's net grows with its size and the tilt, and the walls
+    /// are still found flat.
+    #[test]
+    fn a_large_tilted_skin_still_has_planar_walls() {
+        let (axis, angle): ([f64; 3], f64) = ([1.0, 2.0, 3.0], 37f64.to_radians());
+        let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        let a = [axis[0] / n, axis[1] / n, axis[2] / n];
+        let (s, c) = angle.sin_cos();
+        // Rodrigues: p cos + (a × p) sin + a (a · p)(1 − cos)
+        let turn = move |p: [f64; 3]| {
+            let d = a[0] * p[0] + a[1] * p[1] + a[2] * p[2];
+            let x = [
+                a[1] * p[2] - a[2] * p[1],
+                a[2] * p[0] - a[0] * p[2],
+                a[0] * p[1] - a[1] * p[0],
+            ];
+            [0, 1, 2].map(|i| p[i] * c + x[i] * s + a[i] * d * (1.0 - c))
+        };
+        let sections = [1100.0, 1550.0, 2000.0]
+            .iter()
+            .zip([0.0, 1200.0, 2400.0])
+            .map(|(&h, z)| square_by(h, z, false, turn))
+            .collect::<Vec<_>>();
+        let want = frustum(2400.0, 4.0 * 1100.0 * 1100.0, 4.0 * 2000.0 * 2000.0);
+        let (planes, splines, volume) = skin(&sections, 2, true);
+        assert_eq!((planes, splines), (4, 0));
         assert!(near(volume, want), "{volume} vs {want}");
     }
 }
