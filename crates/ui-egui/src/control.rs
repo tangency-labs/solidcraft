@@ -1154,7 +1154,12 @@ fn ui_start(app: &mut SolveApp, q: params::Start) -> Outcome {
     let preset = match (id, q.params) {
         (_, Value::Null) => None,
         ("joint.drive" | "motion.study", params) => Some(params),
-        _ => return err(format!("`{id}` takes no ui.start params yet (joint.drive takes joint, values; motion.study takes study)")),
+        ("solid.extrude" | "solid.revolve", params) => return start_on_sketch(app, id, &params),
+        _ => {
+            return err(format!(
+                "`{id}` takes no ui.start params yet (joint.drive takes joint, values; motion.study takes study; solid.extrude and solid.revolve take sketch)"
+            ));
+        }
     };
     app.start(id);
     let Some(params) = preset else { return ok(started(app)) };
@@ -1177,6 +1182,26 @@ fn ui_start(app: &mut SolveApp, q: params::Start) -> Outcome {
         crate::dialogs::cancel(app);
         return err(e);
     }
+    ok(started(app))
+}
+
+/// `ui.start {command: "solid.extrude" | "solid.revolve", params: {sketch}}`: what Extrude and
+/// Revolve on a sketch's menu in the history tree do (#6940). The sketch, by id or name, starts
+/// with its profiles picked and stays shown while the dialog is open, even when an earlier
+/// feature uses it.
+fn start_on_sketch(app: &mut SolveApp, id: &str, params: &Value) -> Outcome {
+    let Some(o) = params.as_object() else { return err("params must be an object: {sketch}") };
+    if let Some(key) = o.keys().find(|k| k.as_str() != "sketch") {
+        return err(format!("unknown param `{key}` ({id} takes sketch)"));
+    }
+    let key = match o.get("sketch") {
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::String(name)) => name.clone(),
+        _ => return err("`sketch` must be a sketch id or name"),
+    };
+    let sketch = app.session.doc.find_feature(&key).filter(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. }));
+    let Some(sketch) = sketch.map(|f| f.id) else { return err(format!("no sketch `{key}`")) };
+    crate::dialogs::start_from_sketch(app, id, sketch);
     ok(started(app))
 }
 

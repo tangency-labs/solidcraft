@@ -28,6 +28,12 @@ Turn a sketch profile around an axis to make a round part: a shaft, a pin, a pul
 5. Click OK. You have a pin 0.5 in diameter by 1 in long with a 0.75 in diameter head 0.5 in long.
 6. For a groove, start a new sketch on the XY plane (it runs through the pin's centre line). Draw a rectangle that cuts into the shaft, with corners at (0.4 in, 0.20 in) and (0.5 in, 0.30 in), and click Finish Sketch. Revolve it with Operation set to Cut. For the Axis, click the sketch line along the X axis, or click the round side of the pin (not the flat end); its centre line is used. The result is a groove 0.1 in wide and 0.05 in deep.
 
+#### Several revolves from one sketch
+
+Right-click a sketch and choose **Revolve**: the window opens with the sketch shown, even when
+an earlier feature uses it. **Apply** makes the revolve and keeps the window and the sketch for
+the next one, as for [Extrude](solid.extrude.md).
+
 #### Tips and common mistakes
 
 - **Do** draw the centre line as part of the profile, or as a sketch line in the same sketch. Then picking the axis is one click and it moves with the sketch.

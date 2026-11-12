@@ -37,6 +37,21 @@ body. For example, a rectangle extruded 20 mm becomes a rectangular block.
 4. Check the preview's direction and confirm. You should have one solid block.
 5. Edit the extrusion in the timeline to change its distance later.
 
+#### Several extrusions from one sketch
+
+One sketch can drive several features, each with its own distance:
+
+1. Right-click the sketch in the browser and choose **Extrude**. The window
+   opens with the sketch's regions picked and the sketch shown, even when an earlier feature
+   uses it and has hidden it.
+2. Click the regions you don't want this time to unpick them, set the distance, and choose
+   **Apply**. The extrusion is made, and the window stays open with the sketch still shown.
+3. Pick the next region, set its distance, and **Apply** again. Choose **OK** for the last one,
+   or press Esc when you're done: what you applied stays.
+
+Each Apply is its own step in the timeline and in Undo. When the window closes, the sketch
+is hidden again unless you showed it yourself. **Revolve** on the same menu works the same way.
+
 #### Tips and common mistakes
 
 - **Do** check the operation before confirming. Automatic operation can join an
