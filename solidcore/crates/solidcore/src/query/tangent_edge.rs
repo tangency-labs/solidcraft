@@ -2635,18 +2635,13 @@ mod tests {
 
     /// `wr698`'s `circle_root` (a pipe's root on a plate rounded r 2 by the ball's exact
     /// circle, a procedural blend whose definition is enclosed): on its edges along the root,
-    /// each piece's margin is bounded, halved where it is too loose. Where the pipe's foot
-    /// crosses its net's C1 quarter knot (u = 15.708, multiplicity 2, near `s` = 87.22) the
-    /// definition's feet box is taken cell by cell (the C1-knot follow-up to
-    /// tangency-labs/solidcraft#14284, a use of order 1): edge 35 is Tangent, every part
-    /// enclosed (before it, 3 parts there were not and both edges were Undecided (pi, pi) at
-    /// 87.04, #15005). Edge 46 keeps one piece not enclosed, pinned exactly: where the foot sits
-    /// on the knot at the piece's start (s = 87.2234028), the guesses' first box lies just past
-    /// the line (by 2e-10 in u), so the cell path is not taken; Krawczyk's iterations grow the
-    /// box across it and the one solve refuses it, as before. Edge 46 is then Undecided at
-    /// 87.2234 (margin pi) with 2 parts not enclosed in its decision; this test's halving leaves
-    /// that one piece, [87.22340, 87.22345], refused by the definition box's typed "the
-    /// enclosure is not proved". Taking such a box cell by cell is tangency-labs/solidcraft#15183.
+    /// each piece's margin is bounded, halved where it is too loose, and both edges are
+    /// Tangent. Where the pipe's foot crosses its net's C1 quarter knot (u = 15.708,
+    /// multiplicity 2, near `s` = 87.22) the definition's feet box is taken cell by cell (the
+    /// C1-knot follow-up to tangency-labs/solidcraft#14284, a use of order 1), also where the
+    /// foot sits on the knot just outside the guesses' box and the one solve's contraction
+    /// reaches the line (tangency-labs/solidcraft#15183, edge 46 at `s` = 87.2234). Before
+    /// them, both edges were Undecided (pi, pi) at 87.04 with 3 parts not enclosed (#15005).
     #[test]
     #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn a_procedural_round_s_edges_carry_its_margin() {
@@ -2692,38 +2687,9 @@ mod tests {
             seen.push((e, verdict, counts.not_enclosed, left));
         }
         eprintln!("circle_root edges: {seen:?}");
-        // the definition's partials refused, exactly: definition_box's typed refusal (#14932)
-        let refused = concat!(
-            ": partials Failed(Failure { operation: ",
-            "\"blend::fillet_section::definition_box\", entity: None, ",
-            "reason: Blend(Failed(\"the enclosure is not proved\"))"
-        );
-        let pi = std::f64::consts::PI;
-        let pinned = |e: &EdgeId,
-                      verdict: &Option<Tangency>,
-                      not_enclosed: usize,
-                      left: &[(f64, f64, [String; 2])]| {
-            match format!("{e:?}").as_str() {
-                "EdgeId(35)" => {
-                    *verdict == Some(Tangency::Tangent) && not_enclosed == 0 && left.is_empty()
-                }
-                "EdgeId(46)" => {
-                    let undecided = matches!(verdict, Some(Tangency::Undecided { margin, at, .. })
-                        if margin.to_bits() == pi.to_bits() && (at - 87.2234).abs() < 1e-4);
-                    let parts = left.len() == 1
-                        && left.iter().all(|(s0, s1, why)| {
-                            *s0 >= 87.22340
-                                && *s1 <= 87.22345
-                                && why.iter().any(|w| w.contains(refused))
-                        });
-                    undecided && not_enclosed == 2 && parts
-                }
-                _ => false,
-            }
-        };
-        let all = seen
-            .iter()
-            .all(|(e, verdict, not_enclosed, left)| pinned(e, verdict, *not_enclosed, left));
+        let all = seen.iter().all(|(_, verdict, not_enclosed, left)| {
+            *verdict == Some(Tangency::Tangent) && *not_enclosed == 0 && left.is_empty()
+        });
         assert!(seen.len() == 2 && all, "{seen:?}");
     }
 
