@@ -1146,7 +1146,14 @@ impl Curve {
         let cache = match make_curve_cache::<O>(k, self, opts.handle) {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::curve_missing(OP_GPA, "the curve's cache")),
+            Err(e) => {
+                return Err(crate::error::Failure::new(
+                    OP_GPA,
+                    crate::error::curve::CurveFailure::Missing("the curve's cache"),
+                )
+                .caused_by(e)
+                .into_error())
+            }
         };
         let curve_tree = cache
             .tree()
@@ -1715,5 +1722,35 @@ mod tests {
             )
             .unwrap();
         assert!(r.solutions.is_empty());
+    }
+
+    #[test]
+    fn property_analysis_keeps_the_cache_build_error_as_its_cause() {
+        let k = Kernel::default();
+        // a B-spline with no NURB: its cache cannot be built
+        let c = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::new(3));
+        let built = make_curve_cache::<Obj>(&k, &c, Some(Obj(0))).unwrap_err();
+        let opts = PropertyAnalysisOptions::<Obj> {
+            property_value: None,
+            opt_vectors: &[],
+            want_comb: false,
+            handle: Some(Obj(0)),
+        };
+        let e = c
+            .global_property_analysis(
+                &k,
+                &Extent1d::from_raw(0.0, 1.0),
+                CurvePropertyType::InflectionPoints,
+                1e-6,
+                &opts,
+            )
+            .unwrap_err();
+        assert_eq!(
+            e.curve_failure(),
+            Some(&crate::error::curve::CurveFailure::Missing(
+                "the curve's cache"
+            ))
+        );
+        assert_eq!(e.cause(), Some(&built));
     }
 }

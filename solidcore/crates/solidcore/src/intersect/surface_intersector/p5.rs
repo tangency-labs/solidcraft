@@ -159,7 +159,14 @@ fn intersection_surface_caches_in<O: Copy + PartialEq>(
         if e.is_unported_or_cancelled() {
             e
         } else {
-            SolidError::intersect_missing(OP_CACHES, "the surface's cache or its tree")
+            crate::error::Failure::new(
+                OP_CACHES,
+                crate::error::intersect::IntersectFailure::Missing(
+                    "the surface's cache or its tree",
+                ),
+            )
+            .caused_by(e)
+            .into_error()
         }
     };
     let [h1, h2] = handles;
@@ -532,7 +539,14 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                     if e.is_unported_or_cancelled() {
                         e
                     } else {
-                        SolidError::intersect_missing(OP_DI, "the surface cache's tree")
+                        crate::error::Failure::new(
+                            OP_DI,
+                            crate::error::intersect::IntersectFailure::Missing(
+                                "the surface cache's tree",
+                            ),
+                        )
+                        .caused_by(e)
+                        .into_error()
                     }
                 })?;
             }
@@ -1092,5 +1106,87 @@ mod tests {
             sphere_cut_with_trace_steps(&k, 1),
             Err(SolidError::InvalidInput { .. })
         ));
+    }
+
+    /// A cache context whose cache preparation fails (as a caller's identity
+    /// resolution can).
+    struct FailingContext;
+
+    impl SurfaceSolveContext<NoSurfaceHandle> for FailingContext {
+        fn build_surface_cache(
+            &mut self,
+            _k: &Kernel,
+            _surface: &Surface,
+            _handle: Option<NoSurfaceHandle>,
+        ) -> Result<SurfaceCache<NoSurfaceHandle>> {
+            Err(SolidError::invalid_input("test::identity", "no such face"))
+        }
+        fn face_queries(&self) -> Option<&dyn FaceQueries<NoSurfaceHandle>> {
+            None
+        }
+    }
+
+    #[test]
+    fn intersection_caches_keep_the_context_error_as_their_cause() {
+        let k = Kernel::default();
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let si = SurfaceIntersector::new(&k, &a, &unit(), &b, &unit(), false).unwrap();
+        let e = intersection_surface_caches_with_context(
+            &k,
+            &si,
+            [Some(NoSurfaceHandle), Some(NoSurfaceHandle)],
+            &mut FailingContext,
+        )
+        .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&crate::error::intersect::IntersectFailure::Missing(
+                "the surface's cache or its tree"
+            ))
+        );
+        assert_eq!(
+            e.cause(),
+            Some(&SolidError::invalid_input("test::identity", "no such face"))
+        );
+    }
+
+    #[test]
+    fn do_intersection_keeps_the_tree_build_error_as_its_cause() {
+        let k = Kernel::default();
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let mut ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
+            AdvSurfaceIntersector::new(&k, &a, &unit(), &b, &unit(), false).unwrap();
+        // a B-spline surface with no NURB: its tree cannot be built
+        let empty = Surface::from(BSplineSurface::new());
+        let mut cache: SurfaceCache<NoSurfaceHandle> = SurfaceCache::new(
+            empty.clone(),
+            unit(),
+            crate::surface::surface_cache::SurfaceCacheOptions::default(),
+        );
+        let built = cache.get_tree(&k).map(|_| ()).unwrap_err();
+        let mut caches = vec![
+            SurfaceCache::new(
+                empty.clone(),
+                unit(),
+                crate::surface::surface_cache::SurfaceCacheOptions::default(),
+            ),
+            SurfaceCache::new(
+                empty,
+                unit(),
+                crate::surface::surface_cache::SurfaceCacheOptions::default(),
+            ),
+        ];
+        let e = ssi
+            .do_intersection_with_caches(&k, &mut caches, Some(0.5), Some(0.1))
+            .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&crate::error::intersect::IntersectFailure::Missing(
+                "the surface cache's tree"
+            ))
+        );
+        assert_eq!(e.cause(), Some(&built));
     }
 }

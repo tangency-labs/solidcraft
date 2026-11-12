@@ -1127,11 +1127,15 @@ impl BSplineCurve {
         let composite = match composite {
             Ok(c) => c,
             Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
-            Err(_) => {
-                return Err(SolidError::b_spline(
+            Err(e) => {
+                return Err(crate::error::Failure::new(
                     OP_JOIN,
-                    BSplineFailure::Failed("the joined curve could not be built"),
-                ));
+                    crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::Failed(
+                        "the joined curve could not be built",
+                    )),
+                )
+                .caused_by(e)
+                .into_error());
             }
         };
         self.set_from_gw_nurb(composite.gw_nurb())
@@ -2223,6 +2227,36 @@ mod tests {
             ))
         );
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    #[test]
+    fn join_with_keeps_the_join_construction_error_as_its_cause() {
+        let k = &Kernel::default();
+        // two lines at an angle, 0.005 apart: within the caller's gap tolerance (0.01), so
+        // join_with reaches CreateByJoining, which refuses ends that far apart
+        let mut a = curve(
+            1,
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        let mut b = curve(
+            1,
+            &[[1.005, 0.0, 0.0], [1.005, 1.0, 0.0]],
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        let e = a.join_with(k, true, &mut b, false, Some(0.01)).unwrap_err();
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&crate::error::nurbs::NurbsFailure::BSpline(
+                BSplineFailure::Failed("the joined curve could not be built")
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        let cause = e.cause().expect("the join construction's error is kept");
+        assert!(
+            cause.to_string().contains("segments not end to end"),
+            "{cause}"
+        );
     }
 
     #[test]
