@@ -3598,6 +3598,8 @@ impl SolveApp {
         semantic_content::begin(self, ui.ctx());
         self.cad_ui(ui, &mut report_input);
         semantic_content::finalize(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        panel_runtime::show_desktop_windows(self, ui.ctx());
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).

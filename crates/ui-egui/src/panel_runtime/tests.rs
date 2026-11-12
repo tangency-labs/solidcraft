@@ -1242,15 +1242,26 @@ fn allocation_invisible_physical_edges_and_measured_tab_halves_preserve_rtl_and_
                     if left { card.outer.origin.x - outward } else { card.outer.origin.x + card.outer.size.width - inward }
                 );
             }
-            let before_last =
-                targets.iter().find(|target| target.id == HostDropTargetId::Tab { section: section("group"), before: Some(id("last")) }).unwrap();
-            assert_eq!(before_last.destination, Destination::JoinTab { section: section("group"), index: 1 }, "moved tab removed before indexing");
+            let before_moving = HostDropTargetId::Tab { section: section("group"), before: Some(id("moving")) };
+            let first = card.tabs.iter().find(|tab| tab.instance == id("first")).unwrap();
+            let moving = card.tabs.iter().find(|tab| tab.instance == id("moving")).unwrap();
+            let first_trailing = Point {
+                x: first.bounds.origin.x + first.bounds.size.width * if direction == Direction::Ltr { 0.75 } else { 0.25 },
+                y: middle(first.bounds).y,
+            };
+            let moving_leading = Point {
+                x: moving.bounds.origin.x + moving.bounds.size.width * if direction == Direction::Ltr { 0.25 } else { 0.75 },
+                y: middle(moving.bounds).y,
+            };
             let mut interaction = HostInteraction::default();
-            fixture_press(&service, &host, &mut interaction, HostPointerTarget::Tab { instance: id("moving") });
-            let preview = fixture_move(&service, &host, &mut interaction, middle(before_last.bounds));
-            assert_eq!(preview.target, Some(before_last.id.clone()), "measured tabs arbitrate ahead of top/side edges");
+            fixture_press(&service, &host, &mut interaction, HostPointerTarget::Tab { instance: id("last") });
+            let preview = fixture_move(&service, &host, &mut interaction, first_trailing);
+            assert_eq!(preview.target, Some(before_moving.clone()), "the trailing half inserts after the first tab");
+            assert_eq!(preview.destination, Some(Destination::JoinTab { section: section("group"), index: 1 }));
             assert_eq!(preview.targets.len(), 1);
-            interaction.cancel();
+            let release = interaction.update(&service, &fixture_scope(&service), &host, HostPointerEvent::Release { at: moving_leading });
+            assert_eq!(release.preview.unwrap().target, Some(before_moving));
+            assert_eq!(release.candidate.unwrap().layout(), preview.projected.as_ref().unwrap());
             fixture_press(&service, &host, &mut interaction, HostPointerTarget::Tab { instance: id("moving") });
             let corner = Point {
                 x: if physical_left { card.outer.origin.x + 45.0 } else { card.outer.origin.x + card.outer.size.width - 45.0 },
@@ -13805,4 +13816,39 @@ fn universal_registered_header_command_invokes_only_the_declared_synthetic_bindi
     assert_eq!(editor(&after)["cancels"], editor(&refused)["cancels"]);
     assert_eq!(editor(&after)["transaction_live"], editor(&refused)["transaction_live"]);
     assert_eq!(before["session"], refused["session"]);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn desktop_panel_windows_reserve_ids_only_after_commit_and_fit_the_current_monitor() {
+    use super::native::{DesktopNativeAdapter, NativeMonitor};
+
+    let mut adapter = DesktopNativeAdapter::default();
+    let host = HostId::new("desktop-test").unwrap();
+    let section = SectionId::new("desktop-section").unwrap();
+    let instance = InstanceId::new("desktop-panel").unwrap();
+    let create = [HostEffect::CreateNative { host: host.clone(), section: section.clone() }];
+    adapter.prepare(&create).unwrap();
+    assert!(adapter.viewport_id(&host).is_none());
+    adapter.commit(&create);
+    let previous = adapter.viewport_id(&host).unwrap();
+    assert!(adapter.owns(&host, &section));
+    assert_eq!(adapter.prepare(&create).unwrap_err().rule, Rule::DuplicateId);
+
+    let monitor = egui::Rect::from_min_size(egui::pos2(-1000.0, 0.0), egui::vec2(1000.0, 800.0));
+    adapter.update_monitors(|| vec![NativeMonitor { name: Some("Primary".into()), bounds: monitor, scale: 2.0, primary: true }]);
+    let ctx = egui::Context::default();
+    let min = Size { width: 200.0, height: 100.0 };
+    let max = Size { width: 900.0, height: 900.0 };
+    let builder = adapter.builder(&ctx, &host, &instance, "Panel".into(), max, (min, max)).unwrap();
+    let size = builder.inner_size.unwrap();
+    let origin = builder.position.unwrap();
+    assert!(monitor.contains_rect(egui::Rect::from_min_size((origin.to_vec2() * 2.0).to_pos2(), size * 2.0)));
+    assert_eq!(builder.min_inner_size, Some(egui::vec2(min.width, min.height)));
+
+    adapter.commit(&[HostEffect::ReleaseNative { host: host.clone() }]);
+    assert!(adapter.viewport_id(&host).is_none());
+    adapter.prepare(&create).unwrap();
+    adapter.commit(&create);
+    assert_ne!(adapter.viewport_id(&host), Some(previous));
 }
