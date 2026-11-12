@@ -147,6 +147,143 @@ fn an_added_dimension_is_one_undo_step() {
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), after);
 }
 
+/// What a dry run of add with `p` answers, with its `dry_run: true` taken off.
+fn previewed(s: &mut Session, p: &Value) -> Value {
+    let mut dry = p.clone();
+    dry["dry_run"] = json!(true);
+    let mut reply = run(s, ADD, dry);
+    assert_eq!(reply.as_object_mut().and_then(|o| o.remove("dry_run")), Some(json!(true)), "{reply}");
+    reply
+}
+
+/// What add says refusing `p`, which a dry run of it says too.
+fn refused_alike(s: &mut Session, p: &Value) -> String {
+    let mut dry = p.clone();
+    dry["dry_run"] = json!(true);
+    let e = refused(s, dry);
+    assert_eq!(e, refused(s, p.clone()), "{p}");
+    e
+}
+
+/// A dry run of add answers what the add made next answers, and changes nothing: not the design,
+/// the drawing, its undo steps, whether it needs saving or the values read. An explicit `false`
+/// is an add.
+#[test]
+fn a_dry_run_answers_what_add_would_add_and_changes_nothing() {
+    let (mut s, view) = front_view();
+    let v = ids::encode(view);
+    let kinds = [
+        json!({"length": {"edge": [40, 0, 0]}}),
+        json!({"linear": {"a": [0, 0, 0], "b": [80, 0, 0], "direction": "horizontal"}}),
+        json!({"angle": {"a": [40, 0, 30], "b": [0, 0, 15]}}),
+        json!({"chain": {"points": [[0, 0, 0], [80, 0, 0], [80, 0, 30]]}}),
+    ];
+    let mut answers = Vec::new();
+    for kind in kinds {
+        let p = json!({"view": v, "kind": kind});
+        let (doc, steps, dirty, values) = (s.doc.clone(), s.undo.len(), s.is_dirty(), s.dimension_values.clone());
+        let before = s.drawing("test").unwrap().to_json().unwrap();
+        let dry = previewed(&mut s, &p);
+        assert!(Arc::ptr_eq(&s.doc, &doc), "{kind}: the same design");
+        assert_eq!((s.drawing("test").unwrap().to_json().unwrap(), s.undo.len(), s.is_dirty()), (before, steps, dirty), "{kind}");
+        assert_eq!(s.dimension_values, values, "{kind}: no last good value kept");
+        let added = run(&mut s, ADD, p);
+        assert_eq!(s.undo.len(), steps + 1, "{kind}");
+        assert!(added.get("dry_run").is_none(), "{added}");
+        assert_eq!(dry, added);
+        answers.push(dry);
+    }
+    // The bottom edge's length, below it; the bottom corners 80 apart; the top edge square to the
+    // left one; and the chain from the bottom left corner to the top right one, 80 across and 30 up.
+    reads(&answers[0], 80.0, "80.00");
+    assert_eq!(answers[0]["record"]["offset_mm"], json!(-10.0), "below the bottom edge");
+    reads(&answers[1], 80.0, "80.00");
+    reads(&answers[2], 90.0, "90.00°");
+    let chain = &answers[3];
+    assert_eq!((chain["status"].as_str(), chain["members"].as_array().map(Vec::len)), (Some("ok"), Some(2)), "{chain}");
+    assert!((chain["value"].as_f64().unwrap() - (80f64 * 80.0 + 30.0 * 30.0).sqrt()).abs() < 1e-9, "{chain}");
+    let steps = s.undo.len();
+    let added = run(&mut s, ADD, json!({"view": v, "kind": {"length": {"edge": [40, 0, 30]}}, "dry_run": false}));
+    assert_eq!(s.undo.len(), steps + 1, "an explicit false is an add");
+    assert!(added.get("dry_run").is_none(), "{added}");
+    let id = added["dimension"].as_str().and_then(ids::decode).unwrap();
+    assert!(s.drawing("test").unwrap().dimension(id).is_some());
+}
+
+/// A dry run takes no id: after three of them, the next add's id is the one a copy of the session
+/// made before them gives, and each dry run answered with it.
+#[test]
+fn a_dry_run_takes_no_id() {
+    let (mut s, view) = front_view();
+    let mut twin = s.scratch();
+    let p = json!({"view": ids::encode(view), "kind": {"length": {"edge": [40, 0, 30]}}});
+    let previews: Vec<Value> = (0..3).map(|_| previewed(&mut s, &p)["dimension"].clone()).collect();
+    let added = run(&mut s, ADD, p.clone())["dimension"].clone();
+    assert_eq!(run(&mut twin, ADD, p)["dimension"], added);
+    assert_eq!(previews, vec![added; 3]);
+}
+
+/// A dry run on a hole's rim reads its diameter, as the add saves it by default (read before the
+/// default is set, the rim is a radius), and on a fillet's quarter arc its radius: each the add's
+/// answer.
+#[test]
+fn a_dry_run_of_a_holes_rim_reads_its_diameter() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[80, 20, 30]], "radius": 5, "body": "Box"}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let hole = json!({"body": "Box", "index": round_index(&s, [40.0, 0.0, 15.0], 6.0)});
+    let fillet = json!({"body": "Box", "index": round_index(&s, [75.0, 0.0, 25.0], 5.0)});
+    for (edge, value, text, diameter) in [(hole, 12.0, "Ø12.00", Some(json!(true))), (fillet, 5.0, "R5.00", None)] {
+        let p = json!({"view": ids::encode(view), "kind": {"radial": {"edge": edge}}});
+        let dry = previewed(&mut s, &p);
+        reads(&dry, value, text);
+        assert_eq!(dry["record"]["kind"]["radial"].get("diameter"), diameter.as_ref(), "{dry}");
+        assert_eq!(dry, run(&mut s, ADD, p));
+    }
+}
+
+/// A dry run is refused as the add is, in the same words, and changes nothing: no edge at the
+/// point, a view the drawing hasn't got, a radial dimension on a straight edge, too many decimals,
+/// a part the view's hide leaves out, and a `dry_run` that isn't true or false.
+#[test]
+fn a_dry_run_is_refused_as_add_is() {
+    let state = |s: &Session| (s.drawing("test").unwrap().to_json().unwrap(), s.undo.len(), s.ids.seed());
+    let (mut s, view) = front_view();
+    let v = ids::encode(view);
+    let before = state(&s);
+    let cases = [
+        (json!({"view": v, "kind": {"length": {"edge": [40, 20, 15]}}}), "no edge at [40, 20, 15]"),
+        (json!({"view": ids::encode(99), "kind": {"length": {"edge": [40, 0, 30]}}}), "the drawing has no view"),
+        (json!({"view": v, "kind": {"radial": {"edge": [40, 0, 30]}}}), "isn't a circle or an arc"),
+        (json!({"view": v, "kind": {"length": {"edge": [40, 0, 30]}}, "decimals": 7}), "at most 6 decimals"),
+    ];
+    for (p, why) in cases {
+        let e = refused_alike(&mut s, &p);
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    let e = refused(&mut s, json!({"view": v, "kind": {"length": {"edge": [40, 0, 30]}}, "dry_run": "yes"}));
+    assert!(e.contains("dry_run"), "{e}");
+    assert_eq!(state(&s), before);
+    // A corner on a part the view's hide leaves out, as in
+    // `a_dimension_is_refused_on_a_part_its_view_leaves_out`.
+    let mut s = Session::default();
+    let block = run(&mut s, "component.create", json!({"name": "Block"}))["occurrence"].clone();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 30, "height": 10, "body_name": "Block", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "operation": "new", "body_name": "Base"}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let v = ids::encode(view);
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide": [[block]]}}));
+    let before = state(&s);
+    let linear = json!({"view": v, "kind": {"linear": {"a": [100, 0, 0], "b": {"point": [20, 0, 0], "path": [block]}}}});
+    let e = refused_alike(&mut s, &linear);
+    assert!(e.contains(&format!("view {v} doesn't draw that part: its hide leaves out occurrence path [{block}]")), "{e}");
+    assert_eq!(state(&s), before);
+}
+
 /// The offset `add` saved for a dimension of `kind` on `view`, with `more` params.
 fn offset_of(s: &mut Session, view: u64, kind: Value, more: Value) -> f64 {
     let mut p = json!({"view": ids::encode(view), "kind": kind});
@@ -805,8 +942,8 @@ fn places(v: &Value, at: String, out: &mut Vec<String>) {
 }
 
 /// A hostile value in each place of each command's parameters, at every depth (picks, paths,
-/// corners' edges, a chain's points, the edit's settings): never a panic, and the drawing keeps its
-/// rules.
+/// corners' edges, a chain's points, the edit's settings, the first add's `dry_run`): never a
+/// panic, and the drawing keeps its rules.
 #[test]
 fn hostile_dimension_params_never_panic() {
     let (mut s, view) = front_view();
@@ -833,7 +970,7 @@ fn hostile_dimension_params_never_panic() {
         (
             ADD,
             json!({"view": v, "kind": {"linear": {"a": [0, 0, 0], "b": corner, "direction": {"along": [1, 0]}, "reading": "projected"}},
-            "offset_mm": 5, "text": {"at": [1, 2]}, "decimals": 1, "override_text": "x"}),
+            "offset_mm": 5, "text": {"at": [1, 2]}, "decimals": 1, "override_text": "x", "dry_run": true}),
         ),
         (ADD, json!({"view": v, "kind": {"angle": {"a": {"point": [40, 0, 30], "path": [1]}, "b": [0, 0, 15], "other_side": true}}})),
         (ADD, json!({"view": v, "kind": {"radial": {"edge": {"body": "Box", "index": 0, "path": [1]}, "diameter": true}}})),
