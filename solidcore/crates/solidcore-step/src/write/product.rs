@@ -412,6 +412,12 @@ const MAX_LEVELS: usize = 65;
 /// product shared by several parents is walked once; reaching it again at a level checks the
 /// levels below it from its height. The recursion is at most [`MAX_LEVELS`] deep.
 fn recursive(products: &[ExportProduct], root: usize) -> bool {
+    walk_tree(products, root).0
+}
+
+/// [`recursive`]'s answer and how many times the walk entered a product: at most once per
+/// product plus once per child reference.
+fn walk_tree(products: &[ExportProduct], root: usize) -> (bool, usize) {
     #[derive(Clone, Copy)]
     enum Mark {
         New,
@@ -419,7 +425,8 @@ fn recursive(products: &[ExportProduct], root: usize) -> bool {
         Done(usize),
     }
     /// The height of `p`, entered at `level` (the root at 0); `None` for a cycle or too many levels.
-    fn walk(products: &[ExportProduct], marks: &mut [Mark], p: usize, level: usize) -> Option<usize> {
+    fn walk(products: &[ExportProduct], marks: &mut [Mark], visits: &mut usize, p: usize, level: usize) -> Option<usize> {
+        *visits += 1;
         if level >= MAX_LEVELS {
             return None;
         }
@@ -433,14 +440,16 @@ fn recursive(products: &[ExportProduct], root: usize) -> bool {
         }
         let mut below = 0;
         for (c, _, _) in products.get(p).map(|x| x.children.as_slice()).unwrap_or_default() {
-            below = below.max(walk(products, marks, *c, level + 1)?);
+            below = below.max(walk(products, marks, visits, *c, level + 1)?);
         }
         if let Some(m) = marks.get_mut(p) {
             *m = Mark::Done(below + 1);
         }
         Some(below + 1)
     }
-    walk(products, &mut vec![Mark::New; products.len()], root, 0).is_none()
+    let mut visits = 0;
+    let bad = walk(products, &mut vec![Mark::New; products.len()], &mut visits, root, 0).is_none();
+    (bad, visits)
 }
 
 /// A surface colour for an item (STYLED_ITEM chain; the styles are shared), named as its look is
@@ -660,16 +669,20 @@ mod tests {
             .collect()
     }
 
-    /// A tree that shares its children is checked once per product: 65 levels, each placing the
-    /// next twice (2^64 paths), are checked at once (the walk took hours from 40 levels), and 66
-    /// levels are refused as too deep, as before.
+    /// A tree that shares its children is checked once per product: the walk enters a product at
+    /// most once per product and child reference, not once per path. 20 levels, each placing the
+    /// next twice, have 2^19 paths (the old walk entered 2^20 - 1 times, and took hours from 40
+    /// levels); 65 levels (2^64 paths) are allowed and 66 refused as too deep, as before.
     #[test]
     fn a_shared_tree_is_checked_in_linear_time() {
         let record = box_record();
-        let started = std::time::Instant::now();
-        assert!(!recursive(&shared_chain(&record, 65), 0));
-        assert!(recursive(&shared_chain(&record, 66), 0));
-        assert!(started.elapsed().as_secs_f64() < 1.0, "{:?}", started.elapsed());
+        for levels in [20, 65, 66] {
+            let tree = shared_chain(&record, levels);
+            let references: usize = tree.iter().map(|p| p.children.len()).sum();
+            let (bad, visits) = walk_tree(&tree, 0);
+            assert_eq!(bad, levels > 65, "{levels}");
+            assert!(visits <= tree.len() + references, "{levels} levels: {visits} visits");
+        }
         // The writer itself: 65 products, 128 occurrences.
         let text = products(&shared_chain(&record, 65), 0, &Header::default()).unwrap();
         assert_eq!(text.matches("NEXT_ASSEMBLY_USAGE_OCCURRENCE(").count(), 128);
