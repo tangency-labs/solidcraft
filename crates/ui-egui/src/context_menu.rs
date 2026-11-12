@@ -950,7 +950,12 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     let hidden = !joints.iter().any(|j| app.session.joint_visible(*j));
     vec![
-        act("ui.editJoint", "Edit Joint", "joint").with(json!({ "joint": id })),
+        // A constraint is changed in Constrain, under its rule's icon (#6061).
+        match j.constraint {
+            Some(c) => act("ui.editJoint", "Edit Constraint", crate::dialogs_constrain::rule_icon(c)),
+            None => act("ui.editJoint", "Edit Joint", "joint"),
+        }
+        .with(json!({ "joint": id })),
         act("ui.editJointLimits", "Edit Joint Limits", "joint").with(json!({ "joint": id })).on(!rigid),
         act("ui.driveJoint", "Drive Joint", "drive").with(json!({ "joint": id })).on(!rigid),
         act("ui.animateJoint", "Animate Joint", "play").with(json!({ "joint": id })).on(!rigid && !j.suppressed),
@@ -1907,7 +1912,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.editJoint" | "ui.editJointLimits" | "ui.driveJoint" | "ui.animateJoint" => {
             if let Some(id) = id_of(&p, "joint") {
                 let d = match item.id.as_str() {
-                    "ui.editJoint" => crate::dialogs_assembly::edit_joint(app, id),
+                    "ui.editJoint" => crate::dialogs_assembly::open_joint(app, id),
                     "ui.editJointLimits" => crate::dialogs_assembly::edit_joint_limits(app, id),
                     "ui.animateJoint" => crate::dialogs_assembly::animate_joint(app, id),
                     _ => crate::dialogs_assembly::drive_joint(app, id),
