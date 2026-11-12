@@ -65,7 +65,12 @@ fn export_body<'a>(b: &ExportBody<'a>) -> product::ExportBody<'a> {
 fn kernel_error(e: ExportError) -> KernelError {
     match e {
         ExportError::Body { .. } | ExportError::Record { .. } => KernelError::Failed(e.to_string()),
-        ExportError::Nothing | ExportError::BadReference | ExportError::Recursive | ExportError::NotRigid => KernelError::Invalid(e.to_string()),
+        ExportError::Nothing
+        | ExportError::BadReference
+        | ExportError::Recursive
+        | ExportError::NotRigid
+        | ExportError::Colour { .. }
+        | ExportError::Face { .. } => KernelError::Invalid(e.to_string()),
     }
 }
 

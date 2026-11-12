@@ -7,13 +7,12 @@
 //! next-assembly-usage occurrences placed by item-defined transformations (the structure the
 //! CAx-IF recommends and our reader follows). Identical geometric entities (points, directions,
 //! placements, curves, surfaces) are written once and referenced; ids are dense from `#1`.
-
 //!
 //! [`products`] writes products and assemblies, [`bodies`] the bodies of one part, and
 //! [`solidcore_bodies`] solidcore bodies (`solidcore_ops::Body`) as one part, in one call.
 //!
-//! Origin: SolidCraft's `crates/kernel/src/step_out.rs` (MIT OR Apache-2.0), moved here with its
-//! history (RFC 0003, 1.7). SolidCraft's export calls it with its bodies' records.
+//! Origin: moved from SolidCraft's STEP export adapter (MIT OR Apache-2.0) with its history
+//! (RFC 0003, 1.7).
 
 use std::fmt::Write as _;
 
@@ -26,23 +25,33 @@ use crate::p21::Param;
 /// empty for none).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Colour {
+    /// Red, green and blue, each from 0 to 1; anything else is refused ([`ExportError::Colour`]).
     pub rgb: [f32; 3],
+    /// Opacity from 0 (invisible) to 1 (opaque); anything else is refused.
     pub opacity: f32,
+    /// The colour's name (`COLOUR_RGB`'s name), empty for none.
     pub name: String,
 }
 
 /// A named body to export (coordinates in its part's frame, mm): its record, its colour if it has
 /// one, and the faces with colours of their own (the record's face index and its colour).
 pub struct ExportBody<'a> {
+    /// The body's name: its solids' and surface model's name.
     pub name: String,
+    /// The body's B-rep record, written as it is.
     pub record: &'a Brep,
+    /// The colour of the whole body, if it has one.
     pub color: Option<Colour>,
+    /// Faces with colours of their own: an index into the record's faces (one out of range is
+    /// refused, [`ExportError::Face`]) and its colour.
     pub faces: Vec<(usize, Colour)>,
 }
 
 /// A part or assembly: its own bodies and placed child products.
 pub struct ExportProduct<'a> {
+    /// The product's name; `Part` when blank.
     pub name: String,
+    /// The product's own bodies, in its frame.
     pub bodies: Vec<ExportBody<'a>>,
     /// (child product index, rigid placement in this product, column-major 4×4, occurrence name).
     pub children: Vec<(usize, [[f64; 4]; 4], String)>,
@@ -55,7 +64,9 @@ pub struct Header {
     pub file_name: String,
     /// FILE_NAME time stamp (ISO 8601), empty when unknown.
     pub time_stamp: String,
+    /// FILE_NAME author.
     pub author: String,
+    /// FILE_NAME organization.
     pub organization: String,
     /// FILE_DESCRIPTION text.
     pub description: String,
@@ -68,7 +79,8 @@ pub struct Header {
 /// Why products could not be written.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExportError {
-    /// No product, a root that is not one of them, or no body in the products the root reaches.
+    /// No product, a root that is not one of them, or no body with a face in the products the
+    /// root reaches.
     Nothing,
     /// A child that is not one of the products.
     BadReference,
@@ -76,10 +88,34 @@ pub enum ExportError {
     Recursive,
     /// A placement that is not a rotation and a translation.
     NotRigid,
-    /// A body's record that does not write (its name and the writer's reason).
-    Body { name: String, reason: String },
-    /// A solidcore body whose record could not be made (its name and why).
-    Record { name: String, reason: String },
+    /// A body's record that does not write.
+    Body {
+        /// The body's name.
+        name: String,
+        /// Why the writer refused it.
+        reason: String,
+    },
+    /// A solidcore body whose record could not be made.
+    Record {
+        /// The body's name.
+        name: String,
+        /// Why its record could not be made.
+        reason: String,
+    },
+    /// A body or face colour with a component or opacity that is not a number from 0 to 1.
+    Colour {
+        /// The body's name.
+        name: String,
+    },
+    /// A face colour for a face the body's record does not have.
+    Face {
+        /// The body's name.
+        name: String,
+        /// The face index given.
+        face: usize,
+        /// How many faces the record has.
+        faces: usize,
+    },
 }
 
 impl std::fmt::Display for ExportError {
@@ -91,6 +127,8 @@ impl std::fmt::Display for ExportError {
             Self::NotRigid => f.write_str("component placements must be rigid (rotation and translation) to export as STEP"),
             Self::Body { name, reason } => write!(f, "STEP export of '{name}': {reason}"),
             Self::Record { name, reason } => write!(f, "STEP export of '{name}': no record: {reason}"),
+            Self::Colour { name } => write!(f, "STEP export of '{name}': a colour or opacity is not a number from 0 to 1"),
+            Self::Face { name, face, faces } => write!(f, "STEP export of '{name}': face {face} has a colour, but the body has {faces} faces"),
         }
     }
 }
@@ -158,8 +196,9 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
         }
     }
     let reached: Vec<(usize, &ExportProduct)> = products.iter().enumerate().filter(|(i, _)| reach.get(*i).copied().unwrap_or(false)).collect();
-    // Only these are written: bodies in products the root does not reach do not count.
-    if reached.iter().all(|(_, p)| p.bodies.is_empty()) {
+    // Only these are written: bodies in products the root does not reach do not count, and
+    // neither do bodies with no face (they write no shape).
+    if !reached.iter().flat_map(|(_, p)| &p.bodies).any(|b| !b.record.faces.is_empty()) {
         return Err(ExportError::Nothing);
     }
     for p in products {
@@ -167,18 +206,18 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
             return Err(ExportError::BadReference);
         }
     }
-    // No product may contain itself.
-    fn cyclic(products: &[ExportProduct], p: usize, stack: &mut Vec<usize>) -> bool {
-        if stack.contains(&p) || stack.len() > 64 {
-            return true;
-        }
-        stack.push(p);
-        let bad = products.get(p).is_some_and(|x| x.children.iter().any(|(c, _, _)| cyclic(products, *c, stack)));
-        stack.pop();
-        bad
-    }
-    if cyclic(products, root, &mut Vec::new()) {
+    if recursive(products, root) {
         return Err(ExportError::Recursive);
+    }
+    for b in reached.iter().flat_map(|(_, p)| &p.bodies) {
+        let colours = b.color.iter().chain(b.faces.iter().map(|(_, c)| c));
+        if colours.flat_map(|c| c.rgb.iter().chain(std::iter::once(&c.opacity))).any(|v| !(0.0..=1.0).contains(v)) {
+            return Err(ExportError::Colour { name: b.name.clone() });
+        }
+        let faces = b.record.faces.len();
+        if let Some(&(face, _)) = b.faces.iter().find(|(i, _)| *i >= faces) {
+            return Err(ExportError::Face { name: b.name.clone(), face, faces });
+        }
     }
     // The context states the models' accuracy: the loosest tolerance of their records, edges
     // and vertices. STEP keeps no tolerance per edge, so an edge that lies off its faces (an
@@ -248,7 +287,7 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
     let mut product_ids = Vec::new();
     let mut styled = Vec::new();
     for &(pi, p) in &reached {
-        let name = if p.name.trim().is_empty() { "Part".to_string() } else { p.name.clone() };
+        let name = product_name(p);
         let prod = w.add_distinct("PRODUCT", &[s(&name), s(&name), s(""), refs(&[pctx])]);
         product_ids.push(prod);
         let pdf = w.add_distinct("PRODUCT_DEFINITION_FORMATION", &[s(""), s(""), r(prod)]);
@@ -303,7 +342,7 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
                 continue;
             };
             let nm = if oname.trim().is_empty() {
-                format!("{}:{}", products.get(*ci).map(|c| c.name.as_str()).unwrap_or(""), k + 1)
+                format!("{}:{}", products.get(*ci).map(product_name).unwrap_or_default(), k + 1)
             } else {
                 oname.clone()
             };
@@ -341,6 +380,53 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
     Ok(text)
 }
 
+/// A product's name as written: `Part` when it is blank.
+fn product_name(p: &ExportProduct) -> String {
+    if p.name.trim().is_empty() { "Part".to_string() } else { p.name.clone() }
+}
+
+/// The deepest assembly written: a product tree with more levels is refused as recursive.
+const MAX_LEVELS: usize = 65;
+
+/// Whether the tree under `root` contains a product inside itself, or has more than
+/// [`MAX_LEVELS`] levels. Every child must be one of the products.
+///
+/// A depth-first walk that colours products as it goes (unvisited, on the current path, done)
+/// and keeps for each done product its height (the levels from it down, itself included). A
+/// product shared by several parents is walked once; reaching it again at a level checks the
+/// levels below it from its height. The recursion is at most [`MAX_LEVELS`] deep.
+fn recursive(products: &[ExportProduct], root: usize) -> bool {
+    #[derive(Clone, Copy)]
+    enum Mark {
+        New,
+        OnPath,
+        Done(usize),
+    }
+    /// The height of `p`, entered at `level` (the root at 0); `None` for a cycle or too many levels.
+    fn walk(products: &[ExportProduct], marks: &mut [Mark], p: usize, level: usize) -> Option<usize> {
+        if level >= MAX_LEVELS {
+            return None;
+        }
+        match marks.get(p).copied()? {
+            Mark::OnPath => return None,
+            Mark::Done(height) => return (level + height <= MAX_LEVELS).then_some(height),
+            Mark::New => {}
+        }
+        if let Some(m) = marks.get_mut(p) {
+            *m = Mark::OnPath;
+        }
+        let mut below = 0;
+        for (c, _, _) in products.get(p).map(|x| x.children.as_slice()).unwrap_or_default() {
+            below = below.max(walk(products, marks, *c, level + 1)?);
+        }
+        if let Some(m) = marks.get_mut(p) {
+            *m = Mark::Done(below + 1);
+        }
+        Some(below + 1)
+    }
+    walk(products, &mut vec![Mark::New; products.len()], root, 0).is_none()
+}
+
 /// A surface colour for an item (STYLED_ITEM chain; the styles are shared), named as its look is
 /// (`COLOUR_RGB`'s name, read back on import) when it has a name.
 fn style(w: &mut Writer, item: u64, colour: &Colour) -> u64 {
@@ -369,13 +455,21 @@ fn style(w: &mut Writer, item: u64, colour: &Colour) -> u64 {
 ///
 /// As [`products`].
 pub fn bodies(bodies: Vec<ExportBody<'_>>, header: &Header) -> Result<String> {
-    let name = if header.file_name.is_empty() {
-        "Part".to_string()
-    } else {
-        header.file_name.trim_end_matches(".step").trim_end_matches(".stp").to_string()
-    };
+    let name =
+        if header.file_name.is_empty() { "Part".to_string() } else { strip_suffix(strip_suffix(&header.file_name, ".step"), ".stp").to_string() };
     let p = ExportProduct { name, bodies, children: Vec::new() };
     products(&[p], 0, header)
+}
+
+/// `name` without every trailing `suffix`, compared without regard to ASCII case.
+fn strip_suffix<'a>(mut name: &'a str, suffix: &str) -> &'a str {
+    while let Some(cut) = name.len().checked_sub(suffix.len())
+        && let (Some(head), Some(tail)) = (name.get(..cut), name.get(cut..))
+        && tail.eq_ignore_ascii_case(suffix)
+    {
+        name = head;
+    }
+    name
 }
 
 /// STEP text for solidcore bodies as one part, each named: their records
@@ -525,5 +619,142 @@ mod tests {
         };
         let text = solidcore_bodies(&[("Block", &bx)], &header).unwrap();
         assert!(text.contains("FILE_DESCRIPTION(('d'),'2;1');\nFILE_NAME('f.step','2026-11-12T00:00:00',('a'),('o'),'p','s','');\n"), "{text}");
+    }
+
+    /// A box's record, and a body of it named `name`.
+    fn box_record() -> Brep {
+        solidcore_ops::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap().to_record().unwrap().0
+    }
+    fn body<'a>(name: &str, record: &'a Brep) -> ExportBody<'a> {
+        ExportBody { name: name.into(), record, color: None, faces: Vec::new() }
+    }
+
+    /// `levels` products in a chain, each placing the next twice (a shared child), the last
+    /// holding a box.
+    fn shared_chain(record: &Brep, levels: usize) -> Vec<ExportProduct<'_>> {
+        (0..levels)
+            .map(|i| {
+                let last = i + 1 == levels;
+                ExportProduct {
+                    name: format!("P{i}"),
+                    bodies: if last { vec![body("B", record)] } else { vec![] },
+                    children: if last { vec![] } else { vec![(i + 1, IDENTITY, String::new()), (i + 1, IDENTITY, String::new())] },
+                }
+            })
+            .collect()
+    }
+
+    /// A tree that shares its children is checked once per product: 65 levels, each placing the
+    /// next twice (2^64 paths), are checked at once (the walk took hours from 40 levels), and 66
+    /// levels are refused as too deep, as before.
+    #[test]
+    fn a_shared_tree_is_checked_in_linear_time() {
+        let record = box_record();
+        let started = std::time::Instant::now();
+        assert!(!recursive(&shared_chain(&record, 65), 0));
+        assert!(recursive(&shared_chain(&record, 66), 0));
+        assert!(started.elapsed().as_secs_f64() < 1.0, "{:?}", started.elapsed());
+        // The writer itself: 65 products, 128 occurrences.
+        let text = products(&shared_chain(&record, 65), 0, &Header::default()).unwrap();
+        assert_eq!(text.matches("NEXT_ASSEMBLY_USAGE_OCCURRENCE(").count(), 128);
+        assert_eq!(products(&shared_chain(&record, 66), 0, &Header::default()), Err(ExportError::Recursive));
+    }
+
+    /// A product reached first near the root and again deeper counts its levels from the deeper
+    /// place: a 30-level chain under the root, reached again through 34 more levels, makes 65
+    /// levels (allowed); through 35, 66 (refused). A cycle is refused.
+    #[test]
+    fn a_shared_product_counts_its_levels_where_it_is_deepest() {
+        let record = box_record();
+        let tree = |m: usize| -> Vec<ExportProduct<'_>> {
+            let mut list = vec![ExportProduct {
+                name: "Root".into(),
+                bodies: vec![],
+                children: vec![(1, IDENTITY, String::new()), (31, IDENTITY, String::new())],
+            }];
+            for i in 1..=30 {
+                let children = if i == 30 { vec![] } else { vec![(i + 1, IDENTITY, String::new())] };
+                list.push(ExportProduct { name: format!("X{i}"), bodies: if i == 30 { vec![body("B", &record)] } else { vec![] }, children });
+            }
+            for j in 0..m {
+                let next = if j + 1 == m { 1 } else { 32 + j };
+                list.push(ExportProduct { name: format!("Y{j}"), bodies: vec![], children: vec![(next, IDENTITY, String::new())] });
+            }
+            list
+        };
+        assert!(!recursive(&tree(34), 0));
+        assert!(recursive(&tree(35), 0));
+        let mut cycle = tree(3);
+        if let Some(last) = cycle.get_mut(30) {
+            last.children.push((31, IDENTITY, String::new()));
+        }
+        assert!(recursive(&cycle, 0));
+    }
+
+    /// A body whose record has no face writes no shape, so it is nothing to export.
+    #[test]
+    fn a_body_with_no_face_is_nothing_to_export() {
+        let full = box_record();
+        let empty = Brep { regions: vec![], shells: vec![], faces: vec![], edges: vec![], vertices: vec![], ..full.clone() };
+        let header = Header::default();
+        let err = bodies(vec![body("Empty", &empty)], &header).unwrap_err();
+        assert_eq!(err, ExportError::Nothing);
+        assert_eq!(err.to_string(), "nothing to export");
+        assert!(bodies(vec![body("Empty", &empty), body("Box", &full)], &header).is_ok());
+    }
+
+    /// An unnamed occurrence of a blank-named product is named after the product as written,
+    /// `Part:1`, not `:1`.
+    #[test]
+    fn an_unnamed_occurrence_of_a_blank_product_is_named_part() {
+        let record = box_record();
+        let list = [
+            ExportProduct { name: "Root".into(), bodies: vec![], children: vec![(1, IDENTITY, String::new())] },
+            ExportProduct { name: " ".into(), bodies: vec![body("B", &record)], children: vec![] },
+        ];
+        let text = products(&list, 0, &Header::default()).unwrap();
+        assert!(text.contains("PRODUCT('Part','Part'"), "{text}");
+        assert!(text.contains("NEXT_ASSEMBLY_USAGE_OCCURRENCE('Part:1','Part:1'"), "{text}");
+    }
+
+    /// A colour component or opacity that is not a number from 0 to 1 is refused (it was written
+    /// as `0.` or out of range), and so is a face colour for a face the record does not have (it
+    /// was dropped).
+    #[test]
+    fn bad_colours_and_faces_are_refused() {
+        let record = box_record();
+        let faces = record.faces.len();
+        let ok = Colour { rgb: [0.0, 0.5, 1.0], opacity: 0.25, name: String::new() };
+        let with = |color: Option<Colour>, face: Vec<(usize, Colour)>| {
+            bodies(vec![ExportBody { name: "B".into(), record: &record, color, faces: face }], &Header::default())
+        };
+        assert!(with(Some(ok.clone()), vec![(faces - 1, ok.clone())]).is_ok());
+        for bad in [[f32::NAN, 0.0, 0.0], [1.5, 0.0, 0.0], [0.0, -0.1, 0.0], [0.0, 0.0, f32::INFINITY]] {
+            let c = Colour { rgb: bad, ..ok.clone() };
+            assert_eq!(with(Some(c.clone()), vec![]), Err(ExportError::Colour { name: "B".into() }), "{bad:?}");
+            assert_eq!(with(None, vec![(0, c)]), Err(ExportError::Colour { name: "B".into() }), "face {bad:?}");
+        }
+        for opacity in [f32::NAN, 2.0, -1.0] {
+            assert_eq!(with(Some(Colour { opacity, ..ok.clone() }), vec![]), Err(ExportError::Colour { name: "B".into() }), "{opacity}");
+        }
+        assert_eq!(with(None, vec![(faces, ok.clone())]), Err(ExportError::Face { name: "B".into(), face: faces, faces }));
+    }
+
+    /// The part is named after the file without its `.step` or `.stp`, in any case.
+    #[test]
+    fn the_part_name_drops_the_extension_in_any_case() {
+        let record = box_record();
+        for (file, part) in [
+            ("a.step", "a"),
+            ("PARTS.STEP", "PARTS"),
+            ("b.Stp", "b"),
+            ("c.step.STEP", "c"),
+            ("d.step.stp", "d.step"),
+            ("é.STP", "é"),
+            ("step", "step"),
+        ] {
+            let text = bodies(vec![body("B", &record)], &Header { file_name: file.into(), ..Default::default() }).unwrap();
+            assert!(text.contains(&format!("PRODUCT({0},{0}", string(part))), "{file}: {text}");
+        }
     }
 }
