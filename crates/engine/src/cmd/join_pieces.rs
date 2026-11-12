@@ -3,7 +3,6 @@
 //! result OK makes, and with the warning a Join apart gets (#4434).
 
 use serde_json::Value;
-use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -80,27 +79,27 @@ impl crate::Ahead {
 }
 
 /// Whether the Join from `before` to `after` added (next to) no volume: its material lies inside
-/// the bodies. Display meshes are close enough for that, against the material's own volume;
-/// measuring a large body exactly takes seconds.
+/// the bodies.
 fn adds_nothing(before: &solidcraft_doc::ModelState, after: &solidcraft_doc::ModelState, tools: &[&solidcraft_doc::ModelBody]) -> bool {
     let (mut had, mut have) = (0.0, 0.0);
     for was in &before.bodies {
         match after.body(&was.name) {
             Some(now) if now.body.same_shape(&was.body) => {}
             Some(now) => {
-                had += mesh_volume(&was.mesh());
-                have += mesh_volume(&now.mesh());
+                if let (Ok(m_was), Ok(m_now)) = (was.measure(), now.measure()) {
+                    had += m_was.volume;
+                    have += m_now.volume;
+                }
             }
-            None => had += mesh_volume(&was.mesh()),
+            None => {
+                if let Ok(m_was) = was.measure() {
+                    had += m_was.volume;
+                }
+            }
         }
     }
-    let material: f64 = tools.iter().map(|t| mesh_volume(&t.mesh())).sum();
+    let material: f64 = tools.iter().filter_map(|t| t.measure().ok()).map(|m| m.volume).sum();
     material > 0.0 && (have - had) < material * 0.01
-}
-
-/// The volume a closed mesh encloses.
-fn mesh_volume(m: &solidcraft_geom::Mesh) -> f64 {
-    m.triangles.iter().filter_map(|t| m.tri(t)).map(|[a, b, c]| a.dot(b.cross(c)) / 6.0).sum::<f64>().abs()
 }
 
 /// `cmds` with their New Body or Join operation set to `op`; None when none has one.
