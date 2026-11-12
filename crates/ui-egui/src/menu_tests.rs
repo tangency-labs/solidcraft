@@ -1405,6 +1405,27 @@ fn a_commands_menu_changes_its_keyboard_shortcut() {
     assert!(crate::keymap::capturing(&app), "waiting for the new key");
 }
 
+/// #11852: a drop-down row's ⋯ opens the command's menu (pin, keyboard shortcut, toolbar), and
+/// the drop-down stays open under it, as it now does for a right-click on the row.
+#[test]
+fn a_dropdown_rows_more_button_opens_its_menu_over_the_open_dropdown() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.ui.tab = "MODEL".into();
+    h.frames(4);
+    h.step(&serde_json::json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+    h.frames(3);
+    // The ⋯ shows on the row under the pointer.
+    h.step(&serde_json::json!({"move":{"handle":"dropdown:solid.extrude"}})).unwrap();
+    h.frames(2);
+    h.step(&serde_json::json!({"click":{"handle":"dropdown_more:solid.extrude"}})).expect("a ⋯ on the Extrude row");
+    h.frames(2);
+    assert!(h.app.viewport.context_menu.is_some(), "the row's menu is open");
+    assert_eq!(h.app.menu.target, Target::ToolbarCommand { id: "solid.extrude".into() });
+    let open = h.ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")));
+    assert!(open.is_some(), "the drop-down stays open under the menu");
+}
+
 #[test]
 fn toolbar_pins_removes_reorders_and_keeps_its_layout() {
     use crate::toolbar_custom as tc;
