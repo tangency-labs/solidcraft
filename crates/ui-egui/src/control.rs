@@ -3624,11 +3624,15 @@ mod tests {
             assert_eq!(r["ok"], false, "{bad}: {r}");
             assert!(h.app.dialog.is_none(), "{bad}");
         }
-        for command in ["solid.extrude", "sketch.create", "inspect.zebra"] {
+        for command in ["solid.fillet", "sketch.create", "inspect.zebra"] {
             let r = h.call("ui.start", json!({"command": command, "params": {"distance": 5}}));
             assert!(r["ok"] == false && r["error"].as_str().unwrap().contains("takes no ui.start params"), "{r}");
             assert!(h.app.dialog.is_none() && h.app.tool.is_none() && h.app.session.analysis.is_none(), "{command} started nothing");
         }
+        // Extrude takes a sketch (#6940) and nothing else: an unknown param is refused by name.
+        let r = h.call("ui.start", json!({"command": "solid.extrude", "params": {"distance": 5}}));
+        assert!(r["ok"] == false && r["error"].as_str().unwrap().contains("unknown param `distance`"), "{r}");
+        assert!(h.app.dialog.is_none() && h.app.tool.is_none(), "Extrude started nothing");
     }
 
     /// #9087: the dialog is reported as data (its command, inputs and what OK runs), not as the
