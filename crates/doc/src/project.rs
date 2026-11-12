@@ -1394,15 +1394,17 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
             _ => Vec::new(),
         },
         Some(CurveKind::Spline { pts, control: false, periodic, nurbs: None, handles, .. }) if !handles.is_empty() => {
-            let source: Vec<Vec2> = pts.iter().map(|p| sk.point(*p).ok_or_else(|| DocError::Invalid("missing source spline point".into()))).collect::<Result<_>>()?;
-            let tangents: Vec<Vec2> = handles.iter().map(|p| sk.point(*p).ok_or_else(|| DocError::Invalid("missing source spline handle".into()))).collect::<Result<_>>()?;
+            let source: Vec<Vec2> =
+                pts.iter().map(|p| sk.point(*p).ok_or_else(|| DocError::Invalid("missing source spline point".into()))).collect::<Result<_>>()?;
+            let tangents: Vec<Vec2> = handles
+                .iter()
+                .map(|p| sk.point(*p).ok_or_else(|| DocError::Invalid("missing source spline handle".into())))
+                .collect::<Result<_>>()?;
             let pieces = solidcraft_sketch::fit_beziers_with_handles(&source, &tangents, *periodic).map_err(|e| DocError::Invalid(e.to_string()))?;
-            let scale = pieces.iter().flatten().fold(from.origin.len() + to.origin.len(), |s, p| s.max(p.len()));
-            let mut out = Vec::new();
-            for piece in pieces {
-                out.extend(projected_control_spline(piece.into_iter().map(map).collect(), 3, None, scale, edge_on)?);
-            }
-            coalesce_linear(out)
+            projection_links(
+                solidcore_ops::conic_projection::project_beziers(from, to, &pieces, edge_on, solidcraft_sketch::MAX_COORD)
+                    .map_err(|e| DocError::Invalid(e.to_string()))?,
+            )?
         }
         Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, .. }) => {
             let source: Vec<Vec2> =

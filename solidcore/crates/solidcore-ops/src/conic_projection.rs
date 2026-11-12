@@ -188,6 +188,23 @@ fn coalesce_linear(geometry: Vec<Projection>) -> Vec<Projection> {
         .collect()
 }
 
+/// Project exact cubic spans, retaining one image per span and merging complete linear images.
+pub fn project_beziers(
+    source: &Plane,
+    target: &Plane,
+    pieces: &[[Vec2; 4]],
+    collapse: bool,
+    max_coord: f64,
+) -> Result<Vec<Projection>> {
+    let mut out = Vec::new();
+    for piece in pieces {
+        out.extend(project_control(
+            source, target, piece, 3, None, collapse, max_coord,
+        )?);
+    }
+    Ok(coalesce_linear(out))
+}
+
 /// Fit the source spline exactly, project its controls, and retain its complete image.
 pub fn project_fit(
     source: &Plane,

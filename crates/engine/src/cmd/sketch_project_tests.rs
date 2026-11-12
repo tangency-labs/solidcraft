@@ -1027,6 +1027,42 @@ fn projection_fidelity_keeps_the_full_edge_on_circle_interval() {
 }
 
 #[test]
+fn projection_fidelity_follows_tangent_handle_edits_through_reload_and_undo() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Source"}));
+    run(&mut s, "sketch.spline.fit_point", json!({"points":[[0,0],[8,13],[20,-2]]}));
+    let handle = run(&mut s, "sketch.spline.handles", json!({"curve":"s1"}))["handles"][1].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let target = run(&mut s, "sketch.create", json!({"plane":{"x_dir":[0.8,0,0.6],"y_dir":[0,1,0]},"name":"Target"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs":[{"sketch":"Source","curve":"s1"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let controls = |session: &Session| {
+        let state = session.model.state();
+        let sk = &state.sketch(target).unwrap().sketch;
+        assert_eq!(sk.curves.len(), 2);
+        assert!(!sk.links[0].lost);
+        sk.curves
+            .iter()
+            .map(|curve| {
+                let solidcraft_sketch::CurveKind::Spline { pts, control: true, .. } = &curve.kind else { panic!("not an exact spline") };
+                (curve.id.clone(), pts.iter().map(|p| sk.point(*p).unwrap()).collect::<Vec<_>>())
+            })
+            .collect::<Vec<_>>()
+    };
+    let original = controls(&s);
+    run(&mut s, "sketch.edit", json!({"sketch":"Source"}));
+    run(&mut s, "sketch.move_point", json!({"point":handle,"to":[15,4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let edited = controls(&s);
+    assert_ne!(original, edited);
+    assert_eq!(original.iter().map(|c| &c.0).collect::<Vec<_>>(), edited.iter().map(|c| &c.0).collect::<Vec<_>>());
+    let reloaded = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(edited, controls(&reloaded));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(original, controls(&s));
+}
+
+#[test]
 fn projection_fidelity_refreshes_a_split_fit_spline_after_source_edit_and_reload() {
     let mut s = Session::default();
     let points: Vec<_> = (0..498).map(|i| [i as f64 * 0.1, (i as f64 * 0.07).sin()]).collect();

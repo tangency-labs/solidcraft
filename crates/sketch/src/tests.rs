@@ -1978,7 +1978,9 @@ fn reversing_a_spline_preserves_a_narrow_end_knot() {
     let nurbs = Nurbs { knots: vec![0., 0., 0., 1e-18, 1., 1., 1.], weights: vec![1., 2., 3., 1.] };
     nurbs.check(4, 2).unwrap();
     let pts = controls.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-    let ci = sk.add_curve(CurveKind::Spline { pts, control: true, degree: 2, periodic: false, nurbs: Some(nurbs.clone()) }, None).unwrap();
+    let ci = sk
+        .add_curve(CurveKind::Spline { pts, control: true, degree: 2, periodic: false, nurbs: Some(nurbs.clone()), handles: Vec::new() }, None)
+        .unwrap();
     sk.reverse_spline(ci).unwrap();
     let CurveKind::Spline { pts, nurbs: Some(back), .. } = &sk.curves[ci].kind else { panic!("not an exact spline") };
     back.check(4, 2).unwrap();
