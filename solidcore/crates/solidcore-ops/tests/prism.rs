@@ -1026,6 +1026,32 @@ fn a_bent_edge_crossing_its_neighbour_by_their_corner_leaves_no_sliver() {
     }
 }
 
+/// Two disjoint squares intersect in nothing: the kernel's 2D boolean answers with a sheet of no
+/// faces, which is an empty result, not a sheet to read back (that refused with a query failure).
+#[test]
+fn disjoint_squares_intersect_in_nothing() {
+    let a = rectangle(v(0., 0.), v(10., 10.));
+    let b = rectangle(v(20., 0.), v(30., 10.));
+    for (x, y) in [(&a, &b), (&b, &a)] {
+        let out = planar_regions_boolean(
+            std::slice::from_ref(x),
+            std::slice::from_ref(y),
+            BooleanOp::Intersect,
+            1e-7,
+        );
+        assert_eq!(out, Ok(vec![]));
+    }
+    let union = planar_regions_boolean(
+        std::slice::from_ref(&a),
+        std::slice::from_ref(&b),
+        BooleanOp::Union,
+        1e-7,
+    )
+    .unwrap();
+    assert_eq!(union.len(), 2);
+    assert!(union.iter().all(|r| (area(r) - 100.0).abs() < 1e-9));
+}
+
 #[test]
 fn planar_region_api_rejects_hostile_values_and_budgets() {
     all_fixes();

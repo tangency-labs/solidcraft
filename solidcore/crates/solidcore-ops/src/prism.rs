@@ -61,11 +61,12 @@ fn op2(op: BooleanOp) -> Boolean2d {
     }
 }
 
-/// `a` op `b` (the kernel's 2D boolean); `None` when nothing is left.
+/// `a` op `b` (the kernel's 2D boolean); `None` when nothing is left: no result assigned, or a
+/// result with no faces (two disjoint operands intersected).
 fn combine(k: &mut Kernel, a: Brep, b: Brep, op: BooleanOp) -> solidcore::Result<Option<Brep>> {
     Ok(match boolean_2d(k, a, b, op2(op))? {
-        Boolean2dOutcome::Result(r) => Some(r),
-        Boolean2dOutcome::Unassigned { .. } => None,
+        Boolean2dOutcome::Result(r) if !r.face_list().is_empty() => Some(r),
+        Boolean2dOutcome::Result(_) | Boolean2dOutcome::Unassigned { .. } => None,
     })
 }
 
