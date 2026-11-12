@@ -1303,7 +1303,10 @@ fn sketch_options_and_compass_share_measured_clearance() {
                 h.settle();
                 let dialog = h.app.viewport.dialog_rect.unwrap();
                 let viewport = h.app.viewport.rect.unwrap();
-                assert!((viewport.right() - dialog.right() - SHELL_GAP).abs() < 2.0, "the floating editor opens at the right: {dialog:?}");
+                assert!(
+                    (palette.left() - dialog.right() - SHELL_GAP).abs() < 2.0,
+                    "the floating editor opens beside Sketch Options: {dialog:?} / {palette:?}"
+                );
                 assert!(viewport.contains_rect(dialog));
             }
         }

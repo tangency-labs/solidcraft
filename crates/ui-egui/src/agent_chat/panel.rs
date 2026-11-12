@@ -3110,11 +3110,13 @@ mod tests {
     fn the_first_frame_after_opening_shows_the_agents_being_detected() {
         let ctx = crate::fonts::test_context();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        app.preferences.agent_chat_popped = true;
         toggle(&mut app);
         assert!(app.agent_chat.open && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none());
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 800.0))), ..Default::default() };
-        let mut output = ctx.run_ui(input, |ui| show(&mut app, ui));
+        let mut output = ctx.run_ui(input, |ui| {
+            prepare_shared(&mut app, ui.ctx());
+            shared_content(&mut app, ui, Flow::Tall);
+        });
         let detecting = tr("ui.agent_chat_detecting");
         let shown = crate::test_support::text_shapes(&output).any(|text| text.galley.text() == detecting);
         output.textures_delta.clear();

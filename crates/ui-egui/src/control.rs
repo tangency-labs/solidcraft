@@ -2144,7 +2144,9 @@ mod tests {
         assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), before);
         click_visible_guard(&mut h, &guard);
         h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-        assert!(h.app.panel_runtime().is_none());
+        let layout = h.app.panel_runtime().unwrap().layout().layout();
+        let browser = solidcraft_engine::panels::InstanceId::new("browser").unwrap();
+        assert!(layout.instance(&browser).is_ok(), "the workspace restores production panels after teardown");
     }
 
     #[test]

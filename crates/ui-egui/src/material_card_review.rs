@@ -56,8 +56,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let side = crate::frame::Side::Right;
-    let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
-    let docked = egui::pos2(side.anchor_x(viewport), top);
+    let (_, docked) = crate::shell::floating_editor_anchor(app, ctx);
     let title = tr("ui.material_review.title");
     let moved = crate::frame::dock_offset(ctx, "material_card_review");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
@@ -70,7 +69,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         side,
         ui_kit::Panel::feature_frame(ctx, app.ui.layout, side),
     )
-    .wide();
+    .width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min((docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W)));
     let mut close = false;
     panel.window(ctx).show(ctx, |ui| {
         let (closed, action) = panel.feature(

@@ -5496,7 +5496,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else if app.viewport.gpu_unavailable {
         unavailable_note(app, &painter, rect);
     }
-    let overlay_rect = rect;
+    let overlay_rect = crate::shell::bottom_readout_rect(app, rect);
     crate::viewport_details::legacy_legends(app, ui, overlay_rect);
     placement_note(app, &painter, overlay_rect);
     crate::frame_rate::paint(app, ui, &painter, overlay_rect);
@@ -6153,8 +6153,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // The operations under way first, then the selection's measurement in the corner (clear of
     // them), then the notices and the agent chip above both, so the 3D mouse picture can keep
     // clear of them all.
-    crate::operations::show(app, ui, rect);
-    let readout = quick_measure_readout(app, ui, rect);
+    crate::operations::show(app, ui, overlay_rect);
+    let readout = quick_measure_readout(app, ui, overlay_rect);
     let mut toasts = transient_messages(app, ui, rect, readout);
     toasts.extend(app.operations.rect);
     if app.preferences.space_mouse_in_view
@@ -13023,16 +13023,10 @@ mod tests {
             h.call("ui.move", field.clone());
             h.call("ui.click", field);
             assert!(handle_at(&item).is_none(), "the list must close");
-            // Floating cards sit inside the full viewport. Probe their actual edges; the
-            // content anchor also reserves gaps and space below the short browser card.
-            // Docked panels end at the viewport boundary instead.
-            let (browser_edge, mid, history_edge) = if layout == crate::ui_kit::LayoutMode::Floating {
-                let browser = h.app.shell.browser.expect("the floating browser card");
-                let history = h.app.shell.history.expect("the floating history card");
-                (browser.right(), browser.center().y, history.top())
-            } else {
-                (vp.left(), vp.center().y, vp.bottom())
-            };
+            // The shared host leaves the viewport domain intact in both shell layouts.
+            let browser = h.app.shell.browser.expect("the browser panel");
+            let history = h.app.shell.history.expect("the history panel");
+            let (browser_edge, mid, history_edge) = (browser.right(), browser.center().y, history.top());
             let x = vp.center().x;
             for p in [
                 pos2(dialog.left() + 2.0, dialog.center().y),

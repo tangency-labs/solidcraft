@@ -12910,8 +12910,6 @@ mod settings_search_tests {
             h.call("ui.resize", serde_json::json!({"width":width,"height":1100}));
             h.call("ui.prefs", serde_json::json!({"language":"en","open":"Layout"}));
             for (query, native) in [
-                ("History", None),
-                ("Browser", None),
                 ("Components start open", Some((Role::CheckBox, "prefs:browser_components_open"))),
                 ("Menus", None),
                 ("Highlight active commands", Some((Role::CheckBox, "prefs:persistent_ribbon_pressed"))),
@@ -13369,7 +13367,6 @@ mod settings_search_tests {
             ("play history", "Play History button"),
             ("view's corner", "Also in the view's corner"),
             ("highlight active", "Highlight active commands"),
-            ("On hover", "On hover"),
         ];
         for (query, label) in rows {
             h.app.prefs_window.shell.filter = query.into();

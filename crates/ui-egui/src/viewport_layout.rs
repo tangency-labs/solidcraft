@@ -336,6 +336,15 @@ pub(crate) fn fit_host_bounds(
     fov: f64,
     share: f64,
 ) -> Option<Camera> {
+    let room = host_framing_room(cam, bounds, layout, usable)?;
+    let mut target = layout.clone();
+
+    target.drawable = room;
+    target.middle = room;
+    fit_bounds_sized(cam, bounds, &target, fov, share)
+}
+
+fn host_framing_room(cam: Camera, bounds: &Aabb3, layout: &Layout, usable: &crate::panel_runtime::HostUsableRegion) -> Option<Rect> {
     use crate::panel_runtime::egui_rect;
     use solidcraft_engine::panels::Point;
     if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() || !cam.is_valid() {
@@ -356,13 +365,7 @@ pub(crate) fn fit_host_bounds(
         solidcraft_theme::Tokens::get().space_8,
     )?;
     let room = egui_rect(room);
-    if !room.is_positive() {
-        return None;
-    }
-    let mut target = layout.clone();
-    target.drawable = room;
-    target.middle = room;
-    fit_bounds_sized(cam, bounds, &target, fov, share)
+    room.is_positive().then_some(room)
 }
 
 /// Reposition an explicitly selected focus at the current zoom. Perspective
@@ -468,6 +471,9 @@ fn framing_point(layout: &Layout, hx: f64, hy: f64, hh: f64) -> Pos2 {
 /// Where Home and Fit put the middle of `bounds` on screen for `cam`'s direction in this layout, or `None` when
 /// they could not frame it.
 pub(crate) fn framing_centre(cam: Camera, bounds: &Aabb3, layout: &Layout) -> Option<Pos2> {
+    if let Some(usable) = &layout.usable {
+        return host_framing_room(cam, bounds, layout, usable).map(|room| room.center());
+    }
     if bounds.is_empty()
         || !bounds.min.is_finite()
         || !bounds.max.is_finite()

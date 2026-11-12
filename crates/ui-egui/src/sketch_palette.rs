@@ -375,8 +375,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     let draw_body = |ui: &mut egui::Ui| {
         let t = Tokens::get();
-        crate::ui_kit::text(ui, &status, crate::ui_kit::Text::Report("sketch_constraints", !solved));
+        let status_label = crate::ui_kit::text(ui, &status, crate::ui_kit::Text::Report("sketch_constraints", !solved));
         let meter = crate::ui_kit::progress(ui, "sketch_palette", fraction);
+        crate::scenario::publish_target("sketch_palette:status_header", status_label.rect.union(meter.rect).intersect(ui.clip_rect()));
         crate::scenario::publish_rect("sketch_palette:meter", meter.rect);
         crate::scenario::publish_count("sketch_palette:constrained_fraction", f64::from(fraction));
         if open_ends > 0 {

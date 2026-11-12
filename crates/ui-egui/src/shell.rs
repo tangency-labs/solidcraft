@@ -117,6 +117,21 @@ pub(crate) fn workspace_content(app: &SolveApp, content: Rect) -> Rect {
         .map_or(content, |rect| crate::panel_runtime::egui_rect(rect).intersect(content))
 }
 
+/// Keep bottom readouts above the current shared-host bottom panels.
+pub(crate) fn bottom_readout_rect(app: &SolveApp, mut viewport: Rect) -> Rect {
+    use solidcraft_engine::panels::Zone;
+    let Some(frame) = app.universal_panel_frame() else { return viewport };
+    let gap = Tokens::get().space_8;
+    for section in &frame.layout.sections {
+        let bounds = crate::panel_runtime::egui_rect(section.outer);
+        let is_bottom_history = section.zone == Zone::Floating && section.instance.0 == "history" && bounds.center().y >= viewport.center().y;
+        if (section.zone == Zone::Bottom || is_bottom_history) && bounds.intersect(viewport).is_positive() {
+            viewport.max.y = within(bounds.top() - gap, viewport.top(), viewport.bottom());
+        }
+    }
+    viewport
+}
+
 /// Tool sheets may cover Browser and History, while shell chrome and Assistant stay clear.
 /// Assistant's outside-rail exception stays in its owner.
 pub(crate) fn tool_drag_rect(app: &SolveApp, placement: Rect) -> Rect {

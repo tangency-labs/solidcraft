@@ -514,10 +514,7 @@ fn orbit_after_home_turns_the_model_in_place_beside_the_browser() {
         h.app.ui.show_browser = browser;
         h.settle();
         assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
-        let layout = h.app.viewport.layout.clone().unwrap();
-        let middle = layout.middle.center();
-        let aside = middle.x - layout.viewport.center().x;
-        assert_eq!(aside > 50.0, browser, "browser {browser}: the middle of the free view is {aside} pt right of the view's centre");
+        assert_eq!(h.app.shell.browser.is_some(), browser, "exercise both Browser visibility states");
         h.app.animate_view("home");
         h.settle();
         let rect = h.app.viewport.rect.unwrap();
@@ -526,6 +523,7 @@ fn orbit_after_home_turns_the_model_in_place_beside_the_browser() {
         let middle =
             crate::viewport_layout::framing_centre(h.app.cam, &crate::viewport::view_bounds(&h.app), h.app.viewport.layout.as_ref().unwrap())
                 .unwrap();
+        assert!(!crate::shell::covered(&h.app, middle), "the framing point is in free canvas");
         let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
         // The model's middle, and the point at the camera target's depth under the free view's middle.
         let centre = crate::viewport::view_bounds(&h.app).center();

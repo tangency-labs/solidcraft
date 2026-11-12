@@ -4134,7 +4134,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title_of(&d))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
-    let panel = if manager { panel.width(card_width(&d)) } else { panel.width(card_width(&d) + label_grow).grow_label(grow_key) };
+    let max_width = (docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W);
+    let panel = if manager {
+        panel.width(card_width(&d).min(max_width))
+    } else {
+        panel.width((card_width(&d) + label_grow).min(max_width)).grow_label(grow_key)
+    };
     let reset_scroll = d.reset_scroll;
     let panel =
         panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));

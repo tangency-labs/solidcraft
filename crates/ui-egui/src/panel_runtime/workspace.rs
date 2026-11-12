@@ -2456,6 +2456,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 ),
                                 control.id,
                             )),
+                            HostPointerTarget::HeaderAction { instance, .. } if secondary => {
+                                if let Some(at) = response.interact_pointer_pos() {
+                                    self.frame_content.header_action_context_menu(instance, at);
+                                }
+                            }
                             HostPointerTarget::Menu { instance } => self.commands.push(HostCommand::OpenMenu {
                                 menu: HostMenu::Panel(instance.clone()),
                                 anchor: control.bounds,

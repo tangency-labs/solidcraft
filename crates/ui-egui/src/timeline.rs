@@ -2874,10 +2874,9 @@ mod tests {
                 assert_eq!(rect_of("history:card").unwrap().bottom(), viewport.bottom() - crate::ui_kit::SHELL_GAP);
             } else {
                 let strip = rect_of("history:strip").unwrap();
-                assert_eq!(strip.top(), viewport.bottom());
-                assert_eq!(strip.bottom(), h.ctx.content_rect().bottom());
-                assert_eq!(strip.left(), 0.0);
-                assert_eq!(strip.height(), 40.0);
+                assert!(viewport.contains_rect(strip), "the strip overlays the viewport");
+                assert_eq!(strip.bottom(), viewport.bottom());
+                assert_eq!(strip.left(), viewport.left());
             }
             h.step(&json!({"click":{"handle":"timeline:First"}})).unwrap();
             h.step(&json!({"click":{"handle":"timeline:Second"},"ctrl":true})).unwrap();

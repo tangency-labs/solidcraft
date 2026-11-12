@@ -244,8 +244,7 @@ fn an_empty_bar_has_the_marker_at_its_start_and_returns_only_its_drop() {
     let rig = Rig::new(&[], 0);
     assert_eq!(rig.frame(Vec::new()), Vec::new());
     let marker = rig.marker();
-    let first = rig.at("test:ctl:last");
-    assert!(marker.x > first.x, "the marker after the controls");
+    assert!((marker.x - rig.rect.left() - Tokens::get().space_12 / 2.0).abs() <= 1.0, "the empty strip starts at its marker");
     assert_eq!(rig.drag(marker, marker + vec2(80.0, 0.0)), vec![Action::Seek { slot: 0, before: false }]);
 }
 

@@ -236,7 +236,7 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
                 .iter()
                 .map(|item| match item {
                     Tile::Custom => app.tr("ui.panel_layout.custom"),
-                    Tile::Saved(entry) => entry.name.as_str(),
+                    Tile::Saved(entry) => preset_label(app, view, entry),
                     Tile::Save => app.tr("ui.panel_layout.save_as_tile"),
                 })
                 .collect();
@@ -344,6 +344,15 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
     });
 }
 
+fn preset_label<'a>(app: &'a SolveApp, view: &'a LayoutPreferencesView, entry: &'a LayoutPreferenceEntry) -> &'a str {
+    if !entry.user
+        && let Some(workspace) = view.workspaces.iter().find(|workspace| workspace.id == entry.layout.workspace)
+    {
+        return app.tr(&workspace.title_key);
+    }
+    &entry.name
+}
+
 fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesView, state: &State, focused: bool) -> Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(TILE_WIDTH, TILE_HEIGHT), Sense::CLICK);
@@ -352,7 +361,7 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
         Tile::Custom => (app.tr("ui.panel_layout.custom"), true, t.pref_note_fill, t.form_ink),
         Tile::Saved(entry) => {
             let selected = entry.matches && state.source_name.as_ref().map_or(entry.selected, |name| name == &entry.name);
-            (entry.name.as_str(), selected, if selected { t.selected_bg } else { t.pref_well }, t.form_ink)
+            (preset_label(app, view, entry), selected, if selected { t.selected_bg } else { t.pref_well }, t.form_ink)
         }
         Tile::Save => (app.tr("ui.panel_layout.save_as_tile"), false, t.pref_well, t.form_primary),
     };

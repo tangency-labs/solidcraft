@@ -1307,6 +1307,12 @@ pub(crate) struct ProductionFrame<'a> {
     pub(super) state: ProductionState,
 }
 impl FramePanelContent for ProductionFrame<'_> {
+    fn header_action_context_menu(&mut self, instance: &InstanceId, at: egui::Pos2) {
+        if instance.0 == Product::History.id() {
+            crate::context_menu::open_for(self.app, at, crate::context_menu::Target::HistoryControls);
+        }
+    }
+
     fn render(
         &mut self,
         slot: ContentSlot,

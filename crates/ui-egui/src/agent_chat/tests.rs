@@ -3856,6 +3856,8 @@ fn assistant_marks_follow_chat_login_turns_and_approvals() {
 #[test]
 fn an_agent_without_the_design_tools_is_not_shown_as_ready() {
     let mut h = crate::scenario::Harness::new();
+    // The status badge belongs to the independent Assistant window.
+    h.app.preferences.agent_chat_popped = true;
     h.call("ui.agent_chat", json!({"open": true}));
     h.app.agent_chat.set_state(State::Ready);
     h.app.agent_chat.tools_available = Some(true);
