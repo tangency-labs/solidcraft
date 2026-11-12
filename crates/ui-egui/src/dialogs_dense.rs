@@ -1045,7 +1045,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                     start.clear();
                 }
             });
-            enter |= hint_row(ui, if *fraction { "  Position (0 to 1)" } else { "  Distance" }, start, "0");
+            // Both labels about as wide as the dialog's others: switching keeps the label column
+            // where it is, so the rows don't shift and Start point's choice stays two buttons.
+            enter |= hint_row(ui, if *fraction { "  Position" } else { "  Distance" }, start, "0");
             // Identical: copies keep the original's orientation; Path direction: they turn with
             // the path, keeping the original's relation to it.
             form_row(ui, "Orientation", |ui| {
