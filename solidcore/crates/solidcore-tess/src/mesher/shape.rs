@@ -358,10 +358,18 @@ pub(crate) fn shape(
     // The sides points would encroach on, by their nodes in index order.
     let mut encroached: std::collections::BTreeMap<(u32, u32), (u32, u32)> = std::collections::BTreeMap::new();
     let mut added = 0usize;
+    // The triangles (their nodes, sorted) given up on for a ring side they may not split: they
+    // stay given up whatever changes round them, so no point is spent on them again.
+    let mut dead: std::collections::BTreeSet<[u32; 3]> = std::collections::BTreeSet::new();
+    let sorted = |t: [u32; 3]| {
+        let mut t = t;
+        t.sort_unstable();
+        t
+    };
     let mut queue: VecDeque<u32> = (0..m.tris.len()).filter_map(|t| u32::try_from(t).ok()).collect();
     while let Some(ti) = queue.pop_front() {
         let Some(&t) = m.tris.get(ti as usize) else { continue };
-        if m.stuck.get(ti as usize).copied().unwrap_or(true) || m.is_frozen(ti) || m.collapsed(t) {
+        if m.stuck.get(ti as usize).copied().unwrap_or(true) || m.is_frozen(ti) || m.collapsed(t) || dead.contains(&sorted(t)) {
             continue;
         }
         let (Some([a, b, c]), Some([qa, qb, qc])) = (m.corners(t), m.params(t)) else { continue };
@@ -463,7 +471,10 @@ pub(crate) fn shape(
                         queue.extend(flipped);
                         queue.push_back(ti);
                     }
-                    _ => give_up(&mut m, ti, Some(ShapeLimit::SidesOnNoEdge), &mut limits),
+                    None => {
+                        dead.insert(sorted(t));
+                        give_up(&mut m, ti, Some(ShapeLimit::SidesOnNoEdge), &mut limits);
+                    }
                 }
                 continue;
             }
