@@ -294,15 +294,21 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 /// A concave blend (a round or a chamfer) on one straight edge whose contact line runs off the
 /// flat face it rolls on (the face's outline turns away there, into a rounded corner or an
 /// opening), which SMLib refuses (solidcore#3252): `blend` of the edge on the body with that face
-/// carried on as a slab behind its plane, over the edge's length, the material that blend adds
-/// kept within the face's outline (its sheet thickened along its normal) and joined to the body.
-/// So the blend ends where the face's outline ends, on the surface of whatever the face turns
-/// into there, carried on square to the face. `reach`: how far the blend reaches from the edge
-/// (a round's radius, a chamfer's larger distance), which sizes the slab and the sheet's prism.
+/// carried on as a slab behind its plane, over the edge's length, and of the material that blend
+/// adds, what stands over the face's outline (its sheet thickened along its normal) and what
+/// stands past the edge's line, on the other face's side of it (a box on that side of the line,
+/// over the edge's length), joined to the body. So the blend ends where the face's outline ends,
+/// on the surface of whatever the face turns into there, carried on square to the face, and is
+/// whole where it stands over the other face (leaning back, or curving away behind the edge's
+/// line). The sheet's prism and the box reach as far either way from the plane, and the box as
+/// far from the edge's line, as the added material's own exact box is across, and a margin more:
+/// that material touches the edge, so none of it stands further off. `reach`: how far the blend
+/// reaches from the edge (a round's radius, a chamfer's larger distance), which sizes the slab.
 ///
 /// Only where it gives the blend SMLib would build on an unbounded face: the edge is straight,
 /// one of its faces is planar and it is concave (material in front of that face on the other
-/// face's side), and at each end of the edge a planar face square to it ends the blend, so the
+/// face's side, and in its plane on one side of the edge's line only, the other face's), and
+/// at each end of the edge a planar face square to it ends the blend, so the
 /// slab's square ends add no material the blend could run into. `None` where it does not apply
 /// or a step fails: the caller keeps SMLib's refusal. Decided on exact geometry. Its steps are
 /// checked as they are built whatever the evaluation checks, also under `Validation::Off`.
@@ -358,6 +364,13 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
         if !(inside(middle + n * eps + u * eps) || inside(middle + n * eps - u * eps)) {
             continue;
         }
+        // The side of the edge's line, in the plane, that the other face stands on: the
+        // material is there, and the flat face lies on the other.
+        let along_u = match (inside(middle + u * eps), inside(middle - u * eps)) {
+            (true, false) => true,
+            (false, true) => false,
+            _ => continue,
+        };
         let far = 4.0 * (size + reach);
         let plane = Plane { origin: a, x: d, y: u };
         let rect = Loop2::polygon(&[Vec2::new(0.0, -far), Vec2::new(length, -far), Vec2::new(length, far), Vec2::new(0.0, far)]);
@@ -367,8 +380,18 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
         let fill = crate::boolean(&rounded, &carried, crate::BoolOp::Cut).ok()??;
         // the face itself, by its index, for its sheet
         let sheet = crate::surfaces::taken(body, &rec.rec, &[(f, false)]).ok()?;
-        let prism = crate::thicken(&sheet, 4.0 * (reach + size * 1e-3 + 1.0), true).ok()?;
-        let kept = crate::boolean(&fill, &prism, crate::BoolOp::Intersect).ok()??;
+        // The fill touches the edge, so it stands no further off the face's plane or the edge's
+        // line than its own box is across.
+        let bounds = fill.exact_bounds().ok()?;
+        let room = bounds.min.dist(bounds.max) + size * 1e-3 + 1.0;
+        let prism = crate::thicken(&sheet, 2.0 * room, true).ok()?;
+        // Past the edge's line the fill stands over the other face, not over the flat face's
+        // outline, and is kept whole.
+        let (from, to) = if along_u { (0.0, room) } else { (-room, 0.0) };
+        let beyond = Loop2::polygon(&[Vec2::new(0.0, from), Vec2::new(length, from), Vec2::new(length, to), Vec2::new(0.0, to)]);
+        let beyond = crate::build::extrude(&plane, &[Region2 { outer: beyond, holes: vec![] }], -room, room).ok()?.into_iter().next()?;
+        let keep = crate::boolean(&prism, &beyond, crate::BoolOp::Union).ok()??;
+        let kept = crate::boolean(&fill, &keep, crate::BoolOp::Intersect).ok()??;
         let joined = crate::boolean(body, &kept, crate::BoolOp::Union).ok()??;
         let joined = closed(body, joined).ok()?;
         let grew = |x: &Body| crate::measure(x).ok().map(|m| m.volume);
@@ -1624,6 +1647,180 @@ mod tests {
             let (_, _, area) = boss_chamfer_section(d);
             assert!(v > last && (24.0 * area - (v - before)).abs() < 0.01, "{d}: {v}");
             last = v;
+        }
+    }
+
+    /// What carrying the face on leaves out of a chamfer with contacts `p` on the plate and `q`
+    /// on the boss: the part of its section past the r16 corner's arc, none where `p` is short of
+    /// x 32.5. At x = 32.5 + u the section is as thick as the chamfer's line stands off the plate
+    /// there, `(a - u)` times the line's slope with `a = p.x - 32.5`, and the arc is
+    /// `16 - sqrt(256 - u^2)` below the plate's top: their product integrated over u from 0 to a.
+    fn past_corner_arc(p: (f64, f64), q: (f64, f64)) -> f64 {
+        assert!(q.0 < 32.5, "the chamfer's line runs from the boss past x 32.5");
+        let a = (p.0 - 32.5).max(0.0);
+        let root = (256.0 - a * a).sqrt();
+        let slope = (p.1 - q.1) / (p.0 - q.0);
+        slope * (8.0 * a * a - a * (0.5 * a * root + 128.0 * (a / 16.0).asin()) + (4096.0 - root.powi(3)) / 3.0)
+    }
+
+    /// The round `r` of the boss's base edge on the rounded plate: its centre is `r` off the
+    /// plate's front face and off the boss's cylinder. Its contact on the plane `p` and on the
+    /// boss's circle `t` (in xy), and the area of its section: the triangle of the edge, `p` and
+    /// `t`, less the round's segment on `p t` and the boss's segment on the edge and `t`.
+    fn boss_round_section(r: f64) -> ((f64, f64), (f64, f64), f64) {
+        let (cx, cy, big, yp): (f64, f64, f64, f64) = (14.388009991673611, -14.038301415494109, 12.90348790056394, -10.5);
+        let ex = cx + (big * big - (yp - cy).powi(2)).sqrt();
+        let (bx, by) = (cx + ((big + r).powi(2) - (yp - r - cy).powi(2)).sqrt(), yp - r);
+        let (p, t) = ((bx, yp), (cx + (bx - cx) * big / (big + r), cy + (by - cy) * big / (big + r)));
+        let triangle = 0.5 * ((p.0 - ex) * (t.1 - yp) - (t.0 - ex) * (p.1 - yp)).abs();
+        // the round's arc turns from straight up at `p` to the direction of the boss's axis
+        let round = ((cy - by) / (big + r)).acos();
+        let boss = (yp - cy).atan2(ex - cx) - (t.1 - cy).atan2(t.0 - cx);
+        (p, t, triangle - 0.5 * r * r * (round - round.sin()) - 0.5 * big * big * (boss - boss.sin()))
+    }
+
+    /// How many faces of `out` were made in place of the edge `pick` takes on `body`.
+    fn faces_from_edge(out: &Body, body: &Body, pick: Vec3) -> usize {
+        let (picked, _) = crate::blend_smlib::picked_edges(body, &[pick]).unwrap();
+        let from = [crate::history::FaceOrigin::Edge { operand: 0, edge: picked[0] }];
+        out.history().expect("a history").faces.iter().filter(|f| f.origins == from).count()
+    }
+
+    /// The boss curves away behind the line of its base edge: its circle is back at the edge's x
+    /// (26.797) 7.08 in front of the plate. A chamfer whose contact on the boss lies past there
+    /// (equal distances from 12.92 on) stands over the boss there, not over the plate's face,
+    /// and is whole there all the same: chamfered 13, 14 and 16 its material is its section over
+    /// the boss's 24 mm less the part past the corner's arc, its contact line on the boss runs
+    /// the boss's height, and it is one face.
+    #[test]
+    fn a_concave_chamfer_is_whole_where_it_stands_over_the_boss() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap().volume;
+        for d in [13.0, 14.0, 16.0] {
+            assert!(matches!(chamfer(&body, &[BOSS_EDGE], d), Err(KernelError::TooLarge(_))), "SMLib refuses {d}");
+            let out = chamfer_carrying_face(&body, &[BOSS_EDGE], d).unwrap_or_else(|e| panic!("{d}: {e}"));
+            let (p, q, area) = boss_chamfer_section(d);
+            assert!(q.0 < BOSS_EDGE.x, "{d}: the contact on the boss is behind the edge's line");
+            let m = crate::measure(&out).unwrap();
+            let (added, full) = (m.volume - before, 24.0 * area - past_corner_arc(p, q));
+            assert!(m.shells == 1 && (full - added).abs() < 5e-4, "{d}: added {added} of {full}");
+            for z in [0.0, -24.0] {
+                assert!(has_vertex(&out, Vec3::new(q.0, q.1, z), 1e-6), "{d}: no vertex on the boss at z {z}");
+            }
+            assert_eq!(faces_from_edge(&out, &body, BOSS_EDGE), 1, "{d}");
+        }
+    }
+
+    /// A round likewise, from a radius of 9.75 on: rounded 10.5, 12 and 14 its contact line on
+    /// the boss, behind the edge's line, runs the boss's height, it is one face, and its material
+    /// is its section less the part past the corner's arc. That part has no closed form (over x
+    /// it is the round's height over the plate times the arc's drop below the plate's top, two
+    /// circles' heights), so it is bracketed. With `a` the contact's reach past x 32.5, the round
+    /// stands `w^2 / (r + sqrt(r^2 - w^2))` off the plate `w` short of its contact: at least
+    /// `w^2 / 2r`, at most `w^2 / a^2` of its height at x 32.5. The arc drops likewise, between
+    /// `v^2 / 32` and `v^2 / a^2` of its drop at the contact, and `w^2 (a - w)^2` integrates to
+    /// `a^5 / 30`. The bracket is narrower than what stands over the boss (0.004 against 0.019
+    /// mm³ at 10.5, 0.06 against 1.5 at 14). The section's closed form is SMLib's at radius 5.
+    #[test]
+    fn a_concave_round_is_whole_where_it_stands_over_the_boss() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap().volume;
+        let fits = crate::measure(&fillet(&body, &[BOSS_EDGE], 5.0).unwrap()).unwrap().volume - before;
+        assert!((fits - 24.0 * boss_round_section(5.0).2).abs() < 1e-3, "{fits}");
+        for r in [10.5, 12.0, 14.0] {
+            assert!(matches!(fillet(&body, &[BOSS_EDGE], r), Err(KernelError::TooLarge(_))), "SMLib refuses r {r}");
+            let (out, gone) = fillet_removing(&body, &[BOSS_EDGE], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("r {r}: {e}"));
+            assert!(gone.is_empty());
+            let (p, t, area) = boss_round_section(r);
+            assert!(t.0 < BOSS_EDGE.x, "r {r}: the contact on the boss is behind the edge's line");
+            let a = p.0 - 32.5;
+            let (height, drop) = (r - (r * r - a * a).sqrt(), 16.0 - (256.0 - a * a).sqrt());
+            let (least, most) = (a.powi(5) / (30.0 * 2.0 * r * 32.0), height * drop * a / 30.0);
+            let m = crate::measure(&out).unwrap();
+            let short = 24.0 * area - (m.volume - before);
+            assert!(m.shells == 1 && (least - 1e-3..=most + 1e-3).contains(&short), "r {r}: short by {short}, past the arc {least} to {most}");
+            for z in [0.0, -24.0] {
+                assert!(has_vertex(&out, Vec3::new(t.0, t.1, z), 1e-6), "r {r}: no vertex on the boss at z {z}");
+            }
+            assert_eq!(faces_from_edge(&out, &body, BOSS_EDGE), 1, "r {r}");
+        }
+    }
+
+    /// A plate 30 long and 10 thick, 20 deep, with a wall on its left: the wall's side rises
+    /// from the plate's top (the plane y = 10, from x 20 to its end at x 30) at (20, 10), `wedge`
+    /// degrees from the top and 20 long, and meets the top there in an inside edge along z.
+    fn walled_plate(wedge: f64) -> Body {
+        let (sin, cos) = wedge.to_radians().sin_cos();
+        let far = Vec2::new(20.0 + 20.0 * cos, 10.0 + 20.0 * sin);
+        let outline = [Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0), Vec2::new(30.0, 10.0), Vec2::new(20.0, 10.0), far, Vec2::new(0.0, far.y)];
+        crate::build::extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&outline), holes: vec![] }], 0.0, 20.0).unwrap().pop().unwrap()
+    }
+
+    /// The pick on the inside edge of [`walled_plate`].
+    const WALL_EDGE: Vec3 = Vec3::new(20.0, 10.0, 10.0);
+
+    /// Blends of [`walled_plate`]'s inside edge through where they run past the top's end at
+    /// x 30. A chamfer `d` is the triangle of its two sides, `d^2 sin(wedge) / 2`, and past the
+    /// end it loses its tip there, `d - 10` long and as high as its line stands off the top at
+    /// x 30. Up to 10 it is SMLib's; past it SMLib refuses it and carrying the top on builds it.
+    /// A round whose contacts are 12 from the edge (radius `12 tan(wedge / 2)`) is the kite of
+    /// the edge, its contacts and its centre less its sector, and loses what stands past x 30:
+    /// `r - sqrt(r^2 - w^2)` off the top, `w` from 0 to 2 short of its contact. Each blend is one
+    /// face, in one shell.
+    fn wall_blends_run_on_past_the_tops_end(wedge: f64) {
+        let body = walled_plate(wedge);
+        let before = crate::measure(&body).unwrap().volume;
+        let (sin, cos) = wedge.to_radians().sin_cos();
+        let mut last = before;
+        for d in [9.0, 9.9, 10.1, 12.0] {
+            let plain = chamfer(&body, &[WALL_EDGE], d);
+            let out = chamfer_carrying_face(&body, &[WALL_EDGE], d).unwrap_or_else(|e| panic!("{wedge}°, {d}: {e}"));
+            match plain {
+                Ok(plain) if d < 10.0 => {
+                    assert_eq!(crate::encode_native_body(&out).unwrap(), crate::encode_native_body(&plain).unwrap(), "{wedge}°, {d}")
+                }
+                Err(KernelError::TooLarge(_)) if d > 10.0 => {}
+                other => panic!("{wedge}°, {d}: SMLib gave {:?}", other.map(|_| ())),
+            }
+            let tip = (d - 10.0).max(0.0);
+            let full = 20.0 * 0.5 * (d * d * sin - tip * tip * sin / (1.0 - cos));
+            let m = crate::measure(&out).unwrap();
+            assert!(
+                m.shells == 1 && m.volume > last && (full - (m.volume - before)).abs() < 1e-6,
+                "{wedge}°, {d}: added {} of {full}",
+                m.volume - before
+            );
+            assert_eq!(faces_from_edge(&out, &body, WALL_EDGE), 1, "{wedge}°, {d}");
+            last = m.volume;
+        }
+        let half = wedge.to_radians() / 2.0;
+        let r = 12.0 * half.tan();
+        assert!(matches!(fillet(&body, &[WALL_EDGE], r), Err(KernelError::TooLarge(_))), "{wedge}°: SMLib refuses r {r}");
+        let (out, gone) = fillet_removing(&body, &[WALL_EDGE], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("{wedge}°, r {r}: {e}"));
+        assert!(gone.is_empty());
+        let section = 12.0 * r - r * r * (std::f64::consts::FRAC_PI_2 - half);
+        let past = 2.0 * r - (r * r - 4.0).sqrt() - 0.5 * r * r * (2.0 / r).asin();
+        let m = crate::measure(&out).unwrap();
+        let full = 20.0 * (section - past);
+        assert!(m.shells == 1 && (full - (m.volume - before)).abs() < 1e-6, "{wedge}°, r {r}: added {} of {full}", m.volume - before);
+        assert_eq!(faces_from_edge(&out, &body, WALL_EDGE), 1, "{wedge}°, r {r}");
+    }
+
+    /// With the wall's side leaning back 30° (a wedge of 120°) a blend stands over the wall's
+    /// foot, behind the line of the edge, and is whole there: where it runs past the top's end
+    /// it continues the blend SMLib builds below it.
+    #[test]
+    fn a_blend_in_a_wedge_wider_than_square_is_whole_over_the_other_face() {
+        wall_blends_run_on_past_the_tops_end(120.0);
+    }
+
+    /// With the wall's side upright, or leaning 30° over the top (wedges of 90° and 60°), no
+    /// blend stands behind the line of the edge, and the blends run on past the top's end as
+    /// they did.
+    #[test]
+    fn a_blend_in_a_wedge_up_to_square_runs_on_past_its_face() {
+        for wedge in [90.0, 60.0] {
+            wall_blends_run_on_past_the_tops_end(wedge);
         }
     }
 
