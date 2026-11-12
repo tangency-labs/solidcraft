@@ -300,8 +300,12 @@ fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&
     Err(bad(format!("no face at {at:?}")))
 }
 
-/// Does `at` lie on the surface of a mesh body, within the pick tolerance?
+/// Does `at` lie on the surface of a mesh body, within the pick tolerance? Only mesh bodies:
+/// their triangles are the body itself.
 fn lies_on_mesh(b: &ModelBody, at: Vec3) -> bool {
+    if !b.body.is_mesh() {
+        return false;
+    }
     let Some((positions, triangles)) = b.body.triangle_mesh() else { return false };
     let tol = crate::appearance::pick_tolerance(b);
     triangles.iter().any(|t| {
