@@ -741,9 +741,11 @@ fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) ->
     let side = |an: &Anchor, into: Vec2, base: f64, sign: f64, tangent: f64| -> Option<f64> {
         let region = &sheet.panels.get(an.panel)?.region;
         let flat = |p: Vec2| ((p - an.origin).dot(an.dir), base + sign * (p - an.origin).dot(into));
-        let lines: Vec<Vec<((f64, f64), (f64, f64))>> = std::iter::once(&region.outer)
+        // Each loop's segments in order, its lines laid out (a curve, `None`, has no line to
+        // carry on, and keeps its place: the side beside an edge is its neighbour in the loop).
+        let lines: Vec<Vec<Option<((f64, f64), (f64, f64))>>> = std::iter::once(&region.outer)
             .chain(&region.holes)
-            .map(|l| l.segs.iter().filter_map(|g| if let Seg2::Line { a: p, b: q } = *g { Some((flat(p), flat(q))) } else { None }).collect())
+            .map(|l| l.segs.iter().map(|g| if let Seg2::Line { a: p, b: q } = *g { Some((flat(p), flat(q))) } else { None }).collect())
             .collect();
         // Where a line meets the tangent line, near the end.
         let meets = |(p, q): ((f64, f64), (f64, f64))| -> Option<f64> {
@@ -758,14 +760,14 @@ fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) ->
         let mut beside: Option<(f64, f64)> = None;
         for segs in &lines {
             let n = segs.len();
-            for (k, &(p, q)) in segs.iter().enumerate() {
+            for (k, &(p, q)) in segs.iter().enumerate().filter_map(|(k, s)| s.as_ref().map(|s| (k, s))) {
                 if !(on_anchor(p) && on_anchor(q)) {
                     continue;
                 }
                 for (corner, next) in [(p, segs.get((k + n - 1) % n)), (q, segs.get((k + 1) % n))] {
                     // At the end: on it, or as far off it as the side's slant carries it from
                     // the `a` anchor's line to this one (a side laid on in the flat).
-                    let Some(&(g0, g1)) = next else { continue };
+                    let Some(&Some((g0, g1))) = next else { continue };
                     let (ds, dy) = (g1.0 - g0.0, g1.1 - g0.1);
                     let slant = if dy.abs() > 1e-9 * (ds.abs() + dy.abs()) { (ds / dy * base).abs() } else { 0.0 };
                     let off = (corner.0 - end).abs();
@@ -782,7 +784,7 @@ fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) ->
             return Some(s);
         }
         let mut found = None;
-        for &(p, q) in lines.iter().flatten() {
+        for &(p, q) in lines.iter().flatten().flatten() {
             let (ds, dy) = (q.0 - p.0, q.1 - p.1);
             if dy.abs() <= 1e-9 * (ds.abs() + dy.abs()) {
                 continue;

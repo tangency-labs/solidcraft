@@ -494,7 +494,7 @@ fn to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
 
 /// Whether the way `v` from an arc's center lies within the arc, from angle `start` round
 /// `sweep` (counter-clockwise where above 0).
-fn on_arc(v: Vec2, start: f64, sweep: f64) -> bool {
+pub(crate) fn on_arc(v: Vec2, start: f64, sweep: f64) -> bool {
     sweep.abs() >= TAU || ((v.y.atan2(v.x) - start) * sweep.signum()).rem_euclid(TAU) <= sweep.abs()
 }
 

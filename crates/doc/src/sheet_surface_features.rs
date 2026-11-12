@@ -302,15 +302,19 @@ impl SurfaceSheet {
         })
     }
 
-    /// Moves the edge `a`–`b` of panel `i` `by` mm outward (inward where negative): the panel
-    /// gains, or loses, the strip between. At each end the line of the outline beside the edge
-    /// is followed to the edge's new line (on a slanted edge the strip is a parallelogram); where
-    /// that line is round, or runs nearly along the edge, the end moves square to it.
-    fn move_edge(&mut self, i: usize, (a, b, d): (Vec2, Vec2, Vec2), by: f64) -> Result<()> {
+    /// Moves the edge `a`–`b` of panel `i` `by` mm outward (inward where negative), its bend
+    /// starting `start` mm inside it: the panel gains, or loses, the strip between. At each end
+    /// the line of the outline beside the edge is followed to the edge's new line (on a slanted
+    /// edge the strip is a parallelogram); where it runs nearly along the edge, the end moves
+    /// square to it; where it is round, the strip runs square from where the round crosses the
+    /// bend's start (see `round_ends`), taking all of the round between the two lines.
+    fn move_edge(&mut self, i: usize, (a, b, d): (Vec2, Vec2, Vec2), by: f64, start: f64) -> Result<()> {
         if by.abs() <= 1e-9 {
             return Ok(());
         }
-        let (p, q) = self.moved_ends(i, (a, b, d), by);
+        let (p, q) = self.moved_ends(i, (a, b, d), by, start);
+        let (r0, r1) = self.round_ends(i, (a, b, d), start);
+        let (a, b) = (a + d * r0.unwrap_or(0.0), b + d * r1.unwrap_or(0.0));
         let panel = self.sheet.panels.get(i).ok_or_else(|| DocError::Invalid("panel".into()))?;
         let strip = if by > 0.0 { [a, b, q, p] } else { [p, q, b, a] };
         let strip = Region2 { outer: Loop2::polygon(&strip).ccw(), holes: Vec::new() };
@@ -327,13 +331,83 @@ impl SurfaceSheet {
     }
 
     /// Where the ends of the edge `a`–`b` of panel `i` land with the edge moved `by` mm outward
-    /// (inward where negative): at each end the line of the outline beside the edge is followed
-    /// to the edge's new line; where that line is round, or runs nearly along the edge, the end
-    /// moves square to it.
-    fn moved_ends(&self, i: usize, (a, b, d): (Vec2, Vec2, Vec2), by: f64) -> (Vec2, Vec2) {
+    /// (inward where negative), its bend starting `start` mm inside it: at each end the line of
+    /// the outline beside the edge is followed to the edge's new line; where it runs nearly along
+    /// the edge, the end moves square to it; where it is round, the end lies square across from
+    /// where the round crosses the bend's start (see `round_ends`).
+    fn moved_ends(&self, i: usize, (a, b, d): (Vec2, Vec2, Vec2), by: f64, start: f64) -> (Vec2, Vec2) {
         let out = Vec2::new(d.y, -d.x);
         let (k0, k1) = self.edge_slants(i, (a, b, d));
-        (a + d * (k0 * by) + out * by, b + d * (k1 * by) + out * by)
+        let (r0, r1) = self.round_ends(i, (a, b, d), start);
+        (a + d * r0.unwrap_or(k0 * by) + out * by, b + d * r1.unwrap_or(k1 * by) + out * by)
+    }
+
+    /// At each end of the edge `a`–`b` (way `d`) of panel `i` where the outline beside it is
+    /// round, how far along the edge from that end the outline, followed from the end round the
+    /// corner, first crosses the line `start` mm inside the edge, where the edge's bend starts:
+    /// a bend set in from an edge between rounded corners starts as wide as the plate is there,
+    /// the rounds the blank's outline down to it, and its sides carry on square from there.
+    /// `None` at an end beside a straight edge, where the bend starts on the edge, or where the
+    /// outline turns on past the line without crossing it on lines and arcs.
+    fn round_ends(&self, i: usize, (a, b, d): (Vec2, Vec2, Vec2), start: f64) -> (Option<f64>, Option<f64>) {
+        let Some(panel) = self.sheet.panels.get(i) else { return (None, None) };
+        let segs = &panel.region.outer.segs;
+        let n = segs.len();
+        let k = segs.iter().position(|s| matches!(*s, Seg2::Line { a: x, b: y } if x.dist(a) <= 1e-9 && y.dist(b) <= 1e-9));
+        let Some(k) = k.filter(|_| start > 1e-9) else { return (None, None) };
+        let inward = d.perp();
+        let depth = |p: Vec2| (p - a).dot(inward);
+        // Where segment `s` meets the line: its parameter there, and the point.
+        let meets = |s: &Seg2| -> Vec<(f64, Vec2)> {
+            match *s {
+                Seg2::Line { a: x, b: y } => {
+                    let (dx, dy) = (depth(x), depth(y));
+                    if (dy - dx).abs() <= 1e-12 {
+                        return Vec::new();
+                    }
+                    let t = (start - dx) / (dy - dx);
+                    if (0.0..=1.0).contains(&t) { vec![(t, x.lerp(y, t))] } else { Vec::new() }
+                }
+                Seg2::Arc { center, radius, start: from, sweep } => {
+                    // cos(θ − φ) = c, φ the way inward.
+                    let c = (start - depth(center)) / radius;
+                    if !(-1.0..=1.0).contains(&c) {
+                        return Vec::new();
+                    }
+                    let phi = inward.y.atan2(inward.x);
+                    [phi + c.acos(), phi - c.acos()]
+                        .into_iter()
+                        .map(|th| Vec2::new(th.cos(), th.sin()))
+                        .filter(|&v| crate::sheet_surface_cuts::on_arc(v, from, sweep))
+                        .map(|v| {
+                            let t = ((v.y.atan2(v.x) - from) * sweep.signum()).rem_euclid(std::f64::consts::TAU) / sweep.abs();
+                            (t.min(1.0), center + v * radius)
+                        })
+                        .collect()
+                }
+                _ => Vec::new(),
+            }
+        };
+        // From the end round the outline: back along the segments before the edge, or on along
+        // those after it; the first crossing as walked.
+        let walk = |end: Vec2, back: bool| -> Option<f64> {
+            let at = |m: usize| segs.get(if back { (k + n - m) % n } else { (k + m) % n });
+            if matches!(at(1)?, Seg2::Line { .. }) {
+                return None;
+            }
+            for m in 1..n {
+                let s = at(m)?;
+                if !matches!(s, Seg2::Line { .. } | Seg2::Arc { .. }) {
+                    return None;
+                }
+                let hit = meets(s).into_iter().min_by(|x, y| if back { y.0.total_cmp(&x.0) } else { x.0.total_cmp(&y.0) });
+                if let Some((_, p)) = hit {
+                    return Some((p - end).dot(d));
+                }
+            }
+            None
+        };
+        (walk(a, true), walk(b, false))
     }
 
     /// How far along the edge `a`–`b` (way `d`) of panel `i` the lines of the outline beside it
@@ -469,12 +543,12 @@ impl SurfaceSheet {
         let by = sharp - start;
         // The anchor runs where the edge's neighbours meet its line moved to the sharp (on a
         // slanted edge, not square across from its ends).
-        let (from, to) = self.moved_ends(edge.panel, (a, b, d), by);
+        let (from, to) = self.moved_ends(edge.panel, (a, b, d), by, start);
         // A sharp inside the edge by no more than the thickness needs no cut: the bend's band runs
         // a thickness past its anchor and takes that strip, leaving the panel's other edges (and
         // the rips along them) as they are.
         if by > 0.0 || by < -t - 1e-9 {
-            self.move_edge(edge.panel, (a, b, d), by)?;
+            self.move_edge(edge.panel, (a, b, d), by, start)?;
         }
         let len = (to - from).dot(d);
         if !(len > 1e-9) {
