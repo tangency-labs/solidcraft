@@ -5,7 +5,6 @@
 # pull request. Never add a line: decide with exact geometry (`Body::exact_bounds`,
 # `kernel::apart`, the B-rep's faces and edges). These are truck-era uses SMLib answers exactly.
 crates/doc/src/appearance.rs:nearest_face picks the face nearest a point by the display mesh's triangles
-crates/doc/src/config_styles.rs:Document::configuration_face_indices checks a configuration's named faces against the display mesh
 crates/doc/src/construct.rs:GeoRef::name_picks names picked faces and edges through the display mesh
 crates/doc/src/construct.rs:named_vertex finds where named edges meet through the display mesh
 crates/doc/src/document.rs:MeshData::eq compares imported mesh payloads by their triangles
@@ -27,7 +26,6 @@ crates/doc/src/eval.rs:off_the_ends moves an edge point off the edge's ends by t
 crates/doc/src/eval.rs:parallel_tapped_wall finds a tapped hole's parallel wall on the display mesh
 crates/doc/src/eval.rs:resolve_edges finds edge references again on a mesh
 crates/doc/src/eval.rs:tangent_face_chain grows a face pick across tangent edges on the display mesh
-crates/doc/src/eval.rs:through_all_distance sizes a Through All extent by the display mesh
 crates/doc/src/eval.rs:trim_to_body keeps the tool pieces touching the start by a mesh
 crates/doc/src/eval.rs:unrecorded_touches finds touching pieces by a mesh
 crates/doc/src/eval_more.rs:FaceSlice::outline finds the wall an outline runs along by mesh triangles
@@ -80,7 +78,6 @@ crates/doc/src/naming.rs:normals takes face normals from mesh triangles
 crates/doc/src/naming.rs:roomiest takes a sample point per face from mesh triangles
 crates/doc/src/naming.rs:samples_up_to takes sample points per face from mesh triangles
 crates/doc/src/placement_reuse.rs:same_feature compares imported mesh payloads by their triangles
-crates/doc/src/print_face.rs:Document::locate_print_face finds a print face by the display mesh
 crates/doc/src/project.rs:body_mesh finds a projection's body nearest a point by the display mesh
 crates/doc/src/project.rs:cache_key keys projections by the display mesh
 crates/doc/src/project.rs:exact_edges finds the picked edges by the display mesh

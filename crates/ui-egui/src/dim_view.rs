@@ -850,7 +850,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     let tk = Tokens::get();
     let is_sel = |id: &str| app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { id: x } if x == id));
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(hit);
-    let font = FontId::monospace(solidcraft_theme::Tokens::get().font_body);
+    let font = FontId::monospace(tk.font_body * crate::prefs::dimension_text_scale(&app.preferences));
     let centres = chain_centres(sk);
     let draft_sketch = draft.as_ref().and_then(|(_, d)| d.preview.sketch(d.sketch));
     let draft_centres = draft_sketch.map(|solved| chain_centres(&solved.sketch));
@@ -892,10 +892,8 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             crate::viewport::Conflict::glyph_colour(app, &tk)
         } else if is_sel(&c.id) || hover.as_deref() == Some(c.id.as_str()) {
             tk.accent
-        } else if c.driven {
-            tk.dimension_driven
         } else {
-            tk.dimension
+            crate::prefs::dimension_colour(&app.preferences, c.driven)
         };
         let galley = painter.layout_no_wrap(
             frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
@@ -1540,6 +1538,63 @@ mod tests {
             assert_ne!(c, tk.sketch, "{name}");
             assert_ne!(c, tk.sketch_fixed, "{name}");
         }
+        cancel();
+    }
+
+    /// #14121: the size preference scales a sketch dimension's text, and a custom colour paints
+    /// its lines, arrows and value; the theme's dimension colour is replaced.
+    #[test]
+    fn dimension_text_size_and_colour_follow_the_preferences() {
+        fn strokes(s: &Shape, out: &mut std::collections::BTreeSet<[u8; 4]>) {
+            match s {
+                Shape::LineSegment { stroke, .. } => {
+                    out.insert(stroke.color.to_array());
+                }
+                Shape::Path(p) => {
+                    if let egui::epaint::ColorMode::Solid(c) = p.stroke.color {
+                        out.insert(c.to_array());
+                    }
+                }
+                Shape::Vec(v) => v.iter().for_each(|s| strokes(s, out)),
+                _ => {}
+            }
+        }
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[30,0]],"connect":false,"infer":false})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities":["l1"],"value":30})).unwrap();
+        h.app.session.selection.clear();
+        h.call("ui.view", json!({"view":"top"}));
+        h.settle();
+        h.frames(2);
+        let (_, centre) = drawn().into_iter().next().expect("the dimension is drawn");
+        fn text_near(s: &Shape, centre: Pos2) -> Option<egui::epaint::TextShape> {
+            match s {
+                // The painted galley's box differs a little from the dimension's text box around it.
+                Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 8.0 => Some(t.clone()),
+                Shape::Vec(v) => v.iter().find_map(|s| text_near(s, centre)),
+                _ => None,
+            }
+        }
+        let text_at = |h: &crate::scenario::Harness| h.shapes.iter().find_map(|s| text_near(&s.shape, centre)).expect("the dimension value is drawn");
+        let before = text_at(&h);
+        let custom = egui::Color32::from_rgb(0x12, 0x34, 0x56);
+        h.call("ui.prefs", json!({"dimension_text_scale":2.0,"dimension_colour":[0x12,0x34,0x56]}));
+        h.frames(2);
+        let after = text_at(&h);
+        assert!(
+            (after.galley.size().y - before.galley.size().y * 2.0).abs() <= 2.0,
+            "the text height {} doubles to {}",
+            before.galley.size().y,
+            after.galley.size().y
+        );
+        assert_eq!(after.fallback_color, custom, "the value takes the custom colour");
+        let mut seen = std::collections::BTreeSet::new();
+        h.shapes.iter().for_each(|s| strokes(&s.shape, &mut seen));
+        assert!(seen.contains(&custom.to_array()), "the dimension lines and arrows take the custom colour: {seen:?}");
+        assert!(!seen.contains(&Tokens::get().dimension.to_array()), "the theme's dimension colour is replaced");
         cancel();
     }
 

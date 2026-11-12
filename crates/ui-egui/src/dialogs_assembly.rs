@@ -80,7 +80,7 @@ pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
 /// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, a
 /// sketch point (so a joint can be placed on the design origin or a hole centre, like Fusion's),
 /// and the design's planes, axes and construction points.
-pub const SNAPS: u16 = FACES | EDGES | VERTICES | ORIGIN | POINTS | PLANES | AXES | CONSTRUCTION_POINTS;
+pub const SNAPS: crate::selection::Accept = FACES | EDGES | VERTICES | ORIGIN | POINTS | PLANES | AXES | CONSTRUCTION_POINTS;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
 const MOVES: &[&str] = &[
     "joint.create",
@@ -93,6 +93,8 @@ const MOVES: &[&str] = &[
     "joint.rack_pinion",
     "joint.screw",
     "joint.cam",
+    "assembly.constraint.create",
+    "assembly.constraint.edit",
     "occurrence.align",
     "parts.insert",
     "parts.fastener",
@@ -127,6 +129,7 @@ pub enum Asm {
     },
     Coupling(Box<crate::dialogs_coupling::CouplingForm>),
     Cam(Box<crate::dialogs_coupling::cam::CamForm>),
+    Constrain(Box<crate::dialogs_constrain::ConstrainForm>),
     Interference {
         result: Option<Value>,
         overlaps: Vec<Mesh>,
@@ -277,13 +280,14 @@ impl Asm {
                 _ => "SCREW",
             },
             Asm::Cam(_) => "CAM",
+            Asm::Constrain(_) => "CONSTRAIN",
             Asm::Interference { .. } => "INTERFERENCE",
             Asm::Trace(_) => "MOTION TRACE",
         }
     }
 
     pub fn previews(&self) -> bool {
-        matches!(self, Asm::Joint(_) | Asm::Drive { .. } | Asm::RigidGroup | Asm::Coupling(_) | Asm::Cam(_))
+        matches!(self, Asm::Joint(_) | Asm::Drive { .. } | Asm::RigidGroup | Asm::Coupling(_) | Asm::Cam(_) | Asm::Constrain(_))
     }
 }
 
@@ -311,6 +315,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         }
         "joint.gear" | "joint.rack_pinion" | "joint.screw" => crate::dialogs_coupling::start(app, id)?,
         "joint.cam" => crate::dialogs_coupling::cam::start(app),
+        "assembly.constraint.create" => crate::dialogs_constrain::start(app)?,
         "inspect.interference" => (
             Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into(), check: None },
             vec![SelInput::new("Bodies (all if none)", BODIES, true)],
@@ -403,7 +408,7 @@ fn side_inputs() -> Vec<SelInput> {
 /// occurrence that the side's snap names (the piece nearest its pick, when the name has
 /// several), else the face or edge nearest the pick. A point or frame side names no face, so it
 /// shows its component.
-fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
+pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     let s = &app.session;
     let (pick, face, edge) = match &o.snap {
         Snap::FaceCenter { pick, face, .. } | Snap::CircleCenter { pick, face, .. } => (*pick, face.as_deref(), None),
@@ -1259,6 +1264,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
         }
         Asm::Coupling(f) => enter |= crate::dialogs_coupling::rows(app, ui, f, inputs),
         Asm::Cam(f) => enter |= crate::dialogs_coupling::cam::rows(app, ui, f, inputs),
+        Asm::Constrain(f) => enter |= crate::dialogs_constrain::rows(app, ui, f, inputs, active),
         Asm::Interference { result, overlaps, of, clearance, check } => {
             let picked: Vec<Sel> = inputs.first().map(|i| i.items.clone()).unwrap_or_default();
             if let Some(c) = check.take() {
@@ -1838,6 +1844,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         }
         Asm::Coupling(f) => return crate::dialogs_coupling::commands(app, f, inputs),
         Asm::Cam(f) => return crate::dialogs_coupling::cam::commands(app, f, inputs),
+        Asm::Constrain(f) => return crate::dialogs_constrain::commands(app, f, inputs),
         // The check runs from its Compute button; OK only closes.
         Asm::Interference { .. } => Vec::new(),
         Asm::Trace(f) => cmd("motion.trace.keep", trace::params(s, f, inputs)?),
@@ -1915,6 +1922,8 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             c == "joint.drive" && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() || r["unconnected"].is_string())
         })
         .map(|(_, r)| r.clone());
+    // A constraint's reply: how free its part is with the constraint the preview shows.
+    let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
     let (before, after) = (preview.before, preview.after);
     // A moved component looks like itself (no new surface), with its old place as the ghost.
     let colors = Colors { added: colors.body, new_body: colors.body, ..colors };
@@ -1926,6 +1935,7 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
             b.stopped = stopped;
+            b.placed = placed;
             Ok(b)
         }
         Err(_) => Err("the preview failed".into()),
@@ -1995,12 +2005,13 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     if let Asm::Trace(f) = k {
         trace::overlay(painter, proj, f);
     }
-    // A joint names its two picks; a joint origin and a trace have one.
-    let two = matches!(k, Asm::Joint(_));
+    // A joint and a constraint name their two picks; a joint origin and a trace have one.
+    let two = matches!(k, Asm::Joint(_) | Asm::Constrain(_));
     let hover = match k {
         Asm::Joint(f) => Some(&mut f.hover),
         Asm::JointOrigin { hover, .. } => Some(hover),
         Asm::Trace(f) => Some(&mut f.hover),
+        Asm::Constrain(f) => Some(&mut f.hover),
         _ => None,
     };
     let Some(hover) = hover else { return };
@@ -2743,7 +2754,8 @@ pub(crate) struct JointGlyph {
 
 /// The glyphs to draw, in drawing order: picked joints first, then moving joints, then rigid
 /// ones. Each is sized to the view and to the parts it joins; one whose centre falls inside a
-/// glyph planned before it is faded, unless it is picked.
+/// glyph planned before it is faded, unless it is picked. A badge style
+/// (`joint_symbols`) reaches as far as its badge, the same wherever the joint sits.
 pub(crate) fn joint_glyph_plan(app: &SolveApp, proj: &Proj) -> Vec<JointGlyph> {
     let drawn = drawn_joints(app);
     if drawn.is_empty() {
@@ -2752,6 +2764,7 @@ pub(crate) fn joint_glyph_plan(app: &SolveApp, proj: &Proj) -> Vec<JointGlyph> {
     let frames = joint_frames_world(&app.session);
     let sizes = occurrence_sizes(&app.session);
     let view_len = app.cam.half_height() * 2.0 * GLYPH_VIEW_SHARE;
+    let badge = crate::joint_symbols::badge_reach(app.preferences.joint_symbols);
     let at = |m: &solidcraft_engine::doc::Mat, x: f64, y: f64, z: f64| solidcraft_engine::doc::apply_point(m, Vec3::new(x, y, z));
     let mut plan = Vec::new();
     for (id, picked) in drawn {
@@ -2767,8 +2780,11 @@ pub(crate) fn joint_glyph_plan(app: &SolveApp, proj: &Proj) -> Vec<JointGlyph> {
         plan.push((JointGlyph { id, picked, rigid: j.kind == JointKind::Rigid, len, faded: false, centre }, *m));
     }
     plan.sort_by_key(|(g, _)| (!g.picked, g.rigid));
-    // Screen reach of each glyph: its ring (or a rigid mark), for the overlap test.
+    // Screen reach of each glyph: its badge, or its ring (or a rigid mark), for the overlap test.
     let reach = |g: &JointGlyph, m: &solidcraft_engine::doc::Mat| -> f32 {
+        if let Some(radius) = badge {
+            return radius;
+        }
         if g.rigid {
             return RIGID_MARK;
         }
@@ -2808,9 +2824,14 @@ pub(crate) fn joint_glyph_tip(app: &SolveApp, id: u64) -> Option<String> {
     Some(if j.name.to_lowercase().contains(&kind.to_lowercase()) { j.name.clone() } else { format!("{} ({kind})", j.name) })
 }
 
-/// Joint glyphs in the viewport: a ring where a moving joint sits, its motion axis and its
-/// limits (ticks on the ring for a turn, along the axis for a slide); a small square for a rigid
-/// joint. Glyphs are never picked in the viewport; hovering one names the joint and its type.
+/// Joint glyphs in the viewport, in the style Preferences picks (`joint_symbols`). The default,
+/// [`RING_AND_AXIS`], draws a ring where a moving joint sits, its motion axis and its limits
+/// (ticks on the ring for a turn, along the axis for a slide), and a small square for a rigid
+/// joint ([`ring_shapes`]). The other styles draw a round badge with the pictogram of the joint's
+/// type, the same size wherever it sits ([`crate::joint_symbols::badge_shapes`]): joints that
+/// don't let their parts move draw quiet, a joint with a limit has a mark on its rim, and a picked
+/// joint's badge is larger and filled.
+/// Glyphs are never picked in the viewport; hovering one names the joint and its type.
 pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let plan = joint_glyph_plan(app, proj);
     if plan.is_empty() {
@@ -2833,84 +2854,54 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         .show(|ui| ui.label(tip));
     }
     let t = Tokens::get();
+    let style = app.preferences.joint_symbols;
+    let rings = style == RING_AND_AXIS;
+    let bright = (app.preferences.highlight_moving_joints && !rings).then(|| crate::joint_symbols::bright(&app.session));
     let frames = joint_frames_world(&app.session);
-    let at = |m: &solidcraft_engine::doc::Mat, x: f64, y: f64, z: f64| solidcraft_engine::doc::apply_point(m, Vec3::new(x, y, z));
     // Back to front, so the glyphs drawn first in the plan end up on top.
     for g in plan.iter().rev() {
         let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == g.id) else { continue };
         let Some((_, m)) = frames.iter().find(|(f, _)| *f == g.id) else { continue };
         crate::scenario::publish_handle(&format!("joint-glyph:{}", j.name), g.centre);
         let (stroke, rim) = glyph_strokes(app, g.id, g.picked, j.suppressed);
-        // A glyph piled on another is drawn faint.
-        let fade = |s: Stroke| if g.faded { Stroke::new(s.width, s.color.gamma_multiply(0.3)) } else { s };
-        let (stroke, rim) = (fade(stroke), rim.map(fade));
-        let width = stroke.width;
-        let c = g.centre;
-        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
-        if g.rigid {
-            let half = if g.picked { RIGID_MARK + 1.0 } else { RIGID_MARK };
-            let rect = egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0));
-            if let Some(rim) = rim {
-                painter.rect_stroke(rect, 0.0, rim, egui::StrokeKind::Middle);
-            }
-            painter.rect(rect, 0.0, fill, stroke, egui::StrokeKind::Middle);
+        let screen = |x: f64, y: f64, z: f64| proj.to_screen(solidcraft_engine::doc::apply_point(m, Vec3::new(x, y, z)));
+        if rings {
+            painter.extend(ring_shapes(&screen, j.kind, &j.limits, g, stroke, rim, &t));
             continue;
         }
-        let len = g.len;
-        // The motion axis (z), both ways, and a ring about it: the rim first, then the core.
-        let axis = match (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
-            (Some(a), Some(b)) => Some([a, b]),
-            _ => None,
+        use crate::joint_symbols::Mood;
+        // A joint lit by its pick or by its hovered browser row draws as a picked one does, in
+        // the colour its core stroke has.
+        let mood = if rim.is_some() {
+            Mood::Picked
+        } else if j.suppressed {
+            Mood::Suppressed
+        } else if bright.as_ref().is_some_and(|joints| !joints.contains(&g.id)) {
+            Mood::Quiet
+        } else {
+            Mood::Bright
         };
-        let r = len * 0.5;
-        let ring: Vec<Pos2> = (0..=32)
-            .filter_map(|k| {
-                let a = k as f64 / 32.0 * std::f64::consts::TAU;
-                proj.to_screen(at(m, r * a.cos(), r * a.sin(), 0.0))
-            })
-            .collect();
-        for s in rim.into_iter().chain([stroke]) {
-            if let Some(axis) = axis {
-                painter.line_segment(axis, s);
-            }
-            if ring.len() > 1 {
-                painter.add(egui::Shape::line(ring.clone(), s));
-            }
-        }
-        // Limits: ticks across the ring for a turn, across the axis (or slot) for a slide.
-        let warning = if g.faded { t.warning.gamma_multiply(0.3) } else { t.warning };
-        for (i, lim) in j.limits.iter().enumerate() {
-            let Some((lo, hi)) = lim else { continue };
-            let name = j.kind.dofs().get(i).copied().unwrap_or("");
-            for v in [*lo, *hi] {
-                if !v.is_finite() {
-                    continue;
-                }
-                let (p, q) = match name {
-                    "angle" => ((v.cos() * r * 0.7, v.sin() * r * 0.7, 0.0), (v.cos() * r * 1.3, v.sin() * r * 1.3, 0.0)),
-                    "distance" if v.abs() < 1e6 => ((-r * 0.3, 0.0, v), (r * 0.3, 0.0, v)),
-                    "slide" if v.abs() < 1e6 => ((v, -r * 0.3, 0.0), (v, r * 0.3, 0.0)),
-                    _ => continue,
-                };
-                if let (Some(p), Some(q)) = (proj.to_screen(at(m, p.0, p.1, p.2)), proj.to_screen(at(m, q.0, q.1, q.2))) {
-                    painter.line_segment([p, q], Stroke::new(width, warning));
-                }
-            }
-        }
-        if let Some(rim) = rim {
-            painter.circle_stroke(c, 4.5, rim);
-        }
-        painter.circle(c, if rim.is_some() { 4.5 } else { 3.5 }, fill, stroke);
+        // x runs along the joint's travel as it looks from here.
+        let travel = crate::joint_symbols::along(j.kind).and_then(|d| screen(d[0] * g.len, d[1] * g.len, d[2] * g.len)).map(|tip| tip - g.centre);
+        let x = travel.filter(|d| d.length() > 4.0).map_or(vec2(1.0, 0.0), |d| if d.x < 0.0 { -d.normalized() } else { d.normalized() });
+        let look = crate::joint_symbols::badge(style, j.kind, mood, stroke.color, &t);
+        painter.extend(crate::joint_symbols::badge_shapes(g.centre, x, j.kind, &look, crate::joint_symbols::has_limit(j), g.faded, &t));
     }
 }
 
 /// A joint glyph's core stroke and, while it is picked or its browser row is hovered, the
 /// lighter rim under it: the colours and widths a selected or hovered body's edges use.
 pub(crate) fn glyph_strokes(app: &SolveApp, id: u64, picked: bool, suppressed: bool) -> (Stroke, Option<Stroke>) {
-    let t = Tokens::get();
+    lit_strokes(&Tokens::get(), picked, app.viewport.hover_joint == Some(id), suppressed)
+}
+
+/// [`glyph_strokes`] from a joint's state alone: picked, it takes the selection's core and rim,
+/// hovered or not; hovered, the hovered edge's core and halo; unlit, a plain accent stroke, dim
+/// while the joint is suppressed, and no rim.
+pub(crate) fn lit_strokes(t: &Tokens, picked: bool, hovered: bool, suppressed: bool) -> (Stroke, Option<Stroke>) {
     let lit = if picked {
         Some((t.sel_edge, t.sel_edge_rim))
-    } else if app.viewport.hover_joint == Some(id) {
+    } else if hovered {
         Some((t.hover_edge, t.hover_edge_halo))
     } else {
         None
@@ -2919,6 +2910,91 @@ pub(crate) fn glyph_strokes(app: &SolveApp, id: u64, picked: bool, suppressed: b
         Some((core, rim)) => (Stroke::new(2.5, core), Some(Stroke::new(2.5 + 3.0, rim))),
         None => (Stroke::new(1.5, if suppressed { t.text_dim } else { t.accent }), None),
     }
+}
+
+/// The `joint_symbols` style that draws a ring and axis in the model, as before badges; the
+/// default.
+pub const RING_AND_AXIS: u8 = crate::joint_symbols::RING_AND_AXIS;
+
+/// The [`RING_AND_AXIS`] glyph of a joint of `kind` with these `limits`, `screen` placing a point
+/// of the joint's frame: a ring where a moving joint sits, its motion axis and its limits (ticks
+/// across the ring for a turn, across the axis or slot for a slide), or a small square for a rigid
+/// joint, faint where the plan says it lies on another. `stroke` is its core ([`glyph_strokes`]);
+/// `rim`, while the joint is lit, is drawn under the core.
+pub(crate) fn ring_shapes(
+    screen: &impl Fn(f64, f64, f64) -> Option<Pos2>,
+    kind: JointKind,
+    limits: &[Option<(f64, f64)>],
+    g: &JointGlyph,
+    stroke: Stroke,
+    rim: Option<Stroke>,
+    t: &Tokens,
+) -> Vec<egui::Shape> {
+    let mut out = Vec::new();
+    // A glyph piled on another is drawn faint.
+    let fade = |s: Stroke| if g.faded { Stroke::new(s.width, s.color.gamma_multiply(0.3)) } else { s };
+    let (stroke, rim) = (fade(stroke), rim.map(fade));
+    let width = stroke.width;
+    let c = g.centre;
+    let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
+    if g.rigid {
+        let half = if g.picked { RIGID_MARK + 1.0 } else { RIGID_MARK };
+        let square = egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0));
+        if let Some(rim) = rim {
+            out.push(egui::Shape::rect_stroke(square, 0.0, rim, egui::StrokeKind::Middle));
+        }
+        out.push(egui::Shape::Rect(egui::epaint::RectShape::new(square, 0.0, fill, stroke, egui::StrokeKind::Middle)));
+        return out;
+    }
+    let len = g.len;
+    let r = len * 0.5;
+    // The motion axis (z), both ways, and a ring about it: the rim first, then the core.
+    let axis = match (screen(0.0, 0.0, -len), screen(0.0, 0.0, len)) {
+        (Some(a), Some(b)) => Some([a, b]),
+        _ => None,
+    };
+    for s in rim.into_iter().chain([stroke]) {
+        if let Some(axis) = axis {
+            out.push(egui::Shape::line_segment(axis, s));
+        }
+        out.extend(motion_ring(screen, r, s));
+    }
+    // Limits: ticks across the ring for a turn, across the axis (or slot) for a slide.
+    let warning = if g.faded { t.warning.gamma_multiply(0.3) } else { t.warning };
+    for (i, lim) in limits.iter().enumerate() {
+        let Some((lo, hi)) = lim else { continue };
+        let name = kind.dofs().get(i).copied().unwrap_or("");
+        for v in [*lo, *hi] {
+            if !v.is_finite() {
+                continue;
+            }
+            let (p, q) = match name {
+                "angle" => ((v.cos() * r * 0.7, v.sin() * r * 0.7, 0.0), (v.cos() * r * 1.3, v.sin() * r * 1.3, 0.0)),
+                "distance" if v.abs() < 1e6 => ((-r * 0.3, 0.0, v), (r * 0.3, 0.0, v)),
+                "slide" if v.abs() < 1e6 => ((v, -r * 0.3, 0.0), (v, r * 0.3, 0.0)),
+                _ => continue,
+            };
+            if let (Some(p), Some(q)) = (screen(p.0, p.1, p.2), screen(q.0, q.1, q.2)) {
+                out.push(egui::Shape::line_segment([p, q], Stroke::new(width, warning)));
+            }
+        }
+    }
+    if let Some(rim) = rim {
+        out.push(egui::Shape::circle_stroke(c, 4.5, rim));
+    }
+    out.push(egui::Shape::Circle(egui::epaint::CircleShape { center: c, radius: if rim.is_some() { 4.5 } else { 3.5 }, fill, stroke }));
+    out
+}
+
+/// A ring of radius `r` about a joint's axis.
+fn motion_ring(screen: &impl Fn(f64, f64, f64) -> Option<Pos2>, r: f64, stroke: Stroke) -> Option<egui::Shape> {
+    let ring: Vec<Pos2> = (0..=32)
+        .filter_map(|k| {
+            let a = k as f64 / 32.0 * std::f64::consts::TAU;
+            screen(r * a.cos(), r * a.sin(), 0.0)
+        })
+        .collect();
+    (ring.len() > 1).then(|| egui::Shape::line(ring, stroke))
 }
 
 #[cfg(test)]

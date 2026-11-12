@@ -176,7 +176,8 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
     }
     let sources = body.transformed_sources(m)?;
     let exact = match Rigid::of_matrix(&m) {
-        Some(motion) => Some(solidcraft_geom::brep::placement::moved(body.record(), &motion)),
+        // (a body with a blend by its definition is moved by the kernel, the definition with it)
+        Some(motion) => solidcraft_geom::brep::placement::moved(body.record(), &motion),
         None => solidcraft_geom::brep::placement::mapped(body.record(), &m),
     };
     let (placed, sources, paint) = match exact {

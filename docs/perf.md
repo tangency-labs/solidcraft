@@ -34,6 +34,20 @@ reply carries its own profile while recording.
 
 # Design loading
 
+## The stand-up offer waits beside the window (2026-11-12)
+
+After a STEP or IGES file opens, SolidCraft may offer to stand it up, after weighing how its
+bodies rest. That meshes up to 64 of them. Just after an open, the same bodies are being meshed
+beside the window (`open_meshing`), and the window thread waited for that work: the frame that
+finished the open of a 561-body STEP printer assembly took 0.96–1.66 s, of which 0.79–1.51 s
+was the offer (`SOLIDCRAFT_PROFILE_FRAMES=1`, NVIDIA GB10, release build, three opens each,
+alternating). Only about 0.2 s of that was work: `perf` found the window thread waiting on the
+meshes' `OnceLock`.
+
+While bodies are being meshed, the estimate now runs on a thread of its own and the offer is made
+on a later frame; a design changed meanwhile gets no offer. The same frame now takes 136–168 ms,
+none of it in the offer.
+
 ## Edges made by booleans: each point evaluated once (2026-10-16)
 
 A boolean meshes both operands with truck-meshalgo, which first divides every edge into a
@@ -640,6 +654,25 @@ What changed: rows scrolled out of view only reserve their height. They register
 and paint nothing (no text layout, icons or eye/fold buttons), so the cost follows the rows on
 screen rather than the rows in the tree. Scrolling, Find in Browser and drag and drop still see
 every row's place.
+
+## The active placement's bodies: one name index for the listing (2026-11-12)
+
+With a component active (a STEP assembly opens with its top component active), the model scene
+asks for the active placement's bodies at every build. Listing them named each placement's
+bodies with a fresh index of every occurrence and body in the design (`WorldNames::new`), once for
+every placement in the subtree: the subtree times the design. On a 561-body STEP printer
+assembly that was about 70 ms of each model scene build, so every appearance or visibility edit
+cost a frame of over 100 ms. The listing now makes the index once, when a placement first needs
+it.
+
+Measured on that assembly (NVIDIA GB10, release build, `SOLIDCRAFT_PROFILE_FRAMES=1`, two runs
+each, alternating): eight colour changes of 20 bodies, and the model scene of the frame that
+finishes the open.
+
+| | each colour change | model scene, finishing the open |
+|---|---|---|
+| before (`main`) | 111–202 ms | 136–188 ms |
+| after | under 50 ms (no slow frame) | 7–8 ms |
 
 # Recompute performance
 

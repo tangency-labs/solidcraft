@@ -16,9 +16,8 @@ fn pose(axis: Vec3, degrees: f64, offset: Vec3) -> Axis2Placement {
     p.translate(offset);
     p
 }
-fn body(transport: bool, centre: bool, pose: &Axis2Placement) -> (Kernel, Brep) {
+fn body(centre: bool, pose: &Axis2Placement) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.sweep_frame_on_planar_path_normal = transport;
     let pts = [
         Vec3::new(18., 0., -2.),
         Vec3::new(22., 0., -2.),
@@ -62,10 +61,9 @@ fn inside(k: &Kernel, b: &Brep, p: Vec3) -> bool {
 fn close(a: f64, b: f64, tol: f64) {
     assert!((a - b).abs() < tol, "{a} != {b}");
 }
-/// `transport`: with WR-407's frame too, which takes the sweep's own pose-dependent fit
-/// out; `box_tol` is the bound on the bounding boxes' drift.
-fn compare(centre: bool, transport: bool, box_tol: f64) {
-    let (k, mut flat) = body(transport, centre, &Axis2Placement::IDENTITY);
+/// `box_tol` is the bound on the bounding boxes' drift.
+fn compare(centre: bool, box_tol: f64) {
+    let (k, mut flat) = body(centre, &Axis2Placement::IDENTITY);
     let exact = std::f64::consts::PI * if centre { 160. } else { 144. };
     close(volume(&k, &mut flat), exact, exact * 1e-4);
     let bb = brep_bounding_box(&k, &flat, true).unwrap();
@@ -80,15 +78,15 @@ fn compare(centre: bool, transport: bool, box_tol: f64) {
         (Vec3::X, 0.),
     ] {
         let p = pose(axis, angle, Vec3::new(3., -7., 11.));
-        let (mut k, mut b) = body(transport, centre, &p);
+        let (mut k, mut b) = body(centre, &p);
         let v = volume(&k, &mut b);
         // Against the closed form (pi/4 (r1^2 - r0^2) 4): the sweep is an approximation
         // whose fit depends on the pose, to about 5e-5 of the volume.
         close(v, exact, exact * 1e-4);
         solidcore::topology::brep::p5::transform(&mut k, &mut b, &p.invert(), None, false).unwrap();
         let actual = brep_bounding_box(&k, &b, true).unwrap();
-        // Without WR-407's frame the sweep's fit depends on the pose (up to 3.3e-3 at
-        // the arc's far end); the roll this fixes is 0.73.
+        // The sweep's own fit leaves the boxes within 1e-5 of each other; the roll this
+        // fixes is 0.73.
         let drift = actual
             .min()
             .distance(bb.min())
@@ -112,28 +110,16 @@ fn compare(centre: bool, transport: bool, box_tol: f64) {
 }
 #[test]
 fn centred_profile_is_rigid_motion_invariant() {
-    compare(true, false, 5e-3);
+    compare(true, 1e-5);
 }
 #[test]
 fn first_point_profile_is_rigid_motion_invariant() {
-    compare(false, false, 5e-3);
-}
-#[test]
-fn with_the_transport_frame_the_boxes_agree_closely() {
-    compare(true, true, 1e-5);
-    compare(false, true, 1e-5);
+    compare(false, 1e-5);
 }
 /// A path of two pieces, the line along +y for 20 and the quarter arc, in either order,
-/// the square as in `body`. `transport` turns on WR-407's frame: without it the sweep's
-/// own pose dependence still cuts the arc-then-line path to volume 0 in some poses.
-fn two_piece_body(
-    transport: bool,
-    centre: bool,
-    line_first: bool,
-    pose: &Axis2Placement,
-) -> (Kernel, Brep) {
+/// the square as in `body`.
+fn two_piece_body(centre: bool, line_first: bool, pose: &Axis2Placement) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.sweep_frame_on_planar_path_normal = transport;
     let pts = [
         Vec3::new(18., 0., -2.),
         Vec3::new(22., 0., -2.),
@@ -173,7 +159,7 @@ fn two_piece_body(
 fn a_path_of_a_line_and_an_arc_is_rigid_motion_invariant() {
     for line_first in [true, false] {
         for centre in [true, false] {
-            let (k, mut flat) = two_piece_body(true, centre, line_first, &Axis2Placement::IDENTITY);
+            let (k, mut flat) = two_piece_body(centre, line_first, &Axis2Placement::IDENTITY);
             // the arc's volume, and the line's 20 x 16
             let exact = std::f64::consts::PI * if centre { 160. } else { 144. } + 320.;
             close(volume(&k, &mut flat), exact, exact * 1e-4);
@@ -188,7 +174,7 @@ fn a_path_of_a_line_and_an_arc_is_rigid_motion_invariant() {
                 (Vec3::new(-2., 1., 4.), 41.),
             ] {
                 let p = pose(axis, angle, Vec3::new(3., -7., 11.));
-                let (mut k, mut b) = two_piece_body(true, centre, line_first, &p);
+                let (mut k, mut b) = two_piece_body(centre, line_first, &p);
                 close(volume(&k, &mut b), exact, exact * 1e-4);
                 solidcore::topology::brep::p5::transform(&mut k, &mut b, &p.invert(), None, false)
                     .unwrap();

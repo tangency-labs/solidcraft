@@ -21,6 +21,7 @@ mod mesh_decisions;
 mod params;
 mod pending;
 mod render_assets;
+mod rustfmt;
 mod shared;
 mod skills;
 mod solidcore_paths;
@@ -114,6 +115,9 @@ commands:
   fold-pending    fold assets/locales/pending/*.json into the catalogs and attribution/pending/*.md
                   into ATTRIBUTION.md, and delete them (the Generated files workflow runs this on
                   main; pull requests add the pending files instead of editing the shared ones)
+  fmt [--check]   rustfmt over the workspace and its path dependencies (what `cargo fmt --all`
+                  formats), a few files at a time: `cargo fmt --all` itself cannot start on
+                  Windows, where its one command line is too long; --check only reports
   lists [--fix]   check that files many changes add to are sorted one item per line (the
                   message catalogs in assets/locales, tests/KNOWN_FAILING_TESTS); --fix sorts
                   the catalogs
@@ -172,6 +176,12 @@ fn main() -> ExitCode {
         Some("fold-pending") => pending::run(&root()),
         Some("skills") => skills::run(&root()),
         Some("mesh-decisions") => mesh_decisions::run(&root()),
+        Some("fmt") => match rest[..] {
+            [] => rustfmt::run(&root(), false),
+            ["--check"] => rustfmt::run(&root(), true),
+            // A mistyped --check must not rewrite files.
+            _ => Err("usage: cargo xtask fmt [--check]".into()),
+        },
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
@@ -503,9 +513,7 @@ fn wasm_check() -> Result<(Command, usize), String> {
 /// The quick gates first, so they fail fast; the wasm check (and doc tests) run while the test
 /// binaries do, which leaves cargo's build lock free.
 fn cmd_ci() -> Result<(), String> {
-    let mut c = cargo();
-    c.args(["fmt", "--all", "--", "--check"]);
-    run(c, "cargo fmt --check")?;
+    rustfmt::run(&root(), true)?;
     assets::run(&root())?;
     icons::run(&root())?;
     licences::run(&root(), true)?;

@@ -51,7 +51,7 @@ use crate::nurbs::crv_fit::p1::{
     DerivEnd, ParamMethod,
 };
 use crate::nurbs::crv_fit::p2::{calc_matrix, cpts_with_matrix, deriv_matrix, MatrixEnds};
-use crate::nurbs::crv_tool::p2::make_compatible_knot_tol_traced;
+use crate::nurbs::crv_tool::p2::{make_compatible_knot_tol_mapped, KnotMap};
 use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::geom::{cpts_are_colinear, dist_cpolygon, dist_pt_pt, ColinearDim};
 use crate::nurbs::index;
@@ -315,6 +315,21 @@ fn adjust_cols(
 pub fn create_skin_srf_boundary_continuity(
     cur: &mut [Curve],
     opt: &mut SkinBoundaryOptions,
+) -> Result<Surface> {
+    create_skin_srf_boundary_continuity_mapped(cur, opt, None)
+}
+
+/// [`create_skin_srf_boundary_continuity`], also composing into `maps` (one per curve of
+/// `cur`, when given) where each section's knots went when it makes the sections compatible
+/// ([`KnotMap`]). The surface is the one made without `maps`.
+///
+/// # Errors
+///
+/// Those of [`create_skin_srf_boundary_continuity`].
+pub(crate) fn create_skin_srf_boundary_continuity_mapped(
+    cur: &mut [Curve],
+    opt: &mut SkinBoundaryOptions,
+    maps: Option<&mut [Option<KnotMap>]>,
 ) -> Result<Surface> {
     use Boundary::{Bottom, Left, Right, Top};
     let k = dec1(cur.len())?;
@@ -877,7 +892,18 @@ pub fn create_skin_srf_boundary_continuity(
                 extra.push(1);
             }
         }
-        let res = make_compatible_knot_tol_traced(&mut all, 0.0);
+        // (the maps: the sections', then the derivative curves', which are not kept)
+        let mut all_maps: Option<Vec<Option<KnotMap>>> = maps.is_some().then(|| {
+            all.iter()
+                .map(|c| Some(KnotMap::identity(c.knots())))
+                .collect()
+        });
+        let res = make_compatible_knot_tol_mapped(&mut all, 0.0, all_maps.as_deref_mut());
+        if let (Some(m), Some(made)) = (maps, all_maps) {
+            for (map, step) in m.iter_mut().zip(made) {
+                KnotMap::follow(map, step);
+            }
+        }
         let mut it = all.into_iter();
         for c in cur.iter_mut() {
             if let Some(x) = it.next() {

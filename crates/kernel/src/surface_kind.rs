@@ -1,8 +1,9 @@
 //! What surface a face lies on (plane, cylinder, cone, sphere, torus), for construction
 //! geometry: axes through round faces, centres of spheres and tori.
 
+use solidcore_ops::face_surface::{Exact, FaceSurface as ExactSurface};
 use solidcore_record::Vec3;
-use solidcore_record::brep::{Brep, Curve};
+use solidcore_record::brep::{Brep, Curve, Surface};
 use solidcraft_geom::UnitVec3;
 use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::prelude::*;
@@ -50,8 +51,17 @@ pub fn face_surface(b: &Body, face: usize) -> Option<FaceSurface> {
     surface_of(b.record(), face)
 }
 
-/// The analytic surface of face `face` of the record `b`, as the record holds it.
+/// The analytic surface of face `face` of the record `b`, as the record holds it; a round kept
+/// as its definition is the torus that definition gives, when it is one.
 pub(crate) fn surface_of(b: &Brep, face: usize) -> Option<FaceSurface> {
+    if matches!(b.faces.get(face)?.surface, Surface::Blend { .. }) {
+        return match *ExactSurface::of(b, face).ok()?.exact() {
+            Exact::Torus { centre, axis, major, minor } => {
+                Some(FaceSurface::Torus { center: Vec3::from(centre), axis: Vec3::from(axis).unit()?, major, minor })
+            }
+            _ => None,
+        };
+    }
     Some(match surf_of(b, face)? {
         Surf::Plane { n, d } => FaceSurface::Plane { normal: n.unit()?, point: n * d },
         Surf::Cylinder { o, a, r, .. } => FaceSurface::Cylinder { origin: o, axis: a.unit()?, radius: r },
@@ -73,6 +83,11 @@ pub struct EdgeCircle {
     pub end: Vec3,
     /// The angle the edge spans (radians, 2π for a whole circle).
     pub angle: f64,
+}
+
+/// The record edges that bound face `face` of `b` (none for a face out of range).
+pub fn face_edge_indices(b: &Body, face: usize) -> Vec<usize> {
+    crate::offset::face_edges(b.record(), face).into_iter().map(|e| e as usize).collect()
 }
 
 /// The circle edge `edge` (in the order of [`Body::edges`] and the tessellated mesh's edges)

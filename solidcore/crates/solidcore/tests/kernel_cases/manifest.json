@@ -20,7 +20,7 @@
       }
     },
     "booleans": {
-      "cases": 129,
+      "cases": 130,
       "chain": {
         "1": 9,
         "12": 1,
@@ -31,7 +31,7 @@
         "17": 1,
         "193": 1,
         "28": 1,
-        "3": 2,
+        "3": 3,
         "31": 1,
         "4": 3,
         "5": 1,
@@ -42,9 +42,9 @@
         "8": 6,
         "9": 3
       },
-      "expressible": 114,
+      "expressible": 115,
       "not_expressible": 12,
-      "operation_expressible": 117,
+      "operation_expressible": 118,
       "reasons": {
         "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 10,
         "refused or failed in SolidCraft, not in a kernel operation": 2

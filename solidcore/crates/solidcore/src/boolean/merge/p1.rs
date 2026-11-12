@@ -280,12 +280,9 @@ pub fn faces_coincide(
     ) else {
         return Err(SolidError::entity_missing(OP, "a face has no surface"));
     };
-    let tol = crate::topology::face::p2::tolerance(brep, face)?
-        .max(crate::topology::face::p2::tolerance(other, other_face)?);
-    // The two faces together: where the surfaces must agree.
-    let region = crate::query::face::p1::calculate_bounding_box(k, brep, face, false)?.union(
-        &crate::query::face::p1::calculate_bounding_box(k, other, other_face, false)?,
-    );
+    // The larger face tolerance, and the two faces together: where the surfaces must agree.
+    let (tol, region) =
+        crate::query::face::p1::surface_comparison_extent(k, brep, face, other, other_face)?;
     // Two quadrics of one kind part where the sector cannot see: decided from their
     // definitions. The sector decides the rest: two planes (their gap is what its step-off
     // measures), two different kinds (tangent, they can stay within the tolerance over a

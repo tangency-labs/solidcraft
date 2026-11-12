@@ -36,6 +36,14 @@
 //!   never used: two of its points farther apart than `reach` certify it is not collapsed within
 //!   reach, and otherwise the question is refused.
 //!
+//! On the analytic forms ([`SurfaceEval::collapse`](super::SurfaceEval::collapse)) a direction is
+//! collapsed within `reach` only where the surface narrows to a pole: where its circles along
+//! that direction are somewhere wider than `reach`. A form nowhere wider (a cylinder, a sphere's
+//! meridian, a torus's tube, or any of them no more than `reach` across) is thin, not collapsed,
+//! and only an exact pole is one there. Splines and revolutions do not follow that rule yet:
+//! their iso-lines are decided within `reach` as above, so a round written as a B-spline thinner
+//! than `reach` still reads as collapsed where its analytic form does not.
+//!
 //! The iso-line is taken over the spline's whole knot range along `d`, or over `range` when
 //! one is given ([`collapsed_on`]): over a sub-range only the control points of the knot spans
 //! it meets matter (the B-splines not zero on an interval are independent on it), so a face
@@ -843,6 +851,168 @@ pub fn collapse(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collapse, E
         along(s, uv, 0, reach, None)?,
         along(s, uv, 1, reach, None)?,
     ]))
+}
+
+/// [`collapse`] at `uv`, or, where `uv` is off a spline's knot range (past it by more than the
+/// evaluator's rounding, as a pcurve's end fitted a little beyond the surface is), at the
+/// nearest point of the range with `reach` less `onto_range`'s certified bound `δ`: every
+/// point of an iso-line through `uv` (the surface's end polynomials continued past the range)
+/// lies within `δ / 2` of a point of the one through that nearest point, so a line of diameter
+/// at most `reach − δ` there has one of at most `reach` at `uv` (the triangle inequality), and
+/// a pole answered is a pole within `reach`. A shift not under `reach` (at no reach, any shift)
+/// is refused ([`EvalError::OffRange`], `OffRangeBeyondReach`), never answered; so is a
+/// rational net off the range. Parameters on the range, a closed direction (wrapped by whole
+/// periods: the same point), and any other surface go to [`collapse`] unchanged.
+pub fn collapse_near(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collapse, EvalError> {
+    check(uv, reach)?;
+    let Some((near, shift)) = onto_range(s, uv)? else {
+        return collapse(s, uv, reach);
+    };
+    if !(shift < reach) {
+        return Err(EvalError::OffRange(format!(
+            "OffRangeBeyondReach: ({}, {}) is off the spline's knot range; moving it onto the \
+             range shifts the surface by up to {shift} mm, not under the reach {reach} mm",
+            uv[0], uv[1]
+        )));
+    }
+    // The difference rounded down, so the reach asked is never above reach − δ.
+    collapse(s, near, (reach - shift) * (1.0 - 2.0 * UNIT))
+}
+
+/// Where `uv` is off a polynomial spline's knot range: the nearest point of the range and a
+/// certified bound `δ` on twice the distance a move between them shifts the surface's points,
+/// along either iso-line; `None` on the range.
+///
+/// For a direction `e` that `uv` is off by `o_e`, take the strip of the net over `e`'s end knot
+/// span (the span holding the nearest point) and the whole of the other direction `f`. On it
+/// the partial `∂S/∂e` is the polynomial whose B-spline coefficients are
+/// `p_e (P_(i+1) − P_i) / (t_(i+p_e+1) − t_(i+1))` over the strip's control points, within their
+/// largest length `M_e` (a convex combination of them, in each patch's Bézier form after knot
+/// insertion). Continued past a span of length `h` by `o` at degree `q`, the Bernstein basis
+/// sums in absolute value to `(1 + 2o/h)^q`, so on the strip continued past the range
+/// `|∂S/∂e| ≤ M_e (1 + 2o_e/h_e)^(p_e − 1) (1 + 2o_f/h_f)^(p_f)`, `h_f` the shortest span along
+/// `f`. Every point of an iso-line through `uv` along `f` is then within `o_e` times that of the
+/// line through the nearest point (moving across `e`), and the piece of an iso-line along `e`
+/// past the range within the same of its end; `δ` is twice the sum over the directions, rounded
+/// up. A strip with a weight other than the net's first, or not positive, is refused
+/// ([`EvalError::OffRange`]): a rational continuation is not bounded here.
+fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, EvalError> {
+    let EvalSurface::Nurbs(n) = s else {
+        return Ok(None);
+    };
+    let q = s.wrap(uv);
+    let (deg, knots, count, ctrl) = (n.degree(), n.knots(), n.count(), n.ctrl());
+    let bad = || malformed("knots or a net that do not fit");
+    let none: &[f64] = &[];
+    let kn = |d: usize| knots.get(d).map_or(none, Vec::as_slice);
+    let get = |a: &[usize; 2], d: usize| a.get(d).copied().unwrap_or(0);
+    let mut near = q;
+    let mut off = [0.0f64; 2];
+    for d in 0..2 {
+        let (p, m, k) = (get(&deg, d), get(&count, d), kn(d));
+        let (&lo, &hi) = (k.get(p).ok_or_else(bad)?, k.get(m).ok_or_else(bad)?);
+        let (Some(x), Some(o)) = (near.get_mut(d), off.get_mut(d)) else {
+            return Err(bad());
+        };
+        if onto_knots(k, p, m, *x).is_none() {
+            let t = *x;
+            *x = if t < lo { lo } else { hi };
+            *o = (t - *x).abs() * (1.0 + UNIT);
+        }
+    }
+    if off == [0.0, 0.0] {
+        return Ok(None);
+    }
+    // Each direction's end span at the nearest point (as de Boor takes it): its first control
+    // point index and length, and the direction's shortest span.
+    let mut span = [(0usize, 0.0f64, 0.0f64); 2];
+    for d in 0..2 {
+        let (p, m, k) = (get(&deg, d), get(&count, d), kn(d));
+        let c = onto_knots(k, p, m, near.get(d).copied().unwrap_or(f64::NAN)).ok_or_else(bad)?;
+        let last = m.checked_sub(1).ok_or_else(bad)?;
+        let mut at = p;
+        while at < last && k.get(at + 1).is_some_and(|y| *y <= c) {
+            at += 1;
+        }
+        let h = k.get(at + 1).ok_or_else(bad)? - k.get(at).ok_or_else(bad)?;
+        let shortest = (p..=last)
+            .filter_map(|i| Some(k.get(i + 1)? - k.get(i)?))
+            .filter(|h| *h > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        let spans = h > 0.0 && shortest > 0.0 && shortest.is_finite();
+        if !spans {
+            return Err(bad());
+        }
+        if let Some(slot) = span.get_mut(d) {
+            *slot = (at.checked_sub(p).ok_or_else(bad)?, h, shortest);
+        }
+    }
+    let nu = get(&count, 0);
+    let w0 = ctrl.first().ok_or_else(bad)?[3];
+    let rational = || {
+        EvalError::OffRange(format!(
+            "({}, {}) is off the spline's knot range on a rational net, whose continuation past \
+             the range is not bounded",
+            uv[0], uv[1]
+        ))
+    };
+    // Control point `i` along e, `j` across, as a Euclidean point of the one weight w0.
+    let point = |e: usize, i: usize, j: usize| -> Result<Vec3, EvalError> {
+        let (iu, iv) = if e == 0 { (i, j) } else { (j, i) };
+        let c = ctrl
+            .get(
+                iv.checked_mul(nu)
+                    .and_then(|x| x.checked_add(iu))
+                    .ok_or_else(bad)?,
+            )
+            .copied()
+            .ok_or_else(bad)?;
+        let polynomial = c[3] == w0 && w0 > 0.0 && c.iter().all(|x| x.is_finite());
+        if !polynomial {
+            return Err(rational());
+        }
+        Ok(Vec3::new(c[0], c[1], c[2]) * (1.0 / w0))
+    };
+    let grow = |o: f64, h: f64, power: usize| -> f64 {
+        (0..power).fold(1.0, |acc, _| acc * (1.0 + 2.0 * o / h))
+    };
+    let mut shift = 0.0f64;
+    for e in 0..2 {
+        let f = 1 - e;
+        let (o_e, o_f) = (
+            off.get(e).copied().unwrap_or(0.0),
+            off.get(f).copied().unwrap_or(0.0),
+        );
+        let (p, pf, m_f, k) = (get(&deg, e), get(&deg, f), get(&count, f), kn(e));
+        if o_e == 0.0 || p == 0 {
+            continue;
+        }
+        let (Some(&(first, h_e, _)), Some(&(_, _, h_f))) = (span.get(e), span.get(f)) else {
+            return Err(bad());
+        };
+        let mut top = 0.0f64;
+        for a in first..first + p {
+            let step = k.get(a + p + 1).ok_or_else(bad)? - k.get(a + 1).ok_or_else(bad)?;
+            if !(step > 0.0) {
+                return Err(bad());
+            }
+            for b in 0..m_f {
+                let (x, y) = (point(e, a, b)?, point(e, a + 1, b)?);
+                // The difference's length with its rounding on the points' own sizes (each
+                // point's division, the difference, the length).
+                let len = (y - x).len() + gamma(8) * (x.len() + y.len());
+                top = top.max(p as f64 * len / step);
+            }
+        }
+        shift += o_e * top * grow(o_e, h_e, p - 1) * grow(o_f, h_f, pf);
+    }
+    // Twice the bound, rounded up over its few dozen operations (each point's division, the
+    // differences, lengths, quotients, powers and products).
+    let delta = 2.0 * shift * (1.0 + gamma(64));
+    if !delta.is_finite() {
+        return Err(refused("a shift onto the knot range is not finite"));
+    }
+    Ok(Some((near, delta)))
 }
 
 #[cfg(test)]
