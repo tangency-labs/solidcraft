@@ -137,8 +137,6 @@ const OP_SPAN: &str = "intersect::surface_intersector::p1::SurfaceIntersector::t
 const OP_REVERSE: &str =
     "intersect::surface_intersector::p1::SurfaceIntersector::reverse_curve_direction";
 const OP_LAW: &str = "intersect::surface_intersector::p1::SurfaceIntersector::evaluate_law_point";
-const OP_STEP_BACK: &str =
-    "intersect::surface_intersector::p1::SurfaceIntersector::step_back_from_singularity";
 
 /// `SM_MAX_USER_DOUBLES`.
 pub const MAX_USER_DOUBLES: usize = 4;
@@ -1074,9 +1072,13 @@ impl<'s> SurfaceIntersector<'s> {
     /// curve's side, `near` (the other point of the span), clamped to the domain: the
     /// seam's two parameters name one direction.
     ///
+    /// The answer is clamped to the intersector's domain (the solve runs over the
+    /// surface's natural domain). Where the solve fails or does not converge, `None`: the
+    /// step-back's sampled parameter stays, as before this construction.
+    ///
     /// # Errors
     ///
-    /// [`SolidError::Failed`] when the solve does not converge; those of the solve.
+    /// [`SolidError::Unported`] and [`SolidError::Cancelled`] from the solve.
     fn pole_singular_parameter(
         &self,
         k: &Kernel,
@@ -1117,15 +1119,16 @@ impl<'s> SurfaceIntersector<'s> {
         } else {
             Point2::new(pole.x, near)
         };
-        let degen = self
+        // a solve that fails or does not converge leaves the step-back's parameter
+        let degen = match self
             .surface(srf)
-            .find_degen_param_for_direction(k, guess, toward, true, sing_dir, EFF_ZERO)?;
-        if !degen.converged {
-            return Err(SolidError::intersect_failed(
-                OP_STEP_BACK,
-                "the singular parameter along the curve's tangent did not converge",
-            ));
-        }
+            .find_degen_param_for_direction(k, guess, toward, true, sing_dir, EFF_ZERO)
+        {
+            Ok(d) if d.converged => d,
+            Ok(_) => return Ok(None),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(None),
+        };
         let mut s = if sing_dir == SurfParamType::U {
             degen.uv.x
         } else {
@@ -1138,9 +1141,9 @@ impl<'s> SurfaceIntersector<'s> {
             } else if near - s > period / 2.0 {
                 s += period;
             }
-            s = s.clamp(lo, hi);
         }
-        Ok(Some(s))
+        // the solve runs over the natural domain; the trace stays in its own
+        Ok(Some(s.clamp(lo, hi)))
     }
 
     // ---- refinement and span tests ------------------------------------------------------------------
