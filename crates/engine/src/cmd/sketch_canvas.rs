@@ -280,6 +280,63 @@ mod tests {
     }
 
     #[test]
+    fn canvases_on_model_planes_follow_rebuilds_and_reopen() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::prelude::*;
+
+        let mut s = Session::default();
+        for (command, params) in [
+            ("parameters.add", json!({"name": "station", "expression": "0.25", "unit": ""})),
+            ("sketch.create", json!({"plane": "XY", "name": "Path"})),
+            ("sketch.line", json!({"points": [[0, 0], [20, 0], [20, 10]], "ids": ["a", "b"]})),
+            ("sketch.finish", json!({})),
+            (
+                "construct.plane.three_points",
+                json!({"a": {"point": [0, 0, 5]}, "b": {"point": [1, 0, 5]}, "c": {"point": [0, 1, 5]}, "name": "Numeric"}),
+            ),
+            (
+                "construct.plane.three_points",
+                json!({"a": {"sketch": "Path", "point": "a.start"}, "b": {"sketch": "Path", "point": "a.end"},
+                    "c": {"sketch": "Path", "point": "b.end"}, "name": "Points"}),
+            ),
+            ("construct.plane.along_path", json!({"path": {"sketch": "Path", "curve": "a"}, "t": "station", "name": "Along"})),
+            ("construct.plane.offset", json!({"base": "Along", "offset": 2, "name": "AlongOffset"})),
+            ("construct.plane.at_angle", json!({"base": "Numeric", "axis": "X", "angle": 90, "name": "Angled"})),
+            ("construct.plane.offset", json!({"base": "Angled", "offset": 2, "name": "Derived"})),
+        ] {
+            s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+        }
+        for plane in ["XY", "Numeric", "Points", "Along", "AlongOffset", "Angled", "Derived"] {
+            s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": plane, "name": plane, "width": 40})).unwrap();
+        }
+        let check = |s: &Session, station: f64| {
+            let (vals, _) = s.doc.param_values();
+            let state = s.model.state();
+            for (name, origin, normal) in [
+                ("XY", Vec3::ZERO, Vec3::Z),
+                ("Numeric", Vec3::new(0.0, 0.0, 5.0), Vec3::Z),
+                ("Points", Vec3::ZERO, Vec3::Z),
+                ("Along", Vec3::new(station, 0.0, 0.0), Vec3::X),
+                ("AlongOffset", Vec3::new(station + 2.0, 0.0, 0.0), Vec3::X),
+                ("Angled", Vec3::new(0.0, -5.0, 0.0), -Vec3::Y),
+                ("Derived", Vec3::new(0.0, -7.0, 0.0), -Vec3::Y),
+            ] {
+                let c = s.doc.canvases.iter().find(|c| c.name == name).unwrap();
+                let plane = s.doc.canvas_plane(&vals, c, &state).unwrap_or_else(|e| panic!("{name}: {e}"));
+                assert!(plane.origin.dist(origin) < 1e-9, "{name}: {:?}", plane.origin);
+                assert!(plane.normal().dist(normal) < 1e-9, "{name}: {:?}", plane.normal());
+                let corners = c.world_corners(&plane);
+                assert!((corners[0].dist(corners[1]) - 40.0).abs() < 1e-9, "{name}");
+                assert!((corners[1].dist(corners[2]) - 20.0).abs() < 1e-9, "{name}");
+            }
+        };
+        check(&s, 5.0);
+        s.execute("parameters.change", &json!({"name": "station", "expression": "0.75"})).unwrap();
+        check(&s, 15.0);
+        check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
+    }
+
+    #[test]
     fn deleted_canvas_ids_are_not_reused_after_reopening() {
         let mut s = Session::default();
         let params = json!({"data": png(10, 10)});
