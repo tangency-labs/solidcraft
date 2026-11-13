@@ -99,14 +99,8 @@ fn sweeps_lofts_and_screws() {
     };
     assert_eq!(kinds(&b), ["cone", "plane", "plane"], "lofted frustum");
     let halves = |z: f64, radius: f64| {
-        let half = |start: f64| Curve::Arc {
-            center: [0.0, 0.0, z],
-            axis: [0.0, 0.0, 1.0],
-            reference: [1.0, 0.0, 0.0],
-            radius,
-            start,
-            end: start + PI,
-        };
+        let half =
+            |start: f64| Curve::Arc { center: [0.0, 0.0, z], axis: [0.0, 0.0, 1.0], reference: [1.0, 0.0, 0.0], radius, start, end: start + PI };
         vec![half(0.0), half(PI)]
     };
     for (sections, want, kind) in [
