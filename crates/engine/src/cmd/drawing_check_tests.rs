@@ -646,8 +646,8 @@ fn a_note_that_prints_nothing_is_not_outside_the_sheet() {
 
 /// [`plate`] with a component, Bolt, a 10 mm cube above it, on revolute joint Turn about Z, and an
 /// exploded view, Apart, that moves the Bolt up 50 mm; [`drawn`]'s sheet and front view, with what
-/// `annotate` adds on that view; then the view set by `apart` as a file can hold it (the commands
-/// refuse dimensions and notes on the model there). The session, the view, and the plate's feature.
+/// `annotate` adds on that view; then the view set by `apart`, as a file can hold it. The session, the
+/// view, and the plate's feature.
 fn drawn_apart(
     annotate: impl FnOnce(&mut Session, u64),
     apart: impl FnOnce(&Session, &mut solidcraft_doc::drawing_view::ViewOverrides),

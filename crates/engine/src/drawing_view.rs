@@ -410,71 +410,19 @@ pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'st
     (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
 }
 
-/// How a view draws its parts somewhere other than where the design places them (#13048).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Apart {
-    /// An exploded view.
-    Exploded,
-    /// A position of its own.
-    Posed,
-}
-
-impl Apart {
-    /// How `view` draws its parts apart, if it does: exploded first, as an exploded view of a
-    /// position is still exploded.
-    pub fn of(view: &ResolvedView) -> Option<Apart> {
-        if view.exploded.value != Exploded::Assembled {
-            Some(Apart::Exploded)
-        } else if view.pose.value != Pose::Designed {
-            Some(Apart::Posed)
-        } else {
-            None
-        }
-    }
-
-    /// The view, as a message names it.
-    pub fn view(self) -> &'static str {
-        match self {
-            Apart::Exploded => "an exploded view",
-            Apart::Posed => "a view in a position of its own",
-        }
-    }
-
-    /// Why a sheet holds back a dimension or a note on the model of a view that draws its parts this
-    /// way: Check Drawing's words.
-    pub fn held(self) -> &'static str {
-        match self {
-            Apart::Exploded => "its view draws an exploded view: not supported yet, so it isn't drawn",
-            Apart::Posed => "its view draws a position of its own: not supported yet, so it isn't drawn",
-        }
-    }
-}
-
-/// How view `id` of `d` draws its parts apart from where the design places them, if it does
-/// ([`Apart`]). Its dimensions, balloons and notes on its model read the design's placements, so they
-/// would measure its parts where the design places them: until they read what it draws, new ones are
-/// refused ([`refuse_apart`]) and a sheet holds back those a file brings.
-pub fn draws_apart(d: &Drawing, id: u64) -> Option<Apart> {
-    d.resolve_view(id).ok().as_ref().and_then(Apart::of)
-}
-
-/// Refuses `what` (dimensions, balloons, notes) on view `view` of `d` when it draws its parts apart
-/// ([`draws_apart`]).
-pub fn refuse_apart(d: &Drawing, view: u64, what: &str, cmd: &str) -> Result<()> {
-    match draws_apart(d, view) {
-        Some(apart) => Err(bad(cmd, format!("not supported yet: {what} on {}", apart.view()))),
-        None => Ok(()),
-    }
-}
-
 /// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
 /// shaded parts' pictures are rendered from the design as it places its parts. Its lines alone draw.
+/// Exploded comes first, as an exploded view of a position is still exploded.
 pub fn not_drawable_apart(view: &ResolvedView) -> Option<&'static str> {
-    let shaded = view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded();
-    Apart::of(view).filter(|_| shaded).map(|apart| match apart {
-        Apart::Exploded => "not supported yet: a shaded view of an exploded view",
-        Apart::Posed => "not supported yet: a shaded view in a position of its own",
-    })
+    if !(view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded()) {
+        None
+    } else if view.exploded.value != Exploded::Assembled {
+        Some("not supported yet: a shaded view of an exploded view")
+    } else if view.pose.value != Pose::Designed {
+        Some("not supported yet: a shaded view in a position of its own")
+    } else {
+        None
+    }
 }
 
 /// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to

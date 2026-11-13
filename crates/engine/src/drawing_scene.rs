@@ -1327,8 +1327,7 @@ pub struct ViewStanding {
 pub struct Standing {
     /// Each view, in id order.
     pub views: Vec<ViewStanding>,
-    /// The dimensions and notes its sheets show as they last were, or hold back on a view drawing an
-    /// exploded view ([`out_of_date_annotations`]).
+    /// The dimensions and notes its sheets show as they last were ([`out_of_date_annotations`]).
     pub annotations: Vec<u64>,
 }
 

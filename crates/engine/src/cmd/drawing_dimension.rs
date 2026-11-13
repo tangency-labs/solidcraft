@@ -623,16 +623,13 @@ const TEXT_WAITS: &str = "its text waits for a font to fall back to; drawing.sce
 
 /// Where `dimension` of `d`, read as `r`, sits on its view's sheet now, as the sheet draws it: laid out
 /// through its view's frame ([`paper_group`]), then moved to the view's centre. Or none, with why when
-/// its status doesn't say it, in the sheet's words: its view draws its parts apart, isn't drawn (a
-/// style it can't draw yet, or nothing to measure), has no place for what it measures, or its group
-/// alone fails the paper scene's checks; or its text still waits for a font ([`TEXT_WAITS`]). A text
-/// that can't be set has no box, and says why. It reads the model as it is evaluated and draws no
-/// view's lines, so a view whose lines fail still answers.
+/// its status doesn't say it, in the sheet's words: its view isn't drawn (a style it can't draw yet,
+/// or nothing to measure), has no place for what it measures, or its group alone fails the paper
+/// scene's checks; or its text still waits for a font ([`TEXT_WAITS`]). A text that can't be set has
+/// no box, and says why. It reads the model as it is evaluated and draws no view's lines, so a view
+/// whose lines fail still answers.
 fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved) -> (Option<DimensionLayoutResult>, Option<String>) {
     let id = dimension.view;
-    if let Some(apart) = crate::drawing_view::draws_apart(d, id) {
-        return (None, Some(apart.held().into()));
-    }
     let not_drawn = || (None, Some(NOT_DRAWN.to_string()));
     // The views draw from where the design places its parts, as the sheet does; a dimension reads the
     // same either way, as it reads the model, not the session's moves.

@@ -2240,8 +2240,9 @@ fn the_layout_is_where_the_sheet_draws_it() {
 /// sheet uses. Lost (its edge filleted away): no layout, and nothing more than its status. Its view
 /// drawing nothing (its only part, Block, hidden, as a file can hold it: a placeholder) or in a shaded
 /// style with lines (which the sheet can't draw yet): "its view isn't drawn", as `drawing.scene` says.
-/// Its view drawing an exploded view (set after the add, as a file can hold it): the held words, as
-/// `drawing.check` says them.
+/// Its view drawing an exploded view (set after the add, as a file can hold it) is no longer one of
+/// these: it is drawn where that view draws its parts (#13048), so it has a layout, its arrows' tips
+/// where the sheet draws its arrowheads, and `drawing.check` holds nothing back.
 #[test]
 fn a_dimension_not_drawn_has_no_layout_and_says_why() {
     let (mut s, drawing, dimension) = read_once();
@@ -2290,13 +2291,14 @@ fn a_dimension_not_drawn_has_no_layout_and_says_why() {
     Arc::make_mut(record).settings.exploded = Some(solidcraft_doc::drawing_view::Exploded::View(s.doc.assembly.exploded[0].id));
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
-    let held = run(&mut s, INSPECT, json!({"dimension": on_bolt["dimension"]}));
-    assert!(held.get("layout").is_none(), "{held}");
-    assert_eq!(held["layout_why"], json!(crate::drawing_view::Apart::Exploded.held()), "{held}");
+    let apart = run(&mut s, INSPECT, json!({"dimension": on_bolt["dimension"]}));
+    assert!(apart.get("layout").is_some() && apart.get("layout_why").is_none(), "{apart}");
+    let tips: Vec<Vec2> = layout_arrows(&apart).into_iter().map(|(tip, _)| tip).collect();
+    let (_, drawn, _) = drawn_parts(&sheet_now(&s), &on_bolt);
+    assert_eq!(tips, drawn, "the layout is where the sheet draws the bolt, moved apart");
     let check = run(&mut s, "drawing.check", json!({}));
     let of_bolt = |f: &&Value| f["kind"] == "out_of_date" && f["object"]["id"] == on_bolt["dimension"];
-    let said = check["findings"].as_array().and_then(|all| all.iter().find(of_bolt));
-    assert_eq!(said.map(|f| &f["why"]), Some(&held["layout_why"]), "{check}");
+    assert!(check["findings"].as_array().is_some_and(|all| !all.iter().any(|f| of_bolt(&f))), "{check}");
 }
 
 /// Add and repair answer with the layout inspect gives. The top front edge's length, added, answers
