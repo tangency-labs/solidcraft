@@ -190,17 +190,8 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
             .as_ref()
     };
     let boxes: Vec<Aabb3> = (0..n)
-        .map(|i| match (solid.get(i), meshes.get(i).and_then(Option::as_ref)) {
-            (Some(b), Some(m)) if flag(&used, i) => {
-                // Over the triangles with finite corners, as a shape's set of them is.
-                let mut bx = Aabb3::EMPTY;
-                for p in m.triangles.iter().filter_map(|t| m.tri(t)).filter(|p| p.iter().all(|v| v.is_finite())) {
-                    p.into_iter().for_each(|v| bx.add(v));
-                }
-                let chord = b.display_tol();
-                let g = solidcore_record::Vec3::new(1.0, 1.0, 1.0) * if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
-                if bx.is_empty() { bx } else { Aabb3 { min: bx.min - g, max: bx.max + g } }
-            }
+        .map(|i| match solid.get(i) {
+            Some(b) if flag(&used, i) => b.body.exact_bounds().map(|bb| bb.inflated(2.0 * b.body.record().tolerance)).unwrap_or(Aabb3::EMPTY),
             _ => Aabb3::EMPTY,
         })
         .collect();
@@ -350,9 +341,9 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
 /// One pair: its overlap when the meshes meet or one holds the other, otherwise its distance
 /// when it may be closer than `gap`.
 fn measure_pair(
-    (ba, ka): (&solidcraft_doc::ModelBody, &solidcraft_kernel::Body),
+    (_ba, ka): (&solidcraft_doc::ModelBody, &solidcraft_kernel::Body),
     a: &DistanceShape,
-    (bb, kb): (&solidcraft_doc::ModelBody, &solidcraft_kernel::Body),
+    (_bb, kb): (&solidcraft_doc::ModelBody, &solidcraft_kernel::Body),
     b: &DistanceShape,
     gap: f64,
     min_volume: f64,
@@ -361,19 +352,8 @@ fn measure_pair(
     let mut out = PairResult::default();
     let slack = 2.0 * (a.chord() + b.chord());
     let mesh = a.mesh_closest(b, gap + slack);
-    let holds = |outer: &solidcraft_doc::ModelBody, inner: &solidcraft_doc::ModelBody| {
-        let (o, i) = (outer.mesh(), inner.mesh());
-        let (ob, ib) = (o.bounds(), i.bounds());
-        let nested = ob.min.x <= ib.min.x
-            && ob.min.y <= ib.min.y
-            && ob.min.z <= ib.min.z
-            && ib.max.x <= ob.max.x
-            && ib.max.y <= ob.max.y
-            && ib.max.z <= ob.max.z;
-        nested && i.positions.first().is_some_and(|p| o.contains(*p))
-    };
-    let touching = mesh.is_some_and(|m| m.distance <= slack);
-    if touching || holds(ba, bb) || holds(bb, ba) {
+    let touching = mesh.is_some_and(|m| m.distance <= slack) || ka.meets(kb).unwrap_or(false);
+    if touching {
         // A pair whose shared part can't be worked out is reported, not passed as clear.
         match solidcraft_kernel::boolean(ka, kb, solidcraft_kernel::BoolOp::Intersect) {
             Err(e) => {
