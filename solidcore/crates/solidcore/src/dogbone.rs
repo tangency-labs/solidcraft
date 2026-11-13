@@ -127,6 +127,10 @@ pub enum Skip {
     /// A face at a blind end leans over the corner so far that no relief fits above it: the
     /// relief would have to stop short of the end by the edge's whole length or more.
     Overhang,
+    /// A face at an open end runs so nearly along the edge (within about `reach / 10⁶ mm` rad,
+    /// `reach` how far the relief's section reaches from the edge line) that the relief would have
+    /// to run on past that end by more than the largest size accepted, 10⁶ mm.
+    TooLong,
 }
 
 /// A relief in a corner, in the corner's own terms: its circle's centre as an offset from the
@@ -350,7 +354,8 @@ pub enum EdgeRelief {
 /// relief stops short of the end as far as its planar blind faces lean over the corner (see
 /// [`pull_back`]), so its end disc lies on or above each of their planes and it cuts nothing
 /// below a square or a tilted floor; when that leaves nothing of the edge, the corner is skipped
-/// ([`Skip::Overhang`]).
+/// ([`Skip::Overhang`]). An open end whose face runs so nearly along the edge that the relief
+/// would run on past it by more than 10⁶ mm skips the corner too ([`Skip::TooLong`]).
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for options out of range, a point or a normal that is not
@@ -381,6 +386,9 @@ pub fn edge_relief(
         extension(edge.end, edge.start, at_start, o.radius, reach)?,
         extension(edge.start, edge.end, at_end, o.radius, reach)?,
     ];
+    if extend.iter().any(|e| *e > MAX_SIZE) {
+        return Ok(EdgeRelief::Skipped(Skip::TooLong));
+    }
     let cylinder = match relief_cylinder(edge, directions, lengths, extend, &o)? {
         Ok(cylinder) => cylinder,
         Err(skip) => return Ok(EdgeRelief::Skipped(skip)),

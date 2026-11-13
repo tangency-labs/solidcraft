@@ -562,6 +562,42 @@ fn a_relief_clears_a_sloped_open_end() {
 }
 
 #[test]
+fn an_open_end_nearly_along_the_edge_skips_the_corner() {
+    // The pocket corner edge of `an_edge_relief_reads_its_walls_and_ends`, its top face falling
+    // back over the relief with tan β = 1 / rise: the relief runs R + 2R·tan β past it.
+    let up = edge(Vec3::new(0.0, 0.0, 4.0), Vec3::new(0.0, 0.0, 10.0));
+    let along_x = [edge(Vec3::new(0.0, 0.0, 4.0), Vec3::new(20.0, 0.0, 4.0))];
+    let along_y = [edge(Vec3::new(0.0, 0.0, 4.0), Vec3::new(0.0, 14.0, 4.0))];
+    let walls = [
+        Wall {
+            outward: Vec3::Y,
+            left: true,
+            sides: &along_x,
+        },
+        Wall {
+            outward: Vec3::X,
+            left: false,
+            sides: &along_y,
+        },
+    ];
+    let floor: &[Option<Vec3>] = &[Some(Vec3::Z)];
+    let lean = Vec3::new(-FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0);
+    let o = opts(Style::Normal);
+    // tan β = 10⁵: 3·10⁵ mm past the end, within the largest size: a relief that long.
+    let top: &[Option<Vec3>] = &[Some(lean + Vec3::Z * 1e-5)];
+    let EdgeRelief::Relief(c) = edge_relief(&up, &walls, [floor, top], &o).unwrap() else {
+        panic!("tan β = 1e5: no relief");
+    };
+    assert!(close(c.height, 6.0 + R + 2.0 * R * 1e5, 1e-6), "{c:?}");
+    // tan β = 10⁷: 3·10⁷ mm, past the largest size: that corner is skipped, never refused.
+    let top: &[Option<Vec3>] = &[Some(lean + Vec3::Z * 1e-7)];
+    assert_eq!(
+        edge_relief(&up, &walls, [floor, top], &o).unwrap(),
+        EdgeRelief::Skipped(Skip::TooLong)
+    );
+}
+
+#[test]
 fn ends_axes_and_planes() {
     // A floor facing up at the bottom of an edge running up: blind; the top face: open.
     let (top, floor) = (Vec3::new(0.0, 0.0, 10.0), Vec3::new(0.0, 0.0, 4.0));
