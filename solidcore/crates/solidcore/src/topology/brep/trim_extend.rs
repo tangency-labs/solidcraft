@@ -362,10 +362,14 @@ pub fn extend_trim(
         };
         let (w0, t0) = hit(k, v0, before.direction(k, true)?, reach, &target, tol)?;
         let (w1, t1) = hit(k, v1, -after.direction(k, false)?, reach, &target, tol)?;
-        // the moved edge still runs the way the picked one did
-        let run = picked.direction(k, false)?;
-        if (w1 - w0).dot(run) <= tol {
-            return Err(unsupported("the neighbours cross before the distance"));
+        // a straight moved edge still runs the way the picked one did, its new ends in order
+        // along it (a curved one is checked by its parameters at the ends, below: its chord
+        // need not run along its start tangent, as an arc's does not)
+        if straight {
+            let run = picked.direction(k, false)?;
+            if (w1 - w0).dot(run) <= tol {
+                return Err(unsupported("the neighbours cross before the distance"));
+            }
         }
         corners.push(w0);
         corners.push(w1);
