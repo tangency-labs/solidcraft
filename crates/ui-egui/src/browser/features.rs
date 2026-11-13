@@ -35,7 +35,7 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     };
     let Some(path) = super::placement_named(app, &source, component, body) else { return };
     app.ui.show_browser = true;
-    app.preferences.timeline_left_browser_collapsed = false;
+    reveal_shared_panel(app, "browser");
     app.tree.reveal = None;
     super::open_path(app, &path);
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
@@ -58,6 +58,7 @@ pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
             .unwrap_or_else(|| app.session.doc.first_path(component))
     };
     app.ui.show_browser = true;
+    reveal_shared_panel(app, "browser");
     // Opened whichever way each row starts (Preferences › Layout can start rows closed).
     let start_open = rows_start_open(app);
     set_open(app, "c0", true, true);
@@ -1046,14 +1047,19 @@ mod tests {
         h.app.session = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::from_json(&saved).unwrap());
         h.app.tree.collapsed.insert("c0".into());
         h.app.tree.collapsed.insert(occurrence_key(&path));
-        h.app.preferences.timeline_left_browser_collapsed = true;
+        use solidcraft_engine::panels::{InstanceId, LayoutAction, Mutation};
+        let browser = InstanceId::new("browser").unwrap();
+        let section = h.app.panel_runtime().unwrap().layout().layout().containing(&browser).unwrap().id.clone();
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: true }] })
+            .unwrap();
         let undo = h.app.session.undo.len();
         for id in [base, hole, fillet] {
             find_in_timeline(&mut h.app, id, &world_body);
             assert_eq!(h.app.tree.reveal_feature.as_ref().unwrap().path, path);
             assert!(!h.app.tree.collapsed.contains("c0"));
             assert!(!h.app.tree.collapsed.contains(&occurrence_key(&path)));
-            assert!(!h.app.preferences.timeline_left_browser_collapsed);
+            assert!(!h.app.panel_runtime().unwrap().layout().layout().containing(&browser).unwrap().collapsed);
             h.frames(2);
             assert!(h.app.tree.reveal_feature.is_none(), "the actual feature row was drawn and scrolled to");
             let at = h.call("ui.at", json!({"handle":format!("row:browser-feature:{}:{id}",occurrence_key(&path))}));

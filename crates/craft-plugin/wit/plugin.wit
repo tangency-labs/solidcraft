@@ -1,0 +1,54 @@
+package craft:plugin@0.1.0;
+
+// Capability `commands@0.1`: every interface in this file. A plugin names it in its manifest's
+// `capabilities` list. Later capabilities (ui, viewport, formats, storage) arrive as their own
+// interfaces. While the version is 0.x, a minor version may break the one before it.
+// App commands and their schemas are data; this world never names app types.
+interface types {
+    type json = string;
+    record command-failure { command: string, reason: string }
+    record field-failure { field: string, reason: string }
+    variant plugin-error {
+        permission-denied(string),
+        command-failed(command-failure),
+        limit-exceeded(string),
+        invalid-manifest(field-failure),
+        invalid-input(field-failure),
+        trap(string),
+        cancelled,
+    }
+}
+// The app's command surface: the same commands, inputs and results its MCP clients get.
+interface commands {
+    use types.{json, plugin-error};
+    run: func(command: string, args: json) -> result<json, plugin-error>;
+}
+interface log {
+    enum level { debug, info, warn, error }
+    log: func(level: level, message: string);
+}
+interface control {
+    progress: func(fraction: f32, message: string);
+    cancelled: func() -> bool;
+}
+interface files {
+    use types.{plugin-error};
+    read-file: func(grant: string, path: string) -> result<list<u8>, plugin-error>;
+    write-file: func(grant: string, path: string, data: list<u8>) -> result<_, plugin-error>;
+}
+interface clock {
+    now: func() -> u64;
+}
+// What the plugin exports: its manifest's entries, called by name.
+interface entry {
+    use types.{json, plugin-error};
+    execute: func(entry: string, params: json) -> result<json, plugin-error>;
+}
+world command-plugin {
+    import commands;
+    import log;
+    import control;
+    import files;
+    import clock;
+    export entry;
+}

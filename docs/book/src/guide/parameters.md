@@ -6,11 +6,14 @@ are ones you add yourself, with a unit, an expression and an optional comment. C
 uses them.
 
 When creating or editing a sketch dimension, its value editor shows its model parameter
-name (`d1`, `d2`, …). Click another driving dimension to use its name: when the value is
-just a number (such as `10` or `10 mm`) the name replaces it; otherwise it goes in at the
-cursor, replacing selected text and keeping what you typed, so typing `10 + ` and clicking
-`d1` gives `10 + d1`. Add arithmetic such as `/ 2` to build a dependent dimension. Press **Enter** to apply
-the expression or **Escape** to cancel the edit.
+name (`d1`, `d2`, …). Double-click another dimension to edit it: the current value is applied,
+as **Enter** does (if it is not valid, the box stays open with its error), and the clicked
+dimension opens with its value selected. Single-click another driving dimension to insert its
+name: when the value is just a number (such as `10` or `10 mm`) the name replaces it; otherwise
+it goes in at the cursor, replacing selected text and keeping what you typed, so typing `10 + `
+and clicking `d1` gives `10 + d1`. The name goes in a moment after the click, once it is clear
+the click was not the first of a double-click. Add arithmetic such as `/ 2` to build a dependent
+dimension. Press **Enter** to apply the expression or **Escape** to cancel the edit.
 Add and edit user parameters through the existing **Change Parameters** command.
 
 <img class="dark-ui" src="../media/parameters/dialog.png" alt="The Parameters dialog, numbered 1 to 5">

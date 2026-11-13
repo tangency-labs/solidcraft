@@ -166,7 +166,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         app.tree.redefine_draft = Some(draft);
         return;
     }
-    let side = crate::shell::floating_editor_side(app, crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx));
+    let side = crate::frame::Side::Right;
     let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
     let docked = egui::pos2(side.anchor_x(viewport), top);
     let moved = crate::frame::dock_offset(ctx, "sc_redefine");
@@ -345,7 +345,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         cancel |= closed || action == ui_kit::Action::Cancel;
         apply |= action == ui_kit::Action::Ok;
     });
-    app.viewport.dialog_rect = response.filter(|_| !app.universal_panel_host_enabled() || painted).map(|r| r.response.rect);
+    app.viewport.dialog_rect = response.filter(|_| painted).map(|r| r.response.rect);
     if let Some(rect) = app.viewport.dialog_rect {
         crate::scenario::publish_rect("dialog:outer", rect);
         crate::scenario::publish_rect("dialog:card", rect);

@@ -4,10 +4,8 @@
 //! reversed interval, flips every edge use's orientation and deletes its UV trim even
 //! when the curve's `ReverseParameterization` fails, and it ignores that status. WR-260
 //! records the result: the interval becomes the unset `[1e20, -1e20]` and the topology is
-//! mutated despite the failed curve edit. The port's `reverse_orientation` reproduces
-//! that by default (WR-260's `failed` path), and with
-//! `Kernel::fixes.edge_reversal_keeps_failed_edge` it returns the curve error before any
-//! interval, edge use or UV trim change, as the issue's opt-in fix.
+//! mutated despite the failed curve edit. The port's `reverse_orientation` returns the
+//! curve error before any interval, edge use or UV trim change.
 //!
 //! The isolation uses a public six-face box (`create_box`) whose edge carries the
 //! failure condition of the routine-level `issue_521` test: a `HermiteCurve`, whose
@@ -56,14 +54,6 @@ fn observe(b: &Brep, e: EdgeId, eus: &[EdgeuseId]) -> Observed {
     }
 }
 
-fn flipped(o: OrientType) -> OrientType {
-    match o {
-        OrientType::Same => OrientType::Opposite,
-        OrientType::Opposite => OrientType::Same,
-        OrientType::Unknown => OrientType::Unknown,
-    }
-}
-
 /// A solid box `10 x 20 x 30` with UV trims on its first edge's uses, whose curve is
 /// replaced by a Hermite curve: `SmCurve::ReverseParameterization` (`SM_ERR`, 1001),
 /// the failure condition of the routine-level `issue_521` reversal test.
@@ -89,10 +79,9 @@ fn box_with_failing_reversal_edge(k: &mut Kernel) -> (Brep, EdgeId, Vec<EdgeuseI
 
 #[test]
 fn failed_reversal_is_observable_on_a_public_box_edge() {
-    // Default: upstream ignores the failed curve reversal, installs the unset interval,
-    // flips the uses and deletes the trims (WR-260).
+    // The failed reversal returns before any edge, edge use or trim change (upstream
+    // ignores it, installs the unset interval, flips the uses and deletes the trims).
     let mut k = Kernel::default();
-    assert!(!k.fixes.edge_reversal_keeps_failed_edge);
     let (mut b, e, eus) = box_with_failing_reversal_edge(&mut k);
     let before = observe(&b, e, &eus);
     assert_eq!(before.interval, Extent1d::from_min_max(0.0, 20.0));
@@ -106,38 +95,6 @@ fn failed_reversal_is_observable_on_a_public_box_edge() {
         ]
     );
     assert_eq!(before.trims, [true, false, true, false]);
-
-    assert_eq!(edge::reverse_orientation(&k, &mut b, e), Ok(()));
-    let after = observe(&b, e, &eus);
-    assert_eq!(after.interval, Extent1d::new());
-    assert_eq!(
-        (after.interval.min(), after.interval.max()),
-        (1.0e20, -1.0e20)
-    );
-    assert_eq!(
-        after.orientations,
-        [
-            OrientType::Opposite,
-            OrientType::Same,
-            OrientType::Opposite,
-            OrientType::Same,
-        ]
-    );
-    assert_eq!(after.trims, [false, false, false, false]);
-    assert!(after
-        .orientations
-        .iter()
-        .zip(&before.orientations)
-        .all(|(&a, &b)| a == flipped(b)));
-    assert_eq!(b.face_list().len(), 6);
-    assert_eq!(b.edge_list().len(), 12);
-
-    // Opt-in: the failed reversal returns before any edge, edge use or trim change.
-    let mut k = Kernel::default();
-    k.fixes.edge_reversal_keeps_failed_edge = true;
-    let (mut b, e, eus) = box_with_failing_reversal_edge(&mut k);
-    let before = observe(&b, e, &eus);
-    assert_eq!(before.interval, Extent1d::from_min_max(0.0, 20.0));
     let failed = edge::reverse_orientation(&k, &mut b, e).expect_err("the reversal fails");
     assert_eq!(failed.operation(), "curve::curve::p2::Curve");
     assert_eq!(solidcore::error::upstream_status(&failed), Some(1001));

@@ -3271,6 +3271,60 @@ fn fold_across_two_collinear_tabs() {
     assert!(bb["max"][2].as_f64().unwrap() > 7.0, "both tabs stand up: {bb}");
 }
 
+/// One fold across two tabs with rounded corners keeps every arc one face: 0.40.1 cut the zone from the
+/// outline's chords, so the base and both tabs came out with one flat face per chord (a bracket with eight r 3
+/// corners had 276 faces, 262 of them flat). A 100 x 40 plate with a 15 mm tab hanging 30 below each end, the
+/// tabs' tips rounded 2 and their inner roots 3, the fillets ending where the bend starts (y -3): six arcs (the
+/// tabs' outer sides run on from the plate's ends). The same blank with sharp corners is the reference: 26 faces
+/// (the plate's top and bottom; its rim: the far edge, both ends, the edge between the tabs and the stretch of each
+/// tab's inner side short of the bend, 6; each tab's two faces, two sides and tip, 10; each bend's inside and
+/// outside, the 4 cylinders, and its two sides, 8). A rounded tip corner turns the tip's corner edge into a
+/// cylinder (one face more), and a root fillet takes the place of the flat stretch of tab side short of the bend
+/// (no face more), so the rounded blank has 4 faces and 6 cylinders more, one face for each arc.
+#[test]
+fn fold_across_two_rounded_tabs_keeps_one_face_per_arc() {
+    let rounded = |s: &mut Session| {
+        let (h2, h3) = (2.0 * (1.0 - 0.5f64.sqrt()), 3.0 * (1.0 - 0.5f64.sqrt()));
+        run(s, "sheet.manage_rules", json!({"name": "Steel 0.8", "thickness": "0.8", "active": true}));
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+        let line = |s: &mut Session, a: [f64; 2], b: [f64; 2]| run(s, "sketch.line", json!({"points": [a, b]}));
+        let arc =
+            |s: &mut Session, a: [f64; 2], b: [f64; 2], t: [f64; 2]| run(s, "sketch.arc.three_point", json!({"start": a, "end": b, "through": t}));
+        line(s, [0.0, 40.0], [0.0, -28.0]);
+        arc(s, [0.0, -28.0], [2.0, -30.0], [h2, -30.0 + h2]);
+        line(s, [2.0, -30.0], [13.0, -30.0]);
+        arc(s, [13.0, -30.0], [15.0, -28.0], [15.0 - h2, -30.0 + h2]);
+        line(s, [15.0, -28.0], [15.0, -3.0]);
+        arc(s, [15.0, -3.0], [18.0, 0.0], [15.0 + h3, -h3]);
+        line(s, [18.0, 0.0], [82.0, 0.0]);
+        arc(s, [82.0, 0.0], [85.0, -3.0], [85.0 - h3, -h3]);
+        line(s, [85.0, -3.0], [85.0, -28.0]);
+        arc(s, [85.0, -28.0], [87.0, -30.0], [85.0 + h2, -30.0 + h2]);
+        line(s, [87.0, -30.0], [98.0, -30.0]);
+        arc(s, [98.0, -30.0], [100.0, -28.0], [100.0 - h2, -30.0 + h2]);
+        line(s, [100.0, -28.0], [100.0, 40.0]);
+        line(s, [100.0, 40.0], [0.0, 40.0]);
+        run(s, "sketch.finish", json!({}));
+        run(s, "sheet.flange", json!({"sketch": "Blank"}));
+    };
+    let sharp = |s: &mut Session| outline_blank(s, json!([[0, -30], [15, -30], [15, 0], [85, 0], [85, -30], [100, -30], [100, 40], [0, 40]]));
+    let folded = |blank: &dyn Fn(&mut Session)| {
+        let mut s = Session::default();
+        blank(&mut s);
+        let flat = volume(&mut s);
+        run(&mut s, "sheet.fold", json!({"points": [[-10, -3, 0.8], [110, -3, 0.8]], "fixed": [50, 20, 0.8], "position": "start"}));
+        assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+        assert!(rel(volume(&mut s), flat) < 1e-3, "a fold keeps the material");
+        let bb = &run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"];
+        assert!(bb["max"][2].as_f64().unwrap() > 7.0, "both tabs stand up: {bb}");
+        faces(&mut s)
+    };
+    let ((rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)) = (folded(&rounded), folded(&sharp));
+    let counts = [(rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)];
+    assert_eq!((sharp_faces, sharp_cylinders), (26, 4), "sharp: {counts:?}");
+    assert_eq!((rounded_faces, rounded_cylinders), (sharp_faces + 4, sharp_cylinders + 6), "rounded, sharp: {counts:?}");
+}
+
 /// After one of two collinear tabs is folded, the other one folds in its own feature too (#638, follow-up to #264).
 #[test]
 fn fold_second_collinear_tab_after_the_first() {
@@ -3284,6 +3338,59 @@ fn fold_second_collinear_tab_after_the_first() {
     assert!(bb["max"][2].as_f64().unwrap() > 7.0, "the tabs stand up: {bb}");
     // The tabs stand at the bend, x 106.1 .. 107.9 (centerline at x 107).
     assert!(bb["max"][0].as_f64().unwrap() < 110.0, "neither tab still lies flat out to x 115: {bb}");
+}
+
+/// #15519: a flared wall (90 wide at its root, 110 at its end, as on a mitred tray's flat) whose
+/// rim is folded first, then the wall. The wall's fold line crosses the side walls too, so its
+/// zone falls apart into pieces; the rim's bend is longer than the wall's, but lies wholly beyond
+/// it and goes up with the wall. With side walls or without, the two folds change the volume
+/// by the same amount and the front wall ends up in the same place.
+#[test]
+fn a_flared_wall_folds_with_the_rim_folded_on_its_end() {
+    let front = json!([[-45, -50], [-45, -60], [-55, -90], [55, -90], [45, -60], [45, -50]]);
+    let cross = json!([
+        [50, -45],
+        [60, -45],
+        [90, -55],
+        [90, 55],
+        [60, 45],
+        [50, 45],
+        [45, 50],
+        [45, 60],
+        [55, 90],
+        [-55, 90],
+        [-45, 60],
+        [-45, 50],
+        [-50, 45],
+        [-60, 45],
+        [-90, 55],
+        [-90, -55],
+        [-60, -45],
+        [-50, -45]
+    ]);
+    let mut got = Vec::new();
+    for rest in [json!([[50, -50], [50, 50], [-50, 50], [-50, -50]]), cross] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Steel 2", "thickness": "2 mm", "bend_radius": "2 mm", "k_factor": "0.4", "active": true}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+        let outline: Vec<Value> = front.as_array().into_iter().chain(rest.as_array()).flatten().cloned().collect();
+        run(&mut s, "sketch.line", json!({"points": outline, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Blank"}));
+        let flat_volume = volume(&mut s);
+        run(&mut s, "sheet.fold", json!({"points": [[-40, -80, 0], [40, -80, 0]], "angle": "90 deg", "fixed": [0, 0, 0]}));
+        run(&mut s, "sheet.fold", json!({"points": [[-45, -50, 0], [45, -50, 0]], "angle": "90 deg", "position": "start", "fixed": [0, 0, 0]}));
+        assert_eq!(flat(&mut s)["bends"].as_array().map(Vec::len), Some(2));
+        let bb = run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"].clone();
+        let (z, y) = (bb["max"][2].as_f64().unwrap(), bb["min"][1].as_f64().unwrap());
+        got.push((volume(&mut s) - flat_volume, z, y));
+    }
+    let ((dv1, z1, _), (dv4, z4, y4)) = (got[0], got[1]);
+    assert!((dv1 - dv4).abs() < 1e-3, "the folds change the volume by {dv1} on one wall, {dv4} on the cross");
+    assert!((z1 - z4).abs() < 1e-6, "the wall and its rim stand as high on the cross as alone: z {z1} / {z4}");
+    // The wall stands up from the floor's front edge (y = -50), no longer lying out to y = -90;
+    // the side walls' corners reach y = -55.
+    assert!(z4 > 25.0 && y4 > -56.0, "the wall stands up: z {z4}, y {y4}");
 }
 
 /// An L blank (100 x 50 bottom leg, 40 x 50 upright leg on the right) with a tab x 45..60, y 60..90 on the inside

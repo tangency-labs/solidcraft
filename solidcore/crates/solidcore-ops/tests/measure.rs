@@ -75,6 +75,44 @@ fn a_box_bounds_class_and_counts() {
     assert_eq!(b.solid_count().unwrap(), 1);
 }
 
+/// Many points at once classify as each does alone, in order, a point that is not finite
+/// refused in its place; a batch of only such points is refused point by point.
+#[test]
+fn a_box_classifies_many_points_as_each_alone() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let points = [
+        [0.5, 1.0, 1.5],
+        [f64::INFINITY, 0.0, 0.0],
+        [5.0, 1.0, 1.5],
+        [1.0, 1.0, 1.5],
+        [0.0, 0.0, 0.0],
+        [0.25, 0.5, 2.5],
+    ];
+    let batch = b.classify_points(&points).unwrap();
+    let alone: Vec<_> = points.iter().map(|&p| b.classify_point(p)).collect();
+    assert_eq!(batch, alone);
+    assert_eq!(
+        batch
+            .iter()
+            .map(|c| c.as_ref().ok().copied())
+            .collect::<Vec<_>>(),
+        [
+            Some(PointClass::Inside),
+            None,
+            Some(PointClass::Outside),
+            Some(PointClass::OnBoundary),
+            Some(PointClass::OnBoundary),
+            Some(PointClass::Inside)
+        ]
+    );
+    assert!(b.classify_points(&[]).unwrap().is_empty());
+    let refused = b
+        .classify_points(&[[f64::NAN, 0.0, 0.0], [0.0, f64::INFINITY, 0.0]])
+        .unwrap();
+    assert!(refused.len() == 2 && refused.iter().all(Result::is_err));
+}
+
 #[test]
 fn a_torus_area_is_its_closed_form() {
     all_fixes();

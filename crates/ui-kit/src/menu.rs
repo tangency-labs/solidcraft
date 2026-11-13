@@ -485,6 +485,11 @@ impl<'a> MenuItem<'a> {
         }
     }
 
+    pub(crate) fn trailing_check_width(icon: Icon<'_>, checkable: bool) -> f32 {
+        let t = Tokens::get();
+        if !icon.is_blank() && checkable { t.space_16 + t.space_8 } else { 0.0 }
+    }
+
     pub fn show(&self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
         // Areas first measure intrinsic content. Filling their provisional available
@@ -494,7 +499,8 @@ impl<'a> MenuItem<'a> {
                 ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(self.label).to_string(), FontId::proportional(t.font_label), t.form_ink);
             let shortcut = ui.painter().layout_no_wrap(self.shortcut.to_string(), FontId::monospace(t.font_small), t.form_dim);
             let trailing = if self.submenu { t.space_16 } else { 0.0 };
-            (t.control_height + t.space_2 + label.size().x + shortcut.size().x + t.space_24 + trailing).min(ui.available_width())
+            let check = Self::trailing_check_width(self.icon, self.checked.is_some());
+            (t.control_height + t.space_2 + label.size().x + shortcut.size().x + t.space_24 + trailing + check).min(ui.available_width())
         } else {
             ui.available_width()
         };
@@ -532,7 +538,7 @@ impl<'a> MenuItem<'a> {
             painter.rect_filled(r, t.control_radius, t.accent_soft);
         }
         let icon = Rect::from_center_size(pos2(r.left() + t.control_height / 2.0, r.center().y), vec2(t.space_16, t.space_16));
-        if let Some(on) = self.checked {
+        if let Some(on) = self.checked.filter(|_| self.icon.is_blank()) {
             if on {
                 super::checks::paint_check_glyph(&painter, icon, false, t.form_primary);
             }
@@ -554,6 +560,14 @@ impl<'a> MenuItem<'a> {
                 Stroke::new(1.0, dim),
             ));
             right -= t.space_16;
+        }
+        let check_width = Self::trailing_check_width(self.icon, self.checked.is_some());
+        if check_width > 0.0 {
+            if self.checked == Some(true) {
+                let check = Rect::from_center_size(pos2(right - t.space_8, r.center().y), icon.size());
+                super::checks::paint_check_glyph(&painter, check, false, t.form_primary);
+            }
+            right -= check_width;
         }
         if !self.shortcut.is_empty() {
             let key = painter.layout_no_wrap(solidcraft_ui_text::tr_label(self.shortcut).to_string(), FontId::monospace(t.font_small), dim);
@@ -877,6 +891,22 @@ pub fn rename_menu(ui: &mut Ui, value: &mut String, focused: &mut bool) -> Optio
 mod tests {
     use super::*;
     use crate::test_support::{key, pointer};
+
+    #[test]
+    fn checkable_menu_rows_keep_their_icon_in_both_states() {
+        const HOST: TextureId = TextureId::User(7);
+        let ctx = crate::test_support::context();
+        let item = Item { icon: ItemIcon::texture(HOST), ..Item::action("id", "Label", "") };
+        for checked in [false, true] {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut row = MenuItem::new(&item.id, &item.label, item.icon.as_icon());
+                row.checked = Some(checked);
+                row.show(ui);
+            });
+            assert!(output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == HOST)));
+            assert_eq!(output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Path(_))), checked);
+        }
+    }
 
     #[test]
     fn a_menu_row_draws_a_hosts_texture_and_an_item_still_reads_as_its_kit_name() {

@@ -122,6 +122,8 @@ impl Drop for Harness {
 
 impl Harness {
     pub fn new() -> Harness {
+        // Test-owned reuse store: never the developer's per-user data folder.
+        solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-scenario-imports-{}", std::process::id())));
         solidcraft_ui_text::pin_system_language();
         let mut h = Harness {
             app: SolveApp::new(Session::default(), Services::default()),
@@ -853,7 +855,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                         .collect()
                 });
                 // Workspace panels (docks and strips) are laid out against the viewport, not sized like dialogs.
-                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().map(|(rect, _)| *rect).collect();
+                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().copied().collect();
                 for (id, r) in rects {
                     if panels.iter().any(|p| (p.min - r.min).abs().max_elem() < 1.0 && (p.max - r.max).abs().max_elem() < 1.0) {
                         continue;

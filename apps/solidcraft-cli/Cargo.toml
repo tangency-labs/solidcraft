@@ -42,3 +42,4 @@ serde_json = { workspace = true }
 image = { workspace = true }
 # Tests measure meshes at their own tolerances.
 solidcraft-kernel = { workspace = true }
+wat = "1"
