@@ -381,18 +381,11 @@ fn milestone_plate() -> (Session, [u64; 3], Vec<(Value, Value, Value)>) {
     let mut s = Session::default();
     let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
     let made = s.run_script(&script).unwrap();
-    let size = |reply: &Value| {
-        let b = &reply["boundary_mm"];
-        [0, 1].map(|i| b["max"][i].as_f64().unwrap() - b["min"][i].as_f64().unwrap())
-    };
     let top = made.last().unwrap();
     let below = run(&mut s, "drawing.view.projected", json!({"parent": top["view"], "side": "below"}));
     let right = run(&mut s, "drawing.view.projected", json!({"parent": top["view"], "side": "right"}));
-    // 100 x 80 x 20 at half size: the top shows length by width, below it length by thickness,
-    // right of it thickness by width.
-    for (view, expected) in [(top, [50.0, 40.0]), (&below, [50.0, 10.0]), (&right, [10.0, 40.0])] {
-        let [w, h] = size(view);
-        assert!((w - expected[0]).abs() < 1e-6 && (h - expected[1]).abs() < 1e-6, "{view}");
+    for (view, expected) in [top, &below, &right].into_iter().zip(PLATE_VIEWS) {
+        assert!(same_size(box_size(&view["boundary_mm"]), expected), "{view}");
     }
     let views = [top, &below, &right].map(|view| ids::decode(view["view"].as_str().unwrap()).unwrap());
     // The first bore's rim, by a point on it.
@@ -428,14 +421,42 @@ fn the_milestone_plate_exports_the_same_after_it_is_saved_and_opened() {
     }
 }
 
-/// What each of `views` draws on the open drawing's first sheet: the box round its lines, in sheet mm.
-fn view_sizes(s: &Session, views: [u64; 3]) -> [[f64; 2]; 3] {
-    let d = s.drawing("test").unwrap();
-    let shown = crate::drawing_scene::build(s, d, d.sheets[0].id).unwrap();
-    views.map(|view| {
-        let size = shown.objects.iter().find(|o| o.object == view).unwrap().bounds_mm.size();
-        [size.x, size.y]
-    })
+/// The plate's top, below and right views at 1:2, in sheet mm: length by width, length by thickness,
+/// thickness by width.
+const PLATE_VIEWS: [[f64; 2]; 3] = [[50.0, 40.0], [50.0, 10.0], [10.0, 40.0]];
+/// The same with the width at 100 (acceptance case 85).
+const WIDE_VIEWS: [[f64; 2]; 3] = [[50.0, 50.0], [50.0, 10.0], [10.0, 50.0]];
+
+/// The size of a reply's box, `{min, max}` in sheet mm.
+fn box_size(b: &Value) -> [f64; 2] {
+    [0, 1].map(|i| b["max"][i].as_f64().unwrap() - b["min"][i].as_f64().unwrap())
+}
+
+/// Whether two sizes are the same within 1e-6 mm.
+fn same_size(a: [f64; 2], b: [f64; 2]) -> bool {
+    (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6
+}
+
+/// What each of `views` draws on Sheet 1 of the drawing open: the box round its lines, in sheet mm,
+/// as `drawing.scene` reads it. That is what the export draws, so a deferred drawing's is what its
+/// last update allows.
+fn view_sizes(s: &mut Session, views: [u64; 3]) -> [[f64; 2]; 3] {
+    let reply = run(s, "drawing.scene", json!({"sheet": "Sheet 1"}));
+    let objects = reply["objects"].as_array().unwrap();
+    views.map(|view| box_size(&objects.iter().find(|o| o["object"] == json!(ids::encode(view))).unwrap()["bounds_mm"]))
+}
+
+/// Whether three views' sizes are the ones `expected` gives.
+fn sized_as(sizes: [[f64; 2]; 3], expected: [[f64; 2]; 3]) -> bool {
+    sizes.into_iter().zip(expected).all(|(size, expected)| same_size(size, expected))
+}
+
+/// `id` with `p` run on the model, with the drawing `drawing` closed as a model edit has it, then
+/// opened again.
+fn on_the_model(s: &mut Session, drawing: &str, id: &str, p: Value) {
+    run(s, "drawing.close", json!({}));
+    run(s, id, p);
+    run(s, "drawing.open", json!({"drawing": drawing}));
 }
 
 /// The plate's model edited with its drawing closed (acceptance cases 85 to 87, #4894): each view's
@@ -447,26 +468,18 @@ fn view_sizes(s: &Session, views: [u64; 3]) -> [[f64; 2]; 3] {
 fn the_milestone_plate_follows_its_model_and_undo_brings_its_sheet_back() {
     let (mut s, views, _) = milestone_plate();
     let drawing = ids::encode(s.drawing("test").unwrap().id);
-    let on_the_model = |s: &mut Session, id: &str, p: Value| {
-        run(s, "drawing.close", json!({}));
-        run(s, id, p);
-        run(s, "drawing.open", json!({"drawing": drawing}));
-    };
     let sheet = |s: &mut Session| run(s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
     let folder = Folder::new("drawing-m2-edits");
     let before = sheet(&mut s);
-    // At 1:2, top, below and right: length by width, length by thickness, thickness by width.
-    let wide = [[50.0, 50.0], [50.0, 10.0], [10.0, 50.0]];
-    let plate = [[50.0, 40.0], [50.0, 10.0], [10.0, 40.0]];
+    let (wide, plate) = (WIDE_VIEWS, PLATE_VIEWS);
     for (case, id, edit, sizes) in [
         (85, "parameters.change", json!({"name": "width", "expression": "100 mm"}), wide),
         (86, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}), plate),
         (87, "timeline.delete", json!({"feature": "Bore1"}), plate),
     ] {
-        on_the_model(&mut s, id, edit);
-        for (size, expected) in view_sizes(&s, views).iter().zip(sizes) {
-            assert!((size[0] - expected[0]).abs() < 1e-6 && (size[1] - expected[1]).abs() < 1e-6, "case {case}: {size:?}");
-        }
+        on_the_model(&mut s, &drawing, id, edit);
+        let drawn = view_sizes(&mut s, views);
+        assert!(sized_as(drawn, sizes), "case {case}: {drawn:?}");
         // The sheet the edit gives, and the same from the file.
         let after = sheet(&mut s);
         assert_ne!(after, before, "case {case}");
@@ -476,10 +489,141 @@ fn the_milestone_plate_follows_its_model_and_undo_brings_its_sheet_back() {
         run(&mut opened, "doc.open", json!({"path": path}));
         run(&mut opened, "drawing.open", json!({"drawing": drawing}));
         assert_eq!(sheet(&mut opened), after, "case {case}: opened again");
-        on_the_model(&mut s, "edit.undo", json!({}));
+        on_the_model(&mut s, &drawing, "edit.undo", json!({}));
         assert_eq!(sheet(&mut s), before, "case {case}: undone");
-        on_the_model(&mut s, "edit.redo", json!({}));
+        on_the_model(&mut s, &drawing, "edit.redo", json!({}));
         assert_eq!(sheet(&mut s), after, "case {case}: redone");
-        on_the_model(&mut s, "edit.undo", json!({}));
+        on_the_model(&mut s, &drawing, "edit.undo", json!({}));
     }
+}
+
+/// Sheet 1 of the drawing open, exported as SVG and as a PNG at 150 dpi (A3 is 2481 x 1754 pixels:
+/// 420 and 297 mm are 2480.3 and 1753.9, each side rounded outward), and how many views, dimensions
+/// and notes the export lists out of date.
+fn exported(s: &mut Session) -> ([Value; 2], usize) {
+    let svg = run(s, CMD, json!({"sheet": "Sheet 1"}));
+    let png = run(s, CMD, json!({"sheet": "Sheet 1", "format": "png", "dpi": 150}));
+    assert_eq!(png["report"]["pixels"], json!([2481, 1754]), "{}", png["report"]);
+    assert_eq!(svg["out_of_date"], png["out_of_date"]);
+    ([svg["svg"].clone(), png["data"].clone()], svg["out_of_date"].as_array().map_or(0, Vec::len))
+}
+
+/// [`exported`] once the deferred drawing open is updated.
+fn updated(s: &mut Session) -> ([Value; 2], usize) {
+    run(s, "drawing.update", json!({}));
+    exported(s)
+}
+
+/// Each of `dimensions` as the engine reads it now (`drawing.dimension.inspect`'s text, none when it
+/// reads none) and as Sheet 1 shows it (the text `drawing.scene` sets in its group, the scene every
+/// export writes; none when it isn't drawn).
+fn read_and_shown(s: &mut Session, dimensions: &[Value]) -> (Vec<Option<String>>, Vec<Option<String>>) {
+    let reply = run(s, "drawing.scene", json!({"sheet": "Sheet 1"}));
+    let groups = reply["scene"]["groups"].as_array().unwrap();
+    let shown = dimensions
+        .iter()
+        .map(|dimension| {
+            let id = ids::decode(dimension.as_str().unwrap()).unwrap();
+            let items = groups.iter().find(|g| g["object"] == json!(id))?["items"].as_array().unwrap();
+            Some(items.iter().filter(|item| item["kind"] == "text").map(|item| item["text"].as_str().unwrap()).collect())
+        })
+        .collect();
+    let read = dimensions
+        .iter()
+        .map(|dimension| run(s, "drawing.dimension.inspect", json!({"dimension": dimension}))["text"].as_str().map(str::to_string))
+        .collect();
+    (read, shown)
+}
+
+/// The M2 checkpoint (#4894 W23): the milestone plate's drawing made and checked end to end by
+/// commands alone, in one session, in the checkpoint's order. At each step each dimension's text as
+/// the engine reads it is the text the sheet shows, and the SVG and PNG are compared with the steps
+/// before.
+/// - Made: A3 is 420 x 297 mm in the SVG and 2481 x 1754 pixels in the PNG at 150 dpi. Deferred and
+///   updated, the drawing exports the same bytes.
+/// - The width, a driving size, changed to 100 with the drawing closed: held, the sheet exports the
+///   same bytes and lists its three views and three dimensions out of date, showing 80.00 where the
+///   engine reads 100.00. Updated, the views take case 85's sizes and the sheet shows 100.00.
+/// - Bore1, which a dimension references, deleted: the dimension is lost with its last value 10 and
+///   is drawn nowhere, and the sheet still exports. A new bore where Bore1 was doesn't take it;
+///   repaired to the new bore on purpose, it reads Ø10.00 again, as one undo step. The repair undone
+///   and redone, the sheet is each time the one it was.
+/// - Saved and opened in a new session: the drawing waits for an update, as its setting is saved and
+///   its last update isn't; updated, it exports the same bytes and reads the same.
+/// - Every step undone and the drawing updated, it exports the first bytes again.
+#[test]
+fn the_milestone_plate_runs_the_m2_checkpoint_by_commands_alone() {
+    let (mut s, views, made) = milestone_plate();
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    let dimensions: Vec<Value> = made.into_iter().map(|(id, ..)| id).collect();
+    let texts = |given: [Option<&str>; 3]| given.map(|t| t.map(str::to_string)).to_vec();
+    let plate = texts([Some("100.00"), Some("80.00"), Some("Ø10.00")]);
+    let wide = texts([Some("100.00"), Some("100.00"), Some("Ø10.00")]);
+
+    // Made, then deferred and updated: the same files.
+    assert_eq!(read_and_shown(&mut s, &dimensions), (plate.clone(), plate.clone()));
+    let (first, waiting) = exported(&mut s);
+    assert!(first[0].as_str().unwrap().contains(r#"width="420mm" height="297mm""#) && waiting == 0);
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    assert!(updated(&mut s) == (first.clone(), 0), "deferred and updated, the files changed");
+
+    // A driving size: held, the sheet shows the plate as it was; updated, as the model is.
+    on_the_model(&mut s, &drawing, "parameters.change", json!({"name": "width", "expression": "100 mm"}));
+    let status = run(&mut s, "drawing.status", json!({}));
+    assert_eq!((&status["held"], &status["waiting"]), (&json!(true), &json!(3)), "{status}");
+    assert!(exported(&mut s) == (first.clone(), 6), "held: the last lines, its views and dimensions out of date");
+    assert_eq!(read_and_shown(&mut s, &dimensions), (wide.clone(), plate.clone()));
+    let (wider, waiting) = updated(&mut s);
+    assert!(waiting == 0 && wider != first, "updated, the sheet follows the model");
+    let drawn = view_sizes(&mut s, views);
+    assert!(sized_as(drawn, WIDE_VIEWS), "{drawn:?}");
+    assert_eq!(read_and_shown(&mut s, &dimensions), (wide.clone(), wide.clone()));
+
+    // A referenced hole deleted: lost, with its last value, drawn nowhere, and the sheet still exports.
+    on_the_model(&mut s, &drawing, "timeline.delete", json!({"feature": "Bore1"}));
+    let (without, waiting) = updated(&mut s);
+    assert!(waiting == 0 && without != wider, "the sheet without Bore1");
+    let lost = run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimensions[2]}));
+    assert!(lost["status"] == "lost" && lost["last_good"].as_f64().is_some_and(|v| (v - 10.0).abs() < 1e-9), "{lost}");
+    let gone = texts([Some("100.00"), Some("100.00"), None]);
+    assert_eq!(read_and_shown(&mut s, &dimensions), (gone.clone(), gone.clone()));
+    let listed = run(&mut s, CMD, json!({"sheet": "Sheet 1"}))["dimensions"].clone();
+    let bore1 = listed.as_array().unwrap().iter().find(|d| d["dimension"] == dimensions[2]).unwrap();
+    assert_eq!((&bore1["status"], &bore1["drawn"]), (&json!("lost"), &json!(false)), "{listed}");
+
+    // A new bore where Bore1 was doesn't take its dimension; a repair to it on purpose does.
+    let bore3 = json!({"name": "Bore3", "position": [20, 20, 20], "direction": [0, 0, -1], "diameter": 10, "type": "simple"});
+    on_the_model(&mut s, &drawing, "solid.hole", bore3);
+    let (unrepaired, _) = updated(&mut s);
+    assert_eq!(read_and_shown(&mut s, &dimensions), (gone.clone(), gone));
+    let steps = s.undo.len();
+    let pick = json!({"dimension": dimensions[2], "slot": "edge", "pick": {"edge": [25, 20, 20]}});
+    let repaired = run(&mut s, "drawing.dimension.repair", pick);
+    assert_eq!((&repaired["status"], &repaired["text"], s.undo.len()), (&json!("ok"), &json!("Ø10.00"), steps + 1), "{repaired}");
+    let (fixed, waiting) = exported(&mut s);
+    assert!(waiting == 0 && fixed != unrepaired, "the repaired dimension is drawn");
+    assert_eq!(read_and_shown(&mut s, &dimensions), (wide.clone(), wide.clone()));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(updated(&mut s) == (unrepaired, 0), "the repair undone");
+    run(&mut s, "edit.redo", json!({}));
+    assert!(updated(&mut s) == (fixed.clone(), 0), "the repair redone");
+
+    // Saved, and opened in a new session: it waits for an update, then exports and reads the same.
+    let folder = Folder::new("drawing-m2-checkpoint");
+    run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    let status = run(&mut opened, "drawing.status", json!({}));
+    assert_eq!((&status["held"], &status["waiting"]), (&json!(true), &json!(3)), "opened again: {status}");
+    assert!(updated(&mut opened) == (fixed, 0), "opened again and updated");
+    assert_eq!(read_and_shown(&mut opened, &dimensions), (wide.clone(), wide));
+
+    // Every step undone: the repair, then the new bore, the delete and the width on the model.
+    run(&mut s, "edit.undo", json!({}));
+    for _ in 0..3 {
+        on_the_model(&mut s, &drawing, "edit.undo", json!({}));
+    }
+    assert!(updated(&mut s) == (first, 0), "all undone, the first files");
+    assert_eq!(read_and_shown(&mut s, &dimensions), (plate.clone(), plate));
 }
