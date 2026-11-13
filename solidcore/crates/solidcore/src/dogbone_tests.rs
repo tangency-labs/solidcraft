@@ -693,3 +693,78 @@ fn an_edge_relief_reads_its_walls_and_ends() {
         EdgeRelief::Skipped(Skip::TooOpen)
     );
 }
+
+#[test]
+fn a_relief_stops_short_of_a_tilted_blind_floor() {
+    // The pocket corner edge of `an_edge_relief_reads_its_walls_and_ends`, up from its floor at
+    // z = 4 to the open top at z = 10; a normal relief's centre sits (R/√2, R/√2) off the edge.
+    let up = edge(Vec3::new(0.0, 0.0, 4.0), Vec3::new(0.0, 0.0, 10.0));
+    let along_x = [edge(Vec3::new(0.0, 0.0, 4.0), Vec3::new(20.0, 0.0, 4.0))];
+    let along_y = [edge(Vec3::new(0.0, 0.0, 4.0), Vec3::new(0.0, 14.0, 4.0))];
+    let walls = [
+        Wall {
+            outward: Vec3::Y,
+            left: true,
+            sides: &along_x,
+        },
+        Wall {
+            outward: Vec3::X,
+            left: false,
+            sides: &along_y,
+        },
+    ];
+    let top: &[Option<Vec3>] = &[Some(Vec3::Z)];
+    let here = Vec3::new(0.0, 0.0, 4.0);
+    let o = opts(Style::Normal);
+    // A floor tilted β, rising under the relief (its normal leans away from the corner's void):
+    // the relief stops 2R·tan β (reach · tan β) short of the floor, its end disc on or above it.
+    for beta in [0.1_f64, 0.4, 0.9] {
+        let lean = Vec3::new(-FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0);
+        let n = Vec3::Z * beta.cos() + lean * beta.sin();
+        let floor: &[Option<Vec3>] = &[Some(n)];
+        let EdgeRelief::Relief(c) = edge_relief(&up, &walls, [floor, top], &o).unwrap() else {
+            panic!("tilted floor β = {beta}: no relief");
+        };
+        let back = 2.0 * R * beta.tan();
+        assert!((c.base.z - (4.0 + back)).abs() < 1e-9, "β = {beta}: {c:?}");
+        assert!(
+            (c.height - (6.0 + R - back)).abs() < 1e-9,
+            "β = {beta}: {c:?}"
+        );
+        for k in 0..64 {
+            let a = f64::from(k) * PI / 32.0;
+            let p = c.base + Vec3::new(a.cos(), a.sin(), 0.0) * R;
+            assert!(
+                n.dot(p - here) >= -1e-9,
+                "β = {beta}: {p:?} under the floor"
+            );
+        }
+        // Tilted the other way the floor falls away under the relief: nothing to stop short of.
+        let n = Vec3::Z * beta.cos() - lean * beta.sin();
+        let floor: &[Option<Vec3>] = &[Some(n)];
+        let EdgeRelief::Relief(c) = edge_relief(&up, &walls, [floor, top], &o).unwrap() else {
+            panic!("falling floor β = {beta}: no relief");
+        };
+        assert!((c.base.z - 4.0).abs() < 1e-9, "β = {beta}: {c:?}");
+        assert!((c.height - (6.0 + R)).abs() < 1e-9, "β = {beta}: {c:?}");
+    }
+    // A square floor gives no pull-back, exactly.
+    let square: &[Option<Vec3>] = &[Some(Vec3::Z)];
+    let EdgeRelief::Relief(c) = edge_relief(&up, &walls, [square, top], &o).unwrap() else {
+        panic!("square floor: no relief");
+    };
+    assert_eq!(c.base.z, 4.0);
+    assert_eq!(c.height, 6.0 + R);
+    // A floor so steep that the relief would stop short by more than the edge's length, and a
+    // face along the edge with the circle through it: skipped, never cut under them.
+    let lean = Vec3::new(-FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0);
+    let steep_n = (Vec3::Z * 0.05 + lean).unitize().unwrap();
+    let steep: &[Option<Vec3>] = &[Some(steep_n)];
+    let along: &[Option<Vec3>] = &[Some(lean)];
+    for ends in [[steep, top], [along, top]] {
+        assert_eq!(
+            edge_relief(&up, &walls, ends, &o).unwrap(),
+            EdgeRelief::Skipped(Skip::Overhang)
+        );
+    }
+}

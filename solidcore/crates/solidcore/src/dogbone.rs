@@ -124,6 +124,10 @@ pub enum Skip {
     TooOpen,
     /// A minimal relief whose gap is so large that the circle reaches neither wall.
     Unreached,
+    /// A face at a blind end leans over the corner so far that no relief fits above it: the
+    /// relief would have to stop short of the end by the edge's whole length or more, or the
+    /// face runs along the edge with the relief's circle through it.
+    Overhang,
 }
 
 /// A relief in a corner, in the corner's own terms: its circle's centre as an offset from the
@@ -343,8 +347,11 @@ pub enum EdgeRelief {
 /// [`extension`]): `ends[0]` (at the start) and `ends[1]` (at the end) are the outward normals of the other
 /// faces at that end (`None` for one that is not planar), and an end is open when it has such
 /// faces and every one is planar and faces on the way the edge runs past it (the top of a pocket,
-/// the faces a slot runs through). A pocket's floor faces back along the edge (blind), so the
-/// relief cuts nothing below it.
+/// the faces a slot runs through). A pocket's floor faces back along the edge (blind): there the
+/// relief stops short of the end as far as its planar blind faces lean over the corner (see
+/// [`pull_back`]), so its end disc lies on or above each of their planes and it cuts nothing
+/// below a square or a tilted floor; when that leaves nothing of the edge, the corner is skipped
+/// ([`Skip::Overhang`]).
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for options out of range, a point or a normal that is not
@@ -375,12 +382,86 @@ pub fn edge_relief(
         extension(edge.end, edge.start, at_start, o.radius, reach)?,
         extension(edge.start, edge.end, at_end, o.radius, reach)?,
     ];
-    Ok(
-        match relief_cylinder(edge, directions, lengths, extend, &o)? {
-            Ok(cylinder) => EdgeRelief::Relief(cylinder),
-            Err(skip) => EdgeRelief::Skipped(skip),
-        },
-    )
+    let cylinder = match relief_cylinder(edge, directions, lengths, extend, &o)? {
+        Ok(cylinder) => cylinder,
+        Err(skip) => return Ok(EdgeRelief::Skipped(skip)),
+    };
+    // The circle's centre less the edge's points (square to the edge).
+    let centre = cylinder.base + cylinder.axis * extend[0] - edge.start;
+    let mut back = [0.0; 2];
+    for (i, (there, here, faces)) in [
+        (edge.end, edge.start, at_start),
+        (edge.start, edge.end, at_end),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if extend[i] > 0.0 {
+            continue;
+        }
+        match pull_back(there, here, faces, centre, o.radius)? {
+            Some(t) => back[i] = t,
+            None => return Ok(EdgeRelief::Skipped(Skip::Overhang)),
+        }
+    }
+    let height = cylinder.height - back[0] - back[1];
+    if height <= STRAIGHT * cylinder.height.max(1.0) {
+        return Ok(EdgeRelief::Skipped(Skip::Overhang));
+    }
+    Ok(EdgeRelief::Relief(ReliefCylinder {
+        base: cylinder.base + cylinder.axis * back[0],
+        height,
+        ..cylinder
+    }))
+}
+
+/// How far a relief must stop short of the blind end `here` of an edge whose other end is
+/// `there`, `faces` the outward normals of the faces at `here` other than the walls (`None` for
+/// one that is not planar: it is not read), for a relief whose circle (radius `radius`) has its
+/// centre `centre` from the edge line, square to the edge: so far that its end disc lies on or
+/// above the plane of every planar blind face (see [`end_slope`]; open faces lean away and need
+/// nothing). With `d` the unit direction towards `here`, a face's unit outward normal `n`,
+/// `rise = d·n` (at most 0 for a blind face) and `n⊥ = n − d·rise` (its tilt, `|n⊥| = sin β`),
+/// the disc's lowest point sits `t·|rise| + n⊥·centre − radius·|n⊥|` above the plane when the
+/// relief stops `t` short, so `t = max(0, radius·|n⊥| − n⊥·centre) / |rise|`: 0 at a square
+/// end, at most `reach · tan β` for a circle within `reach` of the edge line. `None` when a face
+/// runs along the edge (`|rise|` at most [`STRAIGHT`]) with the circle through its plane: no
+/// pull-back clears it.
+///
+/// # Errors
+/// As [`end_slope`].
+fn pull_back(
+    there: Point3,
+    here: Point3,
+    faces: &[Option<Vec3>],
+    centre: Vec3,
+    radius: f64,
+) -> Result<Option<f64>> {
+    let along = here - there;
+    if !centre.is_finite() {
+        return Err(invalid("points and normals must be finite"));
+    }
+    let mut back: f64 = 0.0;
+    for outward in faces.iter().flatten() {
+        if end_slope(there, here, *outward)?.is_some() {
+            continue;
+        }
+        // `end_slope` checked both vectors: finite and not zero.
+        let (Ok(d), Ok(n)) = (along.unitize(), outward.unitize()) else {
+            return Err(invalid("a vector of zero length"));
+        };
+        let rise = d.dot(n);
+        let tilt = n - d * rise;
+        let lift = radius * tilt.length() - tilt.dot(centre);
+        if lift <= 0.0 {
+            continue;
+        }
+        if rise.abs() <= STRAIGHT {
+            return Ok(None);
+        }
+        back = back.max(lift / rise.abs());
+    }
+    Ok(Some(back))
 }
 
 /// What a straight edge between two planar faces is.

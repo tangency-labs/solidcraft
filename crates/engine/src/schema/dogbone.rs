@@ -68,7 +68,8 @@ pub struct DogboneSkip {
     /// A point on it: an edge's middle, a face's corner.
     pub at: [f64; 3],
     /// Why: convex (an outside corner), flat, too_open (more open than `max_angle`),
-    /// gap_too_large, not_straight, not_between_two_faces, not_planar,
+    /// gap_too_large, overhang (a blind end's face leans over the corner so far that no
+    /// relief fits above it), not_straight, not_between_two_faces, not_planar,
     /// not_along_axis, no_corners (a picked face with none).
     pub reason: String,
 }
