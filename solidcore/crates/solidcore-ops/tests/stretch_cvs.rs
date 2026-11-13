@@ -97,7 +97,7 @@ fn kept_in_its_plane_a_planar_curve_stays_planar() {
         Some(plane),
     )
     .unwrap();
-    assert!(plane_of(&[out.clone()]).unwrap().is_some(), "{out:?}");
+    assert!(plane_of(std::slice::from_ref(&out)).unwrap().is_some(), "{out:?}");
     assert!(
         cvs(&out).iter().all(|p| (p[2] - 5.0).abs() < 1e-9),
         "{out:?}"
