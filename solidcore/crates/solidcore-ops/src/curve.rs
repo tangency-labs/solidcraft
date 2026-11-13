@@ -16,7 +16,6 @@ use solidcore::curve::blend::{self as kblend, BlendEnd};
 use solidcore::curve::curve::Curve as KCurve;
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::from_parameters::{from_parameters, EdgeCurve};
-use solidcore::error::geom::GeomFailure;
 use solidcore::geom::certified::Verdict;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
@@ -355,7 +354,9 @@ pub fn circle(centre: [f64; 3], normal: [f64; 3], x_dir: [f64; 3], radius: f64) 
 ///
 /// # Errors
 /// [`Error::Argument`] for a coordinate not finite or past the coordinate bound, two points
-/// that coincide, or three on one line (the kernel's solve for the centre nearly singular);
+/// that coincide, or three on one line (the kernel's solve for the centre singular or nearly
+/// so: any geometry failure of [`Ellipse::circle_from_3_points`], whose failures are all of its
+/// input);
 /// [`Error::Record`] for a circle the record cannot hold; the kernel's status otherwise.
 pub fn circle_through(points: [[f64; 3]; 3]) -> Result<Curve> {
     through(points, true)
@@ -381,14 +382,9 @@ fn through(points: [[f64; 3]; 3], closed: bool) -> Result<Curve> {
         "curve::circle_through",
         |k| match Ellipse::circle_from_3_points(k, point(a), point(b), point(c), 3, closed) {
             Ok(circle) => exact_record(k, &KCurve::from(circle)),
-            Err(e)
-                if matches!(
-                    e.geom_failure(),
-                    Some(GeomFailure::NearlySingular | GeomFailure::CoincidentPoints)
-                ) =>
-            {
-                Ok(Err(Error::Argument))
-            }
+            // every geometry failure of the routine is its input's: points on one line (a
+            // centre solve that is singular or nearly so) or on one another
+            Err(e) if e.geom_failure().is_some() => Ok(Err(Error::Argument)),
             Err(e) => Err(e),
         },
     )??;
@@ -1177,12 +1173,17 @@ mod tests {
         [knots[0], knots[knots.len() - 1]]
     }
 
-    /// The arc length of `c` from `a` to `b`, by the kernel.
-    fn length(c: &Curve, a: f64, b: f64) -> f64 {
+    /// The kernel's arc length bracket (control polygon over chord, halved to a depth of 20)
+    /// is asked for [`MEASURE`] of the piece's size: what that depth reaches on these pieces.
+    /// A straight piece is measured exactly (the kernel takes it as a line).
+    const MEASURE: f64 = 1e-6;
+
+    /// The arc length of `c` from `a` to `b`, by the kernel, within [`MEASURE`] of the piece's
+    /// box diagonal.
+    fn length(c: &Curve, a: f64, b: f64) -> solidcore::Result<f64> {
         net_of(c)
             .unwrap()
-            .arc_length(a, b, 1e-12, ToleranceKind::Relative)
-            .unwrap()
+            .arc_length(a, b, MEASURE, ToleranceKind::Relative)
     }
 
     /// The point, first and second derivative of `c` at `t`, from the side `side`.
@@ -1202,14 +1203,14 @@ mod tests {
     #[test]
     fn a_linear_extension_is_straight_along_the_end_tangent_and_as_long_as_asked() {
         let c = cv_curve(&WAVE, 3).unwrap();
-        let old = length(&c, 0.0, 1.0);
         let longer = extend_curve(&c, CurveEndAt::End, 2.0, CurveExtension::Linear).unwrap();
+        // the old curve is the old domain's: only the extension adds length
         same_on_unit(&c, &longer, 1e-12);
         let [lo, hi] = domain(&longer);
         assert_eq!(lo, 0.0);
         assert!(hi > 1.0, "{hi}");
-        assert!((length(&longer, 1.0, hi) - 2.0).abs() < 1e-9);
-        assert!((length(&longer, lo, hi) - old - 2.0).abs() < 1e-9);
+        let grown = length(&longer, 1.0, hi);
+        assert!(matches!(grown, Ok(l) if (l - 2.0).abs() < 1e-9), "{grown:?}");
         // Straight on from the end along P5 - P4 = (1, 1, -1) / sqrt 3, the clamped end's tangent.
         let end = WAVE[5];
         let s = 1.0 / 3f64.sqrt();
@@ -1227,19 +1228,21 @@ mod tests {
 
     #[test]
     fn a_natural_extension_keeps_the_ends_curvature() {
+        use solidcore::nurbs::knots::Side;
         let c = cv_curve(&WAVE, 3).unwrap();
-        let old = length(&c, 0.0, 1.0);
         let longer = extend_curve(&c, CurveEndAt::Start, 1.5, CurveExtension::Natural).unwrap();
         same_on_unit(&c, &longer, 1e-12);
         let [lo, hi] = domain(&longer);
         assert!(lo < 0.0 && hi == 1.0, "{lo} {hi}");
-        // the kernel's stop: within 3 % of the length asked
+        // the kernel's stop: within 3 % of the length asked; the measure within MEASURE of
+        // the piece's diagonal, at most its length
         let grown = length(&longer, lo, 0.0);
-        assert!((grown - 1.5).abs() <= 0.03 * 1.5, "{grown}");
-        assert!((length(&longer, lo, hi) - old - grown).abs() < 1e-9);
+        assert!(
+            matches!(grown, Ok(l) if (l - 1.5).abs() <= 0.03 * 1.5 + MEASURE * 1.6),
+            "{grown:?}"
+        );
         // The start span's polynomial carries on: the point and its first two derivatives at
         // the old start are the same from the extension's side as on the curve.
-        use solidcore::nurbs::knots::Side;
         let (was, now) = (jet(&c, 0.0, Side::Right), jet(&longer, 0.0, Side::Left));
         for (a, b) in was.iter().zip(&now) {
             let gap = dist([a.x, a.y, a.z], [b.x, b.y, b.z]);
@@ -1250,14 +1253,14 @@ mod tests {
     #[test]
     fn both_ends_grow_and_the_curve_between_stays() {
         let c = cv_curve(&WAVE, 3).unwrap();
-        let old = length(&c, 0.0, 1.0);
         let longer = extend_curve(&c, CurveEndAt::Both, 1.0, CurveExtension::Linear).unwrap();
         same_on_unit(&c, &longer, 1e-12);
         let [lo, hi] = domain(&longer);
         assert!(lo < 0.0 && hi > 1.0, "{lo} {hi}");
-        assert!((length(&longer, lo, 0.0) - 1.0).abs() < 1e-9);
-        assert!((length(&longer, 1.0, hi) - 1.0).abs() < 1e-9);
-        assert!((length(&longer, lo, hi) - old - 2.0).abs() < 1e-9);
+        for (a, b) in [(lo, 0.0), (1.0, hi)] {
+            let grown = length(&longer, a, b);
+            assert!(matches!(grown, Ok(l) if (l - 1.0).abs() < 1e-9), "{grown:?}");
+        }
         // a rational arc keeps its circle under the extension
         let w = std::f64::consts::FRAC_1_SQRT_2;
         let arc = Curve::RationalSpline {
