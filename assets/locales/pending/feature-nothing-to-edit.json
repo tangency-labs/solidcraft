@@ -1,0 +1,13 @@
+{
+  "en": {
+    "ui.feature_kind.align": "Align",
+    "ui.feature_kind.body_transfer": "Body transfer",
+    "ui.feature_kind.construction_axis": "Construction axis",
+    "ui.feature_kind.construction_point": "Construction point",
+    "ui.feature_kind.import": "Imported body",
+    "ui.feature_kind.mesh_convert": "Mesh conversion",
+    "ui.feature_kind.mesh_import": "Imported mesh",
+    "ui.feature_kind.repair": "Repair",
+    "ui.feature_nothing_to_edit": "{kind}: nothing to edit"
+  }
+}
