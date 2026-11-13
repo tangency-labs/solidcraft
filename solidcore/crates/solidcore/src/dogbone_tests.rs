@@ -173,12 +173,17 @@ fn the_closed_form_areas_match_a_grid_count() {
 
 #[test]
 fn the_normal_relief_removes_the_least_of_any_circle_through_the_corner() {
-    // r² (π − θ − (sin 2φ + sin(2θ − 2φ))/2) for a centre at angle φ from wall a: least at θ/2.
-    let theta = FRAC_PI_2;
-    let normal = removed_area(theta, &opts(Style::Normal)).unwrap();
-    for phi in [0.1, 0.3, 0.6, 1.0, 1.3] {
-        let c = Vec3::new(R * f64::cos(phi), R * f64::sin(phi), 0.0);
-        assert!(grid_area(c, R, theta) > normal, "{phi}");
+    // A circle through the corner with its centre at angle φ from wall a removes
+    // r² (π − θ − sin θ cos(θ − 2φ)): least at φ = θ/2, which is where the normal relief sits.
+    for theta in [PI / 3.0, FRAC_PI_2, 2.0 * PI / 3.0] {
+        let normal = wedge(theta, Style::Normal).centre;
+        assert!(close(normal.length(), R, 1e-12), "{theta}");
+        let least = grid_area(normal, R, theta);
+        for share in [0.1, 0.3, 0.7, 0.9] {
+            let phi = share * theta;
+            let c = Vec3::new(R * f64::cos(phi), R * f64::sin(phi), 0.0);
+            assert!(grid_area(c, R, theta) > least, "{theta} {phi}");
+        }
     }
 }
 
