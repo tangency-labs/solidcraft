@@ -198,8 +198,10 @@ use crate::kernel::Kernel;
 use crate::math::{max2, min2, Point2, Point3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::math::gamma;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::surface_cache;
+use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::p5::{DropPoint, DropPointOptions};
 use crate::surface::surface::Surface;
@@ -207,6 +209,7 @@ use crate::surface::surface_cache::face_context::{
     prepare_face_surface_cache, prepare_face_surface_cache_state, FaceQueries, PreparedFaceQueries,
 };
 use crate::surface::surface_cache::SurfaceCache;
+use crate::topology::proto_topology::p2::exactly_placed;
 use crate::topology::proto_topology::{ProtoBrep, ProtoTopologyManager};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 use crate::EntityRef;
@@ -221,6 +224,7 @@ const OP_SPLIT_TWO: &str = "boolean::topology_intersector::p1::test_and_split_tw
 const OP_IMPRINT_FACE: &str = "boolean::topology_intersector::p1::test_and_imprint_face";
 const OP_FFC: &str = "boolean::topology_intersector::p1::face_face_coincidence";
 const OP_FACE_FACE: &str = "boolean::topology_intersector::p1::face_face_intersect";
+const OP_CERTIFIED_GAPS: &str = "boolean::topology_intersector::p1::certified_vertex_gaps";
 
 /// A dereference of a null pointer or a deleted object upstream (undefined
 /// behaviour).
@@ -1197,6 +1201,102 @@ pub struct TopologyIntersector<O> {
     subset: Option<BTreeSet<O>>,
     /// `m_pProtoTopoMgr`.
     pub(super) proto_topo_mgr: Option<ProtoTopologyManager<O>>,
+}
+
+/// Not upstream: the tolerances vertex `v` and its edges need to cover the gaps between
+/// the vertex and the curve ends and planes incident to it or to `mates` (the other
+/// operand's vertex of the same definition, which the merge makes one with `v` at either
+/// point), each a distance between computed points (or a point and a plane) plus its
+/// rounding: an edge whose curve end lies farther from `v` than its tolerance, with that
+/// gap; and `v`, with twice its largest gap, when that passes its tolerance (`AssertValid`
+/// checks a vertex's gaps against half of it). A curve end is the end of the edge's
+/// interval nearer `v` (the farther for a closed edge): for an edge longer than twice the
+/// gap that is the end at its vertex.
+///
+/// # Errors
+///
+/// [`SolidError::BooleanFailure`] (`StageFailed`, imprint) when a grown vertex tolerance
+/// would reach the far vertex of one of the edges (a tube may not reach an entity it does
+/// not bound); those of the topology walks and the curve evaluations.
+fn certified_vertex_gaps<O: ClassObject>(
+    k: &Kernel,
+    brep: &impl IntersectorBrep<O>,
+    v: O,
+    mates: &[O],
+) -> Result<Vec<(O, f64)>> {
+    let Some((b, EntityRef::Vertex(vid))) = ClassGeometry::topology_entity(brep, v) else {
+        return Ok(Vec::new());
+    };
+    let point = b.vertex(vid)?.point;
+    let own_tolerance = b.vertex(vid)?.tolerance;
+    let rounded = |p: Point3, q: Point3| p.distance(q) + gamma(8) * (p.length() + q.length());
+    let mut out = Vec::new();
+    let mut gap: f64 = 0.0;
+    let mut reach = Vec::new();
+    for o in std::iter::once(v).chain(mates.iter().copied()) {
+        let Some((ob, EntityRef::Vertex(ovid))) = ClassGeometry::topology_entity(brep, o) else {
+            continue;
+        };
+        for e in vertex::edges(ob, ovid, None)? {
+            let ed = ob.edge(e)?;
+            let Some(curve) = ed.curve.as_ref() else {
+                continue;
+            };
+            let (start, end) = (edge::start_vertex(ob, e)?, edge::end_vertex(ob, e)?);
+            let ends = [
+                curve.evaluate_point(k, ed.interval.min())?,
+                curve.evaluate_point(k, ed.interval.max())?,
+            ];
+            let edge_gap = if start == end {
+                max2(rounded(point, ends[0]), rounded(point, ends[1]))
+            } else {
+                min2(rounded(point, ends[0]), rounded(point, ends[1]))
+            };
+            if edge_gap > ed.tolerance {
+                if let Some(h) = brep.topology_handle_in(ob, EntityRef::Edge(e)) {
+                    out.push((h, edge_gap));
+                }
+            }
+            gap = max2(gap, edge_gap);
+            let far = if start == Some(ovid) { end } else { start };
+            if let Some(far) = far.filter(|&f| f != ovid) {
+                let f = ob.vertex(far)?;
+                reach.push((point.distance(f.point), f.tolerance));
+            }
+        }
+        for f in vertex::faces(ob, ovid)? {
+            let Some(SurfaceKind::Plane(plane)) = ob.face(f)?.surface.as_ref().map(Surface::kind)
+            else {
+                continue;
+            };
+            let position = plane.position();
+            let normal = position.z_axis();
+            let length = normal.length();
+            if !(length > 0.0) {
+                continue;
+            }
+            let w = point - position.origin();
+            let face_gap = (w.dot(normal) / length).abs()
+                + gamma(8) * (point.length() + position.origin().length() + w.length());
+            gap = max2(gap, face_gap);
+        }
+    }
+    let tolerance = zone_tol3d(k, 2.0 * gap);
+    if tolerance > own_tolerance {
+        // (a NaN distance passes no test and refuses)
+        if !reach
+            .iter()
+            .all(|&(apart, far_tol)| tolerance + far_tol < apart)
+        {
+            return Err(SolidError::boolean_stage_failed(
+                OP_CERTIFIED_GAPS,
+                BooleanStage::Imprint,
+                "a merged vertex's tolerance would reach the far vertex of one of its edges",
+            ));
+        }
+        out.push((v, tolerance));
+    }
+    Ok(out)
 }
 
 /// What [`test_and_split_two_edges`] returns.
@@ -2201,6 +2301,52 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // 2026-10-31, glue failure).
                 record(Err(e), ret)?;
             }
+        }
+
+        // Not upstream: each vertex an exactly placed vertex definition made (both source
+        // objects a vertex, a line edge or a plane face) covers the gaps the construction
+        // left between it and the curve ends and planes incident to it or to the other
+        // operand's vertex of the definition (the merge makes the two one, at either
+        // point; WR-306's fit covers its mate the same way). Its definition
+        // took one point for exactly placed points within their summed tolerances
+        // (`EXACT_TOL_FACTOR`), so an edge from one of the others ends a known distance
+        // off it: a distance between two computed points, or from a point to a plane,
+        // exact to rounding (`docs/validity-and-tolerances.md` §8, a construction's
+        // bound). The vertex's tolerance grows to twice its largest gap (`AssertValid`
+        // checks half of it), an edge's to its own curve end's gap, and a growth whose
+        // ball would reach the far vertex of one of its edges is refused.
+        let mut grow: Vec<(O, f64)> = Vec::new();
+        let pvs = mgr.proto_vertices().to_vec();
+        for pv in pvs {
+            let Some(proto_vertex) = mgr.proto_vertex(pv) else {
+                continue;
+            };
+            for &vd in proto_vertex.vertex_definitions() {
+                let Some(def) = mgr.vertex_def(vd) else {
+                    continue;
+                };
+                if !(exactly_placed(&*brep, def.src_topo(1))
+                    && exactly_placed(&*brep, def.src_topo(2)))
+                {
+                    continue;
+                }
+                let mut finals = Vec::new();
+                for v in [def.final_vertex(1), def.final_vertex(2)]
+                    .into_iter()
+                    .flatten()
+                {
+                    if brep.vertex_brep(v)?.is_some() {
+                        finals.push(v);
+                    }
+                }
+                for &v in &finals {
+                    let mates: Vec<O> = finals.iter().copied().filter(|&m| m != v).collect();
+                    grow.extend(certified_vertex_gaps(k, &*brep, v, &mates)?);
+                }
+            }
+        }
+        for (o, tolerance) in grow {
+            brep.set_topology_tolerance(k, o, tolerance, true, true)?;
         }
 
         Ok(())

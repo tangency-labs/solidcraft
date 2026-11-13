@@ -60,6 +60,9 @@
 //! Not upstream (#3090, WR-756): [`place_vertices_on_face_corners`] (after the boolean's
 //! cleanup, a vertex more than the intersection tolerance off one of its faces moves to the
 //! corner its faces define, within half its tolerance and only when that cures the gap).
+//! Not upstream (#15718): once `boolean_post_process` has deleted its topological
+//! vertices, each surviving edge on a line covers the certified gaps the join left
+//! (`topology::brep::p5::cover_joined_line_gaps`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -755,6 +758,9 @@ pub(crate) fn boolean_post_process_with_notifications(
             vertices.push(v);
         }
     }
+    // Not upstream (#15718): the edges that took over a deleted vertex's two edges, whose
+    // gaps are covered once every deletion is done (`cover_joined_line_gaps`).
+    let mut joined = Vec::new();
     for v in vertices {
         if !check_all_edges && relations.mates.vertices.other(v).is_none() {
             continue;
@@ -788,8 +794,8 @@ pub(crate) fn boolean_post_process_with_notifications(
                     brep.geometry_owner_key(EntityRef::Edge(e)),
                 ));
             }
-            ignore_failure(
-                crate::topology::brep::p5::delete_topological_vertex_with_notifications(
+            if let Some(survivor) = ignore_failure(
+                crate::topology::brep::p5::delete_topological_vertex_joining(
                     k,
                     brep,
                     editing,
@@ -797,7 +803,9 @@ pub(crate) fn boolean_post_process_with_notifications(
                     None,
                     notifications.as_deref_mut(),
                 ),
-            )?;
+            )? {
+                joined.push(survivor);
+            }
             for (e, owner, proven) in owners {
                 if !brep.edge_list().contains(&e) {
                     continue;
@@ -814,6 +822,9 @@ pub(crate) fn boolean_post_process_with_notifications(
                 }
             }
         }
+    }
+    for e in joined {
+        crate::topology::brep::p5::cover_joined_line_gaps(k, brep, e)?;
     }
     // Combine a wire shell with a faceuse shell when the B-rep has just those two
     // and they share a mated vertex.

@@ -438,7 +438,6 @@ fn a_taper_passing_a_hair_off_a_corner_intersects_to_one_triangle() {
 /// taper passes the corner farther than one intersection tolerance, and within the sliver
 /// the tolerance cannot resolve (`sliver_bound`) when it passes closer.
 #[test]
-#[ignore = "fails on main: un-ignored with the merged vertex tolerances"]
 fn a_taper_near_a_flange_corner_cuts_to_the_exact_area_or_within_its_sliver() {
     session::set_thread_fixes(Vec::<&str>::new()).unwrap();
     let tx = solidcore::kernel::Kernel::default().tolerances.xsect_tol_3d;
