@@ -406,7 +406,7 @@ fn add_read_step(
     let unchanged = matches!(&sf.kind, solidcraft_doc::FeatureKind::Import { step, .. } if step.as_bytes() == bytes);
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
     let cname = import::component_name(path, name);
-    let (id, placed) = import::add_in_component(s, sf.kind, &fname, sf.body_names, &cname, import::Tree::Step(&sf.import))?;
+    let (id, placed) = import::add_in_component(s, sf.kind, &fname, sf.body_names, &sf.invisible, &cname, import::Tree::Step(&sf.import))?;
     let content_sha256 = unchanged
         .then(|| {
             s.model.state().bodies.iter().filter(|b| b.feature == id).find_map(|b| {
@@ -622,7 +622,7 @@ fn add_mesh(
         Some(p) if !p.places.is_empty() => import::Tree::Mesh(p),
         _ => import::Tree::Flat,
     };
-    let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &cname, tree)?;
+    let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &[], &cname, tree)?;
     let bodies = created_bodies(s, id);
     // The materials' looks, body by body (the bodies are built in the file's order).
     if looks.iter().any(Option::is_some) && bodies.len() == looks.len() {

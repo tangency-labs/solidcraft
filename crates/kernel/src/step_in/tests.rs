@@ -3251,6 +3251,34 @@ fn colour_names_come_in_with_their_colours_and_go_out_again() {
     assert_eq!(back_paint.faces.iter().map(|f| f.name.as_deref()).collect::<Vec<_>>(), [Some("Accent")]);
 }
 
+/// A body an `INVISIBILITY` record names, through its styled item or its representation, is
+/// read hidden; the body is still there, so it can be shown again.
+#[test]
+fn an_invisibility_record_hides_its_styled_item_and_representation() {
+    let import = |extra: &str| {
+        let mut t = String::from(HEAD);
+        t += &cube_entities();
+        t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+        t += extra;
+        t += TAIL;
+        step_import(&t).unwrap()
+    };
+    // A styled item: the record names the item, not the solid it styles.
+    let styled = import("#70=STYLED_ITEM('',(),#101);\n#459=INVISIBILITY((#70));\n");
+    assert_eq!(styled.bodies.len(), 1, "{:?}", styled.warnings);
+    assert!(styled.bodies[0].hidden);
+    assert!(measure(&styled.bodies[0].body).unwrap().volume > 0.0, "the hidden body is still modelled");
+    // A representation: every item it lists is hidden.
+    let represented = import("#459=INVISIBILITY((#60));\n");
+    assert_eq!(represented.bodies.len(), 1, "{:?}", represented.warnings);
+    assert!(represented.bodies[0].hidden);
+    // A file with no INVISIBILITY record leaves the body shown.
+    let shown = import("");
+    assert_eq!(shown.bodies.len(), 1, "{:?}", shown.warnings);
+    assert!(!shown.bodies[0].hidden);
+}
+
 /// #12291: a part styled with a surface colour and, beside it, a curve style (its edges) is the
 /// surface colour, whichever style the file lists first or last. The edge's colour once painted
 /// the whole solid, because the first colour found was taken.
