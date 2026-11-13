@@ -667,3 +667,152 @@ fn pie_slices_whose_walls_part_beyond_tolerance_join_along_the_apex() {
         }
     }
 }
+
+/// The half roll r 48..50 about the z axis, z 0..40, on the y > 0 side, its walls extruded from
+/// a profile whose arcs are framed by `frame % 4` (counter-clockwise from +x or clockwise from
+/// -x, about +z or -z), then mirrored onto itself in x (`frame & 4`) and in z (`frame & 8`):
+/// sixteen frames of the walls' cylinders, one solid.
+fn half_roll(frame: u32) -> Body {
+    let (axis, reference, start, end) = match frame % 4 {
+        0 => ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 0.0, PI),
+        1 => ([0.0, 0.0, -1.0], [-1.0, 0.0, 0.0], 0.0, PI),
+        2 => ([0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], -PI, 0.0),
+        _ => ([0.0, 0.0, -1.0], [1.0, 0.0, 0.0], -PI, 0.0),
+    };
+    let arc = |radius| Curve::Arc {
+        center: [0.0; 3],
+        axis,
+        reference,
+        radius,
+        start,
+        end,
+    };
+    let profile = [
+        arc(50.0),
+        Curve::Line {
+            start: [-50.0, 0.0, 0.0],
+            end: [-48.0, 0.0, 0.0],
+        },
+        arc(48.0),
+        Curve::Line {
+            start: [48.0, 0.0, 0.0],
+            end: [50.0, 0.0, 0.0],
+        },
+    ];
+    let b = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        40.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let sx = if frame & 4 == 0 { 1.0 } else { -1.0 };
+    let (sz, tz) = if frame & 8 == 0 {
+        (1.0, 0.0)
+    } else {
+        (-1.0, 40.0)
+    };
+    if frame >= 4 {
+        b.transform(&[
+            [sx, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, sz, 0.0],
+            [0.0, 0.0, tz, 1.0],
+        ])
+        .unwrap();
+    }
+    b
+}
+
+/// The area of the disc of radius `rho` centred `c` from the origin inside the circle of radius
+/// `r` about the origin (the lens of two circles).
+#[allow(clippy::disallowed_methods)] // the test's reference, not ops computing geometry
+fn lens(r: f64, rho: f64, c: f64) -> f64 {
+    if rho <= 0.0 || c >= r + rho {
+        return 0.0;
+    }
+    if c <= (r - rho).abs() {
+        return PI * r.min(rho).powi(2);
+    }
+    let a1 = ((c * c + r * r - rho * rho) / (2.0 * c * r))
+        .clamp(-1.0, 1.0)
+        .acos();
+    let a2 = ((c * c + rho * rho - r * r) / (2.0 * c * rho))
+        .clamp(-1.0, 1.0)
+        .acos();
+    let k = ((-c + r + rho) * (c + r - rho) * (c - r + rho) * (c + r + rho))
+        .max(0.0)
+        .sqrt();
+    r * r * a1 + rho * rho * a2 - 0.5 * k
+}
+
+/// `f` integrated over `[a, b]` by tanh-sinh quadrature at step `h` (its error falls doubly
+/// exponentially in `1/h`, the endpoint singularities of `f` included).
+#[allow(clippy::disallowed_methods)] // the test's reference, not ops computing geometry
+fn tanh_sinh(f: impl Fn(f64) -> f64, a: f64, b: f64, h: f64) -> f64 {
+    let (mid, half) = ((a + b) / 2.0, (b - a) / 2.0);
+    let mut sum = 0.0;
+    for k in 0..10_000 {
+        let t = f64::from(k) * h;
+        let u = PI / 2.0 * t.sinh();
+        let (x, w) = (u.tanh(), PI / 2.0 * t.cosh() / u.cosh().powi(2));
+        if w < 1e-300 || 1.0 - x < 1e-17 {
+            break;
+        }
+        sum += w * f(mid + half * x);
+        if k > 0 {
+            sum += w * f(mid - half * x);
+        }
+    }
+    sum * h * half
+}
+
+/// The half roll less the r 6 ball about (0, 50, 20) (SolidCraft's sheet metal, a ball cut
+/// centred on a roll's face): the ball's poles (0, 50, 14) and (0, 50, 26) lie on the roll's
+/// outside, and the line where the ball crosses that wall runs into each pole along the ball's
+/// seam meridian, so on the ball the line's trim ends at a corner of its domain, the pole on the
+/// seam. The trace's UV tangent line met the seam a little before the pole, the step was cut
+/// short there though the curve does not cross the seam, and a second step 1e-4 or less went
+/// on to the pole: stepped back 1 % of that, the pole's UV tangent and singular parameter were
+/// below the coordinates' precision, and 12 of the 16 frames gave trims with coincident control
+/// points, cusps, jumps across the seam or ends outside the face, refused as not a solid. Each
+/// frame is one valid solid of V = 3920π - V_ball, V_ball the ball between radii 48 and 50: the
+/// integral over z of the lens areas of the ball's section (radius √(36 - (z-20)²), centred 50
+/// from the axis) within each radius, by tanh-sinh quadrature converged to 1e-14 (h = 1/32 and
+/// 1/64 agree). The volume the kernel measures is 2.1e-9 to 2.5e-9 relative above it at every
+/// accuracy asked: the traced trims' deviation, inside the file's `near` bound.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's reference, not ops computing geometry
+fn a_ball_centred_on_a_rolls_face_with_its_poles_on_the_face_is_cut_in_every_frame() {
+    all_fixes();
+    let section = |z: f64| (36.0 - (z - 20.0) * (z - 20.0)).max(0.0).sqrt();
+    let ball_within =
+        |r: f64, z0: f64, z1: f64, h: f64| tanh_sinh(|z| lens(r, section(z), 50.0), z0, z1, h);
+    // the section reaches radius 48 where its radius is 2: z = 20 ± √32
+    let z48 = 32_f64.sqrt();
+    let v_ball =
+        |h| ball_within(50.0, 14.0, 26.0, h) - ball_within(48.0, 20.0 - z48, 20.0 + z48, h);
+    let (coarse, fine) = (v_ball(1.0 / 32.0), v_ball(1.0 / 64.0));
+    assert!((coarse - fine).abs() <= 1e-14 * fine, "{coarse} {fine}");
+    let want = 3920.0 * PI - fine;
+    let mut failed = Vec::new();
+    for frame in 0..16 {
+        let ball = make_sphere([0.0, 50.0, 20.0], 6.0).unwrap();
+        match boolean(half_roll(frame), ball, BooleanOp::Subtract) {
+            Ok(Some(r)) => {
+                let report = r.check(CheckLevel::All).unwrap();
+                if !report.is_valid() || r.solid_count().unwrap() != 1 || !near(volume(&r), want) {
+                    failed.push(format!(
+                        "frame {frame}: {} mm³, {}",
+                        volume(&r),
+                        report.text
+                    ));
+                }
+            }
+            other => failed.push(format!("frame {frame}: {other:?}")),
+        }
+    }
+    assert!(failed.is_empty(), "closed form {want}: {failed:#?}");
+}
