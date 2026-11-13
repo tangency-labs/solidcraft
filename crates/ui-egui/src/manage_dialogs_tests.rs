@@ -270,7 +270,7 @@ fn configurations(command: &str) {
         assert!(scenario::rect_of(&format!("dialog:column:configuration_table:{label}")).is_some());
     }
     assert_eq!(scenario::rect_of("dialog:table:configuration_table:Default").unwrap().height(), crate::ui_kit::table_row_height());
-    assert!(h.widget("Add Column").is_some());
+    assert!(h.widget("Add column").is_some());
     assert!(h.widget("Add configuration").is_some());
     h.step(&json!({"click":{"handle":"dialog:table:configuration_table:add"}})).unwrap();
     assert_eq!(h.app.session.doc.configs.rows.len(), 1, "add inserts a draft, not a saved row");
