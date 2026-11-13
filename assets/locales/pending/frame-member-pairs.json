@@ -1,5 +1,58 @@
 {
   "en": {
-    "cmd.frame_remove_member": "Remove Tube"
+    "cmd.frame_remove_member": "Remove Tube",
+    "frame.pick_refused": "Can't add that pick: {reason}",
+    "Pick another point": "Pick another point",
+    "A point needs another point after it": "A point needs another point after it",
+    "select lines or points for the path first": "select lines or points for the path first"
+  },
+  "ar": {
+    "cmd.frame_remove_member": "إزالة الأنبوب",
+    "frame.pick_refused": "تعذّرت إضافة هذا الاختيار: {reason}",
+    "Pick another point": "اختر نقطة أخرى",
+    "A point needs another point after it": "يجب أن تلي النقطة نقطة أخرى",
+    "select lines or points for the path first": "اختر أولاً خطوطاً أو نقاطاً للمسار"
+  },
+  "de": {
+    "cmd.frame_remove_member": "Rohr entfernen",
+    "frame.pick_refused": "Diese Auswahl kann nicht hinzugefügt werden: {reason}",
+    "Pick another point": "Einen weiteren Punkt wählen",
+    "A point needs another point after it": "Auf einen Punkt muss ein weiterer Punkt folgen",
+    "select lines or points for the path first": "zuerst Linien oder Punkte für den Pfad wählen"
+  },
+  "he": {
+    "cmd.frame_remove_member": "הסרת צינור",
+    "frame.pick_refused": "לא ניתן להוסיף את הבחירה הזו: {reason}",
+    "Pick another point": "בחרו נקודה נוספת",
+    "A point needs another point after it": "אחרי נקודה צריכה לבוא נקודה נוספת",
+    "select lines or points for the path first": "בחרו תחילה קווים או נקודות עבור המסלול"
+  },
+  "ja": {
+    "cmd.frame_remove_member": "チューブを削除",
+    "frame.pick_refused": "この選択は追加できません: {reason}",
+    "Pick another point": "もう 1 点選択してください",
+    "A point needs another point after it": "点の後にはもう 1 つの点が必要です",
+    "select lines or points for the path first": "先にパスの線または点を選択してください"
+  },
+  "ko": {
+    "cmd.frame_remove_member": "튜브 제거",
+    "frame.pick_refused": "이 선택 항목을 추가할 수 없습니다: {reason}",
+    "Pick another point": "다른 점을 선택하세요",
+    "A point needs another point after it": "점 다음에는 다른 점이 와야 합니다",
+    "select lines or points for the path first": "먼저 경로의 선이나 점을 선택하세요"
+  },
+  "vi": {
+    "cmd.frame_remove_member": "Xóa ống",
+    "frame.pick_refused": "Không thể thêm lựa chọn này: {reason}",
+    "Pick another point": "Chọn thêm một điểm",
+    "A point needs another point after it": "Sau một điểm cần có một điểm khác",
+    "select lines or points for the path first": "hãy chọn đường hoặc điểm cho đường dẫn trước"
+  },
+  "zh": {
+    "cmd.frame_remove_member": "删除管材",
+    "frame.pick_refused": "无法添加此选择：{reason}",
+    "Pick another point": "再选择一个点",
+    "A point needs another point after it": "一个点之后需要另一个点",
+    "select lines or points for the path first": "请先为路径选择线或点"
   }
 }
