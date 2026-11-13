@@ -513,6 +513,60 @@ fn a_t_bone_bites_every_corner_of_a_square_pocket_the_same_way_round() {
 }
 
 #[test]
+fn an_edge_is_relieved_alike_either_way_round() {
+    let r = record(&pocketed());
+    let e = vertical_edges(&r, &[[10.0, 8.0]])[0];
+    // The same record with edge `e` running the other way: its ends swapped, each loop using it
+    // the other way along it.
+    let mut flipped = r.clone();
+    flipped.edges[e].vertices.reverse();
+    for face in &mut flipped.faces {
+        for lp in &mut face.loops {
+            if let Loop::Edges { edges } = lp {
+                for oe in edges.iter_mut().filter(|oe| oe.edge as usize == e) {
+                    oe.forward = !oe.forward;
+                }
+            }
+        }
+    }
+    let span = |c: Cylinder| {
+        if c.axis[2] > 0.0 {
+            (c.base[2], c.base[2] + c.height)
+        } else {
+            (c.base[2] - c.height, c.base[2])
+        }
+    };
+    for style in [
+        Style::Normal,
+        Style::Minimal { gap: 0.25 },
+        Style::TBone { side: Side::Longer },
+        Style::TBone {
+            side: Side::Shorter,
+        },
+    ] {
+        let a = plan(&r, &[e], &[], &options(style)).unwrap();
+        let b = plan(&flipped, &[e], &[], &options(style)).unwrap();
+        assert_eq!((a.tools.len(), b.tools.len()), (1, 1), "{a:?} {b:?}");
+        let (ca, cb) = (a.tools[0].cylinder, b.tools[0].cylinder);
+        assert!(
+            near([ca.base[0], ca.base[1], 0.0], [cb.base[0], cb.base[1], 0.0]),
+            "{ca:?} {cb:?}"
+        );
+        let (sa, sb) = (span(ca), span(cb));
+        // Blind at the floor (z = 4), open at the top (z = 10), whichever way the edge runs.
+        assert!(
+            (sa.0 - 4.0).abs() < 1e-9 && (sa.1 - (10.0 + R)).abs() < 1e-9,
+            "{ca:?}"
+        );
+        assert!(
+            (sb.0 - 4.0).abs() < 1e-9 && (sb.1 - (10.0 + R)).abs() < 1e-9,
+            "{cb:?}"
+        );
+        assert_eq!(cb.radius, R);
+    }
+}
+
+#[test]
 fn a_relief_runs_past_a_sloped_open_end_by_more_than_the_radius() {
     // A 40 x 30 x 30 block whose top slopes, z = 2 + 0.75 y (its outward normal
     // (0, -0.6, 0.8): tan β = 0.75 from the z axis), with a 20 x 6 slot through it.
