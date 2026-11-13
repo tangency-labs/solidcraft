@@ -464,10 +464,11 @@ const OP_EDITABLE: &str = "topology::brep::sheet::editable_sheet";
 /// - A cone (a cylinder too), a sphere, a torus, a surface of revolution or of extrusion: its
 ///   surface's exact NURBS form, the B-spline the kernel keeps for it (its circles rational
 ///   quadratics), on a sheet over its whole box. Only for a face that is its surface's whole box,
-///   bounded by the box's sides (`FindIfRectangularTrim`'s natural trim): a face trimmed inside
-///   it would lose its trims to a whole-box sheet. A closed surface's two seam sides are one
-///   edge used twice and a pole is a point (`CreateFaceFromSurface` shares coincident sides and
-///   drops degenerate ones).
+///   bounded by the box's sides (the natural trim of
+///   [`crate::topology::face::p1::trim_boundary_rectangle`], a pole a point or an edge): a face
+///   trimmed inside it would lose its trims to a whole-box sheet. A closed surface's two seam
+///   sides are one edge used twice and a pole is a point (`CreateFaceFromSurface` shares
+///   coincident sides and drops degenerate ones).
 ///
 /// `b` is unchanged.
 ///
@@ -503,7 +504,7 @@ fn exact_form_sheet(k: &mut Kernel, b: &Brep, f: FaceId, surface: &Surface) -> R
     use crate::geom::attribute::ObjectKey;
     use crate::geom::object::ObjectRef;
     use crate::topology::brep::p3::{brep_copy_mapped, with_nurb};
-    use crate::topology::face::p1::find_if_rectangular_trim;
+    use crate::topology::face::p1::trim_boundary_rectangle;
 
     // the trim query builds the face's trim boundary: on a copy, so `b` is only read
     let (mut c, map) = brep_copy_mapped(k, b)?;
@@ -520,7 +521,7 @@ fn exact_form_sheet(k: &mut Kernel, b: &Brep, f: FaceId, surface: &Surface) -> R
             _ => 0,
         }),
     };
-    if !find_if_rectangular_trim(k, &mut c, cf, &key_of)?.natural {
+    if !trim_boundary_rectangle(k, &mut c, cf, &key_of)?.natural {
         return Err(SolidError::Unsupported {
             operation: OP_EDITABLE,
             reason: "a face that is not its surface's whole box",
