@@ -36,7 +36,10 @@ pub fn convert_prismatic_mesh(body: &Body, tolerance: f64) -> Result<Body> {
             return Err(invalid("tolerance must be between 0.000001 and 1 mm"));
         }
         let input = body.mesh.as_ref().ok_or_else(|| invalid("select a mesh body"))?;
-        let welded = weld(input, tolerance)?;
+        if input.triangles.len() > MAX_TRIANGLES {
+            return Err(over_budget(input.triangles.len()));
+        }
+        let welded = weld(input, tolerance, MAX_TRIANGLES)?;
         let mesh = welded.mesh.as_ref().ok_or_else(|| invalid("empty mesh"))?;
         if mesh.triangles.len() > MAX_TRIANGLES {
             return Err(over_budget(mesh.triangles.len()));
@@ -78,12 +81,17 @@ pub fn convert_prismatic_mesh(body: &Body, tolerance: f64) -> Result<Body> {
     })
 }
 
-fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
-    if mesh.triangles.len() > MAX_TRIANGLES {
-        return Err(over_budget(mesh.triangles.len()));
+/// Merge the vertices within a rounding error of one another, drop the triangles of no area and
+/// return the result as a mesh body. `limit` is the caller's own triangle budget: conversion and
+/// recognition read the same meshes but can afford very different sizes of them. A caller refuses
+/// too many triangles itself, with the reason that fits what it was going to do with them; this
+/// only holds the line on vertices, which is the same line for everyone.
+pub(crate) fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64, limit: usize) -> Result<Body> {
+    if mesh.triangles.len() > limit {
+        return Err(invalid(&format!("the mesh has {} triangles, more than the {limit} this can take", mesh.triangles.len())));
     }
-    if mesh.positions.len() > MAX_TRIANGLES * 3 {
-        return Err(invalid(&format!("the mesh has {} vertices, more than the {} conversion can take", mesh.positions.len(), MAX_TRIANGLES * 3)));
+    if mesh.positions.len() > limit * 3 {
+        return Err(invalid(&format!("the mesh has {} vertices, more than the {} this can take", mesh.positions.len(), limit * 3)));
     }
     let bounds = mesh.positions.iter().fold(solidcraft_geom::Aabb3::EMPTY, |mut b, p| {
         b.add(*p);
@@ -98,6 +106,9 @@ fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
     let mut positions: Vec<Vec3> = Vec::new();
     let mut remap = Vec::new();
     let mut comparisons = 0usize;
+    // Each vertex looks in 27 cells, so the work is linear in the mesh; the budget follows it
+    // rather than capping a large mesh that is welding perfectly well.
+    let budget = mesh.positions.len().saturating_mul(64).max(8_000_000);
     for &p in &mesh.positions {
         let k = key(p);
         let mut found = None;
@@ -106,7 +117,7 @@ fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
                 for dz in -1..=1 {
                     for &i in grid.get(&(k.0 + dx, k.1 + dy, k.2 + dz)).into_iter().flatten() {
                         comparisons += 1;
-                        if comparisons > 8_000_000 {
+                        if comparisons > budget {
                             return Err(invalid("vertex welding exceeds its work budget"));
                         }
                         if positions.get(i as usize).is_some_and(|q| q.dist(p) <= epsilon) {
@@ -502,7 +513,7 @@ mod tests {
         assert!(convert_prismatic_mesh(&mesh_of(&sphere), 0.05).is_err());
         for coordinate in [f64::NAN, f64::INFINITY, f64::MAX, 1e30] {
             let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::new(coordinate, 0., 0.)], triangles: vec![] };
-            assert!(weld(&mesh, 0.05).is_err());
+            assert!(weld(&mesh, 0.05, MAX_TRIANGLES).is_err());
         }
     }
 
@@ -542,7 +553,7 @@ mod tests {
         assert!(err.contains("50001 triangles") && err.contains("50000"), "{err}");
         assert!(err.contains("constant-section") && err.contains("freeform"), "{err}");
         let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::ZERO; MAX_TRIANGLES * 3 + 1], triangles: vec![] };
-        let err = weld(&mesh, 0.05).unwrap_err().to_string();
+        let err = weld(&mesh, 0.05, MAX_TRIANGLES).unwrap_err().to_string();
         assert!(err.contains("150001 vertices") && err.contains("150000"), "{err}");
     }
 

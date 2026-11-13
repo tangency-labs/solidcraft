@@ -38,7 +38,7 @@ fn name_body(cx: &mut Cx, body: &str, want: &str) -> Result<String, ToolError> {
 fn name_feature(cx: &mut Cx, want: Option<&str>) -> String {
     let Some((_, name)) = last_feature(cx) else { return want.unwrap_or("").to_string() };
     match want {
-        Some(w) if w != name => match cx.b.call("timeline.rename", json!({"feature": name, "name": w})) {
+        Some(w) if w != name => match cx.cmd("timeline.rename", json!({"feature": name, "name": w})) {
             Ok(_) => w.to_string(),
             Err(_) => name,
         },
@@ -47,11 +47,11 @@ fn name_feature(cx: &mut Cx, want: Option<&str>) -> String {
 }
 fn hide(cx: &mut Cx, items: &[String]) {
     if !items.is_empty() {
-        let _ = cx.b.call("browser.visibility", json!({"visible": false, "items": items}));
+        let _ = cx.cmd("browser.visibility", json!({"visible": false, "items": items}));
     }
 }
 fn measure(cx: &mut Cx, body: &str) -> Value {
-    cx.b.call("inspect.measure", json!({"bodies": [body]})).ok().and_then(|v| v.get("bodies").and_then(|b| b.get(0)).cloned()).unwrap_or_default()
+    cx.cmd("inspect.measure", json!({"bodies": [body]})).ok().and_then(|v| v.get("bodies").and_then(|b| b.get(0)).cloned()).unwrap_or_default()
 }
 fn arr3(v: Option<&Value>) -> Option<[f64; 3]> {
     let a = v?.as_array()?;
@@ -59,7 +59,7 @@ fn arr3(v: Option<&Value>) -> Option<[f64; 3]> {
 }
 /// Bounding box of bodies: (min, max).
 pub fn bbox(cx: &mut Cx, bodies: &[String]) -> Option<([f64; 3], [f64; 3])> {
-    let m = cx.b.call("inspect.measure", json!({"bodies": bodies})).ok()?;
+    let m = cx.cmd("inspect.measure", json!({"bodies": bodies})).ok()?;
     let mut out: Option<([f64; 3], [f64; 3])> = None;
     for b in m.get("bodies").and_then(Value::as_array).into_iter().flatten() {
         let (Some(lo), Some(hi)) = (arr3(b.pointer("/bbox/min")), arr3(b.pointer("/bbox/max"))) else { continue };
@@ -93,10 +93,10 @@ fn placement(a: &Value) -> Option<[f64; 16]> {
 // ---------- sub-elements ----------
 
 fn faces(cx: &mut Cx, body: &str) -> Vec<Value> {
-    cx.b.call("model.faces", json!({"body": body})).ok().and_then(|v| v.get("faces").and_then(Value::as_array).cloned()).unwrap_or_default()
+    cx.cmd("model.faces", json!({"body": body})).ok().and_then(|v| v.get("faces").and_then(Value::as_array).cloned()).unwrap_or_default()
 }
 fn edges(cx: &mut Cx, body: &str) -> Vec<Value> {
-    cx.b.call("model.edges", json!({"body": body})).ok().and_then(|v| v.get("edges").and_then(Value::as_array).cloned()).unwrap_or_default()
+    cx.cmd("model.edges", json!({"body": body})).ok().and_then(|v| v.get("edges").and_then(Value::as_array).cloned()).unwrap_or_default()
 }
 fn sub_index(sub: &str, kinds: &[&str]) -> Option<(String, usize)> {
     let sub = sub.rsplit('.').next().unwrap_or(sub);
@@ -160,7 +160,7 @@ fn sketch_name(cx: &mut Cx, name: &str, doc: Option<&str>) -> Result<String, Too
     }
 }
 fn sketch_info(cx: &mut Cx, sketch: &str) -> Value {
-    cx.b.call("sketch.inspect", json!({"sketch": sketch})).unwrap_or_default()
+    cx.cmd("sketch.inspect", json!({"sketch": sketch})).unwrap_or_default()
 }
 fn curve_ids(info: &Value) -> Vec<String> {
     info.get("curves")
@@ -179,7 +179,7 @@ fn in_sketch(cx: &mut Cx, sketch: &str, body: impl FnOnce(&mut Cx) -> R) -> R {
         cx.run("sketch.edit", json!({"sketch": sketch}))?;
     }
     let r = body(cx);
-    let _ = cx.b.call("sketch.finish", json!({}));
+    let _ = cx.cmd("sketch.finish", json!({}));
     r
 }
 /// Add curves with one command and report the new ones' geometry indices.
@@ -332,11 +332,8 @@ fn new_pd_body(cx: &mut Cx, label: &str) -> Result<String, ToolError> {
 }
 /// The component a sketch lives in, and that component's bodies.
 fn sketch_home(cx: &mut Cx, sketch: &str) -> (Option<String>, Vec<String>) {
-    let comps = cx.b.call("component.list", json!({}))
-        .ok()
-        .and_then(|v| v.get("components").cloned())
-        .and_then(|c| c.as_array().cloned())
-        .unwrap_or_default();
+    let comps =
+        cx.cmd("component.list", json!({})).ok().and_then(|v| v.get("components").cloned()).and_then(|c| c.as_array().cloned()).unwrap_or_default();
     for c in comps {
         let holds = c.get("sketches").and_then(Value::as_array).is_some_and(|s| s.iter().any(|x| x.as_str() == Some(sketch)));
         if holds && c.get("parent").is_some_and(|p| !p.is_null()) {
@@ -347,7 +344,7 @@ fn sketch_home(cx: &mut Cx, sketch: &str) -> (Option<String>, Vec<String>) {
     (None, Vec::new())
 }
 fn activate(cx: &mut Cx, comp: Option<&str>) {
-    let _ = cx.b.call("component.activate", json!({"component": comp.unwrap_or("root")}));
+    let _ = cx.cmd("component.activate", json!({"component": comp.unwrap_or("root")}));
 }
 fn pd_feature(cx: &mut Cx, a: &Value, cmd: &str, mut params: Value, cut: bool, base: &str, type_id: &str) -> R {
     let sketch = sketch_name(cx, req(a, "sketch")?, s(a, "doc"))?;

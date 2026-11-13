@@ -1,8 +1,9 @@
 # AI Bridge (FreeCAD AIBridge tools)
 
-SolidCraft can serve the tool set of FreeCAD's **AI Bridge** add-on: the same 107 tool names,
-descriptions and JSON Schemas. An AI client written for FreeCAD's bridge drives SolidCraft
-without any changes.
+SolidCraft can serve the tool set of FreeCAD's **AI Bridge** add-on: the same 107 tool names and
+JSON Schemas, which is what a client calls by, so an AI client written for FreeCAD's bridge drives
+SolidCraft without any changes. Every tool description is our own, written against what the tool
+does here rather than taken from the add-on.
 
 The names are a second vocabulary, not a second server. They are served by SolidCraft's own MCP
 server (docs/mcp.md), so they inherit its transport, its token, its path allowances and its
@@ -70,6 +71,26 @@ them.
 |---|---|
 | `mesh_to_shape`, `mesh_rebuild_cad` | Run Convert Mesh. |
 | `mesh_loft_solid`, `mesh_to_solid_multi_axis` | Slice the mesh into convex sections, sketch each one, and loft them. |
+
+Each section is resampled to `points_per_slice` points, evenly along its outline, because a loft
+runs through its sections point by point and the hull of a slice has however many points the mesh
+happens to give it.
+
+What these two cannot do:
+
+- **The loft is smooth, never ruled.** Loft has no ruled setting, so `loft_ruled` and
+  `loft_max_degree` are taken and ignored.
+- **A section is a convex outline**, so a waist, a notch or any other hollow in a slice is filled
+  in. Slicing along more than one axis (`mesh_to_solid_multi_axis`) takes some of it back.
+- **A scan can be refused.** Where the outline changes sharply from one section to the next, the
+  smooth surface misses its own edges by more than the kernel's check allows and the loft fails
+  rather than making a body. More sections narrow the gap: a 292k-triangle scan 107 mm tall went
+  from 8 mm gaps at 16 sections to 2 mm at 40, still far above the 10 µm the check wants.
+
+For a mesh these two cannot take, SolidCraft's own `mesh_to_cad` tool (docs/mcp.md) reads the mesh
+as the surfaces it stands for -- planes, cylinders, cones, spheres and tori, each certified against
+the mesh -- and the part is rebuilt from those with the ordinary commands. That path is parametric
+and it does not need the mesh to loft at all.
 
 ## Limits
 

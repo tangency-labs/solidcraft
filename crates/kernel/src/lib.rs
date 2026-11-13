@@ -86,6 +86,8 @@ mod loft_region_tests;
 mod matchsurf;
 mod measure;
 mod mesh_convert;
+mod mesh_rebuild;
+mod mesh_recognize;
 mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
@@ -170,8 +172,8 @@ pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
 pub use bridge::{Frame, blend_between, bridge, chain, chain_closes, frames, frames_across, sample_grid};
 pub use build::{
-    PathSeg, box_on, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
-    loft_with_rails, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
+    PathSeg, box_on, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft,
+    loft_regions, loft_with_rails, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
 };
 pub use continuity::{
     ContinuityReport, ContinuityTolerances, DEFAULT_SAMPLES, EdgePick, MAX_SAMPLES, MIN_SAMPLES, SeamReport, SeamStation, SeamVerdict, SeamWorst,
@@ -199,6 +201,8 @@ pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
 pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
+pub use mesh_rebuild::{Bore, Boss, Corner, Outline, Prismatic, Unused, prismatic_plan};
+pub use mesh_recognize::{AxisCluster, Patch, Recognition, Surface, recognize_mesh};
 pub use meshbody::{MAX_TRIANGLES, mesh_body};
 pub use native::{body_from_smlib, smlib_body};
 pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};

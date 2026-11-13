@@ -443,6 +443,7 @@ fn handshake_and_tools_list() {
         "inspect_design",
         "measure",
         "body_topology",
+        "mesh_to_cad",
         "set_parameter",
         "check_parameters",
         "screenshot",
@@ -3104,9 +3105,18 @@ fn tool_annotations_tell_the_whole_truth() {
     for name in ["execute", "batch", "save", "export", "open", "screenshot"] {
         assert_eq!(hints(name), (false, true, true), "{name}");
     }
-    for name in
-        ["list_commands", "describe_command", "inspect_design", "measure", "body_topology", "crash_reports", "skill_reference", "running", "pending"]
-    {
+    for name in [
+        "list_commands",
+        "describe_command",
+        "inspect_design",
+        "measure",
+        "body_topology",
+        "mesh_to_cad",
+        "crash_reports",
+        "skill_reference",
+        "running",
+        "pending",
+    ] {
         assert_eq!(hints(name), (true, false, false), "{name}");
     }
     assert_eq!(hints("new_design"), (false, true, false));
@@ -3815,7 +3825,10 @@ fn compact_inspect_design_summarises_sketches_unless_asked() {
     let listed = call(&mut s, 1, "tools/list", json!({}));
     let def = listed["result"]["tools"].as_array().unwrap().iter().find(|d| d["name"] == "inspect_design").cloned().unwrap();
     assert!(def["inputSchema"]["properties"]["bodies"].is_object(), "{def}");
-    assert_eq!(def, crate::tool_definitions_with(crate::Options { compact: true, freecad: false }).into_iter().find(|d| d["name"] == "inspect_design").unwrap());
+    assert_eq!(
+        def,
+        crate::tool_definitions_with(crate::Options { compact: true, freecad: false }).into_iter().find(|d| d["name"] == "inspect_design").unwrap()
+    );
     // Arguments are checked against the tools as listed: `bodies` only with compact output.
     let bodies = json!({"bodies": ["Body1"]});
     assert!(crate::tools::check_arguments_with("inspect_design", &bodies, crate::Options { compact: true, freecad: false }).is_ok());

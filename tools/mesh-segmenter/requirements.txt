@@ -1,0 +1,5 @@
+# Point2Cyl is plain PyTorch (its PointNet++ layers included), so the CPU build is enough and
+# nothing has to be compiled. See README.md.
+--extra-index-url https://download.pytorch.org/whl/cpu
+numpy>=1.24
+torch>=2.2

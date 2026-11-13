@@ -115,7 +115,49 @@ fn slice(tris: &[[[f64; 3]; 3]], axis: &str, h: f64) -> Vec<[f64; 2]> {
     }
     out
 }
-/// Convex hull (counter-clockwise), at most `max` points.
+/// `n` points evenly spaced along a closed ring, the first of them its first point.
+///
+/// A loft runs through its sections point by point, so every section has to carry the same
+/// count: the hull of a slice has however many points the mesh happens to give it, and sections
+/// that disagree make a surface that misses its own edges by millimetres.
+///
+/// Spacing by perimeter, not by angle from the middle. Angle is the better answer for sections
+/// around one axis, because the same direction means the same side of the part in each of
+/// them; it is the worse answer here, because each slice's middle is its own, and on a scan
+/// whose outline wanders off the axis -- a microscope's tube over its foot -- the middle moves
+/// from slice to slice and takes every point with it, until the loft's control net doubles back
+/// on itself.
+fn resample(ring: &[[f64; 2]], n: usize) -> Vec<[f64; 2]> {
+    let m = ring.len();
+    if m < 3 || n < 3 {
+        return ring.to_vec();
+    }
+    let side = |i: usize| {
+        let (a, b) = (ring[i], ring[(i + 1) % m]);
+        (b[0] - a[0]).hypot(b[1] - a[1])
+    };
+    let total: f64 = (0..m).map(side).sum();
+    if !total.is_finite() || total <= 0.0 {
+        return ring.to_vec();
+    }
+    let mut out = Vec::with_capacity(n);
+    let (mut i, mut walked) = (0usize, 0.0);
+    for k in 0..n {
+        let want = total * k as f64 / n as f64;
+        while i + 1 < m && walked + side(i) < want {
+            walked += side(i);
+            i += 1;
+        }
+        let (a, b) = (ring[i], ring[(i + 1) % m]);
+        let t = if side(i) > 0.0 { ((want - walked) / side(i)).clamp(0.0, 1.0) } else { 0.0 };
+        out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+    }
+    out
+}
+
+/// Convex hull (counter-clockwise), resampled to exactly `max` points: that is what
+/// `points_per_slice` asks for, and the hull of a slice has however many points the mesh
+/// happens to give it, which differs from slice to slice.
 fn hull(mut pts: Vec<[f64; 2]>, max: usize) -> Vec<[f64; 2]> {
     pts.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
     pts.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-7 && (a[1] - b[1]).abs() < 1e-7);
@@ -135,11 +177,7 @@ fn hull(mut pts: Vec<[f64; 2]>, max: usize) -> Vec<[f64; 2]> {
         }
         h.pop();
     }
-    if h.len() > max {
-        let n = h.len();
-        h = (0..max).map(|i| h[i * n / max]).collect();
-    }
-    h
+    if h.len() < 3 { h } else { resample(&h, max) }
 }
 
 /// Loft convex slices of a mesh along one axis; returns the new body.
@@ -184,13 +222,13 @@ fn loft_axis(
     let sections: Vec<Value> = sketches.iter().map(|s| json!({"sketch": s})).collect();
     cx.run("solid.loft", json!({"sections": sections, "operation": "new", "name": label, "body_name": label}))?;
     let body = new_bodies(cx, &before).into_iter().next().ok_or_else(|| te("loft_failed", "The loft made no body"))?;
-    let _ = cx.b.call("browser.visibility", json!({"visible": false, "items": &sketches}));
+    let _ = cx.cmd("browser.visibility", json!({"visible": false, "items": &sketches}));
     Ok((body, sketches))
 }
 
 /// The component (id) that holds a body, unless it's the design's root.
 fn component_of(cx: &mut Cx, body: &str) -> Option<Value> {
-    let comps = cx.b.call("component.list", json!({})).ok()?.get("components")?.as_array()?.clone();
+    let comps = cx.cmd("component.list", json!({})).ok()?.get("components")?.as_array()?.clone();
     comps
         .into_iter()
         .find(|c| {
@@ -201,14 +239,14 @@ fn component_of(cx: &mut Cx, body: &str) -> Option<Value> {
 }
 
 fn hide_body(cx: &mut Cx, body: &str) {
-    let _ = cx.b.call("browser.visibility", json!({"visible": false, "items": [body]}));
+    let _ = cx.cmd("browser.visibility", json!({"visible": false, "items": [body]}));
 }
 fn rename_body(cx: &mut Cx, body: &str, want: &str) -> String {
     if body == want {
         return body.to_string();
     }
     let n = unique_body(cx, want);
-    match cx.b.call("body.rename", json!({"body": body, "name": n})) {
+    match cx.cmd("body.rename", json!({"body": body, "name": n})) {
         Ok(_) => n,
         Err(_) => body.to_string(),
     }
@@ -281,10 +319,10 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
             }
             let r = cx.run("mesh.convert", json!({"body": copy, "tolerance": format!("{tol} mm")}));
             if home.is_some() {
-                let _ = cx.b.call("component.activate", json!({"component": "root"}));
+                let _ = cx.cmd("component.activate", json!({"component": "root"}));
             }
             if let Err(e) = r {
-                let _ = cx.b.call("selection.delete", json!({"items": [{"type": "body", "name": copy}]}));
+                let _ = cx.cmd("selection.delete", json!({"items": [{"type": "body", "name": copy}]}));
                 return Err(e);
             }
             let out = new_bodies(cx, &before).into_iter().find(|n| !is_mesh(cx, n)).unwrap_or(copy);
@@ -292,7 +330,8 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
             if hide && out != body && body_names(cx).contains(&body) {
                 hide_body(cx, &body);
             }
-            let m = cx.b.call("inspect.measure", json!({"bodies": [out]}))
+            let m = cx
+                .cmd("inspect.measure", json!({"bodies": [out]}))
                 .ok()
                 .and_then(|v| v.get("bodies").and_then(|b| b.get(0)).cloned())
                 .unwrap_or_default();
@@ -313,12 +352,13 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
             let (made, sketches) = loft_axis(cx, &tris, lo[k], hi[k], &axis, a, step, 16, &label)?;
             let made = rename_body(cx, &made, &label);
             if !b(a, "keep_intermediate", false) {
-                let _ = cx.b.call("browser.visibility", json!({"visible": false, "items": &sketches}));
+                let _ = cx.cmd("browser.visibility", json!({"visible": false, "items": &sketches}));
             }
             if b(a, "hide_mesh_after", true) {
                 hide_body(cx, &body);
             }
-            let m = cx.b.call("inspect.measure", json!({"bodies": [made]}))
+            let m = cx
+                .cmd("inspect.measure", json!({"bodies": [made]}))
                 .ok()
                 .and_then(|v| v.get("bodies").and_then(|b| b.get(0)).cloned())
                 .unwrap_or_default();
@@ -346,12 +386,12 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
                 let keep = b(a, "keep_per_axis_lofts", false);
                 let tools: Vec<String> = lofts[1..].to_vec();
                 match cx.run("solid.combine", json!({"target": lofts[0], "tools": tools, "operation": "intersect", "keep_tools": keep})) {
-                    Ok(_) if keep => drop(cx.b.call("browser.visibility", json!({"visible": false, "items": tools}))),
+                    Ok(_) if keep => drop(cx.cmd("browser.visibility", json!({"visible": false, "items": tools}))),
                     Ok(_) => {}
                     // the kernel can't intersect two freeform lofts everywhere: keep the first
                     // axis's loft and the others (hidden) rather than lose the work
                     Err(e) => {
-                        let _ = cx.b.call("browser.visibility", json!({"visible": false, "items": tools}));
+                        let _ = cx.cmd("browser.visibility", json!({"visible": false, "items": tools}));
                         note = json!(format!(
                             "The per-axis lofts could not be intersected ({}); the result is the {} loft, the others are kept hidden.",
                             e.message, axes[0]
@@ -364,7 +404,8 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
             if b(a, "hide_mesh_after", true) {
                 hide_body(cx, &body);
             }
-            let m = cx.b.call("inspect.measure", json!({"bodies": [result]}))
+            let m = cx
+                .cmd("inspect.measure", json!({"bodies": [result]}))
                 .ok()
                 .and_then(|v| v.get("bodies").and_then(|b| b.get(0)).cloned())
                 .unwrap_or_default();
@@ -393,7 +434,43 @@ mod tests {
             tris.push([c(a.0, a.1, 0.), c(b.0, b.1, 1.), c(a.0, a.1, 1.)]);
         }
         let h = hull(slice(&tris, "z", 0.5), 40);
-        assert_eq!(h.len(), 4);
-        assert!(h.iter().all(|p| (p[0] == 0.0 || p[0] == 1.0) && (p[1] == 0.0 || p[1] == 1.0)));
+        // Every section carries the count asked for, so a loft's sections match each other.
+        assert_eq!(h.len(), 40);
+        assert!(h.iter().all(|p| on_edge_of(p, 0.0, 1.0)), "{h:?}");
+        // and they go right round the square, not all along one side
+        for side in [0usize, 1] {
+            assert!(h.iter().any(|p| (p[side] - 0.0).abs() < 1e-9), "nothing on side {side} = 0: {h:?}");
+            assert!(h.iter().any(|p| (p[side] - 1.0).abs() < 1e-9), "nothing on side {side} = 1: {h:?}");
+        }
+    }
+
+    /// Whether a point sits on the boundary of the axis-aligned square from `lo` to `hi`.
+    fn on_edge_of(p: &[f64; 2], lo: f64, hi: f64) -> bool {
+        let e = 1e-9;
+        let inside = |v: f64| (lo - e..=hi + e).contains(&v);
+        let at_end = |v: f64| (v - lo).abs() < e || (v - hi).abs() < e;
+        (at_end(p[0]) && inside(p[1])) || (at_end(p[1]) && inside(p[0]))
+    }
+
+    #[test]
+    fn a_resampled_ring_keeps_its_shape_and_its_count() {
+        let square = [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]];
+        for n in [12, 17, 40] {
+            let r = resample(&square, n);
+            assert_eq!(r.len(), n);
+            // every point is on the square's boundary
+            assert!(r.iter().all(|p| on_edge_of(p, 0.0, 2.0)), "{r:?}");
+            assert_eq!(r[0], [0.0, 0.0], "it starts where the ring starts");
+            // evenly spaced: consecutive points are the perimeter over n apart, bar the corners
+            let step = 8.0 / n as f64;
+            for w in r.windows(2) {
+                let d = (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]);
+                assert!(d <= step + 1e-9, "{d} apart, more than {step}");
+            }
+        }
+        // However odd a count, the ring is still gone round once and not overshot.
+        assert_eq!(resample(&square, 3).len(), 3);
+        // a ring with no length is left alone, not reduced to n copies of one point
+        assert_eq!(resample(&[[1.0, 1.0], [1.0, 1.0]], 8).len(), 2);
     }
 }

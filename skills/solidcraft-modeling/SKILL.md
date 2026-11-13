@@ -19,6 +19,40 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
    - every feature, with the world point you will use for each edge or face pick
    - the expected volume and bounding box
 
+## Starting from a mesh or a scan
+An imported STL is one frozen body with no faces to pick.
+
+- **A prismatic part -- a plate, a bracket, a flange:** `mesh_rebuild {"body":"Scan"}` builds it
+  again as ordinary features beside the mesh: a sketch on one end face, the profile its walls cross
+  out with its corner radii, an extrusion to the other end face, a cylinder for each boss on it and
+  then a hole for each cylinder through or into it. The thickness, the bore diameters and depths
+  and the boss sizes are user parameters the features follow, and the positions move with the
+  thickness; the outline itself comes off the mesh as drawn, so dimension that sketch yourself if
+  the part's width has to follow a parameter too. Check `accounted`
+  (the share of the mesh's area the features cover) and `unused` (what it did not build, and why),
+  then add those by hand. `plan_only: true` gives you the commands to edit and send as a `batch`
+  instead. An outline that turns back on itself, such as an L, is refused rather than rebuilt as
+  something smaller: rebuild those in pieces, or sketch the outline yourself from the patches.
+- **Anything else:** `mesh_to_cad {"body":"Scan"}` reads the mesh as the surfaces it stands for --
+  planes, cylinders, cones, spheres, tori, each certified against the mesh within `tolerance` --
+  with every patch's radius, axis, apex or tube, whether it faces `outward` (a boss) or inward (a
+  bore), and the directions they share (`axes`: the walls `along` one and the end caps `across`
+  it). Take the numbers and build the part normally.
+
+Either way what you get is parametric, which `mesh.convert` is not (it only reconstructs a
+constant-section prism, and only as a frozen body).
+
+- Pick the tolerance for the mesh you have. A CAD-made mesh takes the default 0.05 mm. A scan needs
+  tenths of a millimetre or more: too tight and every facet becomes its own patch, which is refused.
+- `freeform` is the share of the area nothing analytic fit. On a scan of a sculpted part most of it
+  can be freeform (63 % on one 292k-triangle scan): model those parts yourself, and use the patches
+  for the features that are really there.
+- A part that is prismatic more than one way (a plate is an extrusion along its width too) takes
+  `axis` to say which way; without it the rebuild takes the direction with the most area square to
+  it. A scan that is not quite square to itself takes a wider `align`.
+- An optional learned segmentation (`tools/mesh-segmenter/`) can propose the grouping; it never
+  decides the geometry, because every surface is still fitted and certified here.
+
 ## Build
 - **Stages:** use one batch per stage:
   1. parameters, sketch, dimensions, finish and the first feature

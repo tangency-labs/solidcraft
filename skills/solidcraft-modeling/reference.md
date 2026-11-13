@@ -139,6 +139,8 @@ After `set_parameter L=120` the volume is 35335.2 mm³, and the holes stay in th
 |---|---|
 | `list_commands {}` | **Over 100 KB.** Never call it unfiltered; filter on a distinctive word such as `"hole"` or `"slot"`. |
 | `body_topology` | 25-45 KB |
+| `mesh_rebuild` | about 1 KB, plus the steps it ran: a step per parameter, the sketch, each hole and each boss |
+| `mesh_to_cad` | about 0.2 KB per patch. `max_patches` bounds it: the default 256 is about 50 KB, and a scan can break into thousands. Start at `{"max_patches":40}` to see the shape of the part, then ask for more |
 | `inspect_design {}` | 12 KB, and it grows with the sketches |
 | `inspect_design {"measure":false,"sketches":false}` | 4 KB for one part: parameters, timeline errors, bodies. About 65 B more per body (14 KB at 210 bodies) |
 | `sketch.inspect` | 5 KB per small sketch |

@@ -74,6 +74,7 @@ pub mod libraries;
 pub mod mass_properties;
 pub mod material_properties;
 pub mod materials;
+pub mod mesh;
 pub mod metadata;
 pub mod motion;
 pub mod motion_play;

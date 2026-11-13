@@ -3,8 +3,12 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{Document, FeatureKind, MeshData};
 
 fn imported_box() -> Session {
-    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
-    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    imported_mesh(&solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap(), 0.01)
+}
+
+/// A session holding `body` imported as a mesh, tessellated to `chord` mm.
+fn imported_mesh(body: &solidcraft_kernel::Body, chord: f64) -> Session {
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(chord)).unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {
@@ -619,6 +623,87 @@ fn inserted_mesh_converts_in_its_owner_from_an_active_ancestor() {
     }
 }
 
+/// `mesh.recognize` reads a mesh as the surfaces it stands for, and changes nothing: a box comes
+/// back as six planes square to three directions, each face a wall for two of them and a cap for
+/// the third, with the whole area accounted for (2 * (10*20 + 10*30 + 20*30) = 2200 mm^2).
+#[test]
+fn recognizing_a_box_mesh_names_six_planes_and_changes_nothing() {
+    let mut s = imported_box();
+    let before = s.doc.to_json();
+    let reply = run(&mut s, "mesh.recognize", json!({"body":"Mesh"}));
+    assert_eq!(reply["closed"], json!(true), "{reply}");
+    assert_eq!(reply["freeform"].as_f64(), Some(0.), "{reply}");
+    let patches = reply["patches"].as_array().unwrap();
+    assert_eq!(patches.len(), 6, "{reply}");
+    assert!(patches.iter().all(|p| p["surface"] == "plane" && p["deviation"].as_f64().unwrap() < 1e-9), "{reply}");
+    assert!((reply["area"].as_f64().unwrap() - 2200.).abs() < 1e-6, "{reply}");
+    let axes = reply["axes"].as_array().unwrap();
+    assert_eq!(axes.len(), 3, "{reply}");
+    for axis in axes {
+        let (along, across) = (axis["along"].as_f64().unwrap(), axis["across"].as_f64().unwrap());
+        assert!((along + across - 2200.).abs() < 1e-6, "every face is a wall or a cap: {axis}");
+        assert!(across > 0. && along > 0., "{axis}");
+    }
+    assert_eq!(s.doc.to_json(), before, "recognition changes nothing");
+    assert!(s.model.state().body("Mesh").unwrap().body.is_mesh(), "the mesh body is still a mesh");
+}
+
+/// A tessellated cylinder of radius 5 and height 12 comes back as one cylinder between two discs,
+/// with its radius, its axis and how far it runs. The discs are the end caps of that axis:
+/// 2 * pi * 25 = 157.08 mm^2 between them, a little less once faceted.
+#[test]
+fn recognizing_a_cylinder_mesh_gives_its_radius_axis_and_run() {
+    let body = solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 5., 12.).unwrap();
+    let mut s = imported_mesh(&body, 0.01);
+    let reply = run(&mut s, "mesh.recognize", json!({"body":"Mesh","tolerance":"0.05 mm"}));
+    let patches = reply["patches"].as_array().unwrap();
+    let round = patches.iter().find(|p| p["surface"] == "cylinder").unwrap_or_else(|| panic!("{reply}"));
+    // The facets sit inside the true radius by the chord error, so the fitted radius is a little
+    // under 5: it is the mesh that is faceted, not the fit that is wrong.
+    assert!((round["radius"].as_f64().unwrap() - 5.).abs() < 0.02, "{round}");
+    assert_eq!(round["axis"].as_array().unwrap()[2].as_f64().unwrap().abs(), 1., "the axis is Z: {round}");
+    let along = round["along"].as_array().unwrap();
+    assert!((along[1].as_f64().unwrap() - along[0].as_f64().unwrap() - 12.).abs() < 1e-6, "{round}");
+    assert_eq!(patches.iter().filter(|p| p["surface"] == "plane").count(), 2, "{reply}");
+    let axis = reply["axes"].as_array().unwrap().first().unwrap();
+    assert!((axis["across"].as_f64().unwrap() - 2. * std::f64::consts::PI * 25.).abs() < 1., "the two discs: {axis}");
+}
+
+/// A proposed grouping decides only what is tried together: a group per triangle gives a patch
+/// per triangle, and every one of them is still a certified plane. What cannot be read is refused.
+#[test]
+fn recognition_takes_a_proposed_grouping_and_refuses_what_it_cannot_read() {
+    let mut s = imported_box();
+    let triangles = run(&mut s, "mesh.recognize", json!({"body":"Mesh"}))["triangles"].as_u64().unwrap() as usize;
+    let groups: Vec<u32> = (0..triangles as u32).collect();
+    let reply = run(&mut s, "mesh.recognize", json!({"body":"Mesh","groups":groups}));
+    assert_eq!(reply["found"].as_u64(), Some(triangles as u64), "{reply}");
+    let patches = reply["patches"].as_array().unwrap();
+    assert_eq!(patches.len(), triangles.min(256), "{reply}");
+    assert!(patches.iter().all(|p| p["surface"] == "plane"), "a wrong grouping cannot invent a surface: {reply}");
+    let fewer = run(&mut s, "mesh.recognize", json!({"body":"Mesh","groups":groups,"max_patches":3}));
+    assert_eq!((fewer["patches"].as_array().unwrap().len(), fewer["found"].as_u64()), (3, Some(triangles as u64)), "{fewer}");
+    for (params, expected) in [
+        (json!({"body":"Mesh","groups":[1,2,3]}), "one per triangle"),
+        (json!({"body":"Mesh","groups":[-1]}), "none of them negative"),
+        (json!({"body":"Mesh","groups":"all"}), "one per triangle"),
+        (json!({"body":"Mesh","max_patches":0}), "between 1 and 4096"),
+        (json!({"body":"Mesh","tolerance":"5 mm"}), "between 0.000001 and 1 mm"),
+        (json!({"body":"Nope"}), "no body `Nope`"),
+    ] {
+        let error = s.execute("mesh.recognize", &params).unwrap_err().to_string();
+        assert!(error.contains(expected), "{params}: {error}");
+    }
+    // What conversion leaves behind is a solid, not a mesh body; undoing gives the mesh back and
+    // it reads as the same six planes.
+    run(&mut s, "mesh.convert", json!({"body":"Mesh","tolerance":"0.01 mm"}));
+    let error = s.execute("mesh.recognize", &json!({"body":"Mesh"})).unwrap_err().to_string();
+    assert!(error.contains("select a mesh body"), "{error}");
+    run(&mut s, "edit.undo", json!({}));
+    let back = run(&mut s, "mesh.recognize", json!({"body":"Mesh"}));
+    assert_eq!(back["patches"].as_array().unwrap().len(), 6, "{back}");
+}
+
 #[test]
 fn conversion_from_another_branch_names_the_component_to_activate() {
     let mut s = Session::default();
@@ -630,4 +715,89 @@ fn conversion_from_another_branch_names_the_component_to_activate() {
     assert!(error.contains("activate component 'Mesh 1' first"), "{error}");
     assert_eq!(s.doc.to_json(), before);
     assert_eq!((s.active_component, s.active_occurrence_path.clone()), context);
+}
+
+/// A plate 40 x 30 x 10 with two holes drilled through it, as an imported mesh: the shape whose
+/// answer the rebuild has to come back with.
+fn imported_plate() -> Session {
+    let plate = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
+    let mut body = plate;
+    for (at, radius) in [(Vec3::new(10., 10., 0.), 3.), (Vec3::new(30., 20., 0.), 2.5)] {
+        let tool = solidcraft_kernel::cylinder(at - Vec3::Z, Vec3::Z, radius, 12.).unwrap();
+        body = solidcraft_kernel::boolean(&body, &tool, solidcraft_kernel::BoolOp::Cut).unwrap().unwrap();
+    }
+    imported_mesh(&body, 0.01)
+}
+
+#[test]
+fn a_mesh_is_rebuilt_as_a_sketch_an_extrusion_and_its_holes_which_the_parameters_then_drive() {
+    let mut s = imported_plate();
+    let frozen = volume(&mut s);
+    let out = run(&mut s, "mesh.rebuild", json!({"body": "Mesh", "tolerance": "0.05 mm", "prefix": "plate"}));
+    assert_eq!(out["outline"], "polygon");
+    assert_eq!(out["corners"].as_array().map(Vec::len), Some(4), "{}", out["corners"]);
+    assert_eq!(out["bores"].as_array().map(Vec::len), Some(2), "{}", out["bores"]);
+    assert!(out["bores"].as_array().is_some_and(|b| b.iter().all(|b| b["through"] == true)), "{}", out["bores"]);
+    assert!((out["thickness"].as_f64().unwrap_or_default() - 10.).abs() < 0.05, "{}", out["thickness"]);
+    assert!(out["accounted"].as_f64().unwrap_or_default() > 0.99, "{} with {}", out["accounted"], out["unused"]);
+    // The mesh body is left exactly as it was; the rebuild stands beside it.
+    assert!(out["features"].as_array().is_some_and(|f| !f.is_empty()), "{}", out["features"]);
+    let built = volume(&mut s) - frozen;
+    let expect = 40. * 30. * 10. - PI * (9. + 6.25) * 10.;
+    assert!(rel(built, expect) < 0.01, "{built} against {expect}");
+
+    // Every size is a parameter the features follow, which is the whole point of rebuilding
+    // rather than converting: the plate is 20 thick when its parameter says so.
+    let named: Vec<String> =
+        out["parameters"].as_array().map(|p| p.iter().filter_map(|p| p["name"].as_str().map(str::to_owned)).collect()).unwrap_or_default();
+    assert!(named.contains(&"plate_thickness".to_owned()), "{named:?}");
+    assert!(named.iter().any(|n| n.starts_with("plate_bore_1")), "{named:?}");
+    run(&mut s, "parameters.change", json!({"changes": {"plate_thickness": "20 mm"}}));
+    let taller = volume(&mut s) - frozen;
+    assert!(rel(taller, 40. * 30. * 20. - PI * (9. + 6.25) * 20.) < 0.01, "{taller}");
+
+    // The whole rebuild is one step of Undo, not one per command it ran.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(rel(volume(&mut s), frozen) < 1e-9, "{} against {frozen}", volume(&mut s));
+    assert_eq!(s.doc.features.len(), 1, "{:?}", s.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_plan_only_rebuild_reports_the_commands_and_changes_nothing() {
+    let mut s = imported_plate();
+    let before = s.doc.to_json();
+    let out = run(&mut s, "mesh.rebuild", json!({"body": "Mesh", "plan_only": true, "prefix": "plate"}));
+    assert_eq!(s.doc.to_json(), before, "plan_only changed the design");
+    assert!(out["features"].as_array().is_some_and(Vec::is_empty), "{}", out["features"]);
+    let steps: Vec<&str> = out["steps"].as_array().map(|s| s.iter().filter_map(|s| s["command"].as_str()).collect()).unwrap_or_default();
+    assert!(steps.contains(&"sketch.create") && steps.contains(&"solid.extrude") && steps.contains(&"solid.hole"), "{steps:?}");
+    assert!(steps.iter().filter(|c| **c == "parameters.add").count() >= 3, "{steps:?}");
+    // The reported steps are the ones it would run: sent as a batch they build the same part.
+    let script: Vec<Value> =
+        out["steps"].as_array().map(|s| s.iter().map(|s| json!({"command": s["command"], "params": s["params"]})).collect()).unwrap_or_default();
+    s.run_script(&json!(script)).unwrap_or_else(|err| panic!("the reported steps did not run: {err}"));
+    assert!(volume(&mut s) > 0.);
+}
+
+#[test]
+fn a_rebuild_refuses_what_it_cannot_do_and_hostile_input_never_panics() {
+    let mut s = imported_plate();
+    for bad in [json!({"body": "Mesh", "align": 0}), json!({"body": "Mesh", "align": 90}), json!({"body": "Mesh", "axis": [0, 0, 0]})] {
+        assert!(s.execute("mesh.rebuild", &bad).is_err(), "{bad}");
+    }
+    // A plate is prismatic along its width as well, and rebuilding it that way is a real answer:
+    // 30 by 10 extruded 40. The holes then run across the extrusion instead of through it, so
+    // they are not built, and the reply says so rather than quietly leaving them out.
+    let sideways = run(&mut s, "mesh.rebuild", json!({"body": "Mesh", "axis": [1, 0, 0], "plan_only": true}));
+    assert_eq!(sideways["axis"], json!([1.0, 0.0, 0.0]));
+    assert!((sideways["thickness"].as_f64().unwrap_or_default() - 40.).abs() < 0.05, "{}", sideways["thickness"]);
+    assert!(sideways["bores"].as_array().is_some_and(Vec::is_empty), "{}", sideways["bores"]);
+    assert!(sideways["accounted"].as_f64().unwrap_or_default() < 0.95, "{}", sideways["accounted"]);
+    let unused = sideways["unused"].to_string();
+    assert!(unused.contains("does not turn about the build axis"), "{unused}");
+    assert!(s.execute("mesh.rebuild", &json!({"body": "nope"})).is_err());
+    assert!(s.execute("mesh.rebuild", &json!({"body": "Mesh", "groups": [1, 2]})).is_err());
+    // Nothing above left the design changed.
+    assert_eq!(s.doc.features.len(), 1);
 }

@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "cmd.mesh.rebuild": "إعادة بناء الشبكة كميزات",
+    "cmd.mesh.recognize": "التعرف على الشبكة"
+  },
+  "de": {
+    "cmd.mesh.rebuild": "Netz als Funktionen neu aufbauen",
+    "cmd.mesh.recognize": "Netz erkennen"
+  },
+  "en": {
+    "cmd.mesh.rebuild": "Rebuild Mesh as Features",
+    "cmd.mesh.recognize": "Recognize Mesh"
+  },
+  "he": {
+    "cmd.mesh.rebuild": "בנייה מחדש של רשת משולשים כפיצ'רים",
+    "cmd.mesh.recognize": "זיהוי רשת משולשים"
+  },
+  "ja": {
+    "cmd.mesh.rebuild": "メッシュをフィーチャーとして再構築",
+    "cmd.mesh.recognize": "メッシュを認識"
+  },
+  "ko": {
+    "cmd.mesh.rebuild": "메쉬를 피처로 재구축",
+    "cmd.mesh.recognize": "메쉬 인식"
+  },
+  "vi": {
+    "cmd.mesh.rebuild": "Dựng lại lưới thành các tính năng",
+    "cmd.mesh.recognize": "Nhận dạng lưới"
+  },
+  "zh": {
+    "cmd.mesh.rebuild": "将网格重建为特征",
+    "cmd.mesh.recognize": "识别网格"
+  }
+}

@@ -2,7 +2,7 @@
  {
   "name": "align_center",
   "category": "transform",
-  "description": "Move an object so its center sits on the origin. 'reference' picks the bounding-box center or the center of mass. 'z' = 'center' centers on Z too, 'floor' puts the bottom on Z=0 (print-bed style), 'keep' leaves Z alone.",
+  "description": "Shift an object until its centre lands on the origin. 'reference' picks which centre: the bounding box, or the centre of mass. 'z' decides the vertical: 'center' includes Z in the move, 'floor' seats the lowest point at Z=0 for print-bed placement, 'keep' leaves the height alone.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -39,7 +39,7 @@
  {
   "name": "align_lay_on_face",
   "category": "transform",
-  "description": "Rotate an object so the given face points straight down (-Z), then drop it so its lowest point sits on Z=0, like a slicer's 'lay on face'. Accepts a Part face ('Face3', or 'Pad.Face3' under a Body) or a mesh facet ('Facet123'); for meshes the flat region around the facet is used.",
+  "description": "Turn an object until the face given aims straight down along -Z, then lower it so its lowest point rests at Z=0, the way a slicer's 'lay on face' does. The face may be a Part face ('Face3', or 'Pad.Face3' when it sits under a Body) or a mesh facet ('Facet123'); on a mesh, the flat region surrounding that facet sets the orientation.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -73,7 +73,7 @@
  {
   "name": "assembly_add_part",
   "category": "assembly",
-  "description": "Add a part (any solid object) as a child to an assembly. Best-effort: actually adds via the assembly's group property.",
+  "description": "Attach a part, meaning any solid object, beneath an assembly as a child. This goes through the assembly's group property, so treat it as best-effort.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -97,7 +97,7 @@
  {
   "name": "assembly_create",
   "category": "assembly",
-  "description": "Create a new Assembly container in the active document.",
+  "description": "Start a new Assembly container in the active document.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -114,7 +114,7 @@
  {
   "name": "bool_common",
   "category": "boolean",
-  "description": "Boolean intersection of two or more objects.",
+  "description": "Intersect two or more objects, keeping only the volume they share.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -141,7 +141,7 @@
  {
   "name": "bool_cut",
   "category": "boolean",
-  "description": "Boolean cut: subtract second object from first. Use bool_cut_many for chains.",
+  "description": "Subtract the second object from the first. For a chain of subtractions, reach for bool_cut_many.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -168,7 +168,7 @@
  {
   "name": "bool_fuse",
   "category": "boolean",
-  "description": "Boolean union (fuse) of two or more objects. Returns the new feature.",
+  "description": "Merge two or more objects into one by union, and return the feature that results.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -195,7 +195,7 @@
  {
   "name": "console_clear",
   "category": "console",
-  "description": "Clear the captured console buffer.",
+  "description": "Empty the captured console buffer.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -205,7 +205,7 @@
  {
   "name": "console_print",
   "category": "console",
-  "description": "Print a message to the FreeCAD console.",
+  "description": "Write a message out to the FreeCAD console.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -232,7 +232,7 @@
  {
   "name": "console_tail",
   "category": "console",
-  "description": "Return the most recent FreeCAD console messages (log/message/warning/error).",
+  "description": "Fetch the latest console output from FreeCAD: log, message, warning and error lines.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -260,7 +260,7 @@
  {
   "name": "direct_chamfer",
   "category": "direct_edit",
-  "description": "Bevel edges of a solid with the given size (direct edit).",
+  "description": "Bevel a solid's edges at the size given, editing the shape directly.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -292,7 +292,7 @@
  {
   "name": "direct_fillet",
   "category": "direct_edit",
-  "description": "Round edges of a solid with the given radius (direct edit).",
+  "description": "Round a solid's edges to the radius given, editing the shape directly.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -325,7 +325,7 @@
  {
   "name": "direct_push_pull",
   "category": "direct_edit",
-  "description": "Push or pull faces of a solid along their normals (Plasticity-style direct edit). distance > 0 adds material, < 0 removes it. Curved faces work too: pushing a hole wall out by 1 grows the hole radius by 1.",
+  "description": "Drive a solid's faces along their own normals, Plasticity-style. A positive distance adds material, a negative one takes it away. Curved faces follow the same rule: push a hole's wall outward by 1 and the hole's radius grows by 1.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -357,7 +357,7 @@
  {
   "name": "display_refine",
   "category": "view",
-  "description": "Switch the 3D view to a refined, Plasticity-like look: MSAA anti-aliasing, finer tessellation of curved faces, thin crisp dark edges, softer satin shading with a key and fill light, a dark gradient background and smooth-shaded meshes. Updates open objects too. Previous settings are backed up for display_restore. Anti-aliasing applies to 3D views opened afterwards.",
+  "description": "Give the 3D view a refined, Plasticity-like look: MSAA anti-aliasing, curved faces tessellated more finely, crisp dark edges kept thin, softer satin shading lit by a key and a fill, a dark gradient behind the model, and meshes drawn smooth-shaded. Objects already open are updated too. Everything it changes is saved first, so display_restore can put it back. Views opened afterwards pick up the anti-aliasing.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -384,7 +384,7 @@
  {
   "name": "display_restore",
   "category": "view",
-  "description": "Undo display_refine: remove the viewport effects and restore every display preference it changed.",
+  "description": "Reverse display_refine: drop the viewport effects and put every display preference it touched back as it was.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -394,7 +394,7 @@
  {
   "name": "doc_close",
   "category": "document",
-  "description": "Close a document. Pass save=True to save before closing.",
+  "description": "Close a document, saving it first when save=True.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -412,7 +412,7 @@
  {
   "name": "doc_get_properties",
   "category": "document",
-  "description": "Get document-level properties (Label, Comment, Company, etc.).",
+  "description": "Read the document's own properties: Label, Comment, Company and the rest.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -426,7 +426,7 @@
  {
   "name": "doc_list",
   "category": "document",
-  "description": "List all open FreeCAD documents.",
+  "description": "Name every FreeCAD document currently open.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -436,7 +436,7 @@
  {
   "name": "doc_new",
   "category": "document",
-  "description": "Create a new empty FreeCAD document and make it active.",
+  "description": "Open a fresh, empty FreeCAD document and make it the active one.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -451,7 +451,7 @@
  {
   "name": "doc_open",
   "category": "document",
-  "description": "Open a FreeCAD document file (.FCStd or any supported import format).",
+  "description": "Load a FreeCAD document from disk (.FCStd, or any format that can be imported).",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -468,7 +468,7 @@
  {
   "name": "doc_recompute",
   "category": "document",
-  "description": "Force recompute of the named (or active) document.",
+  "description": "Recompute the named document, or the active one, whether or not it looks stale.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -486,7 +486,7 @@
  {
   "name": "doc_redo",
   "category": "document",
-  "description": "Redo the previously undone operation in the active document.",
+  "description": "Reapply whatever was last undone in the active document.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -496,7 +496,7 @@
  {
   "name": "doc_save",
   "category": "document",
-  "description": "Save the named (or active) document. Use doc_save_as for a new path.",
+  "description": "Save the named document, or the active one. To write it somewhere new, use doc_save_as.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -510,7 +510,7 @@
  {
   "name": "doc_save_as",
   "category": "document",
-  "description": "Save the named (or active) document to the given path.",
+  "description": "Write the named document, or the active one, to the path given.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -530,7 +530,7 @@
  {
   "name": "doc_set_active",
   "category": "document",
-  "description": "Make a named document the active document.",
+  "description": "Switch the active document to the one named.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -547,7 +547,7 @@
  {
   "name": "doc_undo",
   "category": "document",
-  "description": "Undo the last operation in the active document.",
+  "description": "Step the active document back by one operation.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -557,7 +557,7 @@
  {
   "name": "draft_circle",
   "category": "draft",
-  "description": "Draft: create a circle.",
+  "description": "Draft: draw a circle.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -597,7 +597,7 @@
  {
   "name": "draft_line",
   "category": "draft",
-  "description": "Draft: create a 2-point line.",
+  "description": "Draft: draw a line between two points.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -648,7 +648,7 @@
  {
   "name": "draft_text",
   "category": "draft",
-  "description": "Draft: create a text annotation.",
+  "description": "Draft: place a text annotation.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -688,7 +688,7 @@
  {
   "name": "draft_wire",
   "category": "draft",
-  "description": "Draft: create a polyline / wire from a list of points.",
+  "description": "Draft: run a polyline through a list of points.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -733,7 +733,7 @@
  {
   "name": "freecad_python_eval",
   "category": "python",
-  "description": "Evaluate a Python expression in FreeCAD and return its value. For multi-statement code use freecad_python_exec instead.",
+  "description": "Evaluate one Python expression and hand back what it produces. Code spanning several statements belongs in freecad_python_exec.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -750,7 +750,7 @@
  {
   "name": "freecad_python_exec",
   "category": "python",
-  "description": "Execute arbitrary Python code inside FreeCAD's interpreter. Variables persist between calls. Pre-imported: App (FreeCAD), Gui (FreeCADGui), Part, Draft, Sketcher, PartDesign. Returns captured stdout/stderr.",
+  "description": "Run Python of your own inside FreeCAD's interpreter. Variables stay alive from one call to the next. Already imported for you: App (FreeCAD), Gui (FreeCADGui), Part, Draft, Sketcher and PartDesign. Anything written to stdout or stderr comes back.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -773,7 +773,7 @@
  {
   "name": "gui_command_info",
   "category": "gui",
-  "description": "Return the menu text, tooltip, and pixmap of a GUI command.",
+  "description": "Report a GUI command's menu text, tooltip and pixmap.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -790,7 +790,7 @@
  {
   "name": "gui_list_commands",
   "category": "gui",
-  "description": "List every registered FreeCAD GUI command name. Each name can be passed to gui_run_command. Optionally filter by substring.",
+  "description": "Name every GUI command registered with FreeCAD; any of them can be handed to gui_run_command. A substring narrows the list.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -810,7 +810,7 @@
  {
   "name": "gui_run_command",
   "category": "gui",
-  "description": "Run a FreeCAD GUI command by name (e.g. 'Std_New', 'Part_Box', 'PartDesign_Pad'). Equivalent to clicking the menu/toolbar item. Use gui_list_commands to discover available names.",
+  "description": "Fire a FreeCAD GUI command by name, such as 'Std_New', 'Part_Box' or 'PartDesign_Pad', exactly as picking it from a menu or toolbar would. gui_list_commands shows what is on offer.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -832,7 +832,7 @@
  {
   "name": "io_export",
   "category": "io",
-  "description": "Export objects to a CAD file. Format detected from extension (.step, .iges, .brep, .stl, .obj, .dxf, .svg, ...).",
+  "description": "Write objects out to a CAD file, taking the format from the extension (.step, .iges, .brep, .stl, .obj, .dxf, .svg and others).",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -859,7 +859,7 @@
  {
   "name": "io_import",
   "category": "io",
-  "description": "Import a CAD file (.step/.iges/.brep/.stl/.obj/.dxf/.svg/...) into a FreeCAD document. Auto-detects format from extension. Creates a document if none exists.",
+  "description": "Read a CAD file (.step/.iges/.brep/.stl/.obj/.dxf/.svg/...) into a FreeCAD document, taking the format from the extension and creating a document first if none is open.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -880,7 +880,7 @@
  {
   "name": "measure_bounding_box",
   "category": "measure",
-  "description": "Get the axis-aligned bounding box of an object's shape.",
+  "description": "Report the axis-aligned box that encloses an object's shape.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -900,7 +900,7 @@
  {
   "name": "measure_distance",
   "category": "measure",
-  "description": "Measure shortest distance between two sub-elements. Each ref is 'ObjectName' or 'ObjectName.Face1' / '.Edge2' / '.Vertex3'.",
+  "description": "Find the shortest distance between two sub-elements. Write each as 'ObjectName', or 'ObjectName.Face1' / '.Edge2' / '.Vertex3'.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -924,7 +924,7 @@
  {
   "name": "measure_mass_properties",
   "category": "measure",
-  "description": "Volume, surface area and centre-of-mass of an object's shape.",
+  "description": "Report an object's volume, surface area and centre of mass.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -944,7 +944,7 @@
  {
   "name": "mesh_export",
   "category": "mesh",
-  "description": "Export selected (or named) objects to a mesh file (.stl/.obj/...).",
+  "description": "Write the selected objects, or ones you name, to a mesh file (.stl/.obj/...).",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -971,7 +971,7 @@
  {
   "name": "mesh_import",
   "category": "mesh",
-  "description": "Import a mesh file (.stl/.obj/.ply/...) into the active document.",
+  "description": "Read a mesh file (.stl/.obj/.ply/...) into the active document.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -991,7 +991,7 @@
  {
   "name": "mesh_import_file",
   "category": "reverse_engineering",
-  "description": "Import a mesh file (.ply/.stl/.obj/...) into the active document and return the imported object's name(s). Equivalent to File -> Import in the GUI.",
+  "description": "Read a mesh file (.ply/.stl/.obj/...) into the active document and report the name of every object it produced. This is what File -> Import does in the GUI.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1011,7 +1011,7 @@
  {
   "name": "mesh_loft_solid",
   "category": "reverse_engineering",
-  "description": "Reverse-engineer a mesh into a boolean-able solid by slicing the mesh perpendicular to a chosen axis, extracting the outer silhouette at each slice, fitting B-splines, and lofting. Use this when the built-in 'shape from mesh' produces a non-manifold solid that fails boolean operations. All inputs are validated and resampled to safe sizes so OCC's loft algorithm cannot hang.",
+  "description": "Turn a mesh back into a solid that booleans will accept: slice it at right angles to an axis you choose, take the outer silhouette of each slice, fit B-splines to those, and loft through them. Reach for this when the built-in 'shape from mesh' hands back a non-manifold solid that boolean operations reject. Every input is checked and resampled to a safe size, so OCC's loft algorithm cannot hang.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1094,7 +1094,7 @@
  {
   "name": "mesh_rebuild_cad",
   "category": "reverse_engineering",
-  "description": "Rebuild a scanned mesh (or a faceted solid converted from one) as a clean CAD solid with minimal faces, as if modelled from scratch. Best for 2.5D parts (plates, brackets, housings): finds the main axis and height levels, fits each layer's outline with lines, arcs and circles, squares near-axis edges, equalises matching dimensions, averages mirrored features when the part is symmetric, rounds sizes to `grid`, then extrudes and fuses.",
+  "description": "Remodel a scanned mesh, or a faceted solid that came from one, as a clean CAD solid carrying as few faces as possible, the way it would look if drawn from scratch. It suits 2.5D parts such as plates, brackets and housings: the main axis and the height levels are found, each layer's outline is fitted with lines, arcs and circles, edges close to an axis are squared, dimensions that should agree are equalised, mirrored features are averaged on a symmetric part, sizes are rounded to `grid`, and the layers are then extruded and fused.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1161,7 +1161,7 @@
  {
   "name": "mesh_to_shape",
   "category": "mesh",
-  "description": "Convert a Mesh::Feature into a Part (CAD) object. Facets are sewn into a shell, promoted to a solid when closed, and coplanar facets are merged (refine). Exact faceted conversion - for smooth B-spline approximations of organic meshes use mesh_loft_solid instead.",
+  "description": "Turn a Mesh::Feature into a Part (CAD) object. Facets are sewn into a shell, raised to a solid where the shell closes, and coplanar facets are merged (refine). The conversion is exact and stays faceted; for a smooth B-spline approximation of an organic mesh, use mesh_loft_solid.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1217,7 +1217,7 @@
  {
   "name": "mesh_to_solid_multi_axis",
   "category": "reverse_engineering",
-  "description": "Reverse-engineer a mesh into a boolean-able solid using one or more slicing axes. With a single axis, produces the same result as mesh_loft_solid. With two or three axes, builds a per-axis loft and INTERSECTS them (Boolean common) — concavities that would be lost in any single direction's convex-hull silhouette are caught by another axis. Resolution is the spacing between slices in mm.",
+  "description": "Turn a mesh back into a boolean-ready solid, slicing along one axis or several. Given a single axis the result matches mesh_loft_solid. Given two or three, each axis gets its own loft and the lofts are intersected (boolean common), so a concavity that one direction's convex-hull silhouette would swallow is still caught by another. Resolution sets the slice spacing in mm.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1295,7 +1295,7 @@
  {
   "name": "obj_delete",
   "category": "object",
-  "description": "Delete an object from its document.",
+  "description": "Remove an object from its document.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1315,7 +1315,7 @@
  {
   "name": "obj_get",
   "category": "object",
-  "description": "Get all properties of an object by name.",
+  "description": "Read every property of the object named.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1335,7 +1335,7 @@
  {
   "name": "obj_list",
   "category": "object",
-  "description": "List all objects in a document. Returns Name, Label, TypeId for each.",
+  "description": "List a document's objects, giving Name, Label and TypeId for each.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1353,7 +1353,7 @@
  {
   "name": "obj_rename",
   "category": "object",
-  "description": "Change an object's user-visible Label.",
+  "description": "Give an object a different user-visible Label.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1377,7 +1377,7 @@
  {
   "name": "obj_set_property",
   "category": "object",
-  "description": "Set a property on an object. Value should be a JSON-compatible value. Vectors can be passed as {x,y,z}; placements as {Base:{x,y,z}, Rotation:{Axis:{x,y,z}, Angle: rad}}.",
+  "description": "Write a property on an object. The value must be JSON-compatible. Give a vector as {x,y,z} and a placement as {Base:{x,y,z}, Rotation:{Axis:{x,y,z}, Angle: rad}}.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1403,7 +1403,7 @@
  {
   "name": "obj_set_visibility",
   "category": "object",
-  "description": "Show or hide an object in the 3D view.",
+  "description": "Show an object in the 3D view, or hide it.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1427,7 +1427,7 @@
  {
   "name": "obj_shape_info",
   "category": "object",
-  "description": "Inspect the geometric shape of an object: bounding box, volume, area, vertex/edge/face counts. Only meaningful for Part-based objects.",
+  "description": "Examine an object's geometry: bounding box, volume, area, and the counts of vertices, edges and faces. Only Part-based objects carry this.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1447,7 +1447,7 @@
  {
   "name": "part_box",
   "category": "part",
-  "description": "Create a Part::Box primitive.",
+  "description": "Make a Part::Box primitive.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1523,7 +1523,7 @@
  {
   "name": "part_compound",
   "category": "boolean",
-  "description": "Combine objects into a Part::Compound (no boolean op, just grouping).",
+  "description": "Gather objects into a Part::Compound: grouping only, with no boolean applied.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1550,7 +1550,7 @@
  {
   "name": "part_cone",
   "category": "part",
-  "description": "Create a Part::Cone primitive.",
+  "description": "Make a Part::Cone primitive.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1630,7 +1630,7 @@
  {
   "name": "part_create",
   "category": "part",
-  "description": "Generic Part primitive creator. Pass a TypeId (e.g. 'Part::Wedge', 'Part::Ellipsoid', 'Part::Prism') and a dict of properties to set.",
+  "description": "Make any Part primitive. Give a TypeId such as 'Part::Wedge', 'Part::Ellipsoid' or 'Part::Prism', together with a dict of properties to apply.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1704,7 +1704,7 @@
  {
   "name": "part_cylinder",
   "category": "part",
-  "description": "Create a Part::Cylinder primitive.",
+  "description": "Make a Part::Cylinder primitive.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1781,7 +1781,7 @@
  {
   "name": "part_plane",
   "category": "part",
-  "description": "Create a Part::Plane primitive.",
+  "description": "Make a Part::Plane primitive.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1853,7 +1853,7 @@
  {
   "name": "part_sphere",
   "category": "part",
-  "description": "Create a Part::Sphere primitive.",
+  "description": "Make a Part::Sphere primitive.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1921,7 +1921,7 @@
  {
   "name": "part_torus",
   "category": "part",
-  "description": "Create a Part::Torus primitive.",
+  "description": "Make a Part::Torus primitive.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -1995,7 +1995,7 @@
  {
   "name": "pd_active_body",
   "category": "partdesign",
-  "description": "Return the currently active PartDesign Body, or null.",
+  "description": "Report which PartDesign Body is active, or null when none is.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2009,7 +2009,7 @@
  {
   "name": "pd_chamfer",
   "category": "partdesign",
-  "description": "Chamfer edges of a body.",
+  "description": "Chamfer a body's edges.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2044,7 +2044,7 @@
  {
   "name": "pd_create_body",
   "category": "partdesign",
-  "description": "Create a new PartDesign Body. The Body becomes the active body.",
+  "description": "Start a new PartDesign Body, which then becomes the active one.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2061,7 +2061,7 @@
  {
   "name": "pd_create_sketch",
   "category": "partdesign",
-  "description": "Create a Sketcher::SketchObject on a plane. plane can be 'XY','XZ','YZ', the name of a planar face like 'Body.Face1', or another existing reference.",
+  "description": "Put a Sketcher::SketchObject on a plane. The plane may be 'XY', 'XZ' or 'YZ', the name of a planar face such as 'Body.Face1', or another reference that already exists.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2086,7 +2086,7 @@
  {
   "name": "pd_fillet",
   "category": "partdesign",
-  "description": "Add a fillet (rounded edge) to a body. edges should be a list like ['Edge1','Edge3'] of the previous feature.",
+  "description": "Round an edge of a body. Pass edges as a list such as ['Edge1','Edge3'], numbered against the previous feature.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2122,7 +2122,7 @@
  {
   "name": "pd_pad",
   "category": "partdesign",
-  "description": "Pad (extrude) a sketch into a solid in the active or named body.",
+  "description": "Extrude a sketch into a solid, within the active body or one you name.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2157,7 +2157,7 @@
  {
   "name": "pd_pocket",
   "category": "partdesign",
-  "description": "Cut a pocket in the active body using a sketch.",
+  "description": "Use a sketch to cut a pocket into the active body.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2188,7 +2188,7 @@
  {
   "name": "pd_revolution",
   "category": "partdesign",
-  "description": "Revolve a sketch around an axis to make a solid.",
+  "description": "Sweep a sketch around an axis to produce a solid.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2220,7 +2220,7 @@
  {
   "name": "pref_get",
   "category": "preferences",
-  "description": "Get a preference value. group is a path like 'User parameter:BaseApp/Preferences/View'. type must be one of: bool, int, uint, float, string.",
+  "description": "Read a preference. Give group as a path such as 'User parameter:BaseApp/Preferences/View', and type as one of bool, int, uint, float or string.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2253,7 +2253,7 @@
  {
   "name": "pref_list",
   "category": "preferences",
-  "description": "List preference subgroups under a group.",
+  "description": "Name the preference subgroups sitting under a group.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2270,7 +2270,7 @@
  {
   "name": "pref_set",
   "category": "preferences",
-  "description": "Set a preference value (see pref_get for group/type meaning).",
+  "description": "Write a preference; group and type mean what they mean for pref_get.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2304,7 +2304,7 @@
  {
   "name": "selection_add",
   "category": "selection",
-  "description": "Add an object (and optionally a sub-element like 'Face1') to the selection.",
+  "description": "Put an object into the selection, optionally narrowing to a sub-element such as 'Face1'.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2327,7 +2327,7 @@
  {
   "name": "selection_clear",
   "category": "selection",
-  "description": "Clear the current 3D-view selection.",
+  "description": "Drop everything currently selected in the 3D view.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -2337,7 +2337,7 @@
  {
   "name": "selection_get",
   "category": "selection",
-  "description": "Get the current 3D-view selection (objects + sub-elements).",
+  "description": "Report what the 3D view has selected, objects and sub-elements alike.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -2347,7 +2347,7 @@
  {
   "name": "selection_remove",
   "category": "selection",
-  "description": "Remove an object from the selection.",
+  "description": "Take an object back out of the selection.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2367,7 +2367,7 @@
  {
   "name": "server_ping",
   "category": "server",
-  "description": "Liveness check that does NOT touch FreeCAD state. Survives even when the main thread is locked in a long OCC operation.",
+  "description": "Check the server is alive without reading or touching FreeCAD state. It still answers while the main thread sits inside a long OCC operation.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -2377,7 +2377,7 @@
  {
   "name": "shape_to_mesh",
   "category": "mesh",
-  "description": "Convert a Part shape into a Mesh::Feature using the standard mesher.",
+  "description": "Run a Part shape through the standard mesher to produce a Mesh::Feature.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2408,7 +2408,7 @@
  {
   "name": "sketch_add_arc",
   "category": "sketch",
-  "description": "Add an arc by center, radius, start angle (deg), end angle (deg).",
+  "description": "Add an arc, given its centre, radius, start angle and end angle in degrees.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2452,7 +2452,7 @@
  {
   "name": "sketch_add_circle",
   "category": "sketch",
-  "description": "Add a circle to a sketch (centered at cx,cy with radius r).",
+  "description": "Add a circle to a sketch, centred at cx,cy with radius r.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2488,7 +2488,7 @@
  {
   "name": "sketch_add_constraint",
   "category": "sketch",
-  "description": "Add a constraint to a sketch. type: Horizontal/Vertical/Coincident/Parallel/Perpendicular/Tangent/Equal/Symmetric/Distance/DistanceX/DistanceY/Radius/Diameter/Angle. args: list of (geom_index, point_pos) pairs OR plain integers depending on the constraint. value: numeric value for dimensional constraints (in mm or rad as appropriate).",
+  "description": "Constrain a sketch. type is one of Horizontal/Vertical/Coincident/Parallel/Perpendicular/Tangent/Equal/Symmetric/Distance/DistanceX/DistanceY/Radius/Diameter/Angle. args holds either (geom_index, point_pos) pairs or plain integers, depending on which constraint it is. value carries the number for a dimensional constraint, in mm or rad as the type requires.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2520,7 +2520,7 @@
  {
   "name": "sketch_add_line",
   "category": "sketch",
-  "description": "Add a line segment to a sketch. Coordinates are in the sketch plane (X,Y).",
+  "description": "Add a line segment to a sketch, with coordinates taken in the sketch plane (X,Y).",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2560,7 +2560,7 @@
  {
   "name": "sketch_add_rectangle",
   "category": "sketch",
-  "description": "Add a rectangle as 4 connected line segments. Returns the 4 geometry indices.",
+  "description": "Add a rectangle built from 4 joined line segments, and report the 4 geometry indices.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2596,7 +2596,7 @@
  {
   "name": "sketch_delete_geometry",
   "category": "sketch",
-  "description": "Delete geometry elements by index from a sketch.",
+  "description": "Remove geometry from a sketch by index.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2624,7 +2624,7 @@
  {
   "name": "sketch_get_geometry",
   "category": "sketch",
-  "description": "List all geometry elements in a sketch.",
+  "description": "List every geometry element a sketch holds.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2644,7 +2644,7 @@
  {
   "name": "ss_create",
   "category": "spreadsheet",
-  "description": "Create a new Spreadsheet.",
+  "description": "Start a new Spreadsheet.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2661,7 +2661,7 @@
  {
   "name": "ss_get",
   "category": "spreadsheet",
-  "description": "Get a cell's contents (raw expression) and computed value.",
+  "description": "Read a cell: both the raw expression it holds and the value it computes to.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2685,7 +2685,7 @@
  {
   "name": "ss_set",
   "category": "spreadsheet",
-  "description": "Set a cell value (e.g. cell='A1', value='=2*3' or 42 or 'hello').",
+  "description": "Write a cell, for instance cell='A1' with value='=2*3', 42 or 'hello'.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2711,7 +2711,7 @@
  {
   "name": "ss_set_alias",
   "category": "spreadsheet",
-  "description": "Assign an alias to a cell so it can be referenced by name in expressions.",
+  "description": "Give a cell an alias, so expressions can refer to it by name.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2739,7 +2739,7 @@
  {
   "name": "transform_copy",
   "category": "transform",
-  "description": "Make a Part::Copy of an object (independent copy of the shape).",
+  "description": "Produce a Part::Copy of an object, whose shape then stands on its own.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2762,7 +2762,7 @@
  {
   "name": "transform_mirror",
   "category": "transform",
-  "description": "Create a Part::Mirroring of an object across a plane (defined by base+normal).",
+  "description": "Produce a Part::Mirroring of an object about a plane, which a base point and a normal define.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2823,7 +2823,7 @@
  {
   "name": "transform_rotate",
   "category": "transform",
-  "description": "Rotate an object around an axis through a center point by an angle (degrees).",
+  "description": "Spin an object by an angle in degrees, about an axis passing through a centre point.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2885,7 +2885,7 @@
  {
   "name": "transform_set_placement",
   "category": "transform",
-  "description": "Set an object's absolute placement.",
+  "description": "Give an object an absolute placement.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2948,7 +2948,7 @@
  {
   "name": "transform_translate",
   "category": "transform",
-  "description": "Translate an object by (dx, dy, dz). Modifies its Placement.",
+  "description": "Shift an object by (dx, dy, dz), changing its Placement.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -2980,7 +2980,7 @@
  {
   "name": "tree_expand",
   "category": "tree",
-  "description": "Expand or collapse a node in the model tree.",
+  "description": "Open or close a node in the model tree.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -3004,7 +3004,7 @@
  {
   "name": "tree_get",
   "category": "tree",
-  "description": "Return the document's object hierarchy (as shown in the tree view).",
+  "description": "Report the document's object hierarchy, as the tree view shows it.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -3022,7 +3022,7 @@
  {
   "name": "view_fit_all",
   "category": "view",
-  "description": "Zoom and pan so that everything fits in the 3D view.",
+  "description": "Zoom and pan until everything sits inside the 3D view.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -3032,7 +3032,7 @@
  {
   "name": "view_fit_selection",
   "category": "view",
-  "description": "Frame the current selection in the 3D view.",
+  "description": "Frame whatever is selected in the 3D view.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -3042,7 +3042,7 @@
  {
   "name": "view_get_camera",
   "category": "view",
-  "description": "Get the active camera as a string (Inventor format).",
+  "description": "Read the active camera out as a string, in Inventor format.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -3052,7 +3052,7 @@
  {
   "name": "view_redraw",
   "category": "view",
-  "description": "Force the 3D view to redraw immediately.",
+  "description": "Make the 3D view redraw at once.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -3062,7 +3062,7 @@
  {
   "name": "view_screenshot",
   "category": "view",
-  "description": "Render the active 3D view to an image. Returns the image as base64 and, if path is given, also writes it to disk. Format: PNG by default.",
+  "description": "Render whatever the active 3D view shows to an image, returned as base64 and, when a path is given, written to disk as well. PNG unless told otherwise.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -3108,7 +3108,7 @@
  {
   "name": "view_set_camera",
   "category": "view",
-  "description": "Set the active camera from an Inventor-format string (as returned by view_get_camera).",
+  "description": "Point the active camera using an Inventor-format string, of the kind view_get_camera returns.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -3125,7 +3125,7 @@
  {
   "name": "view_set_orientation",
   "category": "view",
-  "description": "Set the 3D view to a named orientation.",
+  "description": "Swing the 3D view round to a named orientation.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -3157,7 +3157,7 @@
  {
   "name": "workbench_activate",
   "category": "workbench",
-  "description": "Switch to a named workbench (e.g. 'PartDesignWorkbench', 'SketcherWorkbench').",
+  "description": "Switch to the workbench named, such as 'PartDesignWorkbench' or 'SketcherWorkbench'.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -3174,7 +3174,7 @@
  {
   "name": "workbench_active",
   "category": "workbench",
-  "description": "Return the name of the currently active workbench.",
+  "description": "Report which workbench is active.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -3184,7 +3184,7 @@
  {
   "name": "workbench_list",
   "category": "workbench",
-  "description": "List all available workbenches by internal name.",
+  "description": "List the workbenches available, by internal name.",
   "inputSchema": {
    "type": "object",
    "properties": {},

@@ -1,6 +1,6 @@
-//! FreeCAD AI Bridge's tool set (the same 107 tool names, descriptions and JSON Schemas) over
-//! SolidCraft's own MCP server, so an AI client written for FreeCAD's bridge drives SolidCraft
-//! unchanged.
+//! FreeCAD AI Bridge's tool set (the same 107 tool names and JSON Schemas, with descriptions
+//! written here) over SolidCraft's own MCP server, so an AI client written for FreeCAD's bridge
+//! drives SolidCraft unchanged.
 //!
 //! The names are a second vocabulary, not a second transport: every call arrives through the
 //! MCP server like any other tool and goes out through [`Backend::call`], so it inherits the
@@ -21,7 +21,9 @@ use serde_json::{Value, json};
 
 use crate::backend::Backend;
 
-/// The tool definitions, copied from FreeCAD's AIBridge (`aibridge_tools`).
+/// The tool definitions: the 107 names and JSON Schemas an AI client written for FreeCAD's
+/// AIBridge (`aibridge_tools`) calls by, which is what makes the vocabulary compatible. Every
+/// description is our own, written against the behaviour each tool has here.
 const TOOLS_JSON: &str = include_str!("tools.json");
 
 /// What a tool returns instead of a value: FreeCAD's ToolError (code, message).
@@ -64,9 +66,15 @@ pub struct Cx<'a> {
 }
 
 impl Cx<'_> {
-    /// Run a SolidCraft command.
+    /// Run a SolidCraft command, through the control channel's `engine.execute`. A command id is
+    /// not a method of the channel: its methods are a fixed set (`engine.execute`,
+    /// `document.inspect`, `ui.*`), so a command id sent as one comes back `unknown method`.
+    pub fn cmd(&mut self, cmd: &str, params: Value) -> Result<Value, String> {
+        self.b.call("engine.execute", json!({"command": cmd, "params": params}))
+    }
+    /// [`Cx::cmd`], with a failure as the tool error a client sees.
     pub fn run(&mut self, cmd: &str, params: Value) -> R {
-        self.b.call(cmd, params).map_err(|e| te("command_failed", format!("{cmd}: {e}")))
+        self.cmd(cmd, params).map_err(|e| te("command_failed", format!("{cmd}: {e}")))
     }
     /// Run a control-channel method (`ui.camera`, `ui.render`, `ui.prefs`...). The same
     /// dispatcher: a backend bridged to the running app passes it on, and one with no window
@@ -80,7 +88,7 @@ impl Cx<'_> {
     /// Leave an open sketch (FreeCAD's tools work outside sketch editing). A design with no
     /// sketch open refuses this, which is the same as nothing to leave.
     pub fn leave_sketch(&mut self) {
-        let _ = self.b.call("sketch.finish", json!({}));
+        let _ = self.cmd("sketch.finish", json!({}));
     }
     /// Every open design and which one is active, as `ui.documents` reports them.
     pub fn docs(&mut self) -> Result<(Vec<Value>, usize), ToolError> {
@@ -146,7 +154,13 @@ fn note(name: &str) -> Option<&'static str> {
         "mesh_to_shape" | "mesh_rebuild_cad" => {
             "Runs Convert Mesh, which rebuilds closed constant-section mechanical meshes as planar and cylindrical faces."
         }
-        "mesh_loft_solid" | "mesh_to_solid_multi_axis" => "Slices the mesh, makes a sketch per section (its convex outline) and lofts them (ruled).",
+        "mesh_loft_solid" | "mesh_to_solid_multi_axis" => {
+            "Slices the mesh, makes a sketch per section and lofts them. A section is the convex outline of the slice, so a \
+             waist or any other hollow in the outline is filled in. The loft is smooth: Loft has no ruled setting, so \
+             `loft_ruled` and `loft_max_degree` are not used. Sections that differ sharply from one to the next, as a \
+             scanned shape's do, make a surface the kernel's check can refuse; more of them (`n_slices`, `resolution_mm`) \
+             is what narrows the gaps."
+        }
         "shape_to_mesh" => "Makes a mesh body copy (via STL); deflections are not used.",
         "io_import" | "io_export" | "doc_open" => {
             "Formats: .solidcraft/.json designs, STEP, IGES, FreeCAD .FCStd and Rhino .3dm import, 3MF/STL/OBJ/glTF/.plasticity meshes; export STL/OBJ/STEP/3MF."
@@ -283,6 +297,52 @@ mod tests {
         assert_eq!(check_args("bool_cut", &json!({"base": "A"})).unwrap_err().code, "type_error");
         assert_eq!(check_args("no_such_tool", &json!({})).unwrap_err().code, "unknown_tool");
     }
+    /// A backend that answers like the app's control channel: it knows a fixed set of methods,
+    /// and anything else is unknown. It keeps what it was asked, a command id inside
+    /// `engine.execute` written as `engine.execute <command>`.
+    #[derive(Default)]
+    struct Recorder {
+        seen: Vec<String>,
+    }
+    impl Backend for Recorder {
+        fn call(&mut self, method: &str, p: Value) -> Result<Value, String> {
+            self.seen.push(match p.get("command").and_then(Value::as_str) {
+                Some(c) if method == "engine.execute" => format!("engine.execute {c}"),
+                _ => method.to_string(),
+            });
+            match method {
+                "engine.execute" | "document.inspect" => Ok(json!({})),
+                other => Err(format!("unknown method `{other}`")),
+            }
+        }
+        fn has_ui(&self) -> bool {
+            false
+        }
+        fn describe(&self) -> String {
+            "a test backend".into()
+        }
+    }
+
+    #[test]
+    fn a_command_goes_out_inside_engine_execute_not_as_a_method() {
+        // The control channel's methods are a fixed set (`engine.execute`, `document.inspect`,
+        // `ui.*`), so a command id sent as a method comes back `unknown method` and the tool
+        // does nothing at all. Every command the bridge runs goes out inside `engine.execute`.
+        let (mut b, mut st) = (Recorder::default(), State::default());
+        let _ = call(&mut b, &mut st, "part_box", &json!({"length": 1, "width": 2, "height": 3}));
+        assert!(b.seen.iter().any(|m| m == "engine.execute solid.box"), "part_box never ran solid.box; asked: {:?}", b.seen);
+        assert!(!b.seen.iter().any(|m| m == "solid.box"), "a command id was sent as a method: {:?}", b.seen);
+
+        // The same for the reverse-engineering tools, which reach the mesh through a command.
+        let (mut b, mut st) = (Recorder::default(), State::default());
+        let _ = call(&mut b, &mut st, "mesh_loft_solid", &json!({"mesh_object": "M"}));
+        assert!(
+            !b.seen.iter().any(|m| m.contains('.') && !m.starts_with("engine.") && !m.starts_with("document.") && !m.starts_with("ui.")),
+            "{:?}",
+            b.seen
+        );
+    }
+
     #[test]
     fn the_bridge_is_off_unless_asked_and_shadows_no_tool_of_ours() {
         let ours = crate::tool_definitions_with(crate::Options::default());

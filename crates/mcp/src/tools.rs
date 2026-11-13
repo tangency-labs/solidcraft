@@ -437,6 +437,82 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             Effect::Files,
         ),
         tool(
+            "mesh_to_cad",
+            "Read a mesh as CAD surfaces",
+            "What an imported mesh or a scan is actually made of: its triangles grouped into patches, each patch named \
+             (plane, cylinder, cone, sphere, torus, or freeform where nothing analytic fits) with that surface's radius, \
+             axis, apex or tube, and the directions the patches share, which is where an extrusion or a revolve would be. \
+             This is the step between an STL and a design: rebuild the part from the patches with the ordinary commands \
+             (sketch.create, solid.extrude, solid.revolve, solid.hole, solid.fillet) and what you get is parametric, \
+             unlike the frozen body `mesh.convert` makes of a constant-section prism. \
+             Every surface is fitted and then certified against the mesh: `deviation` is the worst distance from it, \
+             measured inside the triangles and not only at their corners, and nothing that will not certify within \
+             `tolerance` is named -- it comes back freeform instead, and `freeform` is the share of the area that did. \
+             `groups` hands in a segmenter's proposal (one group number per triangle); it steers which triangles are \
+             tried together and never decides the geometry. Reads only: the design is not touched.",
+            obj(
+                json!({
+                    "body": string("The mesh body, by name (default: the selected mesh body)"),
+                    "tolerance": string(
+                        "How far the mesh may stray from a surface and still be certified as it (default \"0.05 mm\"). It has to cover the mesh's own faceting, so a coarse mesh needs more or its round faces come back as flat bands"
+                    ),
+                    "groups": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 0},
+                        "description": "One group number per triangle, in the body's own triangle order: a neural segmenter's proposal about which triangles make up one face",
+                    },
+                    "max_patches": {"type": "integer", "minimum": 1, "description": "Report at most this many patches, largest area first (default 256)"},
+                }),
+                &[],
+            ),
+            Effect::ReadOnly,
+        ),
+        tool(
+            "mesh_rebuild",
+            "Rebuild a mesh as features",
+            "Build a prismatic part again from what its mesh is made of: a sketch on one end face, an extrusion to the \
+             other, the corner rounds, and the holes and bosses its cylinders stand for -- as ordinary parametric \
+             features, with every size a named parameter they follow, leaving the mesh body alone beside them. This is \
+             `mesh_to_cad` carried through to a design you can change: `mesh.convert` freezes a constant-section prism \
+             as a body, and this gives you a timeline instead. \
+             It never guesses. The profile is where the recognized walls cross, so an outline that turns back on itself, \
+             such as an L or a T, is refused with what did not add up rather than rebuilt as something smaller; a cone, \
+             a sphere, a fillet between faces and anything freeform comes back in `unused` with its area and what to do \
+             about it by hand, and `accounted` is the share of the mesh's area the features cover. \
+             `plan_only` reports the commands it would run and changes nothing: edit those and send them as a `batch` \
+             to build the part differently.",
+            obj(
+                json!({
+                    "body": string("The mesh body, by name (default: the selected mesh body)"),
+                    "tolerance": string(
+                        "How far the mesh may stray from a surface and still be certified as it (default \"0.05 mm\"), as mesh_to_cad takes it. A scan wants tenths of a millimetre or more"
+                    ),
+                    "groups": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 0},
+                        "description": "One group number per triangle, as mesh_to_cad takes them: a segmenter's proposal, which steers the search and never decides the geometry",
+                    },
+                    "axis": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "description": "The direction to extrude along (default: the direction with the most recognized area square to it, which is the one with end faces to extrude between)",
+                    },
+                    "align": {
+                        "type": "number",
+                        "description": "How far a surface's own axis may lean from the build axis and still count as along it or square to it, in degrees (default 2, between 0.0573 and 17.19). A scan of a part that is not quite square to itself needs more",
+                    },
+                    "parameters": {"type": "boolean", "description": "Name each size as a user parameter the features then follow (default true)"},
+                    "prefix": string("What those parameters are called before _thickness and the rest (default: from the body's name)"),
+                    "plan_only": {"type": "boolean", "description": "Report the plan and the commands it would run, and change nothing (default false)"},
+                    "name": string("A name for the extrusion feature"),
+                }),
+                &[],
+            ),
+            Effect::Edits,
+        ),
+        tool(
             "save",
             "Save the design",
             "Save the design to `path` or its current file (a design opened as .solidcraft keeps that name). New designs are .sc files. The default is a design container; a .json path selects plain JSON. Set format to container or json to override the path. \
@@ -994,6 +1070,10 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             let m = exec(b, "inspect.measure", measure_params(a))?;
             Ok(if measure_summary_wanted(a) { measure_summary(m) } else { m })
         }
+        "mesh_to_cad" => exec(b, "mesh.recognize", pick(a, &["body", "tolerance", "groups", "max_patches"])),
+        "mesh_rebuild" => {
+            exec(b, "mesh.rebuild", pick(a, &["body", "tolerance", "groups", "axis", "align", "parameters", "prefix", "plan_only", "name"]))
+        }
         "body_topology" => {
             let p = pick(a, &["body"]);
             let edges = exec(b, "model.edges", p.clone())?;
@@ -1214,6 +1294,10 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             mapped("inspect.compare_picture", p)
         }
         "inspect_design" => mapped("document.inspect", json!({"measure": a.get("measure").and_then(Value::as_bool).unwrap_or(true)})),
+        "mesh_to_cad" => mapped("mesh.recognize", pick(a, &["body", "tolerance", "groups", "max_patches"])),
+        "mesh_rebuild" => {
+            mapped("mesh.rebuild", pick(a, &["body", "tolerance", "groups", "axis", "align", "parameters", "prefix", "plan_only", "name"]))
+        }
         "undo" => mapped("edit.undo", json!({})),
         "redo" => mapped("edit.redo", json!({})),
         "export" => mapped("file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity"])),
@@ -1249,6 +1333,8 @@ const TOOL_STEPS: &[&str] = &[
     "inspect_design",
     "list_commands",
     "measure",
+    "mesh_rebuild",
+    "mesh_to_cad",
     "new_design",
     "open",
     "pending",

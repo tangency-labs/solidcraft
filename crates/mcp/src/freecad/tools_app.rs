@@ -53,9 +53,7 @@ pub fn body_names(cx: &mut Cx) -> Vec<String> {
     bodies_json(cx).iter().filter_map(|b| b.get("name").and_then(Value::as_str).map(str::to_string)).collect()
 }
 pub fn is_mesh(cx: &mut Cx, name: &str) -> bool {
-    bodies_json(cx)
-        .iter()
-        .any(|b| b.get("name").and_then(Value::as_str) == Some(name) && b.get("mesh").and_then(Value::as_bool) == Some(true))
+    bodies_json(cx).iter().any(|b| b.get("name").and_then(Value::as_str) == Some(name) && b.get("mesh").and_then(Value::as_bool) == Some(true))
 }
 /// Every body, as `document.inspect` reports it (`name`, `mesh`, `visible`...).
 fn bodies_json(cx: &mut Cx) -> Vec<Value> {
@@ -63,15 +61,10 @@ fn bodies_json(cx: &mut Cx) -> Vec<Value> {
 }
 /// Whether the design has a parameter by that name.
 fn has_param(cx: &mut Cx, name: &str) -> bool {
-    inspect(cx)
-        .get("params")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .any(|p| p.get("name").and_then(Value::as_str) == Some(name))
+    inspect(cx).get("params").and_then(Value::as_array).into_iter().flatten().any(|p| p.get("name").and_then(Value::as_str) == Some(name))
 }
 fn components(cx: &mut Cx) -> Vec<Value> {
-    cx.b.call("component.list", json!({})).ok().and_then(|v| v.get("components").cloned()).and_then(|c| c.as_array().cloned()).unwrap_or_default()
+    cx.cmd("component.list", json!({})).ok().and_then(|v| v.get("components").cloned()).and_then(|c| c.as_array().cloned()).unwrap_or_default()
 }
 
 /// Resolve a FreeCAD object name: a body, a timeline feature or sketch, a component or a
@@ -189,21 +182,21 @@ fn visible(cx: &mut Cx, o: &Obj) -> bool {
 }
 
 fn serialize(cx: &mut Cx, o: &Obj, props: bool) -> Value {
-    let mut out =
-        json!({"Name": o.name(), "Label": o.name(), "TypeId": type_id(cx, o), "Document": doc_name(cx), "Visibility": visible(cx, o)});
+    let mut out = json!({"Name": o.name(), "Label": o.name(), "TypeId": type_id(cx, o), "Document": doc_name(cx), "Visibility": visible(cx, o)});
     if props {
         let p = match o {
             Obj::Body(n) => {
-                let m = cx.b.call("inspect.measure", json!({"bodies": [n]}))
+                let m = cx
+                    .cmd("inspect.measure", json!({"bodies": [n]}))
                     .ok()
                     .and_then(|v| v.get("bodies").and_then(|b| b.get(0)).cloned())
                     .unwrap_or_default();
-                let look = cx.b.call("appearance.list", json!({"body": n})).unwrap_or_default();
+                let look = cx.cmd("appearance.list", json!({"body": n})).unwrap_or_default();
                 let place = cx.st.place.get(n).copied().unwrap_or(IDENTITY);
                 json!({"Label": n, "Visibility": visible(cx, o), "Shape": m, "Appearance": look, "Placement": placement_json(&place), "Mesh": is_mesh(cx, n)})
             }
-            Obj::Feature { name, .. } => cx.b.call("timeline.inspect", json!({"feature": name})).unwrap_or_default(),
-            Obj::Sketch { name, .. } => cx.b.call("sketch.inspect", json!({"sketch": name})).unwrap_or_default(),
+            Obj::Feature { name, .. } => cx.cmd("timeline.inspect", json!({"feature": name})).unwrap_or_default(),
+            Obj::Sketch { name, .. } => cx.cmd("sketch.inspect", json!({"sketch": name})).unwrap_or_default(),
             Obj::Component { name, .. } => {
                 components(cx).into_iter().find(|c| c.get("name").and_then(Value::as_str) == Some(name)).unwrap_or_default()
             }
@@ -407,7 +400,8 @@ fn pref_default(ty: &str) -> Value {
 
 /// Spreadsheet cell parameter name.
 fn cell_param(cx: &Cx, sheet: &str, cell: &str) -> String {
-    cx.st.sheets
+    cx.st
+        .sheets
         .get(sheet)
         .and_then(|m| m.get(&cell.to_ascii_uppercase()))
         .cloned()
@@ -477,7 +471,7 @@ fn run_script(cx: &mut Cx, code: &str) -> (bool, String, Option<String>) {
     }
     let mut out = String::new();
     for (cmd, params) in steps {
-        match cx.b.call(&cmd, params) {
+        match cx.cmd(&cmd, params) {
             Ok(v) => out.push_str(&format!("{cmd}: {v}\n")),
             Err(e) => return (false, out, Some(format!("{cmd}: {e}"))),
         }
@@ -593,7 +587,7 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
         "doc_get_properties" => (|| {
             cx.use_doc(s(a, "name"))?;
             let ins = inspect(cx);
-            let meta = cx.b.call("document.metadata", json!({})).unwrap_or_default();
+            let meta = cx.cmd("document.metadata", json!({})).unwrap_or_default();
             Ok(json!({
                 "Label": doc_name(cx), "Name": doc_name(cx),
                 "FileName": ins.get("path").cloned().unwrap_or(Value::Null), "Units": ins.get("units"),
@@ -611,10 +605,7 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
             let mut objs: Vec<Obj> = Vec::new();
             for c in components(cx) {
                 if c.get("parent").is_some_and(|p| !p.is_null())
-                    || cx.st.bodies
-                        .iter()
-                        .chain(&cx.st.assemblies)
-                        .any(|n| Some(n.as_str()) == c.get("name").and_then(Value::as_str))
+                    || cx.st.bodies.iter().chain(&cx.st.assemblies).any(|n| Some(n.as_str()) == c.get("name").and_then(Value::as_str))
                 {
                     objs.push(Obj::Component {
                         id: c.get("id").and_then(Value::as_u64).unwrap_or(0),
@@ -713,7 +704,7 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
                 Obj::Sheet(n) => {
                     let params: Vec<String> = cx.st.sheets.remove(n).unwrap_or_default().into_values().collect();
                     for p in params {
-                        let _ = cx.b.call("parameters.delete", json!({"name": p}));
+                        let _ = cx.cmd("parameters.delete", json!({"name": p}));
                     }
                 }
             }
@@ -737,7 +728,7 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
             let body = body_of(cx, name, doc_arg(a))?;
             let m = cx.run("inspect.measure", json!({"bodies": [body]}))?;
             let m = m.get("bodies").and_then(|b| b.get(0)).cloned().unwrap_or_default();
-            let edges = cx.b.call("model.edges", json!({"body": body})).ok();
+            let edges = cx.cmd("model.edges", json!({"body": body})).ok();
             let length: f64 = edges
                 .as_ref()
                 .and_then(|e| e.get("edges"))
@@ -856,7 +847,7 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
                 cx.ctl("ui.camera", json!({"fit": true})).map(|_| json!({"ok": true}))
             } else {
                 cx.ctl("ui.view", json!({"view": "fit", "animate": true}))?;
-                
+
                 Ok(json!({"ok": true}))
             }
         })(),
@@ -932,10 +923,8 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
             let _ = resolve(cx, req(a, "object")?, doc_arg(a))?;
             let exp = b(a, "expanded", true);
             if exp {
-                
                 cx.run("browser.expand_all", json!({}))?;
             } else {
-                
                 cx.run("browser.collapse_all", json!({}))?;
             }
             Ok(json!({"ok": true, "expanded": exp, "note": "best-effort; actual TreeView state is implementation-dependent"}))
@@ -993,18 +982,18 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
         "console_tail" => (|| {
             let limit = a.get("limit").and_then(Value::as_u64).unwrap_or(100).clamp(1, 2000) as usize;
             let level = s(a, "level").unwrap_or("all");
-            let mut items: Vec<Value> =
-                cx.ctl("ui.messages", json!({}))?
-                    .get("messages")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .map(|m| {
-                        let error = m.get("error").and_then(Value::as_bool).unwrap_or(false);
-                        let text = m.get("text").and_then(Value::as_str).unwrap_or("");
-                        json!({"level": console_level(error), "message": format!("{text}\n")})
-                    })
-                    .collect();
+            let mut items: Vec<Value> = cx
+                .ctl("ui.messages", json!({}))?
+                .get("messages")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|m| {
+                    let error = m.get("error").and_then(Value::as_bool).unwrap_or(false);
+                    let text = m.get("text").and_then(Value::as_str).unwrap_or("");
+                    json!({"level": console_level(error), "message": format!("{text}\n")})
+                })
+                .collect();
             items.extend(cx.st.console.iter().map(|(l, m)| json!({"level": l, "message": m})));
             let items: Vec<Value> = items.into_iter().filter(|m| level == "all" || m["level"] == level).collect();
             let n = items.len();
@@ -1019,7 +1008,6 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
             let msg = s(a, "message").unwrap_or("").to_string();
             let level = s(a, "level").unwrap_or("message").to_string();
             if matches!(level.as_str(), "message" | "error" | "warning") {
-                
             } else {
                 cx.st.console.push((level, if msg.ends_with('\n') { msg } else { format!("{msg}\n") }));
             }
@@ -1049,15 +1037,14 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
         "pref_list" => (|| {
             let group = req(a, "group")?.trim_end_matches('/').to_string();
             let entries: Vec<(String, Value)> = if group == SC_GROUP {
-                cx.prefs(json!({}))?
-                    .as_object()
-                    .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-                    .unwrap_or_default()
+                cx.prefs(json!({}))?.as_object().map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default()
             } else {
                 cx.st.params.get(&group).map(|g| g.iter().map(|(k, v)| (k.clone(), v.clone())).collect()).unwrap_or_default()
             };
             let pick = |f: fn(&Value) -> bool| entries.iter().filter(|(_, v)| f(v)).map(|(k, _)| k.clone()).collect::<Vec<_>>();
-            let mut subgroups: Vec<String> = cx.st.params
+            let mut subgroups: Vec<String> = cx
+                .st
+                .params
                 .keys()
                 .filter_map(|k| k.strip_prefix(&format!("{group}/")).map(|r| r.split('/').next().unwrap_or(r).to_string()))
                 .collect();
@@ -1117,10 +1104,8 @@ pub fn call(cx: &mut Cx, name: &str, a: &Value) -> Option<R> {
             let sheet = sheet_of(cx, req(a, "sheet")?)?;
             let cell = req(a, "cell")?;
             // a cell or an alias
-            let param = cx.st.sheets
-                .get(sheet)
-                .and_then(|m| m.values().find(|p| p.as_str() == cell).cloned())
-                .unwrap_or_else(|| cell_param(cx, sheet, cell));
+            let param =
+                cx.st.sheets.get(sheet).and_then(|m| m.values().find(|p| p.as_str() == cell).cloned()).unwrap_or_else(|| cell_param(cx, sheet, cell));
             let list = cx.run("parameters.list", json!({}))?;
             let p = list
                 .get("parameters")
