@@ -282,7 +282,7 @@ impl Default for HostMetrics {
     fn default() -> Self {
         let t = solidcraft_theme::Tokens::get();
         Self {
-            header_height: t.form_header_height,
+            header_height: t.form_header_height - t.space_8,
             content_header_height: 0.0,
             footer_height: t.form_footer_height,
             gap: t.space_4,
@@ -576,6 +576,8 @@ pub struct HostGeometryPolicy {
     pub default_opaque: bool,
     pub effective_surfaces: BTreeMap<SectionId, PanelSurface>,
     pub(crate) hidden_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
+    pub(crate) header_title_widths: BTreeMap<InstanceId, f32>,
+    pub(crate) tab_title_widths: BTreeMap<InstanceId, f32>,
     pub content: Vec<SideContentMeasure>,
     pub content_revision: u64,
     pub scroll: Point,
@@ -591,6 +593,8 @@ impl PartialEq for HostGeometryPolicy {
             && self.default_opaque == other.default_opaque
             && self.effective_surfaces == other.effective_surfaces
             && self.hidden_header_actions == other.hidden_header_actions
+            && self.header_title_widths == other.header_title_widths
+            && self.tab_title_widths == other.tab_title_widths
             && self.identity_reservations == other.identity_reservations
             && self.content == other.content
             && self.content_revision == other.content_revision
@@ -612,6 +616,8 @@ impl Default for HostGeometryPolicy {
             default_opaque: true,
             effective_surfaces: BTreeMap::new(),
             hidden_header_actions: BTreeMap::new(),
+            header_title_widths: BTreeMap::new(),
+            tab_title_widths: BTreeMap::new(),
             content: Vec::new(),
             content_revision: 0,
             scroll: Point { x: 0.0, y: 0.0 },
@@ -648,6 +654,7 @@ pub struct HostSection {
     /// actions and editable inline content.
     pub title: Option<LogicalRect>,
     pub menu: LogicalRect,
+    pub action_bar: Option<LogicalRect>,
     /// Tab headings within the shared header, after the section grip.
     pub tab_strip: Option<LogicalRect>,
     pub tabs: Vec<HostTab>,
@@ -865,6 +872,7 @@ impl HostLayout {
                 Some(section.header),
                 section.title,
                 Some(section.menu),
+                section.action_bar,
                 section.collapse,
                 section.close,
                 section.tab_strip,
@@ -1093,6 +1101,20 @@ fn resolve_layout_source(
         }
         env.content.push(measure);
     }
+    // A content-sized side card still gets its full body when the actions
+    // need their own row. Requests retain their original measurement keys.
+    for measure in &mut env.content {
+        let instance = &measure.request.instance;
+        if measure.policy == SideHeightPolicy::Content
+            && let Ok(section) = proposed.containing(instance)
+        {
+            let spec = service.registry().get(&proposed.instance(instance)?.kind)?;
+            let collapsible = section_collapsible(proposed, service.registry(), section)?;
+            if header_actions_below(policy, metrics, section, instance, spec, collapsible, measure.request.width) {
+                measure.needed_height = (measure.needed_height + metrics.control_extent).min(MAX_LOGICAL);
+            }
+        }
+    }
     let allocation = allocate_layout(proposed, service.registry(), &env)?;
     let source_state = service.inspect();
     let mut result = HostLayout {
@@ -1166,6 +1188,29 @@ fn effective_surface(service: &LayoutService, proposed: &Layout, section: &Secti
     Ok(if policy.default_opaque { PanelSurface::Opaque } else { declared })
 }
 
+fn header_action_visible(policy: &HostGeometryPolicy, instance: &InstanceId, action: &ControlId) -> bool {
+    !policy.hidden_header_actions.get(instance).is_some_and(|hidden| hidden.contains(action))
+}
+
+fn header_actions_below(
+    policy: &HostGeometryPolicy,
+    metrics: HostMetrics,
+    section: &Section,
+    instance: &InstanceId,
+    spec: &PanelSpec,
+    collapsible: bool,
+    width: f32,
+) -> bool {
+    let count = spec.header_actions.iter().filter(|action| header_action_visible(policy, instance, &action.id)).count();
+    let primary = 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
+    count > 0
+        && (section.tabs.len() > 1
+            || policy
+                .header_title_widths
+                .get(instance)
+                .is_some_and(|title| width < title + metrics.control_extent * (primary + count) as f32 + solidcraft_theme::Tokens::get().space_2))
+}
+
 fn append_section(
     out: &mut HostLayout,
     service: &LayoutService,
@@ -1184,24 +1229,39 @@ fn append_section(
     let inline = !section.collapsed && flow == Flow::Wide && outer.size.height <= metrics.inline_max_height;
     let header =
         rect(outer.origin.x, outer.origin.y, outer.size.width, if inline { outer.size.height } else { metrics.header_height.min(outer.size.height) });
-    let hidden = policy.hidden_header_actions.get(instance);
-    let visible_actions = spec.header_actions.iter().filter(|action| !hidden.is_some_and(|hidden| hidden.contains(&action.id)));
-    let control_count = visible_actions.clone().count() + 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
-    let extent = metrics.control_extent.min(header.size.width / control_count.max(1) as f32);
-    let mut cursor = if out.direction == Direction::Ltr { right(header) } else { header.origin.x };
-    let take = |cursor: &mut f32| {
+    let visible_actions = spec.header_actions.iter().filter(|action| header_action_visible(policy, instance, &action.id));
+    let action_count = visible_actions.clone().count();
+    let primary_count = 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
+    let control_count = action_count + primary_count;
+    let split = !inline && !section.collapsed && header_actions_below(policy, metrics, section, instance, spec, collapsible, header.size.width);
+    let action_bar = (split && !section.collapsed)
+        .then(|| {
+            positive_rect(
+                header.origin.x,
+                bottom(header),
+                header.size.width,
+                metrics.control_extent.min((bottom(outer) - bottom(header) - metrics.footer_height).max(0.0)),
+            )
+        })
+        .flatten();
+    let extent = metrics.control_extent.min(header.size.height).min(header.size.width / control_count as f32);
+    let primary_extent = if split { metrics.control_extent.min(header.size.height).min(header.size.width / primary_count as f32) } else { extent };
+    let header_controls = if split { primary_count } else { control_count };
+    let edge_margin = ((header.size.height - primary_extent) / 2.0).min((header.size.width - header_controls as f32 * primary_extent).max(0.0));
+    let mut cursor = if out.direction == Direction::Ltr { right(header) - edge_margin } else { header.origin.x + edge_margin };
+    let take = |cursor: &mut f32, row: LogicalRect, extent: f32| {
         let x = if out.direction == Direction::Ltr { *cursor - extent } else { *cursor };
         *cursor += if out.direction == Direction::Ltr { -extent } else { extent };
-        rect(x, header.origin.y, extent, header.size.height)
+        rect(x, row.origin.y + (row.size.height - extent) / 2.0, extent, extent)
     };
-    let close = if spec.features.hot_closable { Some(take(&mut cursor)) } else { None };
-    let collapse = collapsible.then(|| take(&mut cursor));
-    let menu = take(&mut cursor);
+    let close = spec.features.hot_closable.then(|| take(&mut cursor, header, primary_extent));
+    let collapse = collapsible.then(|| take(&mut cursor, header, primary_extent));
+    let menu = take(&mut cursor, header, primary_extent);
     let mut actions = Vec::new();
     let (heading, inline_content) = if inline {
         // Shared title/grip, declared custom actions, editable inline content,
         // then shared system actions. The whole sequence mirrors in RTL.
-        let available = (header.size.width - extent * control_count as f32).max(0.0);
+        let available = (header.size.width - edge_margin - extent * control_count as f32).max(0.0);
         let title_width = metrics.inline_title_width.min(available * 0.4);
         let mut leading = if out.direction == Direction::Ltr { header.origin.x } else { right(header) };
         let title_x = if out.direction == Direction::Ltr { leading } else { leading - title_width };
@@ -1209,7 +1269,7 @@ fn append_section(
         leading += if out.direction == Direction::Ltr { title_width } else { -title_width };
         for action in visible_actions.clone() {
             let x = if out.direction == Direction::Ltr { leading } else { leading - extent };
-            actions.push((action.id.clone(), rect(x, header.origin.y, extent, header.size.height)));
+            actions.push((action.id.clone(), rect(x, header.origin.y + (header.size.height - extent) / 2.0, extent, extent)));
             leading += if out.direction == Direction::Ltr { extent } else { -extent };
         }
         let content = if out.direction == Direction::Ltr {
@@ -1219,8 +1279,21 @@ fn append_section(
         };
         (title, content)
     } else {
-        for action in visible_actions.rev() {
-            actions.push((action.id.clone(), take(&mut cursor)));
+        if let Some(row) = action_bar {
+            let margin = edge_margin.min(row.size.width / 2.0);
+            let extent = metrics.control_extent.min(row.size.height).min((row.size.width - margin) / action_count as f32);
+            let mut action_cursor = if out.direction == Direction::Ltr { right(row) - margin } else { row.origin.x + margin };
+            for action in visible_actions.rev() {
+                actions.push((action.id.clone(), take(&mut action_cursor, row, extent)));
+            }
+        } else if !split {
+            let remaining = if out.direction == Direction::Ltr { cursor - header.origin.x } else { right(header) - cursor };
+            let extent = extent.min(header.size.height).min(remaining / action_count.max(1) as f32);
+            if extent > 0.0 {
+                for action in visible_actions.rev() {
+                    actions.push((action.id.clone(), take(&mut cursor, header, extent)));
+                }
+            }
         }
         actions.reverse();
         (
@@ -1251,7 +1324,7 @@ fn append_section(
     } else {
         (heading, None)
     };
-    let body_y = bottom(header) + metrics.content_header_height;
+    let body_y = bottom(action_bar.unwrap_or(header)) + metrics.content_header_height;
     let body = if section.collapsed || inline {
         None
     } else {
@@ -1266,30 +1339,36 @@ fn append_section(
     let mut hidden_tabs = Vec::new();
     let mut tab_overflow = None;
     if let Some(strip) = tab_strip {
-        let count = (strip.size.width / metrics.tab_min_width).floor().min(MAX_TABS as f32) as usize;
-        let overflowed = count < section.tabs.len();
-        // Overflow is a compact control, not another full-width tab. Keep the
-        // active heading whenever its minimum width fits beside that control.
+        let preferred = |id: &InstanceId| policy.tab_title_widths.get(id).copied().unwrap_or(metrics.tab_min_width);
+        let minimum = |id: &InstanceId| preferred(id).min(metrics.tab_min_width);
+        let required: f32 = section.tabs.iter().map(minimum).sum();
+        let overflowed = required > strip.size.width;
         let overflow_width = if overflowed { metrics.control_extent.min(strip.size.width) } else { 0.0 };
-        let visible_count = if overflowed {
-            ((strip.size.width - overflow_width) / metrics.tab_min_width).floor().min(MAX_TABS as f32) as usize
-        } else {
-            section.tabs.len()
-        };
-        let mut visible: BTreeSet<_> = section.tabs.iter().take(visible_count).cloned().collect();
-        if visible_count > 0 && !visible.contains(instance) {
-            if let Some(last) = section.tabs.get(visible_count.saturating_sub(1)) {
-                visible.remove(last);
-            }
+        let room = strip.size.width - overflow_width;
+        let mut visible = BTreeSet::new();
+        if !overflowed {
+            visible.extend(section.tabs.iter().cloned());
+        } else if room >= minimum(instance) {
             visible.insert(instance.clone());
+            let mut remaining = room - minimum(instance);
+            for id in section.tabs.iter().filter(|id| *id != instance) {
+                let width = minimum(id);
+                if width > remaining {
+                    break;
+                }
+                remaining -= width;
+                visible.insert(id.clone());
+            }
         }
-        let width = (strip.size.width - overflow_width) / visible.len().max(1) as f32;
+        let required: f32 = visible.iter().map(minimum).sum();
+        let desired: f32 = visible.iter().map(preferred).sum();
+        let fraction = if desired > required { ((room - required) / (desired - required)).clamp(0.0, 1.0) } else { 0.0 };
         let mut cursor = if out.direction == Direction::Ltr { strip.origin.x } else { right(strip) };
         for id in &section.tabs {
             if visible.contains(id) {
                 let remaining =
                     if out.direction == Direction::Ltr { right(strip) - overflow_width - cursor } else { cursor - strip.origin.x - overflow_width };
-                let cell_width = width.min(remaining);
+                let cell_width = (minimum(id) + (preferred(id) - minimum(id)) * fraction).min(remaining);
                 let x = if out.direction == Direction::Ltr { cursor } else { cursor - cell_width };
                 tabs.push(HostTab { instance: id.clone(), bounds: rect(x, strip.origin.y, cell_width, strip.size.height) });
                 cursor = if out.direction == Direction::Ltr { x + cell_width } else { x };
@@ -1387,6 +1466,7 @@ fn append_section(
         header,
         title,
         menu,
+        action_bar,
         tab_strip,
         tabs,
         hidden_tabs,
