@@ -15,9 +15,6 @@ use super::{Snap, XRef, component_bodies};
 use crate::history_names::Match;
 use crate::{DocError, Document, IDENTITY, Mat, ModelBody, ModelState, Result, apply_point, apply_vector, mat_inverse};
 
-/// Rim points sampled to find the face across a cylinder's rim.
-const RIM_SAMPLES: usize = 16;
-
 /// A face found by its persistent name: its body, its index there, the point of it nearest the
 /// pick (the component's coordinates) and the body's offset (a body moved in from another
 /// component keeps its geometry where it was made; the offset places it).
@@ -142,45 +139,32 @@ pub(super) fn placed(m: &Mat, c: CylinderFace) -> CylinderFace {
 }
 
 /// The face across the rim at the `at` end (along the axis) of cylinder `c`, face `face` of `b`
-/// (the body's own coordinates): of the body's other faces, the one nearest the rim's points.
+/// (the body's own coordinates): of the body's other faces, the one sharing the rim edge.
 fn rim_neighbour(b: &ModelBody, face: usize, c: &CylinderFace, at: f64) -> Option<usize> {
-    let mesh = b.mesh();
-    let slack = (c.end - c.start).abs() * 1e-3 + 1e-9;
-    let mut rim: Vec<Vec3> = Vec::new();
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        if *f as usize != face {
+    if b.body.is_mesh() {
+        return None;
+    }
+    let rec = b.body.record();
+    let slack = (c.end - c.start).abs() * 1e-3 + 1e-6;
+    for e in &rec.edges {
+        if !e.uses.iter().any(|u| u.face as usize == face) {
             continue;
         }
-        for k in t {
-            if let Some(q) = mesh.positions.get(*k as usize)
-                && ((*q - c.axis_point).dot(c.axis) - at).abs() <= slack
-                && !rim.iter().any(|r| r.dist(*q) <= slack)
+        let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()) else { continue };
+        let [t0, t1] = e.interval;
+        let (Some(p0), Some(p1)) = (eval.point(t0), eval.point(t1)) else { continue };
+        let at0 = (p0 - c.axis_point).dot(c.axis);
+        let at1 = (p1 - c.axis_point).dot(c.axis);
+        if (at0 - at).abs() <= slack && (at1 - at).abs() <= slack {
+            let mid = eval.point(0.5 * (t0 + t1))?;
+            if ((mid - c.axis_point).dot(c.axis) - at).abs() <= slack
+                && let Some(other) = e.uses.iter().find(|u| u.face as usize != face).map(|u| u.face as usize)
             {
-                rim.push(*q);
+                return Some(other);
             }
         }
     }
-    // Evenly through the rim's points, at most RIM_SAMPLES of them.
-    let step = rim.len().div_ceil(RIM_SAMPLES).max(1);
-    let rim: Vec<Vec3> = rim.into_iter().step_by(step).collect();
-    if rim.is_empty() {
-        return None;
-    }
-    let mut near: BTreeMap<usize, Vec<f64>> = BTreeMap::new();
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        let f = *f as usize;
-        if f == face {
-            continue;
-        }
-        let Some([p, q, r]) = mesh.tri(t) else { continue };
-        let slot = near.entry(f).or_insert_with(|| vec![f64::INFINITY; rim.len()]);
-        for (d, x) in slot.iter_mut().zip(&rim) {
-            *d = d.min(crate::naming::closest(*x, p, q, r).dist(*x));
-        }
-    }
-    // The face that meets the whole rim (the other half of a cylinder split in two meets only
-    // the rim's points at its seams).
-    near.into_iter().map(|(f, d)| (d.iter().sum::<f64>(), f)).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, f)| f)
+    None
 }
 
 /// The ends of a cylinder: (place along the axis, which way out of the face).

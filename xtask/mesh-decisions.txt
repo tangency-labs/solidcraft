@@ -52,7 +52,6 @@ crates/doc/src/joints_face.rs:NamedFace::own_cylinder reads a named face's cylin
 crates/doc/src/joints_face.rs:NamedFace::plane reads a named face's centre and normal from the display mesh
 crates/doc/src/joints_face.rs:face_name_at names the face at a pick by its mesh triangles
 crates/doc/src/joints_face.rs:outline_centre finds a planar face's centre from mesh triangles
-crates/doc/src/joints_face.rs:rim_neighbour finds the face across a cylinder's rim by the display mesh
 crates/doc/src/joints_face.rs:round_end_at finds a cylinder's round end by the display mesh
 crates/doc/src/lineage.rs:order_legacy_family orders a face family by the display mesh
 crates/doc/src/name_lookup.rs:FaceHit::along meets a line with a found face on the display mesh
