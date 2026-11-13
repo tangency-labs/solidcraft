@@ -1835,6 +1835,43 @@ impl Curve {
         }
     }
 
+    /// (not upstream) [`Self::edit_parameterization`] whose natural interval is then
+    /// `new_param` exactly: where the natural interval's ends were already the same as
+    /// `new_param`'s within the scaled zero, the edit leaves them as they are, and the
+    /// knots of a B-spline's, a line's or a conic's NURB are then mapped onto `new_param`,
+    /// so an edge that keeps `new_param` as its interval lies inside its curve. Every
+    /// point is kept. The other kinds are left as [`Self::edit_parameterization`] leaves
+    /// them.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::edit_parameterization`] and of [`BSplineCurve::reparam_to`].
+    pub(crate) fn edit_parameterization_exactly(
+        &mut self,
+        k: &Kernel,
+        new_param: &Extent1d,
+    ) -> Result<()> {
+        self.edit_parameterization(k, new_param)?;
+        if self.natural_interval() == *new_param {
+            return Ok(());
+        }
+        self.memo = CurveMemo::new();
+        match &mut self.kind {
+            CurveKind::BSpline(c) => c.reparam_to(new_param),
+            CurveKind::Hyperbola(c) => c.base_mut().reparam_to(new_param),
+            CurveKind::Parabola(c) => c.base_mut().reparam_to(new_param),
+            CurveKind::Ellipse(c) => {
+                c.base_mut().reparam_to(new_param)?;
+                c.notify(k, NotifyOperation::PostEdit)
+            }
+            CurveKind::Line(c) => {
+                c.ensure_nurb(self.owner)?;
+                c.base_mut().reparam_to(new_param)
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// `ReverseParameterization` (base: `SM_ERR`): the new interval of `old_interval`.
     ///
     /// # Errors
