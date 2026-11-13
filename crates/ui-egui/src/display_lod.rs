@@ -157,6 +157,8 @@ pub(crate) struct Stats {
     pub planning_ms: f64,
     /// Time the last choice of steps took on the UI thread (ms).
     pub choose_ms: f64,
+    /// Bodies whose edges are drawn simplified ([`crate::edge_detail`]).
+    pub simplified_edges: usize,
 }
 
 /// The refinement state of a viewport.
@@ -170,7 +172,10 @@ pub(crate) struct Lod {
     /// The web plans one refinement per frame: more are waiting.
     #[cfg(target_arch = "wasm32")]
     more: bool,
-    /// Bumped whenever a body's drawn step changes (part of the scene's key).
+    /// The edge tolerance step each body's edges are drawn at, by [`body_id`] (absent: the edges
+    /// as meshed). See [`crate::edge_detail`].
+    edges: HashMap<usize, i8>,
+    /// Bumped whenever a body's drawn step or edge step changes (part of the scene's key).
     pub generation: u64,
     clock: u64,
     pub stats: Stats,
@@ -182,6 +187,34 @@ impl Lod {
         let (id, _) = body_id(b);
         let k = *self.shown.get(&id)?;
         self.cache.get(&(id, q, k))?.refined.clone()
+    }
+
+    /// The tolerance (mm) `b`'s edges are simplified to, or 0 to draw them as meshed.
+    pub fn edge_tolerance(&self, b: &ModelBody) -> f64 {
+        self.edges.get(&body_id(b).0).map_or(0.0, |&step| crate::edge_detail::tolerance(step))
+    }
+
+    /// Choose each body's edge step from the most pixels per millimetre it can come to (`None`:
+    /// as meshed) and the chord its edges were meshed to (mm), with
+    /// [`crate::edge_detail::hysteresis`]. A body whose tolerance would be under half its chord
+    /// keeps its edges as meshed: there is next to nothing to drop. Bodies left out keep no step.
+    /// Returns whether any body's edge step changed.
+    pub fn update_edges(&mut self, wanted: impl IntoIterator<Item = (usize, Option<f64>, f64)>) -> bool {
+        let mut next = HashMap::with_capacity(self.edges.len());
+        for (id, ppm, chord) in wanted {
+            let Some(step) = ppm.and_then(crate::edge_detail::step_for) else { continue };
+            let step = crate::edge_detail::hysteresis(self.edges.get(&id).copied(), step);
+            if crate::edge_detail::tolerance(step) >= chord * 0.5 {
+                next.insert(id, step);
+            }
+        }
+        let changed = next != self.edges;
+        self.edges = next;
+        self.stats.simplified_edges = self.edges.len();
+        if changed {
+            self.generation += 1;
+        }
+        changed
     }
 
     /// The step `b` is drawn at.

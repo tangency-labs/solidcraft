@@ -942,6 +942,7 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     let bounds = body_bounds(app, &st);
     let mut live = std::collections::HashSet::with_capacity(st.bodies.len());
     let mut candidates = Vec::new();
+    let mut edge_steps = Vec::new();
     for (b, (name, bx)) in st.bodies.iter().zip(bounds.iter()) {
         let id = crate::display_lod::body_id(b).0;
         live.insert(id);
@@ -956,9 +957,16 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
         };
         let err_px = crate::display_lod::error_px(q, b.body.size(), bx, on_screen, &lens);
         candidates.push(crate::display_lod::Candidate { body: b, err_px, triangles: b.mesh_in_place().0.triangles.len() });
+        // Its edges' tolerance, from the nearest it can come to the eye as the view orbits: on or
+        // off the screen alike, so orbiting needs no new edges (#16265 measured them).
+        if shown {
+            let ppm = crate::edge_detail::orbit_px_per_mm(&proj.cam, bx.min, bx.max, lens.scale);
+            edge_steps.push((id, ppm, q.chord(b.body.size())));
+        }
     }
     let busy = match app.viewport.lod.lock() {
         Ok(mut lod) => {
+            lod.update_edges(edge_steps);
             lod.update(q, candidates, &live);
             lod.stats.choose_ms = crate::now_ms() - t0;
             lod.busy()
@@ -1196,6 +1204,10 @@ struct BodyDraw {
     slot_base: u32,
     edge: crate::gpu::PaletteIndex,
     hidden_edge: crate::gpu::PaletteIndex,
+    /// The most its edges may move when simplified (mm; 0: drawn as meshed), from where the view
+    /// shows it ([`crate::edge_detail`]). Part of its block's key, not of [`BodyDraw::key`]: the
+    /// blocks keep their bodies when the view changes it.
+    edge_tol: f64,
 }
 
 impl BodyDraw {
@@ -1231,16 +1243,27 @@ impl BodyDraw {
                 out.triangle([a.0, b.0, c.0], [a.1, b.1, c.1], color(ti), class(ti));
             }
         }
-        let at = |p: Vec3| self.place.as_ref().map_or(p, |m| solidcraft_engine::doc::apply_point(m, p)).to_f32();
+        let placed = |p: Vec3| self.place.as_ref().map_or(p, |m| solidcraft_engine::doc::apply_point(m, p));
+        let at = |p: Vec3| placed(p).to_f32();
         for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
             if !m.edge_visible(ei) || (shaded && !m.shaded_edge_visible(ei)) {
                 continue;
             }
-            for w in e.windows(2) {
-                let (a, b) = (at(w[0]), at(w[1]));
+            let mut emit = |a: [f32; 3], b: [f32; 3]| {
                 out.line(a, b, self.edge, 1.3);
                 if hidden_edges {
                     out.hidden_line(a, b, self.hidden_edge, 1.0);
+                }
+            };
+            if self.edge_tol > 0.0 && e.len() > 2 {
+                // Simplified where it stands (a placement may scale), to the view's tolerance.
+                let simplified = crate::edge_detail::simplify(&e.iter().map(|p| placed(*p)).collect::<Vec<_>>(), self.edge_tol);
+                for w in simplified.windows(2) {
+                    emit(w[0].to_f32(), w[1].to_f32());
+                }
+            } else {
+                for w in e.windows(2) {
+                    emit(at(w[0]), at(w[1]));
                 }
             }
         }
@@ -1813,6 +1836,7 @@ fn body_scene(
         let instanced =
             (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, slots.instance, look, app.viewport.gpu.is_some_and(|g| g.oit))).flatten();
         let name = b.name.clone();
+        let edge_tol = if edges { app.viewport.lod.lock().map_or(0.0, |l| l.edge_tolerance(b)) } else { 0.0 };
         let body = match instanced {
             Some((mesh, place)) => BodyDraw {
                 name,
@@ -1827,6 +1851,7 @@ fn body_scene(
                 slot_base: slots.faces,
                 edge: slots.edge,
                 hidden_edge: slots.hidden_edge,
+                edge_tol,
             },
             None => BodyDraw {
                 name,
@@ -1841,10 +1866,13 @@ fn body_scene(
                 slot_base: slots.faces,
                 edge: slots.edge,
                 hidden_edge: slots.hidden_edge,
+                edge_tol,
             },
         };
         let key = body.key(shaded, edges, hidden_edges, markers);
         key.hash(&mut run_key);
+        // The edges' tolerance changes the block's bytes but not where blocks end.
+        body.edge_tol.to_bits().hash(&mut run_key);
         run.push(body);
         // Blocks end where a body's own key says, so a body added or removed changes only its
         // own block, not every block after it.
@@ -11604,6 +11632,35 @@ mod tests {
             }
             assert!(lit_faces >= 3, "{lit_faces} faces");
         }
+    }
+
+    /// A body small on the screen draws its edges with fewer segments ([`crate::edge_detail`]):
+    /// its edge step changes the scene, every point kept is one of the meshed edge's own, and
+    /// without the step the edges are drawn as meshed again.
+    #[test]
+    fn a_body_small_on_screen_draws_its_edges_with_fewer_segments_from_its_own_points() {
+        use solidcraft_engine::doc::display_quality::current;
+        let points = |lines: &[u8]| -> std::collections::HashSet<[u32; 3]> {
+            lines
+                .chunks(crate::gpu::LINE_SIZE)
+                .flat_map(|l| [0, 12].map(|at| std::array::from_fn(|i| u32::from_le_bytes(l[at + i * 4..at + i * 4 + 4].try_into().unwrap()))))
+                .collect()
+        };
+        let app = cylinder_app();
+        let body = app.session.world_state().unwrap().bodies[0].clone();
+        let id = crate::display_lod::body_id(&body).0;
+        let chord = current().chord(body.body.size());
+        let meshed = build_scene(&app).merged().lines;
+        let key = scene_key(&app);
+        // Half a pixel per millimetre: the Ø20 rims are 10 px across, simplified to a quarter pixel.
+        assert!(app.viewport.lod.lock().unwrap().update_edges([(id, Some(0.5), chord)]));
+        assert_ne!(scene_key(&app), key, "an edge step rebuilds the scene");
+        let simplified = build_scene(&app).merged().lines;
+        assert!(simplified.len() < meshed.len() / 2, "{} of {} line bytes", simplified.len(), meshed.len());
+        assert!(points(&simplified).is_subset(&points(&meshed)), "every point drawn is a point of the meshed edges");
+        // Up close (or a body that can come to the eye): drawn as meshed again.
+        assert!(app.viewport.lod.lock().unwrap().update_edges([(id, None, chord)]));
+        assert_eq!(build_scene(&app).merged().lines, meshed, "without a step the edges are as meshed");
     }
 
     fn cylinder_app() -> SolveApp {
