@@ -219,6 +219,13 @@ thread_local! {
     pub(crate) static NAME_INDEXES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many (placement, body) pairs [`Session::bodies_hidden_by_parents`] has looked at on
+    /// this thread (tests).
+    pub(crate) static HIDDEN_BY_PARENTS_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// How many placement paths [`PlacementIndex`] names before it stops remembering more.
 const PLACEMENT_PATHS_CACHED: usize = solidcraft_doc::MAX_PLACEMENTS;
 
@@ -939,16 +946,28 @@ impl Session {
 
     /// World names of the bodies a hidden placement, folder or group above them hides (their
     /// own state aside).
+    ///
+    /// The bodies are grouped by component once: asking every body's component at every
+    /// placement cost the placements times the bodies, each time a design change or a joint
+    /// drag frame found something hidden.
     fn bodies_hidden_by_parents(&self) -> std::collections::BTreeSet<String> {
         let st = self.model.state();
         let mut out = std::collections::BTreeSet::new();
-        let names = solidcraft_doc::WorldNames::new(&self.doc, &st);
+        let mut by_component: std::collections::HashMap<u64, Vec<&str>> = std::collections::HashMap::new();
+        for (b, component) in st.bodies.iter().zip(self.doc.model_body_components(&st)) {
+            by_component.entry(component).or_default().push(&b.name);
+        }
+        let mut names = None;
         for (component, path, _) in self.doc.placements() {
+            let Some(bodies) = by_component.get(&component) else { continue };
+            #[cfg(test)]
+            HIDDEN_BY_PARENTS_CHECKS.with(|n| n.set(n.get() + bodies.len()));
             let placement_hidden = !path.is_empty() && !self.occurrence_visible(&path);
             let scope = Self::folder_scope(&path);
-            for b in st.bodies.iter().filter(|b| self.doc.model_body_component(b) == component) {
-                if placement_hidden || self.item_folder_hidden(&scope, component, "bodies", &b.name) {
-                    out.insert(names.name(&b.name, component, &path));
+            for &body in bodies {
+                if placement_hidden || self.item_folder_hidden(&scope, component, "bodies", body) {
+                    let names = names.get_or_insert_with(|| solidcraft_doc::WorldNames::new(&self.doc, &st));
+                    out.insert(names.name(body, component, &path));
                 }
             }
         }
