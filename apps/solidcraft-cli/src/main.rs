@@ -750,6 +750,12 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         &["--no-grid", "--no-axes"],
         true,
     )?;
+    // A snapshot writes one picture. Only the body and tool options take several values.
+    for option in ["--in", "--out", "--width", "--height", "--view", "--camera", "--section", "--quality"] {
+        if args.iter().filter(|a| a.as_str() == option).count() > 1 {
+            return Err(format!("snapshot: {option} may be given only once; use a separate call for each picture"));
+        }
+    }
     if positional(args).is_none() && flag(args, "--in").is_none() {
         return Err(usage());
     }
