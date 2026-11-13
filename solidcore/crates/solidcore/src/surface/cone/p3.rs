@@ -1528,6 +1528,47 @@ mod tests {
             .is_empty());
     }
 
+    /// WR-510 (#1525): a face swept over 0.04°..0.06° only, cut by the plane `x = 3 - 1e-6`.
+    /// The plane is within the zone tolerance (1e-5) of the wall, but the tangent line at 0°
+    /// is outside the face; the crossing at +0.0468° is inside it and stays.
+    #[test]
+    fn issue1525_tangent_line_outside_sweep_keeps_crossing() {
+        let k = Kernel::default();
+        let mut c = Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            3.0,
+            0.04,
+            0.06,
+            12.0,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(&k).unwrap();
+        let d = 3.0 - 1e-6;
+        let zone = Some(1e-5);
+        for (owner, zone_tols) in [
+            (PlaneOwner::NoFace, [None, None]),
+            (PlaneOwner::Face(zone), [None, zone]),
+            (PlaneOwner::NoFace, [zone, None]),
+        ] {
+            let out = wall_section(&k, &c, d, owner, zone_tols);
+            assert_eq!(
+                out.curve_types,
+                vec![TsectCurveType::Crossing],
+                "{owner:?} {zone_tols:?}"
+            );
+            let CurveKind::Line(line) = out.curves_3d[0].kind() else {
+                panic!("expected an analytic line");
+            };
+            let p = line.evaluate_point(line.natural_interval().min());
+            let y = (3.0 * 3.0 - d * d).sqrt();
+            assert!((p.x - d).abs() < 1e-9 && (p.y - y).abs() < 1e-9, "{p:?}");
+        }
+    }
+
     #[test]
     fn general_dispatch_preserves_cone_and_all_parameters() {
         let k = Kernel::default();
