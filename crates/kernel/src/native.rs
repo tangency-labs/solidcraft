@@ -102,6 +102,23 @@ pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep,
     Ok((brep.try_clone().map_err(|e| KernelError::smlib("SMLib", e))?, numbering(body.record(), &brep)))
 }
 
+/// `body` in SMLib as a boolean's operand, with its numbering as [`smlib_body_ordered`] gives it.
+/// Solids touching each other along an edge or at a vertex are kept apart in the record, each
+/// with its own copy of what they share; SMLib gets them sharing it, as its own boolean made them
+/// (`solidcraft_smlib::Brep::from_record_touching`). As copies, a third body's one edge or vertex
+/// there could not be related to both, and the boolean failed (#14419). A body with no such
+/// copies is its own SMLib form ([`Body::smlib`]).
+pub(crate) fn smlib_operand_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
+    body.require_brep("a boolean")?;
+    match solidcraft_smlib::Brep::from_record_touching(body.record(), true).map_err(|e| KernelError::smlib("SMLib", e))? {
+        Some(brep) => {
+            let order = numbering(body.record(), &brep);
+            Ok((brep, order))
+        }
+        None => smlib_body_ordered(body),
+    }
+}
+
 /// `record` in SMLib, imported as given (SMLib's own form; a record it refuses is an error that
 /// names why), with where each of SMLib's faces and edges is in the record's order.
 pub(crate) fn smlib_record_ordered(

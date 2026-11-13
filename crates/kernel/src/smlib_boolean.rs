@@ -2,7 +2,9 @@
 //! or 1, `SmBrep` boolean, the result exported to schema 4 and decoded as a kernel body. The result's history is SMLib's own (its tags carried through the
 //! operation), renumbered from SMLib's face and edge order into the operands' and the result's
 //! ([`crate::history::History`]'s contract). A result SMLib's own check or the record's geometry
-//! check refuses is an error, never a body.
+//! check refuses is an error, never a body. Solids an operand's record keeps apart where they
+//! touch each other go into SMLib sharing what they touch along, as SMLib made them
+//! (`crate::native::smlib_operand_ordered`).
 
 pub(crate) use smlib::{boolean as smlib_boolean, union_all as smlib_union_all};
 
@@ -11,7 +13,7 @@ mod smlib {
 
     use crate::body::Body;
     use crate::history::History;
-    use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
+    use crate::native::{body_from_smlib_ordered, smlib_operand_ordered};
     use crate::ops::BoolOp;
     use crate::validation::{Checked, Step};
     use crate::{KernelError, Result, record};
@@ -25,8 +27,8 @@ mod smlib {
     pub(crate) fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         a.require_brep("a boolean")?;
         b.require_brep("a boolean")?;
-        let (sa, oa) = smlib_body_ordered(a)?;
-        let (sb, ob) = smlib_body_ordered(b)?;
+        let (sa, oa) = smlib_operand_ordered(a)?;
+        let (sb, ob) = smlib_operand_ordered(b)?;
         let ta = sa.tagged(0).map_err(|e| failed("tag", e))?;
         let tb = sb.tagged(1).map_err(|e| failed("tag", e))?;
         let kind = match op {
@@ -58,7 +60,7 @@ mod smlib {
         let mut orders = Some(Vec::with_capacity(bodies.len()));
         for (i, body) in bodies.iter().enumerate() {
             body.require_brep("a union")?;
-            let (s, order) = smlib_body_ordered(body)?;
+            let (s, order) = smlib_operand_ordered(body)?;
             tagged.push(s.tagged(i).map_err(|e| failed("tag", e))?);
             operands.push(s);
             orders = orders.zip(order).map(|(mut v, o)| {

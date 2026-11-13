@@ -1,0 +1,10 @@
+{
+  "description": "Issue #14419: two cylinders r1 h2 at x = 0 and x = 2 touch along the line x = 1, y = 0 and are joined as one body (touching: one_body); the record keeps a copy of that line and its end points per cylinder. Intersecting the body with a third cylinder exactly on the first one failed in SMLib's topology intersector ('relate: another entity is already related to the other one'). Result: the third cylinder, pi * 1^2 * 2 mm3, 3 faces, 3 edges, 2 vertices.",
+  "commands": [
+    {"command": "solid.cylinder", "params": {"radius": 1, "height": 2, "base": [0, 0, 0], "axis": "Z", "body_name": "A"}},
+    {"command": "solid.cylinder", "params": {"radius": 1, "height": 2, "base": [2, 0, 0], "axis": "Z", "body_name": "A2"}},
+    {"command": "solid.combine", "params": {"target": "A", "tools": ["A2"], "operation": "join", "touching": "one_body"}},
+    {"command": "solid.cylinder", "params": {"radius": 1, "height": 2, "base": [0, 0, 0], "axis": "Z", "body_name": "T"}},
+    {"command": "solid.combine", "params": {"target": "A", "tools": ["T"], "operation": "intersect"}}
+  ]
+}
