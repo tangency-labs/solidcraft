@@ -4,15 +4,17 @@
 //! picked in another sketch. Anchor, angle and mirror place the section on each member.
 
 use serde_json::{Map, Value, json};
-use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::frame::{self, MemberProfile};
 use solidcraft_engine::doc::{FeatureKind, ProfileSel};
+use solidcraft_engine::sketch::CurveKind;
+use solidcraft_engine::{Sel, Session};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, check, curves_sketch, form_row, profile_indices, put, shown_expr};
 use crate::selection::{CONSTRUCTION_POINTS, ORIGIN, POINTS, PROFILES, SKETCH_LINES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, is_point};
 use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
+use crate::viewport::Hit;
 
 /// The anchors as `frame.member` names them, and their labels.
 const ANCHORS: &[(&str, &str)] = &[
@@ -57,6 +59,10 @@ pub struct Member {
     /// For each path item, the id of the pair an edit loaded it in: a pair whose two points are
     /// still those two keeps its id.
     pub pair_ids: Vec<Option<String>>,
+    /// Ghost Frame Members: every frame member and End Cap body is drawn see-through while the
+    /// dialog is open, its faces and edges left out of picks, so the points behind and its own
+    /// vertices and centreline ends can be picked. Ticked whenever the dialog opens.
+    pub ghost: bool,
 }
 
 impl Member {
@@ -83,6 +89,7 @@ impl Member {
             path: Vec::new(),
             refs: Vec::new(),
             pair_ids: Vec::new(),
+            ghost: true,
         }
     }
 
@@ -150,9 +157,14 @@ fn pair_indices(items: &[Sel]) -> Result<(Vec<usize>, Vec<(usize, usize)>, Optio
     Ok((lines, pairs, waiting))
 }
 
-/// A pick for the dialog's active input. A pick into Frame Member's path is tried as the live
-/// preview builds it: one that would make the feature fail is taken back, and the dialog says why.
+/// A pick of `sel` as [`pick_hit`] takes it, from no particular hit.
+#[cfg(test)]
 pub(crate) fn pick(app: &SolveApp, d: &mut Dialog, sel: Sel) {
+    pick_as(app, d, sel, None);
+}
+
+/// [`pick_hit`], a new point taking `given` as its lasting reference when there is one.
+fn pick_as(app: &SolveApp, d: &mut Dialog, sel: Sel, mut given: Option<Value>) {
     let before = (matches!(d.kind, Kind::Frame(_)) && d.active == 0).then(|| crate::selection::items(&d.inputs, 0).to_vec());
     d.pick(&app.session, sel);
     let Some(before) = before else { return };
@@ -170,10 +182,63 @@ pub(crate) fn pick(app: &SolveApp, d: &mut Dialog, sel: Sel) {
     if let Kind::Frame(m) = &mut d.kind {
         for (i, item) in items.iter().enumerate().skip(before.len()).filter(|(_, item)| is_point(item)) {
             if let Some(r) = m.refs.get_mut(i).filter(|r| r.is_none()) {
-                *r = point_ref(app, item).ok();
+                *r = given.take().or_else(|| point_ref(app, item).ok());
             }
         }
     }
+}
+
+/// A pick of `sel`, clicked on `hit`, for the dialog's active input. A pick into Frame Member's
+/// path is tried as the live preview builds it: one that would make the feature fail is taken
+/// back, and the dialog says why. A ghosted member's centreline end goes in as the point that end
+/// is built on ([`end_pick`]), its reference copied rather than found again.
+pub(crate) fn pick_hit(app: &SolveApp, d: &mut Dialog, hit: &Hit, sel: Sel) {
+    pick_as(app, d, sel, end_pick(&app.session, hit).map(|(_, r)| r));
+}
+
+/// The centreline ends of the members Ghost Frame Members draws see-through, as picks offer them:
+/// both ends of each member of every evaluated Frame Member but the one being edited (whose
+/// members are the preview). None while the dialog isn't open with the box ticked.
+pub(crate) fn member_ends(app: &SolveApp) -> Vec<Hit> {
+    let Some(d) = app.dialog.as_ref().filter(|d| matches!(&d.kind, Kind::Frame(m) if m.ghost)) else { return Vec::new() };
+    let s = &app.session;
+    let editing = d.editing.map(|(id, _)| id);
+    let mut out = Vec::new();
+    // ponytail: worked out again each call (each pick and frame while the dialog is open); cache
+    // by document and state if a large frame makes that show.
+    for f in s.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::FrameMember { .. }) && Some(f.id) != editing) {
+        if !s.model.result(f.id).is_some_and(|r| !r.skipped && r.error.is_none()) {
+            continue;
+        }
+        let Ok(segments) = frame::member_segments(&s.doc, &s.model.state_before(f.id), f) else { continue };
+        for (line, a, b) in segments {
+            out.push(Hit::MemberEnd { feature: f.id, line: line.clone(), end: 0, point: a });
+            out.push(Hit::MemberEnd { feature: f.id, line, end: 1, point: b });
+        }
+    }
+    out
+}
+
+/// What a centreline end is built on, as the path picks it and the reference it keeps: for a
+/// sketch line's member, the line's end point (a 3D line's end node); for a pair's, a copy of
+/// that pair's first or second point.
+pub(crate) fn end_pick(s: &Session, hit: &Hit) -> Option<(Sel, Value)> {
+    let Hit::MemberEnd { feature, line, end, .. } = hit else { return None };
+    let FeatureKind::FrameMember { path_sketch, pairs, .. } = &s.doc.feature(*feature)?.kind else { return None };
+    if let Some(p) = pairs.iter().find(|p| p.id == *line) {
+        let g = if *end == 0 { &p.a } else { &p.b };
+        return Some((crate::dialogs::point_pick(s, g), serde_json::to_value(g).ok()?));
+    }
+    let sketch = path_sketch.as_ref()?.0;
+    let sk = s.doc.sketch(sketch).ok()?;
+    let point = match sk.wire_index(line).and_then(|i| sk.wires.get(i)) {
+        Some(w) => format!("{}:{}", w.id, if *end == 0 { 0 } else { w.fit.len().checked_sub(1)? }),
+        None => {
+            let CurveKind::Line { a, b } = sk.curves.get(sk.curve_index(line)?)?.kind else { return None };
+            sk.points.get(if *end == 0 { a } else { b })?.id.clone()
+        }
+    };
+    Some((Sel::SketchPoint { id: format!("{sketch}:{point}") }, json!({"sketch": sketch, "point": point})))
 }
 
 /// Ctrl+click on a point of the path: its last occurrence goes. False when the click is not that.
@@ -271,6 +336,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &[SelInpu
     enter |= hint_row(ui, "Angle", &mut m.angle, "0 deg");
     form_row(ui, "Mirror", |ui| check(ui, &mut m.mirror));
     enter |= text_row(ui, "Name", &mut m.name, tr("from the profile")).0;
+    form_row(ui, "Ghost Frame Members", |ui| check(ui, &mut m.ghost));
     enter
 }
 
