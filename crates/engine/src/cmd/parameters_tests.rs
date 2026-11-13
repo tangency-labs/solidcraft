@@ -350,6 +350,17 @@ fn completion_matches_parameters_anywhere_in_their_name() {
     let c = run(&mut s, "parameters.complete", json!({"prefix": "THICK"}));
     assert_eq!(texts(&c), ["cab_side_thickness"], "any case: {c}");
     assert!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "xyz"}))).is_empty());
+    // #11978: the starts of the name's words, in order, find it; out of order they don't.
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "2 * cabthi"}));
+    assert_eq!(texts(&c), ["cab_side_thickness"], "{c}");
+    assert_eq!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "doowid"}))), ["door_width"]);
+    assert!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "thicab"}))).is_empty());
+    // A match by word starts alone comes after every name that contains the word, even a
+    // favourite: `inner_diameter` has no `id` in it.
+    run(&mut s, "parameters.add", json!({"name": "inner_diameter", "expression": "6 mm"}));
+    run(&mut s, "parameters.favorite", json!({"name": "inner_diameter", "favorite": true}));
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "id"}));
+    assert_eq!(texts(&c), ["cab_side_thickness", "side", "door_width", "inner_diameter"], "{c}");
     // Functions keep matching from the start: `in` is not `sin(`.
     let c = run(&mut s, "parameters.complete", json!({"prefix": "in"}));
     assert!(!c["suggestions"].as_array().unwrap().iter().any(|x| x["text"] == "sin("), "{c}");
@@ -387,6 +398,27 @@ fn csv_and_json_round_trip() {
     run(&mut v, "parameters.import", json!({"path": path.to_string_lossy()}));
     assert_eq!(v.doc.param("len").map(|p| p.expr.as_str()), Some("80 mm"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A value a spreadsheet would run as a formula is exported as text, with a `'` first, and
+/// imports back as it was (#12728). A plain number keeps its sign, and `;` makes a field quoted.
+#[test]
+fn csv_keeps_formulas_as_text_and_imports_them_back() {
+    let mut s = Session::default();
+    let rows = [("d3", "4", "plain"), ("a", "=d3", "+2 for the fit"), ("b", "=5", "'=kept"), ("c", "-5 mm", "@x"), ("e", "6", "one; two")];
+    for (name, expression, comment) in rows {
+        run(&mut s, "parameters.add", json!({"name": name, "expression": expression, "comment": comment}));
+    }
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    for written in [",'=d3,", ",'+2 for the fit,", ",'=5,", ",''=kept,", ",'-5 mm,-5,'@x,", ",\"one; two\","] {
+        assert!(csv.contains(written), "{written}: {csv}");
+    }
+    let mut t = Session::default();
+    run(&mut t, "parameters.import", json!({"text": csv}));
+    for (name, _, comment) in rows {
+        let (before, after) = (s.doc.param(name), t.doc.param(name));
+        assert_eq!(after.map(|p| (p.expr.as_str(), p.comment.as_str())), before.map(|p| (p.expr.as_str(), comment)), "{name}: {csv}");
+    }
 }
 
 #[test]
@@ -1197,6 +1229,42 @@ fn a_definition_of_the_parameter_a_value_names_changes_it() {
 /// The error of the feature named `name` in the last evaluation.
 fn feature_error(s: &Session, name: &str) -> Option<String> {
     s.model.results.iter().find(|r| r.name == name).and_then(|r| r.error.clone())
+}
+
+/// A horizontal distance from the origin to a point that is 0 (the point on the y axis) can be
+/// changed to a positive value through its parameter, and back: the point moves along x and the
+/// circle centred on it with it, instead of the sketch failing as a conflict.
+#[test]
+fn a_horizontal_distance_from_the_origin_changed_from_zero_moves_the_point() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Offset", "expression": "0 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 5], [30, 5]], "ids": ["floor"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "floor", "mode": "horizontal"}));
+    for (entities, kind, value) in [
+        (json!(["origin", "floor.start"]), "vertical", json!(5)),
+        (json!(["origin", "floor.start"]), "horizontal", json!(30)),
+        (json!(["floor.start", "floor.end"]), "horizontal", json!(60)),
+    ] {
+        run(&mut s, "sketch.dimension", json!({"entities": entities, "type": kind, "value": value}));
+    }
+    run(&mut s, "sketch.point", json!({"point": [3, 20], "id": "hole", "construction": true, "connect": false}));
+    run(&mut s, "sketch.circle.center", json!({"center": "hole", "diameter": 8}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["floor.start", "hole"], "type": "vertical", "value": 15}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "hole"], "type": "horizontal", "value": "Offset"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    let disc = std::f64::consts::PI * 16.0 * 5.0;
+    for (value, x) in [("0.5 mm", 0.5), ("0 mm", 0.0), ("0.5 mm", 0.5), ("-0 mm", 0.0)] {
+        let r = run(&mut s, "parameters.change", json!({"name": "Offset", "expression": value}));
+        assert_eq!(r["errors"], json!([]), "{value}: {r}");
+        assert!(rel(volume(&mut s), disc) < 1e-3, "{value}");
+        // The disc is centred on the point, so its box's middle in x is where the point went.
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let b = &m["bodies"][0]["bbox"];
+        let middle = (b["min"][0].as_f64().unwrap_or(f64::NAN) + b["max"][0].as_f64().unwrap_or(f64::NAN)) / 2.0;
+        assert!((middle - x).abs() < 1e-3, "{value}: the point is at x = {middle}, want {x}: {m}");
+    }
 }
 
 /// A sketch dimension set negative fails its sketch; the features built from it fail naming that

@@ -1,5 +1,5 @@
 use super::*;
-use solidcraft_geom::{Aabb3, Mesh};
+use solidcraft_geom::{Aabb3, Mesh, MeshGeom};
 
 fn fixed_request_metadata_bytes() -> u64 {
     request().retained_resource_metadata_bytes()
@@ -330,7 +330,7 @@ fn cooperative_raytrace_descriptor_matches_native_only_validation() {
 
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
 #[test]
-fn native_raytrace_refraction_capability_resolves_only_preview_images() {
+fn native_raytrace_refraction_capability_resolves_preview_and_final_images() {
     let host = CpuHost::for_platform().unwrap();
     let descriptor = host.descriptor_for(Integrator::Raytrace).unwrap();
     assert_eq!(descriptor.availability, Availability::Available);
@@ -350,7 +350,9 @@ fn native_raytrace_refraction_capability_resolves_only_preview_images() {
     let resolved = crate::resolve_request(std::slice::from_ref(&backend), &request).unwrap();
     assert_eq!(resolved.executor.as_str(), "cpu-raytrace");
     request.mode = RenderMode::Final;
-    assert!(crate::resolve_request(std::slice::from_ref(&backend), &request).is_err());
+    let final_image = crate::resolve_request(std::slice::from_ref(&backend), &request).unwrap();
+    assert_eq!(final_image.executor, resolved.executor);
+    assert_eq!(final_image.profile.mode, RenderMode::Final);
     request.mode = RenderMode::Preview;
     backend.executors = vec![host.descriptor_for(Integrator::Raster).unwrap()];
     assert!(crate::resolve_request(&[backend], &request).is_err(), "CPU raster must not advertise physical refraction");
@@ -665,21 +667,30 @@ fn a_cancel_after_the_last_digest_chunk_still_wins_the_publication_lock() {
 fn png_and_exr_reuse_one_sha_state_without_mixing_chunk_boundaries() {
     let png: Vec<u8> = (0..PNG_HASH_CHUNK_BYTES + 7).map(|i| (i % 251) as u8).collect();
     let exr: Vec<u8> = (0..PNG_HASH_CHUNK_BYTES * 2 + 19).map(|i| (i % 239) as u8).collect();
-    let mut pending = PendingPng::new(png.clone());
-    pending.exr = Some(exr.clone());
-    let cancel = CancelToken::default();
-    assert!(!pending.step(1, &cancel).unwrap());
-    assert!(pending.png_digest.is_none());
-    assert!(!pending.step(1, &cancel).unwrap());
-    assert_eq!(pending.png_digest.as_ref().unwrap(), &Sha256::digest(&png));
-    assert_eq!(pending.exr_hashed, 0);
-    while !pending.step(1, &cancel).unwrap() {}
-    assert_eq!(pending.digest.finalize(), Sha256::digest(&exr));
+    let mask: Vec<u8> = (0..PNG_HASH_CHUNK_BYTES * 3 + 31).map(|i| (i % 233) as u8).collect();
+    for mask in [None, Some(mask)] {
+        let mut pending = PendingPng::new(png.clone());
+        pending.exr = Some(exr.clone());
+        pending.denoise_mask = mask.clone();
+        let cancel = CancelToken::default();
+        assert!(!pending.step(1, &cancel).unwrap());
+        assert!(pending.png_digest.is_none());
+        assert!(!pending.step(1, &cancel).unwrap());
+        assert_eq!(pending.png_digest.as_ref().unwrap(), &Sha256::digest(&png));
+        assert_eq!(pending.exr_hashed, 0);
+        while !pending.step(1, &cancel).unwrap() {}
+        assert_eq!(pending.png_digest.as_ref().unwrap(), &Sha256::digest(&png));
+        assert_eq!(pending.exr_digest.as_ref().unwrap(), &Sha256::digest(&exr));
+        assert_eq!(pending.denoise_mask_digest, mask.as_ref().map(Sha256::digest));
+        assert_eq!(pending.hashed, png.len());
+        assert_eq!(pending.exr_hashed, exr.len());
+        assert_eq!(pending.denoise_mask_hashed, mask.as_ref().map_or(0, Vec::len));
+    }
     let metadata = std::mem::size_of::<Running>()
         + std::mem::size_of::<RenderFrame>()
         + std::mem::size_of::<RenderPreview>()
         + PREPARED_PROOF_HEADER_BYTES
-        + 64
+        + 3 * 64
         + 2 * crate::MAX_RENDER_ID_BYTES
         + 32;
     assert!(metadata <= FRAME_METADATA_BYTES as usize);
@@ -695,7 +706,7 @@ fn png_and_exr_reuse_one_sha_state_without_mixing_chunk_boundaries() {
 #[test]
 fn png_digest_metadata_fits_the_existing_allowance_without_changing_admission() {
     // Fixed digest/offset state and the completed frame (including its bounded
-    // hex string and backend/executor IDs) fit the existing 1024-byte allowance.
+    // hex string and backend/executor IDs) fit the shared metadata allowance.
     assert!(std::mem::size_of::<PendingPng>() <= 512);
     for linear_master in [false, true] {
         let metadata = std::mem::size_of::<Running>()
@@ -761,6 +772,9 @@ impl ImageExecutor for DropProbe {
             triangles: 0,
             face_appearances: 0,
             projected_pixel_tests: None,
+            caustic_work: None,
+            cpu_workers: None,
+            host_memory: None,
             geometry_bytes: 0,
             pixel_scratch_bytes: self.estimated,
             preparation_bytes: 0,
@@ -1034,6 +1048,9 @@ fn registered_large_pool_is_explicit_finite_and_accounted() {
                 triangles: 0,
                 face_appearances: 0,
                 projected_pixel_tests: None,
+                caustic_work: None,
+                cpu_workers: None,
+                host_memory: None,
                 geometry_bytes: 0,
                 pixel_scratch_bytes: 0,
                 preparation_bytes: 0,
@@ -1048,8 +1065,16 @@ fn registered_large_pool_is_explicit_finite_and_accounted() {
     for limit in [0, super::super::NATIVE_CPU_POOL_BYTES + 1] {
         assert!(ImageHost::with_executor(Arc::new(Envelope(limit))).is_err());
     }
-    let host = ImageHost::with_executor(Arc::new(Envelope(1024 * 1024 * 1024))).unwrap();
-    assert_eq!(host.pool_limit_bytes(), 1024 * 1024 * 1024);
+    let limit = 1024 * 1024 * 1024;
+    let memory = super::super::host_memory::NativeMemoryPool::testing(limit);
+    let host = ImageHost(Arc::new(Owner {
+        executor: Some(Arc::new(Envelope(limit))),
+        shared: ImageHost::shared_with_memory(limit, Some(memory)),
+        kind: HostKind::NativeWorker,
+        running: Mutex::new(None),
+        _worker: None,
+    }));
+    assert_eq!(host.pool_limit_bytes(), limit);
     assert!(host.admit(&empty(), &request(), JobOptions::default()).is_ok());
     assert_eq!(host.admitted_bytes(), 0, "preflight does not allocate or reserve");
     let lease = host.0.shared.budget.reserve(600 * 1024 * 1024).unwrap();
@@ -1789,7 +1814,7 @@ mod prepared_optical_submission {
             }],
         };
         let mut request = ImageRequest { integrator: Integrator::Raytrace, width: 1, height: 1, ..request() };
-        request.camera.set_view(crate::StandardView::Top);
+        request.camera.set_view(solidcraft_viewport::StandardView::Top);
         request.raytrace = Some(RaytraceOptions {
             lights: Some(Vec::new()),
             environment: Some(crate::job::RaytraceEnvironmentOptions { color: [1.0; 3], intensity: 1.0 }),
@@ -2137,6 +2162,9 @@ mod capture_credit {
             // The full raw descriptor still must remain exactly pinned.
             descriptor.profiles[0].features.push(crate::RenderFeature::Hdri);
             descriptor.profiles[0].formats.insert(0, RenderFormat::Exr);
+            let mut final_image = descriptor.profiles[0].clone();
+            final_image.mode = RenderMode::Final;
+            descriptor.profiles.push(final_image);
             let state = self.0.load(Ordering::Acquire);
             descriptor.id = ExecutorId::new(if state == 1 { "changed-capture-map" } else { "capture-map" }).unwrap();
             if state == 3 {
@@ -2219,16 +2247,17 @@ mod capture_credit {
             _worker: None,
         }))
     }
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
     fn mapped() -> (ProductScene, ImageRequest, Weak<Vec<u8>>) {
         use crate::{
             job::{
                 CpuProgressiveOptions, DirectionalLightOptions, OutputOptions, RaytraceOptions,
                 textures::{BaseColorMode, PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},
             },
-            surface::OpaqueSurface,
             texture_input::MapRole,
         };
         use image::ImageEncoder;
+        use solidcraft_viewport::surface::OpaqueSurface;
         let mut bytes = Vec::new();
         image::codecs::png::PngEncoder::new(&mut bytes).write_image(&[128, 64, 32, 255], 1, 1, image::ExtendedColorType::Rgba8).unwrap();
         let map = TextureMap::new(bytes, MapRole::BaseColor).unwrap();
@@ -2274,7 +2303,7 @@ mod capture_credit {
         image.width = 2;
         image.height = 2;
         image.camera.distance = 4.;
-        image.camera.set_view(crate::StandardView::Top);
+        image.camera.set_view(solidcraft_viewport::StandardView::Top);
         image.integrator = Integrator::Raytrace;
         image.textures = Some(maps);
         image.raytrace = Some(RaytraceOptions {
@@ -2467,6 +2496,7 @@ mod capture_credit {
         assert!(weak.upgrade().is_none());
         assert_eq!(host.admitted_bytes(), 0);
     }
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
     #[test]
     fn capture_rechecks_actual_registered_layout_after_admission_before_merging_credit() {
         let (scene, mut image, weak) = mapped();
@@ -2485,6 +2515,7 @@ mod capture_credit {
         assert_eq!(host.admitted_bytes(), 0);
         assert!(host.0.shared.queue.lock().unwrap().is_empty());
     }
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
     #[test]
     fn capture_registered_factory_failure_releases_source_credit_and_preserves_only_record_summary() {
         let (scene, mut image, weak) = mapped();
@@ -2593,5 +2624,619 @@ fn actual_cpu_texture_worker_releases_sources_after_completion_or_cancel_while_s
         drop(status);
         drop(job);
         assert_eq!(host.admitted_bytes(), 0);
+    }
+}
+
+// The native worker checks `stop` and starts waiting while it holds the queue lock. A stop sent
+// in between must still wake it, else joining the worker waits for good (#14500).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_stop_sent_while_the_worker_is_about_to_wait_still_wakes_it() {
+    use std::sync::mpsc::sync_channel;
+    use std::time::Duration;
+    let shared = ImageHost::shared(MEMORY_LIMIT);
+    let (checked, on_checked) = sync_channel(1);
+    let (stopped, on_stopped) = sync_channel(1);
+    let worker = {
+        let shared = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            // Hold the lock between the check and the wait, as native_worker does.
+            let queue = shared.queue.lock().unwrap();
+            assert!(!shared.stop.load(Ordering::Acquire));
+            checked.send(()).unwrap();
+            // A stop that takes the lock cannot finish here; one that doesn't finishes now.
+            let _ = on_stopped.recv_timeout(Duration::from_millis(500));
+            // One wait, without checking `stop` again, as native_worker's wait.
+            let (_queue, waited) = shared.wake.wait_timeout(queue, Duration::from_secs(10)).unwrap();
+            !waited.timed_out()
+        })
+    };
+    on_checked.recv().unwrap();
+    let stopper = {
+        let shared = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            shared.stop_worker();
+            let _ = stopped.send(());
+        })
+    };
+    assert!(worker.join().unwrap(), "the worker missed the stop and waited until its timeout");
+    stopper.join().unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn registered_preview_and_final_profiles_keep_capture_identity_and_completed_mode() {
+    struct TwoModes;
+    impl ImageExecutor for TwoModes {
+        fn descriptor(&self) -> Result<ExecutorDescriptor> {
+            let mut descriptor = CpuExecutor.descriptor()?;
+            let mut final_image = descriptor.profiles[0].clone();
+            final_image.mode = RenderMode::Final;
+            descriptor.profiles.push(final_image);
+            Ok(descriptor)
+        }
+        fn admit(&self, scene: &ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission> {
+            CpuExecutor.admit(scene, request, options)
+        }
+        fn begin(&self, scene: ProductScene, request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Box<dyn ImageWork>> {
+            CpuExecutor.begin(scene, request, options, cancel)
+        }
+    }
+    let host = ImageHost::with_executor(Arc::new(TwoModes)).unwrap();
+    let cancel = CancelToken::default();
+    let credit = host.reserve_capture(0, CaptureProfile::Registered, &cancel, None).unwrap();
+    assert_eq!(host.descriptor().unwrap().profiles.len(), 2);
+    let mut unsupported = CpuExecutor.descriptor().unwrap();
+    unsupported.profiles[0].mode = RenderMode::Quick;
+    assert!(validate_image_profiles(&unsupported).is_err());
+    drop(credit);
+    let mut submission = host.prepare_submission_with_metadata(empty(), request(), JobOptions::default(), None, cancel, None).unwrap();
+    assert!(submission.select_image_mode(RenderMode::Quick).is_err());
+    assert_eq!(submission.resolved.profile.mode, RenderMode::Preview);
+    submission.select_image_mode(RenderMode::Final).unwrap();
+    let job = host.submit_prepared(JobId { session: 981, serial: 1, generation: 1 }, 1, submission).unwrap();
+    let status = job.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    assert_eq!(status.progress.phase, Phase::Completed);
+    assert_eq!(status.resolved.profile.mode, RenderMode::Final);
+    assert_eq!(status.resolved.executor.as_str(), "cpu-product");
+    assert!(job.frame().unwrap().is_some());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn prepared_image_mode_pins_the_final_profile_limits_and_scratch_before_job_creation() {
+    struct ChangingDescriptor(Arc<AtomicU64>);
+    impl ImageExecutor for ChangingDescriptor {
+        fn descriptor(&self) -> Result<ExecutorDescriptor> {
+            let mut descriptor = CpuExecutor.descriptor()?;
+            let mut final_image = descriptor.profiles[0].clone();
+            final_image.mode = RenderMode::Final;
+            match self.0.load(Ordering::Acquire) {
+                1 => final_image.features.push(crate::RenderFeature::Hdri),
+                2 => descriptor.limits.max_dimension -= 1,
+                3 => descriptor.scratch.sample_bytes_per_pixel += 1,
+                _ => {}
+            }
+            descriptor.profiles.push(final_image);
+            Ok(descriptor)
+        }
+        fn admit(&self, scene: &ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission> {
+            CpuExecutor.admit(scene, request, options)
+        }
+        fn begin(&self, scene: ProductScene, request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Box<dyn ImageWork>> {
+            CpuExecutor.begin(scene, request, options, cancel)
+        }
+    }
+    let changed = Arc::new(AtomicU64::new(0));
+    let host = ImageHost::with_executor(Arc::new(ChangingDescriptor(changed.clone()))).unwrap();
+    for mutation in 1..=3 {
+        changed.store(0, Ordering::Release);
+        let mut prepared = host.prepare_submission(empty(), request(), JobOptions::default(), None, CancelToken::default()).unwrap();
+        let held = host.admitted_bytes();
+        changed.store(mutation, Ordering::Release);
+        let error = prepared.select_image_mode(RenderMode::Final).unwrap_err();
+        assert_eq!(error.code, ErrorCode::HostUnavailable);
+        assert!(error.message.contains("descriptor changed"));
+        assert_eq!(prepared.resolved.profile.mode, RenderMode::Preview);
+        assert!(host.0.shared.queue.lock().unwrap().is_empty());
+        assert_eq!(host.admitted_bytes(), held);
+        drop(prepared);
+        assert_eq!(host.admitted_bytes(), 0);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native_memory_admission {
+    use super::*;
+    use crate::job::NativeMemoryPolicy;
+    use crate::job::host_memory::{MemorySnapshot, NativeMemoryPool};
+    use crate::job::{HostMemorySource, NATIVE_CPU_POOL_BYTES};
+
+    fn host(memory: &Arc<NativeMemoryPool>, limit: u64, registered: bool) -> ImageHost {
+        ImageHost(Arc::new(Owner {
+            executor: registered.then(|| Arc::new(CpuExecutor) as Arc<dyn ImageExecutor>),
+            shared: ImageHost::shared_with_memory(limit, Some(memory.clone())),
+            kind: HostKind::NativeWorker,
+            running: Mutex::new(None),
+            _worker: None,
+        }))
+    }
+
+    #[test]
+    fn platform_cpu_and_registered_constructors_use_the_same_native_memory_pool() {
+        let cpu = ImageHost::for_platform().unwrap();
+        let registered = ImageHost::with_executor(Arc::new(CpuExecutor)).unwrap();
+        assert!(Arc::ptr_eq(cpu.0.shared.budget.memory.as_ref().unwrap(), registered.0.shared.budget.memory.as_ref().unwrap()));
+        assert!(cpu.0.shared.budget.memory_admission(0, 0).unwrap().is_some());
+        assert_eq!(cpu.admitted_bytes(), 0);
+        assert_eq!(registered.admitted_bytes(), 0);
+    }
+
+    #[test]
+    fn cpu_and_registered_hosts_share_capacity_and_all_lease_transfers() {
+        let memory = NativeMemoryPool::testing(100);
+        let cpu = host(&memory, 80, false);
+        let registered = host(&memory, 80, true);
+        let mut cpu_lease = cpu.0.shared.budget.reserve(60).unwrap();
+        let error = registered.0.shared.budget.reserve(41).err().unwrap();
+        assert_eq!(error.code, ErrorCode::LimitExceeded);
+        assert!(error.message.contains("41 additional bytes"), "{}", error.message);
+        assert!(error.message.contains("60 bytes already admitted"), "{}", error.message);
+        assert!(error.message.contains("40 bytes available"), "{}", error.message);
+        assert_eq!(registered.admitted_bytes(), 0);
+
+        // The process ledger can accommodate 30, but this host cannot. Its
+        // temporary physical lease must roll back on the software-pool refusal.
+        assert!(cpu.0.shared.budget.reserve(30).is_err());
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 60);
+        let mut gpu_lease = registered.0.shared.budget.reserve(40).unwrap();
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().available_bytes, 0);
+        assert!(cpu_lease.merge_from(&mut gpu_lease).is_err());
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 100);
+
+        let mut checkpoint = cpu_lease.split(20).unwrap();
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 100);
+        cpu_lease.shrink(30).unwrap();
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 90);
+        cpu_lease.merge_from(&mut checkpoint).unwrap();
+        drop(checkpoint);
+        assert_eq!(cpu_lease.bytes, 50);
+        assert!(cpu_lease.shrink(51).is_err());
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 90);
+        drop(gpu_lease);
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 50);
+        drop(cpu_lease);
+        assert_eq!(cpu.admitted_bytes(), 0);
+        assert_eq!(registered.admitted_bytes(), 0);
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 0);
+    }
+
+    #[test]
+    fn legacy_memory_policy_admits_low_or_zero_ram_without_bypassing_software_limits() {
+        for capacity in [0, 32] {
+            for registered in [false, true] {
+                let memory = NativeMemoryPool::testing(capacity);
+                let host = host(&memory, 64, registered);
+                assert_eq!(host.native_memory_policy(), NativeMemoryPolicy::AvailableRam);
+                assert_eq!(host.0.shared.budget.reserve(48).err().unwrap().code, ErrorCode::LimitExceeded);
+                assert_eq!(host.admitted_bytes(), 0);
+
+                host.set_native_memory_policy(NativeMemoryPolicy::SoftwarePoolOnly);
+                assert_eq!(host.clone().native_memory_policy(), NativeMemoryPolicy::SoftwarePoolOnly);
+                let receipt = host.0.shared.budget.memory_admission(48, 0).unwrap().unwrap();
+                assert_eq!(receipt.policy, NativeMemoryPolicy::SoftwarePoolOnly);
+                assert_eq!((receipt.required_bytes, receipt.available_bytes), (48, capacity));
+                assert_eq!(receipt.software_limit_bytes, NATIVE_CPU_POOL_BYTES);
+                assert_eq!(serde_json::to_value(receipt).unwrap()["policy"], "software_pool_only");
+                let held = host.0.shared.budget.reserve(48).unwrap();
+                assert_eq!(host.admitted_bytes(), 48);
+                assert!(host.0.shared.budget.reserve(17).is_err(), "the finite host pool still refuses 65 bytes");
+                let snapshot = memory.check(0, 0, NativeMemoryPolicy::SoftwarePoolOnly).unwrap();
+                assert_eq!((snapshot.admitted_bytes, snapshot.available_bytes), (48, 0), "legacy allocations stay in the shared ledger");
+                drop(held);
+                assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_memory_policies_keep_leases_and_only_change_future_admission() {
+        let memory = NativeMemoryPool::testing(100);
+        let cpu = host(&memory, 100, false);
+        let gpu = host(&memory, 100, true);
+        let cpu_lease = cpu.0.shared.budget.reserve(60).unwrap();
+        gpu.set_native_memory_policy(NativeMemoryPolicy::SoftwarePoolOnly);
+        let receipt = gpu.0.shared.budget.memory_admission(80, 0).unwrap().unwrap();
+        let gpu_lease = gpu.0.shared.budget.reserve(80).unwrap();
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::SoftwarePoolOnly).unwrap().admitted_bytes, 140);
+        assert!(cpu.0.shared.budget.reserve(1).is_err(), "default hosts account for legacy leases too");
+        assert!(gpu.0.shared.budget.reserve(21).is_err(), "legacy mode still rolls back a software-pool refusal");
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::SoftwarePoolOnly).unwrap().admitted_bytes, 140);
+
+        gpu.set_native_memory_policy(NativeMemoryPolicy::AvailableRam);
+        assert_eq!(gpu.admitted_bytes(), 80, "changing the policy does not revoke an existing lease");
+        assert_eq!(receipt.policy, NativeMemoryPolicy::SoftwarePoolOnly, "an earlier receipt keeps the policy actually used");
+        assert!(gpu.0.shared.budget.reserve(1).is_err(), "future reservations use the selected policy");
+        drop(cpu_lease);
+        let later = cpu.0.shared.budget.reserve(20).unwrap();
+        let current = gpu.0.shared.budget.memory_admission(80, 80).unwrap().unwrap();
+        assert_eq!(current.policy, NativeMemoryPolicy::AvailableRam);
+        assert_eq!((current.required_bytes, current.credited_bytes, current.additional_bytes), (80, 80, 0));
+        assert_eq!((current.admitted_bytes, current.physical_debit_bytes, current.available_bytes), (20, 100, 0));
+        drop(gpu_lease);
+        drop(later);
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 0);
+
+        // This checks only integer accounting, with no image or buffer allocation.
+        assert!(memory.reserve(u64::MAX, NativeMemoryPolicy::SoftwarePoolOnly).is_err());
+        let first = host(&memory, NATIVE_CPU_POOL_BYTES, false);
+        let second = host(&memory, NATIVE_CPU_POOL_BYTES, true);
+        first.set_native_memory_policy(NativeMemoryPolicy::SoftwarePoolOnly);
+        second.set_native_memory_policy(NativeMemoryPolicy::SoftwarePoolOnly);
+        let maximum = first.0.shared.budget.reserve(NATIVE_CPU_POOL_BYTES - 1).unwrap();
+        let last = second.0.shared.budget.reserve(1).unwrap();
+        let refused = second.0.shared.budget.reserve(1).err().unwrap();
+        assert_eq!(refused.code, ErrorCode::LimitExceeded);
+        assert!(refused.message.contains("shared software pool"));
+        assert_eq!(second.admitted_bytes(), 1, "the refusal must not debit either ledger");
+        drop(maximum);
+        drop(last);
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 0);
+    }
+
+    #[test]
+    fn native_snapshot_refreshes_for_settled_owners_but_not_funded_work() {
+        let memory = NativeMemoryPool::testing(100);
+        let mut old = memory.reserve(60, NativeMemoryPolicy::AvailableRam).unwrap();
+        memory.set_test_capacity(20);
+        let snapshot = memory.check(40, 0, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((snapshot.capacity_bytes, snapshot.physical_debit_bytes, snapshot.available_bytes), (100, 60, 40));
+        let own = memory.check(60, 60, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((own.required_bytes, own.credited_bytes, own.additional_bytes), (60, 60, 0));
+        assert_eq!((own.admitted_bytes, own.available_bytes), (0, 40));
+        assert!(memory.check(0, 1, NativeMemoryPolicy::AvailableRam).is_err(), "credit cannot exceed the request");
+        assert!(memory.check(61, 61, NativeMemoryPolicy::AvailableRam).is_err(), "credit cannot exceed all held leases");
+
+        let activity = memory.activity().unwrap();
+        old.settle().unwrap();
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().capacity_bytes, 100, "temporary task backing still pins the epoch");
+        drop(activity);
+        let smaller = memory.check(20, 0, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((smaller.capacity_bytes, smaller.admitted_bytes, smaller.physical_debit_bytes), (20, 60, 0));
+        assert!(memory.reserve(21, NativeMemoryPolicy::AvailableRam).is_err());
+        memory.set_test_capacity(200);
+        let current = memory.reserve(150, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert!(old.split(1).is_err(), "retained backing cannot fund another allocation");
+        drop(old);
+        let after = memory.check(50, 0, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((after.admitted_bytes, after.physical_debit_bytes, after.available_bytes), (150, 150, 50));
+        assert!(memory.reserve(51, NativeMemoryPolicy::AvailableRam).is_err(), "dropping old-epoch backing must not release current debit");
+        drop(current);
+    }
+
+    #[test]
+    fn native_epoch_credit_and_checkpoint_recycling_preserve_new_allocation_debits() {
+        let memory = NativeMemoryPool::testing(100);
+        let mut old = memory.reserve(10, NativeMemoryPolicy::AvailableRam).unwrap();
+        old.settle().unwrap();
+        memory.set_test_capacity(80);
+        let mut empty = memory.reserve(0, NativeMemoryPolicy::AvailableRam).unwrap();
+        let mut current = memory.reserve(40, NativeMemoryPolicy::AvailableRam).unwrap();
+        empty.merge_from(&mut current).unwrap();
+        drop(current);
+        assert!(empty.merge_from(&mut old).is_err(), "old settled credit needs new admission before reuse");
+        let mixed = memory.check(70, 50, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((mixed.required_bytes, mixed.credited_bytes, mixed.additional_bytes), (70, 50, 20));
+        assert_eq!((mixed.admitted_bytes, mixed.physical_debit_bytes, mixed.available_bytes), (0, 40, 40));
+        assert!(memory.check(91, 50, NativeMemoryPolicy::AvailableRam).is_err());
+        drop(old);
+
+        let mut free = empty.split(20).unwrap();
+        let mut checkpoint = free.split(10).unwrap();
+        checkpoint.settle().unwrap();
+        free.merge_from(&mut checkpoint).unwrap();
+        memory.set_test_capacity(1);
+        let pinned = memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((pinned.capacity_bytes, pinned.admitted_bytes, pinned.physical_debit_bytes), (80, 40, 40));
+        drop(checkpoint);
+        drop(free);
+        drop(empty);
+        assert_eq!(memory.check(1, 0, NativeMemoryPolicy::AvailableRam).unwrap().capacity_bytes, 1);
+    }
+
+    #[test]
+    fn native_fallback_keeps_all_epochs_charged_and_epoch_overflow_fails_closed() {
+        let memory = NativeMemoryPool::testing(100);
+        let mut old = memory.reserve(60, NativeMemoryPolicy::AvailableRam).unwrap();
+        old.settle().unwrap();
+        memory.set_test_snapshot(MemorySnapshot::from_probe(0, 0, Some(100)));
+        let fallback = memory.check(40, 0, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!(fallback.source, HostMemorySource::ConservativeFallback);
+        assert_eq!((fallback.admitted_bytes, fallback.physical_debit_bytes, fallback.available_bytes), (60, 60, 40));
+        assert!(memory.reserve(41, NativeMemoryPolicy::AvailableRam).is_err());
+        let mut legacy = memory.reserve(80, NativeMemoryPolicy::SoftwarePoolOnly).unwrap();
+        legacy.settle().unwrap();
+        let full = memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((full.admitted_bytes, full.physical_debit_bytes, full.available_bytes), (140, 140, 0));
+        assert!(memory.reserve(1, NativeMemoryPolicy::AvailableRam).is_err());
+        drop(old);
+        let freed = memory.check(20, 0, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((freed.admitted_bytes, freed.physical_debit_bytes, freed.available_bytes), (80, 80, 20));
+        drop(legacy);
+        assert_eq!(memory.check(100, 0, NativeMemoryPolicy::AvailableRam).unwrap().physical_debit_bytes, 0);
+
+        let exhausted = NativeMemoryPool::testing(100);
+        exhausted.set_test_epoch(u64::MAX);
+        assert_eq!(exhausted.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap_err().code, ErrorCode::Internal);
+        assert!(exhausted.reserve(1, NativeMemoryPolicy::SoftwarePoolOnly).is_err(), "invalid accounting cannot create new credit");
+    }
+
+    #[test]
+    fn completed_native_frame_and_request_metadata_allow_fresh_ram_after_work_release() {
+        let small = request();
+        let initial = admit(&empty(), &small).unwrap().estimated_total_bytes + small.retained_resource_metadata_bytes() + 4096;
+        let memory = NativeMemoryPool::testing(initial);
+        let host = host(&memory, MEMORY_LIMIT, false);
+        let job = host.submit(id(7912, 1), 1, empty(), small).unwrap();
+        let work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+        let mut running = Running::begin(work).unwrap();
+        let mut finished = false;
+        for _ in 0..10_000 {
+            if !running.advance(4096).unwrap() {
+                finished = true;
+                break;
+            }
+        }
+        assert!(finished);
+        let frame = job.frame().unwrap().unwrap();
+        assert!(host.admitted_bytes() > frame._reservation.bytes, "retained request metadata must also remain alive");
+        let larger = ImageRequest { width: 128, height: 128, ..request() };
+        memory.set_test_capacity(MEMORY_LIMIT);
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().capacity_bytes, initial);
+        assert!(host.admit(&empty(), &larger, JobOptions::default()).is_err(), "completed Running still owns its lifetime barrier");
+        drop(running);
+        assert!(job.work_released());
+        let admitted = host.admit(&empty(), &larger, JobOptions::default()).unwrap().host_memory.unwrap();
+        assert_eq!((admitted.capacity_bytes, admitted.physical_debit_bytes, admitted.available_bytes), (MEMORY_LIMIT, 0, MEMORY_LIMIT));
+        assert_eq!(admitted.admitted_bytes, host.admitted_bytes());
+        memory.set_test_capacity(admitted.additional_bytes - 1);
+        assert!(host.admit(&empty(), &larger, JobOptions::default()).is_err(), "a later downward observation also applies");
+        job.0.data.lock().unwrap().frame = None;
+        drop(frame);
+        assert_eq!(host.admitted_bytes(), fixed_request_metadata_bytes());
+        memory.set_test_capacity(2000);
+        let metadata_only = memory.check(1500, 0, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((metadata_only.capacity_bytes, metadata_only.physical_debit_bytes), (2000, 0));
+        drop(job);
+        assert_eq!(host.admitted_bytes(), 0);
+    }
+
+    #[cfg(feature = "raytrace-cpu")]
+    #[test]
+    fn externally_held_native_checkpoint_does_not_pin_the_finished_work_epoch() {
+        use crate::job::{CpuProgressiveOptions, RaytraceOptions};
+        let memory = NativeMemoryPool::testing(MEMORY_LIMIT);
+        let host = host(&memory, MEMORY_LIMIT, false);
+        let request = ImageRequest {
+            integrator: Integrator::Raytrace,
+            raytrace: Some(RaytraceOptions {
+                progressive: Some(CpuProgressiveOptions { samples_per_pixel: 3, seed: 7 }),
+                lights: Some(Vec::new()),
+                ..Default::default()
+            }),
+            width: 4,
+            height: 4,
+            ..request()
+        };
+        let job = host.submit(id(7913, 1), 1, empty(), request).unwrap();
+        let work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+        let mut running = Running::begin(work).unwrap();
+        let mut preview = None;
+        let mut finished = false;
+        for _ in 0..100_000 {
+            if !running.advance(1).unwrap() {
+                finished = true;
+                break;
+            }
+            if preview.is_none() {
+                preview = job.preview().unwrap();
+            }
+        }
+        assert!(finished);
+        let preview = preview.unwrap();
+        assert_eq!(preview.info.samples_per_pixel, 1);
+        memory.set_test_capacity(MEMORY_LIMIT * 2);
+        drop(running);
+        let renewed = memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((renewed.capacity_bytes, renewed.physical_debit_bytes), (MEMORY_LIMIT * 2, 0));
+        let current = memory.reserve(20, NativeMemoryPolicy::AvailableRam).unwrap();
+        drop(preview);
+        drop(job);
+        let remaining = memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap();
+        assert_eq!((remaining.admitted_bytes, remaining.physical_debit_bytes), (20, 20));
+        drop(current);
+    }
+
+    #[test]
+    fn native_probe_distinguishes_zero_capacity_cgroup_bounds_and_unavailable_ram() {
+        let fallback = MemorySnapshot::from_probe(0, 0, None);
+        assert_eq!(fallback.capacity_bytes, 512 * 1024 * 1024);
+        assert_eq!(fallback.source, HostMemorySource::ConservativeFallback);
+        assert_eq!(MemorySnapshot::from_probe(0, 0, Some(0)).capacity_bytes, 0);
+        let exhausted = MemorySnapshot::from_probe(100, 0, None);
+        assert_eq!(exhausted.capacity_bytes, 0);
+        assert_eq!(exhausted.source, HostMemorySource::SystemAvailable);
+        let cgroup = MemorySnapshot::from_probe(100, 80, Some(30));
+        assert_eq!(cgroup.capacity_bytes, 30);
+        assert_eq!(cgroup.source, HostMemorySource::SystemAndCgroup);
+        assert_eq!(MemorySnapshot::from_probe(100, 80, Some(0)).capacity_bytes, 0);
+        assert_eq!(MemorySnapshot::from_probe(100, u64::MAX, None).capacity_bytes, 100);
+        assert_eq!(
+            MemorySnapshot::from_probe(u64::MAX, u64::MAX, None).capacity_bytes,
+            u64::MAX,
+            "the RAM observation is separate from the software cap"
+        );
+    }
+
+    #[test]
+    fn native_preflight_reports_capacity_without_reserving_or_creating_an_image() {
+        let memory = NativeMemoryPool::testing(MEMORY_LIMIT);
+        for registered in [false, true] {
+            let host = host(&memory, MEMORY_LIMIT, registered);
+            let report = host.admit(&empty(), &request(), JobOptions::default()).unwrap();
+            let physical = report.host_memory.unwrap();
+            assert_eq!(physical.required_bytes, report.estimated_total_bytes + fixed_request_metadata_bytes());
+            assert_eq!(physical.capacity_bytes, MEMORY_LIMIT);
+            assert_eq!(physical.admitted_bytes, 0);
+            assert_eq!(host.admitted_bytes(), 0);
+            assert!(host.0.shared.queue.lock().unwrap().is_empty());
+            assert!(report.cpu_workers.is_none(), "raster/registered admission omits CPU worker execution");
+        }
+    }
+
+    #[cfg(all(feature = "raytrace-cpu", target_pointer_width = "64"))]
+    #[test]
+    fn maximum_cpu_preflight_uses_real_capacity_gate_without_allocating_film() {
+        use crate::job::{CpuBudget, CpuPathOptions, CpuProgressiveOptions, DenoiseSettings, OutputOptions, RaytraceOptions};
+        let request = ImageRequest {
+            integrator: Integrator::Raytrace,
+            raytrace: Some(RaytraceOptions {
+                threads: crate::job::MAX_CPU_THREADS,
+                budget: CpuBudget::Workstation,
+                progressive: Some(CpuProgressiveOptions { samples_per_pixel: crate::job::MAX_UI_SAMPLES, seed: 7 }),
+                path: Some(CpuPathOptions { max_depth: crate::job::MAX_PATH_DEPTH }),
+                texture_filtering: true,
+                metal_energy_compensation: true,
+                adaptive: Some(Box::new(crate::job::adaptive::AdaptiveSampling {
+                    pilot_samples: crate::job::adaptive::MAX_PILOT_SAMPLES,
+                    min_samples: crate::job::MAX_UI_SAMPLES,
+                    ..Default::default()
+                })),
+                caustics: Some(crate::job::CausticOptions {
+                    photons: crate::job::MAX_CAUSTIC_PHOTONS,
+                    max_depth: crate::job::MAX_PATH_DEPTH,
+                    refresh_per_pass: true,
+                    ..Default::default()
+                }),
+                supersampling: 2,
+                denoise: true,
+                denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+                denoise_diagnostics: true,
+                output: Some(Box::new(OutputOptions {
+                    linear_exr: true,
+                    finishing: crate::job::finishing::Finishing {
+                        bloom: Some(crate::job::bloom::Bloom { strength: 2.0, threshold: 1e6, radius: 64 }),
+                        photographic: crate::job::photographic::Photographic {
+                            flare: crate::job::photographic::Flare { strength: 2.0, threshold: 1e6, ghosts: 4, halo: 2.0, streak: 2.0 },
+                            chromatic_pixels: 12.0,
+                            radial_distortion: 0.3,
+                            soft_focus: 1.0,
+                            sharpening: 1.0,
+                            grain: 0.15,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }),
+            width: 7680,
+            height: 4320,
+            ..request()
+        };
+        let layout = crate::job::admit(&empty(), &request).unwrap();
+        let required = layout.estimated_total_bytes + retained_request_bytes(&request).unwrap() + request.retained_resource_metadata_bytes();
+        assert!(required < CpuBudget::Workstation.limits().max_job_bytes);
+        let memory = NativeMemoryPool::testing(required + 1024);
+        let cpu = host(&memory, NATIVE_CPU_POOL_BYTES, false);
+        let registered = host(&memory, NATIVE_CPU_POOL_BYTES, true);
+        let report = cpu.admit(&empty(), &request, JobOptions::default()).unwrap();
+        let physical = report.host_memory.unwrap();
+        assert_eq!((physical.required_bytes, physical.admitted_bytes, physical.available_bytes), (required, 0, required + 1024));
+        assert_eq!(report.cpu_workers, Some(64));
+        assert_eq!(report.caustic_work.unwrap().maps, crate::job::MAX_UI_SAMPLES + crate::job::adaptive::MAX_PILOT_SAMPLES);
+        assert_eq!(cpu.admitted_bytes(), 0);
+        assert!(cpu.0.shared.queue.lock().unwrap().is_empty());
+        println!("{}", serde_json::json!({ "maximum_cpu_preflight": report }));
+
+        let competing = registered.0.shared.budget.reserve(1025).unwrap();
+        let failure = cpu.admit(&empty(), &request, JobOptions::default()).unwrap_err();
+        assert_eq!(failure.code, ErrorCode::LimitExceeded);
+        assert!(failure.message.contains(&format!("{required} additional bytes")));
+        assert!(failure.message.contains("1025 bytes already admitted"));
+        assert!(failure.message.contains(&format!("{} bytes available", required - 1)));
+        assert_eq!(cpu.admitted_bytes(), 0);
+        drop(competing);
+        assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 0);
+    }
+
+    #[cfg(feature = "raytrace-cpu")]
+    #[test]
+    fn prepared_cpu_workers_and_memory_receipt_survive_queueing_and_cancellation() {
+        use crate::job::{CpuProgressiveOptions, RaytraceOptions};
+        let memory = NativeMemoryPool::testing(MEMORY_LIMIT);
+        let host = host(&memory, MEMORY_LIMIT, false);
+        for (serial, threads) in [(1, 0), (2, 1), (3, 2)] {
+            let request = ImageRequest {
+                integrator: Integrator::Raytrace,
+                raytrace: Some(RaytraceOptions {
+                    threads,
+                    progressive: Some(CpuProgressiveOptions { samples_per_pixel: 3, seed: 7 }),
+                    lights: Some(Vec::new()),
+                    ..Default::default()
+                }),
+                width: 4,
+                height: 4,
+                ..request()
+            };
+            let prepared = host.prepare_submission(empty(), request, JobOptions::default(), None, CancelToken::default()).unwrap();
+            let workers = prepared.admission.cpu_workers.unwrap();
+            assert!((1..=crate::job::MAX_CPU_THREADS).contains(&workers));
+            if threads != 0 {
+                assert_eq!(workers, threads);
+            }
+            assert_eq!(prepared.request().raytrace.as_ref().unwrap().threads, threads);
+            let physical = prepared.admission.host_memory.unwrap();
+            assert_eq!(physical.required_bytes, host.admitted_bytes());
+            assert_eq!(physical.admitted_bytes, 0, "the receipt credits its own already-held lease");
+            assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, host.admitted_bytes());
+            let handle = host.submit_prepared(id(7910, serial), 1, prepared).unwrap();
+            let work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+            assert_eq!(work.cpu_workers, Some(workers));
+            handle.cancel().unwrap();
+            assert!(Running::begin(work).is_none());
+            assert_eq!(handle.status().unwrap().progress.phase, Phase::Cancelled);
+            drop(handle);
+            assert_eq!(host.admitted_bytes(), 0);
+            assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 0);
+        }
+    }
+
+    #[cfg(feature = "raytrace-cpu")]
+    #[test]
+    fn queued_cpu_work_refuses_missing_or_reduced_custom_worker_admission() {
+        use crate::job::RaytraceOptions;
+        for cpu_workers in [None, Some(1), Some(0), Some(65)] {
+            let memory = NativeMemoryPool::testing(MEMORY_LIMIT);
+            let host = host(&memory, MEMORY_LIMIT, false);
+            let request = ImageRequest {
+                integrator: Integrator::Raytrace,
+                raytrace: Some(RaytraceOptions { threads: 2, ..Default::default() }),
+                width: 1,
+                height: 1,
+                ..request()
+            };
+            let handle = host.submit(id(7911, 1), 1, empty(), request).unwrap();
+            let mut work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+            assert_eq!(work.cpu_workers, Some(2));
+            work.cpu_workers = cpu_workers;
+            assert!(Running::begin(work).is_none());
+            let failure = handle.status().unwrap().error.unwrap();
+            assert_eq!(failure.code, if cpu_workers.is_none() { ErrorCode::Internal } else { ErrorCode::InvalidRequest });
+            drop(handle);
+            assert_eq!(host.admitted_bytes(), 0);
+            assert_eq!(memory.check(0, 0, NativeMemoryPolicy::AvailableRam).unwrap().admitted_bytes, 0);
+        }
     }
 }

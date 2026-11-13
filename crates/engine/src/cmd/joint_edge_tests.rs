@@ -122,7 +122,7 @@ fn an_edge_origin_on_a_body_placed_by_an_offset_lands_on_that_edge() {
     let up = solidcraft_doc::apply_vector(&offset, Vec3::Z);
     let st = s.model.state();
     let resolve = |snap: solidcraft_doc::joints::Snap| {
-        let o = solidcraft_doc::joints::JointOrigin { occurrence: 0, snap };
+        let o = solidcraft_doc::joints::JointOrigin::new(0, snap);
         let m = solidcraft_doc::joints::resolve_origin(&s.doc, &st, &o).unwrap_or_else(|e| panic!("{e}"));
         (Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2]))
     };
@@ -142,4 +142,34 @@ fn an_edge_origin_on_a_body_placed_by_an_offset_lands_on_that_edge() {
     .unwrap_or_else(|e| panic!("{e}"));
     let (o, z) = resolve(corner);
     assert!(near(o, at(Vec3::new(0.0, 0.0, 5.0))) && near(z, up), "{o:?} {z:?}");
+}
+
+/// A corner's other edge is found by its own name. Where no edge answers to that name any more,
+/// the corner is gone: the pick lies on the edge the corner was picked from, never on the other
+/// edge, so it cannot say which edge that name meant.
+#[test]
+fn a_corner_whose_other_edge_is_gone_asks_again() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 5, "corner": [0, 0, 0], "body_name": "Plate"}));
+    let boss =
+        run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 5, "base": [20, 20, 5], "operation": "join", "targets": ["Plate"]}))["feature"]
+            .as_u64()
+            .unwrap();
+    let st = s.model.state();
+    let snap = solidcraft_doc::joints::edge_snap(
+        &s.doc,
+        &st,
+        0,
+        Vec3::new(20.0, 0.0, 5.0),
+        Some(Vec3::new(20.0, 10.0, 5.0)),
+        Some(Vec3::new(1.0, 0.0, 5.0)),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let solidcraft_doc::joints::Snap::Edge { pick, edge, face: Some(face), corner: Some(_), axis } = snap else { panic!("{snap:?}") };
+    // The top face, and a face of the boss (a feature with faces on the plate) that no face
+    // answers to: the edge the pick lies on would take that name's place.
+    let corner = Some(format!("{face}|F{boss}:side:l99"));
+    let stale = solidcraft_doc::joints::Snap::Edge { pick, edge, face: Some(face), corner, axis };
+    let origin = solidcraft_doc::joints::JointOrigin::new(0, stale);
+    assert!(solidcraft_doc::joints::resolve_origin(&s.doc, &st, &origin).is_err());
 }

@@ -122,7 +122,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-icons
@@ -161,7 +161,7 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/nfpm.deb" \
             "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_${{ matrix.deb }}.deb"
           sudo dpkg -i "$RUNNER_TEMP/nfpm.deb"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-linux-${{ matrix.arch }}
@@ -369,7 +369,7 @@ jobs:
           envs: "SOLIDCRAFT_VERSION SOLIDCRAFT_BUILD_DATE"
           prepare: |
             pkg install -y bash git curl pkgconf libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.99.1
           run: |
             set -e
             . "$HOME/.cargo/env"
@@ -404,7 +404,7 @@ jobs:
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -502,7 +502,7 @@ jobs:
         with:
           name: icons
           path: icons
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -633,7 +633,7 @@ jobs:
       TRUNK_VERSION: 0.21.14
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -725,10 +725,16 @@ jobs:
         run: |
           tag="v$VERSION"
           sha256sum --check SHA256SUMS.txt
+          # Generated notes start at the newest published release, pre-releases included. Left
+          # to GitHub they start at the Latest stable one, and the list outgrows the 125,000
+          # characters a release body may have.
+          start=()
+          prev="$(gh release list --exclude-drafts --limit 30 --json tagName,publishedAt --jq 'sort_by(.publishedAt) | last | .tagName // empty')"
+          if [ -n "$prev" ]; then start=(--notes-start-tag "$prev"); fi
           # Stage all packages before publishing. Published tags are never replaced.
           gh release create "$tag" --draft --prerelease --latest=false \
             --title "SolidCraft v$VERSION (nightly)" --target "$GITHUB_SHA" \
-            --notes-file ../notes.md --generate-notes -- *
+            --notes-file ../notes.md --generate-notes "${start[@]}" -- *
           gh release edit "$tag" --draft=false --prerelease --latest=false
           echo "### Published nightly: $tag (\`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
       - name: Create or update the draft release
@@ -760,8 +766,13 @@ jobs:
               --target "$GITHUB_SHA" --prerelease="$PRERELEASE"
             gh release upload "$tag" --clobber -- *
           else
+            # As for nightlies: start the generated notes at the newest published release.
+            start=()
+            prev="$(gh release list --exclude-drafts --limit 30 --json tagName,publishedAt --jq 'sort_by(.publishedAt) | last | .tagName // empty')"
+            if [ -n "$prev" ]; then start=(--notes-start-tag "$prev"); fi
             gh release create "$tag" --draft --title "SolidCraft v$VERSION" \
-              --target "$GITHUB_SHA" --notes-file ../notes.md --generate-notes "${pre[@]}" -- *
+              --target "$GITHUB_SHA" --notes-file ../notes.md --generate-notes "${start[@]}" \
+              "${pre[@]}" -- *
           fi
           {
             echo "Draft **SolidCraft v$VERSION** at \`${GITHUB_SHA::9}\`:"

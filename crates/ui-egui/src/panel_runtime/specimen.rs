@@ -13,7 +13,8 @@ use super::*;
 
 const WORKSPACE: &str = "panel_fixture.workspace";
 const INSPECT: &str = "panel_fixture.inspect";
-const PRESETS: &[&str] = &["docks", "tabs", "collapsed", "floating", "overflow", "pinned", "columns", "stack_tabs", "content_fill", "inline"];
+const PRESETS: &[&str] =
+    &["docks", "tabs", "collapsed", "floating", "overflow", "pinned", "columns", "stack_tabs", "content_fill", "inline", "surfaces"];
 type SpecimenIdentities = Rc<RefCell<BTreeMap<ControllerKey, Rc<()>>>>;
 
 fn preset(value: &str) -> PanelResult<()> {
@@ -21,15 +22,18 @@ fn preset(value: &str) -> PanelResult<()> {
 }
 
 /// The caller explicitly opts into original synthetic content at the actual
-/// workspace composition point. An existing runtime is never replaced.
+/// workspace composition point. Explicit fixture mode can replace the production host.
 pub fn enable_host_specimen(app: &mut crate::SolveApp, name: &str) -> PanelResult<()> {
+    enable_host_specimen_remembered(app, name, false, None)
+}
+
+fn enable_host_specimen_remembered(app: &mut crate::SolveApp, name: &str, remember: bool, requested_opacity: Option<f32>) -> PanelResult<()> {
     preset(name)?;
-    if app.panel_runtime().is_some() {
+    if app.panel_runtime.as_ref().is_some_and(|runtime| runtime.production.is_none()) {
         return Err(error(Rule::Lifecycle, "panel specimen cannot take over an existing runtime"));
     }
     let (layout, registry) = specimen_layout(name)?;
-    let instances = layout.instances.clone();
-    let service = LayoutService::new(registry, layout, HostCapabilities::default())?;
+    let service = LayoutService::new(registry, layout, HostCapabilities { persistence: remember, ..Default::default() })?;
     let mut runtime = PanelRuntime::new(
         service,
         RuntimeEnvironment {
@@ -37,7 +41,7 @@ pub fn enable_host_specimen(app: &mut crate::SolveApp, name: &str) -> PanelResul
             document: Some(DocumentId::new(app.session.document_id.clone())?),
             window: HostId::new("panel_fixture.window")?,
             viewport: ViewportId::new("panel_fixture.viewport")?,
-            direction: if crate::bidi::has_rtl(app.tr("ui.panel_fixture.caption")) { Direction::Rtl } else { Direction::Ltr },
+            direction: crate::i18n::panel_direction(&app.preferences.language),
             motion: Motion::Animated,
         },
     )?;
@@ -82,18 +86,58 @@ pub fn enable_host_specimen(app: &mut crate::SolveApp, name: &str) -> PanelResul
     }
     let calls = Rc::new(Cell::new(0));
     let services = SpecimenServices {
-        models: SpecimenModels { name: name.into(), probe, identities, instances, calls: calls.clone() },
+        models: SpecimenModels { name: name.into(), probe, identities, calls: calls.clone() },
         commands: SpecimenCommands { calls },
         local: FakeLocalServices::default(),
+        workspace: WorkspaceId::new(WORKSPACE)?,
     };
     // Stage the complete integration before publishing it. Factories, the first
     // service tick and host option validation may all fail without taking over
     // the app or leaving a partially enabled specimen behind.
     let mut integration = AppPanelRuntime::new(runtime, Box::new(services))?;
     integration.tick(&app.session)?;
-    integration.enable_host(HostOptions::default())?;
+    let mut options = HostOptions::default();
+    options.geometry.default_opaque = name != "surfaces";
+    integration.enable_host(options)?;
+    integration.set_requested_opacity(requested_opacity)?;
+    let repaired = if remember {
+        let mut catalogue = specimen_catalogue(name)?;
+        super::preferences::configure_preferences(&mut integration, &app.panel_layout_preferences, &mut catalogue)?
+    } else {
+        false
+    };
+    app.disable_panel_runtime()?;
     app.panel_runtime = Some(integration);
+    if repaired {
+        super::preferences::report_notice(app);
+    }
     Ok(())
+}
+
+fn specimen_catalogue(current: &str) -> PanelResult<commands::InMemoryCatalogue> {
+    let mut catalogue = commands::InMemoryCatalogue::default();
+    for (name, preset, suffix, title) in [
+        ("Classic", current, "", "classic"),
+        ("Modelling", "docks", ".modelling", "modelling"),
+        ("Sketch", "tabs", ".sketch", "sketch"),
+        ("Render", "columns", ".render", "render"),
+        ("Review", "floating", ".review", "review"),
+    ] {
+        let (mut layout, registry) = specimen_layout(preset)?;
+        layout.workspace = WorkspaceId::new(format!("{WORKSPACE}{suffix}"))?;
+        let workspace = layout.workspace.clone();
+        catalogue.register_builtin(name, &LayoutEnvelope::new(layout), &registry)?;
+        catalogue.register_workspace(commands::WorkspaceDescriptor {
+            id: workspace,
+            title_key: format!("ui.panel_layout.workspace.{title}"),
+            default_preset: name.into(),
+        })?;
+    }
+    Ok(catalogue)
+}
+
+fn specimen_workspace(workspace: &WorkspaceId) -> bool {
+    ["", ".modelling", ".sketch", ".render", ".review"].iter().any(|suffix| workspace.0 == format!("{WORKSPACE}{suffix}"))
 }
 
 fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
@@ -118,9 +162,16 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
             default_size: Size { width: 280.0, height: 240.0 },
             max_size: Size { width: MAX_LOGICAL, height: 1200.0 },
             edge_rule: if pinned { EdgeRule::PinOuter } else { EdgeRule::None },
-            surface: PanelSurface::FollowZone,
+            surface: if name == "surfaces" && fill {
+                PanelSurface::Opaque
+            } else if name == "surfaces" && pinned {
+                PanelSurface::Translucent
+            } else {
+                PanelSurface::FollowZone
+            },
             features: PanelFeatures { multi_instance: !editor, popout: false, hot_closable: editor, ..PanelFeatures::default() },
             side_height_policy: if fill { SideHeightPolicy::Fill } else { SideHeightPolicy::Content },
+            fixed_bottom_height: None,
             header_actions: if editor {
                 vec![HeaderActionSpec { id: ControlId::new("apply")?, label_key: "ui.panel_fixture.apply".into(), icon: "list".into() }]
             } else {
@@ -130,7 +181,9 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
         })?;
     }
     let mut layout = Layout::empty(WorkspaceId::new(WORKSPACE)?);
-    let count = if name == "overflow" {
+    let count = if name == "surfaces" {
+        6
+    } else if name == "overflow" {
         24
     } else if name == "columns" {
         3
@@ -145,16 +198,23 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
         let id = InstanceId::new(format!("specimen-{index}"))?;
         let kind = if name == "inline" {
             "fixture.log"
-        } else if name == "content_fill" && index == 1 {
+        } else if (name == "content_fill" && index == 1) || (name == "surfaces" && index == 3) {
             "fixture.fill"
-        } else if name == "pinned" && index == 1 {
+        } else if (name == "pinned" && index == 1) || (name == "surfaces" && index == 2) {
             "fixture.pin"
         } else if index == 0 {
             "fixture.editor"
         } else {
             "fixture.log"
         };
-        let zone = if name == "inline" {
+        let zone = if name == "surfaces" {
+            match index {
+                0 | 1 => Zone::Left,
+                2 | 3 => Zone::Right,
+                4 => Zone::Bottom,
+                _ => Zone::Floating,
+            }
+        } else if name == "inline" {
             Zone::Bottom
         } else if matches!(name, "columns" | "stack_tabs") {
             Zone::Left
@@ -167,12 +227,14 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
                 _ => Zone::Bottom,
             }
         };
-        let location = if name == "floating" {
+        let location = if name == "floating" || (name == "surfaces" && index == 5) {
             SectionLocation::Floating { origin: Point { x: 48.0 + index as f32 * 64.0, y: 48.0 + index as f32 * 48.0 } }
         } else {
             SectionLocation::Dock { zone }
         };
-        let group = if name == "tabs" {
+        let group = if name == "surfaces" && index == 1 {
+            0
+        } else if name == "tabs" {
             index % 2
         } else if name == "stack_tabs" && index == 3 {
             1
@@ -194,6 +256,10 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
         let (location, column, collapsed, tab_index) = if let Some(section) = layout.sections.iter_mut().find(|section| section.id == section_id) {
             let tab_index = section.tabs.len();
             section.tabs.push(id.clone());
+            if name == "surfaces" {
+                // The inactive text-heavy editor still controls FollowZone.
+                section.active = id.clone();
+            }
             (section.location.clone(), section.column.clone(), section.collapsed, tab_index)
         } else {
             if let Some(column) = &column
@@ -284,16 +350,20 @@ impl PanelController for VisibleSpecimen {
     fn presentation(&self) -> PanelPresentation {
         let snapshot = self.probe.state(&self.key).ok();
         PanelPresentation {
-            title: crate::i18n::format("ui.panel_fixture.title", &[("title", crate::i18n::tr(self.title_key)), ("id", &self.key.instance.0)]),
+            title: solidcraft_ui_text::format(
+                "ui.panel_fixture.title",
+                &[("title", solidcraft_ui_text::tr(self.title_key)), ("id", &self.key.instance.0)],
+            ),
             icon: "list".into(),
-            status: snapshot.map(|state| crate::i18n::format("ui.panel_fixture.updates", &[("count", &state.updates.to_string())])),
+            status: snapshot.map(|state| solidcraft_ui_text::format("ui.panel_fixture.updates", &[("count", &state.updates.to_string())])),
             attention: self.editor,
             actions: if self.editor {
                 [("apply", "ui.panel_fixture.apply"), ("cancel", "ui.panel_fixture.cancel"), ("finish", "ui.panel_fixture.finish")]
                     .into_iter()
                     .map(|(id, key)| RuntimeAction {
+                        pressed: None,
                         id: ControlId(id.into()),
-                        label: crate::i18n::tr(key).into(),
+                        label: solidcraft_ui_text::tr(key).into(),
                         enabled: true,
                         disabled_reason: None,
                     })
@@ -304,7 +374,7 @@ impl PanelController for VisibleSpecimen {
         }
     }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         let rows = if self.editor { 7.0 } else { 5.0 };
         Ok(Arc::new(SpecimenMetrics {
             // The actual body below uses fixed-height truncated labels and a
@@ -323,31 +393,52 @@ impl PanelController for VisibleSpecimen {
         self.inner.render(slot, ui, context, services)?;
         match slot {
             ContentSlot::Header => {
-                ui.label(crate::i18n::tr("ui.panel_fixture.caption"));
+                ui.label(solidcraft_ui_text::tr("ui.panel_fixture.caption"));
             }
             ContentSlot::Body => {
                 // Content owns its scrolling; the host still clips all three slots.
                 let mut result = Ok(());
+                let mut focus_result = Ok(());
                 egui::ScrollArea::vertical().id_salt(("specimen-body", &self.key.instance.0)).show(ui, |ui| {
                     result = self.probe.edit(&self.key, |state| {
-                        let t = crate::theme::Tokens::get();
+                        let t = solidcraft_theme::Tokens::get();
                         ui.spacing_mut().item_spacing.y = t.space_4;
                         ui.spacing_mut().interact_size.y = t.control_height;
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                         ui.add_sized(
                             [ui.available_width(), t.control_height],
-                            egui::Label::new(crate::i18n::tr("ui.panel_fixture.explanation")).truncate(),
+                            egui::Label::new(solidcraft_ui_text::tr("ui.panel_fixture.explanation")).truncate(),
                         );
-                        let draft_label = crate::i18n::tr("ui.panel_fixture.draft");
+                        let draft_label = solidcraft_ui_text::tr("ui.panel_fixture.draft");
                         let label = ui.add_sized([ui.available_width(), t.control_height], egui::Label::new(draft_label).truncate());
                         let draft_id = egui::Id::unique(("specimen-draft", &context.instance, &context.owner));
                         let edit = crate::ui_kit::text_area(ui, draft_label, draft_id, &mut state.draft, 3, 1024);
+                        focus_result = services.local.register_focus_response(
+                            &LocalScope {
+                                workspace: context.workspace.clone(),
+                                document: context.document.clone(),
+                                viewport: context.viewport.clone(),
+                            },
+                            &context.instance,
+                            &edit,
+                        );
                         let _ = edit.labelled_by(label.id);
                         if self.editor {
-                            crate::ui_kit::checkbox(ui, crate::i18n::tr("ui.panel_fixture.guard"), &mut state.reject_cancel);
+                            let guard = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.panel_fixture.guard"), &mut state.reject_cancel);
+                            if focus_result.is_ok() {
+                                focus_result = services.local.register_focus_response(
+                                    &LocalScope {
+                                        workspace: context.workspace.clone(),
+                                        document: context.document.clone(),
+                                        viewport: context.viewport.clone(),
+                                    },
+                                    &context.instance,
+                                    &guard,
+                                );
+                            }
                             ui.add_sized(
                                 [ui.available_width(), t.control_height],
-                                egui::Label::new(crate::i18n::tr(if state.transaction_live {
+                                egui::Label::new(solidcraft_ui_text::tr(if state.transaction_live {
                                     "ui.panel_fixture.live"
                                 } else {
                                     "ui.panel_fixture.finished"
@@ -358,9 +449,10 @@ impl PanelController for VisibleSpecimen {
                     });
                 });
                 result?;
+                focus_result?;
             }
             ContentSlot::Footer => {
-                ui.label(crate::i18n::tr("ui.panel_fixture.footer"));
+                ui.label(solidcraft_ui_text::tr("ui.panel_fixture.footer"));
             }
             ContentSlot::Inline => {
                 self.render_inline(ui, context, services)?;
@@ -373,15 +465,22 @@ impl PanelController for VisibleSpecimen {
     }
     fn render_inline(&mut self, ui: &mut egui::Ui, context: &PanelContext, services: &mut ContentServices<'_>) -> PanelResult<()> {
         self.inner.render(ContentSlot::Body, ui, context, services)?;
+        let mut focus_result = Ok(());
         self.probe.edit(&self.key, |state| {
             // A real editable synthetic value occupies the same total row as
             // shared actions. This is not a production History timeline.
             ui.horizontal_centered(|ui| {
-                ui.add(egui::Label::new(crate::i18n::tr("ui.panel_fixture.inline")).truncate());
+                ui.add(egui::Label::new(solidcraft_ui_text::tr("ui.panel_fixture.inline")).truncate());
                 let id = egui::Id::unique(("specimen-draft", &context.instance, &context.owner));
-                crate::ui_kit::cell_editor(ui, id, &mut state.draft, crate::i18n::tr("ui.panel_fixture.draft"), false);
+                let response = crate::ui_kit::cell_editor(ui, id, &mut state.draft, solidcraft_ui_text::tr("ui.panel_fixture.draft"), false);
+                focus_result = services.local.register_focus_response(
+                    &LocalScope { workspace: context.workspace.clone(), document: context.document.clone(), viewport: context.viewport.clone() },
+                    &context.instance,
+                    &response,
+                );
             });
-        })
+        })?;
+        focus_result
     }
 }
 
@@ -403,7 +502,6 @@ struct SpecimenModels {
     name: String,
     probe: FixtureProbe,
     identities: SpecimenIdentities,
-    instances: Vec<PanelInstance>,
     calls: Rc<Cell<u64>>,
 }
 impl PanelModels for SpecimenModels {
@@ -452,14 +550,23 @@ struct SpecimenServices {
     models: SpecimenModels,
     commands: SpecimenCommands,
     local: FakeLocalServices,
+    workspace: WorkspaceId,
 }
 impl AppPanelServices for SpecimenServices {
+    fn refresh_workspace(&mut self, workspace: &WorkspaceId) -> PanelResult<()> {
+        if !specimen_workspace(workspace) {
+            return Err(error(Rule::Placement, "not a registered specimen workspace"));
+        }
+        self.workspace = workspace.clone();
+        Ok(())
+    }
     fn refresh_read_only(&mut self, session: &Session) -> PanelResult<()> {
         let document = DocumentId::new(session.document_id.clone())?;
-        let scope =
-            LocalScope { workspace: WorkspaceId::new(WORKSPACE)?, document: Some(document), viewport: ViewportId::new("panel_fixture.viewport")? };
-        for instance in &self.models.instances {
-            self.local.bind(instance.id.clone(), scope.clone())?;
+        let scope = LocalScope { workspace: self.workspace.clone(), document: Some(document), viewport: ViewportId::new("panel_fixture.viewport")? };
+        // The bounded registered presets contain at most 24 stable identities.
+        // Scope bindings are input services, not panel registrations or bodies.
+        for index in 0..24 {
+            self.local.bind(InstanceId::new(format!("specimen-{index}"))?, scope.clone())?;
         }
         Ok(())
     }
@@ -491,21 +598,53 @@ fn session_observation(app: &crate::SolveApp) -> Value {
 /// An empty object inspects without ticking services or dispatching layout/model actions.
 pub(crate) fn control_specimen(app: &mut crate::SolveApp, params: &Value) -> Result<Value, String> {
     let object = params.as_object().ok_or("panel_fixture params must be an object")?;
-    if object.keys().any(|key| !matches!(key.as_str(), "enabled" | "preset")) {
+    if object.keys().any(|key| !matches!(key.as_str(), "enabled" | "preset" | "remember" | "translucency_percent" | "reduced_motion")) {
         return Err("unknown panel_fixture parameter".into());
     }
     let enabled = object.get("enabled").map(|v| v.as_bool().ok_or("enabled must be a boolean")).transpose()?;
     let name = object.get("preset").map(|v| v.as_str().ok_or("preset must be a string")).transpose()?;
+    let remember = object.get("remember").map(|v| v.as_bool().ok_or("remember must be a boolean")).transpose()?;
+    let reduced_motion = object.get("reduced_motion").map(|v| v.as_bool().ok_or("reduced_motion must be a boolean")).transpose()?;
+    let requested_opacity = object
+        .get("translucency_percent")
+        .map(|value| {
+            let percent = value
+                .as_f64()
+                .filter(|percent| percent.is_finite() && (0.0..=100.0).contains(percent))
+                .ok_or("translucency_percent must be a finite number from 0 to 100")?;
+            Ok::<f32, &str>((1.0 - percent / 100.0) as f32)
+        })
+        .transpose()?;
     if let Some(name) = name {
         preset(name).map_err(|e| e.to_string())?;
     }
-    if enabled == Some(false) && name.is_some() {
-        return Err("preset cannot be combined with enabled=false".into());
+    if enabled == Some(false) && (name.is_some() || remember.is_some() || requested_opacity.is_some() || reduced_motion.is_some()) {
+        return Err("preset, remember, translucency_percent or reduced_motion cannot be combined with enabled=false".into());
+    }
+    if remember.is_some() && enabled != Some(true) && name.is_none() {
+        return Err("remember requires enabling a panel specimen".into());
     }
     if enabled == Some(true) || name.is_some() {
-        enable_host_specimen(app, name.unwrap_or("docks")).map_err(|e| e.to_string())?;
+        enable_host_specimen_remembered(app, name.unwrap_or("docks"), remember.unwrap_or(false), requested_opacity).map_err(|e| e.to_string())?;
+    } else if requested_opacity.is_some() || reduced_motion.is_some() {
+        if !app.universal_panel_host_enabled() || !app.panel_runtime().is_some_and(|runtime| specimen_workspace(&runtime.environment().workspace)) {
+            return Err("presentation options require an enabled panel specimen host".into());
+        }
+        let integration = app.panel_runtime_mut().ok_or("panel specimen runtime disappeared")?;
+        // Confirm the provider as well as the workspace marker before changing
+        // an existing host. Updating presentation retains controllers and drafts.
+        integration.with_services(|_, services| services.models.read(&ContentOwner::Application, INSPECT)).map_err(|e| e.to_string())?;
+        if let Some(opacity) = requested_opacity {
+            integration.set_requested_opacity(Some(opacity)).map_err(|e| e.to_string())?;
+        }
     }
-    let owns_runtime = app.panel_runtime().is_some_and(|runtime| runtime.environment().workspace.0 == WORKSPACE);
+    if let Some(reduced) = reduced_motion {
+        app.panel_runtime_mut()
+            .ok_or("panel specimen runtime disappeared")?
+            .set_motion(if reduced { Motion::Reduced } else { Motion::Animated })
+            .map_err(|e| e.to_string())?;
+    }
+    let owns_runtime = app.panel_runtime().is_some_and(|runtime| specimen_workspace(&runtime.environment().workspace));
     if enabled == Some(false) && app.panel_runtime().is_some() {
         if !owns_runtime {
             return Err("panel specimen cannot tear down another runtime".into());
@@ -526,7 +665,7 @@ pub(crate) fn control_specimen(app: &mut crate::SolveApp, params: &Value) -> Res
 /// Observe the current host, synthetic probe and actual Session without a tick,
 /// action dispatch, geometry evaluation or cold mesh creation.
 pub fn inspect_host_specimen(app: &mut crate::SolveApp) -> PanelResult<Value> {
-    let owns_runtime = app.panel_runtime().is_some_and(|runtime| runtime.environment().workspace.0 == WORKSPACE);
+    let owns_runtime = app.panel_runtime().is_some_and(|runtime| specimen_workspace(&runtime.environment().workspace));
     let mut reply = json!({"enabled":false,"session":session_observation(app),"host":host_observation(app),
         "effective_usable":app.viewport.layout.as_ref().and_then(|layout| layout.usable.as_ref()).map(|usable|
             json!({"domain":&usable.domain,"obstacles":&usable.obstacles,"free":&usable.free}))});
@@ -534,7 +673,7 @@ pub fn inspect_host_specimen(app: &mut crate::SolveApp) -> PanelResult<Value> {
         let integration = app.panel_runtime_mut().ok_or_else(|| error(Rule::Lifecycle, "panel specimen runtime disappeared"))?;
         let probe = integration.with_services(|runtime, services| {
             let probe = services.models.read(&ContentOwner::Application, INSPECT)?;
-            Ok(json!({"probe":probe,"layout":runtime.layout().inspect(),"controller_count":runtime.controller_count()}))
+            Ok(json!({"probe":probe,"layout":runtime.layout().inspect(),"controller_count":runtime.controller_count(),"reduced_motion":runtime.environment().motion == Motion::Reduced}))
         })?;
         reply["enabled"] = json!(app.universal_panel_host_enabled());
         reply["runtime"] = probe;
@@ -565,7 +704,7 @@ fn host_observation(app: &crate::SolveApp) -> Value {
             json!({
                 "section":section.section,"instance":section.instance,"zone":section.zone,
                 "outer":section.outer,"header":section.header,"body":section.body,"footer":section.footer,
-                "collapsed":section.collapsed,"inline":section.inline,"surface":section.surface,"paint_alpha":section.paint_alpha,"hidden_tabs":section.hidden_tabs,
+                "collapsed":section.collapsed,"inline":section.inline,"surface":section.surface,"paint_alpha":section.paint_alpha,"contrast":section.contrast,"hidden_tabs":section.hidden_tabs,
             })
         })
         .collect();

@@ -1,0 +1,1532 @@
+{
+ "cases": [
+  {
+   "name": "attributed_issue_1462_boxes_union",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Union; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 1,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_difference",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Difference; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 3,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_intersection",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Intersection; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 2,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_coplanar_boxes_union",
+   "note": "Boxes whose z = 0 and z = 10 faces are coplanar with the same orientation (mated faces: the COPY at SmMerge.cpp MakeFaceuse). Union; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 1,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_coplanar_boxes_difference",
+   "note": "Boxes whose z = 0 and z = 10 faces are coplanar with the same orientation (mated faces: the COPY at SmMerge.cpp MakeFaceuse). Difference; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 3,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_coplanar_boxes_intersection",
+   "note": "Boxes whose z = 0 and z = 10 faces are coplanar with the same orientation (mated faces: the COPY at SmMerge.cpp MakeFaceuse). Intersection; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 2,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_through_box_union",
+   "note": "A bar through a box: B's side faces split by A's top and bottom, A's top and bottom get holes. Union; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      3.0,
+      3.0,
+      -2.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      14.0
+     ]
+    },
+    "operation": 1,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_through_box_difference",
+   "note": "A bar through a box: B's side faces split by A's top and bottom, A's top and bottom get holes. Difference; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      3.0,
+      3.0,
+      -2.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      14.0
+     ]
+    },
+    "operation": 3,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_through_box_intersection",
+   "note": "A bar through a box: B's side faces split by A's top and bottom, A's top and bottom get holes. Intersection; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      3.0,
+      3.0,
+      -2.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      14.0
+     ]
+    },
+    "operation": 2,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_in_box_union",
+   "note": "B strictly inside A: no face is split. Union; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      2.0,
+      2.0,
+      2.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "operation": 1,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_in_box_difference",
+   "note": "B strictly inside A: no face is split. Difference; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      2.0,
+      2.0,
+      2.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "operation": 3,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_in_box_intersection",
+   "note": "B strictly inside A: no face is split. Intersection; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      2.0,
+      2.0,
+      2.0
+     ],
+     "size": [
+      4.0,
+      4.0,
+      4.0
+     ]
+    },
+    "operation": 2,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_union",
+   "note": "Cylinder through a box (a through hole for the difference). Union; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 1,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_difference",
+   "note": "Cylinder through a box (a through hole for the difference). Difference; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 3,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_intersection",
+   "note": "Cylinder through a box (a through hole for the difference). Intersection; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 2,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_corner_union",
+   "note": "Cylinder about a box's vertical edge, starting halfway up. Union; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      10.0,
+      10.0,
+      5.0
+     ],
+     "radius": 3.0,
+     "height": 10.0
+    },
+    "operation": 1,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_corner_difference",
+   "note": "Cylinder about a box's vertical edge, starting halfway up. Difference; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      10.0,
+      10.0,
+      5.0
+     ],
+     "radius": 3.0,
+     "height": 10.0
+    },
+    "operation": 3,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_corner_intersection",
+   "note": "Cylinder about a box's vertical edge, starting halfway up. Intersection; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      10.0,
+      10.0,
+      5.0
+     ],
+     "radius": 3.0,
+     "height": 10.0
+    },
+    "operation": 2,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_cylinder_cylinder_tee_union",
+   "note": "T-pipe: a cylinder along y meeting a cylinder along z. Union; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 1,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_cylinder_cylinder_tee_difference",
+   "note": "T-pipe: a cylinder along y meeting a cylinder along z. Difference; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 3,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_cylinder_cylinder_tee_intersection",
+   "note": "T-pipe: a cylinder along y meeting a cylinder along z. Intersection; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 2,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_sphere_box_union",
+   "note": "Sphere cut by a box top face at z = 2. Union; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 5.0
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -10.0,
+      -10.0,
+      -10.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      12.0
+     ]
+    },
+    "operation": 1,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_sphere_box_difference",
+   "note": "Sphere cut by a box top face at z = 2. Difference; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 5.0
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -10.0,
+      -10.0,
+      -10.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      12.0
+     ]
+    },
+    "operation": 3,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_sphere_box_intersection",
+   "note": "Sphere cut by a box top face at z = 2. Intersection; every operand face and edge has its own SM_AB_COPY long attribute.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 5.0
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -10.0,
+      -10.0,
+      -10.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      12.0
+     ]
+    },
+    "operation": 2,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_union_reference",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Union with reference tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 1,
+    "behavior": 1
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_difference_reference",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Difference with reference tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 3,
+    "behavior": 1
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_union_standalone_copy",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Union with standalone_copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 1,
+    "behavior": 2
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_difference_standalone_copy",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Difference with standalone_copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 3,
+    "behavior": 2
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_union_standalone_reference",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Union with standalone_reference tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 1,
+    "behavior": 3
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_difference_standalone_reference",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Difference with standalone_reference tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 3,
+    "behavior": 3
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_union_temp",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Union with temp tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 1,
+    "behavior": 4
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_difference_temp",
+   "note": "#1462: box (0,0,0)+10^3 and box (5,5,5)+10^3 (SolidCraft's overlapping_boxes_union). Difference with temp tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 3,
+    "behavior": 4
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_union_reference",
+   "note": "Cylinder through a box (a through hole for the difference). Union with reference tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 1,
+    "behavior": 1
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_difference_reference",
+   "note": "Cylinder through a box (a through hole for the difference). Difference with reference tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 3,
+    "behavior": 1
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_union_standalone_copy",
+   "note": "Cylinder through a box (a through hole for the difference). Union with standalone_copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 1,
+    "behavior": 2
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_difference_standalone_copy",
+   "note": "Cylinder through a box (a through hole for the difference). Difference with standalone_copy tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 3,
+    "behavior": 2
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_union_standalone_reference",
+   "note": "Cylinder through a box (a through hole for the difference). Union with standalone_reference tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 1,
+    "behavior": 3
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_difference_standalone_reference",
+   "note": "Cylinder through a box (a through hole for the difference). Difference with standalone_reference tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 3,
+    "behavior": 3
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_union_temp",
+   "note": "Cylinder through a box (a through hole for the difference). Union with temp tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 1,
+    "behavior": 4
+   }
+  },
+  {
+   "name": "attributed_box_cylinder_hole_difference_temp",
+   "note": "Cylinder through a box (a through hole for the difference). Difference with temp tags.",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 3,
+    "behavior": 4
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_merge",
+   "note": "#1462 boxes, operation merge (the second operand is returned for partial merge and imprint-classify).",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 5,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_partial_merge",
+   "note": "#1462 boxes, operation partial_merge (the second operand is returned for partial merge and imprint-classify).",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 6,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_imprint",
+   "note": "#1462 boxes, operation imprint (the second operand is returned for partial merge and imprint-classify).",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 7,
+    "behavior": 0
+   }
+  },
+  {
+   "name": "attributed_issue_1462_boxes_imprint_classify",
+   "note": "#1462 boxes, operation imprint_classify (the second operand is returned for partial merge and imprint-classify).",
+   "inputs": {
+    "api": "attributed",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 8,
+    "behavior": 0
+   }
+  }
+ ]
+}

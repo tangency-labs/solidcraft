@@ -53,74 +53,15 @@ use solidcraft_engine::Session;
 use crate::control::{ControlRequest, Outcome, handle};
 use crate::{Services, SolveApp};
 
+// The widget registry (handles, rects and counts drawn this frame) lives in its own crate so UI
+// components can publish without depending on the app; re-exported here for the scenario runner.
+pub use solidcraft_ui_registry::{
+    clear_handles, count_of, handle_at, handles, publish_count, publish_handle, publish_rect, publish_target, publish_target_as, rect_of, rects,
+};
+
 thread_local! {
-    /// Drag handles drawn this frame (name, screen point): manipulators publish theirs so
-    /// scenarios (and the control channel's `ui.at {handle}`) can grab them.
-    static HANDLES: RefCell<Vec<(String, egui::Pos2)>> = const { RefCell::new(Vec::new()) };
-    /// Painted parts with no widget of their own (the toolbar, the workspace switcher…): rects
-    /// and counts by name, for checks.
-    static RECTS: RefCell<Vec<(String, egui::Rect)>> = const { RefCell::new(Vec::new()) };
-    static COUNTS: RefCell<Vec<(String, f64)>> = const { RefCell::new(Vec::new()) };
     /// Widths a scenario's `same_width` checks remembered (by rect name).
     static WIDTHS: RefCell<Vec<(String, f32)>> = const { RefCell::new(Vec::new()) };
-}
-
-/// A manipulator's handle drawn this frame at `at` (screen), by name: "arrow" (a dialog's value
-/// arrow), "triad_x"… Call it from the code that draws the handle, every frame it shows.
-pub fn publish_handle(name: &str, at: egui::Pos2) {
-    // The latest wins (lookups search from the end), so publishing is cheap for browser rows.
-    HANDLES.with(|h| h.borrow_mut().push((name.to_string(), at)));
-}
-
-/// Publish a rectangle and its centered interaction handle with the same explicit identity.
-pub(crate) fn publish_target(name: &str, rect: egui::Rect) {
-    publish_target_as(name, name, rect);
-}
-
-/// Publish centered geometry with explicit, independently named handle and rectangle aliases.
-pub(crate) fn publish_target_as(handle: &str, rect_name: &str, rect: egui::Rect) {
-    publish_handle(handle, rect.center());
-    publish_rect(rect_name, rect);
-}
-
-/// Where a handle was drawn last frame.
-pub fn handle_at(name: &str) -> Option<egui::Pos2> {
-    HANDLES.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
-}
-
-/// Every handle drawn last frame whose name starts with `prefix`.
-pub fn handles(prefix: &str) -> Vec<(String, egui::Pos2)> {
-    HANDLES.with(|h| h.borrow().iter().filter(|(n, _)| n.starts_with(prefix)).cloned().collect())
-}
-
-/// A painted part's rect this frame, by name ("toolbar", "workspace_switcher").
-pub fn publish_rect(name: &str, r: egui::Rect) {
-    RECTS.with(|h| h.borrow_mut().push((name.to_string(), r)));
-}
-
-pub fn rect_of(name: &str) -> Option<egui::Rect> {
-    RECTS.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
-}
-
-#[cfg(test)]
-pub(crate) fn rects(prefix: &str) -> Vec<(String, egui::Rect)> {
-    RECTS.with(|r| r.borrow().iter().filter(|(name, _)| name.starts_with(prefix)).cloned().collect())
-}
-
-/// A number about this frame's drawing, by name ("axis_view_highlights": the axis view's highlighted tips).
-pub fn publish_count(name: &str, v: f64) {
-    COUNTS.with(|h| h.borrow_mut().push((name.to_string(), v)));
-}
-
-pub fn count_of(name: &str) -> Option<f64> {
-    COUNTS.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
-}
-
-/// Forget last frame's handles, rects and counts (called as a frame starts).
-pub fn clear_handles() {
-    HANDLES.with(|h| h.borrow_mut().clear());
-    RECTS.with(|h| h.borrow_mut().clear());
-    COUNTS.with(|h| h.borrow_mut().clear());
 }
 
 /// `v` with "$DIR" in its strings replaced by `dir`.
@@ -161,7 +102,7 @@ pub struct Harness {
     time: f64,
     size: egui::Vec2,
     /// The camera as the last `camera` step left it.
-    cam_mark: Option<solidcraft_engine::render::Camera>,
+    cam_mark: Option<solidcraft_viewport::Camera>,
 }
 
 impl Default for Harness {
@@ -181,7 +122,9 @@ impl Drop for Harness {
 
 impl Harness {
     pub fn new() -> Harness {
-        crate::i18n::pin_system_language();
+        // Test-owned reuse store: never the developer's per-user data folder.
+        solidcraft_engine::use_import_cache_dir(std::env::temp_dir().join(format!("solidcraft-scenario-imports-{}", std::process::id())));
+        solidcraft_ui_text::pin_system_language();
         let mut h = Harness {
             app: SolveApp::new(Session::default(), Services::default()),
             ctx: {
@@ -376,7 +319,7 @@ impl Harness {
         for _ in 0..32 {
             let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;
             let at = egui::pos2(point[0] as f32, point[1] as f32);
-            let page = self.app.prefs_window.open.then(|| rect_of("prefs:page_body")).flatten();
+            let page = self.app.prefs_window.shell.open.then(|| rect_of("prefs:page_body")).flatten();
             let chrome = ["prefs:ok", "prefs:apply", "prefs:cancel", "prefs:search"].iter().any(|key| handle_at(key) == Some(at));
             let Some(page) = page.filter(|page| !chrome && page.x_range().contains(at.x)) else { return Ok(point) };
             if page.contains(at) {
@@ -434,7 +377,7 @@ impl Harness {
     /// frame may turn the view (its right or back vector) by more than `max_deg`, the last
     /// included, so the move ends without a jump.
     fn view_anim(&mut self, v: &str, max_deg: f64) -> Result<(), String> {
-        let basis = |c: &solidcraft_engine::render::Camera| c.basis();
+        let basis = |c: &solidcraft_viewport::Camera| c.basis();
         let mut prev = basis(&self.app.cam);
         self.app.animate_view(v);
         if self.app.cam_anim.is_none() {
@@ -575,7 +518,7 @@ impl Harness {
                     #[cfg(not(target_arch = "wasm32"))]
                     if solidcraft_engine::capture::installed().is_none() {
                         solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-                            let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+                            let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
                             Ok(solidcraft_engine::capture::Picture { rgba, renderer })
                         }));
                     }
@@ -671,7 +614,7 @@ impl Harness {
                     eprintln!("widgets: {texts:?}");
                 }
                 if s["debug"] == json!("handles") {
-                    let names: Vec<String> = HANDLES.with(|h| h.borrow().iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect());
+                    let names: Vec<String> = handles("").iter().map(|(n, p)| format!("{n} @{:.0},{:.0}", p.x, p.y)).collect();
                     eprintln!("handles: {names:?}");
                 }
                 return Ok(());
@@ -894,7 +837,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 if r.width() < lo - 0.5 || r.width() > hi + 0.5 {
                     return Err(format!("dialog width {:.0}, want {lo}..{hi}", r.width()));
                 }
-                let clearance = if rect_of("dialog:header").is_some() { crate::theme::Tokens::get().space_8 } else { 0.0 };
+                let clearance = if rect_of("dialog:header").is_some() { solidcraft_theme::Tokens::get().space_8 } else { 0.0 };
                 if (r.right() - (vp.right() - clearance)).abs() > 0.5 || r.top() < vp.top() || r.bottom() > vp.bottom() + 1.0 {
                     return Err(format!("dialog {r:?} is not docked right inside the viewport {vp:?}"));
                 }
@@ -912,7 +855,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                         .collect()
                 });
                 // Workspace panels (docks and strips) are laid out against the viewport, not sized like dialogs.
-                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().map(|(rect, _)| *rect).collect();
+                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().copied().collect();
                 for (id, r) in rects {
                     if panels.iter().any(|p| (p.min - r.min).abs().max_elem() < 1.0 && (p.max - r.max).abs().max_elem() < 1.0) {
                         continue;
@@ -1141,8 +1084,8 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
             }
             "theme_colors" => {
                 // Read the applied tokens after the scenario frame, not the source theme file.
-                let tokens = crate::theme::Tokens::get();
-                let resolved = crate::theme_files::export("Scenario", crate::theme_files::Base::Dark, &tokens);
+                let tokens = solidcraft_theme::Tokens::get();
+                let resolved = crate::theme_files::export("Scenario", crate::theme_files::Base::Dark, &tokens, None);
                 for (key, want) in v.as_object().into_iter().flatten() {
                     if resolved["colors"][key] != *want {
                         return Err(format!("theme colour {key}: got {}, want {want}", resolved["colors"][key]));

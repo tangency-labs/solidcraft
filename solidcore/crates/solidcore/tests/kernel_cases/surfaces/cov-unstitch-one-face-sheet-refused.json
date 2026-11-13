@@ -1,0 +1,35 @@
+{
+  "area": "surfaces",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-unstitch-one-face-sheet-refused",
+  "expected": {
+    "method": "a single face is already as far apart as it goes",
+    "outcome": "refused",
+    "refusal": "the body has one face: nothing to unstitch",
+    "source": "invariants",
+    "sources": [],
+    "what": "unstitch on a body of one face: nothing to take apart, refused"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 5 (surface.unstitch): invalid input: the body has one face: nothing to unstitch",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 5 (surface.unstitch): invalid input: the body has one face: nothing to unstitch",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "unstitch on a body of one face: nothing to take apart, refused",
+  "why_not": [
+    "no kernel operation ran before the failure: step 5 (surface.unstitch): invalid input: the body has one face: nothing to unstitch"
+  ]
+}

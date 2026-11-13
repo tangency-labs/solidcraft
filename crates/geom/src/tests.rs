@@ -22,6 +22,70 @@ fn cube_mesh(s: f64) -> Mesh {
 }
 
 #[test]
+fn crease_normals_respect_angles_groups_and_duplicate_vertex_seams() {
+    let theta = 30f64.to_radians();
+    let mesh = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(0., -theta.cos(), theta.sin())],
+        triangles: vec![[0, 1, 2], [1, 0, 3]],
+        ..Default::default()
+    };
+    let flat = mesh.crease_corner_normals(20f64.to_radians(), None).unwrap();
+    assert!((flat[0][0] - Vec3::Z).len() < 1e-12);
+    assert!((flat[1][1] - Vec3::new(0., theta.sin(), theta.cos())).len() < 1e-12);
+    let smooth = mesh.crease_corner_normals(40f64.to_radians(), None).unwrap();
+    let expected = Vec3::new(0., (theta / 2.).sin(), (theta / 2.).cos());
+    assert!((smooth[0][0] - expected).len() < 1e-12);
+    assert_eq!(smooth[0][0], smooth[1][1]);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[1, 2])).unwrap(), flat);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[0, 0])).unwrap(), flat);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[7, 7])).unwrap(), smooth);
+    let split = Mesh {
+        positions: mesh.triangles.iter().flatten().map(|&i| mesh.positions[i as usize]).collect(),
+        triangles: vec![[0, 1, 2], [3, 4, 5]],
+        ..Default::default()
+    };
+    assert_eq!(split.crease_corner_normals(1., None).unwrap(), smooth);
+    assert!(mesh.crease_corner_normals(f64::NAN, None).is_err());
+    assert!(mesh.crease_corner_normals(1., Some(&[1])).is_err());
+    let cube = cube_mesh(1.);
+    let normals = cube.crease_corner_normals(45f64.to_radians(), None).unwrap();
+    for (t, n) in cube.triangles.iter().zip(normals) {
+        let [a, b, c] = t.map(|i| cube.positions[i as usize]);
+        let face = (b - a).cross(c - a).normalized().unwrap();
+        for n in n {
+            assert!((n - face).len() < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn crease_normals_skip_degenerate_faces_without_breaking_valid_fans() {
+    let theta = 30f64.to_radians();
+    let mut mesh = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(0., -theta.cos(), theta.sin())],
+        triangles: vec![[0, 1, 2], [1, 0, 3]],
+        ..Default::default()
+    };
+    let expected = mesh.crease_corner_normals(40f64.to_radians(), None).unwrap();
+    // Repeated indices, coincident vertices and distinct collinear vertices all
+    // touch the healthy pair's shared edge. None may break that smoothing fan.
+    mesh.positions.extend([Vec3::X, Vec3::X * 2.]);
+    mesh.triangles.extend([[0, 1, 1], [0, 1, 4], [0, 1, 5]]);
+    let groups = vec![7; mesh.triangles.len()];
+    for groups in [None, Some(groups.as_slice())] {
+        let normals = mesh.crease_corner_normals(40f64.to_radians(), groups).unwrap();
+        assert_eq!(&normals[..2], expected.as_slice());
+        assert_eq!(&normals[2..], &[[Vec3::Z; 3]; 3]);
+        assert!(normals.iter().flatten().all(|n| n.is_finite() && (n.len() - 1.).abs() < 1e-12));
+    }
+    mesh.triangles.push([0, 1, u32::MAX]);
+    assert!(mesh.crease_corner_normals(1., None).unwrap_err().contains("index is missing"));
+    mesh.triangles.pop();
+    mesh.positions[0] = Vec3::new(f64::INFINITY, 0., 0.);
+    assert!(mesh.crease_corner_normals(1., None).unwrap_err().contains("non-finite"));
+}
+
+#[test]
 fn display_edge_masks_keep_identity_and_break_only_certified_sharp_patches() {
     let mut mesh =
         Mesh { edges: vec![vec![Vec3::ZERO, Vec3::Z]; 2], edge_faces: vec![vec![0, 1], vec![1, 2]], seams: vec![true, true], ..Mesh::default() };
@@ -205,6 +269,26 @@ fn tangent_chains_follow_smooth_edges() {
         ..Default::default()
     };
     assert_eq!(seam.tangent_chain(0, 5f64.to_radians()), vec![0]);
+}
+
+#[test]
+fn a_mesh_chain_runs_through_one_and_a_half_degrees_and_stops_at_three() {
+    // Edges of an open polyline whose direction turns `turn` degrees at each vertex.
+    let polyline = |turn: f64| {
+        let mut m = Mesh { positions: vec![Vec3::ZERO, Vec3::X], ..Default::default() };
+        let (mut p, mut a) = (Vec3::ZERO, 0.0f64);
+        for _ in 0..4 {
+            let q = p + Vec3::new(a.cos(), a.sin(), 0.0) * 5.0;
+            m.edges.push(vec![p, q]);
+            (p, a) = (q, a + turn.to_radians());
+        }
+        m.edge_faces = vec![vec![0]; 4];
+        m
+    };
+    let mut c = polyline(1.5).tangent_chain(0, TANGENT_CHAIN);
+    c.sort();
+    assert_eq!(c, vec![0, 1, 2, 3], "1.5° is inside the chain angle");
+    assert_eq!(polyline(3.0).tangent_chain(0, TANGENT_CHAIN), vec![0], "3° is a corner");
 }
 
 /// A helix of `pieces` edge pieces (a thread's crest), each five points long.
@@ -978,4 +1062,13 @@ fn a_similarity_moves_each_kind_of_segment_exactly() {
     ] {
         assert!(Similarity2::new(scale, angle, shift).is_none(), "{scale} {angle} {shift:?}");
     }
+}
+
+/// The display mesh and its levels of detail are solidcore-tess's own types, not copies: a mesh
+/// the kernel's tessellation makes is the one the viewport draws, with nothing converted.
+#[test]
+fn the_display_mesh_and_its_levels_are_solidcore_tess_types() {
+    let mesh: solidcore_tess::Mesh = crate::Mesh { positions: vec![Vec3::X], ..Default::default() };
+    let level: solidcore_tess::simplify::Level = crate::simplify::Level { error: 0.5, ..Default::default() };
+    assert_eq!((mesh.positions, level.error), (vec![Vec3::X], 0.5));
 }

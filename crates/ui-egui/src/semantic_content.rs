@@ -98,6 +98,10 @@ pub(crate) struct Frame {
     active: Option<(ContentOwner, ContentRequest)>,
     last_bodies: Vec<String>,
     last_plane: Option<String>,
+    /// The feature and joint a row lit last frame, cleared only while the viewport still shows
+    /// them: the timeline sets `hover_feature` earlier in the frame.
+    last_feature: Option<u64>,
+    last_joint: Option<u64>,
     plane_underlay: Option<String>,
     finalized: bool,
 }
@@ -228,6 +232,19 @@ pub(crate) fn set_external_body_hover(app: &mut SolveApp, bodies: Vec<String>) {
     app.viewport.hover_bodies = bodies;
 }
 
+/// The timeline's own write of the hovered feature. A Browser row that lit the same feature a
+/// frame earlier no longer owns it, so expiring the Browser's hover leaves the timeline's alone.
+pub(crate) fn set_timeline_feature_hover(app: &mut SolveApp, feature: Option<u64>) {
+    if feature.is_some() {
+        app.tree.content.last_feature = None;
+        app.viewport.hover_feature = feature;
+    } else if app.tree.content.last_feature.is_none() {
+        app.viewport.hover_feature = None;
+    }
+}
+
+/// Expire previous hover contributions owned by browser or content trees before applying
+/// new actions for the current frame, returning the previous bodies and construction plane.
 fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
     let old_bodies = std::mem::take(&mut app.tree.content.last_bodies);
     let old_plane = app.tree.content.last_plane.take();
@@ -239,6 +256,16 @@ fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
     let plane_underlay = app.tree.content.plane_underlay.take();
     if old_plane.is_some() && app.viewport.hover_plane == old_plane {
         app.viewport.hover_plane = plane_underlay;
+    }
+    if let Some(feature) = app.tree.content.last_feature.take()
+        && app.viewport.hover_feature == Some(feature)
+    {
+        app.viewport.hover_feature = None;
+    }
+    if let Some(joint) = app.tree.content.last_joint.take()
+        && app.viewport.hover_joint == Some(joint)
+    {
+        app.viewport.hover_joint = None;
     }
     (old_bodies, old_plane)
 }
@@ -405,6 +432,8 @@ fn presented(ui: &Ui) -> bool {
     ui.is_visible() && ui.opacity() > 0.0
 }
 
+/// Finalize content tree hover state, pointer ownership, and drag interactions across panels
+/// for the current frame, requesting a repaint if visible hover highlights changed.
 pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     ensure_session(app, ctx);
     if app.tree.content.finalized {
@@ -429,6 +458,7 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Keep the previous contribution until finalization: floating viewports paint before
     // their overlaid panels. Expire only our contribution, leaving other producers intact.
+    let lit_before = (app.viewport.hover_feature, app.viewport.hover_joint);
     let (old_bodies, old_plane) = expire_hover(app);
     // Egui's response hit testing supplies pointer ownership, including occlusion and capture.
     // Stable owner iteration only breaks ties; submission order never decides the winner.
@@ -463,9 +493,20 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
             app.tree.content.last_plane.clone_from(&actions.hover_plane);
             app.viewport.hover_plane.clone_from(&actions.hover_plane);
         }
+        if let Some(feature) = actions.hover_feature {
+            app.viewport.hover_feature = Some(feature);
+            app.tree.content.last_feature = Some(feature);
+        }
+        if let Some(joint) = actions.hover_joint {
+            app.viewport.hover_joint = Some(joint);
+            app.tree.content.last_joint = Some(joint);
+        }
         crate::browser::apply_content_actions(app, actions);
     }
-    if old_bodies != app.tree.content.last_bodies || old_plane != app.tree.content.last_plane {
+    if old_bodies != app.tree.content.last_bodies
+        || old_plane != app.tree.content.last_plane
+        || lit_before != (app.viewport.hover_feature, app.viewport.hover_joint)
+    {
         ctx.request_repaint();
     }
 }

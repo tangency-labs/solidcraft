@@ -1,6 +1,5 @@
 //! Layout checks over every toolbar command, headless (see `solidcraft_ui_egui::scenario`):
-//! each command's dialog opens docked at the viewport's right within its width limits (or in
-//! the left column, when the preferences put it there), and every window it opens fits on screen.
+//! each command's dialog opens at the right edge within its width limits, and every window fits on screen.
 
 use serde_json::{Value, json};
 use solidcraft_ui_egui::scenario::{Harness, check, rect_of};
@@ -24,12 +23,12 @@ fn harness() -> Harness {
 #[test]
 fn the_harness_takes_english_as_the_system_language() {
     let h = Harness::new();
-    assert_eq!(h.app.preferences.language, solidcraft_ui_egui::i18n::SYSTEM);
-    assert_eq!(solidcraft_ui_egui::i18n::effective_language(&h.app.preferences.language), "en");
+    assert_eq!(h.app.preferences.language, solidcraft_ui_text::SYSTEM);
+    assert_eq!(solidcraft_ui_text::effective_language(&h.app.preferences.language), "en");
 }
 
 #[test]
-fn every_dialog_opens_docked_within_its_width_limits() {
+fn every_dialog_opens_at_the_right_within_its_width_limits() {
     let mut bad = Vec::new();
     let mut seen = 0;
     for spec in solidcraft_engine::command_specs() {
@@ -44,7 +43,7 @@ fn every_dialog_opens_docked_within_its_width_limits() {
             // Wide cards use the kit's bounded table/timeline width.
             let w = rect_of("dialog:outer").map_or(0.0, |r| r.width());
             let limits = if matches!(spec.id, "config.table" | "config.configure" | "motion.study") {
-                let width = solidcraft_ui_egui::theme::Tokens::get().form_card_width * 3.0;
+                let width = solidcraft_theme::Tokens::get().form_card_width * 3.0;
                 json!({"min":width - 4.0,"max":width + 2.0})
             } else if w > 400.0 {
                 json!({"min":480,"max":562})
@@ -60,44 +59,6 @@ fn every_dialog_opens_docked_within_its_width_limits() {
         }
     }
     assert!(seen > 20, "only {seen} commands opened a dialog");
-    assert!(bad.is_empty(), "{} problems:\n{}", bad.len(), bad.join("\n"));
-}
-
-/// Dialogs › In the left column (#6707): every command's dialog opens in the browser's place, at
-/// least as wide as the browser and its own card, and fits on screen.
-#[test]
-fn every_dialog_opens_in_the_left_column_when_asked() {
-    let mut bad = Vec::new();
-    let mut seen = 0;
-    for spec in solidcraft_engine::command_specs() {
-        if spec.tab.is_empty() || spec.tab == "SKETCH" {
-            continue;
-        }
-        let mut h = harness();
-        h.call("ui.prefs", json!({"dialog_place": "left_column"}));
-        h.frames(2);
-        let Some(browser) = rect_of("browser:card") else {
-            bad.push(format!("{}: no browser before the dialog", spec.id));
-            continue;
-        };
-        h.call("ui.start", json!({"command": spec.id}));
-        h.frames(4);
-        let (Some(dialog), Some(column)) = (rect_of("dialog:outer").filter(|_| h.app.dialog.is_some()), rect_of("dialog:column")) else {
-            continue;
-        };
-        seen += 1;
-        let screen = h.ctx.content_rect();
-        if (dialog.left() - browser.left()).abs() > 1.0 || (dialog.top() - browser.top()).abs() > 1.0 {
-            bad.push(format!("{}: dialog {dialog:?} is not in the browser's place {browser:?}", spec.id));
-        }
-        if dialog.width() < browser.width().max(260.0) - 2.5 || (dialog.width() - column.width()).abs() > 2.5 {
-            bad.push(format!("{}: dialog width {:.0}, column {:.0}, browser {:.0}", spec.id, dialog.width(), column.width(), browser.width()));
-        }
-        if !screen.expand(1.0).contains_rect(dialog) || rect_of("browser:card").is_some() {
-            bad.push(format!("{}: dialog {dialog:?} off screen or beside a browser", spec.id));
-        }
-    }
-    assert!(seen > 20, "only {seen} commands opened a dialog in the column");
     assert!(bad.is_empty(), "{} problems:\n{}", bad.len(), bad.join("\n"));
 }
 
@@ -143,12 +104,12 @@ fn docked_ribbon_geometry_and_search() {
             assert_eq!(search.top(), ribbon.top() + 4.0);
             assert_eq!(search.right(), ribbon.right() - 4.0);
             assert_eq!(search.center().y, ribbon.top() + 15.0);
-            let t = solidcraft_ui_egui::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let (hint_width, key_width) = h.ctx.fonts_mut(|fonts| {
                 (
                     fonts
                         .layout_no_wrap(
-                            solidcraft_ui_egui::i18n::tr_label("Search commands").to_owned(),
+                            solidcraft_ui_text::tr_label("Search commands").to_owned(),
                             egui::FontId::proportional(t.font_button),
                             t.form_dim,
                         )
@@ -161,7 +122,7 @@ fn docked_ribbon_geometry_and_search() {
             assert_eq!(search.width(), (hint_width + key_width + t.space_16 + t.space_4 * 5.0 + t.space_2).ceil());
             assert!(ribbon.contains_rect(search));
             assert!(search.left() > workspace.right());
-            assert!(h.app.viewport.rect.unwrap().top() >= toolbar::APP_BAR_HEIGHT + toolbar::RIBBON_HEIGHT);
+            assert!(h.app.viewport.rect.unwrap().top() < ribbon.bottom(), "the ribbon overlays the viewport");
             h.step(&json!({"click":{"handle":"ribbon:search"}})).unwrap();
             assert!(h.app.ui.palette_open);
             h.frames(10);
@@ -172,7 +133,7 @@ fn docked_ribbon_geometry_and_search() {
             assert_eq!(Some(field), rect_of("shortcut:search"));
             assert_eq!(Some(field), rect_of("palette:search"));
             let popup = rect_of("ribbon:search_popup").unwrap();
-            assert_eq!(popup.top(), field.bottom() + solidcraft_ui_egui::theme::Tokens::get().space_6);
+            assert_eq!(popup.top(), field.bottom() + solidcraft_theme::Tokens::get().space_6);
             assert_eq!(popup.x_range(), field.x_range());
             assert!(popup.top() >= search.bottom());
             assert!(popup.left() <= search.left());
