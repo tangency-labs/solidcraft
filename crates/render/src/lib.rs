@@ -39,5 +39,5 @@ pub use curve_display::{PixelCurveView, SampledPath, SamplingBudget, SamplingQua
 pub use gif::gif;
 pub use model_bounds::view_bounds;
 pub use product::{FaceAppearance, ProductMesh, ProductScene};
-pub use visual_style::VisualStyle;
 pub use silhouette::{PreparedSilhouettes, SilhouetteBuilder, SilhouetteEdge, SilhouetteView};
+pub use visual_style::VisualStyle;

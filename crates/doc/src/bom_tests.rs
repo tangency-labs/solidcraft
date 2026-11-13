@@ -272,8 +272,16 @@ fn all_levels_lists_at_each_cap_and_refuses_one_more() {
     let mut doc = Document::default();
     let (part, _) = add(&mut doc, "Part", 0);
     let base = doc.occurrences.iter().map(|o| o.id).max().unwrap_or(0);
-    let placement =
-        |id: u64| Occurrence { id, component: part, parent: 0, name: format!("Part:{id}"), transform: IDENTITY, grounded: false, bom_type: None, expressed_moves: Vec::new() };
+    let placement = |id: u64| Occurrence {
+        id,
+        component: part,
+        parent: 0,
+        name: format!("Part:{id}"),
+        transform: IDENTITY,
+        grounded: false,
+        bom_type: None,
+        expressed_moves: Vec::new(),
+    };
     doc.occurrences.extend((1..MAX_PLACEMENTS as u64).map(|i| placement(base + i)));
     let all = listed(&doc, view(View::AllLevels)).unwrap();
     assert_eq!((all.rows.len(), all.total.occurrences), (1, MAX_PLACEMENTS as u64));
@@ -484,8 +492,16 @@ fn every_placement_is_in_one_row_or_none() {
 fn a_damaged_files_structure_is_listed_or_refused_never_followed_forever() {
     let mut doc = Document::default();
     let (a, _) = add(&mut doc, "A", 0);
-    let ghost =
-        |id, component, parent| Occurrence { id, component, parent, name: format!("{id}"), transform: IDENTITY, grounded: false, bom_type: None, expressed_moves: Vec::new() };
+    let ghost = |id, component, parent| Occurrence {
+        id,
+        component,
+        parent,
+        name: format!("{id}"),
+        transform: IDENTITY,
+        grounded: false,
+        bom_type: None,
+        expressed_moves: Vec::new(),
+    };
     // An occurrence of a component that isn't there has no row and counts nowhere.
     doc.occurrences.push(ghost(900, 999, 0));
     assert_eq!(rows(&listed(&doc, Request::default()).unwrap()), [row("1", "A", Normal, 1, 1)]);
