@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Concentric constraint</title>
+  <path d="M12 40.78L12 48.78A20 11.55 0 0 0 52 48.78L52 40.78Z" fill="#b8c3cf"/>
+  <path d="M39 40.78L39 59.59A20 11.55 0 0 0 52 48.78L52 40.78Z" fill="#8e9faf"/>
+  <path d="M12 40.78L12 48.78A20 11.55 0 0 0 52 48.78L52 40.78Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12 40.78A20 11.55 0 1 0 52 40.78A20 11.55 0 1 0 12 40.78Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 14.78L24 32.78A8 4.62 0 0 0 40 32.78L40 14.78Z" fill="#b8c3cf"/>
+  <path d="M34.8 14.78L34.8 37.11A8 4.62 0 0 0 40 32.78L40 14.78Z" fill="#8e9faf"/>
+  <path d="M24 14.78L24 32.78A8 4.62 0 0 0 40 32.78L40 14.78Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 14.78A8 4.62 0 1 0 40 14.78A8 4.62 0 1 0 24 14.78Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 4.78L32 58.78" fill="none" stroke="#ffffff" stroke-width="4.75" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 4.78L32 58.78" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

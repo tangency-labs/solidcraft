@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Point on axis constraint</title>
+  <path d="M22 31.67L22 53.67A10 5.77 0 0 0 42 53.67L42 31.67Z" fill="#b8c3cf"/>
+  <path d="M35.5 31.67L35.5 59.08A10 5.77 0 0 0 42 53.67L42 31.67Z" fill="#8e9faf"/>
+  <path d="M22 31.67L22 53.67A10 5.77 0 0 0 42 53.67L42 31.67Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22 31.67A10 5.77 0 1 0 42 31.67A10 5.77 0 1 0 22 31.67Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 5.67L32 31.67" fill="none" stroke="#ffffff" stroke-width="4.75" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 5.67L32 31.67" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="10.67" r="4.2" fill="#236ead"/>
+</svg>

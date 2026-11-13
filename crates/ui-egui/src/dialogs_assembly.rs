@@ -16,7 +16,7 @@ use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::joints::{JointKind, JointOrigin, Snap};
+use solidcraft_engine::doc::joints::{Constraint, JointKind, JointOrigin, Snap};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::geom::{Aabb3, Mesh};
 
@@ -2093,6 +2093,24 @@ pub(crate) fn snap_name(k: SnapKind) -> &'static str {
 
 // ---- timeline and browser ----
 
+/// How a joint row shows a joint: its icon and tooltip. A constraint shows its rule's own icon and
+/// "Mate constraint" (the rule, not the joint kind it is kept as); any other joint, its kind.
+pub(crate) fn joint_look(kind: JointKind, constraint: Option<Constraint>) -> (&'static str, String) {
+    match constraint {
+        Some(c) => {
+            (crate::dialogs_constrain::rule_icon(c), solidcraft_ui_text::format("constrain.row_tip", &[("rule", crate::dialogs_constrain::label(c))]))
+        }
+        None => ("joint", format!("{kind:?} joint")),
+    }
+}
+
+/// The dialog a joint row's double-click and its menu's Edit open: Constrain on a constraint (to
+/// change its rule), Edit Joint on any other joint.
+pub fn open_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
+    let tagged = app.session.doc.assembly.joints.iter().any(|j| j.id == id && j.constraint.is_some());
+    if tagged { crate::dialogs_constrain::edit_constraint(app, id) } else { edit_joint(app, id) }
+}
+
 /// A joint's menu (timeline and browser): Edit, Drive, Suppress, Delete.
 fn joint_menu(
     app: &SolveApp,
@@ -2101,8 +2119,10 @@ fn joint_menu(
     open: &mut Option<Dialog>,
     run: &mut Option<(&'static str, Value)>,
 ) {
-    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Edit Joint"), crate::ui_kit::Button::Normal).clicked() {
-        *open = edit_joint(app, id);
+    let tagged = app.session.doc.assembly.joints.iter().any(|j| j.id == id && j.constraint.is_some());
+    let edit = if tagged { solidcraft_ui_text::tr("cmd.assembly_constraint_edit") } else { solidcraft_ui_text::tr_label("Edit Joint") };
+    if crate::ui_kit::button(ui, edit, crate::ui_kit::Button::Normal).clicked() {
+        *open = open_joint(app, id);
         ui.close();
     }
     if kind != JointKind::Rigid && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Drive Joint"), crate::ui_kit::Button::Normal).clicked() {
@@ -2298,7 +2318,7 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
         }
         let resp = resp.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
         if resp.double_clicked() {
-            open = edit_joint(app, id);
+            open = open_joint(app, id);
         } else if resp.clicked() {
             pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
@@ -2389,7 +2409,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
         );
         let response = response.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
         if response.double_clicked() {
-            open = edit_joint(app, id);
+            open = open_joint(app, id);
         } else if response.clicked() {
             pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
@@ -2415,8 +2435,8 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 /// edits, drives, suppresses or deletes). Returns the joint whose row is under the pointer.
 pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Option<u64> {
     use crate::browser::{Row, draw_row, is_open, toggle};
-    let joints: Vec<(u64, String, JointKind, bool)> =
-        app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
+    let joints: Vec<(u64, String, JointKind, bool, Option<Constraint>)> =
+        app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed, j.constraint)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
     if joints.is_empty() {
         return None;
@@ -2443,16 +2463,17 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
     }
     let mut dialog: Option<Dialog> = None;
     let mut hovered = None;
-    for (id, name, kind, suppressed) in joints {
+    for (id, name, kind, suppressed, constraint) in joints {
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
+        let (icon, tip) = joint_look(kind, constraint);
         let r = draw_row(
             ui,
             ui.scope_id().with(("joint", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
-                icon: "joint",
+                icon,
                 label: &name,
                 name: true,
                 rename: true,
@@ -2462,7 +2483,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
             },
         );
         if let Some(resp) = &r.resp {
-            resp.clone().backing_on_hover_text(format!("{kind:?} joint"));
+            resp.clone().backing_on_hover_text(tip);
         }
         if r.hovered {
             hovered = Some(id);
@@ -2476,7 +2497,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
         if r.slow_rename {
             crate::browser::start_inline_rename(app, crate::context_menu::RenameWhat::Joint(id), &r);
         } else if r.double {
-            dialog = edit_joint(app, id);
+            dialog = open_joint(app, id);
         }
         crate::browser::inline_rename(app, ui, &r, &name);
         // The same menus as the rest of the browser.
@@ -2545,13 +2566,14 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         let id = j.id;
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
+        let (icon, tip) = joint_look(j.kind, j.constraint);
         let r = draw_row(
             ui,
             ui.scope_id().with((&key, "joint", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
-                icon: "joint",
+                icon,
                 label: &j.name,
                 secondary: &j.other,
                 name: true,
@@ -2564,7 +2586,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
             hovered = Some(id);
         }
         if let Some(resp) = &r.resp {
-            resp.clone().backing_on_hover_text(format!("{:?} joint", j.kind));
+            resp.clone().backing_on_hover_text(tip);
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
@@ -2572,7 +2594,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
             pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
         if r.double {
-            dialog = edit_joint(app, id);
+            dialog = open_joint(app, id);
         }
         if let Some(at) = r.secondary {
             if !app.tree.picked_joints.contains(&id) {
@@ -2594,6 +2616,8 @@ pub(crate) struct PlacementJoint {
     pub id: u64,
     pub name: String,
     pub kind: JointKind,
+    /// The rule it was made as, for a constraint.
+    pub constraint: Option<Constraint>,
     pub suppressed: bool,
     /// The name of the placement the joint joins this one to (empty when there is none).
     pub other: String,
@@ -2628,7 +2652,14 @@ fn placement_joint_index(doc: &solidcraft_engine::doc::Document) -> std::collect
     let name_of = |o: u64| names.get(&o).map(|n| (*n).to_string()).unwrap_or_default();
     let mut by: std::collections::HashMap<u64, Vec<PlacementJoint>> = std::collections::HashMap::new();
     for j in &doc.assembly.joints {
-        let joint = |other: u64| PlacementJoint { id: j.id, name: j.name.clone(), kind: j.kind, suppressed: j.suppressed, other: name_of(other) };
+        let joint = |other: u64| PlacementJoint {
+            id: j.id,
+            name: j.name.clone(),
+            kind: j.kind,
+            constraint: j.constraint,
+            suppressed: j.suppressed,
+            other: name_of(other),
+        };
         by.entry(j.a.occurrence).or_default().push(joint(j.b.occurrence));
         if j.b.occurrence != j.a.occurrence {
             by.entry(j.b.occurrence).or_default().push(joint(j.a.occurrence));

@@ -25,7 +25,8 @@
     "constrain.rule_perpendicular": "Perpendicular",
     "constrain.rule_angle": "Angle",
     "constrain.rule_tangent": "Tangent",
-    "constrain.rule_point_on_axis": "Point on axis"
+    "constrain.rule_point_on_axis": "Point on axis",
+    "constrain.row_tip": "{rule} constraint"
   },
   "de": {
     "help.assembly.constraint.create": "Platziert ein Teil an einem anderen durch eine geometrische Regel zwischen je einer Referenz: Passend, Bündig, Abstand, Konzentrisch, Tangential und weitere. Jede Regel nimmt dem Teil einen Teil seiner Freiheit und lässt den Rest. Damit positionieren Sie Teile beim Konstruieren, bevor feststeht, wie sie sich bewegen.",
@@ -53,7 +54,8 @@
     "constrain.rule_perpendicular": "Senkrecht",
     "constrain.rule_angle": "Winkel",
     "constrain.rule_tangent": "Tangential",
-    "constrain.rule_point_on_axis": "Punkt auf Achse"
+    "constrain.rule_point_on_axis": "Punkt auf Achse",
+    "constrain.row_tip": "Abhängigkeit {rule}"
   },
   "ja": {
     "help.assembly.constraint.create": "各部品の参照どうしの幾何ルール（合致、同一面、距離、同心、接線など）で部品を別の部品に配置します。各ルールは部品の自由度の一部を取り除き、残りは保ちます。動き方が決まる前の設計中に部品を位置決めするのに使います。",
@@ -81,7 +83,8 @@
     "constrain.rule_perpendicular": "垂直",
     "constrain.rule_angle": "角度",
     "constrain.rule_tangent": "接線",
-    "constrain.rule_point_on_axis": "軸上の点"
+    "constrain.rule_point_on_axis": "軸上の点",
+    "constrain.row_tip": "{rule}拘束"
   },
   "zh": {
     "help.assembly.constraint.create": "通过两个零件各自参照之间的几何规则（配合、齐平、距离、同心、相切等）放置零件。每条规则去除零件的部分自由度并保留其余部分。用于在设计时、尚不清楚零件如何运动之前定位零件。",
@@ -109,7 +112,8 @@
     "constrain.rule_perpendicular": "垂直",
     "constrain.rule_angle": "角度",
     "constrain.rule_tangent": "相切",
-    "constrain.rule_point_on_axis": "轴上点"
+    "constrain.rule_point_on_axis": "轴上点",
+    "constrain.row_tip": "{rule}约束"
   },
   "ko": {
     "help.assembly.constraint.create": "각 부품의 참조 사이의 기하 규칙(메이트, 플러시, 거리, 동심, 접선 등)으로 부품을 다른 부품에 배치합니다. 각 규칙은 부품의 자유도 일부를 없애고 나머지는 유지합니다. 움직임이 정해지기 전, 설계하면서 부품의 위치를 잡을 때 사용합니다.",
@@ -137,7 +141,8 @@
     "constrain.rule_perpendicular": "수직",
     "constrain.rule_angle": "각도",
     "constrain.rule_tangent": "접선",
-    "constrain.rule_point_on_axis": "축 위의 점"
+    "constrain.rule_point_on_axis": "축 위의 점",
+    "constrain.row_tip": "{rule} 구속"
   },
   "vi": {
     "help.assembly.constraint.create": "Đặt một chi tiết vào chi tiết khác bằng một quy tắc hình học giữa một tham chiếu trên mỗi chi tiết: áp mặt, phẳng hàng, khoảng cách, đồng tâm, tiếp xúc và các quy tắc khác. Mỗi quy tắc bỏ đi một phần bậc tự do của chi tiết và giữ phần còn lại. Dùng để định vị chi tiết trong khi thiết kế, trước khi biết chúng chuyển động thế nào.",
@@ -165,7 +170,8 @@
     "constrain.rule_perpendicular": "Vuông góc",
     "constrain.rule_angle": "Góc",
     "constrain.rule_tangent": "Tiếp xúc",
-    "constrain.rule_point_on_axis": "Điểm trên trục"
+    "constrain.rule_point_on_axis": "Điểm trên trục",
+    "constrain.row_tip": "Ràng buộc {rule}"
   },
   "ar": {
     "help.assembly.constraint.create": "يضع جزءًا مقابل جزء آخر بقاعدة هندسية بين مرجع على كل منهما: تلاصق، استواء، مسافة، تمركز، تماس وغيرها. كل قاعدة تزيل بعض حرية الجزء وتُبقي الباقي. استخدمه لتحديد مواضع الأجزاء أثناء التصميم، قبل أن تعرف كيف تتحرك.",
@@ -193,7 +199,8 @@
     "constrain.rule_perpendicular": "تعامد",
     "constrain.rule_angle": "زاوية",
     "constrain.rule_tangent": "تماس",
-    "constrain.rule_point_on_axis": "نقطة على محور"
+    "constrain.rule_point_on_axis": "نقطة على محور",
+    "constrain.row_tip": "قيد {rule}"
   },
   "he": {
     "help.assembly.constraint.create": "ממקם חלק מול חלק אחר בכלל גאומטרי בין הפניה על כל אחד מהם: הצמדה, יישור, מרחק, קונצנטריות, משיקות ועוד. כל כלל מסיר חלק מחופש התנועה של החלק ומשאיר את השאר. השתמשו בו כדי למקם חלקים בזמן התכנון, לפני שידוע איך הם נעים.",
@@ -221,6 +228,7 @@
     "constrain.rule_perpendicular": "ניצב",
     "constrain.rule_angle": "זווית",
     "constrain.rule_tangent": "משיק",
-    "constrain.rule_point_on_axis": "נקודה על ציר"
+    "constrain.rule_point_on_axis": "נקודה על ציר",
+    "constrain.row_tip": "אילוץ {rule}"
   }
 }
