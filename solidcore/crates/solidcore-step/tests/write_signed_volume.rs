@@ -1078,6 +1078,60 @@ fn a_sphere_a_cone_and_a_torus_are_written_right_side_out() {
     assert_right_side_out("torus", &mut kernel, &mut torus, 2.0 * PI * PI * 5.0 * 2.25, 1e-9);
 }
 
+/// A solid bounded by an inside-out torus (its minor circle's NURB running against STEP's
+/// minor angle), on the default kernel: the torus knows it is inside out, as its generator
+/// says, so the file's face is the right way round. TOROIDAL_SURFACE's normal points out of
+/// its tube, which is out of the material here, so the face's `same_sense` is .T.; its loops
+/// and `same_sense` give the solid's volume 2π²Rr² with a positive sign. Read back, the
+/// solid needs no face turned over, is valid, and has the same volume.
+#[test]
+fn an_inside_out_torus_is_written_right_side_out_and_reads_back() {
+    use solidcore::curve::curve::CurveKind;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::mass::integrator::properties::brep_volume_default;
+    use solidcore::surface::surface::{Surface, SurfaceKind};
+    use solidcore::surface::torus::{Torus, TorusOptions};
+    use solidcore::topology::brep::sheet::sheet_on;
+    use solidcore::topology::brep::validation::{CheckLevel, check_brep};
+    use solidcore_convert::brep::to_kernel_body;
+    use std::f64::consts::PI;
+    let mut kernel = Kernel::default();
+    let frame = Axis2Placement::new(Point3::new(3.0, 4.0, 5.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+    let torus = Torus::create_canonical(&kernel, &frame, 5.0, 1.5, TorusOptions { inside_out: true, ..TorusOptions::default() }, None).unwrap();
+    let generator_inside_out = match torus.base().gen_curve().unwrap().kind() {
+        CurveKind::Ellipse(e) => e.inside_out(),
+        _ => panic!("the torus's generator is a circle"),
+    };
+    assert!(generator_inside_out, "the generator runs against the minor angle");
+    let (mut brep, face) = sheet_on(&mut kernel, Surface::from(torus), 1e-6).unwrap();
+    let SurfaceKind::Torus(on_face) = brep.face(face).unwrap().surface.as_ref().unwrap().kind() else {
+        panic!("the face is on a torus");
+    };
+    assert!(on_face.inside_out(), "the face's torus forgot that it is inside out");
+    let expected = 2.0 * PI * PI * 5.0 * 2.25;
+    let kernel_volume = brep_volume_default(&kernel, &mut brep, 1e-9).unwrap();
+    assert!((kernel_volume - expected).abs() <= 1e-9 * expected, "kernel volume {kernel_volume}, expected {expected}");
+
+    assert_right_side_out("inside-out torus", &mut kernel, &mut brep, expected, 1e-9);
+    let text = write_step("inside-out torus", &mut kernel, &mut brep);
+    let faces = measure(&text);
+    assert_eq!(faces.len(), 1, "{faces:?}");
+    assert!(faces[0].same_sense, "the face's normal is the torus's outward one: {:?}", faces[0]);
+    assert!(faces[0].by_sense > 0.0 && faces[0].by_loops > 0.0, "{:?}", faces[0]);
+
+    let read = solidcore_step::topology::read_solids(&p21::parse(&text).unwrap());
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert_eq!(read.solids.len(), 1);
+    let solid = &read.solids[0];
+    assert!(!solid.sheet && solid.turned.is_empty(), "read back turned faces over: {:?} {:?}", solid.turned, solid.notes);
+    let mut back = to_kernel_body(&mut kernel, &solid.brep, false).unwrap();
+    let check = check_brep(&mut kernel, &mut back, CheckLevel::Level2).unwrap();
+    assert_eq!(check.pointers_status, 1000, "pointers");
+    assert_eq!(check.assert_valid, Some(true), "{:?}", check.reports);
+    let back_volume = brep_volume_default(&kernel, &mut back, 1e-9).unwrap();
+    assert!((back_volume - expected).abs() <= 1e-9 * expected, "read-back volume {back_volume}, expected {expected}");
+}
+
 /// A loft (degree 1) from a square of circumradius 2 to one of circumradius 1 turned by
 /// 30 degrees, 6 above it: its four sides are bilinear B-spline surfaces. Its cross-section
 /// area is quadratic in the height, so the prismatoid formula is exact:
