@@ -1422,35 +1422,35 @@ mod tests {
         (br, e)
     }
 
-    /// A line edge from the origin to (10, 0, 0) and a ray past it: nearest where the ray
-    /// passes over the edge, at the ray's origin where it points away, and on the edge's end
-    /// where the ray passes beyond it.
+    /// A line edge from the origin to (1, 0, 0) (the helper's line runs one unit from its first
+    /// point over `[0, 1]`) and a ray past it: nearest where the ray passes over the edge, at the
+    /// ray's origin where it points away, and on the edge's end where the ray passes beyond it.
     #[test]
     fn a_line_edge_is_nearest_a_ray_where_the_ray_passes_it() {
         let k = Kernel::default();
-        let (b, e) = wire(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), true);
+        let (b, e) = wire(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), true);
         let near = |o: Point3, d: Vec3| closest_point_to_ray(&k, &b, e, o, d).unwrap().unwrap();
 
         // down past the edge, 3 to its side: the edge's middle, under the ray
-        let c = near(Point3::new(5.0, 3.0, 4.0), Vec3::new(0.0, 0.0, -1.0));
+        let c = near(Point3::new(0.5, 3.0, 4.0), Vec3::new(0.0, 0.0, -1.0));
         assert!((c.parameter - 0.5).abs() < 1e-6, "{c:?}");
-        assert!(c.point.distance(Point3::new(5.0, 0.0, 0.0)) < 1e-6, "{c:?}");
+        assert!(c.point.distance(Point3::new(0.5, 0.0, 0.0)) < 1e-6, "{c:?}");
         assert!(
-            c.on_ray.distance(Point3::new(5.0, 3.0, 0.0)) < 1e-6,
+            c.on_ray.distance(Point3::new(0.5, 3.0, 0.0)) < 1e-6,
             "{c:?}"
         );
         assert!((c.distance - 3.0).abs() < 1e-6, "{c:?}");
 
         // the same line pointing up, away from the edge: nearest at the ray's origin
-        let c = near(Point3::new(5.0, 3.0, 4.0), Vec3::new(0.0, 0.0, 1.0));
+        let c = near(Point3::new(0.5, 3.0, 4.0), Vec3::new(0.0, 0.0, 1.0));
         assert!(
-            c.on_ray.distance(Point3::new(5.0, 3.0, 4.0)) < 1e-6,
+            c.on_ray.distance(Point3::new(0.5, 3.0, 4.0)) < 1e-6,
             "{c:?}"
         );
         assert!((c.distance - 5.0).abs() < 1e-6, "{c:?}");
 
         // a slanted ray crossing the edge's line past its end: nearest at the end
-        let c = near(Point3::new(14.0, 0.0, 8.0), Vec3::new(0.0, 1.0, -2.0));
+        let c = near(Point3::new(1.4, 0.0, 8.0), Vec3::new(0.0, 1.0, -2.0));
         assert!((c.parameter - 1.0).abs() < 1e-6, "{c:?}");
 
         // a direction of no length or not finite is refused
