@@ -2123,6 +2123,27 @@ fn step_conformance_parts_read_back_their_exact_shape() {
     }
 }
 
+/// `tiny_rounds_coarse_tolerance` (tests/step-regressions): a pin's quarter round, a corner ball
+/// and a rim's quarter torus, each of radius 0.05 mm, in a file of 0.1 mm uncertainty. Every
+/// face comes in with its exact area (a quarter turn of the round 1 mm long, an eighth of the
+/// ball, a quarter of the torus's tube on a quarter of its ring). A collapse test that took a
+/// surface thinner than the tolerance for a pole refused all three ("a face whose boundary does
+/// not lie on its surface"); the step-conformance files all state 1e-6 mm or less and never met
+/// it.
+#[test]
+fn faces_smaller_than_a_coarse_tolerance_read() {
+    let text = include_str!("../../../../tests/step-regressions/tiny_rounds_coarse_tolerance.step");
+    let imp = step_import(text).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported")), "{:?}", imp.warnings);
+    assert_eq!(imp.bodies.len(), 1);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert_eq!(m.faces, 3);
+    let (r, ring) = (0.05, 2.0);
+    let half = std::f64::consts::FRAC_PI_2;
+    let area = half * r + 4.0 * std::f64::consts::PI * r * r / 8.0 + half * r * (ring * half + r);
+    assert!(rel(m.area, area) < 1e-3, "area {} vs {area}", m.area);
+}
+
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {

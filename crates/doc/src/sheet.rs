@@ -1574,6 +1574,135 @@ fn curved_fold(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<Cu
     })
 }
 
+/// A panel's outline cut exactly across a fold whose zone falls apart into tabs (see
+/// `Sheet::fold_tabs`): the stretches of outline short of the zone, and between them each tab,
+/// as the outline runs into the zone, beyond it and back. Every curve stays as drawn.
+#[derive(Clone, Debug, PartialEq)]
+struct TabCut {
+    /// `near[k]` is followed by `tabs[k]`, which is followed by `near[k + 1]` (round the loop).
+    near: Vec<Vec<Seg2>>,
+    tabs: Vec<CutTab>,
+}
+
+/// One tab of a [`TabCut`]: into the zone, beyond it and back, and its span along the line.
+#[derive(Clone, Debug, PartialEq)]
+struct CutTab {
+    into: Vec<Seg2>,
+    far: Vec<Seg2>,
+    back: Vec<Seg2>,
+    u: (f64, f64),
+}
+
+impl TabCut {
+    /// The part that stays: the outline short of the zone, with the tabs that `fold` keeps
+    /// whole and each one that folds closed off along the zone's near line.
+    fn fixed(&self, fold: impl Fn(usize) -> bool) -> Loop2 {
+        let mut segs = Vec::new();
+        let count = self.near.len();
+        for (k, (near, tab)) in self.near.iter().zip(&self.tabs).enumerate() {
+            segs.extend_from_slice(near);
+            if fold(k) {
+                let (Some(a), Some(b)) = (near.last().map(Seg2::end), self.near.get((k + 1) % count).and_then(|n| n.first()).map(Seg2::start)) else {
+                    continue;
+                };
+                segs.push(Seg2::Line { a, b });
+            } else {
+                segs.extend(tab.into.iter().chain(&tab.far).chain(&tab.back).cloned());
+            }
+        }
+        Loop2 { segs }
+    }
+
+    /// Tab `k`'s material beyond the zone, closed off along the zone's far line.
+    fn moving(&self, k: usize) -> Option<Loop2> {
+        let far = &self.tabs.get(k)?.far;
+        let mut segs = far.clone();
+        segs.push(Seg2::Line { a: far.last()?.end(), b: far.first()?.start() });
+        Some(Loop2 { segs })
+    }
+}
+
+/// `outline` cut at the zone between the lines at `s0` and `s0 + ba` along `n` into the
+/// stretches short of it and the tabs that cross it: each tab goes into the zone on straight
+/// edges, out the far side, and back, once. Anything else (a notch into the zone, a tab that
+/// comes back into the zone beyond it, an edge along either line) is `None`.
+fn tab_cut(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<TabCut> {
+    const ON_LINE: f64 = 1e-6;
+    if outline.segs.len() > MAX_FLAT_POINTS {
+        return None;
+    }
+    let outline = outline.ccw();
+    let mut pieces = Vec::new();
+    for seg in &outline.segs {
+        let mut near = Vec::new();
+        cut_at_level(seg, n, s0, &mut near);
+        for piece in &near {
+            cut_at_level(piece, n, s0 + ba, &mut pieces);
+        }
+    }
+    let mut bands = Vec::with_capacity(pieces.len());
+    for piece in &pieces {
+        let v = piece.mid().dot(n);
+        if !v.is_finite() || (v - s0).abs() <= ON_LINE || (v - s0 - ba).abs() <= ON_LINE {
+            return None;
+        }
+        bands.push(if v < s0 {
+            0
+        } else if v > s0 + ba {
+            2
+        } else {
+            1
+        });
+    }
+    let count = pieces.len();
+    let first = (0..count).find(|&i| bands.get(i) == Some(&0) && bands.get((i + count - 1) % count) != Some(&0))?;
+    let mut runs: Vec<(i32, Vec<Seg2>)> = Vec::new();
+    for k in 0..count {
+        let i = (first + k) % count;
+        let (band, piece) = (*bands.get(i)?, *pieces.get(i)?);
+        match runs.last_mut() {
+            Some((b, run)) if *b == band => run.push(piece),
+            _ => runs.push((band, vec![piece])),
+        }
+    }
+    let on = |q: Vec2, s: f64| (q.dot(n) - s).abs() <= ON_LINE;
+    // Into the zone and back must be straight edges square across it, as the tabs' zone pieces
+    // are rectangles.
+    let square = |run: &[Seg2]| {
+        run.iter().all(|s| match *s {
+            Seg2::Line { a, b } => ((b - a).dot(d)).abs() <= ON_LINE,
+            _ => false,
+        })
+    };
+    let (mut near, mut tabs) = (Vec::new(), Vec::new());
+    for chunk in runs.chunks(4) {
+        let [(0, n0), (1, into), (2, far), (1, back)] = chunk else { return None };
+        let (Some(i0), Some(i1), Some(f0), Some(f1), Some(b0), Some(b1)) = (
+            into.first().map(Seg2::start),
+            into.last().map(Seg2::end),
+            far.first().map(Seg2::start),
+            far.last().map(Seg2::end),
+            back.first().map(Seg2::start),
+            back.last().map(Seg2::end),
+        ) else {
+            return None;
+        };
+        if !(on(i0, s0) && on(i1, s0 + ba) && on(f0, s0 + ba) && on(f1, s0 + ba) && on(b0, s0 + ba) && on(b1, s0) && square(into) && square(back)) {
+            return None;
+        }
+        let u = (i0.dot(d).min(b1.dot(d)), i0.dot(d).max(b1.dot(d)));
+        if u.1 - u.0 <= ON_LINE {
+            return None;
+        }
+        near.push(n0.clone());
+        tabs.push(CutTab { into: into.clone(), far: far.clone(), back: back.clone(), u });
+    }
+    if tabs.len() < 2 {
+        return None;
+    }
+    Some(TabCut { near, tabs })
+}
+
 /// Two counter-clockwise loops joined along a straight edge they share, running opposite ways:
 /// every curve of both exactly as it was, which the planar booleans wouldn't hand back.
 fn join_along_seam(a: &Loop2, b: &Loop2) -> Option<Loop2> {
@@ -5666,7 +5795,7 @@ impl SheetBody {
         if strips.len() > 1 {
             let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
             let angle = if flip { -angle } else { angle };
-            return self.fold_tabs(panel, &pts, (n, d), (s0, ba), span, (angle, radius), &strips);
+            return self.fold_tabs(panel, (&pts, &outline), (n, d), (s0, ba), span, (angle, radius), &strips);
         }
         // The bend zone is a rectangle across the panel, or straight edges of the sheet slant
         // across it, or curved ones do. Those ends fold to helices and curves, as torn ends and
@@ -5776,7 +5905,7 @@ impl SheetBody {
     fn fold_tabs(
         &mut self,
         panel: Option<usize>,
-        pts: &[Vec2],
+        (pts, outline): (&[Vec2], &Loop2),
         (n, d): (Vec2, Vec2),
         (s0, ba): (f64, f64),
         span: (f64, f64),
@@ -5843,13 +5972,28 @@ impl SheetBody {
             let leg = moving.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
             made.push((u0, u1, n * s0 + d * u0, leg, moving));
         }
-        // Flanges already on this panel: those beyond a folding tab move with it.
+        // Flanges already on this panel: those beyond a folding tab move with it. A flange wholly
+        // beyond the zone sits on one piece of the material beyond it, and goes where that piece
+        // goes, however long its bend is: a rim on a flared wall is longer than the wall's bend
+        // (#15519).
+        let piece_of = |f: &SheetFlange| {
+            let root = f.p + f.d * (f.len / 2.0);
+            beyond.iter().position(|part| near_outline(&Ring::new(part.clone()), root, 1e-6))
+        };
         let mut moves = Vec::new();
         for (k, f) in self.flanges.iter().enumerate() {
             if f.parent != panel {
                 continue;
             }
             let (e0, e1) = (f.p.dot(n) - s0, (f.p + f.d * f.len).dot(n) - s0);
+            if e0.min(e1) >= ba - 1e-9
+                && let Some(piece) = piece_of(f)
+            {
+                if let Some(j) = chosen.iter().position(|i| hangs.get(*i).is_some_and(|h| h.contains(&piece))) {
+                    moves.push((k, j));
+                }
+                continue;
+            }
             let fu = (f.p.dot(d).min((f.p + f.d * f.len).dot(d)), f.p.dot(d).max((f.p + f.d * f.len).dot(d)));
             let crosses = Err(DocError::Invalid("not supported yet: a fold through a flange's bend".into()));
             match made.iter().position(|m| fu.0 >= m.0 - 1e-9 && fu.1 <= m.1 + 1e-9) {
@@ -5865,17 +6009,53 @@ impl SheetBody {
             }
             v.into_iter().map(snap).collect::<Vec<_>>()
         };
+        // The same pieces cut from the exact outline, so its arcs and curves stay as drawn: cut
+        // from the chords, every arc came out as one flat face per chord (a hundred and more for
+        // a few rounded corners). Where the exact cut doesn't come out as the same pieces, the
+        // chords stay.
+        let exact = tab_cut(outline, n, d, s0, ba).and_then(|cut| {
+            if cut.tabs.len() != strips.len() {
+                return None;
+            }
+            let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() <= 1e-4 && (a.1 - b.1).abs() <= 1e-4;
+            let of = strip_u.iter().map(|&u| cut.tabs.iter().position(|t| near(t.u, u))).collect::<Option<Vec<usize>>>()?;
+            let folds = chosen.iter().map(|&i| of.get(i).copied()).collect::<Option<Vec<usize>>>()?;
+            // The chords cut off at most their sagitta (1e-3) along the outline.
+            let close = |exact: &Loop2, poly: &[Vec2]| {
+                let m = poly.len();
+                let perimeter: f64 = (0..m).filter_map(|i| Some(poly.get(i)?.dist(*poly.get((i + 1) % m)?))).sum();
+                (exact.signed_area().abs() - signed_area(poly).abs()).abs() <= 2e-3 * perimeter + 1e-6
+            };
+            let fixed_exact = cut.fixed(|k| folds.contains(&k));
+            if !close(&fixed_exact, &fixed) {
+                return None;
+            }
+            let mut moving = Vec::with_capacity(folds.len());
+            for (&k, m) in folds.iter().zip(&made) {
+                let lp = cut.moving(k)?;
+                if !close(&lp, &m.4) {
+                    return None;
+                }
+                moving.push(lp.ccw());
+            }
+            Some((fixed_exact.ccw(), moving))
+        });
+        let (fixed_exact, mut moving_exact) = match exact {
+            Some((f, m)) => (Some(f), m.into_iter().map(Some).collect()),
+            None => (None, Vec::new()),
+        };
+        moving_exact.resize(made.len(), None);
         match panel {
-            None => self.base = Region2 { outer: Loop2::polygon(&fixed).ccw(), holes: self.base.holes.clone() },
+            None => self.base = Region2 { outer: fixed_exact.unwrap_or_else(|| Loop2::polygon(&fixed).ccw()), holes: self.base.holes.clone() },
             Some(j) => {
                 if let Some(f) = self.flanges.get_mut(j) {
                     f.shape = Some(ccw(fixed));
-                    f.exact = None;
+                    f.exact = fixed_exact;
                 }
             }
         }
         let first = self.flanges.len();
-        for (u0, u1, p0, leg, moving) in made {
+        for ((u0, u1, p0, leg, moving), exact) in made.into_iter().zip(moving_exact) {
             self.flanges.push(SheetFlange {
                 parent: panel,
                 p: snap(p0),
@@ -5891,7 +6071,7 @@ impl SheetBody {
                 tear_curved: (false, false),
                 tear_ease: (0.0, 0.0),
                 shape: Some(ccw(moving)),
-                exact: None,
+                exact,
                 zone_shape: None,
                 tag: String::new(),
             });

@@ -430,6 +430,38 @@ pub const ELEMENTS: &[Element] = &[
             },
         );
     }),
+    element!("browser", |ui, _| {
+        let mut state = browser::BrowserState::default();
+        let header = browser::Header { title: "Objects", count: "2 objects", collapsible: true, search: Some("Search objects") };
+        let _ = browser::Browser::new(&mut state, browser::Style::default(), 0).header(header).show(ui, |rows| {
+            rows.row(browser::Node {
+                id: 1,
+                key: "layer",
+                row: Row { fold: Some(true), eye: Some(true), icon: "folder", label: "Default", radio: Some(true), count: "2", ..Default::default() },
+                click_folds: true,
+                ..Default::default()
+            });
+            for (id, label, selected) in [(2, "Body 1", true), (3, "Body 2", false)] {
+                rows.row(browser::Node {
+                    id,
+                    key: label,
+                    row: Row {
+                        depth: 1,
+                        eye: Some(true),
+                        icon: "body",
+                        label,
+                        name: true,
+                        selected,
+                        mark: if selected { Mark::Here } else { Mark::None },
+                        ..Default::default()
+                    },
+                    select: browser::Selectable::Yes(0),
+                    rename: browser::Rename::Inline,
+                    ..Default::default()
+                });
+            }
+        });
+    }),
     element!("tree_row_disabled_actions", |ui, _| {
         let actions =
             [TreeAction { icon: "lookat", hover_only: true, label: "Solo", reason: Some("Not available yet"), target: "gallery:tree:solo" }];
@@ -668,13 +700,7 @@ pub const ELEMENTS: &[Element] = &[
                 |ui| {
                     text(ui, "Controls", Text::Inline);
                 },
-                |ui, ()| {
-                    layout_preview(
-                        ui,
-                        LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true },
-                        "Where the panels go",
-                    )
-                },
+                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history_in_browser: false }, "Where the panels go"),
             )
         });
     }),
@@ -1085,9 +1111,6 @@ pub const ELEMENTS: &[Element] = &[
             history_marker(ui.painter(), rect, false, accent);
         });
     }),
-    element!("history_seam_rest", |ui, _| history_seam_example(ui, HistoryHandleState::Rest)),
-    element!("history_seam_hover", |ui, _| history_seam_example(ui, HistoryHandleState::Hover)),
-    element!("history_seam_drag", |ui, _| history_seam_example(ui, HistoryHandleState::Drag)),
     element!("file_navigation", |ui, _| {
         FileView::navigation(ui, |ui| {
             FileView::back_to(ui, "gallery:file:back", "Back to {name}", "Sample Plate", "Esc");
@@ -1719,6 +1742,9 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
+    }),
+    element!("value_row", "dialog:row:Gallery", None, |ui, _| {
+        value_row(ui, "Gallery", "XY plane");
     }),
     element!("count_row", "dialog:row:Gallery", Some("dialog:Gallery up"), |ui, _| {
         let mut count = "6".to_owned();
@@ -2524,19 +2550,6 @@ fn gallery_covers_every_inline_element() {
                 }
             }
         }
-    }
-}
-
-#[cfg(any(test, feature = "test-support"))]
-fn history_seam_example(ui: &mut Ui, state: HistoryHandleState) {
-    let t = Tokens::get();
-    let allocation = ui.allocate_space(vec2(280.0, 250.0)).1;
-    for (names, offset) in [(false, 0.0), (true, 125.0)] {
-        let width = if state == HistoryHandleState::Drag { 112.0 } else { history_width(names) };
-        // Separate samples vertically so the guide/chip fits within the gallery allocation.
-        let card = egui::Rect::from_min_size(allocation.min + vec2(t.space_8, offset + t.space_8), vec2(width, 104.0));
-        ui.painter().rect(card, t.radius_lg, t.panel, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-        HistorySeam::new(card).paint(ui.painter(), card, names, state);
     }
 }
 

@@ -262,7 +262,10 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
     use RoomReason as R;
     Some(match r {
         NoRoomReason::BallDoesNotFit => R::BallDoesNotFit,
+        // the crease trim's refusal: the blend runs off its face across a tangent edge onto
+        // the face beyond, which would need a crease
         NoRoomReason::RailLeavesFace
+        | NoRoomReason::CreaseAcrossTangentEdge
         | NoRoomReason::ConcaveOverflow
         | NoRoomReason::OverflowWithConcaveBlend
         | NoRoomReason::OverflowWithRollover
@@ -1150,7 +1153,7 @@ fn overflow_first(
 pub fn failure(e: &SolidError) -> Option<Error> {
     let b = e.blend_failure().filter(|b| b.replaces_upstream_status())?;
     Some(Error::BlendFailed {
-        class: b.kind(),
+        class: b.class(),
         status: e.sm_status().unwrap_or(solidcore::error::SM_ERR),
         phrase: b.to_string(),
     })
@@ -1655,6 +1658,115 @@ fn faces_along_indices(
         (Some(i0), Some(i1)) => Ok([(i0, l0), (i1, l1)]),
         _ => Err(Error::Exception),
     })
+}
+
+/// A flat face of a concave straight edge that a round can be carried on past, with the slab
+/// that carries it on (the kernel's [`solidcore::blend::carried_face::CarriedFace`], its face
+/// by index).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CarriedFace {
+    /// The flat face's index.
+    pub face: usize,
+    /// The edge's start vertex: the origin of the slab's frame.
+    pub origin: [f64; 3],
+    /// The unit direction of the edge.
+    pub along: [f64; 3],
+    /// The unit direction in the face's plane square to the edge; `along` × `across` is the
+    /// face's outward normal.
+    pub across: [f64; 3],
+    /// The slab's rectangle in (`along`, `across`) from `origin`.
+    pub outline: [[f64; 2]; 4],
+    /// The slab's extent along the outward normal, up to the face's plane.
+    pub depth: [f64; 2],
+    /// How far to either side of its plane the face's outline is to be carried.
+    pub reach: f64,
+    /// Which way along `across` from the edge's line the other face's material stands, in the
+    /// face's plane: `1.0` or `-1.0`.
+    pub other_side: f64,
+}
+
+/// The flat faces of `body`'s edge at index `edge` that a round of radius `radius` can be
+/// carried on past (the kernel's [`solidcore::blend::carried_face::carried_faces`]): for an
+/// application building a round wider than the flat face beside its edge, by rounding the
+/// edge on the body with that face carried on as a slab and keeping what the round adds
+/// within the face's outline. None where that does not give the round of an unbounded face:
+/// the edge is not straight and concave, no face of it is flat, or an end of it has no flat
+/// face square to it.
+///
+/// # Errors
+/// [`Error::Argument`] for an index past the edges or a radius not finite, positive and at
+/// most [`MAX_SIZE`]; the kernel's refusals.
+pub fn carried_faces(body: &Body, edge: usize, radius: f64) -> Result<Vec<CarriedFace>> {
+    carried_faces_impl(body, None, edge, radius)
+}
+
+/// [`carried_faces`] with the edge and the returned faces indexed by `order`.
+///
+/// # Errors
+/// As [`carried_faces`] and [`Body::copy_with_order`].
+pub fn carried_faces_ordered(
+    body: &Body,
+    order: &crate::Order,
+    edge: usize,
+    radius: f64,
+) -> Result<Vec<CarriedFace>> {
+    carried_faces_impl(body, Some(order), edge, radius)
+}
+
+fn carried_faces_impl(
+    body: &Body,
+    order: Option<&crate::Order>,
+    edge: usize,
+    radius: f64,
+) -> Result<Vec<CarriedFace>> {
+    if !size_ok(radius) {
+        return Err(Error::Argument);
+    }
+    if let Some(order) = order {
+        let (copy, mapped) = body.copy_with_order(order)?;
+        return with_body("carried_faces", &copy, |k, b| {
+            carried_face_indices(k, b, Some(&mapped), edge, radius)
+        })?;
+    }
+    measure_body("carried_faces", body, |k, b| {
+        carried_face_indices(k, b, None, edge, radius)
+    })?
+}
+
+fn carried_face_indices(
+    k: &mut Kernel,
+    b: &mut Brep,
+    order: Option<&crate::Order>,
+    edge: usize,
+    radius: f64,
+) -> solidcore::Result<Result<Vec<CarriedFace>>> {
+    let edges = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
+    let Some(&e) = edges.get(edge) else {
+        return Ok(Err(Error::Argument));
+    };
+    if !b.edge_list().contains(&e) {
+        return Ok(Err(Error::Argument));
+    }
+    let found = solidcore::blend::carried_face::carried_faces(k, b, e, radius)?;
+    // The supplied order is mapped through the measurement copy.
+    let face_order = order.map_or_else(|| b.face_list(), |o| o.faces.as_slice());
+    let mut out = Vec::new();
+    for c in found {
+        let Some(face) = face_order.iter().position(|&g| g == c.face) else {
+            return Ok(Err(Error::Exception));
+        };
+        out.push(CarriedFace {
+            face,
+            origin: [c.origin.x, c.origin.y, c.origin.z],
+            along: [c.along.x, c.along.y, c.along.z],
+            across: [c.across.x, c.across.y, c.across.z],
+            outline: c.outline,
+            depth: c.depth,
+            reach: c.reach,
+            other_side: c.other_side,
+        });
+    }
+    Ok(Ok(out))
 }
 
 /// The tangent chain of the edges of `body` at record indices `edges` (through `order`, its

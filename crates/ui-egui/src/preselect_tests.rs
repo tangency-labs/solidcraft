@@ -3906,6 +3906,54 @@ fn extrude_takes_every_profile_of_a_sketch_clicked_in_the_browser() {
     );
 }
 
+/// #15521: a sketch on a face has the face's edges projected into it; clicked in the Browser with
+/// Extrude open, it gives Profiles what was drawn, as `profiles: "all"` takes it, and not the face
+/// around the drawing. The picks are the sketch's own profiles that make up the drawn regions,
+/// also where a projected edge cuts a drawn region in two.
+#[test]
+fn extrude_takes_what_was_drawn_on_a_face_sketch_clicked_in_the_browser() {
+    let disc = std::f64::consts::PI * 25.0;
+    let cases: [(&str, &[(&str, serde_json::Value)], f64); 4] = [
+        ("a circle", &[("sketch.circle.center", json!({"center": [30, 20], "diameter": 10}))], disc),
+        (
+            "a rectangle around a circle",
+            &[
+                ("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [50, 30]})),
+                ("sketch.circle.center", json!({"center": [30, 20], "diameter": 10})),
+            ],
+            800.0 - disc,
+        ),
+        ("a rectangle across the face's edge", &[("sketch.rectangle.two_point", json!({"p0": [40, 10], "p1": [80, 30]}))], 800.0),
+        ("nothing", &[], 2400.0),
+    ];
+    for (drawn, curves, area) in cases {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 20})).unwrap();
+        h.app.run("sketch.create", json!({"plane": {"face": [30, 20, 20]}, "name": "Hole", "project_edges": true})).unwrap();
+        for (command, params) in curves {
+            h.app.run(command, params.clone()).unwrap();
+        }
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.session.selection.clear();
+        h.app.start("solid.extrude");
+        h.frames(2);
+        h.step(&json!({"click": {"browser": "Hole"}})).unwrap();
+        h.frames(2);
+        let sketch = h.app.session.doc.features.iter().find(|f| f.name == "Hole").map(|f| f.id).unwrap();
+        let world = crate::open_meshing::session_world(&h.app.session);
+        let profiles = &world.sketch(sketch).unwrap().profiles;
+        let items = &h.app.dialog.as_ref().expect("Extrude stays open").inputs[0].items;
+        let picked: Vec<f64> = items
+            .iter()
+            .map(|item| match item {
+                Sel::Profile { sketch: id, index } if *id == sketch => profiles[*index].area,
+                other => panic!("{drawn}: {other:?} is not a profile of the clicked sketch"),
+            })
+            .collect();
+        assert!((picked.iter().sum::<f64>() - area).abs() < 1e-6, "{drawn}: picked profiles of areas {picked:?}, {area} drawn");
+    }
+}
+
 /// A selected sketch point and origin axis, either way round, go to Coincident from the toolbar:
 /// the point lands on the axis.
 #[test]
@@ -3920,6 +3968,29 @@ fn coincident_takes_a_selected_point_and_origin_axis() {
         let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         let y = sk.point(sk.point_index("q").unwrap()).unwrap().y;
         assert!(y.abs() < 1e-6, "reverse {reverse}: point at y {y} ({:?})", h.app.status);
+    }
+}
+
+/// #15461: a selected line or circle and an origin axis, either way round, go to Collinear and
+/// Tangent from the toolbar: the line lands on the axis, the circle touches it.
+#[test]
+fn curve_constraints_take_a_selected_origin_axis() {
+    for reverse in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[5, 8], [25, 11]], "infer": false, "connect": false})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [-20, 9], "radius": 3})).unwrap();
+        for (command, curve) in [("sketch.constraint.collinear", "l1"), ("sketch.constraint.tangent", "c1")] {
+            let (picked, axis) = (Sel::SketchCurve { id: curve.into(), sketch: None }, Sel::Axis { name: "X".into() });
+            h.app.session.selection = if reverse { vec![axis, picked] } else { vec![picked, axis] };
+            h.app.start(command);
+            assert!(h.app.tool.is_none(), "reverse {reverse}: {command} applied from the selection, no tool left waiting ({:?})", h.app.status);
+        }
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let y = |id: &str| sk.point(sk.resolve_point(id).unwrap()).unwrap().y;
+        assert!(y("l1.start").abs() < 1e-6 && y("l1.end").abs() < 1e-6, "reverse {reverse}: line at y {} / {}", y("l1.start"), y("l1.end"));
+        let r = sk.radius(sk.curve_index("c1").unwrap()).unwrap();
+        assert!((y("c1.center").abs() - r).abs() < 1e-6, "reverse {reverse}: circle centre at y {} with radius {r}", y("c1.center"));
     }
 }
 
@@ -4099,6 +4170,49 @@ fn hovering_a_picked_row_lights_that_item_in_the_view() {
     h.frames(2);
     assert_eq!(lit(&h), None);
     assert_eq!(h.app.viewport.hover, None);
+}
+
+/// Hovering a picked edge keeps it lit - in the pick's own colour, one step thicker and its halo
+/// wider - instead of drawing nothing, which left the pointer resting invisibly on the pick.
+#[test]
+fn hovering_a_picked_edge_keeps_it_lit_in_the_pick_colours() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.frames(2);
+    let pick = crate::dialogs::edge_sel(&h.app.session, Vec3::new(20.0, 0.0, 20.0)).unwrap();
+    let Sel::Edge { body, index, point } = &pick else { panic!("an edge, not {pick:?}") };
+    h.app.session.selection = vec![pick.clone()];
+    h.frames(2);
+    // Every line the highlight draws, as its palette colour and its width in eighths of a pixel
+    // (a lifted line's width slot holds that; a plain line's holds `f32` bits and is not set).
+    let mut drawn = |hover: Option<crate::viewport::Hit>| -> Vec<([u8; 4], Option<u32>)> {
+        h.app.viewport.hover = hover;
+        let scene = crate::viewport::build_highlight(&h.app).merged();
+        let palette = scene.palette.entries().to_vec();
+        scene
+            .lines
+            .chunks(crate::gpu::LINE_SIZE)
+            .filter(|c| c.len() == crate::gpu::LINE_SIZE)
+            .map(|c| {
+                let idx = u32::from_le_bytes(c[24..28].try_into().unwrap());
+                let word = u32::from_le_bytes(c[28..32].try_into().unwrap());
+                let width = (word & 0x8000_0000 != 0).then_some((word >> 24) & 0x7F);
+                (palette.get(idx as usize).copied().unwrap_or([0; 4]), width)
+            })
+            .collect()
+    };
+    let t = solidcraft_theme::Tokens::get();
+    let (core, rim) = (crate::viewport::c4(t.sel_edge), crate::viewport::c4(t.sel_edge_rim));
+    let hover = crate::viewport::Hit::Edge { body: body.clone(), index: *index, mid: *point, point: *point };
+    let (picked, hovered) = (drawn(None), drawn(Some(hover)));
+    assert!(hovered.len() > picked.len(), "hovering the picked edge lights it again");
+    // The redraw stays in the pick's own colours, one step wider: core 4 px and halo 7 px,
+    // above the picked pass's 3 px and 6 px.
+    assert!(hovered.contains(&(core, Some(32))) && hovered.contains(&(rim, Some(56))), "the picked edge is redrawn thicker");
+    assert!(!picked.contains(&(core, Some(32))) && !picked.contains(&(rim, Some(56))), "the picked pass alone draws the narrower widths");
+    for (colour, _) in &hovered {
+        assert!(colour != &crate::viewport::c4(t.hover_edge) && colour != &crate::viewport::c4(t.hover_edge_halo), "no hover colour is swapped in");
+    }
 }
 
 /// #3683: a body or feature row lights what the Browser and timeline rows light: the body, or

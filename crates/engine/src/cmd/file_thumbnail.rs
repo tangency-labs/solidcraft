@@ -71,7 +71,7 @@ fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, 
         let face_colors =
             s.doc.face_colors(body).into_iter().map(|(face, look)| (face as u32, Rgb(look.color[0], look.color[1], look.color[2]))).collect();
         let opacity = s.doc.model_body_opacity(body) as f32;
-        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
+        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default(), values: None });
     }
     if bounds.is_empty() {
         return None;

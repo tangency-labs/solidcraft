@@ -412,7 +412,6 @@ fn display_pick(app: &mut SolveApp, item: &str) {
         "agent_cursor" => app.ui.agent_cursor.show = !app.ui.agent_cursor.show,
         "agent_chat" => {
             app.agent_chat.open = !app.agent_chat.open;
-            app.preferences.agent_chat_minimized &= !app.agent_chat.open;
         }
         id => {
             if let Some(slot) = navigation_bar::find(id) {

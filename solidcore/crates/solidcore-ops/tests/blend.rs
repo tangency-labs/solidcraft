@@ -1434,3 +1434,64 @@ fn a_kernel_unsupported_after_a_no_room_note_is_its_own_cause() {
         );
     }
 }
+
+/// An L of legs 40 and width 20, 10 high: its inner upright edge at (20, 20) is concave between
+/// two flat faces and ends on the flat top and bottom, so a round can be carried on past
+/// either face: each is named by its index, with the slab's frame at the edge's start, the
+/// edge's 10 along it, and `along` × `across` the face's outward normal (+x or +y). A convex
+/// edge has none; an index past the edges and a radius that is not positive are refused before
+/// the kernel.
+#[test]
+fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
+    all_fixes();
+    let l = [
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0, 20.0),
+        (20.0, 20.0),
+        (20.0, 40.0),
+        (0.0, 40.0),
+    ];
+    let profile: Vec<_> = (0..l.len())
+        .map(|i| segment(l[i], l[(i + 1) % l.len()]))
+        .collect();
+    let b = swept(&profile, 10.0);
+    let inner = nearest_edge(&b, [20.0, 20.0, 5.0]);
+    let found = solidcore_ops::carried_faces(&b, inner, 6.0).unwrap();
+    assert_eq!(found.len(), 2);
+    assert_ne!(found[0].face, found[1].face);
+    let mut normals = Vec::new();
+    for c in &found {
+        assert!(c.face < b.to_record().unwrap().0.faces.len());
+        assert!((c.origin[0] - 20.0).abs() < 1e-9 && (c.origin[1] - 20.0).abs() < 1e-9);
+        assert_eq!(
+            c.outline,
+            [
+                [0.0, -c.reach],
+                [10.0, -c.reach],
+                [10.0, c.reach],
+                [0.0, c.reach]
+            ]
+        );
+        assert_eq!(c.depth, [-c.reach, 0.0]);
+        let (a, x) = (
+            Vec3::new(c.along[0], c.along[1], c.along[2]),
+            Vec3::new(c.across[0], c.across[1], c.across[2]),
+        );
+        normals.push(a.cross(x));
+    }
+    let is = |n: Vec3, x: f64, y: f64| (n - Vec3::new(x, y, 0.0)).length() < 1e-9;
+    assert!(normals.iter().any(|&n| is(n, 1.0, 0.0)) && normals.iter().any(|&n| is(n, 0.0, 1.0)));
+    let convex = nearest_edge(&b, [40.0, 0.0, 5.0]);
+    assert!(solidcore_ops::carried_faces(&b, convex, 6.0)
+        .unwrap()
+        .is_empty());
+    assert!(matches!(
+        solidcore_ops::carried_faces(&b, 999, 6.0),
+        Err(Error::Argument)
+    ));
+    assert!(matches!(
+        solidcore_ops::carried_faces(&b, inner, 0.0),
+        Err(Error::Argument)
+    ));
+}

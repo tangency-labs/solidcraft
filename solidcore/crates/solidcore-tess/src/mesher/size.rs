@@ -92,6 +92,18 @@ impl Rules {
     }
 }
 
+/// A caller's size function on the mesh path ([`crate::mesh()`]): the longest side it asks for at a
+/// point (mm). A value that is not finite and positive asks for nothing there.
+pub(crate) type SizeAt<'a> = &'a (dyn Fn(Vec3) -> f64 + Sync);
+
+/// The longest side asked at `p`: `h`, or the size function's value there where that is less.
+pub(crate) fn local(h: f64, at: Option<SizeAt<'_>>, p: Vec3) -> f64 {
+    match at.map(|f| f(p)) {
+        Some(s) if s.is_finite() && s > 0.0 => h.min(s),
+        _ => h,
+    }
+}
+
 /// The body's extent: twice the largest distance of a vertex from the vertices' centroid. Unlike
 /// a bounding box diagonal it does not change when the body is turned, so a placed copy meshes
 /// like the original.

@@ -49,16 +49,107 @@ pub fn ui_font(name: &str) -> Option<egui::FontData> {
     Some(font)
 }
 
+/// Names of the chosen font file's medium, semibold and bold siblings, each ahead of
+/// [`UI_FONT`] in its weight family.
+const UI_FONT_WEIGHTS: [&str; 3] = ["ui_font_medium", "ui_font_semibold", "ui_font_bold"];
+
+fn is_ui_font_entry(entry: &str) -> bool {
+    entry == UI_FONT || UI_FONT_WEIGHTS.contains(&entry)
+}
+
 /// Put a chosen interface face first in every sans family; keep Plex and language fallbacks.
 /// A user-selected static face keeps its own weight (we never synthesize a bold face).
-pub fn with_ui_font(mut fonts: FontDefinitions, font: egui::FontData) -> FontDefinitions {
+pub fn with_ui_font(fonts: FontDefinitions, font: egui::FontData) -> FontDefinitions {
+    with_ui_font_faces(fonts, font, [None, None, None])
+}
+
+/// [`with_ui_font`], with the medium, semibold and bold families led by `heavier` faces.
+pub fn with_ui_font_faces(mut fonts: FontDefinitions, font: egui::FontData, heavier: [Option<Arc<egui::FontData>>; 3]) -> FontDefinitions {
     fonts.font_data.insert(UI_FONT.to_owned(), Arc::new(font));
-    for family in sans_families() {
+    for name in UI_FONT_WEIGHTS {
+        fonts.font_data.remove(name);
+    }
+    let leads = std::iter::once(None).chain(heavier.into_iter().zip(UI_FONT_WEIGHTS).map(|(face, name)| face.map(|face| (name, face))));
+    for (family, lead) in sans_families().into_iter().zip(leads) {
         let list = fonts.families.entry(family).or_default();
-        list.retain(|entry| entry != UI_FONT);
+        list.retain(|entry| !is_ui_font_entry(entry));
         list.insert(0, UI_FONT.to_owned());
+        if let Some((name, face)) = lead {
+            fonts.font_data.insert(name.to_owned(), face);
+            list.insert(0, name.to_owned());
+        }
     }
     fonts
+}
+
+/// Most folder entries looked at for a chosen font file's sibling weights.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_SIBLING_ENTRIES: usize = 4096;
+
+/// Weights tried, nearest first, for the medium, semibold and bold families.
+#[cfg(not(target_arch = "wasm32"))]
+const WEIGHT_PREFERENCES: [&[u16]; 3] = [&[500, 600, 700], &[600, 700, 500], &[700, 600, 800, 900, 500]];
+
+/// The weight a font file's suffix names (`SemiBold` → 600), case-insensitively.
+#[cfg(not(target_arch = "wasm32"))]
+fn suffix_weight(suffix: &str) -> Option<u16> {
+    let suffix: String = suffix.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect();
+    Some(match suffix.as_str() {
+        "thin" | "hairline" => 100,
+        "extralight" | "ultralight" => 200,
+        "light" => 300,
+        "regular" | "normal" | "book" => 400,
+        "medium" => 500,
+        "semibold" | "demibold" => 600,
+        "bold" => 700,
+        "extrabold" | "ultrabold" => 800,
+        "black" | "heavy" => 900,
+        _ => return None,
+    })
+}
+
+/// `Family-Weight.ttf` (or `.otf`) as its family stem and weight.
+#[cfg(not(target_arch = "wasm32"))]
+fn family_and_weight(path: &std::path::Path) -> Option<(String, u16)> {
+    let extension = path.extension()?.to_str()?;
+    if !(extension.eq_ignore_ascii_case("ttf") || extension.eq_ignore_ascii_case("otf")) {
+        return None;
+    }
+    let (family, suffix) = path.file_stem()?.to_str()?.rsplit_once('-')?;
+    Some((family.to_ascii_lowercase(), suffix_weight(suffix)?)).filter(|(family, _)| !family.is_empty())
+}
+
+/// For a chosen `Family-Weight` font file, the nearest heavier sibling file for the medium,
+/// semibold and bold families; `None` keeps the chosen face. Never a lighter face.
+#[cfg(not(target_arch = "wasm32"))]
+fn heavier_faces(name: &str) -> [Option<Arc<egui::FontData>>; 3] {
+    let mut faces = [None, None, None];
+    let Some(chosen) = solidcraft_engine::sketch::font_file_path(name) else { return faces };
+    let Some((family, weight)) = family_and_weight(&chosen) else { return faces };
+    let dir = chosen.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+    let Ok(entries) = std::fs::read_dir(dir) else { return faces };
+    let mut paths: Vec<std::path::PathBuf> = entries.flatten().take(MAX_SIBLING_ENTRIES).map(|entry| entry.path()).collect();
+    paths.sort();
+    let mut siblings = std::collections::BTreeMap::new();
+    for path in paths {
+        if let Some((other, w)) = family_and_weight(&path)
+            && other == family
+            && w > weight
+        {
+            siblings.entry(w).or_insert(path);
+        }
+    }
+    let mut loaded: std::collections::BTreeMap<u16, Option<Arc<egui::FontData>>> = std::collections::BTreeMap::new();
+    for (face, preferences) in faces.iter_mut().zip(WEIGHT_PREFERENCES) {
+        for &w in preferences.iter().filter(|w| **w >= weight).take_while(|w| **w > weight) {
+            let Some(path) = siblings.get(&w) else { continue };
+            if let Some(found) = loaded.entry(w).or_insert_with(|| path.to_str().and_then(ui_font).map(Arc::new)) {
+                *face = Some(found.clone());
+                break;
+            }
+        }
+    }
+    faces
 }
 
 /// `fonts` with `bytes` appended as the last fallback of every interface
@@ -88,7 +179,7 @@ fn promote_font_to_front(fonts: &mut FontDefinitions, name: &str) {
             && let Some(pos) = list.iter().position(|entry| entry == name)
         {
             let item = list.remove(pos);
-            let first = usize::from(list.first().is_some_and(|entry| entry == UI_FONT));
+            let first = list.iter().take_while(|entry| is_ui_font_entry(entry)).count();
             list.insert(first, item);
         }
     }
@@ -613,7 +704,7 @@ fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Opt
     };
     let mut fonts = look::definitions();
     if let Some(font) = self::ui_font(ui_font) {
-        fonts = with_ui_font(fonts, font);
+        fonts = with_ui_font_faces(fonts, font, heavier_faces(ui_font));
     }
     let order = fallback_order(language);
     for name in order {
@@ -884,6 +975,79 @@ mod tests {
             assert_eq!(list.iter().filter(|n| *n == UI_FONT).count(), 1);
         }
         assert_eq!(again.families[&FontFamily::Monospace], defaults.families[&FontFamily::Monospace]);
+    }
+
+    /// The bundled fonts the sibling-weight tests copy, by the name each test gives it.
+    fn bundled_faces() -> [(&'static str, Vec<u8>); 3] {
+        let read = |path: &str| std::fs::read(format!("{}/../../{path}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        [
+            ("light", read("crates/sketch/assets/fonts/liberation-sans/LiberationSans-Regular.ttf")),
+            ("medium", read("crates/look/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf")),
+            ("bold", read("crates/look/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf")),
+        ]
+    }
+
+    /// Which of `faces` leads each installed sans family, regular to bold.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn leading_faces<'a>(ui_font: &str, faces: &[(&'a str, Vec<u8>)]) -> [&'a str; 4] {
+        let ctx = egui::Context::default();
+        setup_fonts_without_waiting(&ctx, "en", ui_font);
+        let fonts = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
+        sans_families().map(|family| {
+            let lead = fonts.font_data[&fonts.families[&family][0]].bytes();
+            faces.iter().find(|(_, bytes)| bytes.as_slice() == lead).map_or("other", |(name, _)| *name)
+        })
+    }
+
+    /// A light font file chosen for the interface drew bold labels light too: the heavier
+    /// weight files beside it now lead the medium, semibold and bold families.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_chosen_font_file_takes_its_heavier_weights_from_its_siblings() {
+        let faces = bundled_faces();
+        let [(_, light), (_, medium), (_, bold)] = &faces;
+        let folder = FontFolder::new("sibling-weights");
+        let file = |name: &str| folder.0.join(name).to_string_lossy().into_owned();
+        let chosen = file("Foo-Extralight.ttf");
+        std::fs::write(&chosen, light).unwrap();
+        assert_eq!(leading_faces(&chosen, &faces), ["light"; 4], "no siblings: the chosen face everywhere");
+
+        std::fs::write(file("Foo-Medium.ttf"), medium).unwrap();
+        std::fs::write(file("Foo-Thin.ttf"), bold).unwrap();
+        std::fs::write(file("Foo-MediumItalic.ttf"), bold).unwrap();
+        std::fs::write(file("Bar-Bold.ttf"), bold).unwrap();
+        std::fs::write(file("Foo-Black.ttf"), b"not a font").unwrap();
+        assert_eq!(leading_faces(&chosen, &faces), ["light", "medium", "medium", "medium"], "bold falls back to Medium");
+        assert_eq!(leading_faces(&file("Foo-Medium.ttf"), &faces), ["medium"; 4], "never a lighter face");
+
+        std::fs::write(file("foo-DEMIBOLD.otf"), bold).unwrap();
+        assert_eq!(leading_faces(&chosen, &faces), ["light", "medium", "bold", "bold"]);
+
+        let fonts = with_ui_font_faces(look::definitions(), egui::FontData::from_owned(light.clone()), heavier_faces(&chosen));
+        let fonts = with_ui_font(fonts, egui::FontData::from_owned(light.clone()));
+        for family in sans_families() {
+            assert_eq!(fonts.families[&family][0], UI_FONT, "a plain choice drops the siblings");
+            assert_eq!(fonts.families[&family].iter().filter(|name| is_ui_font_entry(name)).count(), 1);
+        }
+        assert!(UI_FONT_WEIGHTS.iter().all(|name| !fonts.font_data.contains_key(*name)));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_font_family_name_keeps_one_face_for_every_weight() {
+        let family = solidcraft_engine::sketch::DEFAULT_FONT_FAMILY;
+        assert!(heavier_faces(family).iter().all(Option::is_none));
+        assert_eq!(leading_faces(family, &bundled_faces()), ["light"; 4], "Liberation Sans, as the built-in family");
+        for (suffix, weight) in [
+            ("SemiBold", Some(600)),
+            ("Semi Bold", Some(600)),
+            ("DemiBold", Some(600)),
+            ("extrabold", Some(800)),
+            ("Heavy", Some(900)),
+            ("Italic", None),
+        ] {
+            assert_eq!(suffix_weight(suffix), weight, "{suffix}");
+        }
     }
 
     #[test]

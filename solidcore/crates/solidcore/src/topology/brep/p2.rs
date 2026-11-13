@@ -59,11 +59,11 @@
 //!   exists, so upstream's `SmObjDelete` guards have nothing to undo. The merged end
 //!   shell is deleted ([`shell::destroy`]), and a vertex shell's vertex use is deleted
 //!   with its record (`delete pVU`).
-//! - Opt-in (WR-585, fork tangency-labs/smlib@be8ac73):
-//!   [`UpstreamFixes::boolean_wire_edge_keeps_faceuse_shell`](crate::kernel::UpstreamFixes::boolean_wire_edge_keeps_faceuse_shell)
-//!   makes `MakeEdgeTopology`, joining a wire start shell to a faceuse end shell, move
-//!   the wires into the faceuse shell, put it in the wire shell's place in the region
-//!   and delete the wire shell, instead of moving every face use into the wire shell.
+//! - `MakeEdgeTopology`, joining a wire start shell to a faceuse end shell, moves the
+//!   wires into the faceuse shell, puts it in the wire shell's place in the region and
+//!   deletes the wire shell, where upstream moves every face use into the wire shell, the
+//!   size of the body for each such edge a boolean makes (WR-585, fork
+//!   tangency-labs/smlib@be8ac73).
 //! - `MateLaminaEdgeToSurface` checks for the face's surface before the neighbour
 //!   (lamina / seam) checks; upstream binds the surface only for `IsSeam`, so a face
 //!   without surface there ends in the distance loop instead of
@@ -587,6 +587,26 @@ pub enum NotifyArg {
     Object(ObjectRef),
 }
 
+/// What [`ArenaNotifyState::seed`] has visited, for the tests of the callers that must not
+/// seed a whole B-rep for each edit they make (solidcraft#15786). Compiled only for tests.
+#[cfg(test)]
+pub(crate) mod seeded {
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+
+    static CALLS: AtomicU64 = AtomicU64::new(0);
+    static ENTITIES: AtomicU64 = AtomicU64::new(0);
+
+    pub(crate) fn note(entities: usize) {
+        CALLS.fetch_add(1, Relaxed);
+        ENTITIES.fetch_add(entities as u64, Relaxed);
+    }
+
+    /// The calls and the entities they visited since the last [`take`].
+    pub(crate) fn take() -> (u64, u64) {
+        (CALLS.swap(0, Relaxed), ENTITIES.swap(0, Relaxed))
+    }
+}
+
 impl NotifyArg {
     fn object_ref(self, env: &NotifyEnv<'_>) -> ObjectRef {
         match self {
@@ -837,6 +857,8 @@ impl ArenaNotifyState {
         all.extend(b.edges().iter().map(|(x, _)| EntityRef::Edge(x)));
         all.extend(b.vertexuses().iter().map(|(x, _)| EntityRef::Vertexuse(x)));
         all.extend(b.vertices().iter().map(|(x, _)| EntityRef::Vertex(x)));
+        #[cfg(test)]
+        seeded::note(all.len());
         if self.records.is_empty() {
             // Bulk build (sorted input is O(n)); the same map as entry-by-entry.
             self.records = all
@@ -2347,13 +2369,10 @@ pub fn make_edge_topology(
             let vu = shell_vertexuse(b, end_shell)?;
             delete_vertexuse(b, vu)?;
             shell_clear_members(b, end_shell)?;
-        } else if k.fixes.boolean_wire_edge_keeps_faceuse_shell
-            && b.shell(start_shell)?.is_wire_shell()
-            && b.shell(end_shell)?.is_faceuse_shell()
-        {
-            // WR-585 (opt-in, fork tangency-labs/smlib@be8ac73): the faceuse shell takes
-            // the wire shell's wires and its place in the region, and the wire shell
-            // goes, instead of moving every face use into the wire shell.
+        } else if b.shell(start_shell)?.is_wire_shell() && b.shell(end_shell)?.is_faceuse_shell() {
+            // WR-585 (fork tangency-labs/smlib@be8ac73): the faceuse shell takes the wire
+            // shell's wires and its place in the region, and the wire shell goes, instead
+            // of moving every face use into the wire shell.
             let reg = shell_region(b, start_shell)?.ok_or(null_deref("shell without region"))?;
             shell_transfer_children(k, b, start_shell, end_shell)?;
             shell::region_remove_shell(b, reg, end_shell)?;

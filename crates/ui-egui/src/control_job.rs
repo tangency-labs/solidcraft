@@ -22,8 +22,8 @@
 //!
 //! Done within the app's wait ([`crate::dialogs::APPLY_AT_ONCE`]), a request just runs, as
 //! before. Headless use, tests and the web build ([`SolveApp::apply_off_thread`] unset) run
-//! everything at once, and so does the app unless the preference is on (Preferences > AI,
-//! `agent_off_thread`, off by default).
+//! everything at once, and so does the app with the preference off (Preferences > AI,
+//! `agent_off_thread`, on by default).
 //!
 //! The client that sent a request can cancel it (`control.cancel`, through its [`Ticket`]): one
 //! still waiting its turn is answered as cancelled without running, and one computing off the
@@ -54,6 +54,12 @@ fn progress_of(ticket: &Ticket) -> Arc<Progress> {
     progress
 }
 
+/// Order inspection registrations across worker completions and commands run on the window.
+pub(crate) fn next_plugin_inspection() -> usize {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
 /// The reply to a request its client cancelled before it ran.
 pub(crate) fn cancelled_reply(method: &str) -> Value {
     let method: String = method.chars().take(128).collect();
@@ -68,6 +74,15 @@ pub(crate) fn stopped_reply(label: &str, writes_file: bool) -> Value {
         format!("stopped: `{label}` was cancelled (control.cancel) while it computed; nothing was applied")
     };
     json!({"ok": false, "stopped": true, "error": error})
+}
+
+/// The same stop flag reaches both evaluation and each parallel display worker.
+pub(crate) fn warm_plugin_display(
+    prepared: &solidcraft_engine::ComputedCommands,
+    quality: solidcraft_engine::doc::display_quality::DisplayQuality,
+    progress: &Progress,
+) -> solidcraft_engine::Result<()> {
+    prepared.warm_display(quality, || !progress.is_cancelled())
 }
 
 /// Areas whose commands only compute the design (no files written, nothing started outside the
@@ -109,6 +124,8 @@ const ANSWERED_ON_A_COPY: &[&str] =
 /// of bodies, minutes on an assembly of 150): they run on a copy too, whatever the preference,
 /// since an answer from the design as it was when asked has no order to keep.
 const READ_ON_A_COPY: &[&str] = &[
+    "model.mesh",
+    "plugin.inspect",
     "inspect.measure",
     "document.inspect",
     "inspect.clearance",
@@ -151,7 +168,7 @@ fn executed(params: &Value) -> Option<(&str, Value)> {
     Some((command, params.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))
 }
 
-/// A request that only reads the design and can take long ([`READ_ON_A_COPY`]): an
+/// A request that only reads design data or an inert package and can take long ([`READ_ON_A_COPY`]): an
 /// `engine.execute` of such a command, or the `document.inspect` method. The command and its
 /// parameters.
 fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
@@ -189,7 +206,14 @@ enum Work {
     /// was computed for.
     Ahead { commands: Vec<(String, Value)>, doc: Arc<solidcraft_engine::doc::Document>, revision: u64, tries: u8, kept: Arc<KeptResults> },
     /// Run on a copy; the reply comes from there.
-    Answer,
+    Answer { inspection: Option<(u64, usize)> },
+    /// External code executes once on its worker. Stale/cancelled results are discarded.
+    Plugin {
+        prepared: Receiver<Result<solidcraft_engine::ComputedCommands, String>>,
+        disabled: std::collections::BTreeSet<String>,
+        limits: solidcraft_engine::plugin::HostLimits,
+        level: Option<solidcraft_engine::schema::ParamCheck>,
+    },
 }
 
 /// A control request computing off the window thread.
@@ -522,15 +546,20 @@ impl SolveApp {
         let stopped = match self.control_job.take() {
             Some(job) => {
                 job.req.ticket.stop();
-                Some((job.req.reply, job.label))
+                let writes_file = matches!(job.work, Work::Plugin { .. });
+                Some((job.req.reply, job.label, writes_file))
             }
-            None => self.agent.stop(),
+            None => self.agent.stop().map(|(reply, label)| (reply, label, false)),
         };
-        if let Some((reply, label)) = stopped {
+        if let Some((reply, label, writes_file)) = stopped {
             let _ = reply.send(json!({
                 "ok": false,
                 "stopped": true,
-                "error": format!("stopped: the person at the app stopped `{label}` while it computed; nothing was applied"),
+                "error": if writes_file {
+                    format!("stopped: the person at the app stopped `{label}` while it computed; the design is unchanged, but its file may still be written")
+                } else {
+                    format!("stopped: the person at the app stopped `{label}` while it computed; nothing was applied")
+                },
             }));
         }
     }
@@ -538,6 +567,66 @@ impl SolveApp {
     /// Take a control request off the window thread when it computes long (see the module
     /// notes). Returns it when it should simply run here now.
     pub(crate) fn offload_control(&mut self, ctx: &egui::Context, req: ControlRequest) -> Option<ControlRequest> {
+        crate::plugins::sync_policy(self);
+        if cfg!(not(target_arch = "wasm32"))
+            && matches!(req.method.as_str(), "engine.execute" | "command")
+            && let Some((command, params)) = executed(&req.params)
+            && command.eq_ignore_ascii_case("plugin.run")
+        {
+            if self.control_job.is_some() {
+                self.control_held.push_back(req);
+                return None;
+            }
+            let scope = match crate::control::request_scope(self, &req.params) {
+                Ok(scope) => scope,
+                Err(e) => {
+                    let _ = req.reply.send(json!({"ok":false,"error":e}));
+                    return None;
+                }
+            };
+            let Ok(level) = crate::control::request_param_check(&req.method, &req.params) else { return Some(req) };
+            if crate::control_params::parse::<crate::control_params::Execute>(&req.params).is_err() {
+                return Some(req);
+            }
+            let mut copy = self.session.scratch();
+            if let Some(level) = level {
+                copy.param_check = level;
+            }
+            let quality = solidcraft_engine::doc::display_quality::current();
+            let (tx, prepared) = std::sync::mpsc::channel();
+            #[cfg(test)]
+            let gate = self.apply_gate.clone();
+            let progress = progress_of(&req.ticket);
+            let warm_progress = progress.clone();
+            let Some(done) = spawn(scope, progress, move || {
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    let _ = gate.lock().ok()?.recv();
+                }
+                let result = copy
+                    .compute_commands(&[("plugin.run".into(), params)], None)
+                    .and_then(|prepared| {
+                        warm_plugin_display(&prepared, quality, &warm_progress)?;
+                        Ok(prepared)
+                    })
+                    .map_err(|e| e.to_string());
+                let _ = tx.send(result);
+                None
+            }) else {
+                let _ = req.reply.send(json!({"ok":false,"error":self.tr("ui.plugin_start_failed")}));
+                return None;
+            };
+            req.ticket.computing(true);
+            self.control_job = Some(ControlJob {
+                label: label(self, "plugin.run"),
+                req,
+                work: Work::Plugin { prepared, disabled: self.preferences.disabled_plugins.clone(), limits: self.session.plugin_limits, level },
+                done,
+                started: crate::now_ms(),
+                steps: None,
+            });
+            return None;
+        }
         if self.apply_off_thread.is_none() || self.file_load_holds() || self.file_picker.is_some() {
             return Some(req);
         }
@@ -590,7 +679,14 @@ impl SolveApp {
         // The copy has no history and no file (#9624): an inspection reports the design's own.
         let s = &self.session;
         let own = (id == "document.inspect").then(|| (s.undo.len(), s.redo.len(), s.path.clone()));
+        let inspection = (id == "plugin.inspect").then(|| (self.session.uid, next_plugin_inspection()));
+        #[cfg(test)]
+        let gate = inspection.and(self.apply_gate.clone());
         let rx = spawn(scope, progress_of(&req.ticket), move || {
+            #[cfg(test)]
+            if let Some(gate) = gate {
+                let _ = gate.lock().ok()?.recv();
+            }
             let mut reply = match copy.execute(id, &params) {
                 Ok(mut v) => {
                     if let (Some((undo, redo, path)), Some(o)) = (own, v.as_object_mut()) {
@@ -608,7 +704,7 @@ impl SolveApp {
             Some(reply)
         });
         let Some(rx) = rx else { return Some(req) };
-        let job = ControlJob { label: label(self, id), req, work: Work::Answer, done: rx, started: crate::now_ms(), steps: None };
+        let job = ControlJob { label: label(self, id), req, work: Work::Answer { inspection }, done: rx, started: crate::now_ms(), steps: None };
         match within_wait(self, &job.done) {
             Some(reply) => self.answered(job, reply),
             None => {
@@ -630,7 +726,32 @@ impl SolveApp {
             let _ = job.req.reply.send(stopped_reply(&job.label, true));
             return;
         }
-        let reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
+        let mut reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
+        // Inspection runs on a scratch session. Retain its inert registration so namespaced
+        // entries resolve on the live session without loading or executing code on the window.
+        if reply["ok"] == true
+            && let Some((command, params)) = executed(&job.req.params)
+            && spec_id(command) == Some("plugin.inspect")
+            && let (Some(id), Some(path)) = (reply.pointer("/result/manifest/id").and_then(Value::as_str), params.get("path").and_then(Value::as_str))
+        {
+            let current = match job.work {
+                Work::Answer { inspection: Some((uid, version)) } if uid == self.session.uid => {
+                    let key = (uid, id.to_owned());
+                    if self.plugin_inspection_versions.get(&key).is_some_and(|latest| *latest > version) {
+                        false
+                    } else {
+                        self.plugin_inspection_versions.insert(key, version);
+                        true
+                    }
+                }
+                _ => false,
+            };
+            if current {
+                self.session.plugin_state.packages.insert(id.to_owned(), path.to_owned());
+            } else {
+                reply = json!({"ok":false,"error":self.tr("ui.plugin_context_changed")});
+            }
+        }
         let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
         if reply["ok"] == true && export {
             let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
@@ -684,6 +805,56 @@ impl SolveApp {
         }
         let Some(job) = self.control_job.take() else { return };
         ctx.request_repaint();
+        if let Work::Plugin { prepared, disabled, limits, level } = &job.work {
+            if !job.req.ticket.back() {
+                let _ = job.req.reply.send(stopped_reply(&job.label, true));
+                return;
+            }
+            let result = if self.file_load_holds()
+                || self.file_picker.is_some()
+                || disabled != &self.preferences.disabled_plugins
+                || *limits != crate::plugins::host_limits(&self.preferences)
+            {
+                Err(self.tr("ui.plugin_context_changed").to_string())
+            } else {
+                prepared
+                    .try_recv()
+                    .map_err(|_| self.tr("ui.plugin_no_result").to_string())
+                    .and_then(|r| r)
+                    .and_then(|prepared| {
+                        let before = self.session.doc.clone();
+                        // Move the redo stack instead of cloning the whole history on the window thread.
+                        let redo = std::mem::take(&mut self.session.redo);
+                        let replies = self.session.accept_commands(prepared);
+                        if replies.is_err() || Arc::ptr_eq(&before, &self.session.doc) {
+                            self.session.redo = redo;
+                        }
+                        replies.map_err(|_| self.tr("ui.plugin_context_changed").to_string())
+                    })
+                    .and_then(|replies| replies.into_iter().last().map(|(_, reply)| reply).ok_or_else(|| self.tr("ui.plugin_no_result").to_string()))
+            };
+            self.big_operation |= crate::now_ms() - job.started >= crate::recovery_ui::BIG_OPERATION_MS;
+            let result = result.and_then(|reply| {
+                if let Some(exits) = reply.get("sketch_exits").and_then(Value::as_array) {
+                    for sketch in exits {
+                        self.sketch_closed(sketch.as_u64());
+                    }
+                }
+                crate::render_workspace::apply_command(self, "plugin.run", &reply)?;
+                Ok(reply)
+            });
+            let result = self.command_completed("plugin.run", result);
+            let mut reply = match result {
+                Ok(result) => json!({"ok":true,"result":result}),
+                Err(error) => json!({"ok":false,"error":error}),
+            };
+            if let Some(level) = level {
+                reply["param_check"] = json!(level.name());
+            }
+            let _ = job.req.reply.send(reply);
+            ctx.request_repaint();
+            return;
+        }
         // A file opening meanwhile: the request waits for it as any design change does.
         if (self.file_load_holds() || self.file_picker.is_some()) && job.req.ticket.wait_again() {
             self.control_held.push_front(job.req);
@@ -772,7 +943,8 @@ mod tests {
         let (req, _reply) = ControlRequest::new("engine.batch", request);
         // The worker never answers: the batch stays where the test puts it.
         let (_worker, done) = std::sync::mpsc::channel();
-        h.app.control_job = Some(ControlJob { req, work: Work::Answer, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
+        h.app.control_job =
+            Some(ControlJob { req, work: Work::Answer { inspection: None }, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
         let rows = |h: &mut crate::scenario::Harness| {
             let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
             listed["operations"].as_array().unwrap().clone()
@@ -797,7 +969,8 @@ mod tests {
         let steps = Steps::new(&h.app, &mixed, &commands);
         let (req, _reply) = ControlRequest::new("engine.batch", mixed);
         let (_worker, done) = std::sync::mpsc::channel();
-        h.app.control_job = Some(ControlJob { req, work: Work::Answer, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
+        h.app.control_job =
+            Some(ControlJob { req, work: Work::Answer { inspection: None }, done, started: 0.0, label: String::new(), steps: Some(steps.clone()) });
         steps.now.store(1, Ordering::Relaxed);
         let rows = rows(&mut h);
         assert_eq!(rows[0]["steps"], json!({"done": 0, "total": 3}));
