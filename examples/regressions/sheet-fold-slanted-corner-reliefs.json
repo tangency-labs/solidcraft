@@ -1,0 +1,14 @@
+{
+ "description": "A 200 x 100 tray's flat with 20 mm walls in 1.5 mm sheet (bend radius 1.5, k 0.5), its corner reliefs cut as another CAD program draws them: a thin V whose sides run straight across both bend zones, from the start line to the far edge, so each wall's end lies inside the neighbouring wall's zone. The four walls are folded on lines that start inside the V. Each fold was refused: its bend zone is not a rectangle, and the neighbouring walls' ends made it one piece with them ('the bend zone reaches a corner of the sheet's outline').",
+ "commands": [
+  {"command": "sheet.manage_rules", "params": {"name": "Sheet 1.5 mm", "thickness": "1.5", "k_factor": "0.5", "bend_radius": "1.5", "active": true}},
+  {"command": "sketch.create", "params": {"plane": "XY", "name": "Blank"}},
+  {"command": "sketch.line", "params": {"points": [[0.6, -21.767146], [199.4, -21.767146], [199.4, -1.767146], [198.232854, 1.767146], [201.767146, -1.237002], [221.767146, -1.237002], [221.767146, 101.237002], [201.767146, 101.237002], [198.232854, 98.232854], [199.4, 101.767146], [199.4, 121.767146], [0.6, 121.767146], [0.6, 101.767146], [1.767146, 98.232854], [-1.767146, 101.237002], [-21.767146, 101.237002], [-21.767146, -1.237002], [-1.767146, -1.237002], [1.767146, 1.767146], [0.6, -1.767146]], "closed": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "sheet.flange", "params": {"sketch": "Blank"}},
+  {"command": "sheet.fold", "params": {"points": [[1.4, 0, 1.5], [198.6, 0, 1.5]], "fixed": [100.0, 50.0, 1.5]}},
+  {"command": "sheet.fold", "params": {"points": [[1.4, 100.0, 1.5], [198.6, 100.0, 1.5]], "fixed": [100.0, 50.0, 1.5]}},
+  {"command": "sheet.fold", "params": {"points": [[0, 1.4, 1.5], [0, 98.6, 1.5]], "fixed": [100.0, 50.0, 1.5]}},
+  {"command": "sheet.fold", "params": {"points": [[200.0, 1.4, 1.5], [200.0, 98.6, 1.5]], "fixed": [100.0, 50.0, 1.5]}}
+ ]
+}
