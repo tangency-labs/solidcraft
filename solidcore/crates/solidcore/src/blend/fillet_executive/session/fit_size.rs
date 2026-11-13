@@ -298,10 +298,11 @@ fn ball_through_at(
 /// over a smooth far edge of its face, the whole length, rolls on the face beyond, and its
 /// face's boundary is that face's: less the edges it rolled over, and with the edges at their
 /// ends taken as the side edges the rail ends on (as those at the filleted edge's ends). The
-/// face it rolled off lies inside the band and does not bound it. A boundary point of a
+/// face it rolled off lies inside the band and does not bound it. Each boundary point of a
 /// solver with a rolled rail sizes it only where the solver's own ball of that size touches
-/// that point ([`rolls_through`]): the ball through it may lie on another sheet of the
-/// rolled-onto face's surface (beyond a boss, against the extension of the other face).
+/// that point, or where that cannot be told ([`rolls_through`]): the ball through it may lie
+/// on another sheet of the rolled-onto face's surface (beyond a boss, against the extension
+/// of the other face). Such a solver of another kind than a constant ball is not sized.
 ///
 /// # Errors
 ///
@@ -351,6 +352,11 @@ pub fn largest_size_on_its_faces(
     let rolled = solver.base().rolled_faces;
     let tangency = solver.base().tangency_tolerance;
     let confirm = rolled.iter().any(Option::is_some);
+    if confirm && kind != FitKind::Radius {
+        // the confirmation rolls the solver's ball: a rolled rail of another kind is not
+        // sized (the rollover rolls only constant balls)
+        return Ok(None);
+    }
     for (rail, edgeuse) in [eu0, eu1].into_iter().enumerate() {
         let Some(own) = eu::face(target, edgeuse)? else {
             continue;
@@ -371,7 +377,7 @@ pub fn largest_size_on_its_faces(
                 {
                     let p0 = edge::vertex(target, e)?;
                     let p1 = edge::other_vertex(target, e, p0)?;
-                    rail_ends.extend([p0, p1].into_iter().filter(Option::is_some));
+                    rail_ends.extend([p0, p1].into_iter().flatten().map(Some));
                     over.push(e);
                 }
             }
@@ -390,11 +396,22 @@ pub fn largest_size_on_its_faces(
             }
             let curve = curve.clone();
             let ivl = edge::interval(target, e)?;
-            let target_now: &Brep = target;
-            let rho_at = |solver: &mut SolverObject, t: f64| -> Result<f64> {
+            let mut rho_at = |solver: &mut SolverObject, t: f64| -> Result<f64> {
                 let q = curve.evaluate_point(k, ivl.evaluate(smos_max(0.0, smos_min(1.0, t))))?;
+                if confirm {
+                    // a ball of a solver with a rolled rail (a constant ball): no bound where
+                    // the solver does not roll it, kept where its section is not found
+                    let through = ball_through_at(k, &*target, solver, rail, q, max, Some(ratio))?;
+                    let Some((rho, _, at)) = through else {
+                        return Ok(BIG_DOUBLE);
+                    };
+                    return Ok(match rolls_through(k, target, solver, rail, q, rho, at)? {
+                        Some(false) => BIG_DOUBLE,
+                        Some(true) | None => rho,
+                    });
+                }
                 Ok(
-                    match ball_through(k, target_now, solver, rail, q, max, Some(ratio))? {
+                    match ball_through(k, &*target, solver, rail, q, max, Some(ratio))? {
                         Some((rho, chord)) => {
                             if kind == FitKind::Chord {
                                 chord
@@ -440,23 +457,7 @@ pub fn largest_size_on_its_faces(
                     f2 = rho_at(solver, x2)?;
                 }
             }
-            // where the least lies, for its confirmation: the sample's, or the search's
-            let mut least_at = at;
-            if smos_min(f1, f2) < least {
-                least_at = if f1 < f2 { x1 } else { x2 };
-            }
             least = smos_min(least, smos_min(f1, f2));
-            if confirm && kind == FitKind::Radius {
-                let q = curve
-                    .evaluate_point(k, ivl.evaluate(smos_max(0.0, smos_min(1.0, least_at))))?;
-                let through = ball_through_at(k, target, solver, rail, q, max, Some(ratio))?;
-                let Some((rho, _, t)) = through else {
-                    continue;
-                };
-                if !rolls_through(k, target, solver, rail, q, rho, t)? {
-                    continue;
-                }
-            }
             if found.is_none_or(|r| least < r) {
                 found = Some(least);
             }
@@ -467,7 +468,8 @@ pub fn largest_size_on_its_faces(
 
 /// Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): whether the
 /// ball of radius `rho` that `solver` rolls, in its section at its filleted edge's `t`,
-/// touches its face `rail` at `q`, within the solver's 3D tolerance. A ball through a boundary
+/// touches its face `rail` at `q`, within the solver's 3D tolerance; `None` where that cannot
+/// be told (no single ball, or no section found). A ball through a boundary
 /// point that touches the other face's surface ([`ball_through`]) is not always the solver's:
 /// past a boss a rail rolled onto, it may touch that surface on the boss's far side and the
 /// other face's surface extended beyond the face, where the solver's ball never rolls. The
@@ -485,7 +487,7 @@ fn rolls_through(
     q: Point3,
     rho: f64,
     t: f64,
-) -> Result<bool> {
+) -> Result<Option<bool>> {
     let base = solver.base();
     let tol = base.approx_tol_3d;
     let own = base
@@ -508,7 +510,7 @@ fn rolls_through(
         SrfIndex::Second
     };
     if !set_ball_radius(solver, rho)? {
-        return Ok(false); // no single ball: not confirmed
+        return Ok(None); // no single ball
     }
     let contact = (|| -> Result<Option<Point3>> {
         let Some(pnt) = ball_section_at(k, target, solver, &curve, t, None)? else {
@@ -525,7 +527,7 @@ fn rolls_through(
     })();
     set_ball_radius(solver, own)?;
     let contact = contact?;
-    Ok(contact.is_some_and(|on| on.distance(q) <= tol))
+    Ok(contact.map(|on| on.distance(q) <= tol))
 }
 
 /// `SmFilletSolver::BandsMeetAt(rOther, lMine, lTheirs, ...)`: the radius at which this
